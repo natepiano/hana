@@ -1,0 +1,12 @@
+[package]
+name = "hana"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crate_a = { path = "crate_a" }
+
+[workspace]
+members = [
+    "crate_a",
+]
