@@ -1,4 +1,6 @@
-[package]
-name = "hana"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+    "apps/hana",
+]
+resolver = "2"
+target-dir = "target"

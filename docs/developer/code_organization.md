@@ -1,10 +1,9 @@
 # Code Organization
 
-## File Structure
+## File Structure Within Crates
 
 ```
-hana/
-├── docs/
+crate/
 ├── src/
 │   ├── lib.rs           # Library root, public exports
 │   ├── display/         # Major subsystem = folder
@@ -20,7 +19,7 @@ hana/
 
 ## When to Split Files
 
-Start with a single file until you hit these thresholds:
+Start with a single file until you hit these thresholds (use common sense - these are just guidelines)
 - File exceeds ~300 lines
 - Multiple developers frequently working on different sections
 - Clear separation of concerns emerges
@@ -165,7 +164,6 @@ Before committing new code organization:
 - [ ] Related code stays together
 - [ ] Module structure matches project needs
 - [ ] Changes minimize compilation impact
-- [ ] Organization supports team workflow
 
 ## Doc Links
 - [Architecture](../architecture/README.md) - High level system design

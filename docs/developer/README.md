@@ -15,6 +15,7 @@ What you need to know to contribute to hana.
 - [Error Handling](../architecture/error_handling.md)
 - [Testing Approach](testing.md)
 - [Performance Testing](performance_testing.md)
+- [Workspace Organization](workspace_organization.md)
 ## Doc Links
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
