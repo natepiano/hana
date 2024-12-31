@@ -61,4 +61,4 @@ runners, which can be specified in workflow configurations using `runs-on: [ubun
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
 - [Plugin Development](../plugins/README.md) - Guidelines for plugin development
-- [User](../developer/README.md) - Hana user documentation
+- [User](../user/README.md) - Hana user documentation
