@@ -3,4 +3,3 @@ members = [
     "apps/hana",
 ]
 resolver = "2"
-target-dir = "target"

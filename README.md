@@ -1,6 +1,6 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/bevyengine/bevy#license)
 
-# Hana: Distributed Visualization Management System
+# Hana: A Distributed Visualization Management System
 ## Project Name
 Hana (花) - Named after the Japanese word for "flower," reflecting the system's ability to let visualizations bloom across multiple displays.
 ## System Overview
@@ -27,7 +27,6 @@ The hana system is meant to be pluggable and modular - drawing inspiration from 
 - [User](./docs/developer/README.md) - Hana user documentation
 
 ## License
-
 Hana is free, open source and permissively licensed!
 Except where noted (below and/or in individual files), all code in this repository is dual-licensed under either:
 
