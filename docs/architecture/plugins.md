@@ -58,10 +58,10 @@ windows in the [Display Environment](./display.md).
 - Version control and updates
 ## Integration Points
 ### [Display Environment](./display.md)
-- Window management and rendering
-- Multi-display coordination
-- Viewport handling
-- Coordinate transformations
+- Visualization rendering within provided window context
+- Receiving window/camera information from application
+- Optional: Internal camera and lighting management
+- Coordinate transformations within visualization space
 ### Parameter System
 - Parameter declaration and defaults
 - Real-time updates

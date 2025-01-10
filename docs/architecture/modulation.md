@@ -4,7 +4,7 @@
 The modulation system provides the foundation for controlling visualization behaviors and enables dynamic connections between parameters through modulation. It offers a standardized interface for input/output integration and real-time control.
 ## Parameter Types
 ### Core Types
-- **Param**: Standard adjustable parameter normalized to -1.0 to 1.0 range
+- **Param**: Standard adjustable parameter with configurable range
 - **Input**: External control source (OSC, midi, etc.)
 - **Output**: Value output for feedback or chaining
 - **Light**: Visual indicator for status/activity

@@ -39,9 +39,10 @@ a 3D interface for managing the [Display Environment](./display.md) and integrat
 - Position displays within groups
 - Monitor network status and connectivity
 ### Window Management
-- Create and manage visualization windows
+- Create and manage OS windows for visualizations
 - Assign plugins to windows
 - Configure window bounds and properties
+- Provide window and camera context to plugins
 - Support spanning across multiple displays
 - Allow for the same plugin on different windows
 - Allow for setting whether it is full screen or not

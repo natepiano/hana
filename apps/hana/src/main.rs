@@ -5,6 +5,6 @@ fn main() {
 mod tests {
     #[test]
     fn test_your_momma() {
-        assert_eq!(1, 1);
+        assert_eq!(3, 3);
     }
 }

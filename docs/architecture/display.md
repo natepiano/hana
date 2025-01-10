@@ -33,11 +33,12 @@ The Display Environment is managed within the [hana application](application.md)
     - Contains one or more windows
     - Can be assigned a name
 
-4. **Window**: A visualization container
-    - Bounded area where plugins render
-    - Can span multiple displays
-    - Maintains plugin instance and state
-    - Handles plugin-specific parameters
+4. **Window**: A standard operating system window
+   - Bounded area where plugins render
+   - Managed by the operating system
+   - Contains a plugin visualizations
+   - Handles plugin-specific parameters
+   - It's important to know that a visualization can run on multiple windows on multiple Displays. It could be duplicated, it could be given information to coordinate running different parts of the visualization across different displays.
 
 ## Spatial Management
 - Environment uses right-handed 3D coordinate system

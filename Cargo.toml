@@ -1,5 +1,5 @@
 [workspace]
 members = [
-    "apps/hana",
+    "apps/hana", "crates/hana-plugin", "examples/basic-plugin",
 ]
 resolver = "2"

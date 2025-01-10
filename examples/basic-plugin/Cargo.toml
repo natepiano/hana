@@ -1,0 +1,11 @@
+[package]
+name = "basic-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]  # Needed for dynamic loading
+
+[dependencies]
+bevy = "0.15.1"
+hana-plugin = { path = "../../crates/hana-plugin" }
