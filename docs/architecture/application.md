@@ -1,14 +1,14 @@
 # Hana Application
 ## Purpose
-The hana application serves as the central hub for configuring 
-and controlling all aspects of the hana system. It provides 
+The hana application serves as the central hub for configuring
+and controlling all aspects of the hana system. It provides
 a 3D interface for managing the [Display Environment](./display.md) and integrates with all core systems:
 - [Display Environment](./display.md) configuration
 - Network configuration and monitoring
 - Input controller setup (OSC, midi, keyboards, gamepads, sensors)
 - Parameter and control system management
 - Modulation interface management
-- Plugin library management and updates
+- Visualization library management and updates
 - State saving and restoration
 - Performance monitoring
 - Diagnostic tools
@@ -40,11 +40,11 @@ a 3D interface for managing the [Display Environment](./display.md) and integrat
 - Monitor network status and connectivity
 ### Window Management
 - Create and manage OS windows for visualizations
-- Assign plugins to windows
+- Assign visualizations to windows
 - Configure window bounds and properties
-- Provide window and camera context to plugins
+- Provide window and camera context to visualizations
 - Support spanning across multiple displays
-- Allow for the same plugin on different windows
+- Allow for the same visualization on different windows
 - Allow for setting whether it is full screen or not
 ### Interaction Features
 - Drag-and-drop placement of windows
@@ -65,8 +65,8 @@ a 3D interface for managing the [Display Environment](./display.md) and integrat
 - Discover and connect to remote machines
 - Monitor display network status
 - Manage synchronization
-### [Plugin System](./plugins.md)
-- Manage visualization plugins
+### [Visualization System](./visualizations.md)
+- Manage visualizations
 - Handle version compatibility
 - Update management
 ## [State Management](./state.md)
@@ -95,5 +95,5 @@ a 3D interface for managing the [Display Environment](./display.md) and integrat
 - [Architecture](README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../developer/README.md) - Guidelines for visualization development
 - [User](../user/README.md) - Hana user documentation

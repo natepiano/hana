@@ -1,20 +1,20 @@
-# Plugin System
+# Visualization System
 
 ## Overview
-The Plugin System enables extensible visualization capabilities in hana through 
-independently developed plugins. Each plugin implements visualizations within
+The Visualization System enables extensible visualization capabilities in hana through
+independently developed visualizations. Each visualization implements visualizations within
 windows in the [Display Environment](./display.md).
 ## Architecture
 ### Core Components
-1. **Plugin Runtime**
-    - Loads and initializes plugins
-    - Manages plugin lifecycle and state
+1. **Visualization Runtime**
+    - Loads and initializes visualizations
+    - Manages visualization lifecycle and state
     - Handles resource allocation and cleanup
     - Implements security sandboxing
     - Monitors performance and resource usage
 
-2. **Plugin Development Kit**
-    - Standard plugin template and structure
+2. **Visualization Development Kit**
+    - Standard visualization template and structure
     - Integration interfaces for:
         - [Display Environment](./display.md) and window management
         - Parameter system
@@ -22,14 +22,14 @@ windows in the [Display Environment](./display.md).
     - Testing framework and tools
     - Documentation generation
 
-3. **Plugin Repository**
-    - Public registry for plugin discovery
+3. **Visualization Repository**
+    - Public registry for visualization discovery
     - Version management and compatibility tracking
     - Automated security scanning
     - Distribution infrastructure
-## Plugin Lifecycle
+## Visualization Lifecycle
 ### Development
-1. Create plugin using development kit
+1. Create visualization using development kit
 2. Implement required interfaces
 3. Test functionality and performance
 4. Generate documentation
@@ -40,7 +40,7 @@ windows in the [Display Environment](./display.md).
 3. Repository publication
 4. Update notification to clients
 ### Runtime
-1. Plugin discovery and loading
+1. Visualization discovery and loading
 2. Resource allocation and initialization
 3. Integration with [Display Environment](./display.md)
 4. [State Management](./state.md) and persistence
@@ -68,13 +68,13 @@ windows in the [Display Environment](./display.md).
 - Modulation support
 - State persistence
 ### Management Interface
-- Plugin discovery and installation
+- Visualization discovery and installation
 - [Configuration Management](./configuration.md)
 - Status monitoring
 - Resource tracking
 ## Best Practices
 ### Development
-- Follow plugin template structure
+- Follow visualization template structure
 - Implement proper [Resource Management](./resource.md)
 - Provide clear documentation
 - Include comprehensive tests
@@ -86,12 +86,12 @@ windows in the [Display Environment](./display.md).
 ### [Error Handling](./error_handling.md)
 - Implement graceful failure recovery
 - Provide clear error messages
-- Maintain plugin isolation
+- Maintain visualization isolation
 - Support state recovery
 
 ## Doc Links
 - [Architecture](README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../developer/README.md) - Guidelines for visualization development
 - [User](../user/README.md) - Hana user documentation
