@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.15.1"
-hana-network = { path = "../../crates/hana-network" }
+bevy.workspace = true
+hana_network.workspace = true

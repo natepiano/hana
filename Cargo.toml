@@ -1,4 +1,20 @@
 [workspace]
-default-members = ["apps/hana"]
-members = ["apps/hana", "crates/hana-network", "examples/basic-visualization"]
+default-members = [
+    "apps/hana",
+    "crates/hana_network",
+    "examples/basic_visualization",
+]
+members = ["apps/hana", "crates/hana_network", "examples/basic_visualization"]
 resolver = "2"
+
+[workspace.dependencies]
+
+#
+# Workspace member crates
+#
+hana_network = { path = "crates/hana_network" }
+
+#
+# External dependencies
+#
+bevy = "0.15.1"

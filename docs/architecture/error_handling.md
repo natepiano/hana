@@ -4,67 +4,58 @@
 The Hana system employs a modular and layered error-handling strategy using `eyre` and `thiserror` to ensure consistency, maintainability, and clarity. This approach supports seamless propagation and management of errors across different components, fostering a robust and fault-tolerant architecture with strong tracing integration.
 
 ## Key Principles
-1. **Module-Specific Error Types**  
-   Each library module defines its own error type using **`thiserror`**, encapsulating errors specific to its operations.
+1. **Module-Specific Error Types**
+  Each library module defines its own error type using **`thiserror`**, encapsulating errors specific to its operations.
 
-2. **Unified Error Propagation**  
-   Library-specific errors are propagated as-is, allowing module consumers to handle them directly or convert them into application-level errors.
+1. **Module-Specific Naming Convention**
+  Module-specific error types are named with the pattern my_module::Error which mirrors what is becoming common practice in the Rust ecosystem.
 
-3. **Centralized Error Handling in Management Application**  
-   The Management Application integrates errors from different libraries using **`eyre`**, ensuring flexibility and ease of error reporting with tracing context.
+1. **Type Alias for `Result`**
+  Each library module includes a type alias for `Result` to pair the module's error type with the return value of functions, then using the Result from this module ensures we're using this module's error type.
 
-4. **Type Alias for `Result`**  
-   Each library module includes a type alias for `Result` to pair its error type with the return value of functions.
+1. **Enums for Error Variants**
+  Error types are defined as enums with variants representing different error cases, ensuring clarity and extensibility. Wrap errors from dependencies and use thiserror #from attribute, which implements From trait, to allow easy conversion to the module's error type. You can add Serde::Serialize to support logging.
 
-5. **Avoiding `unwrap` and `expect`**  
-   The use of `unwrap` and `expect` is prohibited in production code to avoid panics. Instead, errors are explicitly handled or propagated.
-
-## Dependencies and Setup
-
-### Dependencies
-```toml
-[dependencies]
-eyre = "0.6"
-thiserror = "0.2"
-tracing = "0.1"
-tracing-error = "0.2"
-tracing-subscriber = "0.3"
-```
-
-### Error Handler Setup
+1. **Use struct variant's to provide extra information**
+Here we have ConnectionFailed - don't do this:
 ```rust
-use eyre::{Result, WrapErr};
-use tracing_error::SpanTrace;
-
-fn setup_error_handling() {
-    eyre::set_hook(Box::new(|_| {
-        Box::new(SpanTrace::capture())
-    }))
-    .expect("Failed to set eyre hook");
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Failed to connect: {0}")]
+    ConnectionFailed(String, u32),
 }
 ```
+instead do this:
+```rust
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Failed to connect: {0}")]
+    ConnectionFailed{message: String, code: u32},
+}
+```
+And it will allow you to see that the String is a message and the u32 is a code. And this will propagate wherever you're looking at it with Debug or Display.
+
+1. **Centralized Error Handling in Management Application**
+  The [Management Application](../../apps/hana/README.md) integrates errors from different libraries using **`eyre`**, ensuring flexibility and ease of error reporting with tracing context.
+
+1. **Avoiding `unwrap` and `expect`**
+   The use of `unwrap` and `expect` is prohibited in production code to avoid panics. Instead, errors are explicitly handled or propagated. Make it easy to use ? to propagate errors.
 
 ## Libraries: Using `thiserror`
+You can create an error.rs to drop module specific error enum and type alias. Your library can re-export the type alias and error enum. This way you can have a single place to manage all the errors for a library - and make it easy to use.
 
 ### Module-Specific Error Definitions
-Each library defines an error enum using the **`thiserror`** crate to encapsulate specific error cases:
+Each library defines an error enum using the **`thiserror`** crate to encapsulate specific error cases - here is an example from the `hana_network` library:
 
 ```rust
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum NetworkError {
-    #[error("Failed to connect: {0}")]
-    ConnectionFailed(String),
-
-    #[error("Timeout occurred")]
-    Timeout,
-
-    #[error("Invalid configuration: {0}")]
-    InvalidConfig(String),
-
-    #[error("Underlying I/O error: {0}")]
-    IoError(#[from] std::io::Error),
+pub enum Error {
+    #[error("IO error: {0}")]
+    Io(#[from] IoError),
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] BincodeError),
 }
 ```
 
@@ -76,15 +67,15 @@ This approach ensures:
 Each library defines a type alias for `Result` to simplify function signatures:
 
 ```rust
-pub type Result<T> = std::result::Result<T, NetworkError>;
+pub type Result<T> = std::result::Result<T, Error>;
 ```
 
 ### Propagating Errors Between Libraries
 When one library depends on another, its error type can wrap the other's error:
 
 ```rust
-impl From<hana_input::InputError> for NetworkError {
-    fn from(err: hana_input::InputError) -> Self {
+impl From<hana_input::Error> for hana_network::Error {
+    fn from(err: hana_input::Error) -> Self {
         Self::InvalidConfig(format!("Input error: {}", err))
     }
 }
@@ -95,8 +86,20 @@ impl From<hana_input::InputError> for NetworkError {
 In the Management Application, **`eyre`** simplifies error handling while maintaining rich context through tracing integration.
 
 ### Handling Errors with `eyre`
+**Setup**
 
-#### Example with Tracing Integration
+```rust
+use eyre::{Result, WrapErr};
+use tracing_error::SpanTrace;
+
+fn setup_error_handling() {
+    eyre::set_hook(Box::new(|_| {
+        Box::new(SpanTrace::capture())
+    }))
+    .expect("Failed to set eyre hook");
+}
+```
+### Example with Tracing Integration
 ```rust
 use eyre::{Result, WrapErr};
 use tracing::{info, instrument};
@@ -105,16 +108,16 @@ use tracing::{info, instrument};
 fn perform_network_operation() -> Result<()> {
     let trace = SpanTrace::capture();
     info!("Starting network operation");
-    
+
     hana_network::connect("https://example.com")
         .wrap_err("Failed to perform network operation")?;
-        
+
     Ok(())
 }
 
 fn main() -> Result<()> {
     setup_error_handling();
-    
+
     if let Err(e) = perform_network_operation() {
         eprintln!("Error with context: {:?}", e);
         // Error will include span trace
@@ -153,50 +156,71 @@ Span trace:
 
 ### Development Guidelines
 1. Use `#[instrument]` on functions for automatic span creation
-2. Add context with `wrap_err()` when propagating errors
+2. Implement `From` traits for error conversion between modules
 3. Include relevant data in span fields
 4. Keep error types focused and well-documented
 
 ### Error Handling Patterns
 ```rust
+// In library code:
 #[instrument]
-fn process_data(input: &str) -> Result<()> {
-    let span_trace = SpanTrace::capture();
-    
-    // Add context to library errors
-    validate_input(input)
-        .wrap_err("Invalid input format")?;
-        
-    // Record additional context
-    info!("Processing validated input");
-    
-    process_validated_input(input)
-        .wrap_err("Processing failed")?;
-        
+fn process_data(input: &str) -> Result<ProcessedData> {
+    let validated = validate_input(input)?; // Uses From trait for error conversion
+    let processed = process_validated_input(validated)?; // Uses From trait
+    Ok(processed)
+}
+
+// In management application:
+#[instrument]
+fn handle_data_processing(input: &str) -> eyre::Result<()> {
+    // Here we can use wrap_err() since we're in the application layer
+    process_data(input)
+        .wrap_err("Failed to process data")?;
     Ok(())
 }
 ```
 
 ## Advanced Usage
 
-### Custom Error Reporting
+### Context Enrichment
 ```rust
-fn setup_custom_error_handling() {
-    eyre::set_hook(Box::new(|error| {
-        Box::new(CustomErrorReport {
-            span_trace: SpanTrace::capture(),
-            error: error.to_string(),
-        })
-    }))
-    .expect("Failed to set custom error hook");
+// In the management application, we can add rich context to errors:
+#[instrument(err(Debug))]
+fn complex_operation() -> eyre::Result<()> {
+    // Add structured fields to spans for better debugging
+    tracing::info!(user_id = "123", operation = "sync", "Starting complex operation");
+
+    let result = do_something()?;
+
+    // Record outcomes
+    tracing::info!(status = "complete", items_processed = 42);
+    Ok(())
 }
 ```
 
 ### Integration with Logging System
-Errors automatically integrate with the logging framework:
-- Span context preserved in logs
-- Error chain available in log output
-- Unified debugging experience
+Since we use `tracing`, errors are automatically integrated with our logging infrastructure:
+
+```rust
+use tracing::{info, error, instrument};
+
+#[instrument]
+fn database_operation() -> Result<()> {
+    info!("Starting database operation");
+
+    match perform_query() {
+        Ok(result) => {
+            info!(rows_affected = result.rows, "Query successful");
+            Ok(())
+        }
+        Err(e) => {
+            // Error will automatically include span context
+            error!(error = ?e, "Database query failed");
+            Err(e)
+        }
+    }
+}
+```
 
 ## Summary
 - Use `thiserror` in libraries for typed errors
