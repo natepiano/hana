@@ -9,7 +9,7 @@ fn main() -> Result<()> {
 
     // Try to connect with retries
     let mut attempts = 0;
-    let max_attempts = 5;
+    let max_attempts = 15;
     let mut stream = loop {
         match TcpStream::connect("127.0.0.1:3001") {
             Ok(stream) => break stream,

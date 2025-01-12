@@ -1,9 +1,14 @@
 # Display Environment Architecture
 
+** check out this link **
+https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/opacity.rs
+
+shows a builder model for laying out a UI - as I'm writing this i realize we need a dynamic layout for users so we'll have to think about this - especially if we want to avoid
+
 ## Purpose
-The display environment system manages the spatial arrangement and 
-control of all display devices in the hana network, 
-enabling visualization across arbitrary 3D configurations of screens 
+The display environment system manages the spatial arrangement and
+control of all display devices in the hana network,
+enabling visualization across arbitrary 3D configurations of screens
 and projectors.
 
 The Display Environment is managed within the [hana application](application.md).

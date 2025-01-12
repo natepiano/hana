@@ -1,20 +1,67 @@
 [workspace]
+resolver = "2"
 default-members = [
-    "apps/hana",
+    "crates/hana",
     "crates/hana_network",
+    "crates/hana_visualization",
     "examples/basic_visualization",
 ]
-members = ["apps/hana", "crates/hana_network", "examples/basic_visualization"]
-resolver = "2"
+members = [
+    "crates/hana",
+    "crates/hana_network",
+    "crates/hana_visualization",
+    "examples/basic_visualization",
+]
 
 [workspace.dependencies]
-
 #
 # Workspace member crates
 #
 hana_network = { path = "crates/hana_network" }
+hana_visualization = { path = "crates/hana_visualization" }
 
 #
 # External dependencies
 #
-bevy = "0.15.1"
+
+# this is the bevy prelude - trial and error to figure out the minimal
+# features needed to display basic_visualization
+# add other features as necessary - eventually we'll stabilize and maybe
+# that will require the whole prelude, we'll see
+bevy = { version = "0.15.1", default-features = false, features = [
+"bevy_pbr",
+"bevy_winit",
+"multi_threaded",
+"tonemapping_luts",
+# "android-game-activity",
+# "android-game-activity",
+# "android_shared_stdcxx",
+# "animation",
+# "bevy_asset",
+# "bevy_audio",
+# "bevy_color",
+# "bevy_core_pipeline",
+# "bevy_gilrs",
+# "bevy_gizmos",
+# "bevy_gltf",
+# "bevy_mesh_picking_backend",
+# "bevy_picking",
+# "bevy_render",
+# "bevy_scene",
+# "bevy_sprite",
+# "bevy_sprite_picking_backend",
+# "bevy_state",
+# "bevy_text",
+# "bevy_ui",
+# "bevy_ui_picking_backend",
+# "bevy_window",
+# "custom_cursor",
+# "default_font",
+# "hdr",
+# "png",
+# "smaa_luts",
+# "sysinfo_plugin",
+# "vorbis",
+# "webgl2",
+# "x11",
+] }

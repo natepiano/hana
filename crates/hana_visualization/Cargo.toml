@@ -1,8 +1,8 @@
 [package]
-name = "basic-visualization"
+name = "hana_visualization"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 bevy.workspace = true
-hana_visualization.workspace = true
+hana_network.workspace = true
