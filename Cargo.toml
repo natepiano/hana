@@ -36,6 +36,7 @@ bevy = { version = "0.15.1", default-features = false, features = [
 "default_font",
 "multi_threaded",
 "tonemapping_luts",
+"x11",
 # "android-game-activity",
 # "android-game-activity",
 # "android_shared_stdcxx",
@@ -63,5 +64,4 @@ bevy = { version = "0.15.1", default-features = false, features = [
 # "sysinfo_plugin",
 # "vorbis",
 # "webgl2",
-# "x11",
 ] }

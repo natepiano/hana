@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     }
     println!("Finished sending counts");
 
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(Duration::from_secs(5));
     hana_network::write_command(&mut stream, &Command::Stop)?;
 
     child.wait()?;
