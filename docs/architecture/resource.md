@@ -44,7 +44,7 @@ For now this is mostly aspirational
 - Alert configuration
 - Usage reporting
 ## Integration Points
-### [Plugin System](./plugins.md)
+### [Visualization System](./visualization.md)
 - Resource usage reporting
 - Performance metric collection
 - Usage threshold configuration
@@ -74,5 +74,5 @@ For now this is mostly aspirational
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../visualization/README.md) - Guidelines for visualization development
 - [User](../user/README.md) - Hana user documentation

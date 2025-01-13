@@ -58,10 +58,10 @@ impl StateManager {
     fn propagate_state_change(&self, change: StateChange) {
         // Create versioned change record
         let versioned_change = self.create_versioned_change(change);
-        
+
         // Request propagation via Network Architecture
         self.network.propagate_message(versioned_change);
-        
+
         // Track propagation status
         self.track_change_propagation(versioned_change);
     }
@@ -165,7 +165,7 @@ impl StateManager {
 - Peer status notifications
 - Network health monitoring
 - Connection event handling
-### [Plugin System](./plugins.md)
+### [Visualization System](./visualization.md)
 - Plugin state capture
 - State restoration to plugins
 - Version compatibility checks
@@ -179,5 +179,5 @@ impl StateManager {
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../visualization/README.md) - Guidelines for visualization development
 - [User](../user/README.md) - Hana user documentation

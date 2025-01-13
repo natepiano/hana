@@ -30,7 +30,10 @@ hana_visualization = { path = "crates/hana_visualization" }
 # that will require the whole prelude, we'll see
 bevy = { version = "0.15.1", default-features = false, features = [
 "bevy_pbr",
+"bevy_text",
+"bevy_ui",
 "bevy_winit",
+"default_font",
 "multi_threaded",
 "tonemapping_luts",
 # "android-game-activity",
@@ -51,12 +54,9 @@ bevy = { version = "0.15.1", default-features = false, features = [
 # "bevy_sprite",
 # "bevy_sprite_picking_backend",
 # "bevy_state",
-# "bevy_text",
-# "bevy_ui",
 # "bevy_ui_picking_backend",
 # "bevy_window",
 # "custom_cursor",
-# "default_font",
 # "hdr",
 # "png",
 # "smaa_luts",

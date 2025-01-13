@@ -36,7 +36,7 @@ pub enum Error {
 And it will allow you to see that the String is a message and the u32 is a code. And this will propagate wherever you're looking at it with Debug or Display.
 
 1. **Centralized Error Handling in Management Application**
-  The [Management Application](../../apps/hana/README.md) integrates errors from different libraries using **`eyre`**, ensuring flexibility and ease of error reporting with tracing context.
+  The [Management Application](../../crates/hana/README.md) integrates errors from different libraries using **`eyre`**, ensuring flexibility and ease of error reporting with tracing context.
 
 1. **Avoiding `unwrap` and `expect`**
    The use of `unwrap` and `expect` is prohibited in production code to avoid panics. Instead, errors are explicitly handled or propagated. Make it easy to use ? to propagate errors.
@@ -233,5 +233,5 @@ fn database_operation() -> Result<()> {
 - [Architecture](README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Plugin Development](../visualization/README.md) - Guidelines for plugin development
 - [User](../user/README.md) - Hana user documentation

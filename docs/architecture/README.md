@@ -27,16 +27,15 @@ Architecture docs provide a high level overview and design of hana system compon
 ### Network
 - [Network Architecture](./network.md)
 - [Security Architecture](./security.md)
-### Plugins
-- [Plugins System](plugins.md)
 ### Reliability
 - [Error Handling](./error_handling.md)
 - [Logging Framework](./logging.md)
 - [Resource Management](./resource.md)
+### Visualizations
+- [Visualization System](./visualization.md)
 ## Doc Links
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../visualization/README.md) - Guidelines for visualization development
 - [User](../user/README.md) - Hana user documentation
-

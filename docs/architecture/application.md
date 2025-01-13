@@ -65,7 +65,7 @@ a 3D interface for managing the [Display Environment](./display.md) and integrat
 - Discover and connect to remote machines
 - Monitor display network status
 - Manage synchronization
-### [Visualization System](./visualizations.md)
+### [Visualization System](./visualization.md)
 - Manage visualizations
 - Handle version compatibility
 - Update management

@@ -20,9 +20,9 @@ The configuration management system handles core system settings that determine 
 - Default ports
 - Local network discovery settings
 - Connection timeouts
-### [Plugin System](./plugins.md) Configuration
-- Plugin load paths
-- Default resource limits for plugins
+### [Visualization System](./visualization.md) Configuration
+- Visualization load paths
+- Default resource limits for visualizations
 ## Storage Format
 - TOML format for consistency with rust ecosystem
 - Simple hierarchy matching system components
@@ -71,5 +71,5 @@ max_instances = 50
 - [Architecture](README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../visualization/README.md) - Guidelines for visualization development
 - [User](../user/README.md) - Hana user documentation

@@ -27,12 +27,12 @@ fn main() -> Result<()> {
     println!("Connected to visualization!");
 
     println!("Starting count command flood...");
-    for i in 0..1000 {
+    for i in 0..10000 {
         hana_network::write_command(&mut stream, &Command::Count(i))?;
     }
     println!("Finished sending counts");
 
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    std::thread::sleep(Duration::from_secs(3));
     hana_network::write_command(&mut stream, &Command::Stop)?;
 
     child.wait()?;

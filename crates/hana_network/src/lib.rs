@@ -201,7 +201,7 @@ mod read_tests {
             4, 0, 0, 0, // Length prefix (4 bytes)
             0, 1, 2, 3, // Invalid command data
         ];
-        let mut cursor = std::io::Cursor::new(data);
+        let mut cursor = Cursor::new(data);
 
         match read_command(&mut cursor) {
             Err(Error::Serialization(_)) => (), // Success

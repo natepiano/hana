@@ -23,7 +23,7 @@ The hana system is meant to be pluggable and modular - drawing inspiration from 
 - [Architecture](./docs/architecture/README.md) - High level system design
 - [Developer](./docs/developer/README.md) - Coding guidelines for hana contributors
 - [Overview](./README.md) - Hana overview
-- [Plugin Development](./docs/plugins/README.md) - Guidelines for plugin development
+- [Plugin Development](docs/visualization/README.md) - Guidelines for plugin development
 - [User](./docs/developer/README.md) - Hana user documentation
 
 ## License

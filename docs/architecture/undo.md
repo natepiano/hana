@@ -1,8 +1,8 @@
 # Undo System Architecture
 
 ## Overview
-The undo system provides reliable undo/redo functionality across Hana's distributed 
-environment while maintaining state consistency. It integrates with the [State Management](./state.md) 
+The undo system provides reliable undo/redo functionality across Hana's distributed
+environment while maintaining state consistency. It integrates with the [State Management](./state.md)
 and [Network Architecture](./network.md) systems to ensure synchronized operations across all peers.
 ## Core Principles
 - Command-based undo system tracking discrete operations
@@ -68,8 +68,8 @@ and [Network Architecture](./network.md) systems to ensure synchronized operatio
 - Conflict detection
 - History reconciliation
 
-### [Plugins](./plugins.md) Integration
-- Plugin-specific undo operations
+### [Visualization](./visualization.md) Integration
+- Visualization-specific undo operations
 - State preservation
 - Resource cleanup
 - Version compatibility
@@ -92,5 +92,5 @@ and [Network Architecture](./network.md) systems to ensure synchronized operatio
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Visualization Development](../visualization/README.md) - Guidelines for visualizations development
 - [User](../user/README.md) - Hana user documentation

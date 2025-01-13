@@ -1,7 +1,7 @@
 # Testing Approach
 
 ## Overview
-Testing strategy emphasizing integration tests and following bevy's testing 
+Testing strategy emphasizing integration tests and following bevy's testing
 patterns, with a focus on non-UI components and leveraging rust's built-in testing capabilities.
 ## Core Testing Principles
 - Favor integration tests over unit tests
@@ -18,7 +18,7 @@ patterns, with a focus on non-UI components and leveraging rust's built-in testi
 1. **Core System Tests**
     - Network protocol validation
     - State synchronization
-    - [Plugin System](../architecture/plugins.md) integration
+    - [Visualization System](../architecture/visualization.md) integration
     - [Configuration Management](../architecture/configuration.md)
 2. **Display Tests**
     - Basic display coordination
@@ -52,13 +52,13 @@ patterns, with a focus on non-UI components and leveraging rust's built-in testi
 - Extended management app testing
 - Network simulation framework
 
-Note: GitHub Actions does support testing on all three major platforms 
-(Linux, macOS, and Windows). This capability is available through GitHub-hosted 
+Note: GitHub Actions does support testing on all three major platforms
+(Linux, macOS, and Windows). This capability is available through GitHub-hosted
 runners, which can be specified in workflow configurations using `runs-on: [ubuntu-latest, macos-latest, windows-latest]`.
 
 ## Doc Links
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors
 - [Overview](../../README.md) - Hana overview
-- [Plugin Development](../plugins/README.md) - Guidelines for plugin development
+- [Plugin Development](../visualization/README.md) - Guidelines for plugin development
 - [User](../user/README.md) - Hana user documentation

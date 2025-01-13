@@ -58,5 +58,5 @@ bevy = { version = "0.15", default-features = false }
 - [Architecture](../architecture/README.md)
 - [Developer](../developer/README.md)
 - [Overview](../../README.md)
-- [Plugin Development](../plugins/README.md)
+- [Plugin Development](../visualization/README.md)
 - [User](../user/README.md)
