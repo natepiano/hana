@@ -13,6 +13,7 @@ members = [
     "examples/basic_visualization",
 ]
 
+
 [workspace.dependencies]
 #
 # Workspace member crates
@@ -65,3 +66,6 @@ bevy = { version = "0.15.1", default-features = false, features = [
 # "vorbis",
 # "webgl2",
 ] }
+
+[profile.dev.package]
+bevy = { opt-level = 3 }

@@ -9,12 +9,13 @@ What you need to know to contribute to hana.
 - Try to keep workspaces single purpose to avoid needing to repeat large dependencies (such as[bevy](https://bevyengine.org/)) across them
 - Prefer turning off defaults and explicitly specifying feature dependencies - to improve compile time and limit binary size
 ## TOC
-- [Contributing ](./contributing.md) 
+- [Contributing ](./contributing.md)
 - [Code Organization](./code_organization.md)
 - [Documentation Guidelines](documentation.md)
 - [Error Handling](../architecture/error_handling.md)
 - [Testing Approach](testing.md)
 - [Performance Testing](performance_testing.md)
+- [Versioning](versioning.md)
 - [Workspace Organization](workspace_organization.md)
 ## Doc Links
 - [Architecture](../architecture/README.md) - High level system design

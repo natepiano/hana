@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use hana_visualization::HanaPlugin;
+use hana_visualization::VisualizationControl;
 
 use std::f32::consts::PI;
 
@@ -21,7 +21,7 @@ fn main() {
             #[cfg(not(target_arch = "wasm32"))]
             WireframePlugin,
         ))
-        .add_plugins(HanaPlugin)
+        .add_plugins(VisualizationControl)
         .add_systems(Startup, setup)
         .add_systems(
             Update,

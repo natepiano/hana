@@ -56,6 +56,11 @@ Note: GitHub Actions does support testing on all three major platforms
 (Linux, macOS, and Windows). This capability is available through GitHub-hosted
 runners, which can be specified in workflow configurations using `runs-on: [ubuntu-latest, macos-latest, windows-latest]`.
 
+# To Investigate
+Read about these in rust for rustaceans - fuzz testing is about trying random inputs to try to make your api crash. Proptest is somewhat like fuzz testing but more structured. Loom is for testing concurrent code - such as making sure thread ordering doesn't actually matter to your sync points.  Criterion is for benchmark testing.
+- Cargo-fuzz and arbitrary - also proptest- and loom - all for testing
+- Criterion for benchmark tests
+
 ## Doc Links
 - [Architecture](../architecture/README.md) - High level system design
 - [Developer](../developer/README.md) - Coding guidelines for hana contributors

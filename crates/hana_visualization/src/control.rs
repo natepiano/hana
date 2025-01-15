@@ -11,9 +11,9 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-pub struct HanaPlugin;
+pub struct VisualizationControl;
 
-impl Plugin for HanaPlugin {
+impl Plugin for VisualizationControl {
     fn build(&self, app: &mut App) {
         // Channel for sending commands from network thread to Bevy app
         let (tx, rx) = channel();
