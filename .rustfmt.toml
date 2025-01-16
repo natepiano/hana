@@ -1,0 +1,13 @@
+# comments
+comment_width               = 100  # Default: 80
+format_code_in_doc_comments = true # Default: false
+wrap_comments               = true # Default: false
+
+# imports
+group_imports       = "StdExternalCrate" # Default: "Preserve"
+imports_granularity = "Module"           # Default: "Preserve"
+reorder_imports     = true               # Default: false
+
+# vertical alighment thresholds
+enum_discrim_align_threshold = 50 # Default: 0
+struct_field_align_threshold = 50 # Default: 0

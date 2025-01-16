@@ -1,15 +1,11 @@
-use bevy::prelude::App;
-use bevy::prelude::Local;
-use bevy::prelude::Plugin;
-use bevy::prelude::Res;
-use bevy::prelude::Resource;
-use bevy::prelude::Update;
-
-use hana_network::{Command, Result};
+//! VisualizationControl bevy plugin for use in bevy based visualizations
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+use bevy::prelude::{App, Local, Plugin, Res, Resource, Update};
+use hana_network::{Command, Result};
 
 pub struct VisualizationControl;
 

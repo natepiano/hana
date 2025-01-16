@@ -1,0 +1,17 @@
+# This is a configuration file for the bacon tool
+# Complete help on configuration: https://dystroy.org/bacon/config/
+#
+# You may check the current default at
+#   https://github.com/Canop/bacon/blob/main/defaults/default-bacon.toml
+#
+# this one is set up to run cargo fmt using the nightly toolchain by default
+# so it will watch all changes and format according to the .rustfmt.toml file
+default_job          = "fmt"
+
+# Run cargo fmt using the latest
+[jobs.fmt]
+command     = ["cargo", "+nightly", "fmt"]
+need_stdout = false
+
+[keybindings]
+f = "job:fmt"

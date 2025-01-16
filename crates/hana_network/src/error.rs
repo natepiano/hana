@@ -1,5 +1,6 @@
-use bincode::Error as BincodeError;
 use std::io::Error as IoError;
+
+use bincode::Error as BincodeError;
 // don't be confused - this is just for the derive macro
 use thiserror::Error;
 

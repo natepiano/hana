@@ -1,8 +1,8 @@
 [package]
-name = "hana"
-version = "0.1.0"
-edition = "2021"
 default-run = "hana"
+edition     = "2021"
+name        = "hana"
+version     = "0.1.0"
 
 [dependencies]
 hana_network.workspace = true

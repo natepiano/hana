@@ -1,24 +1,23 @@
 [workspace]
-resolver = "2"
 default-members = [
-    "crates/hana",
-    "crates/hana_network",
-    "crates/hana_visualization",
-    "examples/basic_visualization",
+  "crates/hana",
+  "crates/hana_network",
+  "crates/hana_visualization",
+  "examples/basic_visualization",
 ]
 members = [
-    "crates/hana",
-    "crates/hana_network",
-    "crates/hana_visualization",
-    "examples/basic_visualization",
+  "crates/hana",
+  "crates/hana_network",
+  "crates/hana_visualization",
+  "examples/basic_visualization",
 ]
-
+resolver = "2"
 
 [workspace.dependencies]
 #
 # Workspace member crates
 #
-hana_network = { path = "crates/hana_network" }
+hana_network       = { path = "crates/hana_network" }
 hana_visualization = { path = "crates/hana_visualization" }
 
 #
@@ -30,42 +29,43 @@ hana_visualization = { path = "crates/hana_visualization" }
 # add other features as necessary - eventually we'll stabilize and maybe
 # that will require the whole prelude, we'll see
 bevy = { version = "0.15.1", default-features = false, features = [
-"bevy_pbr",
-"bevy_text",
-"bevy_ui",
-"bevy_winit",
-"default_font",
-"multi_threaded",
-"tonemapping_luts",
-"x11",
-# "android-game-activity",
-# "android-game-activity",
-# "android_shared_stdcxx",
-# "animation",
-# "bevy_asset",
-# "bevy_audio",
-# "bevy_color",
-# "bevy_core_pipeline",
-# "bevy_gilrs",
-# "bevy_gizmos",
-# "bevy_gltf",
-# "bevy_mesh_picking_backend",
-# "bevy_picking",
-# "bevy_render",
-# "bevy_scene",
-# "bevy_sprite",
-# "bevy_sprite_picking_backend",
-# "bevy_state",
-# "bevy_ui_picking_backend",
-# "bevy_window",
-# "custom_cursor",
-# "hdr",
-# "png",
-# "smaa_luts",
-# "sysinfo_plugin",
-# "vorbis",
-# "webgl2",
+  "bevy_pbr",
+  "bevy_text",
+  "bevy_ui",
+  "bevy_winit",
+  "default_font",
+  "multi_threaded",
+  "tonemapping_luts",
+  "x11",
+  # "android-game-activity",
+  # "android-game-activity",
+  # "android_shared_stdcxx",
+  # "animation",
+  # "bevy_asset",
+  # "bevy_audio",
+  # "bevy_color",
+  # "bevy_core_pipeline",
+  # "bevy_gilrs",
+  # "bevy_gizmos",
+  # "bevy_gltf",
+  # "bevy_mesh_picking_backend",
+  # "bevy_picking",
+  # "bevy_render",
+  # "bevy_scene",
+  # "bevy_sprite",
+  # "bevy_sprite_picking_backend",
+  # "bevy_state",
+  # "bevy_ui_picking_backend",
+  # "bevy_window",
+  # "custom_cursor",
+  # "hdr",
+  # "png",
+  # "smaa_luts",
+  # "sysinfo_plugin",
+  # "vorbis",
+  # "webgl2",
 ] }
+# error-stack = { version = "0.5.0" }
 
 [profile.dev.package]
 bevy = { opt-level = 3 }

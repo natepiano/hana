@@ -1,7 +1,8 @@
-use hana_network::{Command, Result};
 use std::net::TcpStream;
 use std::process::Command as ProcessCommand;
 use std::time::Duration;
+
+use hana_network::{Command, Result};
 
 fn main() -> Result<()> {
     // Launch visualization

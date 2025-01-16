@@ -1,6 +1,8 @@
-pub use crate::error::{Error, Result};
-use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+
+use serde::{Deserialize, Serialize};
+
+pub use crate::error::{Error, Result};
 
 mod error;
 
@@ -35,9 +37,9 @@ pub fn read_command(stream: &mut impl Read) -> Result<Option<Command>> {
 
 #[cfg(test)]
 mod write_tests {
+    use std::io::{Error as IoError, ErrorKind, Write};
+
     use super::*;
-    use std::io::Write;
-    use std::io::{Error as IoError, ErrorKind};
 
     struct FailingStream {
         error_kind: ErrorKind,
@@ -81,9 +83,9 @@ mod write_tests {
     #[test]
     fn test_write_command_length_prefix_error() {
         struct FailAfterNBytes {
-            fail_after: usize,
+            fail_after:    usize,
             bytes_written: usize,
-            write_calls: Vec<usize>, // Track size of each write
+            write_calls:   Vec<usize>, // Track size of each write
         }
 
         impl Write for FailAfterNBytes {
@@ -105,9 +107,9 @@ mod write_tests {
         }
 
         let mut mock_stream = FailAfterNBytes {
-            fail_after: 4,
+            fail_after:    4,
             bytes_written: 0,
-            write_calls: Vec::new(),
+            write_calls:   Vec::new(),
         };
         let command = Command::Ping;
 
@@ -145,8 +147,9 @@ mod write_tests {
 
 #[cfg(test)]
 mod read_tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     #[test]
     fn test_read_command_success() {
@@ -167,7 +170,7 @@ mod read_tests {
         let mut cursor = Cursor::new(data);
 
         match read_command(&mut cursor) {
-            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => (), // Expected error
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => (), /* Expected error */
             other => panic!("Expected UnexpectedEof error, got {:?}", other),
         }
     }

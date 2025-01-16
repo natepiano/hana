@@ -1,10 +1,8 @@
-use bevy::prelude::*;
-use hana_visualization::VisualizationControl;
-
 use std::f32::consts::PI;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+use bevy::prelude::*;
 use bevy::{
     color::palettes::basic::SILVER,
     //    prelude::*,
@@ -13,6 +11,7 @@ use bevy::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
     },
 };
+use hana_visualization::VisualizationControl;
 
 fn main() {
     App::new()
@@ -34,7 +33,8 @@ fn main() {
         .run();
 }
 
-/// A marker component for our shapes so we can query them separately from the ground plane
+/// A marker component for our shapes so we can query them separately from the
+/// ground plane
 #[derive(Component)]
 struct Shape;
 
@@ -166,8 +166,8 @@ fn uv_debug_texture() -> Image {
 
     Image::new_fill(
         Extent3d {
-            width: TEXTURE_SIZE as u32,
-            height: TEXTURE_SIZE as u32,
+            width:                 TEXTURE_SIZE as u32,
+            height:                TEXTURE_SIZE as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
