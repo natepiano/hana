@@ -3,7 +3,6 @@ use std::io::{Read, Write};
 use serde::{Deserialize, Serialize};
 
 pub use crate::error::{Error, Result};
-
 mod error;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

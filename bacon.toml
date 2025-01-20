@@ -6,12 +6,18 @@
 #
 # this one is set up to run cargo fmt using the nightly toolchain by default
 # so it will watch all changes and format according to the .rustfmt.toml file
-default_job          = "fmt"
+default_job = "fmt"
 
-# Run cargo fmt using the latest
+# run cargo fmt using the latest
 [jobs.fmt]
 command     = ["cargo", "+nightly", "fmt"]
 need_stdout = false
 
+# run taplo fmt
+[jobs.taplo]
+command     = ["taplo", "fmt"]
+need_stdout = true
+
 [keybindings]
 f = "job:fmt"
+p = "job:taplo"
