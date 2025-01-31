@@ -9,6 +9,7 @@ Create a simple example plugin with a 3D visualization
 Demonstrate dynamic loading of plugin at runtime
 
 Project Structure
+```
 hana/
 ├── Cargo.toml                  # Workspace manifest
 ├── crates/
@@ -17,6 +18,7 @@ hana/
 │   └── hana_visualization/    # Core plugin interface
 ├── examples/
 │   └── basic_visualization/   # Example visualization plugin
+```
 
 Technology Stack
 
