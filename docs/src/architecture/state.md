@@ -175,9 +175,3 @@ impl StateManager {
 - Manual intervention controls
 - Recovery operation triggers
 - Configuration interface
-## Doc Links
-- [Architecture](../architecture/README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Visualization Development](../visualization/README.md) - Guidelines for visualization development
-- [User](../user/README.md) - Hana user documentation

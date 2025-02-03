@@ -90,10 +90,3 @@ a 3D interface for managing the [Display Environment](./display.md) and integrat
 ## [Deployment System](deployment.md)
 - Update local application version
 - Manage updates across network
-
-## Doc Links
-- [Architecture](README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Visualization Development](../developer/README.md) - Guidelines for visualization development
-- [User](../user/README.md) - Hana user documentation

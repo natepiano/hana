@@ -25,10 +25,3 @@
     - Support for multiple midi devices.
 ## Additional Input Support
 - Keyboard, mouse, gamepad, and other sensors for parameter mapping.
-
-## Doc Links
-- [Architecture](../architecture/README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Plugin Development](../visualization/README.md) - Guidelines for plugin development
-- [User](../user/README.md) - Hana user documentation

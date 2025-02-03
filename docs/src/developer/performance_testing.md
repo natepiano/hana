@@ -19,11 +19,11 @@
 fn test_state_update_latency() {
     let test_network = TestNetwork::new(3); // 3 peer setup
     let initial_state = generate_test_state();
-    
+
     let start = Instant::now();
     test_network.propagate_state_update(initial_state);
     let sync_time = start.elapsed();
-    
+
     assert!(sync_time < Duration::from_millis(100));
 }
 ```
@@ -54,10 +54,3 @@ fn test_state_update_latency() {
 - Performance regression detection
 - Resource utilization monitoring
 - Network saturation alerts
-
-## Doc Links
-- [Architecture](../architecture/README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Plugin Development](../visualization/README.md) - Guidelines for plugin development
-- [User](../user/README.md) - Hana user documentation

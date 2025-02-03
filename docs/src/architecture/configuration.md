@@ -67,9 +67,3 @@ connection_timeout = 5000  # ms
 load_path = "plugins/"
 max_instances = 50
 ```
-## Doc Links
-- [Architecture](README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Visualization Development](../visualization/README.md) - Guidelines for visualization development
-- [User](../user/README.md) - Hana user documentation

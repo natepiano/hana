@@ -44,7 +44,7 @@ pub struct Window {
 
 impl Window {
     pub fn new(id: WindowId) -> Self {
-        Self { 
+        Self {
             id,
             size: (800, 600),
         }
@@ -164,10 +164,3 @@ Before committing new code organization:
 - [ ] Related code stays together
 - [ ] Module structure matches project needs
 - [ ] Changes minimize compilation impact
-
-## Doc Links
-- [Architecture](../architecture/README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Plugin Development](../visualization/README.md) - Guidelines for plugin development
-- [User](../user/README.md) - Hana user documentation

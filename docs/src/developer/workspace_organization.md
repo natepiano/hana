@@ -6,16 +6,16 @@ hana/
 ├── Cargo.toml           # Workspace manifest
 ├── apps/
 │   └── hana/           # Main application
-│       ├── Cargo.toml  
+│       ├── Cargo.toml
 │       └── src/
 ├── crates/
 │   ├── hana-display/   # Display management
-│   ├── hana-network/   # Network functionality 
+│   ├── hana-network/   # Network functionality
 │   ├── hana-plugin/    # Plugin system
 │   ├── hana-config/    # Configuration
 │   ├── hana-input/     # Input handling
 │   └── hana-state/     # State management
-├── docs/               
+├── docs/
 ├── examples/
 └── target/             # Single shared target directory
 ```
@@ -53,10 +53,3 @@ bevy = { version = "0.15", default-features = false }
 - [ ] Dependencies minimized per crate
 - [ ] Breaking changes documented
 - [ ] Workspace dependencies consistent
-
-## Doc Links
-- [Architecture](../architecture/README.md)
-- [Developer](../developer/README.md)
-- [Overview](../../README.md)
-- [Plugin Development](../visualization/README.md)
-- [User](../user/README.md)

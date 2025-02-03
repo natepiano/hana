@@ -103,7 +103,7 @@ docs/
 └── README.md              # Project overview
 
 src/
-└── {module}/              # Source code 
+└── {module}/              # Source code
     └── mod.rs             # Module docs generate API reference
 
 target/
@@ -188,10 +188,3 @@ target/
 This documentation strategy aims to balance completeness with maintainability. It prioritizes user-facing documentation and critical system understanding while avoiding documentation overhead for standard or obvious components.
 
 The strategy should evolve with the project, adapting to user feedback and development needs while maintaining its core focus on essential documentation.
-
-## Doc Links
-- [Architecture](../architecture/README.md) - High level system design
-- [Developer](../developer/README.md) - Coding guidelines for hana contributors
-- [Overview](../../README.md) - Hana overview
-- [Plugin Development](../visualization/README.md) - Guidelines for plugin development
-- [User](../user/README.md) - Hana user documentation
