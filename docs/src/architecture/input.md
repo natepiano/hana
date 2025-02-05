@@ -5,7 +5,7 @@
 ## OSC Integration
 - **Address Structure**:
   ```
-  /hana                    # Root namespace
+  /hana                   # Root namespace
     /{viz_id}             # Visualization instance
       /{group}            # Parameter group
         /{param}          # Parameter name
@@ -25,3 +25,8 @@
     - Support for multiple midi devices.
 ## Additional Input Support
 - Keyboard, mouse, gamepad, and other sensors for parameter mapping.
+## State management
+- input configuration saved automatically
+- parameters saved automatically
+- a configuration can be explicitly saved
+- user input mappings can be explicitly saved
