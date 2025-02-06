@@ -14,7 +14,7 @@ The intent is to create an open source library of visualizations, ready to use a
 ## Inspiration
 The hana system is meant to be pluggable and modular - drawing inspiration from the plugin system, modularity, simplicity and ease of use of [vcv rack](https://vcvrack.com) software as well as inspiration from bevy to make an application interface that is as easy to use as a game.
 ## Documentation
-[docs on github.io](https://natemccoy.github.io/hana/)
+[docs on github.io](https://natepiano.github.io/hana/)
 ## Goals and Features
 ### High-Level Goals
 - Enable seamless distributed visualization across monitors (and more) attached to computers on a local network.
