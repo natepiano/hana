@@ -28,7 +28,7 @@ hana_visualization = { path = "crates/hana_visualization" }
 # features needed to display basic_visualization
 # add other features as necessary - eventually we'll stabilize and maybe
 # that will require the whole prelude, we'll see
-bevy = { version = "0.15.1", default-features = false, features = [
+bevy = { version = "0.15.2", default-features = false, features = [
   "bevy_pbr",
   "bevy_text",
   "bevy_ui",

@@ -1,6 +1,6 @@
 # Resource Management
 
-## Overview
+## Purpose
 The resource management system monitors and optimizes system resource usage across the hana network. It focuses on detection and reporting rather than direct control, working within bevy's constraints while providing useful insights and basic throttling capabilities.
 ## Caveat
 This doc is really a pre-optimization. I think implementing monitoring of key measures and making them visible in the management app is a good start. From there we can choose which of these techniques would be interesting to tackle if it becomes important.
@@ -13,7 +13,7 @@ For now this is mostly aspirational
 - Frame drop detection
 - Window-specific performance tracking
 ### Memory Usage
-- System memory monitoring per plugin
+- System memory monitoring per Visualization
 - Memory trend analysis
 - Leak detection through usage patterns
 - Allocation logging and alerts
@@ -24,14 +24,14 @@ For now this is mostly aspirational
 - Peer connection quality metrics
 ### CPU Usage
 - System-wide CPU utilization
-- Per-plugin CPU monitoring
+- Per-visualization CPU monitoring
 - Thread usage tracking
 - Process priority management
 ## Resource Optimization
 ### Performance Management
 - Frame rate targets per window
 - Update frequency adjustment
-- Plugin execution priority
+- Visualization execution priority
 - Resource usage warnings
 ### Network Optimization
 - Update prioritization
@@ -60,7 +60,7 @@ For now this is mostly aspirational
 - Configuration persistence
 - Network-wide monitoring
 ## Best Practices
-### Plugin Development
+### Visualization Development
 - Resource usage guidelines
 - Performance optimization tips
 - Monitoring integration

@@ -1,6 +1,11 @@
 # Deployment System
-## Overview
-System deployment, updates, and maintenance across the distributed hana network.
+## Purpose
+There are a few areas covered under "deployment" - possibly this could be split into multiple sections
+- [Management app](application.md) deployment onto a local system.
+- Distributing the [Management app](application.md) across a network of peers.
+- Updating the app to the latest version.
+- Updating visualizations to the latest version.
+
 ## System Installation
 - Platform-specific installation packages (Windows, macOS, Linux)
 - Dependency management and prerequisites
@@ -10,7 +15,7 @@ System deployment, updates, and maintenance across the distributed hana network.
 - Consistent library storage structure across platforms
 - Standard paths for:
     - Core system libraries
-    - Plugins
+    - Visualizations
     - Configuration files
     - State files
     - Logs

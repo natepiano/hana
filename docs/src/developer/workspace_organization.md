@@ -1,14 +1,13 @@
 # Workspace Organization
+## Purpose
+We're using a workspace to save on compile times and to keep the code organized. The workspace is defined in the root `Cargo.toml` file.
 
 ## Structure
 ```
 hana/
 ├── Cargo.toml           # Workspace manifest
-├── apps/
-│   └── hana/           # Main application
-│       ├── Cargo.toml
-│       └── src/
 ├── crates/
+│   ├── hana            # management app
 │   ├── hana-display/   # Display management
 │   ├── hana-network/   # Network functionality
 │   ├── hana-plugin/    # Plugin system
@@ -16,7 +15,13 @@ hana/
 │   ├── hana-input/     # Input handling
 │   └── hana-state/     # State management
 ├── docs/
+│ ├── src                  # mdbook docs root
+│ │ ├── architecture        # architecture docs
+│ │ └── developer           # dev docs
+│ ├── user                  # hana management app docs
+│ └── visualization         # visualization sdk docs
 ├── examples/
+│ └── basic_visualization # example visualization
 └── target/             # Single shared target directory
 ```
 
@@ -27,21 +32,6 @@ hana/
 - Keep dependencies minimal and explicit per crate
 - Avoid duplicating heavy dependencies across crates
 - Use feature flags to control optional functionality
-
-### Dependencies
-```toml
-# Root Cargo.toml
-[workspace]
-members = [
-    "apps/hana",
-    "crates/hana-display",
-    "crates/hana-network",
-    "crates/hana-plugin",
-]
-
-[workspace.dependencies]
-bevy = { version = "0.15", default-features = false }
-```
 
 ### Version Management
 - Maintain consistent version numbers across workspace

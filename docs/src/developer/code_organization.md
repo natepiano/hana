@@ -135,7 +135,7 @@ mod tests { /* ... */ }
 
 ## Testing Organization
 
-### Small Modules
+### Small Module Unit Tests
 ```rust
 // At the bottom of the file
 #[cfg(test)]
@@ -145,7 +145,7 @@ mod tests {
 }
 ```
 
-### Large Modules
+### Large Module Unit Tests
 ```
 module/
 ├── mod.rs
@@ -154,6 +154,9 @@ module/
     ├── mod.rs
     └── integration.rs
 ```
+### Integration Tests
+use ./tests folder in the crate root for integration tests as is typical
+for rust projects
 
 ## Review Checklist
 

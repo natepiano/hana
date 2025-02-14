@@ -1,7 +1,7 @@
 # Configuration Management
 
-## Overview
-The configuration management system handles core system settings that determine how hana operates. It focuses on application configuration rather than user-created content or runtime state, which are managed by the [State Management](./state.md) system.
+## Purpose
+The configuration management system handles core system settings that determine how hana operates. It focuses on application configuration rather than user-created content or runtime state, which are managed by the [State Management](state.md) system.
 ## Core Principles
 - **Hierarchical Configuration**: System-wide defaults with local overrides
 - **Simplicity**: Plain TOML files for easy editing and reading
@@ -42,11 +42,12 @@ The configuration management system handles core system settings that determine 
 - Simple network propagation where needed
 ## Implementation Guidelines
 ### File Structure
+(tbd)
 ```
 config/
-  ├── defaults.toml    # System-wide defaults
-  ├── local.toml      # Local instance overrides
-  └── plugins.toml    # Plugin system settings
+  ├── defaults.toml          # System-wide defaults
+  ├── local.toml             # Local instance overrides
+  └── visualizations.toml    # Visualization settings
 ```
 ### Example Configuration
 ```toml
@@ -63,7 +64,7 @@ max_cpu_percent = 80
 discovery_port = 45678
 connection_timeout = 5000  # ms
 
-[plugins]
-load_path = "plugins/"
+[visualizations]
+load_path = "visualizations/"
 max_instances = 50
 ```

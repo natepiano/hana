@@ -1,14 +1,14 @@
 # Documentation Guidelines
 
-## Overview
+## Purpose
 This document outlines Hana's documentation guidelines, defining what should be documented, where documentation should live, and how to maintain it effectively.
 
 ## Documentation Categories
 
 ### Always Document
-1. **Public APIs and Interfaces**
+1. **Crate Public APIs and Interfaces**
     - All public API endpoints and their parameters
-    - Plugin interfaces and lifecycle hooks
+    - Visualization SDK
     - Network protocols and message formats
     - Configuration file formats and options
 
@@ -22,7 +22,7 @@ This document outlines Hana's documentation guidelines, defining what should be 
     - Installation and setup procedures
     - Basic usage instructions
     - Common troubleshooting steps
-    - Plugin development guides
+    - Visualization development guides
     - Configuration guides
 
 4. **Critical Decisions**
@@ -84,85 +84,6 @@ This document outlines Hana's documentation guidelines, defining what should be 
     - Style: Concise, focused on "why"
     - Use: Sparingly, only where needed
 
-### Documentation Structure
-
-```
-docs/
-├── architecture/          # System design docs
-│   ├── overview.md        # High-level system description
-│   ├── network.md         # Network architecture
-│   └── security.md        # Security model
-├── developer/             # Developer guides
-│   ├── building.md        # Build instructions
-│   ├── testing.md         # Testing guidelines
-│   └── plugins/           # Plugin development guides
-├── user/                  # User documentation
-│   ├── installation.md    # Installation guide
-│   ├── configuration.md   # Configuration guide
-│   └── tutorials/         # Usage tutorials
-└── README.md              # Project overview
-
-src/
-└── {module}/              # Source code
-    └── mod.rs             # Module docs generate API reference
-
-target/
-└── doc/                   # Generated API documentation
-```
-
-### Documentation Types
-
-1. **User Documentation** (`/docs/user/`)
-    - Installation and setup
-    - Configuration guides
-    - Usage tutorials
-    - Troubleshooting
-
-2. **Architecture Documentation** (`/docs/architecture/`)
-    - System design docs
-    - Component interactions
-    - Design decisions
-    - Security model
-
-3. **Developer Documentation** (`/docs/developer/`)
-    - Build instructions
-    - Testing guidelines
-    - Plugin development
-    - Contributing guide
-
-4. **API Documentation** (Generated)
-    - Auto-generated from source comments
-    - Built using `cargo doc`
-    - Published with releases
-    - Includes module, type, and function docs
-
-## Documentation Maintenance
-
-### Review Process
-- Documentation review in PR process
-- Regular documentation audits
-- User feedback incorporation
-- Documentation testing (examples, links)
-
-### Update Triggers
-1. **Must Update**
-    - API changes
-    - Feature additions/removals
-    - Security model changes
-    - Configuration changes
-
-2. **Consider Updating**
-    - Implementation improvements
-    - Performance optimizations
-    - Internal refactoring
-    - Test strategy changes
-
-3. **Skip Updates**
-    - Minor bug fixes
-    - Regular maintenance
-    - Style changes
-    - Temporary changes
-
 ## Documentation Style
 
 ### General Guidelines
@@ -182,9 +103,3 @@ target/
 - Include table of contents for long docs
 - Use code blocks with language tags
 - Maintain consistent formatting
-
-## Implementation Notes
-
-This documentation strategy aims to balance completeness with maintainability. It prioritizes user-facing documentation and critical system understanding while avoiding documentation overhead for standard or obvious components.
-
-The strategy should evolve with the project, adapting to user feedback and development needs while maintaining its core focus on essential documentation.

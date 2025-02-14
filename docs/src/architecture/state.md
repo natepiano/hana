@@ -2,6 +2,11 @@
 
 ## Purpose
 Manages the synchronization, versioning, and persistence of state across the hana system. Provides a robust foundation for maintaining consistency and handling state recovery across the distributed system.
+
+This document is really just some scratch notes about somethings we know we'll need (persisting the management app configuration) and the fact that if we have a mesh architecture we will need some way to synchronize system state across all nodes in the mesh.
+
+Everything in this doc is subject to change - and speculative at this point.
+
 ## Core Responsibilities
 - State versioning and change tracking
 - State synchronization logic
@@ -9,14 +14,15 @@ Manages the synchronization, versioning, and persistence of state across the han
 - State persistence and recovery
 - Update ordering and consistency
 ## Runtime State Components
-### [Display Environment](./display.md) State
+### [Management App](application.md) State
 - Global environment properties
 - Display group configurations
 - Individual display states
 - Window assignments and properties
+- Any value that the user sets
 ### Visualization State
-- Plugin instance states
-- Parameter values
+- Modulation state
+- Input mappings
 - Modulation routing
 - Input mappings (OSC, midi)
 ### System State
@@ -25,6 +31,7 @@ Manages the synchronization, versioning, and persistence of state across the han
 - Global system settings
 - Resource allocation state
 ## State Synchronization
+
 ### Version Management
 - Each state change assigned unique version
 - Version tracking per state component
@@ -45,7 +52,7 @@ Manages the synchronization, versioning, and persistence of state across the han
 - User notification for critical conflicts
 - Automatic resolution for non-critical conflicts
 ## Network Integration
-### State Propagation
+### State Propagation (made up example)
 ```rust
 struct StateChange {
     component: StateComponent,
@@ -74,7 +81,7 @@ impl StateManager {
 - Partial update handling
 - State request processing
 ## State Persistence
-### Save Operations
+### Save Operations (made up example)
 ```rust
 struct SavedState {
     environment: EnvironmentState,
@@ -125,7 +132,7 @@ impl StateManager {
 4. Execute recovery operations
 5. Verify state consistency
 6. Resume normal operation
-## [Error Handling](./error_handling.md)
+## [Error Handling](error_handling.md)
 - Invalid state detection
 - Version mismatch handling
 - Corruption detection
@@ -143,7 +150,7 @@ impl StateManager {
 ### Runtime Synchronization
 1. Component state change detected
 2. Version number assigned
-3. Change propagated via [Network Architecture](./network.md)
+3. Change propagated via [Network Architecture](network_security.md)
 4. Peers validate and apply update
 5. Confirmation of synchronization
 ### State Save/Restore
@@ -152,26 +159,22 @@ impl StateManager {
 3. State serialized and stored
 4. Optional network synchronization
 5. Available for future restoration
-### Network Partition Recovery
-1. Partition detected
-2. Active states preserved
-3. Change logs maintained
-4. Reconciliation on reconnection
-5. Conflicts resolved automatically
-6. Manual resolution if needed
+
 ## Integration Points
-### [Network Architecture](./network.md)
+### [Network Architecture](network_security.md)
 - Message transport for state updates
 - Peer status notifications
 - Network health monitoring
 - Connection event handling
-### [Visualization System](./visualization.md)
-- Plugin state capture
+### [Visualization Manager](visualization_manager.md)
+- Visualization state capture
 - State restoration to plugins
 - Version compatibility checks
 - Resource state tracking
-### Management Interface
+### [Management App](application.md)
 - State visualization
 - Manual intervention controls
 - Recovery operation triggers
 - Configuration interface
+### [Undo](undo.md)
+- what happens when undo passes a save or load operation?

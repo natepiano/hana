@@ -1,54 +1,53 @@
 # Undo System Architecture
 
-## Overview
+## Purpose
 The undo system provides reliable undo/redo functionality across Hana's distributed
-environment while maintaining state consistency. It integrates with the [State Management](./state.md)
-and [Network Architecture](./network.md) systems to ensure synchronized operations across all peers.
+environment while maintaining state consistency. It integrates with the [State Management](state.md)
+and [Network Architecture](network_security.md) systems to ensure synchronized operations across all peers.
 ## Core Principles
-- Command-based undo system tracking discrete operations
+- Operation-based undo system tracking discrete operations
 - Network-aware operation history
 - Memory-efficient storage of change history
 - Clear user feedback about available undo/redo operations
 - Preservation of causality in distributed operations
 ## Components
-### Command System
-- Each undoable operation encapsulated as a command
-- Commands contain both forward and reverse operations
-- Metadata for tracking command relationships and dependencies
-- Integration with [State Management](./state.md) for version control
+### Operation System
+- Each undoable operation encapsulated as an Operation
+- Operations contain both `apply`  and `reverse` methods
+- Metadata for tracking Operation relationships and dependencies
+- Integration with [State Management](state.md) for version control
 ### History Management
-- Per-session command history tracking
+- Per-session Operation history tracking
 - Memory-bounded operation storage
-- Command merging for composite operations
+- Operation merging for composite operations (probably)
 - History pruning based on relevance and age
 - Network-wide history synchronization
 ### Network Integration
-- Command propagation via [Network Architecture](./network.md)
+the idea is we want one view of the display environment regardless of which node we are on. and we should be able to undo operations on that node even if they happened on a different one.
+- Operation propagation via [Network Architecture](./network.md)
 - Consistency preservation across peers
 - Conflict resolution for simultaneous operations
-- History reconciliation after network partitions
-
 ### User Interface
-- Undo/redo indicators in the hana [application](./application.md)
-- Visual feedback for undoable operations
-- Clear status for network-wide undo state
-- History visualization for complex operations
+- Undo/redo indicators in [management app](application.md)
+- Visual feedback for undoable operations (maybe)
+- Clear status for network-wide undo state (maybe)
+- History visualization for complex operations (maybe)
 
-## Command Categories
+## Operation Categories
 
-### Environment Commands
+### Environment Operations
 - Display group modifications
 - Display positioning changes
 - Window management operations
 - Global property adjustments
 
-### Parameter Commands
+### Modulation Operations
 - Parameter value changes
 - Modulation routing updates
 - Input mapping modifications
-- Plugin configuration changes
+- Module configuration changes (or node if that's what we call them)
 
-### System Commands
+### System Operations
 - Network configuration updates
 - Plugin loading/unloading
 - Resource allocation changes
@@ -57,13 +56,13 @@ and [Network Architecture](./network.md) systems to ensure synchronized operatio
 ## Integration Points
 
 ### [State Management](./state.md) Integration
-- Command versioning
+- Operation versioning
 - State validation pre/post undo
 - History persistence
 - Recovery mechanisms
 
 ### [Network Architecture](./network.md) Integration
-- Command synchronization
+- Operation synchronization
 - Operation ordering
 - Conflict detection
 - History reconciliation
@@ -74,16 +73,9 @@ and [Network Architecture](./network.md) systems to ensure synchronized operatio
 - Resource cleanup
 - Version compatibility
 
-## Limitations and Constraints
-- Time-limited history retention
-- Resource-intensive operation pruning
-- Real-time parameter updates not individually undoable
-- Network partition handling
-- Plugin-specific undo limitations
-
 ## Error Handling
 - Failed undo/redo recovery
 - Network synchronization failures
 - Resource exhaustion management
-- Plugin state inconsistencies
+- Visualization state inconsistencies
 - History corruption recovery

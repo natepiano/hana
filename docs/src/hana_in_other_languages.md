@@ -1,6 +1,6 @@
 # Hana in Other Languages
 Hana is a spiffy word for the name of a technical tool designed to support creativity.
-Flowers are beautiful and inspirational. From a human developer perspective it is a
+Flowers are beautiful and inspirational. From a human perspective it's a
 short word (4 chars) that is easy to type (each character alternates between the left
 and right hand). Across many languages it can mean flower, happiness, grace, care in
 arranging or positioning - all words that lend themselves to the purpose of the project.

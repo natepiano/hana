@@ -3,13 +3,11 @@
 ### Latency Testing
 - State update propagation timing
 - Display synchronization delays
-- Controller election speeds
 - Round-trip time measurements
 ### Throughput Testing
 - Maximum sustainable update rate
-- Plugin state synchronization bandwidth
+- Visualization state synchronization bandwidth
 - Window content distribution capacity
-- Multi-peer scaling characteristics
 ## Test Scenarios
 ### Basic Network Tests
 

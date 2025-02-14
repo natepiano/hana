@@ -1,13 +1,13 @@
 # Logging Framework
 
-## Overview
+## Purpose
 The logging framework provides structured logging using the `tracing` crate across Hana's distributed system. It focuses on clear, actionable log levels that help diagnose issues and monitor system health.
 
 ## Log Levels
 
 ### ERROR
 Used for failures requiring immediate attention:
-- Plugin crashes
+- Visualization crashes
 - Network connection failures
 - Resource exhaustion
 - State synchronization failures
@@ -18,13 +18,13 @@ Used for recoverable issues affecting performance or reliability:
 - Network latency spikes
 - Frame rate drops
 - Failed connection retries
-- Plugin load warnings
+- Visualization startup warnings
 - Resource usage approaching limits
 
 ### INFO
 Used for significant state changes and normal operations:
 - System startup/shutdown
-- Plugin load/unload
+- Visualization startup/shutdown
 - Display configuration changes
 - Network peer connections/disconnections
 - Controller role changes
@@ -83,25 +83,3 @@ fn process_message(msg: &Message) {
 3. Log at appropriate levels based on operational impact
 4. Avoid logging sensitive information
 5. Consider performance impact of debug/trace logging
-
-## Configuration
-```toml
-[dependencies]
-tracing = "0.1"
-tracing-subscriber = "0.3"
-```
-
-Basic setup:
-```rust
-use tracing_subscriber::{prelude::*, fmt, EnvFilter};
-
-fn setup_logging() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(filter)
-        .init();
-}
-```

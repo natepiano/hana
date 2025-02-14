@@ -1,13 +1,15 @@
 # Security Architecture
 
-## Overview
-Security model focused on peer-to-peer trust and plugin safety in local network environments. The system prioritizes secure machine-to-machine communication and plugin isolation without requiring user authentication infrastructure.
+## Purpose
+Security model focused on peer-to-peer trust and visualization (downloadable binaries) safety in local network environments.
+
+At this point these are all just ideas - we have not settled on the actual needs and approach for security yet.
 ## Instance Security
 ### Peer Authentication
 - Pre-shared key or certificate-based authentication between peers
 - Simple trust establishment during initial setup
 - Automatic peer discovery on local network only
-- No persistent user accounts or credentials
+- No persistent user accounts or credentials - will this be true if, for example, we create an installation that needs to be secure but changeable by authorized users?
 ### Trust Management
 - Trust established at first connection
 - Optional: ability to "forget" trusted peers
@@ -24,27 +26,18 @@ Security model focused on peer-to-peer trust and plugin safety in local network 
 - Required ports documentation
 - Rate limiting for network messages
 - Protection against network flooding
-## Plugin Security
+## Visualization Security
 ### Sandboxing
 - Resource isolation and limits
 - Restricted filesystem access
 - Network access controls
 - Memory/CPU usage monitoring
-### Plugin Verification
+### Visualization Verification
 - code signing requirements
-- Automated security scanning in plugin repository
+- Automated security scanning in visualization repository
 - Runtime behavior monitoring
 - Version control and update verification
-## Data Security
-### State Data
-- Encryption at rest for saved states
-- Secure state synchronization between peers
-- State modification only from trusted peers
-- Audit logs for state changes
-### Configuration Security
-- Local configuration file protection
-- Secure storage of peer trust information
-- Data retention and cleanup policies
+
 ## Input Validation
 ### Parameter Validation
 - Input sanitization for all parameters
@@ -60,15 +53,15 @@ Security model focused on peer-to-peer trust and plugin safety in local network 
 
 ## Monitoring
 
-### Security Logging
+### Security Logging(?)
 - Basic security event logging
 - Performance impact monitoring
 - Optional: extended logging for debugging
 
 ### Incident Response
-- Automatic peer disconnection on security violations
+- Automatic peer disconnection on security violations - is this a security issue or just a network issue?
 - Recovery procedures
-- Simple incident reporting
+- Simple incident reporting to management app
 
 ## Documentation
 

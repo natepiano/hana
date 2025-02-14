@@ -1,31 +1,25 @@
-# Display Environment Architecture
-
-** check out this link **
-https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/opacity.rs
-
-shows a builder model for laying out a UI - as I'm writing this i realize we need a dynamic layout for users so we'll have to think about this - especially if we want to avoid
+# Display Environment
 
 ## Purpose
 The display environment system manages the spatial arrangement and
-control of all display devices in the hana network,
+configuration of all display devices in the hana network,
 enabling visualization across arbitrary 3D configurations of screens
-and projectors.
-
-The Display Environment is managed within the [hana application](application.md).
+and projectors. Or lasers. Or Lights. Or AR devices. Or VR headsets. Or whatever.
 
 ## Requirements
-- Support single-screen and multi-monitor configurations
-- Expose standardized parameter ranges for visualizations
-- Enable multiscale rendering and split-rendering capability
-- Provide virtualized preview of all available displays in the [application](application.md)
+- Place virtualized screens and projectors in a 3D space mimicking the physical environment such as a stage or installation
+- Display and manage the physical properties of each display including information about the machine to which they're attached in the mesh network.
+- Provide virtualized preview of visualizations on available displays in the [application](application.md)
+- Allow [state](state.md) to be saved and loaded
 ## Hierarchy
 1. **Environment**: The complete 3D space where displays exist
-    - Contains one or more Display Groups
+-   - Contains one or more Groups (fixtures? walls?) that define the physical space and on which Displays can be located
+    - Contains one or more Displays
     - Defines the global coordinate system
     - Manages global properties (e.g., ambient lighting, scale)
-    - Can be assigned a name
+    - Can be assigned a name - such as "Stage" or "Installation" or "Favorite Customer"
 
-2. **Display Group**: A logical collection of displays with spatial relationship
+2. **Display Groups**: A logical collection of displays with spatial relationship
     - Examples: "North Wall", "Stage Right", "Ceiling Array"
     - Defines relative positioning of member displays
     - Can be manipulated as a unit (move, rotate, etc.)
@@ -41,17 +35,19 @@ The Display Environment is managed within the [hana application](application.md)
 4. **Window**: A standard operating system window
    - Bounded area where plugins render
    - Managed by the operating system
-   - Contains a plugin visualizations
-   - Handles plugin-specific parameters
-   - It's important to know that a visualization can run on multiple windows on multiple Displays. It could be duplicated, it could be given information to coordinate running different parts of the visualization across different displays.
+   - Contains a visualizations
+   - Handles visualization-specific parameters
+   - It's important to know that a visualization can run on multiple windows on multiple Displays. It could be duplicated, it could be given information to coordinate running different parts of the visualization across different displays - e.g., the camera angle and viewport that this particular monitor is handling for a much larger visualization.
 
 ## Spatial Management
 - Environment uses right-handed 3D coordinate system
-- Display Groups define local coordinate spaces
+- Display Groups define local coordinate spaces - probably via parent / child relationships in bevy
 - Displays track physical dimensions and positions
 - Windows handle viewport calculations and plugin rendering
 
 ## Example Configuration
+think of this as pseudo code for example purposes only - names and fields will almost certainly change
+
 ```rust
 struct Environment {
     coordinate_system: CoordinateSystem,
