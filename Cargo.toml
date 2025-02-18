@@ -6,7 +6,7 @@ default-members = [
   "examples/basic_visualization",
 ]
 members = [
-  "crates/hana",
+  "crates/hana", "crates/hana_input",
   "crates/hana_network",
   "crates/hana_visualization",
   "examples/basic_visualization",
@@ -65,7 +65,9 @@ bevy = { version = "0.15.2", default-features = false, features = [
   # "vorbis",
   # "webgl2",
 ] }
-# error-stack = { version = "0.5.0" }
+error-stack = "0.5.0"
+serde     = { version = "1.0.217", features = ["derive"] }
+thiserror = "2.0.11"
 
 [profile.dev.package]
 bevy = { opt-level = 3 }

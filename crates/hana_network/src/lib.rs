@@ -1,22 +1,40 @@
 use std::io::{Read, Write};
 
-use serde::{Deserialize, Serialize};
-
 pub use crate::error::{Error, Result};
+use error_stack::{Report, ResultExt};
+use serde::{Deserialize, Serialize}; // Add this // Change this
+
 mod error;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     Count(u32),
     Ping,
-    Stop,
+    Shutdown,
 }
 
 pub fn write_command(stream: &mut impl Write, command: &Command) -> Result<()> {
-    let command_bytes = bincode::serialize(command)?;
+    let command_bytes = bincode::serialize(command)
+        .change_context(Error::Serialization)
+        .attach_printable_lazy(|| format!("Failed to serialize command: {:?}", command))?;
+
     let len_prefix = command_bytes.len() as u32;
-    stream.write_all(&len_prefix.to_le_bytes())?;
-    stream.write_all(&command_bytes)?;
+
+    stream
+        .write_all(&len_prefix.to_le_bytes())
+        .change_context(Error::Io)
+        .attach_printable("Failed to write length prefix")?;
+
+    stream
+        .write_all(&command_bytes)
+        .change_context(Error::Io)
+        .attach_printable_lazy(|| {
+            format!(
+                "Failed to write {} bytes of command data",
+                command_bytes.len()
+            )
+        })?;
+
     Ok(())
 }
 
@@ -26,11 +44,26 @@ pub fn read_command(stream: &mut impl Read) -> Result<Option<Command>> {
         Ok(_) => {
             let len = u32::from_le_bytes(len_bytes) as usize;
             let mut buffer = vec![0u8; len];
-            stream.read_exact(&mut buffer)?;
-            Ok(Some(bincode::deserialize(&buffer)?))
+
+            stream
+                .read_exact(&mut buffer)
+                .change_context(Error::Io)
+                .attach_printable_lazy(|| {
+                    format!("Failed to read {} bytes of command data", len)
+                })?;
+
+            let command = bincode::deserialize(&buffer)
+                .change_context(Error::Serialization)
+                .attach_printable_lazy(|| {
+                    format!("Failed to deserialize {} bytes into Command", buffer.len())
+                })?;
+
+            Ok(Some(command))
         }
-        Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
-        Err(e) => Err(e.into()),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(e) => Err(Report::new(Error::Io)
+            .attach_printable("Failed to read length prefix")
+            .attach_printable(e)),
     }
 }
 
@@ -72,19 +105,16 @@ mod write_tests {
         };
         let command = Command::Ping;
 
-        // this has to fail so let's validate that it does
-        match write_command(&mut mock_stream, &command) {
-            Err(Error::Io(e)) => assert_eq!(e.kind(), ErrorKind::BrokenPipe),
-            _ => panic!("Expected IO error"),
-        }
+        let result = write_command(&mut mock_stream, &command);
+        assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
     #[test]
     fn test_write_command_length_prefix_error() {
         struct FailAfterNBytes {
-            fail_after:    usize,
+            fail_after: usize,
             bytes_written: usize,
-            write_calls:   Vec<usize>, // Track size of each write
+            write_calls: Vec<usize>, // Track size of each write
         }
 
         impl Write for FailAfterNBytes {
@@ -106,21 +136,14 @@ mod write_tests {
         }
 
         let mut mock_stream = FailAfterNBytes {
-            fail_after:    4,
+            fail_after: 4,
             bytes_written: 0,
-            write_calls:   Vec::new(),
+            write_calls: Vec::new(),
         };
         let command = Command::Ping;
 
         let result = write_command(&mut mock_stream, &command);
-
-        // Print the sizes of all write calls
-        println!("Write calls: {:?}", mock_stream.write_calls);
-
-        match result {
-            Err(Error::Io(e)) => assert_eq!(e.kind(), ErrorKind::BrokenPipe),
-            _ => panic!("Expected IO error"),
-        }
+        assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
     #[test]
@@ -168,10 +191,8 @@ mod read_tests {
         let data = vec![4, 0, 0, 0]; // Length prefix (4 bytes)
         let mut cursor = Cursor::new(data);
 
-        match read_command(&mut cursor) {
-            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => (), /* Expected error */
-            other => panic!("Expected UnexpectedEof error, got {:?}", other),
-        }
+        let result = read_command(&mut cursor);
+        assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
     #[test]
@@ -190,10 +211,8 @@ mod read_tests {
             error_kind: std::io::ErrorKind::Other,
         };
 
-        match read_command(&mut mock_stream) {
-            Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::Other),
-            _ => panic!("Expected IO error"),
-        }
+        let result = read_command(&mut mock_stream);
+        assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
     #[test]
@@ -205,9 +224,7 @@ mod read_tests {
         ];
         let mut cursor = Cursor::new(data);
 
-        match read_command(&mut cursor) {
-            Err(Error::Serialization(_)) => (), // Success
-            other => panic!("Expected serialization error, got {:?}", other),
-        }
+        let result = read_command(&mut cursor);
+        assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Serialization));
     }
 }

@@ -1,10 +1,10 @@
 [package]
-edition = "2021"
-name    = "hana_network"
+name = "hana_input"
 version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-bincode = { version = "1.3.3" }
 error-stack.workspace = true
-serde.workspace = true
 thiserror.workspace = true
+
+# midir = "0.10.1"

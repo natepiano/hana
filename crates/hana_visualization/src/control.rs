@@ -46,7 +46,7 @@ fn handle_commands(receiver: Res<CommandReceiver>, mut count: Local<u32>) {
         while let Ok(command) = rx.try_recv() {
             match command {
                 Command::Ping => println!("rx ping!"),
-                Command::Stop => {
+                Command::Shutdown => {
                     println!("Final count received: {}", *count);
                     std::process::exit(0);
                 }
@@ -66,7 +66,7 @@ fn handle_connection(mut stream: TcpStream, tx: Sender<Command>) -> Result<()> {
 
     while let Ok(Some(command)) = hana_network::read_command(&mut stream) {
         match command {
-            Command::Stop | Command::Ping => {
+            Command::Shutdown | Command::Ping => {
                 println!("Received TCP: {:?}", command);
             }
             _ => {}

@@ -6,8 +6,8 @@ Create minimal working system with:
 - MPE MIDI parameter mapping
 - Error handling foundation
 ## Core Components Needed
-1. Plugin System (minimal)
-    - Local plugin loading
+1. visualization library (minimal)
+    - Local visualization loading
     - Single window rendering
     - Basic parameter system
 
@@ -19,35 +19,31 @@ Create minimal working system with:
 3. Error Handling
     - Using established error handling patterns
     - Focus on local operation errors
+
 ## Development Path
-1. Create basic plugin loading
-2. Add window display
-3. Implement MPE input
-4. Connect parameter system
+1. Create basic visualization loading (done)
+2. Add window display (done)
+3. Implement MPE input (not done)
+4. Connect parameter system (not done)
 
-# Plugin System - Initial Spike
+# Visualization System - Initial Spike
 
-## Core Plugin Interface
-A plugin must:
-- Expose a known entry point for loading
-- Provide visualization capabilities
-- Accept window/camera context
-- Be buildable as a dynamic library
-
+## Visualization
+A viualization must:
+- Use the VisualizationControl plugin
+- receive messages from the hana application visa the VisualizationControl bevy plugin
 ## Simple Test Plugin
 The spike should include:
-- A basic visualization plugin (e.g., spinning cube)
-- Built as a dynamic library (.dll/.so/.dylib)
+- A basic visualization
 - Minimal parameter interface
 
-## Plugin Loading
+## Visualization Loading
 The application should:
-- Load plugin from filesystem path
-- Initialize plugin with window context
-- Handle basic error cases (missing/invalid plugin)
+- Load visualization from filesystem path
+- Initialize visualization with window context
+- Handle basic error cases (missing/invalid visualization)
 
-## Key Questions to Validate
-- Can we dynamically load plugins at runtime?
-- Can plugins render into the application's windows?
-- Is the separation of concerns clear and maintainable?
-- Can plugins be developed independently?
+## parameter mapping
+- the hana app needs to connect to a local midi device and accept incoming MPE midi messages and send them to the VisualizationControl plugin for processing.
+- right now i just want to focus on pressure coming from any key on the keyboard
+- i want to map this in the examples/basic_visualization to moving all of the objects up and down on the vertical access

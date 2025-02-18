@@ -2,10 +2,8 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum Error {
-    #[error("IO operation failed")]
-    Io,
-    #[error("Serialization operation failed")]
-    Serialization,
+    #[error("Input operation failed")]
+    InputError,
 }
 
 pub type Result<T> = error_stack::Result<T, Error>;

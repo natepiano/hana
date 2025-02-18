@@ -1,41 +1,43 @@
-use std::net::TcpStream;
-use std::process::Command as ProcessCommand;
-use std::time::Duration;
+mod error;
+mod visualization_process;
 
-use hana_network::{Command, Result};
+use error_stack::ResultExt;
+use hana_network::Command;
+
+use std::path::PathBuf;
+
+use std::time::Duration;
+use visualization_process::VisualizationProcess;
+
+use error::{Error, Result};
 
 fn main() -> Result<()> {
-    // Launch visualization
-    let mut child = ProcessCommand::new("./target/debug/basic-visualization").spawn()?;
+    let visualization_path = PathBuf::from("./target/debug/basic-visualization");
+    let visualization = VisualizationProcess::new(visualization_path)?;
 
-    // Try to connect with retries
-    let mut attempts = 0;
-    let max_attempts = 15;
-    let mut stream = loop {
-        match TcpStream::connect("127.0.0.1:3001") {
-            Ok(stream) => break stream,
-            Err(e) => {
-                attempts += 1;
-                if attempts >= max_attempts {
-                    return Err(e.into());
-                }
-                println!("Connection attempt {} failed, retrying...", attempts);
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        }
-    };
+    let mut stream = visualization.connect()?;
 
     println!("Connected to visualization!");
 
     println!("Starting count command flood...");
+
     for i in 0..10000 {
-        hana_network::write_command(&mut stream, &Command::Count(i))?;
+        hana_network::write_command(&mut stream, &Command::Count(i))
+            .change_context(Error::Network)
+            .attach_printable_lazy(|| format!("Failed to send count command {}", i))?;
     }
+
     println!("Finished sending counts");
 
     std::thread::sleep(Duration::from_secs(5));
-    hana_network::write_command(&mut stream, &Command::Stop)?;
 
-    child.wait()?;
+    // the shutdown asks the process to exit - this is a cooperative shutdown request
+    hana_network::write_command(&mut stream, &Command::Shutdown)
+        .change_context(Error::Network)
+        .attach_printable("Failed to send stop command")?;
+
+    // now we wait for shutdown but do we know that's cool?
+    visualization.wait(Duration::from_secs(5))?;
+
     Ok(())
 }
