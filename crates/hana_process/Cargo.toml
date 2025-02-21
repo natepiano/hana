@@ -1,0 +1,12 @@
+[package]
+name = "hana_process"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hana_helper"
+path = "src/bin/hana_helper.rs"
+
+[dependencies]
+error-stack.workspace = true
+thiserror.workspace = true

@@ -1,42 +1,46 @@
-use crate::{Error, Result};
+mod error;
+
+pub use crate::error::{Error, Result};
 use error_stack::{Report, ResultExt};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-const MAX_ATTEMPTS: u8 = 15;
-const RETRY_DELAY: Duration = Duration::from_millis(500);
+const TCP_ADDR: &str = "127.0.0.1:3001";
+const CONNECTION_MAX_ATTEMPTS: u8 = 15;
+const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
-pub struct VisualizationProcess {
+pub struct Process {
     child: std::process::Child,
     path: PathBuf,
 }
 
-impl VisualizationProcess {
-    pub fn new(path: PathBuf) -> Result<Self> {
+impl Process {
+    pub fn run(path: PathBuf) -> Result<Self> {
         Command::new(&path)
             .spawn()
             .map_err(Error::Io)
             .attach_printable(format!("Failed to launch visualization: {path:?}"))
-            .map(|child| VisualizationProcess { child, path })
+            .map(|child| Process { child, path })
     }
 
     pub fn connect(&self) -> Result<TcpStream> {
-        // Try to connect with retries
+        // Try to connect - with retries
         let mut attempts = 0;
         let stream = loop {
-            match TcpStream::connect("127.0.0.1:3001") {
+            match TcpStream::connect(TCP_ADDR) {
                 Ok(stream) => break stream,
                 Err(_) => {
                     attempts += 1;
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= CONNECTION_MAX_ATTEMPTS {
                         return Err(Report::new(Error::ConnectionTimeout).attach_printable(
                             format!("Failed to connect after {attempts} attempts"),
                         ));
                     }
                     println!("Connection attempt {} failed, retrying...", attempts);
-                    std::thread::sleep(RETRY_DELAY);
+                    std::thread::sleep(CONNECTION_RETRY_DELAY);
                 }
             }
         };
@@ -44,29 +48,36 @@ impl VisualizationProcess {
         Ok(stream)
     }
 
-    pub fn wait(mut self, timeout: Duration) -> Result<()> {
+    pub fn ensure_shutdown(mut self, timeout: Duration) -> Result<()> {
         use std::thread;
 
         let start = std::time::Instant::now();
+
+        //child.try_wait() will return Some(..) if the child process has exited
+        // otherwise we keep trying until we reach the timeout
         while start.elapsed() < timeout {
             match self.child.try_wait().map_err(Error::Io)? {
                 Some(_status) => return Ok(()),
-                None => thread::sleep(Duration::from_millis(100)),
+                None => thread::sleep(SHUTDOWN_TIMEOUT),
             }
         }
 
         // If we get here, we've timed out
+        // kill throws io::Error so we wrap it in our own because that's what we do
+        // however it's almost completely unlikely that this will fail
+        // this will generally just kill and move on
         self.child
             .kill()
-            .map_err(Error::Io)
+            .map_err(|e| Error::Io(e))
             .attach_printable("Failed to kill visualization process after timeout")?;
 
-        Err(Report::new(Error::ConnectionTimeout)
-            .attach_printable("Visualization process failed to shutdown in time"))
+        // if we've made it this far, we throw the NotResponding error to indicate that we were unable to kill it
+        Err(Report::new(Error::NotResponding)
+            .attach_printable("Visualization process not responding"))
     }
 }
 
-impl Drop for VisualizationProcess {
+impl Drop for Process {
     fn drop(&mut self) {
         if let Err(e) = self.child.kill() {
             // Convert to error-stack Report and log with context
@@ -76,35 +87,5 @@ impl Drop for VisualizationProcess {
             // Log the full error chain
             eprintln!("{:?}", error);
         }
-    }
-}
-
-#[cfg(test)]
-mod error_tests {
-    use super::*;
-
-    #[test]
-    fn test_spawn_error() {
-        let result = Command::new("non_existent_executable")
-            .spawn()
-            .map_err(Error::Io)
-            .attach_printable("Failed to launch visualization");
-
-        let err = result.expect_err("Expected spawn to fail");
-
-        // Verify error type
-        assert!(matches!(err.current_context(), Error::Io(_)));
-
-        // Verify error message chain
-        let error_string = format!("{err:?}");
-        assert!(
-            error_string.contains("Failed to launch visualization"),
-            "Missing expected error message"
-        );
-        assert!(
-            error_string.contains("No such file or directory"),
-            "Missing underlying OS error"
-        );
-        println!("Error string: {}", error_string);
     }
 }

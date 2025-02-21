@@ -2,6 +2,7 @@
 [Introduction](./README.md)
 - [Architecture Overview](./architecture/architecture_overview.md)
   - [Application](./architecture/application.md)
+  - [Command System](./architecture/command_system.md)
   - [Display Environment](./architecture/display.md)
   - [Visualization Manager](./architecture/visualization_manager.md)
   - [Input & Control](./architecture/input.md)
@@ -31,3 +32,4 @@
   - [Versioning](./developer/versioning.md)
 # Appendix
 - [Hana in Other Languages](./hana_in_other_languages.md)
+- [Use Cases](./use_cases.md)

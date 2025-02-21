@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-error-stack.workspace = true
-thiserror.workspace = true
+# error-stack.workspace = true
+# thiserror.workspace = true
 
 # midir = "0.10.1"

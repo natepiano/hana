@@ -1,0 +1,1 @@
+everyone's phone is showing a piece of the visualization and the game is to get everyone to work together to show the visualization - possibly by arranging geometrically - or by dancing - or by.... by itself this could be a whole project

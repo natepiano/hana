@@ -1,13 +1,17 @@
 [workspace]
 default-members = [
   "crates/hana",
+ # "crates/hana_input",
   "crates/hana_network",
+  "crates/hana_process",
   "crates/hana_visualization",
   "examples/basic_visualization",
 ]
 members = [
-  "crates/hana", "crates/hana_input",
+  "crates/hana",
+  "crates/hana_input",
   "crates/hana_network",
+  "crates/hana_process",
   "crates/hana_visualization",
   "examples/basic_visualization",
 ]
@@ -18,6 +22,7 @@ resolver = "2"
 # Workspace member crates
 #
 hana_network       = { path = "crates/hana_network" }
+hana_process       = { path = "crates/hana_process" }
 hana_visualization = { path = "crates/hana_visualization" }
 
 #

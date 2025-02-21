@@ -1956,16 +1956,13 @@ version = "0.1.0"
 dependencies = [
  "error-stack",
  "hana_network",
+ "hana_process",
  "thiserror 2.0.11",
 ]
 
 [[package]]
 name = "hana_input"
 version = "0.1.0"
-dependencies = [
- "error-stack",
- "thiserror 2.0.11",
-]
 
 [[package]]
 name = "hana_network"
@@ -1974,6 +1971,14 @@ dependencies = [
  "bincode",
  "error-stack",
  "serde",
+ "thiserror 2.0.11",
+]
+
+[[package]]
+name = "hana_process"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
  "thiserror 2.0.11",
 ]
 

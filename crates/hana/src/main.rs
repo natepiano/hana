@@ -1,21 +1,26 @@
 mod error;
-mod visualization_process;
 
 use error_stack::ResultExt;
 use hana_network::Command;
-
+use hana_process::Process;
 use std::path::PathBuf;
 
 use std::time::Duration;
-use visualization_process::VisualizationProcess;
 
 use error::{Error, Result};
 
 fn main() -> Result<()> {
+    // todo : TypeState for Process for "unstarted", "running", "connected" i think shutdown is implicit
+    //        move this into some helper function so main is pure
     let visualization_path = PathBuf::from("./target/debug/basic-visualization");
-    let visualization = VisualizationProcess::new(visualization_path)?;
+    let visualization = Process::run(visualization_path)
+        .change_context(Error::Process)
+        .attach_printable("Failed to start visualization process")?;
 
-    let mut stream = visualization.connect()?;
+    let mut stream = visualization
+        .connect()
+        .change_context(Error::Network)
+        .attach_printable("Failed to connect to visualization process")?;
 
     println!("Connected to visualization!");
 
@@ -36,8 +41,10 @@ fn main() -> Result<()> {
         .change_context(Error::Network)
         .attach_printable("Failed to send stop command")?;
 
-    // now we wait for shutdown but do we know that's cool?
-    visualization.wait(Duration::from_secs(5))?;
+    visualization
+        .ensure_shutdown(Duration::from_secs(5))
+        .change_context(Error::Process)
+        .attach_printable("Failed to shutdown visualization process")?;
 
     Ok(())
 }
