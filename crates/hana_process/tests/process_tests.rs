@@ -1,9 +1,9 @@
-use error_stack::ResultExt;
-use hana_process::Process;
-use hana_process::{Error, Result};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+
+use error_stack::ResultExt;
+use hana_process::{Error, Process, Result};
 
 #[test]
 fn test_spawn_error() {

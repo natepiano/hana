@@ -1,19 +1,20 @@
 use std::io::{Read, Write};
 
-pub use crate::error::{Error, Result};
 use error_stack::{Report, ResultExt};
-use serde::{Deserialize, Serialize}; // Add this // Change this
+use serde::{Deserialize, Serialize};
+
+pub use crate::error::{Error, Result};
 
 mod error;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Command {
+pub enum Instruction {
     Count(u32),
     Ping,
     Shutdown,
 }
 
-pub fn write_command(stream: &mut impl Write, command: &Command) -> Result<()> {
+pub fn send_instruction(stream: &mut impl Write, command: &Instruction) -> Result<()> {
     let command_bytes = bincode::serialize(command)
         .change_context(Error::Serialization)
         .attach_printable_lazy(|| format!("Failed to serialize command: {:?}", command))?;
@@ -38,7 +39,7 @@ pub fn write_command(stream: &mut impl Write, command: &Command) -> Result<()> {
     Ok(())
 }
 
-pub fn read_command(stream: &mut impl Read) -> Result<Option<Command>> {
+pub fn receive_instruction(stream: &mut impl Read) -> Result<Option<Instruction>> {
     let mut len_bytes = [0u8; 4];
     match stream.read_exact(&mut len_bytes) {
         Ok(_) => {
@@ -92,9 +93,9 @@ mod write_tests {
     #[test]
     fn test_write_command_success() {
         let mut buffer = Vec::new();
-        let command = Command::Ping;
+        let command = Instruction::Ping;
 
-        assert!(write_command(&mut buffer, &command).is_ok());
+        assert!(send_instruction(&mut buffer, &command).is_ok());
         assert!(!buffer.is_empty());
     }
 
@@ -103,18 +104,18 @@ mod write_tests {
         let mut mock_stream = FailingStream {
             error_kind: ErrorKind::BrokenPipe,
         };
-        let command = Command::Ping;
+        let command = Instruction::Ping;
 
-        let result = write_command(&mut mock_stream, &command);
+        let result = send_instruction(&mut mock_stream, &command);
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
     #[test]
     fn test_write_command_length_prefix_error() {
         struct FailAfterNBytes {
-            fail_after: usize,
+            fail_after:    usize,
             bytes_written: usize,
-            write_calls: Vec<usize>, // Track size of each write
+            write_calls:   Vec<usize>, // Track size of each write
         }
 
         impl Write for FailAfterNBytes {
@@ -136,22 +137,22 @@ mod write_tests {
         }
 
         let mut mock_stream = FailAfterNBytes {
-            fail_after: 4,
+            fail_after:    4,
             bytes_written: 0,
-            write_calls: Vec::new(),
+            write_calls:   Vec::new(),
         };
-        let command = Command::Ping;
+        let command = Instruction::Ping;
 
-        let result = write_command(&mut mock_stream, &command);
+        let result = send_instruction(&mut mock_stream, &command);
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
     #[test]
     fn test_write_command_correct_format() {
         let mut buffer = Vec::new();
-        let command = Command::Count(42);
+        let command = Instruction::Count(42);
 
-        write_command(&mut buffer, &command).unwrap();
+        send_instruction(&mut buffer, &command).unwrap();
 
         // First 4 bytes should be length prefix
         let len_bytes = &buffer[0..4];
@@ -162,8 +163,8 @@ mod write_tests {
         assert_eq!(command_bytes.len(), len as usize);
 
         // Should deserialize back to original command
-        let deserialized: Command = bincode::deserialize(command_bytes).unwrap();
-        assert!(matches!(deserialized, Command::Count(42)));
+        let deserialized: Instruction = bincode::deserialize(command_bytes).unwrap();
+        assert!(matches!(deserialized, Instruction::Count(42)));
     }
 }
 
@@ -176,13 +177,13 @@ mod read_tests {
     #[test]
     fn test_read_command_success() {
         // Create a valid serialized command
-        let command = Command::Ping;
+        let command = Instruction::Ping;
         let mut buffer = Vec::new();
-        write_command(&mut buffer, &command).unwrap();
+        send_instruction(&mut buffer, &command).unwrap();
 
         let mut cursor = Cursor::new(buffer);
-        let result = read_command(&mut cursor).unwrap();
-        assert_eq!(result, Some(Command::Ping));
+        let result = receive_instruction(&mut cursor).unwrap();
+        assert_eq!(result, Some(Instruction::Ping));
     }
 
     #[test]
@@ -191,7 +192,7 @@ mod read_tests {
         let data = vec![4, 0, 0, 0]; // Length prefix (4 bytes)
         let mut cursor = Cursor::new(data);
 
-        let result = read_command(&mut cursor);
+        let result = receive_instruction(&mut cursor);
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
@@ -211,7 +212,7 @@ mod read_tests {
             error_kind: std::io::ErrorKind::Other,
         };
 
-        let result = read_command(&mut mock_stream);
+        let result = receive_instruction(&mut mock_stream);
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
 
@@ -224,7 +225,7 @@ mod read_tests {
         ];
         let mut cursor = Cursor::new(data);
 
-        let result = read_command(&mut cursor);
+        let result = receive_instruction(&mut cursor);
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Serialization));
     }
 }

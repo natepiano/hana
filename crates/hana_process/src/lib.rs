@@ -1,11 +1,13 @@
 mod error;
 
-pub use crate::error::{Error, Result};
-use error_stack::{Report, ResultExt};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+
+use error_stack::{Report, ResultExt};
+
+pub use crate::error::{Error, Result};
 
 const TCP_ADDR: &str = "127.0.0.1:3001";
 const CONNECTION_MAX_ATTEMPTS: u8 = 15;
@@ -14,7 +16,7 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub struct Process {
     child: std::process::Child,
-    path: PathBuf,
+    path:  PathBuf,
 }
 
 impl Process {
@@ -71,7 +73,8 @@ impl Process {
             .map_err(|e| Error::Io(e))
             .attach_printable("Failed to kill visualization process after timeout")?;
 
-        // if we've made it this far, we throw the NotResponding error to indicate that we were unable to kill it
+        // if we've made it this far, we throw the NotResponding error to indicate that we were
+        // unable to kill it
         Err(Report::new(Error::NotResponding)
             .attach_printable("Visualization process not responding"))
     }

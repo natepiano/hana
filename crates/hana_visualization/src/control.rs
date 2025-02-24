@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use bevy::prelude::{App, Local, Plugin, Res, Resource, Update};
-use hana_network::{Command, Result};
+use hana_network::{Instruction, Result};
 
 pub struct VisualizationControl;
 
@@ -39,18 +39,18 @@ impl Plugin for VisualizationControl {
     }
 }
 #[derive(Resource)]
-struct CommandReceiver(Arc<Mutex<std::sync::mpsc::Receiver<Command>>>);
+struct CommandReceiver(Arc<Mutex<std::sync::mpsc::Receiver<Instruction>>>);
 
 fn handle_commands(receiver: Res<CommandReceiver>, mut count: Local<u32>) {
     if let Ok(rx) = receiver.0.lock() {
         while let Ok(command) = rx.try_recv() {
             match command {
-                Command::Ping => println!("rx ping!"),
-                Command::Shutdown => {
+                Instruction::Ping => println!("rx ping!"),
+                Instruction::Shutdown => {
                     println!("Final count received: {}", *count);
                     std::process::exit(0);
                 }
-                Command::Count(_) => {
+                Instruction::Count(_) => {
                     *count += 1;
                     if *count % 100 == 0 {
                         println!("rx {} counts", *count);
@@ -61,12 +61,12 @@ fn handle_commands(receiver: Res<CommandReceiver>, mut count: Local<u32>) {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, tx: Sender<Command>) -> Result<()> {
+fn handle_connection(mut stream: TcpStream, tx: Sender<Instruction>) -> Result<()> {
     println!("New connection established!");
 
-    while let Ok(Some(command)) = hana_network::read_command(&mut stream) {
+    while let Ok(Some(command)) = hana_network::receive_instruction(&mut stream) {
         match command {
-            Command::Shutdown | Command::Ping => {
+            Instruction::Shutdown | Instruction::Ping => {
                 println!("Received TCP: {:?}", command);
             }
             _ => {}

@@ -1,7 +1,8 @@
 [workspace]
 default-members = [
   "crates/hana",
- # "crates/hana_input",
+  "crates/hana_controller",
+  "crates/hana_input",
   "crates/hana_network",
   "crates/hana_process",
   "crates/hana_visualization",
@@ -9,6 +10,7 @@ default-members = [
 ]
 members = [
   "crates/hana",
+  "crates/hana_controller",
   "crates/hana_input",
   "crates/hana_network",
   "crates/hana_process",
@@ -21,6 +23,7 @@ resolver = "2"
 #
 # Workspace member crates
 #
+hana_controller    = { path = "crates/hana_controller" }
 hana_network       = { path = "crates/hana_network" }
 hana_process       = { path = "crates/hana_process" }
 hana_visualization = { path = "crates/hana_visualization" }
@@ -71,7 +74,7 @@ bevy = { version = "0.15.2", default-features = false, features = [
   # "webgl2",
 ] }
 error-stack = "0.5.0"
-serde     = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.218", features = ["derive"] }
 thiserror = "2.0.11"
 
 [profile.dev.package]

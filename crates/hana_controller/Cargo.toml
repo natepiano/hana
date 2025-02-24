@@ -1,0 +1,10 @@
+[package]
+edition = "2021"
+name    = "hana_controller"
+version = "0.1.0"
+
+[dependencies]
+error-stack.workspace  = true
+hana_network.workspace = true
+hana_process.workspace = true
+thiserror.workspace    = true
