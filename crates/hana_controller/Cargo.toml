@@ -8,3 +8,5 @@ error-stack.workspace  = true
 hana_network.workspace = true
 hana_process.workspace = true
 thiserror.workspace    = true
+tokio.workspace        = true
+# tracing.workspace      = true

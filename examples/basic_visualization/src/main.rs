@@ -11,7 +11,10 @@ use bevy::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
     },
 };
-use hana_visualization::VisualizationControl;
+use hana_visualization::{VisualizationControl, VisualizationEvent};
+
+#[derive(Component)]
+struct RotationSpeed(f32);
 
 fn main() {
     App::new()
@@ -26,6 +29,7 @@ fn main() {
             Update,
             (
                 rotate,
+                handle_viz_events,
                 #[cfg(not(target_arch = "wasm32"))]
                 toggle_wireframe,
             ),
@@ -88,6 +92,7 @@ fn setup(
             )
             .with_rotation(Quat::from_rotation_x(-PI / 4.)),
             Shape,
+            RotationSpeed(1.0),
         ));
     }
 
@@ -105,6 +110,7 @@ fn setup(
             )
             .with_rotation(Quat::from_rotation_x(-PI / 4.)),
             Shape,
+            RotationSpeed(1.0),
         ));
     }
 
@@ -142,9 +148,26 @@ fn setup(
     ));
 }
 
-fn rotate(mut query: Query<&mut Transform, With<Shape>>, time: Res<Time>) {
-    for mut transform in &mut query {
-        transform.rotate_y(time.delta_secs() / 2.);
+fn rotate(mut query: Query<(&mut Transform, &RotationSpeed), With<Shape>>, time: Res<Time>) {
+    for (mut transform, speed) in &mut query {
+        transform.rotate_y(time.delta_secs() * speed.0);
+    }
+}
+
+// Add a new system to handle visualization events
+fn handle_viz_events(
+    mut events: EventReader<VisualizationEvent>,
+    mut query: Query<&mut RotationSpeed>,
+) {
+    for event in events.read() {
+        match event {
+            VisualizationEvent::Ping => {
+                // On ping, double the rotation speed of all shapes
+                for mut speed in &mut query {
+                    speed.0 *= 2.0;
+                }
+            }
+        }
     }
 }
 
@@ -166,8 +189,8 @@ fn uv_debug_texture() -> Image {
 
     Image::new_fill(
         Extent3d {
-            width:                 TEXTURE_SIZE as u32,
-            height:                TEXTURE_SIZE as u32,
+            width: TEXTURE_SIZE as u32,
+            height: TEXTURE_SIZE as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -186,47 +209,3 @@ fn toggle_wireframe(
         wireframe_config.global = !wireframe_config.global;
     }
 }
-
-// fn main() {
-//     println!("Starting Bevy app...");
-//     App::new()
-//         .add_plugins(DefaultPlugins)
-//         .add_plugins(HanaPlugin)
-//         // .insert_resource(CommandReceiver(rx))
-//         // .add_systems(Update, handle_commands)
-//         .add_systems(Startup, setup)
-//         .run();
-// }
-
-// /// set up a simple 3D scene
-// fn setup(
-//     mut commands: Commands,
-//     mut meshes: ResMut<Assets<Mesh>>,
-//     mut materials: ResMut<Assets<StandardMaterial>>,
-// ) {
-//     // circular base
-//     commands.spawn((
-//         Mesh3d(meshes.add(Circle::new(4.0))),
-//         MeshMaterial3d(materials.add(Color::WHITE)),
-//         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-//     ));
-//     // cube
-//     commands.spawn((
-//         Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-//         MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-//         Transform::from_xyz(0.0, 0.5, 0.0),
-//     ));
-//     // light
-//     commands.spawn((
-//         PointLight {
-//             shadows_enabled: true,
-//             ..default()
-//         },
-//         Transform::from_xyz(4.0, 8.0, 4.0),
-//     ));
-//     // camera
-//     commands.spawn((
-//         Camera3d::default(),
-//         Transform::from_xyz(-2.5, 4.5, 9.0).looking_at(Vec3::ZERO, Vec3::Y),
-//     ));
-// }

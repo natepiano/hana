@@ -1,12 +1,12 @@
 mod error;
 use std::marker::PhantomData;
-use std::net::TcpStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use error_stack::ResultExt;
 use hana_network::Instruction;
 use hana_process::Process;
+use tokio::net::TcpStream;
 
 pub use crate::error::{Error, Result};
 
@@ -26,8 +26,8 @@ pub struct Visualization<State> {
     process: Process,
     // In the Unstarted state, there is no connection.
     // In the Connected state, we hold the TcpStream.
-    stream:  StreamState<State>,
-    _state:  PhantomData<State>,
+    stream: StreamState<State>,
+    _state: PhantomData<State>,
 }
 
 pub enum StreamState<State> {
@@ -52,44 +52,42 @@ impl Visualization<Unstarted> {
 
 impl Visualization<Started> {
     /// Connect to the visualization process
-    pub fn connect(self) -> Result<Visualization<Connected>> {
-        let stream = self
-            .process
-            .connect()
+    pub async fn connect(self) -> Result<Visualization<Connected>> {
+        let stream = hana_network::connect()
+            .await
             .change_context(Error::Process)
             .attach_printable("Failed to connect to visualization process")?;
 
         Ok(Visualization {
             process: self.process,
-            stream:  StreamState::Connected(stream),
-            _state:  PhantomData,
+            stream: StreamState::Connected(stream),
+            _state: PhantomData,
         })
     }
 }
 
 impl Visualization<Connected> {
     /// Send a command to the connected visualization
-    pub fn send_instruction(&mut self, instruction: &Instruction) -> Result<()> {
+    async fn send_instruction(&mut self, instruction: &Instruction) -> Result<()> {
         let StreamState::Connected(stream) = &mut self.stream else {
             // This documents why this case is impossible
             panic!("Type system ensures Visualization<Connected> must have StreamState::Connected");
         };
 
         hana_network::send_instruction(stream, instruction)
+            .await
             .change_context(Error::Network)
             .attach_printable_lazy(|| format!("Failed to send instruction: {:?}", instruction))
     }
 
-    /// Shutdown the visualization gracefully
-    pub fn shutdown(mut self, timeout: Duration) -> Result<()> {
-        let StreamState::Connected(ref mut stream) = self.stream else {
-            panic!("Type system ensures Visualization<Connected> must have StreamState::Connected");
-        };
+    pub async fn ping(&mut self) -> Result<()> {
+        self.send_instruction(&Instruction::Ping).await
+    }
 
+    /// Shutdown the visualization gracefully
+    pub async fn shutdown(mut self, timeout: Duration) -> Result<()> {
         // Send shutdown command
-        hana_network::send_instruction(stream, &Instruction::Shutdown)
-            .change_context(Error::Network)
-            .attach_printable("Failed to send shutdown instruction")?;
+        self.send_instruction(&Instruction::Shutdown).await?;
 
         // Ensure process terminates
         self.process

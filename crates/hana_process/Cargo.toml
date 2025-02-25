@@ -10,3 +10,4 @@ path = "src/bin/hana_helper.rs"
 [dependencies]
 error-stack.workspace = true
 thiserror.workspace   = true
+tracing.workspace     = true

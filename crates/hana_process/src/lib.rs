@@ -1,53 +1,29 @@
 mod error;
 
-use std::net::TcpStream;
+use error_stack::{Report, ResultExt};
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
-
-use error_stack::{Report, ResultExt};
+use tracing::info;
 
 pub use crate::error::{Error, Result};
 
-const TCP_ADDR: &str = "127.0.0.1:3001";
-const CONNECTION_MAX_ATTEMPTS: u8 = 15;
-const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub struct Process {
     child: std::process::Child,
-    path:  PathBuf,
+    path: PathBuf,
 }
 
 impl Process {
     pub fn run(path: PathBuf) -> Result<Self> {
         Command::new(&path)
+            //  .env_remove("RUST_LOG")
             .spawn()
             .map_err(Error::Io)
             .attach_printable(format!("Failed to launch visualization: {path:?}"))
             .map(|child| Process { child, path })
-    }
-
-    pub fn connect(&self) -> Result<TcpStream> {
-        // Try to connect - with retries
-        let mut attempts = 0;
-        let stream = loop {
-            match TcpStream::connect(TCP_ADDR) {
-                Ok(stream) => break stream,
-                Err(_) => {
-                    attempts += 1;
-                    if attempts >= CONNECTION_MAX_ATTEMPTS {
-                        return Err(Report::new(Error::ConnectionTimeout).attach_printable(
-                            format!("Failed to connect after {attempts} attempts"),
-                        ));
-                    }
-                    println!("Connection attempt {} failed, retrying...", attempts);
-                    std::thread::sleep(CONNECTION_RETRY_DELAY);
-                }
-            }
-        };
-
-        Ok(stream)
     }
 
     pub fn ensure_shutdown(mut self, timeout: Duration) -> Result<()> {
@@ -63,6 +39,8 @@ impl Process {
                 None => thread::sleep(SHUTDOWN_TIMEOUT),
             }
         }
+
+        info!("elapsed wait to shutdown: {}", start.elapsed().as_millis());
 
         // If we get here, we've timed out
         // kill throws io::Error so we wrap it in our own because that's what we do

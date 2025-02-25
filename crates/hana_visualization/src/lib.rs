@@ -1,5 +1,5 @@
 //! exposes the VisualizationControl plugin for use in bevy based visualizations
-mod control;
+mod visualization_control;
 
 /// The `VisualizationPlugin` is a Bevy plugin for hana's remote control of your
 /// visualization.
@@ -15,4 +15,4 @@ mod control;
 ///     // other app setup code
 ///     .run();
 /// ```
-pub use control::VisualizationControl;
+pub use visualization_control::{VisualizationControl, VisualizationEvent};
