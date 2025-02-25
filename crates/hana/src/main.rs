@@ -24,14 +24,11 @@ async fn main() -> Result<()> {
 
     let mut viz = viz.connect().await.change_context(Error::Controller)?;
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    viz.ping().await.change_context(Error::Controller)?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    viz.ping().await.change_context(Error::Controller)?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    viz.ping().await.change_context(Error::Controller)?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    viz.ping().await.change_context(Error::Controller)?;
+    for _ in 0..8 {
+        viz.ping().await.change_context(Error::Controller)?;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Shutdown

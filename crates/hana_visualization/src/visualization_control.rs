@@ -1,10 +1,9 @@
 //! VisualizationControl bevy plugin for use in bevy based visualizations
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
-
 use bevy::prelude::*;
 use hana_network::{Instruction, Result};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+
 use tracing::{debug, error};
 
 /// The `VisualizationControl` plugin enables remote control of your visualization.
@@ -21,8 +20,9 @@ pub struct VisualizationControl;
 impl Plugin for VisualizationControl {
     fn build(&self, app: &mut App) {
         // Channel for sending commands from network thread to Bevy app
-        let (tx, rx) = channel();
-        let rx = Arc::new(Mutex::new(rx));
+        let (tx, rx) = channel(32);
+        // let rx = Arc::new(Mutex::new(rx));
+        // let rx = Arc::new(Mutex::new(Some(rx)));
 
         // Create and spawn the tokio runtime in a separate thread
         std::thread::spawn(move || {
@@ -63,20 +63,19 @@ pub enum VisualizationEvent {
 }
 
 #[derive(Resource)]
-struct InstructionReceiver(Arc<Mutex<std::sync::mpsc::Receiver<Instruction>>>);
+// struct InstructionReceiver(Arc<Mutex<std::sync::mpsc::Receiver<Instruction>>>);
+struct InstructionReceiver(Receiver<Instruction>);
 
 // Convert network instructions to Bevy events
 fn handle_instructions(
-    receiver: Res<InstructionReceiver>,
+    mut receiver: ResMut<InstructionReceiver>,
     mut viz_events: EventWriter<VisualizationEvent>,
 ) {
-    if let Ok(rx) = receiver.0.lock() {
-        while let Ok(instruction) = rx.try_recv() {
-            let _ = match instruction {
-                Instruction::Ping => viz_events.send(VisualizationEvent::Ping),
-                _ => return,
-            };
-        }
+    while let Ok(instruction) = receiver.0.try_recv() {
+        let _ = match instruction {
+            Instruction::Ping => viz_events.send(VisualizationEvent::Ping),
+            _ => return,
+        };
     }
 }
 
@@ -90,10 +89,7 @@ fn handle_visualization_events(mut events: EventReader<VisualizationEvent>) {
 }
 
 /// The tx channel acts as a thread-safe queue between the network operations and the game logic.
-async fn handle_connection(
-    mut stream: TcpStream,
-    tx: std::sync::mpsc::Sender<Instruction>,
-) -> Result<()> {
+async fn handle_connection(mut stream: TcpStream, tx: Sender<Instruction>) -> Result<()> {
     debug!("New connection established!");
 
     loop {
@@ -104,26 +100,23 @@ async fn handle_connection(
                         debug!("Received shutdown instruction, terminating...");
                         std::process::exit(0);
                     }
-                    // Forward other instructions to Bevy
+                    // Forward other instructions to Bevy using tokio's send
                     _ => {
-                        if let Err(e) = tx.send(instruction) {
+                        if let Err(e) = tx.send(instruction).await {
                             error!("Failed to send instruction: {}", e);
-                            break;
+                            return Ok(()); // Return Result to satisfy the function signature
                         }
                     }
                 }
             }
             Ok(None) => {
                 debug!("Connection closed by controller");
-                break;
+                return Ok(());
             }
             Err(e) => {
                 error!("Connection error: {}", e);
-                break;
+                return Err(e);
             }
         }
     }
-
-    debug!("Connection handler exiting, process will terminate");
-    std::process::exit(0);
 }

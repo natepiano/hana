@@ -1,6 +1,5 @@
 mod error;
 
-
 use std::time::Duration;
 
 use error_stack::{Report, ResultExt};
@@ -145,7 +144,6 @@ mod write_tests {
         }
     }
 
-
     #[tokio::test]
     async fn test_write_command_success() {
         let mut mock = Box::pin(MockAsyncWriter {
@@ -158,7 +156,6 @@ mod write_tests {
         assert!(!mock.as_ref().written.is_empty());
     }
 
-
     #[tokio::test]
     async fn test_write_command_io_error() {
         let mut mock = Box::pin(MockAsyncWriter {
@@ -170,7 +167,6 @@ mod write_tests {
         let result = send_instruction(&mut mock, &command).await;
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
-
 
     #[tokio::test]
     async fn test_write_command_correct_format() {
@@ -256,7 +252,6 @@ mod read_tests {
         }
     }
 
-
     #[tokio::test]
     async fn test_read_command_unexpected_eof() {
         let mock = MockAsyncReader {
@@ -269,8 +264,6 @@ mod read_tests {
         let result = receive_instruction(&mut stream).await;
         assert!(matches!(result, Err(ref e) if *e.current_context() == Error::Io));
     }
-
-
 
     #[tokio::test]
     async fn test_read_command_io_error() {
