@@ -10,6 +10,7 @@ use bevy::{
         render_asset::RenderAssetUsages,
         render_resource::{Extent3d, TextureDimension, TextureFormat},
     },
+    window::{MonitorSelection, WindowMode},
 };
 use hana_plugin::{HanaEvent, HanaPlugin};
 
@@ -17,24 +18,38 @@ use hana_plugin::{HanaEvent, HanaPlugin};
 struct RotationSpeed(f32);
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins.set(ImagePlugin::default_nearest()),
+    let mut app = App::new();
+    let fullscreen = std::env::args().any(|arg| arg == "--fullscreen");
+
+    app.add_plugins((
+        DefaultPlugins
+            .set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    mode: if fullscreen {
+                        WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+                    } else {
+                        WindowMode::Windowed
+                    },
+                    ..default()
+                }),
+                ..default()
+            }),
+        #[cfg(not(target_arch = "wasm32"))]
+        WireframePlugin,
+    ))
+    .add_plugins(HanaPlugin)
+    .add_systems(Startup, setup)
+    .add_systems(
+        Update,
+        (
+            rotate,
+            handle_viz_events,
             #[cfg(not(target_arch = "wasm32"))]
-            WireframePlugin,
-        ))
-        .add_plugins(HanaPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                rotate,
-                handle_viz_events,
-                #[cfg(not(target_arch = "wasm32"))]
-                toggle_wireframe,
-            ),
-        )
-        .run();
+            toggle_wireframe,
+        ),
+    )
+    .run();
 }
 
 /// A marker component for our shapes so we can query them separately from the

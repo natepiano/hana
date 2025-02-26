@@ -19,8 +19,10 @@ pub struct Process {
 impl Process {
     pub fn run(path: PathBuf, log_filter: impl Into<String>) -> Result<Self> {
         let log_filter = log_filter.into();
-        Command::new(&path)
-            .env("RUST_LOG", &log_filter)
+        let mut command = Command::new(&path);
+        command.env("RUST_LOG", &log_filter);
+
+        command
             .spawn()
             .map_err(Error::Io)
             .attach_printable(format!("Failed to launch visualization: {path:?}"))
