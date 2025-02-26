@@ -44,7 +44,7 @@ fn get_probably_editor_parent() -> Result<i32> {
     }
 
     // Get the login process PID
-    let login_pid = parse_parent_pid(&lines[1])?;
+    let login_pid = parse_parent_pid(lines[1])?;
     trace!("Login process PID: {}", login_pid);
 
     // Now get the UI parent process info
@@ -66,7 +66,7 @@ fn get_probably_editor_parent() -> Result<i32> {
             .attach_printable("No process info found for login process"));
     }
 
-    let ui_pid = parse_parent_pid(&lines[1])?;
+    let ui_pid = parse_parent_pid(lines[1])?;
     trace!("Found UI parent process PID: {}", ui_pid);
     Ok(ui_pid)
 }

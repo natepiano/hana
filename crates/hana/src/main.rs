@@ -3,7 +3,7 @@ mod utils;
 
 use error::{Error, Result};
 use error_stack::ResultExt;
-use hana_controller::{Unstarted, Visualization};
+use hana_visualization::{Unstarted, Visualization};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{info, trace};
@@ -12,7 +12,7 @@ use tracing::{info, trace};
 async fn main() -> Result<()> {
     trace!("Starting Hana visualization management system");
 
-    let log_filter = crate::utils::setup_logging();
+    let log_filter = utils::setup_logging();
 
     let viz_path = PathBuf::from("./target/debug/basic-visualization");
 

@@ -3,6 +3,14 @@
 //! it's fine
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+/// This will take it's queue from RUST_LOG as shown below or it will
+/// have a default. Whatever is created here is also passed on to
+/// newly instantiated Visualizations for consistency across the garden
+/// (hana = flower so a hana network is a garden)
+///
+/// - Allow all logs: `RUST_LOG=debug`
+/// - Show only plugin logs: `RUST_LOG=hana_plugin=debug,bevy=off`
+/// - Suppress all logs: `RUST_LOG=off`
 pub fn setup_logging() -> String {
     let maybe_env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         //default

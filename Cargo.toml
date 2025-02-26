@@ -23,10 +23,10 @@ resolver = "2"
 #
 # Workspace member crates
 #
-hana_controller    = { path = "crates/hana_visualization" }
 hana_network       = { path = "crates/hana_network" }
+hana_plugin        = { path = "crates/hana_plugin" }
 hana_process       = { path = "crates/hana_process" }
-hana_visualization = { path = "crates/hana_plugin" }
+hana_visualization = { path = "crates/hana_visualization" }
 
 #
 # External dependencies

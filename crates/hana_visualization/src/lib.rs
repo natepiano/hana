@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use error_stack::ResultExt;
 use hana_network::Instruction;
+use hana_network::{Endpoint, HanaApp};
 use hana_process::Process;
 use tokio::net::TcpStream;
 
@@ -32,7 +33,7 @@ pub struct Visualization<State> {
 
 pub enum StreamState<State> {
     Unconnected(PhantomData<State>),
-    Connected(TcpStream),
+    Connected(Endpoint<HanaApp, TcpStream>),
 }
 
 impl Visualization<Unstarted> {
@@ -53,14 +54,14 @@ impl Visualization<Unstarted> {
 impl Visualization<Started> {
     /// Connect to the visualization process
     pub async fn connect(self) -> Result<Visualization<Connected>> {
-        let stream = hana_network::connect()
+        let endpoint = Endpoint::<HanaApp, TcpStream>::connect_to_visualization()
             .await
             .change_context(Error::Process)
             .attach_printable("Failed to connect to visualization process")?;
 
         Ok(Visualization {
             process: self.process,
-            stream: StreamState::Connected(stream),
+            stream: StreamState::Connected(endpoint),
             _state: PhantomData,
         })
     }
@@ -69,12 +70,12 @@ impl Visualization<Started> {
 impl Visualization<Connected> {
     /// Send a command to the connected visualization
     async fn send_instruction(&mut self, instruction: &Instruction) -> Result<()> {
-        let StreamState::Connected(stream) = &mut self.stream else {
-            // This documents why this case is impossible
+        let StreamState::Connected(endpoint) = &mut self.stream else {
             panic!("Type system ensures Visualization<Connected> must have StreamState::Connected");
         };
 
-        hana_network::send_instruction(stream, instruction)
+        endpoint
+            .send(instruction)
             .await
             .change_context(Error::Network)
             .attach_printable_lazy(|| format!("Failed to send instruction: {:?}", instruction))

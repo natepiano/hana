@@ -307,7 +307,7 @@ name = "basic-visualization"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "hana_visualization",
+ "hana_plugin",
 ]
 
 [[package]]
@@ -1993,23 +1993,12 @@ name = "hana"
 version = "0.1.0"
 dependencies = [
  "error-stack",
- "hana_controller",
  "hana_process",
+ "hana_visualization",
  "thiserror 2.0.11",
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "hana_controller"
-version = "0.1.0"
-dependencies = [
- "error-stack",
- "hana_network",
- "hana_process",
- "thiserror 2.0.11",
- "tokio",
 ]
 
 [[package]]
@@ -2029,6 +2018,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hana_plugin"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "error-stack",
+ "hana_network",
+ "thiserror 2.0.11",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "hana_process"
 version = "0.1.0"
 dependencies = [
@@ -2042,10 +2043,11 @@ dependencies = [
 name = "hana_visualization"
 version = "0.1.0"
 dependencies = [
- "bevy",
+ "error-stack",
  "hana_network",
+ "hana_process",
+ "thiserror 2.0.11",
  "tokio",
- "tracing",
 ]
 
 [[package]]

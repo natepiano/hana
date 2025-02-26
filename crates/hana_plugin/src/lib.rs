@@ -1,18 +1,21 @@
 //! exposes the VisualizationControl plugin for use in bevy based visualizations
-mod visualization_control;
+mod error;
+mod instruction_receiver;
+mod plugin;
+pub use instruction_receiver::InstructionReceiver;
 
-/// The `VisualizationPlugin` is a Bevy plugin for hana's remote control of your
+/// The `HanaPlugin` is a Bevy plugin for hana's remote control of your
 /// visualization.
 ///
 /// # Example
 ///
 /// ```rust
-/// # use hana_visualization::VisualizationControl;
+/// # use hana_plugin::HanaPlugin;
 /// # use bevy::prelude::*;
 ///
 /// App::new()
-///     .add_plugins(VisualizationControl)
+///     .add_plugins(HanaPlugin)
 ///     // other app setup code
 ///     .run();
 /// ```
-pub use visualization_control::{VisualizationControl, VisualizationEvent};
+pub use plugin::{HanaEvent, HanaPlugin};

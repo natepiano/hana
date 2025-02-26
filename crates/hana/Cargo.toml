@@ -6,8 +6,8 @@ version     = "0.1.0"
 
 [dependencies]
 error-stack.workspace = true
-hana_controller.workspace = true
 hana_process.workspace = true
+hana_visualization.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

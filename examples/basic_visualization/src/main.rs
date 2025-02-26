@@ -11,7 +11,7 @@ use bevy::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
     },
 };
-use hana_visualization::{VisualizationControl, VisualizationEvent};
+use hana_plugin::{HanaEvent, HanaPlugin};
 
 #[derive(Component)]
 struct RotationSpeed(f32);
@@ -23,7 +23,7 @@ fn main() {
             #[cfg(not(target_arch = "wasm32"))]
             WireframePlugin,
         ))
-        .add_plugins(VisualizationControl)
+        .add_plugins(HanaPlugin)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -155,13 +155,10 @@ fn rotate(mut query: Query<(&mut Transform, &RotationSpeed), With<Shape>>, time:
 }
 
 // Add a new system to handle visualization events
-fn handle_viz_events(
-    mut events: EventReader<VisualizationEvent>,
-    mut query: Query<&mut RotationSpeed>,
-) {
+fn handle_viz_events(mut events: EventReader<HanaEvent>, mut query: Query<&mut RotationSpeed>) {
     for event in events.read() {
         match event {
-            VisualizationEvent::Ping => {
+            HanaEvent::Ping => {
                 // On ping, double the rotation speed of all shapes
                 for mut speed in &mut query {
                     speed.0 *= 2.0;
