@@ -1994,6 +1994,7 @@ version = "0.1.0"
 dependencies = [
  "error-stack",
  "hana_controller",
+ "hana_window",
  "thiserror 2.0.11",
  "tokio",
  "tracing",
@@ -2043,6 +2044,16 @@ dependencies = [
  "bevy",
  "hana_network",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hana_window"
+version = "0.1.0"
+dependencies = [
+ "error-stack",
+ "libc",
+ "thiserror 2.0.11",
  "tracing",
 ]
 

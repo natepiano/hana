@@ -7,29 +7,30 @@ use error::{Error, Result};
 use error_stack::ResultExt;
 use hana_controller::{Unstarted, Visualization};
 
-use tracing::info;
+use tracing::{info, trace};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logging();
-    info!("Starting Hana visualization management system");
+    trace!("Starting Hana visualization management system");
 
     let viz_path = PathBuf::from("./target/debug/basic-visualization");
 
     // Create and connect visualization using typestate pattern
     let viz = Visualization::<Unstarted>::start(viz_path).change_context(Error::Controller)?;
 
-    info!("Visualization process started, establishing connection...");
+    trace!("Visualization process started, establishing connection...");
 
     let mut viz = viz.connect().await.change_context(Error::Controller)?;
 
     for _ in 0..8 {
         viz.ping().await.change_context(Error::Controller)?;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    #[cfg(debug_assertions)]
+    hana_window::activate_parent_window().change_context(Error::Window)?;
 
     // Shutdown
     info!("Initiating shutdown...");
@@ -52,7 +53,7 @@ fn setup_logging() {
                 .with_target(true),
         )
         .with(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,hana=debug")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,hana=info")),
         )
         .init();
 }

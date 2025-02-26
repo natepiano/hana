@@ -6,6 +6,7 @@ default-members = [
   "crates/hana_network",
   "crates/hana_process",
   "crates/hana_visualization",
+  "crates/hana_window",
   "examples/basic_visualization",
 ]
 members = [
@@ -15,6 +16,7 @@ members = [
   "crates/hana_network",
   "crates/hana_process",
   "crates/hana_visualization",
+  "crates/hana_window",
   "examples/basic_visualization",
 ]
 resolver = "2"
@@ -27,6 +29,7 @@ hana_controller    = { path = "crates/hana_controller" }
 hana_network       = { path = "crates/hana_network" }
 hana_process       = { path = "crates/hana_process" }
 hana_visualization = { path = "crates/hana_visualization" }
+hana_window        = { path = "crates/hana_window" }
 
 #
 # External dependencies
@@ -36,7 +39,7 @@ hana_visualization = { path = "crates/hana_visualization" }
 # features needed to display basic_visualization
 # add other features as necessary - eventually we'll stabilize and maybe
 # that will require the whole prelude, we'll see
-bevy = { version = "0.15.3", default-features = false, features = [
+bevy = { version = "^0.15.3", default-features = false, features = [
   "bevy_pbr",
   "bevy_text",
   "bevy_ui",
@@ -74,17 +77,17 @@ bevy = { version = "0.15.3", default-features = false, features = [
   # "webgl2",
 ] }
 error-stack = { version = "0.5.0", features = ["spantrace"] }
-serde       = { version = "1.0.218", features = ["derive"] }
-thiserror   = "2.0.11"
+serde = { version = "1.0.218", features = ["derive"] }
+thiserror = "2.0.11"
 tokio = { version = "1.43", default-features = false, features = [
-    "rt-multi-thread",  # for multi-threaded runtime
-    "net",              # for TcpStream
-    "io-util",          # for AsyncReadExt, AsyncWriteExt
-    "macros",           # for #[tokio::main]
-    "sync",             # for mpsc::channel
-    "time",             # for sleep
-]}
-tracing     = "0.1.41"
+  "io-util",         # for AsyncReadExt, AsyncWriteExt
+  "macros",          # for #[tokio::main]
+  "net",             # for TcpStream
+  "rt-multi-thread", # for multi-threaded runtime
+  "sync",            # for mpsc::channel
+  "time",            # for sleep
+] }
+tracing = "0.1.41"
 
 [profile.dev.package]
 bevy = { opt-level = 3 }

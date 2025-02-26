@@ -93,6 +93,8 @@ impl Visualization<Connected> {
         self.process
             .ensure_shutdown(timeout)
             .change_context(Error::Process)
-            .attach_printable("Failed to shutdown visualization process")
+            .attach_printable("failed to ensure shutdown of visualization process")?;
+
+        Ok(())
     }
 }

@@ -29,7 +29,7 @@ Create minimal working system with:
 # Visualization System - Initial Spike
 
 ## Visualization
-A viualization must:
+A visualization must:
 - Use the VisualizationControl plugin
 - receive messages from the hana application visa the VisualizationControl bevy plugin
 ## Simple Test Plugin

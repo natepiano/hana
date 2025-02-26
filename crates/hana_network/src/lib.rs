@@ -6,7 +6,7 @@ use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tracing::warn;
+use tracing::debug;
 
 pub use crate::error::{Error, Result};
 
@@ -25,7 +25,7 @@ pub async fn connect() -> Result<TcpStream> {
                     return Err(Report::new(Error::ConnectionTimeout)
                         .attach_printable(format!("Failed to connect after {attempts} attempts")));
                 }
-                warn!("Connection attempt {} failed, retrying...", attempts);
+                debug!("Connection attempt {} failed, retrying...", attempts);
                 tokio::time::sleep(CONNECTION_RETRY_DELAY).await;
             }
         }
