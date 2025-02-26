@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "macos"))]
+use crate::error::Result;
+
 #[cfg(target_os = "macos")]
 mod macos;
 
