@@ -19,9 +19,9 @@ pub struct Started;
 /// Marker type for visualizations that have successfully connected.
 pub struct Connected;
 
-/// The Visualization type represents a remote visualization process along with its network
-/// connection. The State generic parameter enforces that only valid operations are available at a
-/// given stage.
+/// The Visualization type represents a remote visualization process along with its
+/// TcpStream for its network connection. The State generic parameter enforces that
+/// only valid operations are available at a given stage.
 pub struct Visualization<State> {
     process: Process,
     // In the Unstarted state, there is no connection.

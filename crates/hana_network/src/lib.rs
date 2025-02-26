@@ -1,3 +1,4 @@
+mod endpoint;
 mod error;
 
 use std::time::Duration;

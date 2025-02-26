@@ -14,7 +14,6 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 pub struct Process {
     child: Option<std::process::Child>, // Changed to Option
     path: PathBuf,
-    log_filter: String,
 }
 
 impl Process {
@@ -28,7 +27,6 @@ impl Process {
             .map(|child| Process {
                 child: Some(child),
                 path,
-                log_filter,
             })
     }
 
