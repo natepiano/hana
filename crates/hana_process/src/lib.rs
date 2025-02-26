@@ -14,17 +14,21 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 pub struct Process {
     child: Option<std::process::Child>, // Changed to Option
     path: PathBuf,
+    log_filter: String,
 }
 
 impl Process {
-    pub fn run(path: PathBuf) -> Result<Self> {
+    pub fn run(path: PathBuf, log_filter: impl Into<String>) -> Result<Self> {
+        let log_filter = log_filter.into();
         Command::new(&path)
+            .env("RUST_LOG", &log_filter)
             .spawn()
             .map_err(Error::Io)
             .attach_printable(format!("Failed to launch visualization: {path:?}"))
             .map(|child| Process {
-                child: Some(child), // Wrap in Some
+                child: Some(child),
                 path,
+                log_filter,
             })
     }
 

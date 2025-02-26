@@ -5,6 +5,8 @@ use std::time::Duration;
 use error_stack::ResultExt;
 use hana_process::{Error, Process, Result};
 
+const TEST_LOG_FILTER: &str = "warn,hana=warn";
+
 #[test]
 fn test_spawn_error() {
     let result = Command::new("non_existent_executable")
@@ -28,7 +30,7 @@ fn test_ensure_shutdown() -> Result<()> {
     // Make sure that "hana_helper" is specified as a binary target in your Cargo.toml.
     let helper_path = PathBuf::from(env!("CARGO_BIN_EXE_hana_helper"));
 
-    let visualization = Process::run(helper_path)?;
+    let visualization = Process::run(helper_path, TEST_LOG_FILTER)?;
 
     // Use a short timeout so that ensure_shutdown will trigger killing.
     let timeout = Duration::from_millis(100);

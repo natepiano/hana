@@ -37,8 +37,8 @@ pub enum StreamState<State> {
 
 impl Visualization<Unstarted> {
     /// Create a new unstarted visualization
-    pub fn start(path: PathBuf) -> Result<Visualization<Started>> {
-        let process = Process::run(path)
+    pub fn start(path: PathBuf, log_filter: impl Into<String>) -> Result<Visualization<Started>> {
+        let process = Process::run(path, log_filter.into())
             .change_context(Error::Process)
             .attach_printable("Failed to start visualization process")?;
 
