@@ -1,11 +1,10 @@
 [package]
 edition = "2021"
-name    = "hana_controller"
+name    = "hana_visualization"
 version = "0.1.0"
 
 [dependencies]
-error-stack.workspace  = true
+bevy.workspace         = true
 hana_network.workspace = true
-hana_process.workspace = true
-thiserror.workspace    = true
 tokio.workspace        = true
+tracing.workspace      = true

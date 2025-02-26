@@ -13,7 +13,7 @@ use tracing::{debug, error};
 /// tracing configuration. To control log output:
 ///
 /// - Allow all logs: `RUST_LOG=debug`
-/// - Show only plugin logs: `RUST_LOG=hana_visualization=debug,bevy=off`
+/// - Show only plugin logs: `RUST_LOG=hana_plugin=debug,bevy=off`
 /// - Suppress all logs: `RUST_LOG=off`
 pub struct VisualizationControl;
 
