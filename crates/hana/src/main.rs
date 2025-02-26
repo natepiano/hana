@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     }
 
     #[cfg(debug_assertions)]
-    hana_window::activate_parent_window().change_context(Error::Window)?;
+    hana_process::debug::activate_parent_window().change_context(Error::Controller)?;
 
     // Shutdown
     info!("Initiating shutdown...");

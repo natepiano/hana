@@ -6,7 +6,6 @@ default-members = [
   "crates/hana_network",
   "crates/hana_process",
   "crates/hana_visualization",
-  "crates/hana_window",
   "examples/basic_visualization",
 ]
 members = [
@@ -16,7 +15,6 @@ members = [
   "crates/hana_network",
   "crates/hana_process",
   "crates/hana_visualization",
-  "crates/hana_window",
   "examples/basic_visualization",
 ]
 resolver = "2"
@@ -29,7 +27,6 @@ hana_controller    = { path = "crates/hana_controller" }
 hana_network       = { path = "crates/hana_network" }
 hana_process       = { path = "crates/hana_process" }
 hana_visualization = { path = "crates/hana_visualization" }
-hana_window        = { path = "crates/hana_window" }
 
 #
 # External dependencies

@@ -2,11 +2,7 @@ use crate::error::{Error, Result};
 use error_stack::{Report, ResultExt};
 use tracing::trace;
 
-pub(crate) fn activate_parent_window() -> Result<()> {
-    // let shell_pid = unsafe { libc::getppid() };
-    // trace!("Our parent shell PID: {}", shell_pid);
-
-    // Get the UI parent process info through the login process
+pub fn activate_parent_window() -> Result<()> {
     let ui_pid = get_probably_editor_parent()?;
     trace!("Found UI parent process PID: {}", ui_pid);
 
@@ -23,7 +19,7 @@ pub(crate) fn activate_parent_window() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn get_probably_editor_parent() -> Result<i32> {
+fn get_probably_editor_parent() -> Result<i32> {
     let shell_pid = unsafe { libc::getppid() };
     trace!("Our parent shell PID: {}", shell_pid);
 
@@ -48,7 +44,7 @@ pub(crate) fn get_probably_editor_parent() -> Result<i32> {
     }
 
     // Get the login process PID
-    let login_pid = parse_parent_pid(lines[1])?;
+    let login_pid = parse_parent_pid(&lines[1])?;
     trace!("Login process PID: {}", login_pid);
 
     // Now get the UI parent process info
@@ -70,7 +66,7 @@ pub(crate) fn get_probably_editor_parent() -> Result<i32> {
             .attach_printable("No process info found for login process"));
     }
 
-    let ui_pid = parse_parent_pid(lines[1])?;
+    let ui_pid = parse_parent_pid(&lines[1])?;
     trace!("Found UI parent process PID: {}", ui_pid);
     Ok(ui_pid)
 }

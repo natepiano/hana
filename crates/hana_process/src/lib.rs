@@ -1,13 +1,13 @@
+#[cfg(debug_assertions)]
+pub mod debug;
 mod error;
 
+pub use crate::error::{Error, Result};
 use error_stack::{Report, ResultExt};
-
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 use tracing::{debug, error};
-
-pub use crate::error::{Error, Result};
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
