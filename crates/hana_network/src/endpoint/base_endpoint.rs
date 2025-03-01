@@ -1,14 +1,11 @@
 use crate::message::{HanaMessage, Receiver, Sender};
 use crate::prelude::*;
 use crate::role::Role;
+use crate::transport::Transport;
 use error_stack::{Report, ResultExt};
 use std::fmt::Debug;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-// Add this at the top of the file alongside existing imports
-use crate::transport::Transport;
-
-// Add this new struct that works with our Transport abstraction
 /// A network endpoint in the Hana system using the generic transport abstraction
 pub struct Endpoint<R: Role, T: Transport> {
     role: std::marker::PhantomData<R>,

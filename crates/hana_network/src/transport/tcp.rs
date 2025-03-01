@@ -1,10 +1,8 @@
+use super::*;
+use crate::prelude::*;
+use error_stack::{Report, ResultExt};
 use std::fmt;
 use std::time::Duration;
-
-use super::{TransportConnector, TransportListener};
-use crate::prelude::*;
-use crate::transport::Transport;
-use error_stack::{Report, ResultExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::net::TcpStream;
