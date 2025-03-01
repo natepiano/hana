@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use error_stack::ResultExt;
-use hana_network::{Endpoint, Instruction, TcpTransport, Visualization};
-use tokio::net::TcpListener;
+use hana_network::{Instruction, VisualizationEndpoint};
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -36,24 +35,18 @@ impl InstructionReceiver {
     }
 
     /// bind to the port and attempt to connect to listen for a hana app
-    /// we time out after 1 second
     async fn run_network(tx: mpsc::Sender<Instruction>) -> Result<()> {
-        let mut listener = TcpListener::bind("127.0.0.1:3001")
-            .await
-            .change_context(Error::Io)
-            .attach_printable("failed to bind to port")?;
-
         info!("checking for hana app on port 3001");
 
         match tokio::time::timeout(
             Duration::from_secs(1),
-            Self::accept_connection(&mut listener),
+            VisualizationEndpoint::listen_for_hana(),
         )
         .await
         {
-            Ok(Ok(transport_endpoint)) => {
+            Ok(Ok(endpoint)) => {
                 info!("hana app connected successfully");
-                Self::handle_messages(transport_endpoint, tx).await
+                Self::handle_messages(endpoint, tx).await
             }
             Ok(Err(e)) => Err(e
                 .change_context(Error::Network)
@@ -65,25 +58,12 @@ impl InstructionReceiver {
         }
     }
 
-    // New method to accept connection using TcpTransport directly
-    async fn accept_connection(
-        listener: &mut TcpListener,
-    ) -> error_stack::Result<Endpoint<Visualization, TcpTransport>, hana_network::Error> {
-        let (stream, _) = listener
-            .accept()
-            .await
-            .change_context(hana_network::Error::Io)
-            .attach_printable("Failed to accept connection")?;
-
-        Ok(Endpoint::new(TcpTransport::new(stream)))
-    }
-
     async fn handle_messages(
-        mut transport_endpoint: Endpoint<Visualization, TcpTransport>,
+        mut endpoint: VisualizationEndpoint,
         tx: mpsc::Sender<Instruction>,
     ) -> Result<()> {
         loop {
-            match transport_endpoint
+            match endpoint
                 .receive()
                 .await
                 .change_context(Error::Network)

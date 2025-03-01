@@ -1,13 +1,14 @@
 use std::fmt;
 use std::time::Duration;
 
-use error_stack::Report;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
-use tracing::debug;
-
+use super::{TransportConnector, TransportListener};
 use crate::prelude::*;
-use crate::transport::Transport; // Added import for debug macro
+use crate::transport::Transport;
+use error_stack::{Report, ResultExt};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpListener as TokioTcpListener;
+use tokio::net::TcpStream;
+use tracing::debug; // Added import for debug macro
 
 const CONNECTION_MAX_ATTEMPTS: u8 = 15;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
@@ -22,35 +23,6 @@ impl TcpTransport {
     pub fn new(stream: TcpStream) -> Self {
         Self { stream }
     }
-
-    /// Connect to a TCP address with retry logic
-    ///
-    /// This mimics the behavior of the original `connect()` function in lib.rs
-    pub async fn connect(addr: &str) -> Result<Self> {
-        let mut attempts = 0;
-        let stream = loop {
-            match TcpStream::connect(addr).await {
-                Ok(stream) => break stream,
-                Err(_) => {
-                    attempts += 1;
-                    if attempts >= CONNECTION_MAX_ATTEMPTS {
-                        return Err(Report::new(Error::ConnectionTimeout).attach_printable(
-                            format!("Failed to connect after {attempts} attempts"),
-                        ));
-                    }
-                    debug!("Connection attempt {} failed, retrying...", attempts);
-                    tokio::time::sleep(CONNECTION_RETRY_DELAY).await;
-                }
-            }
-        };
-
-        Ok(Self::new(stream))
-    }
-
-    /// Connect to the default visualization address (equivalent to the original connect())
-    pub async fn connect_default() -> error_stack::Result<Self, Error> {
-        Self::connect("127.0.0.1:3001").await
-    }
 }
 
 impl Transport for TcpTransport {}
@@ -60,6 +32,86 @@ impl fmt::Debug for TcpTransport {
         f.debug_struct("TcpTransport")
             .field("peer_addr", &self.stream.peer_addr().ok())
             .finish()
+    }
+}
+
+pub struct TcpListener {
+    listener: TokioTcpListener,
+}
+
+impl TcpListener {
+    pub async fn bind(addr: &str) -> Result<Self> {
+        let listener = TokioTcpListener::bind(addr)
+            .await
+            .change_context(Error::Io)
+            .attach_printable(format!("Failed to bind to {}", addr))?;
+
+        Ok(Self { listener })
+    }
+
+    pub async fn bind_default() -> Result<Self> {
+        Self::bind("127.0.0.1:3001").await
+    }
+}
+
+impl TransportListener for TcpListener {
+    type Transport = TcpTransport;
+
+    async fn accept(&self) -> Result<Self::Transport> {
+        let (stream, _) = self
+            .listener
+            .accept()
+            .await
+            .change_context(Error::Io)
+            .attach_printable("Failed to accept connection")?;
+
+        Ok(TcpTransport::new(stream))
+    }
+}
+
+// TCP connector implementation
+pub struct TcpConnector {
+    addr: String,
+    max_attempts: u8,
+    retry_delay: Duration,
+}
+
+impl TcpConnector {
+    pub fn new(addr: impl Into<String>) -> Self {
+        Self {
+            addr: addr.into(),
+            max_attempts: CONNECTION_MAX_ATTEMPTS,
+            retry_delay: CONNECTION_RETRY_DELAY,
+        }
+    }
+
+    pub fn default() -> Self {
+        Self::new("127.0.0.1:3001")
+    }
+}
+
+impl TransportConnector for TcpConnector {
+    type Transport = TcpTransport;
+
+    async fn connect(&self) -> Result<Self::Transport> {
+        let mut attempts = 0;
+        let stream = loop {
+            match TcpStream::connect(&self.addr).await {
+                Ok(stream) => break stream,
+                Err(_) => {
+                    attempts += 1;
+                    if attempts >= self.max_attempts {
+                        return Err(Report::new(Error::ConnectionTimeout).attach_printable(
+                            format!("Failed to connect after {attempts} attempts"),
+                        ));
+                    }
+                    debug!("Connection attempt {} failed, retrying...", attempts);
+                    tokio::time::sleep(self.retry_delay).await;
+                }
+            }
+        };
+
+        Ok(TcpTransport::new(stream))
     }
 }
 

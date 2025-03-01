@@ -1,13 +1,11 @@
 mod error;
 mod prelude;
-
+use error_stack::ResultExt;
+use hana_network::{HanaEndpoint, Instruction};
+use hana_process::Process;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::Duration;
-
-use error_stack::ResultExt;
-use hana_network::{Endpoint, HanaApp, Instruction, TcpTransport};
-use hana_process::Process;
 
 use crate::prelude::*;
 
@@ -33,7 +31,7 @@ pub struct Visualization<State> {
 
 pub enum StreamState<State> {
     Unconnected(PhantomData<State>),
-    Connected(Endpoint<HanaApp, TcpTransport>),
+    Connected(HanaEndpoint),
 }
 
 impl Visualization<Unstarted> {
@@ -54,13 +52,11 @@ impl Visualization<Unstarted> {
 impl Visualization<Started> {
     /// Connect to the visualization process
     pub async fn connect(self) -> Result<Visualization<Connected>> {
-        // Use the transport approach internally
-        let transport = TcpTransport::connect_default()
+        // Use the new helper function from hana_network
+        let endpoint = HanaEndpoint::connect_to_visualization()
             .await
-            .change_context(Error::Process)
+            .change_context(Error::Network)
             .attach_printable("Failed to connect to visualization process")?;
-
-        let endpoint = Endpoint::new(transport);
 
         Ok(Visualization {
             process: self.process,

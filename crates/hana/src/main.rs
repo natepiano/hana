@@ -13,12 +13,12 @@ use tracing::{info, trace};
 async fn main() -> Result<()> {
     trace!("Starting Hana visualization management system");
 
-    let log_filter = utils::setup_logging();
+    let env_filter_str = utils::setup_logging();
 
     let viz_path = PathBuf::from("./target/debug/basic-visualization");
 
     // Create and connect visualization using typestate pattern (i.e. <Unstarted>)
-    let viz = Visualization::<Unstarted>::start(viz_path, log_filter)
+    let viz = Visualization::<Unstarted>::start(viz_path, env_filter_str)
         .change_context(Error::Controller)?;
 
     trace!("Visualization process started, establishing connection...");

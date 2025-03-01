@@ -1,10 +1,10 @@
 mod endpoint;
 mod error;
-mod message;
+pub mod message;
 mod prelude;
+mod role;
 mod transport;
 
-pub use crate::endpoint::{Endpoint, HanaApp, Visualization};
+pub use crate::endpoint::{HanaEndpoint, VisualizationEndpoint};
 pub use crate::message::Instruction;
 pub use crate::prelude::*;
-pub use crate::transport::tcp::TcpTransport;
