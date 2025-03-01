@@ -1,9 +1,9 @@
 use crate::message::{HanaMessage, Receiver, Sender};
-use crate::{Error, Result};
+use crate::prelude::*;
 use error_stack::{Report, ResultExt};
 use std::fmt::Debug;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 /// Represents the role of a Hana network endpoint
 pub trait Role {}
@@ -16,20 +16,21 @@ impl Role for HanaApp {}
 pub struct Visualization;
 impl Role for Visualization {}
 
-/// A network endpoint in the Hana system
-pub struct Endpoint<R: Role, S> {
+// Add this at the top of the file alongside existing imports
+use crate::transport::Transport;
+
+// Add this new struct that works with our Transport abstraction
+/// A network endpoint in the Hana system using the generic transport abstraction
+pub struct Endpoint<R: Role, T: Transport> {
     role: std::marker::PhantomData<R>,
-    pub(crate) stream: S,
+    transport: T,
 }
 
-impl<R: Role, S> Endpoint<R, S>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    pub(crate) fn new(stream: S) -> Self {
+impl<R: Role, T: Transport> Endpoint<R, T> {
+    pub fn new(transport: T) -> Self {
         Self {
             role: std::marker::PhantomData,
-            stream,
+            transport,
         }
     }
 
@@ -45,13 +46,13 @@ where
 
         let len_prefix = message_bytes.len() as u32;
 
-        self.stream
+        self.transport
             .write_all(&len_prefix.to_le_bytes())
             .await
             .change_context(Error::Io)
             .attach_printable("Failed to write length prefix")?;
 
-        self.stream
+        self.transport
             .write_all(&message_bytes)
             .await
             .change_context(Error::Io)
@@ -71,12 +72,12 @@ where
         R: Receiver<M>,
     {
         let mut len_bytes = [0u8; 4];
-        match self.stream.read_exact(&mut len_bytes).await {
+        match self.transport.read_exact(&mut len_bytes).await {
             Ok(_) => {
                 let len = u32::from_le_bytes(len_bytes) as usize;
                 let mut buffer = vec![0u8; len];
 
-                self.stream
+                self.transport
                     .read_exact(&mut buffer)
                     .await
                     .change_context(Error::Io)
@@ -100,48 +101,49 @@ where
     }
 }
 
-// Role-specific constructors
-impl Endpoint<HanaApp, TcpStream> {
+// Role-specific constructors for the new transport-based endpoint
+impl Endpoint<HanaApp, crate::transport::TcpTransport> {
     pub async fn connect_to_visualization() -> Result<Self> {
-        let stream = super::connect()
+        let transport = crate::transport::tcp::TcpTransport::connect_default()
             .await
             .change_context(Error::ConnectionTimeout)
             .attach_printable("Failed to connect to visualization process")?;
 
-        Ok(Self::new(stream))
+        Ok(Self::new(transport))
     }
 }
 
-impl Endpoint<Visualization, TcpStream> {
-    pub async fn connect_to_hana_app(listener: &mut TcpListener) -> Result<Self> {
+impl Endpoint<Visualization, crate::transport::TcpTransport> {
+    pub async fn accept_controller(listener: &mut TcpListener) -> Result<Self> {
         let (stream, _) = listener
             .accept()
             .await
             .change_context(Error::Io)
             .attach_printable("Failed to accept connection from controller")?;
 
-        Ok(Self::new(stream))
+        Ok(Self::new(crate::transport::TcpTransport::new(stream)))
     }
 }
 
-mod tests {
-    use super::*;
-    use crate::message::Instruction;
-    use std::{
-        pin::Pin,
-        task::{Context, Poll},
-    };
+#[cfg(test)]
+mod tests_transport {
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-    /// Mock role type used for testing the `Endpoint` implementation.
-    /// This type is never instantiated directly as it's only used with `PhantomData`.
-    #[allow(dead_code)]
+    use super::*;
+    use crate::message::Instruction;
+    use crate::transport::Transport;
+
+    // Mock role for testing
     struct MockRole;
     impl Role for MockRole {}
     impl Sender<Instruction> for MockRole {}
     impl Receiver<Instruction> for MockRole {}
 
-    struct MockStream {
+    // Mock transport implementation for testing
+    struct MockTransport {
         read_data: Vec<u8>,
         write_data: Vec<u8>,
         read_position: usize,
@@ -149,8 +151,7 @@ mod tests {
         read_error_kind: Option<std::io::ErrorKind>,
     }
 
-    impl MockStream {
-        #[allow(dead_code)]
+    impl MockTransport {
         fn new(read_data: Vec<u8>) -> Self {
             Self {
                 read_data,
@@ -161,7 +162,6 @@ mod tests {
             }
         }
 
-        #[allow(dead_code)]
         fn with_write_error(read_data: Vec<u8>, error_after: usize) -> Self {
             Self {
                 read_data,
@@ -172,7 +172,6 @@ mod tests {
             }
         }
 
-        #[allow(dead_code)]
         fn with_read_error(error_kind: std::io::ErrorKind) -> Self {
             Self {
                 read_data: vec![],
@@ -184,7 +183,22 @@ mod tests {
         }
     }
 
-    impl AsyncRead for MockStream {
+    // Implement Debug for MockTransport
+    impl Debug for MockTransport {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MockTransport")
+                .field("read_position", &self.read_position)
+                .field("read_data_len", &self.read_data.len())
+                .field("write_data_len", &self.write_data.len())
+                .finish()
+        }
+    }
+
+    // Implement Transport for MockTransport
+    impl Transport for MockTransport {}
+
+    // Implement AsyncRead for MockTransport
+    impl AsyncRead for MockTransport {
         fn poll_read(
             mut self: Pin<&mut Self>,
             _: &mut Context<'_>,
@@ -205,7 +219,8 @@ mod tests {
         }
     }
 
-    impl AsyncWrite for MockStream {
+    // Implement AsyncWrite for MockTransport
+    impl AsyncWrite for MockTransport {
         fn poll_write(
             mut self: Pin<&mut Self>,
             _: &mut Context<'_>,
@@ -234,14 +249,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_message_success() {
-        let mock = MockStream::new(vec![]);
-        let mut endpoint = Endpoint::<MockRole, MockStream>::new(mock);
+    async fn test_transport_send_message_success() {
+        let mock = MockTransport::new(vec![]);
+        let mut endpoint = Endpoint::<MockRole, MockTransport>::new(mock);
 
         let instruction = Instruction::Ping;
         endpoint.send(&instruction).await.unwrap();
 
-        let written = &endpoint.stream.write_data;
+        let written = &endpoint.transport.write_data;
         assert!(!written.is_empty());
 
         // Verify format: length prefix + serialized data
@@ -251,9 +266,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_message_io_error() {
-        let mock = MockStream::with_write_error(vec![], 0);
-        let mut endpoint = Endpoint::<MockRole, MockStream>::new(mock);
+    async fn test_transport_send_message_io_error() {
+        let mock = MockTransport::with_write_error(vec![], 0);
+        let mut endpoint = Endpoint::<MockRole, MockTransport>::new(mock);
 
         let instruction = Instruction::Ping;
         let result = endpoint.send(&instruction).await;
@@ -261,7 +276,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_receive_message_success() {
+    async fn test_transport_receive_message_success() {
         // Create test data
         let instruction = Instruction::Ping;
         let msg_bytes = bincode::serialize(&instruction).unwrap();
@@ -269,26 +284,26 @@ mod tests {
         let mut data = len.to_le_bytes().to_vec();
         data.extend(msg_bytes);
 
-        let mock = MockStream::new(data);
-        let mut endpoint = Endpoint::<MockRole, MockStream>::new(mock);
+        let mock = MockTransport::new(data);
+        let mut endpoint = Endpoint::<MockRole, MockTransport>::new(mock);
 
         let result: Option<Instruction> = endpoint.receive().await.unwrap();
         assert_eq!(result, Some(Instruction::Ping));
     }
 
     #[tokio::test]
-    async fn test_receive_message_io_error() {
-        let mock = MockStream::with_read_error(std::io::ErrorKind::Other);
-        let mut endpoint = Endpoint::<MockRole, MockStream>::new(mock);
+    async fn test_transport_receive_message_io_error() {
+        let mock = MockTransport::with_read_error(std::io::ErrorKind::Other);
+        let mut endpoint = Endpoint::<MockRole, MockTransport>::new(mock);
 
         let result = endpoint.receive::<Instruction>().await;
         assert!(matches!(result, Err(e) if *e.current_context() == Error::Io));
     }
 
     #[tokio::test]
-    async fn test_receive_message_eof() {
-        let mock = MockStream::new(vec![]);
-        let mut endpoint = Endpoint::<MockRole, MockStream>::new(mock);
+    async fn test_transport_receive_message_eof() {
+        let mock = MockTransport::new(vec![]);
+        let mut endpoint = Endpoint::<MockRole, MockTransport>::new(mock);
 
         let result: Option<Instruction> = endpoint.receive().await.unwrap();
         assert_eq!(result, None);

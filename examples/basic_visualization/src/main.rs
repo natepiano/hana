@@ -201,8 +201,8 @@ fn uv_debug_texture() -> Image {
 
     Image::new_fill(
         Extent3d {
-            width: TEXTURE_SIZE as u32,
-            height: TEXTURE_SIZE as u32,
+            width:                 TEXTURE_SIZE as u32,
+            height:                TEXTURE_SIZE as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,

@@ -1,14 +1,13 @@
 use std::time::Duration;
 
-use crate::error::{Error, Result};
 use bevy::prelude::*;
 use error_stack::ResultExt;
-use hana_network::{
-    endpoint::{Endpoint, Visualization},
-    Instruction,
-};
-use tokio::{net::TcpListener, net::TcpStream, sync::mpsc};
+use hana_network::{Endpoint, Instruction, TcpTransport, Visualization};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tracing::debug;
+
+use crate::error::{Error, Result};
 
 #[derive(Resource)]
 pub struct InstructionReceiver {
@@ -48,13 +47,13 @@ impl InstructionReceiver {
 
         match tokio::time::timeout(
             Duration::from_secs(1),
-            Endpoint::<Visualization, TcpStream>::connect_to_hana_app(&mut listener),
+            Self::accept_connection(&mut listener),
         )
         .await
         {
-            Ok(Ok(endpoint)) => {
+            Ok(Ok(transport_endpoint)) => {
                 info!("hana app connected successfully");
-                Self::handle_messages(endpoint, tx).await
+                Self::handle_messages(transport_endpoint, tx).await
             }
             Ok(Err(e)) => Err(e
                 .change_context(Error::Network)
@@ -66,12 +65,25 @@ impl InstructionReceiver {
         }
     }
 
+    // New method to accept connection using TcpTransport directly
+    async fn accept_connection(
+        listener: &mut TcpListener,
+    ) -> error_stack::Result<Endpoint<Visualization, TcpTransport>, hana_network::Error> {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .change_context(hana_network::Error::Io)
+            .attach_printable("Failed to accept connection")?;
+
+        Ok(Endpoint::new(TcpTransport::new(stream)))
+    }
+
     async fn handle_messages(
-        mut endpoint: Endpoint<Visualization, TcpStream>,
+        mut transport_endpoint: Endpoint<Visualization, TcpTransport>,
         tx: mpsc::Sender<Instruction>,
     ) -> Result<()> {
         loop {
-            match endpoint
+            match transport_endpoint
                 .receive()
                 .await
                 .change_context(Error::Network)

@@ -1,11 +1,12 @@
 mod error;
 mod utils;
 
+use std::path::PathBuf;
+use std::time::Duration;
+
 use error::{Error, Result};
 use error_stack::ResultExt;
 use hana_visualization::{Unstarted, Visualization};
-use std::path::PathBuf;
-use std::time::Duration;
 use tracing::{info, trace};
 
 #[tokio::main]

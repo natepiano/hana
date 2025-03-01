@@ -1,13 +1,16 @@
 #[cfg(debug_assertions)]
-pub mod debug;
+pub mod debug; // used to return focus to the editor after process completes
 mod error;
+mod prelude;
 
-pub use crate::error::{Error, Result};
-use error_stack::{Report, ResultExt};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+
+use error_stack::{Report, ResultExt};
 use tracing::{debug, error};
+
+pub use crate::prelude::*;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 

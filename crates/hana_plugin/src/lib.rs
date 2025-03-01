@@ -2,8 +2,8 @@
 mod error;
 mod instruction_receiver;
 mod plugin;
-pub use instruction_receiver::InstructionReceiver;
-
+mod prelude;
+use instruction_receiver::InstructionReceiver;
 /// The `HanaPlugin` is a Bevy plugin for hana's remote control of your
 /// visualization.
 ///
@@ -19,3 +19,4 @@ pub use instruction_receiver::InstructionReceiver;
 ///     .run();
 /// ```
 pub use plugin::{HanaEvent, HanaPlugin};
+pub use prelude::*;

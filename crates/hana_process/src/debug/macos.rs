@@ -1,6 +1,7 @@
-use crate::error::{Error, Result};
 use error_stack::{Report, ResultExt};
 use tracing::trace;
+
+use crate::error::{Error, Result};
 
 pub fn activate_parent_window() -> Result<()> {
     let ui_pid = get_probably_editor_parent()?;
@@ -95,15 +96,27 @@ fn get_app_path_from_ps(pid: i32) -> Result<String> {
         .change_context(Error::WindowActivation)
         .attach_printable("Failed to parse ps output as UTF-8")?;
 
-    let cmd = output_str
-        .lines()
-        .nth(1)
-        .and_then(|line| line.split_whitespace().last())
-        .and_then(|path| path.split("/Contents/MacOS/").next())
+    let cmd_line = output_str.lines().nth(1).ok_or_else(|| {
+        Report::new(Error::WindowActivation)
+            .attach_printable("Could not find process info line in ps output")
+    })?;
+
+    // Try to extract the app path from the command line
+    let app_path = cmd_line
+        .split_whitespace().find(|part| part.contains(".app"))
+        .map(|app_with_path| {
+            // Extract just the app part (e.g., /Applications/Zed.app)
+            if let Some(app_end_idx) = app_with_path.find(".app") {
+                &app_with_path[..app_end_idx + 4]
+            } else {
+                app_with_path
+            }
+        })
         .ok_or_else(|| {
             Report::new(Error::WindowActivation)
-                .attach_printable("Failed to extract application path from ps output")
+                .attach_printable(format!("Failed to find .app in command line: {}", cmd_line))
         })?;
 
-    Ok(cmd.to_string())
+    trace!("Found app path: {}", app_path);
+    Ok(app_path.to_string())
 }

@@ -1,15 +1,15 @@
 mod error;
+mod prelude;
+
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use error_stack::ResultExt;
-use hana_network::Instruction;
-use hana_network::{Endpoint, HanaApp};
+use hana_network::{Endpoint, HanaApp, Instruction, TcpTransport};
 use hana_process::Process;
-use tokio::net::TcpStream;
 
-pub use crate::error::{Error, Result};
+use crate::prelude::*;
 
 /// Marker type for visualizations that have not yet connected their network.
 pub struct Unstarted;
@@ -33,13 +33,13 @@ pub struct Visualization<State> {
 
 pub enum StreamState<State> {
     Unconnected(PhantomData<State>),
-    Connected(Endpoint<HanaApp, TcpStream>),
+    Connected(Endpoint<HanaApp, TcpTransport>),
 }
 
 impl Visualization<Unstarted> {
     /// Create a new unstarted visualization
-    pub fn start(path: PathBuf, log_filter: impl Into<String>) -> Result<Visualization<Started>> {
-        let process = Process::run(path, log_filter.into())
+    pub fn start(path: PathBuf, env_filter: impl Into<String>) -> Result<Visualization<Started>> {
+        let process = Process::run(path, env_filter.into())
             .change_context(Error::Process)
             .attach_printable("Failed to start visualization process")?;
 
@@ -54,10 +54,13 @@ impl Visualization<Unstarted> {
 impl Visualization<Started> {
     /// Connect to the visualization process
     pub async fn connect(self) -> Result<Visualization<Connected>> {
-        let endpoint = Endpoint::<HanaApp, TcpStream>::connect_to_visualization()
+        // Use the transport approach internally
+        let transport = TcpTransport::connect_default()
             .await
             .change_context(Error::Process)
             .attach_printable("Failed to connect to visualization process")?;
+
+        let endpoint = Endpoint::new(transport);
 
         Ok(Visualization {
             process: self.process,
