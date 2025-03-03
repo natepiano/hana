@@ -1,14 +1,12 @@
 use crate::prelude::*;
 use crate::transport::provider::*;
-use error_stack::{Report, ResultExt};
+use crate::transport::support::*;
+use error_stack::ResultExt;
 use std::fmt;
-use std::time::Duration;
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::net::TcpStream;
 use tracing::debug; // Added import for debug macro
 
-const CONNECTION_MAX_ATTEMPTS: u8 = 15;
-const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
 const DEFAULT_IP_PORT: &str = "127.0.0.1:3001";
 
 /// A TCP-based transport implementation
@@ -70,17 +68,11 @@ impl TransportListener for TcpListener {
 // TCP connector implementation
 pub struct TcpConnector {
     addr: String,
-    max_attempts: u8,
-    retry_delay: Duration,
 }
 
 impl TcpConnector {
     pub fn new(addr: impl Into<String>) -> Self {
-        Self {
-            addr: addr.into(),
-            max_attempts: CONNECTION_MAX_ATTEMPTS,
-            retry_delay: CONNECTION_RETRY_DELAY,
-        }
+        Self { addr: addr.into() }
     }
 
     pub fn default() -> Self {
@@ -93,22 +85,18 @@ impl TransportConnector for TcpConnector {
 
     async fn connect(&self) -> Result<Self::Transport> {
         debug!("Connecting via TCP to {}", self.addr);
-        let mut attempts = 0;
-        let stream = loop {
-            match TcpStream::connect(&self.addr).await {
-                Ok(stream) => break stream,
-                Err(_) => {
-                    attempts += 1;
-                    if attempts >= self.max_attempts {
-                        return Err(Report::new(Error::ConnectionTimeout).attach_printable(
-                            format!("Failed to connect after {attempts} attempts"),
-                        ));
-                    }
-                    debug!("Connection attempt {} failed, retrying...", attempts);
-                    tokio::time::sleep(self.retry_delay).await;
-                }
-            }
-        };
+
+        let addr = self.addr.clone();
+
+        let stream = connect_with_retry(
+            || {
+                let addr = addr.clone();
+                async move { TcpStream::connect(&addr).await }
+            },
+            RetryConfig::default(),
+            &self.addr,
+        )
+        .await?;
 
         Ok(TcpTransport::new(stream))
     }

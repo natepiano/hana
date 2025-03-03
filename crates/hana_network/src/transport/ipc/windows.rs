@@ -9,8 +9,6 @@ use tokio::net::windows::named_pipe::{
 };
 use tracing::debug;
 
-const CONNECTION_MAX_ATTEMPTS: u8 = 15;
-const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
 const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\hana-ipc";
 
 pub struct IpcTransport {
@@ -84,17 +82,11 @@ impl TransportListener for IpcListener {
 
 pub struct IpcConnector {
     pipe_name: String,
-    max_attempts: u8,
-    retry_delay: Duration,
 }
 
 impl IpcConnector {
     pub fn new(pipe_name: String) -> Self {
-        Self {
-            pipe_name,
-            max_attempts: CONNECTION_MAX_ATTEMPTS,
-            retry_delay: CONNECTION_RETRY_DELAY,
-        }
+        Self { pipe_name }
     }
 
     pub fn default() -> Result<Self> {
@@ -108,24 +100,23 @@ impl TransportConnector for IpcConnector {
     async fn connect(&self) -> Result<Self::Transport> {
         debug!("Connecting via named pipes to {:?}", &self.pipe_name);
 
-        let mut attempts = 0;
-        let client = loop {
-            match ClientOptions::new().open(&self.pipe_name) {
-                Ok(client) => break client,
-                Err(e) => {
-                    attempts += 1;
-                    if attempts >= self.max_attempts {
-                        return Err(Report::new(Error::ConnectionTimeout)
-                                            .attach_printable(format!(
-                                                "Failed to connect to named pipe after {attempts} attempts. Pipe name: {}",
-                                                self.pipe_name
-                                            )));
+        let pipe_name = self.pipe_name.clone();
+
+        let client = connect_with_retry_config(
+            || {
+                let pipe_name = pipe_name.clone();
+                async move {
+                    // ClientOptions::open is not async, but we can wrap it
+                    match ClientOptions::new().open(&pipe_name) {
+                        Ok(client) => Ok(client),
+                        Err(e) => Err(e),
                     }
-                    debug!("Connection attempt {} failed: {}, retrying...", attempts, e);
-                    tokio::time::sleep(self.retry_delay).await;
                 }
-            }
-        };
+            },
+            RetryConfig::default(),
+            &self.pipe_name,
+        )
+        .await?;
 
         Ok(IpcTransport::new_client(client))
     }
@@ -225,7 +216,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
-    async fn test_windows_named_pipe_transport() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_windows_named_pipe_transport(
+    ) -> core::result::Result<(), Box<dyn std::error::Error>> {
         // Create a unique pipe name for this test
         let pipe_name = format!(r"\\.\pipe\hana-ipc-test-{}", std::process::id());
 

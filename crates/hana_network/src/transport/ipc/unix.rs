@@ -1,15 +1,13 @@
 use crate::prelude::*;
 use crate::transport::provider::*;
-use error_stack::{Report, ResultExt};
+use crate::transport::support::*;
+use error_stack::ResultExt;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::net::UnixListener as TokioUnixListener;
 use tokio::net::UnixStream as TokioUnixStream;
-use tracing::{debug, warn};
+use tracing::debug;
 
-const CONNECTION_MAX_ATTEMPTS: u8 = 15;
-const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
 const DEFAULT_SOCKET_PATH: &str = "/tmp/hana-ipc.sock";
 
 pub struct IpcTransport {
@@ -44,9 +42,11 @@ impl IpcListener {
 
     pub async fn bind<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
+        debug!("Attempting to bind IPC socket at {:?}", path);
 
         // Remove socket file if it exists
         if path.exists() {
+            debug!("Found existing socket file at {:?}, removing it", path);
             std::fs::remove_file(path)
                 .change_context(Error::Io)
                 .attach_printable_lazy(|| {
@@ -54,9 +54,12 @@ impl IpcListener {
                 })?;
         }
 
+        debug!("Binding Unix socket at {:?}", path);
         let listener = TokioUnixListener::bind(path)
             .change_context(Error::Io)
             .attach_printable_lazy(|| format!("Failed to bind Unix socket at {:?}", path))?;
+
+        debug!("Successfully bound Unix socket at {:?}", path);
 
         Ok(Self {
             listener,
@@ -69,7 +72,7 @@ impl TransportListener for IpcListener {
     type Transport = IpcTransport;
 
     async fn accept(&self) -> Result<Self::Transport> {
-        warn!("accept called on unix IpcListener");
+        debug!("accept called on unix IpcListener");
         let (stream, _) = self
             .listener
             .accept()
@@ -85,7 +88,7 @@ impl Drop for IpcListener {
     fn drop(&mut self) {
         // Clean up the socket file when the listener is dropped
         if self.path.exists() {
-            println!("Cleaning up Unix socket at {:?}", self.path);
+            debug!("Cleaning up Unix socket at {:?}", self.path);
             let _ = std::fs::remove_file(&self.path);
         }
     }
@@ -93,16 +96,12 @@ impl Drop for IpcListener {
 
 pub struct IpcConnector {
     path: PathBuf,
-    max_attempts: u8,
-    retry_delay: Duration,
 }
 
 impl IpcConnector {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
-            max_attempts: CONNECTION_MAX_ATTEMPTS,
-            retry_delay: CONNECTION_RETRY_DELAY,
         }
     }
 
@@ -111,28 +110,62 @@ impl IpcConnector {
     }
 }
 
+// impl TransportConnector for IpcConnector {
+//     type Transport = IpcTransport;
+
+//     async fn connect(&self) -> Result<Self::Transport> {
+//         debug!("Connecting via Unix Sockets to {:?}", &self.path);
+
+//         // Check if socket file exists
+//         if !self.path.exists() {
+//             debug!("Socket file {:?} does not exist yet", &self.path);
+//         } else {
+//             debug!("Socket file {:?} exists", &self.path);
+//         }
+
+//         let config = RetryConfig::default();
+
+//         let max_attempts = config.max_attempts;
+//         let retry_delay = config.retry_delay;
+
+//         let mut attempts = 0;
+//         let stream = loop {
+//             match TokioUnixStream::connect(&self.path).await {
+//                 Ok(stream) => break stream,
+//                 Err(_) => {
+//                     attempts += 1;
+//                     if attempts >= max_attempts {
+//                         return Err(Report::new(Error::ConnectionTimeout).attach_printable(
+//                             format!("Failed to connect after {attempts} attempts"),
+//                         ));
+//                     }
+//                     debug!("Connection attempt {} failed, retrying...", attempts);
+//                     tokio::time::sleep(retry_delay).await;
+//                 }
+//             }
+//         };
+
+//         Ok(IpcTransport::new(stream))
+//     }
+// }
+
 impl TransportConnector for IpcConnector {
     type Transport = IpcTransport;
 
     async fn connect(&self) -> Result<Self::Transport> {
         debug!("Connecting via Unix Sockets to {:?}", &self.path);
 
-        let mut attempts = 0;
-        let stream = loop {
-            match TokioUnixStream::connect(&self.path).await {
-                Ok(stream) => break stream,
-                Err(_) => {
-                    attempts += 1;
-                    if attempts >= self.max_attempts {
-                        return Err(Report::new(Error::ConnectionTimeout).attach_printable(
-                            format!("Failed to connect after {attempts} attempts"),
-                        ));
-                    }
-                    debug!("Connection attempt {} failed, retrying...", attempts);
-                    tokio::time::sleep(self.retry_delay).await;
-                }
-            }
-        };
+        let path = self.path.clone();
+
+        let stream = connect_with_retry(
+            || {
+                let path = path.clone();
+                async move { TokioUnixStream::connect(&path).await }
+            },
+            RetryConfig::default(),
+            &self.path,
+        )
+        .await?;
 
         Ok(IpcTransport::new(stream))
     }

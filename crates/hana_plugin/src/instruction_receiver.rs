@@ -36,9 +36,9 @@ impl InstructionReceiver {
 
     /// bind to the port and attempt to connect to listen for a hana app
     async fn run_network(tx: mpsc::Sender<Instruction>) -> Result<()> {
-        info!("checking for hana app on port 3001");
+        info!("checking for hana app");
         match tokio::time::timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(5),
             VisualizationEndpoint::listen_for_hana(),
         )
         .await
