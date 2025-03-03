@@ -118,10 +118,10 @@ impl TransportConnector for IpcConnector {
                     attempts += 1;
                     if attempts >= self.max_attempts {
                         return Err(Report::new(Error::ConnectionTimeout)
-                            .attach_printable(format!(
-                                "Failed to connect to named pipe after {attempts} attempts"
-                            ))
-                            .attach_printable_lazy(|| format!("Pipe name: {}", self.pipe_name)));
+                                            .attach_printable(format!(
+                                                "Failed to connect to named pipe after {attempts} attempts. Pipe name: {}",
+                                                self.pipe_name
+                                            )));
                     }
                     debug!("Connection attempt {} failed: {}, retrying...", attempts, e);
                     tokio::time::sleep(self.retry_delay).await;

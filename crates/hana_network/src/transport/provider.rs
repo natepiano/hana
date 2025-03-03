@@ -7,6 +7,10 @@ use crate::prelude::*;
 use std::fmt::Debug;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+pub trait Transport: AsyncRead + AsyncWrite + Unpin + Debug {
+    // No additional methods required for the initial implementation
+}
+
 /// A provider of transport implementations
 ///
 /// This trait serves as an abstraction layer for different transport types.
@@ -31,10 +35,6 @@ pub trait TransportProvider {
 
     /// Get a default listener for this transport
     async fn listener() -> Result<Self::Listener>;
-}
-
-pub trait Transport: AsyncRead + AsyncWrite + Unpin + Debug {
-    // No additional methods required for the initial implementation
 }
 
 #[allow(async_fn_in_trait)]

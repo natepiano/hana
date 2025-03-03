@@ -1,5 +1,7 @@
+//! Implement standard AsyncRead and AsyncWrite traits for the appropriate type
+//! So we don't have to write this twice for both tcp and unix sockets
 #[macro_export]
-macro_rules! impl_async_io_for_field {
+macro_rules! impl_async_io {
     ($type:ty, $field:ident) => {
         impl tokio::io::AsyncRead for $type {
             fn poll_read(

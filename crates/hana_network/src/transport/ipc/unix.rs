@@ -138,5 +138,4 @@ impl TransportConnector for IpcConnector {
     }
 }
 
-use crate::impl_async_io_for_field;
-impl_async_io_for_field!(IpcTransport, stream);
+crate::impl_async_io!(IpcTransport, stream);

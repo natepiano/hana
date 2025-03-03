@@ -11,22 +11,6 @@ const CONNECTION_MAX_ATTEMPTS: u8 = 15;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
 const DEFAULT_IP_PORT: &str = "127.0.0.1:3001";
 
-pub struct TcpProvider;
-
-impl TransportProvider for TcpProvider {
-    type Transport = TcpTransport;
-    type Connector = TcpConnector;
-    type Listener = TcpListener;
-
-    fn connector() -> Result<Self::Connector> {
-        Ok(TcpConnector::default())
-    }
-
-    async fn listener() -> Result<Self::Listener> {
-        TcpListener::bind_default().await
-    }
-}
-
 /// A TCP-based transport implementation
 pub struct TcpTransport {
     stream: TcpStream,
@@ -130,5 +114,4 @@ impl TransportConnector for TcpConnector {
     }
 }
 
-use crate::impl_async_io_for_field;
-impl_async_io_for_field!(TcpTransport, stream);
+crate::impl_async_io!(TcpTransport, stream);

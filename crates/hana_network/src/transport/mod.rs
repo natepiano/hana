@@ -5,9 +5,9 @@ pub mod provider;
 pub use provider::*;
 mod support;
 
-pub mod tcp;
+pub mod rpc;
 #[allow(unused_imports)]
-pub use tcp::TcpProvider;
+pub use rpc::TcpProvider;
 
 pub mod ipc;
 pub use ipc::IpcProvider as DefaultProvider;
