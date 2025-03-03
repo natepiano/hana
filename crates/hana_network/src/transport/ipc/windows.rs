@@ -225,7 +225,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
-    async fn test_windows_named_pipe_transport() -> Result<()> {
+    async fn test_windows_named_pipe_transport() -> Result<(), Box<dyn std::error::Error>> {
         // Create a unique pipe name for this test
         let pipe_name = format!(r"\\.\pipe\hana-ipc-test-{}", std::process::id());
 
