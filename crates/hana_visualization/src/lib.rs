@@ -36,8 +36,12 @@ pub enum StreamState<State> {
 
 impl Visualization<Unstarted> {
     /// Create a new unstarted visualization
-    pub fn start(path: PathBuf, env_filter: impl Into<String>) -> Result<Visualization<Started>> {
+    pub async fn start(
+        path: PathBuf,
+        env_filter: impl Into<String>,
+    ) -> Result<Visualization<Started>> {
         let process = Process::run(path, env_filter.into())
+            .await
             .change_context(Error::Process)
             .attach_printable("Failed to start visualization process")?;
 
@@ -92,6 +96,7 @@ impl Visualization<Connected> {
         // Ensure process terminates
         self.process
             .ensure_shutdown(timeout)
+            .await
             .change_context(Error::Process)
             .attach_printable("failed to ensure shutdown of visualization process")?;
 

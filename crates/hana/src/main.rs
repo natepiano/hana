@@ -19,14 +19,15 @@ async fn main() -> Result<()> {
 
     // Create and connect visualization using typestate pattern (i.e. <Unstarted>)
     let viz = Visualization::<Unstarted>::start(viz_path, env_filter_str)
-        .change_context(Error::Controller)?;
+        .await
+        .change_context(Error::Visualization)?;
 
     trace!("Visualization process started, establishing connection...");
 
-    let mut viz = viz.connect().await.change_context(Error::Controller)?;
+    let mut viz = viz.connect().await.change_context(Error::Visualization)?;
 
     for _ in 0..8 {
-        viz.ping().await.change_context(Error::Controller)?;
+        viz.ping().await.change_context(Error::Visualization)?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
@@ -47,7 +48,7 @@ async fn main() -> Result<()> {
     info!("initiating shutdown...");
     viz.shutdown(Duration::from_secs(5))
         .await
-        .change_context(Error::Controller)?;
+        .change_context(Error::Visualization)?;
     info!("shutdown complete");
 
     Ok(())

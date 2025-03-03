@@ -7,8 +7,8 @@ mod support;
 
 pub mod rpc;
 #[allow(unused_imports)]
-pub use rpc::TcpProvider as DefaultProvider;
+pub use rpc::TcpProvider;
 
 pub mod ipc;
 #[allow(unused_imports)]
-pub use ipc::IpcProvider;
+pub use ipc::IpcProvider as DefaultProvider;

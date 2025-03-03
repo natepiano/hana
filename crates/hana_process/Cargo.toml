@@ -13,4 +13,5 @@ libc = "0.2.170"
 [dependencies]
 error-stack.workspace = true
 thiserror.workspace   = true
+tokio.workspace       = true
 tracing.workspace     = true

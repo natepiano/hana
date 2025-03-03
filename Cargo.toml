@@ -85,6 +85,7 @@ tokio = { version = "1.43", default-features = false, features = [
   "io-util",         # for AsyncReadExt, AsyncWriteExt
   "macros",          # for #[tokio::main]
   "net",             # for TcpStream
+  "process",         # for process::Command
   "rt-multi-thread", # for multi-threaded runtime
   "sync",            # for mpsc::channel
   "time",            # for sleep

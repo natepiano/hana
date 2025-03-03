@@ -102,7 +102,7 @@ impl TransportConnector for IpcConnector {
 
         let pipe_name = self.pipe_name.clone();
 
-        let client = connect_with_retry_config(
+        let client = connect_with_retry(
             || {
                 let pipe_name = pipe_name.clone();
                 async move {
