@@ -2,18 +2,36 @@ use super::base_endpoint::Endpoint;
 use crate::prelude::*;
 use crate::role::Role;
 use crate::role::{HanaRole, VisualizationRole};
-use crate::transport::tcp::{TcpConnector, TcpListener, TcpTransport};
-use crate::transport::*;
+use crate::transport::provider::*;
+use crate::transport::DefaultProvider;
 use std::ops::{Deref, DerefMut};
 
 /// A generic endpoint that can be specialized for different roles in the Hana system
 pub struct RoleBasedEndpoint<R: Role, T: Transport>(Endpoint<R, T>);
 
 /// An endpoint for a Hana controller to connect to and control visualizations
-pub type HanaEndpoint<T = TcpTransport> = RoleBasedEndpoint<HanaRole, T>;
+pub type HanaEndpoint =
+    RoleBasedEndpoint<HanaRole, <DefaultProvider as TransportProvider>::Transport>;
+
+impl HanaEndpoint {
+    pub async fn connect_to_visualization() -> Result<Self> {
+        let connector = DefaultProvider::connector()?;
+        let transport = connector.connect().await?;
+        Ok(Self::new(transport))
+    }
+}
 
 /// An endpoint for a visualization to accept connections from Hana controllers
-pub type VisualizationEndpoint<T = TcpTransport> = RoleBasedEndpoint<VisualizationRole, T>;
+pub type VisualizationEndpoint =
+    RoleBasedEndpoint<VisualizationRole, <DefaultProvider as TransportProvider>::Transport>;
+
+impl VisualizationEndpoint {
+    pub async fn listen_for_hana() -> Result<Self> {
+        let listener = DefaultProvider::listener().await?;
+        let transport = listener.accept().await?;
+        Ok(Self::new(transport))
+    }
+}
 
 impl<R: Role, T: Transport> RoleBasedEndpoint<R, T> {
     /// Create a new role-based endpoint with the specified transport
@@ -38,36 +56,20 @@ impl<R: Role, T: Transport> DerefMut for RoleBasedEndpoint<R, T> {
     }
 }
 
-// Role-specific implementation for HanaRole
-impl RoleBasedEndpoint<HanaRole, TcpTransport> {
-    /// Connect to a visualization at the default address
-    pub async fn connect_to_visualization() -> Result<Self> {
-        let connector = TcpConnector::default();
-        let transport = connector.connect().await?;
-        Ok(Self::new(transport))
-    }
-}
-
-// Role-specific implementation for VisualizationRole
-impl RoleBasedEndpoint<VisualizationRole, TcpTransport> {
-    /// Listen on the default port and accept a connection
-    pub async fn listen_for_hana() -> Result<Self> {
-        let listener = TcpListener::bind_default().await?;
-        let transport = listener.accept().await?;
-        Ok(Self::new(transport))
-    }
-}
-
 #[cfg(test)]
 mod tests_endpoint {
     use super::*;
     use crate::message::Instruction;
     use crate::transport::mock::MockTransport;
 
+    pub type TestHanaEndpoint = RoleBasedEndpoint<HanaRole, MockTransport>;
+
+    pub type TestVisualizationEndpoint = RoleBasedEndpoint<VisualizationRole, MockTransport>;
+
     #[tokio::test]
     async fn test_hana_endpoint_send_message() {
         let mock = MockTransport::new(vec![]);
-        let mut endpoint = HanaEndpoint::new(mock);
+        let mut endpoint = TestHanaEndpoint::new(mock);
 
         let instruction = Instruction::Ping;
         endpoint.send(&instruction).await.unwrap();
@@ -86,7 +88,7 @@ mod tests_endpoint {
         data.extend(msg_bytes);
 
         let mock = MockTransport::new(data);
-        let mut endpoint = VisualizationEndpoint::new(mock);
+        let mut endpoint = TestVisualizationEndpoint::new(mock);
 
         let result: Option<Instruction> = endpoint.receive().await.unwrap();
         assert_eq!(result, Some(Instruction::Ping));

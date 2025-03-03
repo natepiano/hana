@@ -1,11 +1,51 @@
 //! Mock transport implementation for testing
 //! gated by #[cfg(test)] in mod.rs
+use crate::prelude::*;
+use crate::transport::provider::*;
 use std::fmt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::transport::Transport;
+
+pub struct MockProvider;
+
+impl TransportProvider for MockProvider {
+    type Transport = MockTransport;
+    type Connector = MockConnector;
+    type Listener = MockListener;
+
+    fn connector() -> Result<Self::Connector> {
+        Ok(MockConnector)
+    }
+
+    async fn listener() -> Result<Self::Listener> {
+        Ok(MockListener)
+    }
+}
+
+#[derive(Default)]
+pub struct MockConnector;
+
+impl TransportConnector for MockConnector {
+    type Transport = MockTransport;
+
+    async fn connect(&self) -> Result<Self::Transport> {
+        Ok(MockTransport::new(vec![]))
+    }
+}
+
+#[derive(Default)]
+pub struct MockListener;
+
+impl TransportListener for MockListener {
+    type Transport = MockTransport;
+
+    async fn accept(&self) -> Result<Self::Transport> {
+        Ok(MockTransport::new(vec![]))
+    }
+}
 
 // Mock transport implementation for testing
 pub struct MockTransport {

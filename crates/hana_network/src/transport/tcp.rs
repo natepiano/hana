@@ -1,15 +1,31 @@
-use super::*;
 use crate::prelude::*;
+use crate::transport::provider::*;
 use error_stack::{Report, ResultExt};
 use std::fmt;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::net::TcpStream;
 use tracing::debug; // Added import for debug macro
 
 const CONNECTION_MAX_ATTEMPTS: u8 = 15;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(200);
+const DEFAULT_IP_PORT: &str = "127.0.0.1:3001";
+
+pub struct TcpProvider;
+
+impl TransportProvider for TcpProvider {
+    type Transport = TcpTransport;
+    type Connector = TcpConnector;
+    type Listener = TcpListener;
+
+    fn connector() -> Result<Self::Connector> {
+        Ok(TcpConnector::default())
+    }
+
+    async fn listener() -> Result<Self::Listener> {
+        TcpListener::bind_default().await
+    }
+}
 
 /// A TCP-based transport implementation
 pub struct TcpTransport {
@@ -48,7 +64,7 @@ impl TcpListener {
     }
 
     pub async fn bind_default() -> Result<Self> {
-        Self::bind("127.0.0.1:3001").await
+        Self::bind(DEFAULT_IP_PORT).await
     }
 }
 
@@ -84,7 +100,7 @@ impl TcpConnector {
     }
 
     pub fn default() -> Self {
-        Self::new("127.0.0.1:3001")
+        Self::new(DEFAULT_IP_PORT)
     }
 }
 
@@ -92,6 +108,7 @@ impl TransportConnector for TcpConnector {
     type Transport = TcpTransport;
 
     async fn connect(&self) -> Result<Self::Transport> {
+        debug!("Connecting via TCP to {}", self.addr);
         let mut attempts = 0;
         let stream = loop {
             match TcpStream::connect(&self.addr).await {
@@ -113,38 +130,5 @@ impl TransportConnector for TcpConnector {
     }
 }
 
-// Implement AsyncRead by delegating to the inner TcpStream
-impl AsyncRead for TcpTransport {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.stream).poll_read(cx, buf)
-    }
-}
-
-// Implement AsyncWrite by delegating to the inner TcpStream
-impl AsyncWrite for TcpTransport {
-    fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        std::pin::Pin::new(&mut self.stream).poll_write(cx, buf)
-    }
-
-    fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.stream).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.stream).poll_shutdown(cx)
-    }
-}
+use crate::impl_async_io_for_field;
+impl_async_io_for_field!(TcpTransport, stream);

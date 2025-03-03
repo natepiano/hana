@@ -19,6 +19,11 @@ members = [
 ]
 resolver = "2"
 
+[workspace.lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
 [workspace.dependencies]
 #
 # Workspace member crates
