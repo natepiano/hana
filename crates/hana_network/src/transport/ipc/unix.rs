@@ -110,45 +110,6 @@ impl IpcConnector {
     }
 }
 
-// impl TransportConnector for IpcConnector {
-//     type Transport = IpcTransport;
-
-//     async fn connect(&self) -> Result<Self::Transport> {
-//         debug!("Connecting via Unix Sockets to {:?}", &self.path);
-
-//         // Check if socket file exists
-//         if !self.path.exists() {
-//             debug!("Socket file {:?} does not exist yet", &self.path);
-//         } else {
-//             debug!("Socket file {:?} exists", &self.path);
-//         }
-
-//         let config = RetryConfig::default();
-
-//         let max_attempts = config.max_attempts;
-//         let retry_delay = config.retry_delay;
-
-//         let mut attempts = 0;
-//         let stream = loop {
-//             match TokioUnixStream::connect(&self.path).await {
-//                 Ok(stream) => break stream,
-//                 Err(_) => {
-//                     attempts += 1;
-//                     if attempts >= max_attempts {
-//                         return Err(Report::new(Error::ConnectionTimeout).attach_printable(
-//                             format!("Failed to connect after {attempts} attempts"),
-//                         ));
-//                     }
-//                     debug!("Connection attempt {} failed, retrying...", attempts);
-//                     tokio::time::sleep(retry_delay).await;
-//                 }
-//             }
-//         };
-
-//         Ok(IpcTransport::new(stream))
-//     }
-// }
-
 impl TransportConnector for IpcConnector {
     type Transport = IpcTransport;
 

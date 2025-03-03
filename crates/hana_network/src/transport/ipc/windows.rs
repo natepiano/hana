@@ -1,8 +1,8 @@
 use crate::prelude::*;
 use crate::transport::provider::*;
-use error_stack::{Report, ResultExt};
+use crate::transport::support::*;
+use error_stack::ResultExt;
 use std::fmt;
-use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
