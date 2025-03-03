@@ -33,7 +33,15 @@ async fn main() -> Result<()> {
     // return to the editor - very useful when you're in full screen in macos
     // after the visualization ends, you'll pop right back to this editor window
     #[cfg(debug_assertions)]
-    hana_process::debug::activate_parent_window().change_context(Error::Controller)?;
+    match hana_process::debug::activate_parent_window() {
+        Ok(_) => {
+            info!("Successfully activated parent window");
+        }
+        Err(report) => {
+            // Log the full error report with context and attached printable messages
+            tracing::warn!("Failed to activate parent window: {report:?}");
+        }
+    };
 
     // Shutdown
     info!("initiating shutdown...");
