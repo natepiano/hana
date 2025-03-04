@@ -60,7 +60,7 @@ impl<R: Role, T: Transport> DerefMut for RoleBasedEndpoint<R, T> {
 mod tests_endpoint {
     use super::*;
     use crate::message::Instruction;
-    use crate::transport::mock::MockTransport;
+    use crate::transport::mock_provider::MockTransport;
 
     pub type TestHanaEndpoint = RoleBasedEndpoint<HanaRole, MockTransport>;
 

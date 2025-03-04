@@ -31,7 +31,8 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
     {
         let message_bytes = bincode::serialize(message)
             .change_context(Error::Serialization)
-            .attach_printable_lazy(|| format!("failed to serialize message: {:?}", message))?;
+            .attach_printable_lazy(|| format!("failed to serialize message: '{message:?}'"))
+            .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
         let len_prefix = message_bytes.len() as u32;
 
@@ -39,7 +40,10 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
             .write_all(&len_prefix.to_le_bytes())
             .await
             .change_context(Error::Io)
-            .attach_printable("Failed to write length prefix")?;
+            .attach_printable_lazy(|| {
+                format!("Failed to write length prefix: '{len_prefix}' to message: '{message:?}'")
+            })
+            .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
         self.transport
             .write_all(&message_bytes)
@@ -47,10 +51,11 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
             .change_context(Error::Io)
             .attach_printable_lazy(|| {
                 format!(
-                    "Failed to write {} bytes of message data",
-                    message_bytes.len()
+                    "Failed to write {} bytes of message data for message: '{message:?}'",
+                    message_bytes.len(),
                 )
-            })?;
+            })
+            .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
         Ok(())
     }
@@ -73,19 +78,21 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
                     .change_context(Error::Io)
                     .attach_printable_lazy(|| {
                         format!("Failed to read {} bytes of message data", len)
-                    })?;
+                    })
+                    .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
                 let message = bincode::deserialize(&buffer)
                     .change_context(Error::Serialization)
                     .attach_printable_lazy(|| {
                         format!("Failed to deserialize {} bytes into message", buffer.len())
-                    })?;
+                    })
+                    .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
                 Ok(Some(message))
             }
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
             Err(e) => Err(Report::new(Error::Io)
-                .attach_printable("Failed to read length prefix")
+                .attach_printable("Failed to read length prefix for message")
                 .attach_printable(e)),
         }
     }
@@ -103,7 +110,7 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
 mod tests_transport {
     use super::*;
     use crate::message::Instruction;
-    use crate::transport::mock::MockTransport;
+    use crate::transport::mock_provider::MockTransport;
 
     // Mock role for testing
     struct MockRole;

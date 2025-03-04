@@ -15,6 +15,7 @@ eventually migrate this issue list to github when you're working with other devs
 - We need a policy and a UX to handle local process failure - whether the process is shutdown manually or just becomes unresponsive. There's a lot of choices we could make and a lot of things we could do to make it so users can recover from these situations with the least amount of fuss.
 - Buffered comms
 - Lanes as in [aeronet](https://github.com/aecsocket/aeronet/blob/main/crates/aeronet_transport/src/lane.rs) for bevy - supporting unordered reliable, unordered unreliable, ordered reliable and unordered reliable. Each have use cases
+- handle network errors in the hana_plugin when network failures occur
 - decide whether we want to have a hanad (or hana_d or hana_daemon) whose sole responsibility is to provide network discovery for every machine it's running on - and then allow for starting remote visualizations without necessarily needing to run a local [hana app](./application.md). And if a hana app come online, it can connect via hanad rather than have hana itself be responsible for the discovery process. Advantages include
   - No cpu/gpu on remote machines required to run a hana app
   - lightweight and can easily just be started up and remain listening on any machine in the mesh

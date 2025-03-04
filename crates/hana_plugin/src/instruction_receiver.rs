@@ -45,7 +45,7 @@ impl InstructionReceiver {
         {
             Ok(Ok(endpoint)) => {
                 info!("hana app connected successfully");
-                Self::handle_messages(endpoint, tx).await
+                Self::forward_instruction_to_channel(endpoint, tx).await
             }
             Ok(Err(e)) => Err(e
                 .change_context(Error::Network)
@@ -57,7 +57,7 @@ impl InstructionReceiver {
         }
     }
 
-    async fn handle_messages(
+    async fn forward_instruction_to_channel(
         mut endpoint: VisualizationEndpoint,
         tx: mpsc::Sender<Instruction>,
     ) -> Result<()> {
@@ -81,7 +81,7 @@ impl InstructionReceiver {
                     }
                 },
                 None => {
-                    debug!("Controller disconnected");
+                    debug!("hana app disconnected");
                     return Ok(());
                 }
             }
@@ -91,4 +91,15 @@ impl InstructionReceiver {
     pub fn try_recv(&mut self) -> Option<Instruction> {
         self.instruction_rx.try_recv().ok()
     }
+    // leaving this here for the future as we'll need to figure out what to do when we get an
+    // instruction receive error pub fn try_recv(&mut self) -> Result<Option<Instruction>> {
+    //     match self.instruction_rx.try_recv() {
+    //         Ok(instruction) => Ok(Some(instruction)),
+    //         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
+    //         Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+    //             Err(error_stack::Report::new(Error::Channel)
+    //                 .attach_printable("Instruction channel disconnected unexpectedly"))
+    //         }
+    //     }
+    // }
 }

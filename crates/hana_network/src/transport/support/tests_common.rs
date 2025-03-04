@@ -1,7 +1,9 @@
-use crate::transport::{TransportConnector, TransportListener};
 use std::error::Error as StdError;
 use std::time::Duration;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::transport::{TransportConnector, TransportListener};
 
 /// Test utility for IPC transport implementations.
 pub async fn test_ipc_transport<L, C, T>(

@@ -2004,8 +2004,8 @@ dependencies = [
 name = "hana"
 version = "0.1.0"
 dependencies = [
+ "bevy",
  "error-stack",
- "hana_process",
  "hana_visualization",
  "thiserror 2.0.11",
  "tokio",

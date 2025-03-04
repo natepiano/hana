@@ -41,7 +41,7 @@ impl TcpListener {
         let listener = TokioTcpListener::bind(addr)
             .await
             .change_context(Error::Io)
-            .attach_printable(format!("Failed to bind to {}", addr))?;
+            .attach_printable_lazy(|| format!("Failed to bind to {}", addr))?;
 
         Ok(Self { listener })
     }

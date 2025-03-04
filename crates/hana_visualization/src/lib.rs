@@ -1,5 +1,6 @@
 mod error;
 mod prelude;
+
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -41,10 +42,12 @@ impl Visualization<Unstarted> {
         path: PathBuf,
         env_filter: impl Into<String>,
     ) -> Result<Visualization<Started>> {
-        let process = Process::run(path, env_filter.into())
+        let process = Process::run(path.clone(), env_filter.into())
             .await
             .change_context(Error::Process)
-            .attach_printable("Failed to start visualization process")?;
+            .attach_printable_lazy(|| {
+                format!("Failed to start visualization process at: {path:?}")
+            })?;
 
         Ok(Visualization {
             process,

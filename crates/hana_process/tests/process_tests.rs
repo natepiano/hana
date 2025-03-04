@@ -1,9 +1,8 @@
 use std::path::PathBuf;
-// use std::process::Command;
 use std::time::Duration;
 
 use error_stack::ResultExt;
-use hana_process::{Error, Process, Result};
+use hana_process::{Error, Process};
 
 const TEST_LOG_FILTER: &str = "warn,hana=warn";
 
@@ -25,7 +24,7 @@ async fn test_spawn_error() {
 }
 
 #[tokio::test]
-async fn test_ensure_shutdown() -> Result<()> {
+async fn test_ensure_shutdown() -> Result<(), Box<dyn std::error::Error>> {
     // Use Cargo's provided env var to determine the path of the built helper.
     let helper_path = PathBuf::from(env!("CARGO_BIN_EXE_hana_helper"));
 
@@ -48,6 +47,34 @@ async fn test_ensure_shutdown() -> Result<()> {
             err.current_context()
         );
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_is_running() -> Result<(), Box<dyn std::error::Error>> {
+    // Use Cargo's provided env var to determine the path of the built helper.
+    let helper_path = PathBuf::from(env!("CARGO_BIN_EXE_hana_helper"));
+
+    // Spawn the process
+    let mut process = Process::run(helper_path, TEST_LOG_FILTER).await?;
+
+    // Check that it's running
+    let running = process.is_running().await?;
+    assert!(running, "Process should be running initially");
+
+    // Kill the process and handle io::Error conversion
+    process.child.kill().await?;
+
+    // Wait for the process to exit and handle io::Error conversion
+    process.child.wait().await?;
+
+    // Now we can be sure the process has exited
+    let running = process.is_running().await?;
+    assert!(
+        !running,
+        "Process should not be running after kill and wait"
+    );
 
     Ok(())
 }

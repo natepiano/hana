@@ -11,7 +11,7 @@ impl Plugin for HanaPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(InstructionReceiver::spawn())
             .add_event::<HanaEvent>()
-            .add_systems(Update, handle_hana_instructions);
+            .add_systems(Update, handle_hana_instruction);
     }
 }
 
@@ -21,7 +21,7 @@ pub enum HanaEvent {
     // We can add more events here as needed
 }
 
-fn handle_hana_instructions(
+fn handle_hana_instruction(
     mut adapter: ResMut<InstructionReceiver>,
     mut viz_events: EventWriter<HanaEvent>,
 ) {

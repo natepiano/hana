@@ -33,7 +33,7 @@ impl fmt::Debug for IpcTransport {
 
 pub struct IpcListener {
     listener: TokioUnixListener,
-    path: PathBuf,
+    path:     PathBuf,
 }
 
 impl IpcListener {
@@ -137,10 +137,12 @@ crate::impl_async_io!(IpcTransport, stream);
 
 #[cfg(test)]
 mod tests_ipc {
+    use std::error::Error as StdError;
+
+    use tempfile::tempdir;
+
     use super::{IpcConnector, IpcListener};
     use crate::transport::support::test_ipc_transport;
-    use std::error::Error as StdError;
-    use tempfile::tempdir;
 
     #[tokio::test]
     async fn test_unix_socket_transport() -> Result<(), Box<dyn StdError + Send + Sync>> {

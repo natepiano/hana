@@ -214,9 +214,10 @@ impl AsyncWrite for IpcTransport {
 
 #[cfg(test)]
 mod tests_ipc {
+    use std::error::Error as StdError;
+
     use super::{IpcConnector, IpcListener};
     use crate::transport::support::test_ipc_transport;
-    use std::error::Error as StdError;
 
     #[tokio::test]
     async fn test_windows_named_pipe_transport() -> Result<(), Box<dyn StdError + Send + Sync>> {
