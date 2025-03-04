@@ -63,6 +63,9 @@ impl TransportListener for IpcListener {
     type Transport = IpcTransport;
 
     async fn accept(&self) -> Result<Self::Transport> {
+        debug!("Creating named pipe server at {}", self.pipe_name);
+
+        // Create a server instance
         let server = ServerOptions::new()
             .first_pipe_instance(true)
             .create(&self.pipe_name)
@@ -71,12 +74,19 @@ impl TransportListener for IpcListener {
                 format!("Failed to create named pipe server at {}", self.pipe_name)
             })?;
 
+        debug!(
+            "Waiting for client connection on named pipe {}",
+            self.pipe_name
+        );
+
         // Wait for a client connection
         server
             .connect()
             .await
             .change_context(Error::Io)
             .attach_printable("Failed to connect named pipe server to client")?;
+
+        debug!("Client connected to named pipe {}", self.pipe_name);
 
         Ok(IpcTransport::new_server(server))
     }
@@ -100,7 +110,7 @@ impl TransportConnector for IpcConnector {
     type Transport = IpcTransport;
 
     async fn connect(&self) -> Result<Self::Transport> {
-        debug!("Connecting via named pipes to {:?}", &self.pipe_name);
+        debug!("Connecting via named pipes to {}", &self.pipe_name);
 
         let pipe_name = self.pipe_name.clone();
 
@@ -110,12 +120,21 @@ impl TransportConnector for IpcConnector {
                 async move {
                     // ClientOptions::open is not async, but we can wrap it
                     match ClientOptions::new().open(&pipe_name) {
-                        Ok(client) => Ok(client),
-                        Err(e) => Err(e),
+                        Ok(client) => {
+                            debug!("Successfully connected to named pipe {}", pipe_name);
+                            Ok(client)
+                        }
+                        Err(e) => {
+                            debug!("Failed to connect to named pipe {}: {:?}", pipe_name, e);
+                            Err(e)
+                        }
                     }
                 }
             },
-            RetryConfig::default(),
+            RetryConfig {
+                max_attempts: 30,                                   // Increase retry attempts
+                retry_delay: std::time::Duration::from_millis(100), // Shorter delay
+            },
             &self.pipe_name,
         )
         .await?;
@@ -215,16 +234,29 @@ impl AsyncWrite for IpcTransport {
 #[cfg(test)]
 mod tests_ipc {
     use std::error::Error as StdError;
+    use tokio::task;
 
     use super::{IpcConnector, IpcListener};
     use crate::transport::support::test_ipc_transport;
 
+    // Add this function to set up logging for tests
+    fn init_test_logging() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .try_init();
+    }
+
     #[tokio::test]
     async fn test_windows_named_pipe_transport() -> Result<(), Box<dyn StdError + Send + Sync>> {
+        // Initialize logging
+        init_test_logging();
+
+        println!("Starting Windows IPC test");
+
         // Create a unique pipe name for this test
         let pipe_name = format!(r"\\.\pipe\hana-ipc-test-{}", std::process::id());
 
-        // Create listener and connector
+        // Create listener
         let listener = IpcListener::with_name(pipe_name.clone()).map_err(|e| format!("{e}"))?;
         let connector = IpcConnector::new(pipe_name);
 
