@@ -211,13 +211,15 @@ impl AsyncWrite for IpcTransport {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests_ipc {
+    use super::{IpcConnector, IpcListener};
+    use crate::transport::{TransportConnector, TransportListener};
+    use std::error::Error as StdError;
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
-    async fn test_windows_named_pipe_transport(
-    ) -> core::result::Result<(), Box<dyn std::error::Error>> {
+    async fn test_windows_named_pipe_transport() -> std::result::Result<(), Box<dyn StdError>> {
         // Create a unique pipe name for this test
         let pipe_name = format!(r"\\.\pipe\hana-ipc-test-{}", std::process::id());
 
@@ -228,20 +230,18 @@ mod tests {
         let connector = IpcConnector::new(pipe_name);
 
         // Spawn a task to accept a connection
-        let server_task = tokio::spawn(async move {
-            let mut transport = listener.accept().await?;
+        let server_handle = tokio::spawn(async move {
+            let mut transport = listener.accept().await.unwrap();
 
             // Read some data
             let mut buf = [0u8; 5];
-            transport.read_exact(&mut buf).await?;
+            transport.read_exact(&mut buf).await.unwrap();
 
             // Verify the data
             assert_eq!(&buf, b"hello");
 
             // Send response
-            transport.write_all(b"world").await?;
-
-            Ok::<_, Report<Error>>(())
+            transport.write_all(b"world").await.unwrap();
         });
 
         // Give the server a moment to start
@@ -251,23 +251,19 @@ mod tests {
         let mut client_transport = connector.connect().await?;
 
         // Send a message
-        client_transport
-            .write_all(b"hello")
-            .await
-            .map_err(|e| Report::new(Error::Io).attach_printable(e))?;
+        client_transport.write_all(b"hello").await?;
 
         // Read the response
         let mut response = [0u8; 5];
-        client_transport
-            .read_exact(&mut response)
-            .await
-            .map_err(|e| Report::new(Error::Io).attach_printable(e))?;
+        client_transport.read_exact(&mut response).await?;
 
         // Verify the response
         assert_eq!(&response, b"world");
 
-        // Wait for the server to complete
-        server_task.await.unwrap()?;
+        // Wait for the server task to complete
+        server_handle
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn StdError>)?;
 
         Ok(())
     }
