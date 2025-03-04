@@ -234,10 +234,7 @@ impl AsyncWrite for IpcTransport {
 #[cfg(test)]
 mod tests_ipc {
     use std::error::Error as StdError;
-    use tokio::task;
-
-    use super::{IpcConnector, IpcListener};
-    use crate::transport::support::test_ipc_transport;
+    use tracing_subscriber::{fmt, EnvFilter};
 
     // Add this function to set up logging for tests
     fn init_test_logging() {
