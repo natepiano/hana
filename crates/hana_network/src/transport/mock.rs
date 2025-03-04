@@ -1,12 +1,13 @@
 //! Mock transport implementation for testing
 //! gated by #[cfg(test)] in mod.rs
-use crate::prelude::*;
-use crate::transport::provider::*;
 use std::fmt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+use crate::prelude::*;
+use crate::transport::provider::*;
 use crate::transport::Transport;
 
 pub struct MockProvider;
@@ -49,11 +50,11 @@ impl TransportListener for MockListener {
 
 // Mock transport implementation for testing
 pub struct MockTransport {
-    pub read_data: Vec<u8>,
-    pub write_data: Vec<u8>,
-    pub read_position: usize,
+    pub read_data:         Vec<u8>,
+    pub write_data:        Vec<u8>,
+    pub read_position:     usize,
     pub write_error_after: Option<usize>,
-    pub read_error_kind: Option<std::io::ErrorKind>,
+    pub read_error_kind:   Option<std::io::ErrorKind>,
 }
 
 impl MockTransport {
@@ -79,11 +80,11 @@ impl MockTransport {
 
     pub fn with_read_error(error_kind: std::io::ErrorKind) -> Self {
         Self {
-            read_data: vec![],
-            write_data: Vec::new(),
-            read_position: 0,
+            read_data:         vec![],
+            write_data:        Vec::new(),
+            read_position:     0,
             write_error_after: None,
-            read_error_kind: Some(error_kind),
+            read_error_kind:   Some(error_kind),
         }
     }
 }

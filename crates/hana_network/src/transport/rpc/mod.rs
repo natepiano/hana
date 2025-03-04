@@ -1,9 +1,9 @@
 mod tcp;
 
+use tcp::*;
+
 use crate::prelude::*;
 use crate::transport::provider::*;
-
-use tcp::*;
 
 pub struct TcpProvider;
 

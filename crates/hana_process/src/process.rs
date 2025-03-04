@@ -1,14 +1,16 @@
-use crate::prelude::*;
-use error_stack::{Report, ResultExt};
 use std::path::PathBuf;
 use std::time::Duration;
+
+use error_stack::{Report, ResultExt};
 use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
+use crate::prelude::*;
+
 pub struct Process {
     child: tokio::process::Child,
-    path: PathBuf,
+    path:  PathBuf,
 }
 
 impl Process {

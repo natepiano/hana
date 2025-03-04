@@ -1,8 +1,10 @@
-use crate::prelude::*;
-use error_stack::Report;
 use std::fmt::Debug;
 use std::time::Duration;
+
+use error_stack::Report;
 use tracing::debug;
+
+use crate::prelude::*;
 
 pub const DEFAULT_MAX_ATTEMPTS: u8 = 15;
 pub const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(200);
@@ -11,14 +13,14 @@ pub const DEFAULT_RETRY_DELAY: Duration = Duration::from_millis(200);
 #[derive(Debug, Clone, Copy)]
 pub struct RetryConfig {
     pub max_attempts: u8,
-    pub retry_delay: Duration,
+    pub retry_delay:  Duration,
 }
 
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
             max_attempts: DEFAULT_MAX_ATTEMPTS,
-            retry_delay: DEFAULT_RETRY_DELAY,
+            retry_delay:  DEFAULT_RETRY_DELAY,
         }
     }
 }

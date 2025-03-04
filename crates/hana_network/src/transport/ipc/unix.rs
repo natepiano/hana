@@ -1,12 +1,13 @@
+use std::fmt;
+use std::path::{Path, PathBuf};
+
+use error_stack::ResultExt;
+use tokio::net::{UnixListener as TokioUnixListener, UnixStream as TokioUnixStream};
+use tracing::debug;
+
 use crate::prelude::*;
 use crate::transport::provider::*;
 use crate::transport::support::*;
-use error_stack::ResultExt;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use tokio::net::UnixListener as TokioUnixListener;
-use tokio::net::UnixStream as TokioUnixStream;
-use tracing::debug;
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/hana-ipc.sock";
 
@@ -137,60 +138,23 @@ crate::impl_async_io!(IpcTransport, stream);
 #[cfg(test)]
 mod tests_ipc {
     use super::{IpcConnector, IpcListener};
-    use crate::transport::{TransportConnector, TransportListener};
+    use crate::transport::support::test_ipc_transport;
     use std::error::Error as StdError;
-    use std::time::Duration;
     use tempfile::tempdir;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
-    async fn test_unix_socket_transport() -> std::result::Result<(), Box<dyn StdError>> {
+    async fn test_unix_socket_transport() -> Result<(), Box<dyn StdError + Send + Sync>> {
         // Create a temporary directory for our socket file
         let temp_dir = tempdir()?;
         let socket_path = temp_dir.path().join("hana-test.sock");
 
-        // Create a listener with our unique socket path
-        let listener = IpcListener::bind(&socket_path).await?;
-
-        // Create a connector for the same socket
+        // Create listener and connector
+        let listener = IpcListener::bind(&socket_path)
+            .await
+            .map_err(|e| format!("{e}"))?;
         let connector = IpcConnector::new(&socket_path);
 
-        // Spawn a task to accept a connection
-        let server_handle = tokio::spawn(async move {
-            let mut transport = listener.accept().await.unwrap();
-
-            // Read some data
-            let mut buf = [0u8; 5];
-            transport.read_exact(&mut buf).await.unwrap();
-
-            // Verify the data
-            assert_eq!(&buf, b"hello");
-
-            // Send response
-            transport.write_all(b"world").await.unwrap();
-        });
-
-        // Give the server a moment to start
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        // Connect to the server
-        let mut client_transport = connector.connect().await?;
-
-        // Send a message
-        client_transport.write_all(b"hello").await?;
-
-        // Read the response
-        let mut response = [0u8; 5];
-        client_transport.read_exact(&mut response).await?;
-
-        // Verify the response
-        assert_eq!(&response, b"world");
-
-        // Wait for the server task to complete
-        server_handle
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn StdError>)?;
-
-        Ok(())
+        // Run the test
+        test_ipc_transport(listener, connector).await
     }
 }

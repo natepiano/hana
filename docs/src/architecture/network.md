@@ -25,7 +25,7 @@ eventually migrate this issue list to github when you're working with other devs
   - timing and play/pause control - provided by ableton link (tbd)
   - communication between hana apps on the mesh
   - connection of a particular hana app instance to a particular visualization to update it's modulation / play it in real time
-  - decidee whether messages (and roles?) need to come out of hana_network app as these are higher level constructs
+  - decide whether messages (and roles?) need to come out of hana_network app as these are higher level constructs
   - decide whether a Visualization can implement their own message types (how would they define the hana app side?) possible use cases could be visualizations talking to each other on multiple machines in the mesh?
 
 # Network discussion with claude 3.5

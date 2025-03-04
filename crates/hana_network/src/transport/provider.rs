@@ -3,9 +3,11 @@
 //! The TransportProvider trait allows for compile-time selection of different
 //! transport implementations while maintaining a consistent interface.
 
-use crate::prelude::*;
 use std::fmt::Debug;
+
 use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::prelude::*;
 
 pub trait Transport: AsyncRead + AsyncWrite + Unpin + Debug {
     // No additional methods required for the initial implementation

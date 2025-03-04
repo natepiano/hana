@@ -1,11 +1,12 @@
 mod error;
 mod prelude;
-use error_stack::ResultExt;
-use hana_network::{HanaEndpoint, Instruction};
-use hana_process::Process;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::time::Duration;
+
+use error_stack::ResultExt;
+use hana_network::{HanaEndpoint, Instruction};
+use hana_process::Process;
 
 use crate::prelude::*;
 
@@ -25,8 +26,8 @@ pub struct Visualization<State> {
     process: Process,
     // In the Unstarted state, there is no connection.
     // In the Connected state, we hold the TcpStream.
-    stream: StreamState<State>,
-    _state: PhantomData<State>,
+    stream:  StreamState<State>,
+    _state:  PhantomData<State>,
 }
 
 pub enum StreamState<State> {
@@ -64,8 +65,8 @@ impl Visualization<Started> {
 
         Ok(Visualization {
             process: self.process,
-            stream: StreamState::Connected(endpoint),
-            _state: PhantomData,
+            stream:  StreamState::Connected(endpoint),
+            _state:  PhantomData,
         })
     }
 }

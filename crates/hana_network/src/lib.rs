@@ -9,8 +9,8 @@
 //!
 //! - **Role-Based Endpoints**: Type-safe network endpoints based on application roles, ensuring
 //!   that only appropriate messages can be sent or received by specific role types.
-//! - **Message System**: A flexible message passing system where message capabilities are
-//!   bound to specific roles through the type system.
+//! - **Message System**: A flexible message passing system where message capabilities are bound to
+//!   specific roles through the type system.
 //! - **Multiple Transport Layers**: Support for different transport mechanisms (IPC, TCP) with a
 //!   unified interface.
 //! - **Platform Flexibility**: Automatic selection of appropriate IPC mechanism based on platform
@@ -53,7 +53,8 @@
 //!
 //! ## Role-Based Message System
 //!
-//! The library uses Rust's type system to enforce which roles can send or receive specific messages:
+//! The library uses Rust's type system to enforce which roles can send or receive specific
+//! messages:
 //!
 //! ```rust,ignore
 //! use hana_network::message::{HanaMessage, Sender, Receiver};

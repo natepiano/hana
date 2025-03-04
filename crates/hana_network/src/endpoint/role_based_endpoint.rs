@@ -1,10 +1,10 @@
+use std::ops::{Deref, DerefMut};
+
 use super::base_endpoint::Endpoint;
 use crate::prelude::*;
-use crate::role::Role;
-use crate::role::{HanaRole, VisualizationRole};
+use crate::role::{HanaRole, Role, VisualizationRole};
 use crate::transport::provider::*;
 use crate::transport::DefaultProvider;
-use std::ops::{Deref, DerefMut};
 
 /// A generic endpoint that can be specialized for different roles in the Hana system
 pub struct RoleBasedEndpoint<R: Role, T: Transport>(Endpoint<R, T>);

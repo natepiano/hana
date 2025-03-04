@@ -103,7 +103,8 @@ fn get_app_path_from_ps(pid: i32) -> Result<String> {
 
     // Try to extract the app path from the command line
     let app_path = cmd_line
-        .split_whitespace().find(|part| part.contains(".app"))
+        .split_whitespace()
+        .find(|part| part.contains(".app"))
         .map(|app_with_path| {
             // Extract just the app part (e.g., /Applications/Zed.app)
             if let Some(app_end_idx) = app_with_path.find(".app") {

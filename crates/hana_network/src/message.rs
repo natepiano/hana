@@ -27,7 +27,6 @@
 //! // only be sent by the Visualization role to the HanaApp role
 //! impl Receiver<VisualizationStatus> for role::HanaApp {}
 //! impl Sender<VisualizationStatus> for role::Visualization {}
-//!
 //! ```
 //! other messages will be added in the future
 //! this may require expanding messages into a module for ease of use
