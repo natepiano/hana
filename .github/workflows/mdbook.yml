@@ -1,8 +1,12 @@
-name: Deploy mdBook
+name: deploy mdBook
 
 on:
   push:
     branches: ["main"]
+    # will only run on changes to these paths (and this workflow) unless invoked manually
+    paths:
+      - "docs/**"
+      - ".github/workflows/mdbook.yml"
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 

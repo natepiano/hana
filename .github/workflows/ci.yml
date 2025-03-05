@@ -1,4 +1,4 @@
-name: Rust
+name: ci for macos and ubuntu
 
 on:
   push:
