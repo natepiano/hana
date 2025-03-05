@@ -17,10 +17,6 @@ async fn test_spawn_error() {
 
     // Verify error type
     assert!(matches!(err.current_context(), Error::Io(_)));
-
-    // Verify error message chain
-    let error_string = format!("{err:?}");
-    println!("Error string: {}", error_string);
 }
 
 #[tokio::test]

@@ -150,7 +150,7 @@ impl StateManager {
 ### Runtime Synchronization
 1. Component state change detected
 2. Version number assigned
-3. Change propagated via [Network Architecture](network_security.md)
+3. Change propagated via [Network](network.md)
 4. Peers validate and apply update
 5. Confirmation of synchronization
 ### State Save/Restore
@@ -161,7 +161,7 @@ impl StateManager {
 5. Available for future restoration
 
 ## Integration Points
-### [Network Architecture](network_security.md)
+### [Network](network.md)
 - Message transport for state updates
 - Peer status notifications
 - Network health monitoring

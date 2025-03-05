@@ -1,5 +1,5 @@
-# Hana Architecture
-Architecture docs provide a high level overview and design of the hana system components. It id currently very high level and not an in-depth technical design document. As such it is acting more like a sometimes-technical requirements document.
+# Hana Design Overview
+These docs provide a high level overview and design of the hana system components. It id currently very high level and not an in-depth technical design document. As such it is acting more like a sometimes-technical requirements document.
 
 ## Non-Functional Requirements
 ### Fast

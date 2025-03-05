@@ -5,7 +5,7 @@ and controlling all aspects of the hana system. It provides
 a 3D game-like interface for managing the [Display Environment](display.md) and integrates with all core systems:
 - Management app [Configuration](configuration.md)
 - [Display Environment](display.md) management
-- [Network](network_security.md) configuration and monitoring
+- [Network](network.md) configuration and monitoring
 - [Input](input.md) controller setup (OSC, midi, keyboards, gamepads, sensors)
 - [Modulation](modulation.md) interface management
 - Integrating with the [Visualization Library](visualization_library.md), the [SDK](visualization_sdk.md) and [managing visualizations](visualization_manager.md) from the application.
@@ -70,7 +70,7 @@ a 3D game-like interface for managing the [Display Environment](display.md) and 
 - Assign inputs (OSC, midi, etc.) to specific parameters
 - Configure and route modulation signals
 - Monitor real-time modulation flows
-### [Network Architecture](network_security.md)
+### [Network](network.md)
 - Discover and connect to remote machines
 - Monitor display network status
 - Manage synchronization

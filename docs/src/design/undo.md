@@ -3,7 +3,7 @@
 ## Purpose
 The undo system provides reliable undo/redo functionality across Hana's distributed
 environment while maintaining state consistency. It integrates with the [State Management](state.md)
-and [Network Architecture](network_security.md) systems to ensure synchronized operations across all peers.
+and [Network](network.md) systems to ensure synchronized operations across all peers.
 ## Core Principles
 - Operation-based undo system tracking discrete operations
 - Network-aware operation history
