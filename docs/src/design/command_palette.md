@@ -1,6 +1,8 @@
-A command system for Hana that supports both internal key bindings and external control, while keeping it type-safe and extensible.
+# Command Palette
 
-Additionally I'd like to implement a command palette with fuzzy searching as is found in many apps.
+We need a command system  for Hana that supports both internal key bindings and external control, while keeping it type-safe and extensible.
+
+With this, we need a Command Palette with fuzzy searching as is found in many apps (obsidian, raycast, zed, jetbrains, vscode, etc.)
 
 Seems to me that the command palette functionality could be it's own crate - i would use leafwing input manager for the commands. There can be a json keybindings file that maps all commands to keys - both default and user-defined which just overrides the default keybindings. Make it work like zed as much possible as there system is easy and intuitive.
 

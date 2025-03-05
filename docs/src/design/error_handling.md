@@ -1,163 +1,91 @@
 # Error Handling in the Hana System
 
-## Purpose
-The Hana system employs a modular and layered error-handling strategy using `anyhow` and `thiserror` to ensure consistency, maintainability, and clarity. This approach supports seamless propagation and management of errors across different components, fostering a robust and fault-tolerant architecture with strong tracing integration.
+The Hana system implements structured error handling using the `error-stack` crate to provide context and create a clear chain of errors across module and crate boundaries.
 
-note: Currently this is just some ideas based on research into error handling. We'll need to actually use `anyhow` and `thiserror` a few times and then update this document to reflect actual usage.
+Each crate defines its error types in a dedicated `error.rs` file. These error enums serve to recontextualize lower-level errors into aggregate error types within the crate. For example, when a crate uses `hana_network`, it may define a single error variant like `Network` that represents all possible underlying `hana_network` errors rather than exposing those implementation details.
 
-## Key Principles
-1. **Module-Specific Error Types**
-  Each library module defines its own error type using **`thiserror`**, encapsulating errors specific to its operations.
+Here's a concrete example from the codebase showing how standard library errors are transformed:
 
-1. **Module-Specific Naming Convention**
-  Module-specific error types are named with the pattern my_module::Error which mirrors what is becoming common practice in the Rust ecosystem.
-
-1. **Type Alias for `Result`**
-  Each library module includes a type alias for `Result` to pair the module's error type with the return value of functions, then using the Result from this module ensures we're using this module's error type.
-
-1. **Enums for Error Variants**
-  Error types are defined as enums with variants representing different error cases, ensuring clarity and extensibility. Wrap errors from dependencies and use thiserror #from attribute, which implements From trait, to allow easy conversion to the module's error type. You can add serde::Serialize to support logging.
-
-1. **Use struct variant's to provide extra information**
-Here we have ConnectionFailed - don't do this:
 ```rust
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Failed to connect: {0}")]
-    ConnectionFailed(String, u32),
+// In hana_network/src/transport/unix.rs
+if path.exists() {
+    debug!("Found existing socket file at {:?}, removing it", path);
+    std::fs::remove_file(path)
+        .change_context(Error::Io)
+        .attach_printable_lazy(|| {
+            format!("Failed to remove existing socket file at {:?}", path)
+        })?;
 }
 ```
-instead do this:
+
+In this example, a standard library `io::Result<()>` from `std::fs::remove_file` is mapped to the `hana_network` error type using `change_context(Error::Io)`. This transforms the low-level IO error into a domain-specific error that can be further recontextualized up the error stack. The additional context from `attach_printable_lazy` provides specific details about what operation failed.
+
+Each crate also includes a `prelude.rs` module that exports a type alias for `Result`:
+
 ```rust
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Failed to connect: {0}")]
-    ConnectionFailed{message: String, code: u32},
-}
+// In error.rs
+pub type Result<T> = error_stack::Result<T, Error>;
+
+// In prelude.rs
+pub use crate::error::{Error, Result};
 ```
-And it will allow you to see that the String is a message and the u32 is a code. And this will propagate wherever you're looking at it with Debug or Display.
 
-1. **Centralized Error Handling in Management Application**
-  The [Management App](application.md) integrates errors from different libraries using **`anyhow`**, ensuring flexibility and ease of error reporting with tracing context.
+This type alias lets code use a simple `Result<T>` rather than `error_stack::Result<T, Error>` throughout the crate.
 
-1. **Avoiding `unwrap` and `expect`**
-   The use of `unwrap` and `expect` is prohibited in production code to avoid panics. Instead, errors are explicitly handled or propagated. Make it easy to use `?` to propagate errors.
+The system uses `change_context()` specifically when crossing crate boundaries and `attach_printable()` to add context without changing the error type within the same crate.
 
-## Libraries: Using `thiserror`
-You can create an error.rs to drop module specific error enum and type alias. Your library can re-export the type alias and error enum. This way you can have a single place to manage all the errors for a library - and make it easy to use.
+## example error output
+Below is the output from an example error showing how a broken pipe propagates from hana_network up to hana_visualization up to the hana app itself
 
-### Module-Specific Error Definitions
-Each library defines an error enum using the **`thiserror`** crate to encapsulate specific error cases - here is an example from the `hana_network` library:
+With the recontextualization that happens into each layer's error type plus extra information added with attach_printable or attach_printable_lazy. The information provided is robust and helps pinpoint actual issues.
 
+```
+Error: Visualization error
+├╴at crates/hana/src/main.rs:30:26
+│
+├─▶ Network error
+│   ├╴at /Users/natemccoy/RustroverProjects/hana/crates/hana_visualization/src/lib.rs:85:14
+│   ╰╴Failed to send instruction: Ping
+│
+├─▶ IO operation failed
+│   ├╴at /Users/natemccoy/RustroverProjects/hana/crates/hana_network/src/endpoint/base_endpoint.rs:44:14
+│   ├╴Failed to write length prefix: '4' to message: 'Ping'
+│   ╰╴transport: UnixTransport { peer_addr: None }
+│
+╰─▶ Broken pipe (os error 32)
+    ╰╴at /Users/natemccoy/RustroverProjects/hana/crates/hana_network/src/endpoint/base_endpoint.rs:44:14
+```
+
+With this we can see that an underyling IO error gets turned into  `hana_network::error::Error::Io` which in turn gets turned into a `hana_visualization::error::Error::Network` which in turn gets turned into hana::error::Error::Visualization.
+
+Because Hana is interacting with the hana_visualization lib, it sees the error a Visualization error. Because the hana_visualization is calling hana_network, it sees the error as a Network error and because hana_network is calling underlying Io methods, it sees the error as an IO error.
+
+Voilá!
+
+## Enum with field(s)
+This is the error from hana_process/src/error.rs:
 ```rust
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("IO error: {0}")]
-    Io(#[from] IoError),
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] BincodeError),
-}
-```
-
-This approach ensures:
-- **Clarity:** Errors are explicitly tied to their source library
-- **Extensibility:** Adding new error cases doesn't affect other modules
-
-### Unified `Result` Type Alias
-Each library defines a type alias for `Result` to simplify function signatures:
-
-```rust
-pub type Result<T> = std::result::Result<T, Error>;
-```
-
-### Propagating Errors Between Libraries
-When one library depends on another, its error type can wrap the other's error:
-
-```rust
-impl From<hana_input::Error> for hana_network::Error {
-    fn from(err: hana_input::Error) -> Self {
-        Self::InvalidConfig(format!("Input error: {}", err))
-    }
-}
-```
-
-## Management Application: Using `anyhow`
-
-In the Management App, **`anyhow`** simplifies error handling while maintaining rich context.
-
-## Key Features of Integration
-
-### Rich Context Through Spans
-- Every error includes its trace context
-- Spans show exact error origin
-- Function entry/exit tracking
-- Additional context via span fields
-
-### Error Propagation with Context
-- Automatic span capture
-- Error source chain preservation
-- Custom error reports possible
-- Integration with logging system
-
-## Best Practices
-
-### Development Guidelines
-1. Use `#[instrument]` on functions for automatic span creation
-2. Implement `From` traits for error conversion between modules
-3. Include relevant data in span fields
-4. Keep error types focused and well-documented
-
-### Error Handling Patterns
-```rust
-// In library code:
-#[instrument]
-fn process_data(input: &str) -> Result<ProcessedData> {
-    let validated = validate_input(input)?; // Uses From trait for error conversion
-    let processed = process_validated_input(validated)?; // Uses From trait
-    Ok(processed)
+    #[error("Io error {source:?}")]
+    Io { source: std::io::Error },
+    #[error("Process not responding")]
+    NotResponding,
+    #[error("Process check failed")]
+    ProcessCheckFailed { path: PathBuf },
 }
 
-// In management application:
-#[instrument]
-fn handle_data_processing(input: &str) -> anyhow::Result<()> {
-    // Here we can use wrap_err() since we're in the application layer
-    process_data(input)
-        .wrap_err("Failed to process data")?;
-    Ok(())
-}
+pub type Result<T> = error_stack::Result<T, Error>;
 ```
 
-## Advanced Usage
+notice that this Io error has a field - so unless we have the Err already, we will need to use `.map_err(|e| Error::Io { source: e })` instead of change_context so that we can construct our own Error::Io correctly.
 
-### Integration with Logging System
-Since we use `tracing`, errors are automatically integrated with our logging infrastructure:
+After doing the mapping, because we will now be working with our own Result type, we can then still call attach_printable on it.
 
-```rust
-use tracing::{info, error, instrument};
+If you don't wish to capture field information i.e., the variant was just Io then you could instead do `.change_context(Error::Io)`. Choose this based on whether you need to preserve more error details or not.
 
-#[instrument]
-fn database_operation() -> Result<()> {
-    info!("Starting database operation");
-
-    match perform_query() {
-        Ok(result) => {
-            info!(rows_affected = result.rows, "Query successful");
-            Ok(())
-        }
-        Err(e) => {
-            // Error will automatically include span context
-            error!(error = ?e, "Database query failed");
-            Err(e)
-        }
-    }
-}
-```
-
-## Summary
-- Use `thiserror` in libraries for typed errors
-- Use `anyhow` in the Management Application
-- Always include tracing context
-- Maintain proper error propagation
-- Keep error types focused and documented
+## ? in tests
+To easily use ? in tests we can make the result for the test ```Result<(), Box<dyn std::error::Error>>``` which allows it to just pass through any error. We don't need special error handling machinery for tests as we just want to catch things if they fail and then make them pass.

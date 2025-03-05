@@ -9,13 +9,13 @@ const TEST_LOG_FILTER: &str = "warn,hana=warn";
 async fn test_spawn_error() {
     let result = tokio::process::Command::new("non_existent_executable")
         .spawn()
-        .map_err(Error::Io)
+        .map_err(|e| Error::Io { source: e })
         .attach_printable("Failed to launch visualization");
 
     let err = result.expect_err("Expected spawn to fail");
 
     // Verify error type
-    assert!(matches!(err.current_context(), Error::Io(_)));
+    assert!(matches!(err.current_context(), Error::Io { source: _ }));
 }
 
 #[tokio::test]

@@ -8,7 +8,7 @@ use crate::{prelude::*, process_control::ProcessControl};
 
 pub struct Process<P: ProcessControl> {
     pub child: P,
-    path:      PathBuf,
+    path: PathBuf,
 }
 
 // Provide a concrete implementation for the common case
@@ -24,7 +24,7 @@ impl Process<tokio::process::Child> {
 
         command
             .spawn()
-            .map_err(Error::Io)
+            .map_err(|e| Error::Io { source: e })
             .attach_printable(format!("Command failed: {command:?}"))
             .map(|child| Process { child, path })
     }
@@ -34,9 +34,8 @@ impl<P: ProcessControl> Process<P> {
     pub async fn ensure_shutdown(mut self, shutdown_timeout: Duration) -> Result<()> {
         // More elegant timeout handling with tokio
         match timeout(shutdown_timeout, self.child.wait()).await {
-            Ok(result) => {
+            Ok(_) => {
                 // Process exited within timeout
-                result.map_err(Error::Io)?;
                 Ok(())
             }
             Err(_) => {
@@ -66,11 +65,9 @@ impl<P: ProcessControl> Process<P> {
         match self.child.try_wait() {
             Ok(Some(_)) => Ok(false), // Process has exited
             Ok(None) => Ok(true),     // Process is still running
-            Err(e) => Err(
-                Report::new(Error::Io(e)).change_context(Error::ProcessCheckFailed {
-                    path: self.path.clone(),
-                }),
-            ),
+            Err(e) => Err(Report::new(e).change_context(Error::ProcessCheckFailed {
+                path: self.path.clone(),
+            })),
         }
     }
 }
@@ -92,7 +89,7 @@ async fn test_is_running_error() {
 
     let mut process = Process {
         child: mock,
-        path:  test_path.clone(),
+        path: test_path.clone(),
     };
 
     let result = process.is_running().await;
