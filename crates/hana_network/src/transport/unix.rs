@@ -33,7 +33,7 @@ impl fmt::Debug for UnixTransport {
 
 pub struct UnixListener {
     listener: TokioUnixListener,
-    path:     PathBuf,
+    path: PathBuf,
 }
 
 impl UnixListener {
@@ -149,7 +149,7 @@ mod tests_ipc {
     {
         // Create a temporary directory for our socket file
         let temp_dir = tempdir()?;
-        let socket_path = temp_dir.path().join("hana-test.sock");
+        let socket_path = temp_dir.path().join("hana-unix-test.sock");
 
         // Create listener and connector
         let listener = UnixListener::bind(&socket_path)
