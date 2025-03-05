@@ -1,9 +1,7 @@
 //! utility fn's for configuring tracing behavior
 //! the only fn currently here is to configure tracing_subscriber
 //! it's fine
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// This will take it's tracing level filter from RUST_LOG as shown below or it will
 /// have a default. Whatever is created here is also passed on to

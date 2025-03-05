@@ -1,10 +1,14 @@
 use std::ops::{Deref, DerefMut};
 
 use super::base_endpoint::Endpoint;
-use crate::prelude::*;
-use crate::role::{HanaRole, Role, VisualizationRole};
-use crate::transport::unix::{UnixConnector, UnixListener, UnixTransport};
-use crate::transport::{TransportConnector, TransportListener}; // Add this import
+use crate::{
+    prelude::*,
+    role::{HanaRole, Role, VisualizationRole},
+    transport::{
+        unix::{UnixConnector, UnixListener, UnixTransport},
+        TransportConnector, TransportListener,
+    },
+};
 
 /// A generic endpoint that can be specialized for different roles in the Hana system
 pub struct RoleBasedEndpoint<R: Role, T: crate::transport::Transport>(Endpoint<R, T>);
@@ -57,8 +61,7 @@ impl<R: Role, T: crate::transport::Transport> DerefMut for RoleBasedEndpoint<R, 
 #[cfg(test)]
 mod tests_endpoint {
     use super::*;
-    use crate::message::Instruction;
-    use crate::transport::mock::MockTransport;
+    use crate::{message::Instruction, transport::mock::MockTransport};
 
     pub type TestHanaEndpoint = RoleBasedEndpoint<HanaRole, MockTransport>;
     pub type TestVisualizationEndpoint = RoleBasedEndpoint<VisualizationRole, MockTransport>;

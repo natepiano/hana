@@ -1,5 +1,4 @@
-use std::error::Error as StdError;
-use std::time::Duration;
+use std::{error::Error as StdError, time::Duration};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

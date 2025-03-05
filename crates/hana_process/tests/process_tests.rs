@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use error_stack::ResultExt;
 use hana_process::{Error, Process};

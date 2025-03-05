@@ -4,9 +4,9 @@ format_code_in_doc_comments = true # Default: false
 wrap_comments               = true # Default: false
 
 # imports
-group_imports       = "StdExternalCrate" # Default: "Preserve"
-imports_granularity = "Module"           # Default: "Preserve"
-reorder_imports     = true               # Default: false
+group_imports       = "StdExternalCrate"
+imports_granularity = "Crate"
+reorder_imports     = true
 
 # vertical alighment thresholds
 enum_discrim_align_threshold = 50 # Default: 0

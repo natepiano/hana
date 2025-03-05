@@ -3,10 +3,12 @@ use std::fmt::Debug;
 use error_stack::{Report, ResultExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::message::{HanaMessage, Receiver, Sender};
-use crate::prelude::*;
-use crate::role::Role;
-use crate::transport::Transport;
+use crate::{
+    message::{HanaMessage, Receiver, Sender},
+    prelude::*,
+    role::Role,
+    transport::Transport,
+};
 
 /// A network endpoint in the Hana system using the generic transport abstraction
 pub struct Endpoint<R: Role, T: Transport> {
@@ -109,8 +111,7 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
 #[cfg(test)]
 mod tests_transport {
     use super::*;
-    use crate::message::Instruction;
-    use crate::transport::mock::MockTransport;
+    use crate::{message::Instruction, transport::mock::MockTransport};
 
     // Mock role for testing
     struct MockRole;

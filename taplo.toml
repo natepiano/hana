@@ -1,15 +1,11 @@
-include = [
-  "**/Cargo.toml",
-  ".rustfmt.toml",
-  ".taplo.toml",
-  "bacon.toml",
-  "docs/book.toml",
-]
+include = ["**/*.toml"]
+
 
 [formatting]
 align_entries  = true
 reorder_arrays = true
 reorder_keys   = true
+
 
 [[rule]]
 include = ["bacon.toml"]

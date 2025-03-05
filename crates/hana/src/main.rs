@@ -1,8 +1,7 @@
 mod error;
 mod utils;
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use bevy::prelude::*;
 use error::{Error, Result};

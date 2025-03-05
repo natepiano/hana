@@ -1,5 +1,4 @@
-use std::fmt::Debug;
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
 use error_stack::Report;
 use tracing::debug;

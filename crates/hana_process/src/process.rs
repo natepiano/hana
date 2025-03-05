@@ -1,13 +1,10 @@
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use error_stack::{Report, ResultExt};
-use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::{process::Command, time::timeout};
 use tracing::debug;
 
-use crate::prelude::*;
-use crate::process_control::ProcessControl;
+use crate::{prelude::*, process_control::ProcessControl};
 
 pub struct Process<P: ProcessControl> {
     pub child: P,
@@ -81,11 +78,9 @@ impl<P: ProcessControl> Process<P> {
 #[cfg(test)]
 #[tokio::test]
 async fn test_is_running_error() {
-    use std::io;
-    use std::path::PathBuf;
+    use std::{io, path::PathBuf};
 
-    use crate::process::Process;
-    use crate::support::MockProcessControl;
+    use crate::{process::Process, support::MockProcessControl};
 
     // Create a mock with a specific error using direct initialization
     let mock_error = io::Error::new(io::ErrorKind::Other, "Test error");

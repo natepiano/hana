@@ -4,9 +4,10 @@ use error_stack::ResultExt;
 use tokio::net::{TcpListener as TokioTcpListener, TcpStream};
 use tracing::debug;
 
-use crate::prelude::*;
-use crate::transport::support::*;
-use crate::transport::{Transport, TransportConnector, TransportListener};
+use crate::{
+    prelude::*,
+    transport::{support::*, Transport, TransportConnector, TransportListener},
+};
 
 const DEFAULT_IP_PORT: &str = "127.0.0.1:3001";
 
