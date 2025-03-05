@@ -6,27 +6,10 @@ use tokio::net::{UnixListener as TokioUnixListener, UnixStream as TokioUnixStrea
 use tracing::debug;
 
 use crate::prelude::*;
-use crate::transport::provider::*;
 use crate::transport::support::*;
+use crate::transport::{Transport, TransportConnector, TransportListener};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/hana-ipc.sock";
-
-// Generic interface
-pub struct UnixProvider;
-
-impl TransportProvider for UnixProvider {
-    type Transport = UnixTransport;
-    type Connector = IpcConnector;
-    type Listener = IpcListener;
-
-    fn connector() -> Result<Self::Connector> {
-        IpcConnector::default()
-    }
-
-    async fn listener() -> Result<Self::Listener> {
-        IpcListener::create().await
-    }
-}
 
 pub struct UnixTransport {
     stream: TokioUnixStream,
@@ -48,12 +31,12 @@ impl fmt::Debug for UnixTransport {
     }
 }
 
-pub struct IpcListener {
+pub struct UnixListener {
     listener: TokioUnixListener,
-    path: PathBuf,
+    path:     PathBuf,
 }
 
-impl IpcListener {
+impl UnixListener {
     pub async fn create() -> Result<Self> {
         Self::bind(DEFAULT_SOCKET_PATH).await
     }
@@ -86,7 +69,7 @@ impl IpcListener {
     }
 }
 
-impl TransportListener for IpcListener {
+impl TransportListener for UnixListener {
     type Transport = UnixTransport;
 
     async fn accept(&self) -> Result<Self::Transport> {
@@ -102,7 +85,7 @@ impl TransportListener for IpcListener {
     }
 }
 
-impl Drop for IpcListener {
+impl Drop for UnixListener {
     fn drop(&mut self) {
         // Clean up the socket file when the listener is dropped
         if self.path.exists() {
@@ -112,11 +95,11 @@ impl Drop for IpcListener {
     }
 }
 
-pub struct IpcConnector {
+pub struct UnixConnector {
     path: PathBuf,
 }
 
-impl IpcConnector {
+impl UnixConnector {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
@@ -128,7 +111,7 @@ impl IpcConnector {
     }
 }
 
-impl TransportConnector for IpcConnector {
+impl TransportConnector for UnixConnector {
     type Transport = UnixTransport;
 
     async fn connect(&self) -> Result<Self::Transport> {
@@ -158,22 +141,23 @@ mod tests_ipc {
 
     use tempfile::tempdir;
 
-    use super::{IpcConnector, IpcListener};
-    use crate::transport::support::test_ipc_transport;
+    use super::*;
+    use crate::transport::support::test_transport;
 
     #[tokio::test]
-    async fn test_unix_socket_transport() -> Result<(), Box<dyn StdError + Send + Sync>> {
+    async fn test_unix_socket_transport() -> std::result::Result<(), Box<dyn StdError + Send + Sync>>
+    {
         // Create a temporary directory for our socket file
         let temp_dir = tempdir()?;
         let socket_path = temp_dir.path().join("hana-test.sock");
 
         // Create listener and connector
-        let listener = IpcListener::bind(&socket_path)
+        let listener = UnixListener::bind(&socket_path)
             .await
             .map_err(|e| format!("{e}"))?;
-        let connector = IpcConnector::new(&socket_path);
+        let connector = UnixConnector::new(&socket_path);
 
-        // Run the test
-        test_ipc_transport(listener, connector).await
+        // Run the standard transport test
+        test_transport(listener, connector).await
     }
 }

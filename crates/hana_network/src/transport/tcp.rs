@@ -5,28 +5,12 @@ use tokio::net::{TcpListener as TokioTcpListener, TcpStream};
 use tracing::debug;
 
 use crate::prelude::*;
-use crate::transport::provider::*;
-use crate::transport::support::*; // Added import for debug macro
+use crate::transport::support::*;
+use crate::transport::{Transport, TransportConnector, TransportListener};
 
 const DEFAULT_IP_PORT: &str = "127.0.0.1:3001";
 
-pub struct TcpProvider;
-
-impl TransportProvider for TcpProvider {
-    type Transport = TcpTransport;
-    type Connector = TcpConnector;
-    type Listener = TcpListener;
-
-    fn connector() -> Result<Self::Connector> {
-        Ok(TcpConnector::default())
-    }
-
-    async fn listener() -> Result<Self::Listener> {
-        TcpListener::bind_default().await
-    }
-}
-
-/// A TCP-based transport implementation
+// A TCP-based transport implementation
 pub struct TcpTransport {
     stream: TcpStream,
 }
@@ -120,3 +104,24 @@ impl TransportConnector for TcpConnector {
 }
 
 crate::impl_async_io!(TcpTransport, stream);
+
+#[cfg(test)]
+mod tests_tcp {
+    use std::error::Error as StdError;
+
+    use super::*;
+    use crate::transport::support::test_transport;
+
+    #[tokio::test]
+    async fn test_tcp_transport() -> std::result::Result<(), Box<dyn StdError + Send + Sync>> {
+        // Use a different port to avoid conflicts
+        let addr = "127.0.0.1:3099";
+
+        // Create listener and connector
+        let listener = TcpListener::bind(addr).await.map_err(|e| format!("{e}"))?;
+        let connector = TcpConnector::new(addr);
+
+        // Run the standard transport test
+        test_transport(listener, connector).await
+    }
+}

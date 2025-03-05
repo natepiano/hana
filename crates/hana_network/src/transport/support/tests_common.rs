@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::transport::{TransportConnector, TransportListener};
 
 /// Test utility for IPC transport implementations.
-pub async fn test_ipc_transport<L, C, T>(
+pub async fn test_transport<L, C, T>(
     listener: L,
     connector: C,
 ) -> Result<(), Box<dyn StdError + Send + Sync>>

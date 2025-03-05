@@ -110,7 +110,7 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
 mod tests_transport {
     use super::*;
     use crate::message::Instruction;
-    use crate::transport::mock_provider::MockTransport;
+    use crate::transport::mock::MockTransport;
 
     // Mock role for testing
     struct MockRole;

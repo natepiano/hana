@@ -9,5 +9,3 @@ mod impl_async_io;
 mod tests_common;
 #[cfg(test)]
 pub use tests_common::*;
-#[cfg(test)]
-pub mod mock_provider;
