@@ -10,6 +10,22 @@ use crate::transport::support::*; // Added import for debug macro
 
 const DEFAULT_IP_PORT: &str = "127.0.0.1:3001";
 
+pub struct TcpProvider;
+
+impl TransportProvider for TcpProvider {
+    type Transport = TcpTransport;
+    type Connector = TcpConnector;
+    type Listener = TcpListener;
+
+    fn connector() -> Result<Self::Connector> {
+        Ok(TcpConnector::default())
+    }
+
+    async fn listener() -> Result<Self::Listener> {
+        TcpListener::bind_default().await
+    }
+}
+
 /// A TCP-based transport implementation
 pub struct TcpTransport {
     stream: TcpStream,

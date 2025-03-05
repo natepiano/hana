@@ -11,19 +11,36 @@ use crate::transport::support::*;
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/hana-ipc.sock";
 
-pub struct IpcTransport {
+// Generic interface
+pub struct UnixProvider;
+
+impl TransportProvider for UnixProvider {
+    type Transport = UnixTransport;
+    type Connector = IpcConnector;
+    type Listener = IpcListener;
+
+    fn connector() -> Result<Self::Connector> {
+        IpcConnector::default()
+    }
+
+    async fn listener() -> Result<Self::Listener> {
+        IpcListener::create().await
+    }
+}
+
+pub struct UnixTransport {
     stream: TokioUnixStream,
 }
 
-impl IpcTransport {
+impl UnixTransport {
     pub fn new(stream: TokioUnixStream) -> Self {
         Self { stream }
     }
 }
 
-impl Transport for IpcTransport {}
+impl Transport for UnixTransport {}
 
-impl fmt::Debug for IpcTransport {
+impl fmt::Debug for UnixTransport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IpcTransport")
             .field("peer_addr", &self.stream.peer_addr().ok())
@@ -33,7 +50,7 @@ impl fmt::Debug for IpcTransport {
 
 pub struct IpcListener {
     listener: TokioUnixListener,
-    path:     PathBuf,
+    path: PathBuf,
 }
 
 impl IpcListener {
@@ -70,7 +87,7 @@ impl IpcListener {
 }
 
 impl TransportListener for IpcListener {
-    type Transport = IpcTransport;
+    type Transport = UnixTransport;
 
     async fn accept(&self) -> Result<Self::Transport> {
         debug!("accept called on unix IpcListener");
@@ -81,7 +98,7 @@ impl TransportListener for IpcListener {
             .change_context(Error::Io)
             .attach_printable("Failed to accept connection on Unix socket")?;
 
-        Ok(IpcTransport::new(stream))
+        Ok(UnixTransport::new(stream))
     }
 }
 
@@ -112,7 +129,7 @@ impl IpcConnector {
 }
 
 impl TransportConnector for IpcConnector {
-    type Transport = IpcTransport;
+    type Transport = UnixTransport;
 
     async fn connect(&self) -> Result<Self::Transport> {
         debug!("Connecting via Unix Sockets to {:?}", &self.path);
@@ -129,11 +146,11 @@ impl TransportConnector for IpcConnector {
         )
         .await?;
 
-        Ok(IpcTransport::new(stream))
+        Ok(UnixTransport::new(stream))
     }
 }
 
-crate::impl_async_io!(IpcTransport, stream);
+crate::impl_async_io!(UnixTransport, stream);
 
 #[cfg(test)]
 mod tests_ipc {

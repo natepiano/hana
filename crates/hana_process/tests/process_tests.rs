@@ -31,13 +31,13 @@ async fn test_ensure_shutdown() -> Result<(), Box<dyn std::error::Error>> {
     let visualization = Process::run(helper_path, TEST_LOG_FILTER).await?;
 
     // Use a short timeout so that ensure_shutdown will trigger killing.
-    let timeout = Duration::from_millis(100);
+    let timeout = Duration::from_millis(1);
 
     let result = visualization.ensure_shutdown(timeout).await;
 
     assert!(
         result.is_err(),
-        "ensure_shutdown should error out because hana_helper never exits gracefully"
+        "should error because hana_helper is a loop that never exits gracefully"
     );
 
     if let Err(err) = result {

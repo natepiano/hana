@@ -3,12 +3,12 @@ pub mod provider;
 pub use provider::*;
 mod support;
 
-pub mod rpc;
+pub mod tcp;
 #[allow(unused_imports)]
-pub use rpc::TcpProvider;
+pub use tcp::TcpProvider;
 
-pub mod ipc;
-#[allow(unused_imports)]
-pub use ipc::IpcProvider as DefaultProvider;
+pub mod unix;
 #[cfg(test)]
 pub use support::mock_provider;
+#[allow(unused_imports)]
+pub use unix::UnixProvider as DefaultProvider;

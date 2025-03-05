@@ -5,13 +5,10 @@ name        = "hana"
 version     = "0.1.0"
 
 [dependencies]
-bevy.workspace = true
-error-stack.workspace = true
+bevy.workspace               = true
+error-stack.workspace        = true
 hana_visualization.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-tracing-subscriber = { version = "0.3.19", features = [
-  "env-filter",
-  "registry",
-] }
+thiserror.workspace          = true
+tokio.workspace              = true
+tracing.workspace            = true
+tracing-subscriber.workspace = true

@@ -92,6 +92,10 @@ tokio = { version = "1.43", default-features = false, features = [
   "time",            # for sleep
 ] }
 tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = [
+  "env-filter",
+  "registry",
+] }
 
 [profile.dev.package]
 bevy = { opt-level = 3 }
