@@ -1,4 +1,6 @@
 # Transport and Synchronization
+{{#include ../ai.md}}
+
 ## Purpose
 Outline the transport control mechanism and timing synchronization for the hana system.
 

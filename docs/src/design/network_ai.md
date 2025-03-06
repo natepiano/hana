@@ -1,5 +1,5 @@
 # Network discussion with Claude 3.5
-Everything below just came from an claude-assisted dialog - not necessarily everything will be as is described below.
+{{#include ../ai.md}}
 ## Purpose
 Enables reliable peer-to-peer communication and display coordination across the hana network. Focused on network transport, topology management, and connection health.
 ## Core Responsibilities

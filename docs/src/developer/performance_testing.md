@@ -1,4 +1,5 @@
 # Performance Testing Strategy
+{{#include ../ai.md}}
 ## Network Performance Testing
 ### Latency Testing
 - State update propagation timing

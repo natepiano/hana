@@ -1,4 +1,6 @@
 # Deployment System
+{{#include ../ai.md}}
+
 ## Purpose
 There are a few areas covered under "deployment" - possibly this could be split into multiple sections
 - [Management app](application.md) deployment onto a local system.

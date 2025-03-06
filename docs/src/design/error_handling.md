@@ -1,8 +1,8 @@
-# Error Handling in the Hana System
+# Error Handling
 
 The Hana system implements structured error handling using the `error-stack` crate to provide context and create a clear chain of errors across module and crate boundaries.
 
-Each crate defines its error types in a dedicated `error.rs` file. These error enums serve to recontextualize lower-level errors into aggregate error types within the crate. For example, when a crate uses `hana_network`, it may define a single error variant like `Network` that represents all possible underlying `hana_network` errors rather than exposing those implementation details.
+Each crate defines its error types in a dedicated `error.rs` file. These error enums serve to contextualize lower-level errors into aggregate error types within the crate. For example, when a crate uses `hana_network`, it may define a single error variant like `Network` that represents all possible underlying `hana_network` errors rather than exposing those implementation details.
 
 Here's a concrete example from the codebase showing how standard library errors are transformed:
 
@@ -18,7 +18,7 @@ if path.exists() {
 }
 ```
 
-In this example, a standard library `io::Result<()>` from `std::fs::remove_file` is mapped to the `hana_network` error type using `change_context(Error::Io)`. This transforms the low-level IO error into a domain-specific error that can be further recontextualized up the error stack. The additional context from `attach_printable_lazy` provides specific details about what operation failed.
+In this example, a standard library `io::Result<()>` from `std::fs::remove_file` is mapped to the `hana_network` error type using `change_context(Error::Io)`. This transforms the low-level IO error into a domain-specific error that can be further contextualized up the error stack. The additional context from `attach_printable_lazy` provides specific details about what operation failed.
 
 Each crate also includes a `prelude.rs` module that exports a type alias for `Result`:
 
@@ -37,7 +37,7 @@ The system uses `change_context()` specifically when crossing crate boundaries a
 ## example error output
 Below is the output from an example error showing how a broken pipe propagates from hana_network up to hana_visualization up to the hana app itself
 
-With the recontextualization that happens into each layer's error type plus extra information added with attach_printable or attach_printable_lazy. The information provided is robust and helps pinpoint actual issues.
+With the contextualization that happens into each layer's error type plus extra information added with attach_printable or attach_printable_lazy. The information provided is robust and helps pinpoint actual issues.
 
 ```
 Error: Visualization error
@@ -56,11 +56,16 @@ Error: Visualization error
     ╰╴at /Users/natemccoy/RustroverProjects/hana/crates/hana_network/src/endpoint/base_endpoint.rs:44:14
 ```
 
-With this we can see that an underyling IO error gets turned into  `hana_network::error::Error::Io` which in turn gets turned into a `hana_visualization::error::Error::Network` which in turn gets turned into hana::error::Error::Visualization.
+With this we can see that an underlying IO error gets turned into  `hana_network::error::Error::Io` which in turn gets turned into a `hana_visualization::error::Error::Network` which in turn gets turned into hana::error::Error::Visualization.
 
 Because Hana is interacting with the hana_visualization lib, it sees the error a Visualization error. Because the hana_visualization is calling hana_network, it sees the error as a Network error and because hana_network is calling underlying Io methods, it sees the error as an IO error.
 
 Voilá!
+
+## a note about the underlying error from libraries we don't control
+In experimenting with Io errors, error-stack seems very good at providing a report for the original underlying error so that when we change context to our own error, we see a good message for the underlying.
+
+As a result, we don't try to capture that source information in a field of the enum variant as it is already captured in the error-stack.
 
 ## Enum with field(s)
 This is the error from hana_process/src/error.rs:

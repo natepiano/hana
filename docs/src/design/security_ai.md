@@ -1,5 +1,6 @@
 # Security discussions with Claude 3.5
-Everything below just came from an claude-assisted dialog - not necessarily everything will be as is described below.
+{{#include ../ai.md}}
+
 
 ## Purpose
 Security model focused on peer-to-peer trust and visualization (downloadable binaries) safety in local network environments.

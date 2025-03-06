@@ -1,21 +1,13 @@
-use std::{
-    fmt,
-    os::{
-        fd::RawFd,
-        unix::{
-            io::{AsRawFd, FromRawFd},
-            net::UnixStream as StdUnixStream,
-        },
-    },
-};
+use std::fmt;
+use std::os::fd::RawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::net::UnixStream as StdUnixStream;
 
 use error_stack::ResultExt;
 use tokio::net::UnixStream as TokioUnixStream;
 
-use crate::{
-    prelude::*,
-    transport::{Transport, TransportConnector, TransportListener},
-};
+use crate::prelude::*;
+use crate::transport::{Transport, TransportConnector, TransportListener};
 
 /// Transport implementation using Unix socket pairs
 pub struct SocketPairTransport {

@@ -5,7 +5,7 @@ Hana uses the tracing crate to manage logging and tracing within the application
 
 ## Tracing Configuration
 
-The tracing setup in this application is configured through the `setup_logging` function in `hana/crates/hana/src/utils/trace.rs`. Let me explain how it works:
+The tracing setup in this application is configured through the `setup_logging` function in `hana/crates/hana/src/utils/trace.rs`. Here's how it works:
 
 ### Tracing Configuration
 

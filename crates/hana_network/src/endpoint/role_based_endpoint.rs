@@ -1,14 +1,10 @@
 use std::ops::{Deref, DerefMut};
 
 use super::base_endpoint::Endpoint;
-use crate::{
-    prelude::*,
-    role::{HanaRole, Role, VisualizationRole},
-    transport::{
-        unix::{UnixConnector, UnixListener, UnixTransport},
-        TransportConnector, TransportListener,
-    },
-};
+use crate::prelude::*;
+use crate::role::{HanaRole, Role, VisualizationRole};
+use crate::transport::unix::{UnixConnector, UnixListener, UnixTransport};
+use crate::transport::{TransportConnector, TransportListener};
 
 /// A generic endpoint that can be specialized for different roles in the Hana system
 pub struct RoleBasedEndpoint<R: Role, T: crate::transport::Transport>(Endpoint<R, T>);
@@ -61,7 +57,8 @@ impl<R: Role, T: crate::transport::Transport> DerefMut for RoleBasedEndpoint<R, 
 #[cfg(test)]
 mod tests_endpoint {
     use super::*;
-    use crate::{message::Instruction, transport::mock::MockTransport};
+    use crate::message::Instruction;
+    use crate::transport::mock::MockTransport;
 
     pub type TestHanaEndpoint = RoleBasedEndpoint<HanaRole, MockTransport>;
     pub type TestVisualizationEndpoint = RoleBasedEndpoint<VisualizationRole, MockTransport>;
@@ -82,7 +79,7 @@ mod tests_endpoint {
     async fn test_visualization_endpoint_receive_message() {
         // Create test data
         let instruction = Instruction::Ping;
-        let msg_bytes = bincode::serialize(&instruction).unwrap();
+        let msg_bytes = bincode::encode_to_vec(&instruction, bincode::config::standard()).unwrap();
         let len = msg_bytes.len() as u32;
         let mut data = len.to_le_bytes().to_vec();
         data.extend(msg_bytes);

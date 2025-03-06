@@ -1,28 +1,29 @@
 # Workspace Organization
+{{#include ../ai.md}}
 ## Purpose
 We're using a workspace to save on compile times and to keep the code organized. The workspace is defined in the root `Cargo.toml` file.
 
 ## Structure
 ```
 hana/
-├── Cargo.toml           # Workspace manifest
+├── Cargo.toml            # Workspace manifest
 ├── crates/
-│   ├── hana            # management app
-│   ├── hana-display/   # Display management
-│   ├── hana-network/   # Network functionality
-│   ├── hana-plugin/    # Plugin system
-│   ├── hana-config/    # Configuration
-│   ├── hana-input/     # Input handling
-│   └── hana-state/     # State management
+│   ├── hana              # management app
+│   ├── hana-display/     # Display management
+│   ├── hana-network/     # Network functionality
+│   ├── hana-plugin/      # Plugin system
+│   ├── hana-config/      # Configuration
+│   ├── hana-input/       # Input handling
+│   └── hana-state/       # State management
 ├── docs/
 │ ├── src                  # mdbook docs root
-│ │ ├── architecture        # architecture docs
-│ │ └── developer           # dev docs
-│ ├── user                  # hana management app docs
-│ └── visualization         # visualization sdk docs
+│ │ ├── design             # design docs
+│ │ └── developer          # dev docs
+│ ├── user                 # hana management app docs
+│ └── visualization        # visualization sdk docs
 ├── examples/
-│ └── basic_visualization # example visualization
-└── target/             # Single shared target directory
+│ └── basic_visualization  # example visualization
+└── target/                # Single shared target directory
 ```
 
 ## Guidelines

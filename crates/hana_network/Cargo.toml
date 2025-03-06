@@ -4,9 +4,8 @@ name    = "hana_network"
 version = "0.1.0"
 
 [dependencies]
-bincode               = { version = "1.3.3" }
+bincode               = { version = "2.0.0"}
 error-stack.workspace = true
-serde.workspace       = true
 tempfile.workspace    = true
 thiserror.workspace   = true
 tokio.workspace       = true

@@ -1,5 +1,5 @@
-# Undo System Architecture
-
+# Undo
+{{#include ../ai.md}}
 ## Purpose
 The undo system provides reliable undo/redo functionality across Hana's distributed
 environment while maintaining state consistency. It integrates with the [State Management](state.md)

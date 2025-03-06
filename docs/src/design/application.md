@@ -1,4 +1,6 @@
 # Hana Application
+{{#include ../ai.md}}
+
 ## Purpose
 The hana application serves as the central hub for configuring
 and controlling all aspects of the hana system. It provides

@@ -1,8 +1,6 @@
-use std::{
-    fmt,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::fmt;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 

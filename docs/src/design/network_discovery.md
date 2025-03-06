@@ -7,6 +7,10 @@ Additionally anyone that wants to control visualizations on the mesh needs to ru
 To accomplish this, we propose a UDP discovery protocol for the mesh network.
 
 # Design
+{{#include ../ai.md}}
+
+**And...**
+that said, I spent some serious time getting this design in place so I think it's pretty solid and close to what hana actually needs.
 
 ## Overview
 ### Motivation

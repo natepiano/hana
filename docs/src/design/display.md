@@ -1,4 +1,5 @@
 # Display Environment
+{{#include ../ai.md}}
 
 ## Purpose
 The display environment system manages the spatial arrangement and

@@ -1,4 +1,5 @@
 # Visualization SDK
+{{#include ../ai.md}}
 ## Purpose
 Describe the Visualization SDK and its role in the hana system (TBD)
 

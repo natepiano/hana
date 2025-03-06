@@ -10,7 +10,8 @@ Commands will have to be bound to actions that can be executed - there's a fair 
 
 Ideally this would be something built up front as a command system for "operating hana" will be useful for development, testing and debugging from jump.
 
-Here's a high-level approach for just the commands (from claude)
+Here's a high-level approach for just the commands
+{{#include ../ai.md}}
 
 ```rust
 /// Each subsystem defines their commands as a strongly typed enum

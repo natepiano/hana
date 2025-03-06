@@ -1,5 +1,5 @@
 # Testing Approach
-
+{{#include ../ai.md}}
 ## Purpose
 Testing strategy emphasizing integration tests and following bevy's testing
 patterns, with a focus on non-UI components and leveraging rust's built-in testing capabilities.

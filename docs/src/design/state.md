@@ -1,4 +1,5 @@
 # State Management
+{{#include ../ai.md}}
 
 ## Purpose
 Manages the synchronization, versioning, and persistence of state across the hana system. Provides a robust foundation for maintaining consistency and handling state recovery across the distributed system.

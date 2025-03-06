@@ -5,7 +5,7 @@ wrap_comments               = true # Default: false
 
 # imports
 group_imports       = "StdExternalCrate"
-imports_granularity = "Crate"
+imports_granularity = "Module"
 reorder_imports     = true
 
 # vertical alighment thresholds

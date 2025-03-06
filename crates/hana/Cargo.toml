@@ -7,8 +7,10 @@ version     = "0.1.0"
 [dependencies]
 bevy.workspace               = true
 error-stack.workspace        = true
+flume                        = "0.11.1"
 hana_visualization.workspace = true
+leafwing-input-manager       = "0.16"
+strum                        = { version = "0.27.1", features = ["derive"] }
 thiserror.workspace          = true
 tokio.workspace              = true
 tracing.workspace            = true
-tracing-subscriber.workspace = true

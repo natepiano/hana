@@ -1,5 +1,5 @@
 # Documentation Guidelines
-
+{{#include ../ai.md}}
 ## Purpose
 This document outlines Hana's documentation guidelines, defining what should be documented, where documentation should live, and how to maintain it effectively.
 

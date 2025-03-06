@@ -1,4 +1,5 @@
 # Modulation System
+{{#include ../ai.md}}
 
 ## Purpose
 The modulation system provides the foundation for controlling visualization behaviors and enables dynamic connections between parameters through modulation. It offers a standardized interface for input/output integration and real-time control.

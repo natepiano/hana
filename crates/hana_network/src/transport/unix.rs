@@ -1,16 +1,13 @@
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-};
+use std::fmt;
+use std::path::{Path, PathBuf};
 
 use error_stack::ResultExt;
 use tokio::net::{UnixListener as TokioUnixListener, UnixStream as TokioUnixStream};
 use tracing::debug;
 
-use crate::{
-    prelude::*,
-    transport::{support::*, Transport, TransportConnector, TransportListener},
-};
+use crate::prelude::*;
+use crate::transport::support::*;
+use crate::transport::{Transport, TransportConnector, TransportListener};
 
 const DEFAULT_SOCKET_PATH: &str = "/tmp/hana-ipc.sock";
 
