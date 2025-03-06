@@ -3,8 +3,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Io error {source:?}")]
-    Io { source: std::io::Error },
+    #[error("Io error")]
+    Io,
     #[error("Process not responding")]
     NotResponding,
     #[error("Process check failed")]

@@ -9,13 +9,13 @@ const TEST_LOG_FILTER: &str = "warn,hana=warn";
 async fn test_spawn_error() {
     let result = tokio::process::Command::new("non_existent_executable")
         .spawn()
-        .map_err(|e| Error::Io { source: e })
+        .change_context(Error::Io)
         .attach_printable("Failed to launch visualization");
 
     let err = result.expect_err("Expected spawn to fail");
 
     // Verify error type
-    assert!(matches!(err.current_context(), Error::Io { source: _ }));
+    assert!(matches!(err.current_context(), Error::Io));
 }
 
 #[tokio::test]
@@ -72,4 +72,25 @@ async fn test_is_running() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_io_error_simulation() {
+    use std::path::PathBuf;
+
+    // Attempt to run a process that definitely doesn't exist
+    let nonexistent_path = PathBuf::from("/path/that/definitely/does/not/exist");
+    let result = Process::run(nonexistent_path, "info").await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+
+    // Print the full error report for inspection
+    println!("Full error report:\n{:?}", err);
+
+    // Print just the context part
+    println!("Error context: {:?}", err.current_context());
+
+    // Check that it's the expected error type
+    assert!(matches!(err.current_context(), Error::Io));
 }

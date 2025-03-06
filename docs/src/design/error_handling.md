@@ -70,8 +70,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Io error {source:?}")]
-    Io { source: std::io::Error },
+    #[error("Io error")]
+    Io,
     #[error("Process not responding")]
     NotResponding,
     #[error("Process check failed")]
@@ -81,11 +81,20 @@ pub enum Error {
 pub type Result<T> = error_stack::Result<T, Error>;
 ```
 
-notice that this Io error has a field - so unless we have the Err already, we will need to use `.map_err(|e| Error::Io { source: e })` instead of change_context so that we can construct our own Error::Io correctly.
+Notice that ProcessCheckFailed has a field - that's not a problem as you can just create a new error report and propagate it up - here's one example:
 
-After doing the mapping, because we will now be working with our own Result type, we can then still call attach_printable on it.
-
-If you don't wish to capture field information i.e., the variant was just Io then you could instead do `.change_context(Error::Io)`. Choose this based on whether you need to preserve more error details or not.
+```rust
+pub async fn is_running(&mut self) -> Result<bool> {
+    match self.child.try_wait() {
+        Ok(Some(_)) => Ok(false), // Process has exited
+        Ok(None) => Ok(true),     // Process is still running
+        Err(e) => Err(Report::new(e).change_context(Error::ProcessCheckFailed {
+            path: self.path.clone(),
+        })),
+    }
+}
+```
+In this case we're propagating the error ourselves so we create a new error-stack Report with the underlying error and then change_context to a fully qualified ProcessCheckFailed that includes that path information for the failed process.
 
 ## ? in tests
 To easily use ? in tests we can make the result for the test ```Result<(), Box<dyn std::error::Error>>``` which allows it to just pass through any error. We don't need special error handling machinery for tests as we just want to catch things if they fail and then make them pass.

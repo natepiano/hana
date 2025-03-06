@@ -6,6 +6,7 @@ use tracing::debug;
 
 use crate::{prelude::*, process_control::ProcessControl};
 
+#[derive(Debug)]
 pub struct Process<P: ProcessControl> {
     pub child: P,
     path: PathBuf,
@@ -24,7 +25,7 @@ impl Process<tokio::process::Child> {
 
         command
             .spawn()
-            .map_err(|e| Error::Io { source: e })
+            .change_context(Error::Io)
             .attach_printable(format!("Command failed: {command:?}"))
             .map(|child| Process { child, path })
     }

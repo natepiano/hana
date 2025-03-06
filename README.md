@@ -11,8 +11,16 @@ Hana is a distributed visualization management system that enables control and d
 ```shell
 git clone https://github.com/natepiano/hana.git
 cd hana
+cargo build --workspace
 cargo run
 ```
+we have the build --workspace to ensure the examples/basic-visualization is built before running
+
+As of the current version, the hana binary doesn't have any specific functionality yet. It just launches a separate basic visualization, sends it some commands and then shuts down the visualization automatically.
+
+When it shuts down - you'll see an blank window which is the actual hana UI that will eventually be a real UI :)
+
+So that's intentional :) just shut down the blank window when you're ready to.
 
 ## License
 Hana is free, open source and permissively licensed!
