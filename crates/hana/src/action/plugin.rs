@@ -26,7 +26,9 @@ pub enum Action {
     Ping,
     Start,
     Shutdown,
-    ToggleText,
+    VizPing,
+    VizStart,
+    VizShutdown,
 }
 
 impl Action {
@@ -52,7 +54,10 @@ impl Action {
             Self::Ping => input_map.with(action, KeyCode::KeyP),
             Self::Start => input_map.with(action, KeyCode::F1),
             Self::Shutdown => insert_shift_input(input_map, action, KeyCode::F1),
-            Self::ToggleText => input_map.with(action, KeyCode::F2),
+
+            Self::VizPing => input_map.with(action, KeyCode::KeyV),
+            Self::VizStart => input_map.with(action, KeyCode::F2),
+            Self::VizShutdown => insert_shift_input(input_map, action, KeyCode::F2),
         })
     }
 }

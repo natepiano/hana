@@ -53,7 +53,6 @@ pub struct ToggleState {
 /// the ActionState is gating the entire system and you don't have to take up an argument
 /// and surround your code with an if statement if you in the simple case where the system
 /// is only invoked by a key press
-#[allow(dead_code)]
 pub fn just_pressed<A: Actionlike>(action: A) -> impl Fn(Res<ActionState<A>>) -> bool {
     move |action_state: Res<ActionState<A>>| action_state.just_pressed(&action)
 }

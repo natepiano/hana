@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use bevy::ecs::component::Component;
 use error_stack::{Report, ResultExt};
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -9,10 +10,10 @@ use tracing::debug;
 use crate::prelude::*;
 use crate::process_control::ProcessControl;
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
 pub struct Process<P: ProcessControl> {
     pub child: P,
-    path: PathBuf,
+    path:      PathBuf,
 }
 
 // Provide a concrete implementation for the common case
@@ -95,7 +96,7 @@ async fn test_is_running_error() {
 
     let mut process = Process {
         child: mock,
-        path: test_path.clone(),
+        path:  test_path.clone(),
     };
 
     let result = process.is_running().await;

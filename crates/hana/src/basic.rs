@@ -26,6 +26,27 @@ impl Plugin for BasicPlugin {
     }
 }
 
+/// send visualization instructions from the systems in basic.rs so that we have
+/// the same error handling for all of them
+fn send_visualization_instruction(
+    tokio_sender: Res<TokioSender>,
+    instruction: VisualizationInstruction,
+    exit: &mut EventWriter<AppExit>,
+) {
+    let result = tokio_sender
+        .0
+        .send(instruction.clone())
+        .change_context(Error::TokioRuntimeChannelClosed)
+        .attach_printable_lazy(|| format!("VisualizationCommand: {instruction:?}"));
+
+    if let Err(report) = result {
+        // This is always critical since it means the communication channel is broken
+        error!("CRITICAL ERROR: {report:?}");
+        exit.send(AppExit::from_code(1));
+        //exit.send(AppExit::Error(std::num::NonZeroU8::new(1).unwrap()));
+    }
+}
+
 /// return the environment variable for RUST_LOG so we can
 /// pass it to the visualization process
 fn get_rust_log_value() -> String {
@@ -36,7 +57,7 @@ fn get_rust_log_value() -> String {
 }
 
 /// System to start a visualization when the StartVisualization action is triggered
-fn start_visualization(tokio_sender: Res<TokioSender>, exit: EventWriter<AppExit>) {
+fn start_visualization(tokio_sender: Res<TokioSender>, mut exit: EventWriter<AppExit>) {
     info!("Starting visualization...");
 
     let path = PathBuf::from("./target/debug/basic-visualization");
@@ -46,43 +67,23 @@ fn start_visualization(tokio_sender: Res<TokioSender>, exit: EventWriter<AppExit
     send_visualization_instruction(
         tokio_sender,
         VisualizationInstruction::Start { path, env_filter },
-        exit,
+        &mut exit,
     );
 }
 
-/// send visualization instructions from the systems in basic.rs so that we have
-/// the same error handling for all of them
-fn send_visualization_instruction(
-    tokio_sender: Res<TokioSender>,
-    instruction: VisualizationInstruction,
-    mut exit: EventWriter<AppExit>,
-) {
-    let result = tokio_sender
-        .0
-        .send(instruction.clone())
-        .change_context(Error::TokioRuntimeChannelClosed)
-        .attach_printable_lazy(|| format!("VisualizationCommand: {instruction:?}"));
-
-    if let Err(report) = result {
-        error!("CRITICAL ERROR: {report:?}");
-        exit.send(AppExit::Error(std::num::NonZeroU8::new(1).unwrap()));
-    }
-}
-
 /// System to ping a visualization when the PingVisualization action is triggered
-fn ping_visualization(tokio_sender: Res<TokioSender>, exit: EventWriter<AppExit>) {
+fn ping_visualization(tokio_sender: Res<TokioSender>, mut exit: EventWriter<AppExit>) {
     info!("Attempting to ping visualization...");
-    send_visualization_instruction(tokio_sender, VisualizationInstruction::Ping, exit);
+    send_visualization_instruction(tokio_sender, VisualizationInstruction::Ping, &mut exit);
 }
 
-/// System to shutdown a visualization when the StopVisualization action is triggered
-fn shutdown_visualization(tokio_sender: Res<TokioSender>, exit: EventWriter<AppExit>) {
+fn shutdown_visualization(tokio_sender: Res<TokioSender>, mut exit: EventWriter<AppExit>) {
     info!("Attempting to shut down visualization...");
     send_visualization_instruction(
         tokio_sender,
         VisualizationInstruction::Shutdown {
             timeout: Duration::from_secs(5),
         },
-        exit,
+        &mut exit,
     );
 }

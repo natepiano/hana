@@ -10,8 +10,9 @@ use crate::role::Role;
 use crate::transport::Transport;
 
 /// A network endpoint in the Hana system using the generic transport abstraction
+#[derive(Debug)]
 pub struct Endpoint<R: Role, T: Transport> {
-    role: std::marker::PhantomData<R>,
+    role:      std::marker::PhantomData<R>,
     transport: T,
 }
 

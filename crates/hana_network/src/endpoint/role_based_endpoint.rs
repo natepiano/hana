@@ -7,6 +7,7 @@ use crate::transport::unix::{UnixConnector, UnixListener, UnixTransport};
 use crate::transport::{TransportConnector, TransportListener};
 
 /// A generic endpoint that can be specialized for different roles in the Hana system
+#[derive(Debug)]
 pub struct RoleBasedEndpoint<R: Role, T: crate::transport::Transport>(Endpoint<R, T>);
 
 /// An endpoint for a Hana controller to connect to and control visualizations

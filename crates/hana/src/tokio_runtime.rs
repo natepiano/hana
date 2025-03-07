@@ -7,6 +7,8 @@ use flume::{Receiver, Sender};
 use hana_visualization::{Connected, Unstarted, Visualization};
 use tokio::runtime::Runtime;
 
+use crate::prelude::*;
+
 // original code
 // // Create and connect visualization using typestate pattern (i.e. <Unstarted>)
 // let viz = Visualization::<Unstarted>::start(viz_path, env_filter_str)
@@ -54,7 +56,10 @@ impl Plugin for TokioRuntimePlugin {
         spawn_tokio_thread(runtime, to_tokio_rx, to_bevy_tx);
 
         // Add system to process messages from Tokio
-        app.add_systems(Update, process_tokio_messages);
+        app.add_systems(
+            Update,
+            process_non_error_events.after(crate::error_handling::process_error_events),
+        );
     }
 }
 
@@ -70,7 +75,7 @@ pub struct BevyReceiver(pub Receiver<BevyVisualizationEvent>);
 #[derive(Debug, Clone)]
 pub enum VisualizationInstruction {
     Start {
-        path: std::path::PathBuf,
+        path:       std::path::PathBuf,
         env_filter: String,
     },
     Ping, // No ID required - implicit "ping the active one"
@@ -81,12 +86,12 @@ pub enum VisualizationInstruction {
 }
 
 /// Events that Tokio can send back to Bevy
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BevyVisualizationEvent {
     Started,
     Pinged,
     Shutdown,
-    Failed { error: String },
+    Failed(error_stack::Report<Error>), // Send the full Report
 }
 
 /// Unique identifier for visualizations
@@ -95,7 +100,7 @@ pub struct VisualizationId(pub u64);
 
 fn spawn_tokio_thread(
     runtime: Arc<Runtime>,
-    commands_rx: Receiver<VisualizationInstruction>,
+    instructions_rx: Receiver<VisualizationInstruction>,
     events_tx: Sender<BevyVisualizationEvent>,
 ) {
     std::thread::spawn(move || {
@@ -104,7 +109,7 @@ fn spawn_tokio_thread(
 
         // Process commands from Bevy
         runtime.block_on(async {
-            while let Ok(instruction) = commands_rx.recv_async().await {
+            while let Ok(instruction) = instructions_rx.recv_async().await {
                 // Clone the state and sender for the spawned task
                 let state = Arc::clone(&visualization_state);
                 let tx = events_tx.clone();
@@ -140,104 +145,133 @@ impl VisualizationState {
         }
     }
 
-    /// Sends a failure event with the given error message
-    fn send_failure(tx: &Sender<BevyVisualizationEvent>, error: impl Into<String>) {
-        tx.send(BevyVisualizationEvent::Failed {
-            error: error.into(),
-        })
-        .ok();
+    async fn handle_ping(state: Arc<tokio::sync::Mutex<Self>>, tx: Sender<BevyVisualizationEvent>) {
+        debug!("Handling ping command");
+
+        // Take visualization temporarily (if available)
+        let viz_option = {
+            let mut state_guard = state.lock().await;
+            state_guard.active_visualization.take()
+        };
+
+        // Process based on whether we have a visualization
+        match viz_option {
+            Some(mut viz) => {
+                match viz.ping().await {
+                    Ok(_) => {
+                        debug!("Ping successful");
+                        // Put visualization back
+                        let mut state_guard = state.lock().await;
+                        state_guard.active_visualization = Some(viz);
+                        tx.send(BevyVisualizationEvent::Pinged).ok();
+                    }
+                    Err(err) => {
+                        error!("Ping failed: {err:?}");
+                        // Don't put visualization back - it's in a bad state
+                        let report = err.change_context(Error::Visualization);
+                        tx.send(BevyVisualizationEvent::Failed(report)).ok();
+                    }
+                }
+            }
+            None => {
+                warn!("No active visualization to ping");
+                let report = error_stack::Report::new(Error::Visualization)
+                    .attach_printable("No active visualization to ping");
+                tx.send(BevyVisualizationEvent::Failed(report)).ok();
+            }
+        }
     }
 
-    /// Handles the Start instruction
+    // Updated handle_start with cleaner mutex handling
     async fn handle_start(
         state: Arc<tokio::sync::Mutex<Self>>,
         tx: Sender<BevyVisualizationEvent>,
         path: std::path::PathBuf,
         env_filter: String,
     ) {
-        // Acquire lock to modify state
-        let mut state_guard = state.lock().await;
+        debug!("Handling start command for {:?}", path);
 
-        // If there's already an active visualization, shut it down first
-        if let Some(viz) = state_guard.active_visualization.take() {
-            if let Err(err) = viz.shutdown(Duration::from_secs(3)).await {
-                Self::send_failure(
-                    &tx,
-                    format!("Failed to shut down previous visualization: {}", err),
-                );
-                return;
+        // Shut down any existing visualization
+        {
+            let viz_option = {
+                let mut state_guard = state.lock().await;
+                state_guard.active_visualization.take()
+            };
+
+            if let Some(viz) = viz_option {
+                match viz.shutdown(Duration::from_secs(3)).await {
+                    Ok(_) => {
+                        tx.send(BevyVisualizationEvent::Shutdown).ok();
+                    }
+                    Err(err) => {
+                        let report = err.change_context(Error::Visualization);
+                        tx.send(BevyVisualizationEvent::Failed(report)).ok();
+                        return;
+                    }
+                }
             }
-            tx.send(BevyVisualizationEvent::Shutdown).ok();
         }
 
         // Start a new visualization
-        let started = match Visualization::<Unstarted>::start(path, env_filter).await {
-            Ok(started) => started,
-            Err(err) => {
-                Self::send_failure(&tx, format!("Failed to start: {}", err));
-                return;
+        match Visualization::<Unstarted>::start(path.clone(), env_filter).await {
+            Ok(started) => {
+                match started.connect().await {
+                    Ok(connected) => {
+                        // Store the new visualization
+                        let mut state_guard = state.lock().await;
+                        state_guard.active_visualization = Some(connected);
+                        tx.send(BevyVisualizationEvent::Started).ok();
+                    }
+                    Err(err) => {
+                        let report = err.change_context(Error::Visualization);
+                        tx.send(BevyVisualizationEvent::Failed(report)).ok();
+                    }
+                }
             }
-        };
-
-        // Connect to the started visualization
-        match started.connect().await {
-            Ok(connected) => {
-                state_guard.active_visualization = Some(connected);
-                tx.send(BevyVisualizationEvent::Started).ok();
-            }
             Err(err) => {
-                Self::send_failure(&tx, format!("Failed to connect: {}", err));
+                let report = err.change_context(Error::Visualization);
+                tx.send(BevyVisualizationEvent::Failed(report)).ok();
             }
         }
     }
 
-    /// Handles the Ping instruction
-    async fn handle_ping(state: Arc<tokio::sync::Mutex<Self>>, tx: Sender<BevyVisualizationEvent>) {
-        let mut state_guard = state.lock().await;
-
-        match &mut state_guard.active_visualization {
-            Some(viz) => match viz.ping().await {
-                Ok(_) => {
-                    tx.send(BevyVisualizationEvent::Pinged).ok();
-                }
-                Err(err) => {
-                    Self::send_failure(&tx, format!("Failed to ping: {}", err));
-                    // Visualization is in a bad state, remove it
-                    state_guard.active_visualization = None;
-                }
-            },
-            None => {
-                Self::send_failure(&tx, "No active visualization to ping");
-            }
-        }
-    }
-
-    /// Handles the Shutdown instruction
+    // Updated handle_shutdown with cleaner mutex handling
     async fn handle_shutdown(
         state: Arc<tokio::sync::Mutex<Self>>,
         tx: Sender<BevyVisualizationEvent>,
         timeout: Duration,
     ) {
-        let mut state_guard = state.lock().await;
+        debug!("Handling shutdown command");
 
-        match state_guard.active_visualization.take() {
+        // Take visualization temporarily (if available)
+        let viz_option = {
+            let mut state_guard = state.lock().await;
+            state_guard.active_visualization.take()
+        };
+
+        match viz_option {
             Some(viz) => match viz.shutdown(timeout).await {
                 Ok(_) => {
+                    debug!("Shutdown successful");
                     tx.send(BevyVisualizationEvent::Shutdown).ok();
                 }
                 Err(err) => {
-                    Self::send_failure(&tx, format!("Failed to shut down: {}", err));
+                    error!("Shutdown failed: {err:?}");
+                    let report = err.change_context(Error::Visualization);
+                    tx.send(BevyVisualizationEvent::Failed(report)).ok();
                 }
             },
             None => {
-                Self::send_failure(&tx, "No active visualization to shut down");
+                warn!("No active visualization to shut down");
+                let report = error_stack::Report::new(Error::Visualization)
+                    .attach_printable("No active visualization to shut down");
+                tx.send(BevyVisualizationEvent::Failed(report)).ok();
             }
         }
     }
 }
 
-/// System to process messages from Tokio and update Bevy state
-fn process_tokio_messages(
+fn process_non_error_events(
     bevy_receiver: Res<BevyReceiver>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
@@ -256,9 +290,8 @@ fn process_tokio_messages(
             BevyVisualizationEvent::Shutdown => {
                 info!("Visualization shut down successfully");
             }
-            BevyVisualizationEvent::Failed { error } => {
-                error!("Visualization operation failed: {}", error);
-            }
+            // Don't handle Failed here - let the error handling system do it
+            BevyVisualizationEvent::Failed(_) => {}
         }
     }
 }

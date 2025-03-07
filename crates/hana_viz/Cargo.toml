@@ -1,0 +1,16 @@
+[package]
+edition = "2024"
+name    = "hana_viz"
+version = "0.1.0"
+
+[dependencies]
+bevy.workspace         = true
+error-stack.workspace  = true
+hana_async.workspace   = true
+hana_network.workspace = true
+hana_process.workspace = true
+thiserror.workspace    = true
+tokio.workspace        = true
+
+[lints]
+workspace = true

@@ -1,20 +1,24 @@
 [workspace]
 default-members = [
   "crates/hana",
+  "crates/hana_async",
   "crates/hana_input",
   "crates/hana_network",
   "crates/hana_plugin",
   "crates/hana_process",
   "crates/hana_visualization",
+  "crates/hana_viz",
   "examples/basic_visualization",
 ]
 members = [
   "crates/hana",
+  "crates/hana_async",
   "crates/hana_input",
   "crates/hana_network",
   "crates/hana_plugin",
   "crates/hana_process",
   "crates/hana_visualization",
+  "crates/hana_viz",
   "examples/basic_visualization",
 ]
 resolver = "2"
@@ -28,10 +32,12 @@ unwrap_used = "deny"
 #
 # Workspace member crates
 #
+hana_async         = { path = "crates/hana_async" }
 hana_network       = { path = "crates/hana_network" }
 hana_plugin        = { path = "crates/hana_plugin" }
 hana_process       = { path = "crates/hana_process" }
 hana_visualization = { path = "crates/hana_visualization" }
+hana_viz           = { path = "crates/hana_viz" }
 
 #
 # External dependencies
@@ -80,6 +86,8 @@ bevy = { version = "^0.15.3", default-features = false, features = [
   # "webgl2",
 ] }
 error-stack = { version = "0.5.0", features = ["spantrace"] }
+flume = "0.11.1"
+
 tempfile = "3.17.1"
 thiserror = "2.0.11"
 tokio = { version = "1.43", default-features = false, features = [

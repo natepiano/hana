@@ -15,6 +15,10 @@ fn setup(mut commands: Commands) {
             Press f1 to start the basic visualization\n\
             Press shift-f1 to stop it\n\
             Press p to Ping it\n\
+            \n\
+            Press f2 to viz start the basic visualization\n\
+            Press shift-f2 to viz stop it\n\
+            Press v to viz Ping it\n\
             ",
         ),
         Node {

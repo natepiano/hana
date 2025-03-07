@@ -1,0 +1,14 @@
+[package]
+edition = "2024"
+name    = "hana_async"
+version = "0.1.0"
+
+[dependencies]
+bevy.workspace        = true
+error-stack.workspace = true
+flume.workspace       = true
+thiserror.workspace   = true
+tokio.workspace       = true
+
+[lints]
+workspace = true

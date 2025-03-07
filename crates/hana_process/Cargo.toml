@@ -11,6 +11,7 @@ path = "src/bin/hana_helper.rs"
 libc = "0.2.170"
 
 [dependencies]
+bevy.workspace        = true
 error-stack.workspace = true
 thiserror.workspace   = true
 tokio.workspace       = true
