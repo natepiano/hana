@@ -30,11 +30,11 @@ unwrap_used = "deny"
 #
 # Workspace member crates
 #
-hana_async         = { path = "crates/hana_async" }
-hana_network       = { path = "crates/hana_network" }
-hana_plugin        = { path = "crates/hana_plugin" }
-hana_process       = { path = "crates/hana_process" }
-hana_viz           = { path = "crates/hana_viz" }
+hana_async   = { path = "crates/hana_async" }
+hana_network = { path = "crates/hana_network" }
+hana_plugin  = { path = "crates/hana_plugin" }
+hana_process = { path = "crates/hana_process" }
+hana_viz     = { path = "crates/hana_viz" }
 
 #
 # External dependencies

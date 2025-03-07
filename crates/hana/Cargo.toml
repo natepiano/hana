@@ -5,12 +5,12 @@ name        = "hana"
 version     = "0.1.0"
 
 [dependencies]
-bevy.workspace               = true
-error-stack.workspace        = true
-hana_async.workspace         = true
-hana_network.workspace       = true
-hana_viz.workspace           = true
-leafwing-input-manager       = "0.16"
-strum                        = { version = "0.27.1", features = ["derive"] }
-thiserror.workspace          = true
-tracing.workspace            = true
+bevy.workspace         = true
+error-stack.workspace  = true
+hana_async.workspace   = true
+hana_network.workspace = true
+hana_viz.workspace     = true
+leafwing-input-manager = "0.16"
+strum                  = { version = "0.27.1", features = ["derive"] }
+thiserror.workspace    = true
+tracing.workspace      = true
