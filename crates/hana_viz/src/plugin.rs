@@ -18,14 +18,13 @@ impl Plugin for HanaVizPlugin {
         // Register events
         app.add_event::<StartVisualization>()
             .add_event::<ShutdownVisualization>()
-            .add_event::<SendInstruction>()
-            .add_event::<VisualizationStateChanged>();
+            .add_event::<SendInstruction>();
 
         // Add systems when they're created
         app.add_systems(
             Update,
             (
-                process_visualization_events,
+                process_outcomes_from_runtime,
                 handle_start_visualization_requests,
                 handle_shutdown_visualization_requests,
                 handle_send_instruction_requests,

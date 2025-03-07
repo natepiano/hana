@@ -21,7 +21,6 @@ pub struct AsyncRuntimePlugin;
 impl Plugin for AsyncRuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, init_async_runtime);
-        //   app.init_resource::<AsyncRuntime>();
     }
 }
 
@@ -31,6 +30,9 @@ pub struct AsyncRuntime {
     runtime: Arc<Runtime>,
 }
 
+/// used to initialize the tokio async runtime and add it as a resource
+/// exits the app with an error code if the runtime creation fails
+/// currently this is the only app exit we are aware of
 fn init_async_runtime(mut commands: Commands, mut exit: EventWriter<AppExit>) {
     let result = AsyncRuntime::new();
     match result {
@@ -71,19 +73,19 @@ impl AsyncRuntime {
         flume::unbounded()
     }
 
-    /// Helper method to create a command-event worker system
-    pub fn create_worker<Cmd, Evt, F, Fut>(
+    /// Helper method to create our bridge between the async worker and the main bevy ECS system thread(s)
+    pub fn create_worker<Cmd, Msg, F, Fut>(
         &self,
         process_fn: F,
-    ) -> (CommandSender<Cmd>, EventReceiver<Evt>)
+    ) -> (CommandSender<Cmd>, MessageReceiver<Msg>)
     where
         Cmd: Send + Clone + std::fmt::Debug + 'static,
-        Evt: Send + 'static,
+        Msg: Send + 'static,
         F: Fn(Cmd) -> Fut + Send + Sync + Clone + 'static,
-        Fut: Future<Output = Vec<Evt>> + Send + 'static,
+        Fut: Future<Output = Vec<Msg>> + Send + 'static,
     {
         let (cmd_tx, cmd_rx) = flume::unbounded();
-        let (event_tx, event_rx) = flume::unbounded();
+        let (msg_tx, msg_rx) = flume::unbounded();
 
         let runtime = Arc::clone(&self.runtime);
 
@@ -91,20 +93,23 @@ impl AsyncRuntime {
         std::thread::spawn(move || {
             runtime.block_on(async {
                 while let Ok(command) = cmd_rx.recv_async().await {
-                    let event_sender = event_tx.clone();
+                    let message_sender = msg_tx.clone();
                     let process = process_fn.clone();
 
                     runtime.spawn(async move {
                         let results = process(command).await;
                         for event in results {
-                            let _ = event_sender.send(event);
+                            let _ = message_sender.send(event);
                         }
                     });
                 }
             });
         });
 
-        (CommandSender(cmd_tx), EventReceiver(event_rx))
+        // give the other side of the communication channels
+        // back to the bevy side so they can send commands to the worker
+        // and receive messages from the worker
+        (CommandSender(cmd_tx), MessageReceiver(msg_rx))
     }
 
     /// Run a closure in a blocking context
@@ -131,9 +136,9 @@ where
 }
 
 /// Typed wrapper for event receivers
-pub struct EventReceiver<T>(Receiver<T>);
+pub struct MessageReceiver<T>(Receiver<T>);
 
-impl<T> EventReceiver<T>
+impl<T> MessageReceiver<T>
 where
     T: Send + 'static,
 {

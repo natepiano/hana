@@ -4,14 +4,14 @@ use bevy::prelude::*;
 use hana_network::Instruction;
 
 use crate::entity::*;
-use crate::runtime::{VisualizationCommand, VisualizationCommandSender};
+use crate::runtime::{RuntimeOutcomeMessage, RuntimeTask, RuntimeTaskSender};
 
 /// Handles StartVisualization events by creating or updating visualization entities
 pub fn handle_start_visualization_requests(
     mut commands: Commands,
     mut start_events: EventReader<StartVisualization>,
     unstarted: Query<&Visualization, With<Unstarted>>,
-    cmd_sender: Res<VisualizationCommandSender>,
+    cmd_sender: Res<RuntimeTaskSender>,
 ) {
     for event in start_events.read() {
         match event.entity {
@@ -27,7 +27,7 @@ pub fn handle_start_visualization_requests(
                         .insert(Starting);
 
                     // Send command to async worker
-                    let _ = cmd_sender.0.send(VisualizationCommand::Start {
+                    let _ = cmd_sender.0.send(RuntimeTask::Start {
                         entity,
                         path: viz.path.clone(),
                         env_filter: viz.env_filter.clone(),
@@ -49,10 +49,9 @@ pub fn handle_start_visualization_requests(
                     });
 
                     let visualization = Visualization {
-                        path:       path.clone(),
-                        name:       name.clone(),
+                        path: path.clone(),
+                        name: name.clone(),
                         env_filter: env_filter.clone(),
-                        tags:       event.tags.clone(),
                     };
 
                     // Spawn entity first
@@ -60,8 +59,8 @@ pub fn handle_start_visualization_requests(
 
                     info!("Starting new visualization: {}", name);
 
-                    // Send command to async worker
-                    let _ = cmd_sender.0.send(VisualizationCommand::Start {
+                    // Send command to async worker via flume channel
+                    let _ = cmd_sender.0.send(RuntimeTask::Start {
                         entity,
                         path: path.clone(),
                         env_filter,
@@ -77,7 +76,7 @@ pub fn handle_shutdown_visualization_requests(
     mut commands: Commands,
     mut shutdown_events: EventReader<ShutdownVisualization>,
     connected: Query<Entity, With<Connected>>,
-    cmd_sender: Res<VisualizationCommandSender>,
+    cmd_sender: Res<RuntimeTaskSender>,
 ) {
     for event in shutdown_events.read() {
         if connected.get(event.entity).is_ok() {
@@ -90,14 +89,14 @@ pub fn handle_shutdown_visualization_requests(
                 .insert(ShuttingDown);
 
             // Send command to async worker
-            let _ = cmd_sender.0.send(VisualizationCommand::Send {
-                entity:      event.entity,
+            let _ = cmd_sender.0.send(RuntimeTask::Send {
+                entity: event.entity,
                 instruction: Instruction::Shutdown,
             });
 
             // Set a timeout to force terminate if needed
-            let _ = cmd_sender.0.send(VisualizationCommand::Terminate {
-                entity:  event.entity,
+            let _ = cmd_sender.0.send(RuntimeTask::Terminate {
+                entity: event.entity,
                 timeout: Duration::from_millis(event.timeout_ms),
             });
         }
@@ -108,7 +107,7 @@ pub fn handle_shutdown_visualization_requests(
 pub fn handle_send_instruction_requests(
     mut instruction_events: EventReader<SendInstruction>,
     connected: Query<Entity, With<Connected>>,
-    cmd_sender: Res<VisualizationCommandSender>,
+    cmd_sender: Res<RuntimeTaskSender>,
 ) {
     for event in instruction_events.read() {
         if connected.get(event.entity).is_ok() {
@@ -118,24 +117,23 @@ pub fn handle_send_instruction_requests(
             );
 
             // Send command to async worker
-            let _ = cmd_sender.0.send(VisualizationCommand::Send {
-                entity:      event.entity,
+            let _ = cmd_sender.0.send(RuntimeTask::Send {
+                entity: event.entity,
                 instruction: event.instruction.clone(),
             });
         }
     }
 }
 
-// Process events coming from the visualization runtime
-pub fn process_visualization_events(
+// Process events coming backfrom the visualization runtime
+pub fn process_outcomes_from_runtime(
     mut commands: Commands,
-    events: Res<crate::runtime::VisualizationEventReceiver>,
-    mut state_events: EventWriter<VisualizationStateChanged>,
+    messages: Res<crate::runtime::RuntimeMessageReceiver>,
 ) {
-    // Try to receive all pending events
-    while let Some(event) = events.0.try_recv() {
+    // Try to receive all pending messages
+    while let Some(event) = messages.0.try_recv() {
         match event {
-            crate::runtime::VisualizationEvent::Started { entity } => {
+            RuntimeOutcomeMessage::Started { entity } => {
                 info!("Visualization started successfully: {:?}", entity);
 
                 // Update entity state
@@ -143,21 +141,15 @@ pub fn process_visualization_events(
                     .entity(entity)
                     .remove::<Starting>()
                     .insert(Connected);
-
-                state_events.send(VisualizationStateChanged {
-                    entity,
-                    new_state: "Connected".to_string(),
-                    error: None,
-                });
             }
-            crate::runtime::VisualizationEvent::InstructionSent {
+            RuntimeOutcomeMessage::InstructionSent {
                 entity,
                 instruction,
             } => {
                 debug!("Instruction sent: {:?} to {:?}", instruction, entity);
                 // Could update UI or other state here if needed
             }
-            crate::runtime::VisualizationEvent::Shutdown { entity } => {
+            RuntimeOutcomeMessage::Shutdown { entity } => {
                 info!("Visualization shut down: {:?}", entity);
 
                 commands
@@ -165,14 +157,8 @@ pub fn process_visualization_events(
                     .remove::<Connected>()
                     .remove::<ShuttingDown>()
                     .insert(Unstarted);
-
-                state_events.send(VisualizationStateChanged {
-                    entity,
-                    new_state: "Unstarted".to_string(),
-                    error: None,
-                });
             }
-            crate::runtime::VisualizationEvent::Error { entity, error } => {
+            RuntimeOutcomeMessage::Error { entity, error } => {
                 // Change from report to error
                 error!("Visualization error for {:?}: {:?}", entity, error);
 
@@ -183,12 +169,6 @@ pub fn process_visualization_events(
                     .insert(Disconnected {
                         error: Some(format!("{:?}", error)),
                     });
-
-                state_events.send(VisualizationStateChanged {
-                    entity,
-                    new_state: "Error".to_string(),
-                    error: Some(format!("{:?}", error)),
-                });
             }
         }
     }

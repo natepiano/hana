@@ -5,38 +5,40 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use error_stack::{Report, ResultExt};
-use hana_async::{AsyncRuntime, CommandSender, EventReceiver};
+use hana_async::{AsyncRuntime, CommandSender, MessageReceiver};
 use hana_network::{HanaEndpoint, Instruction};
 use hana_process::Process;
 use tokio::sync::Mutex;
 
 use crate::error::{Error, Result};
 
+// tasks that the AsyncRuntime can do
 #[derive(Debug, Clone)]
-pub enum VisualizationCommand {
+pub enum RuntimeTask {
     /// Start a visualization process and connect to it
     Start {
-        entity:     Entity,
-        path:       PathBuf,
+        entity: Entity,
+        path: PathBuf,
         env_filter: String,
     },
     /// Send a network instruction to the running visualization
     Send {
-        entity:      Entity,
+        entity: Entity,
         instruction: Instruction,
     },
     /// Terminate the visualization process (with optional timeout)
     Terminate { entity: Entity, timeout: Duration },
 }
 
-/// Events sent from the async worker back to Bevy systems
+/// Messages sent from the async worker back to Bevy systems
+/// Once completed, the Bevy systems can take appropriate action to update components
 #[derive(Debug)]
-pub enum VisualizationEvent {
+pub enum RuntimeOutcomeMessage {
     /// Visualization process was started and connected successfully
     Started { entity: Entity },
     /// An instruction was sent successfully
     InstructionSent {
-        entity:      Entity,
+        entity: Entity,
         instruction: Instruction,
     },
     /// A visualization has shut down
@@ -44,75 +46,76 @@ pub enum VisualizationEvent {
     /// An error occurred
     Error {
         entity: Entity,
-        error:  Report<Error>,
+        error: Report<Error>,
     },
 }
 
 /// Resource for sending commands to the async worker
+/// a CommandSender is just a flume channel
 #[derive(Resource, Clone)]
-pub struct VisualizationCommandSender(pub CommandSender<VisualizationCommand>);
+pub struct RuntimeTaskSender(pub CommandSender<RuntimeTask>);
 
 /// Resource for receiving events from the async worker
+/// MessageReceiver is just the other side of that flume channel
 #[derive(Resource)]
-pub struct VisualizationEventReceiver(pub EventReceiver<VisualizationEvent>);
+pub struct RuntimeMessageReceiver(pub MessageReceiver<RuntimeOutcomeMessage>);
 
 /// Initialize the async runtime for visualization management
 pub fn setup_visualization_runtime(
     async_runtime: &AsyncRuntime,
-) -> (VisualizationCommandSender, VisualizationEventReceiver) {
+) -> (RuntimeTaskSender, RuntimeMessageReceiver) {
     // Create shared state for the worker
     let state = Arc::new(Mutex::new(VisualizationState::new()));
 
     // Use the create_worker method from AsyncRuntime
-    let (cmd_sender, event_receiver) =
-        async_runtime.create_worker(move |command: VisualizationCommand| {
-            let state = Arc::clone(&state);
-            async move {
-                match command {
-                    VisualizationCommand::Start {
-                        entity,
-                        path,
-                        env_filter,
-                    } => match handle_start(state.clone(), entity, path, env_filter).await {
-                        Ok(()) => vec![VisualizationEvent::Started { entity }],
-                        Err(err) => vec![VisualizationEvent::Error { entity, error: err }],
-                    },
-                    VisualizationCommand::Send {
-                        entity,
-                        instruction,
-                    } => {
-                        let instruction_clone = instruction.clone();
-                        let was_shutdown = matches!(instruction, Instruction::Shutdown);
+    let (cmd_sender, event_receiver) = async_runtime.create_worker(move |command: RuntimeTask| {
+        let state = Arc::clone(&state);
+        async move {
+            match command {
+                RuntimeTask::Start {
+                    entity,
+                    path,
+                    env_filter,
+                } => match handle_start(state.clone(), entity, path, env_filter).await {
+                    Ok(()) => vec![RuntimeOutcomeMessage::Started { entity }],
+                    Err(err) => vec![RuntimeOutcomeMessage::Error { entity, error: err }],
+                },
+                RuntimeTask::Send {
+                    entity,
+                    instruction,
+                } => {
+                    let instruction_clone = instruction.clone();
+                    let was_shutdown = matches!(instruction, Instruction::Shutdown);
 
-                        match handle_send(state.clone(), entity, instruction).await {
-                            Ok(()) => {
-                                let mut events = vec![VisualizationEvent::InstructionSent {
-                                    entity,
-                                    instruction: instruction_clone,
-                                }];
+                    match handle_send(state.clone(), entity, instruction).await {
+                        Ok(()) => {
+                            let mut events = vec![RuntimeOutcomeMessage::InstructionSent {
+                                entity,
+                                instruction: instruction_clone,
+                            }];
 
-                                if was_shutdown {
-                                    events.push(VisualizationEvent::Shutdown { entity });
-                                }
-
-                                events
+                            if was_shutdown {
+                                events.push(RuntimeOutcomeMessage::Shutdown { entity });
                             }
-                            Err(err) => vec![VisualizationEvent::Error { entity, error: err }],
+
+                            events
                         }
+                        Err(err) => vec![RuntimeOutcomeMessage::Error { entity, error: err }],
                     }
-                    VisualizationCommand::Terminate { entity, timeout } => {
-                        match handle_terminate(state.clone(), entity, timeout).await {
-                            Ok(()) => vec![VisualizationEvent::Shutdown { entity }],
-                            Err(err) => vec![VisualizationEvent::Error { entity, error: err }],
-                        }
+                }
+                RuntimeTask::Terminate { entity, timeout } => {
+                    match handle_terminate(state.clone(), entity, timeout).await {
+                        Ok(()) => vec![RuntimeOutcomeMessage::Shutdown { entity }],
+                        Err(err) => vec![RuntimeOutcomeMessage::Error { entity, error: err }],
                     }
                 }
             }
-        });
+        }
+    });
 
     (
-        VisualizationCommandSender(cmd_sender),
-        VisualizationEventReceiver(event_receiver),
+        RuntimeTaskSender(cmd_sender),
+        RuntimeMessageReceiver(event_receiver),
     )
 }
 

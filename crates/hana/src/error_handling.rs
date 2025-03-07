@@ -1,7 +1,8 @@
 use bevy::color::palettes::tailwind::*;
 use bevy::prelude::*;
 use error_stack::Report;
-use hana_viz::VisualizationStateChanged;
+use hana_viz::Disconnected;
+//use hana_viz::VisualizationStateChanged;
 
 use crate::error::{Error, Severity};
 
@@ -31,36 +32,27 @@ pub struct ErrorMessage {
     pub created_for: usize, // Index in the ErrorState.errors array
 }
 
-/// System to process errors from Tokio
+/// System to process visualization errors
 pub fn process_visualization_errors(
     mut error_state: ResMut<ErrorState>,
-    mut state_events: EventReader<VisualizationStateChanged>,
-    _exit: EventWriter<AppExit>,
+    disconnected_query: Query<(Entity, &Disconnected), Added<Disconnected>>,
 ) {
-    for event in state_events.read() {
-        // Only process events with errors
-        if let Some(error_msg) = &event.error {
+    for (entity, disconnected) in disconnected_query.iter() {
+        if let Some(error_msg) = &disconnected.error {
             // Log the error
             error!(
-                "Visualization {:?} error in state {}: {}",
-                event.entity, event.new_state, error_msg
+                "Visualization {:?} disconnected with error: {}",
+                entity, error_msg
             );
 
             // Create an error report
             let report = Report::new(Error::Visualization).attach_printable(format!(
-                "Visualization {:?} error in state {}: {}",
-                event.entity, event.new_state, error_msg
+                "Visualization {:?} disconnected with error: {}",
+                entity, error_msg
             ));
 
             // Add the report to our error history
             error_state.errors.push(report);
-
-            // Check for critical errors
-            if event.new_state == "Error" || event.new_state == "Disconnected" {
-                // These are errors but not critical - application can continue
-                // If we had critical errors that should exit the app, we would handle them here
-                // exit.send(AppExit::Error(std::num::NonZeroU8::new(1).unwrap()));
-            }
         }
     }
 }

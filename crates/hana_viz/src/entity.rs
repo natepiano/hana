@@ -42,9 +42,6 @@ pub struct Visualization {
 
     /// Environment filter for logging
     pub env_filter: String,
-
-    /// Additional tags for categorization
-    pub tags: Vec<String>,
 }
 
 /// Component to hold the process when started
@@ -77,9 +74,6 @@ pub struct StartVisualization {
 
     /// Environment filter (defaults to parent process RUST_LOG)
     pub env_filter: Option<String>,
-
-    /// Tags for categorization
-    pub tags: Vec<String>,
 }
 
 /// Event to request shutting down a visualization
@@ -100,17 +94,4 @@ pub struct SendInstruction {
 
     /// Instruction to send
     pub instruction: hana_network::Instruction,
-}
-
-/// Event emitted when a visualization's state changes
-#[derive(Event, Debug, Clone)]
-pub struct VisualizationStateChanged {
-    /// The entity that changed state
-    pub entity: Entity,
-
-    /// The new state (as a string for simplicity)
-    pub new_state: String,
-
-    /// Optional error information
-    pub error: Option<String>,
 }

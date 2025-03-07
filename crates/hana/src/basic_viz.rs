@@ -15,28 +15,27 @@ impl Plugin for BasicVizPlugin {
         app.add_systems(
             Update,
             (
-                viz_start.run_if(just_pressed(Action::Start)),
-                viz_ping.run_if(just_pressed(Action::Ping)),
-                viz_shutdown.run_if(just_pressed(Action::Shutdown)),
+                start_system.run_if(just_pressed(Action::Start)),
+                ping_system.run_if(just_pressed(Action::Ping)),
+                shutdown_system.run_if(just_pressed(Action::Shutdown)),
             ),
         );
     }
 }
 
-fn viz_start(mut start_events: EventWriter<StartVisualization>) {
+fn start_system(mut start_events: EventWriter<StartVisualization>) {
     info!("Starting visualization via hana_viz...");
 
     // Create event to start visualization
     start_events.send(StartVisualization {
-        entity:     None, // Create a new entity
-        path:       Some(PathBuf::from("./target/debug/basic-visualization")),
-        name:       Some("Basic Visualization".to_string()),
+        entity: None, // Create a new entity
+        path: Some(PathBuf::from("./target/debug/basic-visualization")),
+        name: Some("basic-visualization".to_string()),
         env_filter: Some(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())),
-        tags:       vec!["basic".to_string()],
     });
 }
 
-fn viz_ping(
+fn ping_system(
     viz_query: Query<Entity, With<Connected>>,
     mut instruction_events: EventWriter<SendInstruction>,
 ) {
@@ -54,7 +53,7 @@ fn viz_ping(
     }
 }
 
-fn viz_shutdown(
+fn shutdown_system(
     viz_query: Query<Entity, With<Connected>>,
     mut shutdown_events: EventWriter<ShutdownVisualization>,
 ) {

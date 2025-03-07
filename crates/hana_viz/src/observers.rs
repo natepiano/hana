@@ -7,7 +7,6 @@ use crate::entity::*;
 pub fn on_visualization_start(
     trigger: Trigger<OnRemove, Unstarted>,
     visualizations: Query<&Visualization>,
-    mut state_events: EventWriter<VisualizationStateChanged>,
 ) {
     let entity = trigger.entity();
     if let Ok(visualization) = visualizations.get(entity) {
@@ -16,22 +15,12 @@ pub fn on_visualization_start(
             visualization.name, visualization.path
         );
 
-        state_events.send(VisualizationStateChanged {
-            entity,
-            new_state: "Starting".to_string(),
-            error: None,
-        });
-
         // Starting is added by the system that processes the StartVisualization event
     }
 }
 
 /// Observer for when a visualization becomes connected
-pub fn on_visualization_connected(
-    trigger: Trigger<OnAdd, NetworkHandle>,
-    mut state_events: EventWriter<VisualizationStateChanged>,
-    mut commands: Commands,
-) {
+pub fn on_visualization_connected(trigger: Trigger<OnAdd, NetworkHandle>, mut commands: Commands) {
     let entity = trigger.entity();
 
     info!("Visualization connected: {:?}", entity);
@@ -40,19 +29,12 @@ pub fn on_visualization_connected(
         .entity(entity)
         .remove::<Starting>()
         .insert(Connected);
-
-    state_events.send(VisualizationStateChanged {
-        entity,
-        new_state: "Connected".to_string(),
-        error: None,
-    });
 }
 
 /// Observer for when a visualization is disconnected
 pub fn on_visualization_disconnected(
     trigger: Trigger<OnAdd, Disconnected>,
     disconnected: Query<&Disconnected>,
-    mut state_events: EventWriter<VisualizationStateChanged>,
 ) {
     let entity = trigger.entity();
     let error_str = disconnected.get(entity).ok().and_then(|d| d.error.clone());
@@ -61,12 +43,6 @@ pub fn on_visualization_disconnected(
         "Visualization disconnected: {:?} (error: {:?})",
         entity, error_str
     );
-
-    state_events.send(VisualizationStateChanged {
-        entity,
-        new_state: "Disconnected".to_string(),
-        error: error_str,
-    });
 }
 
 /// Observer for when a process handle is removed (process terminated)
@@ -97,7 +73,6 @@ pub fn on_process_terminated(
 pub fn on_visualization_shutdown_complete(
     trigger: Trigger<OnRemove, ShuttingDown>,
     mut commands: Commands,
-    mut state_events: EventWriter<VisualizationStateChanged>,
 ) {
     let entity = trigger.entity();
 
@@ -109,10 +84,4 @@ pub fn on_visualization_shutdown_complete(
         .insert(Unstarted)
         .remove::<Connected>()
         .remove::<Disconnected>();
-
-    state_events.send(VisualizationStateChanged {
-        entity,
-        new_state: "Unstarted".to_string(),
-        error: None,
-    });
 }
