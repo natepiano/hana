@@ -1,6 +1,7 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::HashMap, path::PathBuf};
 
 use bevy::prelude::*;
 use error_stack::{Report, ResultExt};
@@ -15,13 +16,13 @@ use crate::error::{Error, Result};
 pub enum VisualizationCommand {
     /// Start a visualization process and connect to it
     Start {
-        entity: Entity,
-        path: PathBuf,
+        entity:     Entity,
+        path:       PathBuf,
         env_filter: String,
     },
     /// Send a network instruction to the running visualization
     Send {
-        entity: Entity,
+        entity:      Entity,
         instruction: Instruction,
     },
     /// Terminate the visualization process (with optional timeout)
@@ -35,7 +36,7 @@ pub enum VisualizationEvent {
     Started { entity: Entity },
     /// An instruction was sent successfully
     InstructionSent {
-        entity: Entity,
+        entity:      Entity,
         instruction: Instruction,
     },
     /// A visualization has shut down
@@ -43,7 +44,7 @@ pub enum VisualizationEvent {
     /// An error occurred
     Error {
         entity: Entity,
-        error: Report<Error>,
+        error:  Report<Error>,
     },
 }
 

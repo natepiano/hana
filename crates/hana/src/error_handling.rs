@@ -1,9 +1,9 @@
 use bevy::color::palettes::tailwind::*;
-use bevy::prelude::*; // Add this import
+use bevy::prelude::*;
 use error_stack::Report;
+use hana_viz::VisualizationStateChanged;
 
 use crate::error::{Error, Severity};
-use crate::tokio_runtime::{BevyReceiver, BevyVisualizationEvent};
 
 pub struct ErrorHandlingPlugin;
 
@@ -11,8 +11,11 @@ impl Plugin for ErrorHandlingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ErrorState>()
             // Run error processing before display updates
-            .add_systems(Update, process_error_events)
-            .add_systems(Update, (update_error_display,).after(process_error_events));
+            .add_systems(Update, process_visualization_errors)
+            .add_systems(
+                Update,
+                (update_error_display,).after(process_visualization_errors),
+            );
     }
 }
 
@@ -29,26 +32,35 @@ pub struct ErrorMessage {
 }
 
 /// System to process errors from Tokio
-pub fn process_error_events(
+pub fn process_visualization_errors(
     mut error_state: ResMut<ErrorState>,
-    bevy_receiver: Res<BevyReceiver>,
-    mut exit: EventWriter<AppExit>,
+    mut state_events: EventReader<VisualizationStateChanged>,
+    _exit: EventWriter<AppExit>,
 ) {
-    // Process all pending messages from Tokio
-    while let Ok(event) = bevy_receiver.0.try_recv() {
-        if let BevyVisualizationEvent::Failed(report) = event {
-            // Log the entire error report
-            error!("Error received: {report:?}");
+    for event in state_events.read() {
+        // Only process events with errors
+        if let Some(error_msg) = &event.error {
+            // Log the error
+            error!(
+                "Visualization {:?} error in state {}: {}",
+                event.entity, event.new_state, error_msg
+            );
 
-            // Check severity and exit on critical errors
-            let is_critical = matches!(report.current_context(), Error::TokioRuntimeChannelClosed);
-            if is_critical {
-                error!("CRITICAL ERROR detected - application will exit");
-                exit.send(AppExit::Error(std::num::NonZeroU8::new(1).unwrap()));
-            }
+            // Create an error report
+            let report = Report::new(Error::Visualization).attach_printable(format!(
+                "Visualization {:?} error in state {}: {}",
+                event.entity, event.new_state, error_msg
+            ));
 
-            // Add the report to our error history (taking ownership)
+            // Add the report to our error history
             error_state.errors.push(report);
+
+            // Check for critical errors
+            if event.new_state == "Error" || event.new_state == "Disconnected" {
+                // These are errors but not critical - application can continue
+                // If we had critical errors that should exit the app, we would handle them here
+                // exit.send(AppExit::Error(std::num::NonZeroU8::new(1).unwrap()));
+            }
         }
     }
 }
@@ -85,7 +97,6 @@ pub fn update_error_display(
         let error = report.current_context();
         let severity = match error {
             Error::Visualization => Severity::Error,
-            Error::TokioRuntimeChannelClosed => Severity::Critical,
         };
 
         // Get color based on severity

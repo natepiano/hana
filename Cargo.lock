@@ -2138,15 +2138,12 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "error-stack",
- "flume",
  "hana_async",
  "hana_network",
- "hana_visualization",
  "hana_viz",
  "leafwing-input-manager",
  "strum",
  "thiserror 2.0.11",
- "tokio",
  "tracing",
 ]
 
@@ -2199,16 +2196,6 @@ dependencies = [
  "thiserror 2.0.11",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "hana_visualization"
-version = "0.1.0"
-dependencies = [
- "error-stack",
- "hana_network",
- "hana_process",
- "thiserror 2.0.11",
 ]
 
 [[package]]
