@@ -24,16 +24,16 @@ jobs:
         with:
           toolchain: 1.85.0
 
-      - name: Cache dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      # - name: Cache dependencies
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: |
+      #       ~/.cargo/registry
+      #       ~/.cargo/git
+      #       target
+      #     key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      #     restore-keys: |
+      #       ${{ runner.os }}-cargo-
 
       - name: build
         run: cargo build
