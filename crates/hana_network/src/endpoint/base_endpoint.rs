@@ -1,6 +1,5 @@
-use std::fmt::Debug; // Add this import
+use std::fmt::Debug;
 
-use bincode::{config, Decode, Encode};
 use error_stack::{Report, ResultExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -10,7 +9,6 @@ use crate::role::Role;
 use crate::transport::Transport;
 
 /// A network endpoint in the Hana system using the generic transport abstraction
-#[derive(Debug)]
 pub struct Endpoint<R: Role, T: Transport> {
     role:      std::marker::PhantomData<R>,
     transport: T,
@@ -28,11 +26,11 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
     /// R: Sender<M> - a Role is a Sender of a particular kind of HanaMessage
     pub async fn send<M>(&mut self, message: &M) -> Result<()>
     where
-        M: HanaMessage + Debug + Encode,
+        M: HanaMessage + Debug,
         R: Sender<M>,
     {
-        let message_bytes = bincode::encode_to_vec(message, config::standard())
-            .change_context(Error::Encoding)
+        let message_bytes = bincode::serialize(message)
+            .change_context(Error::Serialization)
             .attach_printable_lazy(|| format!("failed to serialize message: '{message:?}'"))
             .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
@@ -64,8 +62,7 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
 
     /// Receive a message (only available if this role implements Receiver for the message type)
     /// R: Receiver<M> - a Role is a Receiver of a particular kind of HanaMessage
-    pub async fn receive<M: HanaMessage + Decode<()>>(&mut self) -> Result<Option<M>>
-    // Add Decode trait bound
+    pub async fn receive<M: HanaMessage>(&mut self) -> Result<Option<M>>
     where
         R: Receiver<M>,
     {
@@ -84,9 +81,8 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
                     })
                     .attach_printable_lazy(|| format!("transport: {:?}", self.transport))?;
 
-                let message = bincode::decode_from_slice::<M, _>(&buffer, config::standard())
-                    .map(|(value, _)| value)
-                    .change_context(Error::Decoding)
+                let message = bincode::deserialize(&buffer)
+                    .change_context(Error::Serialization)
                     .attach_printable_lazy(|| {
                         format!("Failed to deserialize {} bytes into message", buffer.len())
                     })
@@ -153,7 +149,7 @@ mod tests_transport {
     async fn test_transport_receive_message_success() {
         // Create test data
         let instruction = Instruction::Ping;
-        let msg_bytes = bincode::encode_to_vec(&instruction, config::standard()).unwrap();
+        let msg_bytes = bincode::serialize(&instruction).unwrap();
         let len = msg_bytes.len() as u32;
         let mut data = len.to_le_bytes().to_vec();
         data.extend(msg_bytes);

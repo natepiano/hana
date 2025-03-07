@@ -7,7 +7,6 @@ use crate::transport::unix::{UnixConnector, UnixListener, UnixTransport};
 use crate::transport::{TransportConnector, TransportListener};
 
 /// A generic endpoint that can be specialized for different roles in the Hana system
-#[derive(Debug)]
 pub struct RoleBasedEndpoint<R: Role, T: crate::transport::Transport>(Endpoint<R, T>);
 
 /// An endpoint for a Hana controller to connect to and control visualizations
@@ -80,7 +79,7 @@ mod tests_endpoint {
     async fn test_visualization_endpoint_receive_message() {
         // Create test data
         let instruction = Instruction::Ping;
-        let msg_bytes = bincode::encode_to_vec(&instruction, bincode::config::standard()).unwrap();
+        let msg_bytes = bincode::serialize(&instruction).unwrap();
         let len = msg_bytes.len() as u32;
         let mut data = len.to_le_bytes().to_vec();
         data.extend(msg_bytes);

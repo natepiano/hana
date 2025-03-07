@@ -19,7 +19,7 @@ where
     let accept_fut = listener.accept();
 
     // Give a brief moment to ensure accept is started
-    tokio::time::sleep(Duration::from_millis(1)).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Create client connection
     let mut client_transport = connector

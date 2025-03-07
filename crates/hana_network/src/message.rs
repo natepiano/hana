@@ -6,14 +6,14 @@
 //! all you need to do is create a class of messages that can be sent or received is to
 //! ```rust
 //! # use hana_network::message::{HanaMessage, Sender, Receiver};
-//! # use bincode::{Encode, Decode};
+//! # use serde::{Serialize, Deserialize};
 //! # mod role {
 //! #     pub struct HanaApp;
 //! #     pub struct Visualization;
 //! # }
 //!
-//! // create a message type - messages are encoded and decoded with bincode
-//! #[derive(Debug, PartialEq, Clone, Encode, Decode)]
+//! // create a message type
+//! #[derive(Serialize, Deserialize)]
 //! pub enum VisualizationStatus {
 //!     Visualizing,
 //!     DoingOtherStuff,
@@ -36,10 +36,10 @@
 //! might make sense to move to its own crate - HanaMessage's are a form of documentation
 //! for hana behavior. If we split this out, we should probably move Role with it
 //! ass they are tightly coupled
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 /// Messages that can be sent over the Hana network
-pub trait HanaMessage: Encode + Decode<()> {}
+pub trait HanaMessage: Serialize + for<'de> Deserialize<'de> {}
 
 /// Define sender capability for a specific message type
 pub trait Sender<M: HanaMessage> {}
@@ -47,7 +47,7 @@ pub trait Sender<M: HanaMessage> {}
 /// Define receiver capability for a specific message type
 pub trait Receiver<M: HanaMessage> {}
 
-#[derive(Clone, Debug, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {
     Ping,
     Shutdown,

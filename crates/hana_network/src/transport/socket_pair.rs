@@ -49,14 +49,14 @@ impl SocketPairTransport {
     /// The file descriptor must be valid and refer to a Unix socket
     pub unsafe fn from_raw_fd(fd: RawFd) -> Result<Self> {
         // First create a standard Unix stream from the raw fd
-       unsafe  { let std_stream = StdUnixStream::from_raw_fd(fd); 
+        let std_stream = StdUnixStream::from_raw_fd(fd);
 
         // Then convert to a tokio Unix stream
         let tokio_stream = TokioUnixStream::from_std(std_stream)
             .change_context(Error::Io)
             .attach_printable("Failed to convert std UnixStream to tokio UnixStream")?;
 
-        Ok(Self::new(tokio_stream)) }
+        Ok(Self::new(tokio_stream))
     }
 }
 
