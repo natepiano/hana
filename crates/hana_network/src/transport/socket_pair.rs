@@ -56,7 +56,7 @@ impl SocketPairTransport {
 
     pub unsafe fn from_raw_fd(fd: RawFd) -> Result<Self> {
         // First create a standard Unix stream from the raw fd
-        let std_stream = StdUnixStream::from_raw_fd(fd);
+        let std_stream = unsafe { StdUnixStream::from_raw_fd(fd) };
 
         // Set to non-blocking mode
         std_stream
