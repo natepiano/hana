@@ -18,10 +18,19 @@ impl InstructionReceiver {
         let (tx, rx) = mpsc::channel(32);
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("Failed to create tokio runtime");
+                .map_err(|e| {
+                    error_stack::Report::new(Error::CantStartNetworkRuntime)
+                        .attach_printable(format!("Failed to create tokio runtime: {e}"))
+                }) {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    error!("{err}");
+                    return;
+                }
+            };
 
             rt.block_on(async {
                 match Self::run_network(tx).await {
@@ -33,6 +42,25 @@ impl InstructionReceiver {
 
         Self { instruction_rx: rx }
     }
+    // pub fn spawn() -> Self {
+    //     let (tx, rx) = mpsc::channel(32);
+
+    //     std::thread::spawn(move || {
+    //         let rt = tokio::runtime::Builder::new_current_thread()
+    //             .enable_all()
+    //             .build()
+    //             .expect("Failed to create tokio runtime");
+
+    //         rt.block_on(async {
+    //             match Self::run_network(tx).await {
+    //                 Ok(()) => debug!("network connection closed normally"),
+    //                 Err(report) => info!("Visualization running without hana network: {report}"),
+    //             }
+    //         });
+    //     });
+
+    //     Self { instruction_rx: rx }
+    // }
 
     /// bind to the port and attempt to connect to listen for a hana app
     async fn run_network(tx: mpsc::Sender<Instruction>) -> Result<()> {

@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Can't start network runtime")]
+    CantStartNetworkRuntime,
     #[error("Network error")]
     Network,
     #[error("I/O error")]
