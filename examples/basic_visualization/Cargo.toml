@@ -1,7 +1,8 @@
 [package]
-edition = "2024"
+edition.workspace = true
 name    = "basic-visualization"
-version = "0.1.0"
+version.workspace = true
+
 
 [dependencies]
 bevy.workspace        = true
