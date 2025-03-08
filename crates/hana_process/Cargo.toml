@@ -7,8 +7,8 @@ version.workspace = true
 name = "hana_helper"
 path = "src/bin/hana_helper.rs"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-libc = "0.2.170"
+[lints]
+workspace = true
 
 [dependencies]
 bevy.workspace        = true

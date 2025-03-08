@@ -2182,7 +2182,6 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "error-stack",
- "libc",
  "thiserror 2.0.12",
  "tokio",
  "tracing",

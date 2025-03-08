@@ -3,12 +3,12 @@ edition.workspace = true
 name    = "hana_async"
 version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bevy.workspace        = true
 error-stack.workspace = true
 flume.workspace       = true
 thiserror.workspace   = true
 tokio.workspace       = true
-
-[lints]
-workspace = true

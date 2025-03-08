@@ -3,6 +3,9 @@ edition.workspace = true
 name = "hana_viz"
 version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bevy.workspace         = true
 error-stack.workspace  = true
@@ -11,6 +14,3 @@ hana_network.workspace = true
 hana_process.workspace = true
 thiserror.workspace    = true
 tokio.workspace        = true
-
-[lints]
-workspace = true

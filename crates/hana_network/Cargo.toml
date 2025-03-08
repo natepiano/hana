@@ -3,6 +3,9 @@ edition.workspace = true
 name    = "hana_network"
 version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bincode               = { version = "1.3.3" }
 error-stack.workspace = true
