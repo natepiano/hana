@@ -19,12 +19,22 @@ impl SocketPairTransport {
         Self { stream }
     }
 
-    /// Create a socket pair returning the parent and child transports
     pub fn create_pair() -> Result<(Self, Self)> {
         // Create a standard Unix socket pair
         let (stream1, stream2) = StdUnixStream::pair()
             .change_context(Error::Io)
             .attach_printable("Failed to create Unix socket pair")?;
+
+        // Set both sockets to non-blocking mode
+        stream1
+            .set_nonblocking(true)
+            .change_context(Error::Io)
+            .attach_printable("Failed to set socket to non-blocking mode")?;
+
+        stream2
+            .set_nonblocking(true)
+            .change_context(Error::Io)
+            .attach_printable("Failed to set socket to non-blocking mode")?;
 
         // Convert to tokio Unix streams
         let stream1 = TokioUnixStream::from_std(stream1)
@@ -44,12 +54,15 @@ impl SocketPairTransport {
         self.stream.as_raw_fd()
     }
 
-    /// Create a transport from a raw file descriptor
-    /// # Safety
-    /// The file descriptor must be valid and refer to a Unix socket
     pub unsafe fn from_raw_fd(fd: RawFd) -> Result<Self> {
         // First create a standard Unix stream from the raw fd
         let std_stream = StdUnixStream::from_raw_fd(fd);
+
+        // Set to non-blocking mode
+        std_stream
+            .set_nonblocking(true)
+            .change_context(Error::Io)
+            .attach_printable("Failed to set socket from raw fd to non-blocking mode")?;
 
         // Then convert to a tokio Unix stream
         let tokio_stream = TokioUnixStream::from_std(std_stream)
