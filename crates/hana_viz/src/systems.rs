@@ -49,8 +49,8 @@ pub fn handle_start_visualization_requests(
                     });
 
                     let visualization = Visualization {
-                        path: path.clone(),
-                        name: name.clone(),
+                        path:       path.clone(),
+                        name:       name.clone(),
                         env_filter: env_filter.clone(),
                     };
 
@@ -90,13 +90,13 @@ pub fn handle_shutdown_visualization_requests(
 
             // Send command to async worker
             let _ = cmd_sender.0.send(RuntimeTask::Send {
-                entity: event.entity,
+                entity:      event.entity,
                 instruction: Instruction::Shutdown,
             });
 
             // Set a timeout to force terminate if needed
             let _ = cmd_sender.0.send(RuntimeTask::Terminate {
-                entity: event.entity,
+                entity:  event.entity,
                 timeout: Duration::from_millis(event.timeout_ms),
             });
         }
@@ -118,14 +118,14 @@ pub fn handle_send_instruction_requests(
 
             // Send command to async worker
             let _ = cmd_sender.0.send(RuntimeTask::Send {
-                entity: event.entity,
+                entity:      event.entity,
                 instruction: event.instruction.clone(),
             });
         }
     }
 }
 
-// Process events coming backfrom the visualization runtime
+// Process events coming back from the visualization runtime
 pub fn process_outcomes_from_runtime(
     mut commands: Commands,
     messages: Res<crate::runtime::RuntimeMessageReceiver>,

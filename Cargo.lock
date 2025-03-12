@@ -2143,9 +2143,14 @@ dependencies = [
  "bevy",
  "error-stack",
  "flume",
+ "hana_const",
  "thiserror 2.0.12",
  "tokio",
 ]
+
+[[package]]
+name = "hana_const"
+version = "0.1.0"
 
 [[package]]
 name = "hana_input"

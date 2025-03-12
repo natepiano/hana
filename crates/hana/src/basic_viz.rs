@@ -30,9 +30,9 @@ fn start_system(mut start_events: EventWriter<StartVisualization>) {
 
     // Create event to start visualization
     start_events.send(StartVisualization {
-        entity: None, // Create a new entity
-        path: Some(PathBuf::from("./target/debug/basic-visualization")),
-        name: Some("basic-visualization".to_string()),
+        entity:     None, // Create a new entity
+        path:       Some(PathBuf::from("./target/debug/basic-visualization")),
+        name:       Some("basic-visualization".to_string()),
         env_filter: Some(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())),
     });
 }

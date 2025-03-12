@@ -1,4 +1,4 @@
-//! async runtime - covering networking, process managemnt,
+//! async runtime - covering networking, process management,
 //! and channels to bridge between sync and async code
 use std::future::Future;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ fn init_async_runtime(mut commands: Commands, mut exit: EventWriter<AppExit>) {
         Ok(runtime) => commands.insert_resource(runtime),
         Err(report) => {
             error!("CRITICAL ERROR: {report:?}");
-            exit.send(AppExit::from_code(1));
+            exit.send(AppExit::from_code(hana_const::EXIT_ASYNC_RUNTIME_ERROR));
         }
     }
 }
@@ -75,7 +75,8 @@ impl AsyncRuntime {
         flume::unbounded()
     }
 
-    /// Helper method to create our bridge between the async worker and the main bevy ECS system thread(s)
+    /// Helper method to create our bridge between the async worker and the main bevy ECS system
+    /// thread(s)
     pub fn create_worker<Cmd, Msg, F, Fut>(
         &self,
         process_fn: F,

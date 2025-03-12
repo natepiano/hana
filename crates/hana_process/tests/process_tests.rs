@@ -6,6 +6,7 @@ use hana_process::{Error, Process};
 
 const TEST_LOG_FILTER: &str = "warn,hana=warn";
 
+#[allow(clippy::expect_used)]
 #[tokio::test]
 async fn test_spawn_error() {
     let result = tokio::process::Command::new("non_existent_executable")
@@ -75,6 +76,7 @@ async fn test_is_running() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
 #[tokio::test]
 async fn test_io_error_simulation() {
     use std::path::PathBuf;

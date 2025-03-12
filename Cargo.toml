@@ -6,6 +6,7 @@ version = "0.1.0"
 default-members = [
   "crates/hana",
   "crates/hana_async",
+  "crates/hana_const",
   "crates/hana_input",
   "crates/hana_network",
   "crates/hana_plugin",
@@ -16,6 +17,7 @@ default-members = [
 members = [
   "crates/hana",
   "crates/hana_async",
+  "crates/hana_const",
   "crates/hana_input",
   "crates/hana_network",
   "crates/hana_plugin",
@@ -35,6 +37,8 @@ unwrap_used = "deny"
 # Workspace member crates
 #
 hana_async   = { path = "crates/hana_async" }
+hana_const   = { path = "crates/hana_const" }
+# hana_input   = { path = "crates/hana_input" }
 hana_network = { path = "crates/hana_network" }
 hana_plugin  = { path = "crates/hana_plugin" }
 hana_process = { path = "crates/hana_process" }

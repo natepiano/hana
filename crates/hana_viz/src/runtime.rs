@@ -17,13 +17,13 @@ use crate::error::{Error, Result};
 pub enum RuntimeTask {
     /// Start a visualization process and connect to it
     Start {
-        entity: Entity,
-        path: PathBuf,
+        entity:     Entity,
+        path:       PathBuf,
         env_filter: String,
     },
     /// Send a network instruction to the running visualization
     Send {
-        entity: Entity,
+        entity:      Entity,
         instruction: Instruction,
     },
     /// Terminate the visualization process (with optional timeout)
@@ -38,7 +38,7 @@ pub enum RuntimeOutcomeMessage {
     Started { entity: Entity },
     /// An instruction was sent successfully
     InstructionSent {
-        entity: Entity,
+        entity:      Entity,
         instruction: Instruction,
     },
     /// A visualization has shut down
@@ -46,7 +46,7 @@ pub enum RuntimeOutcomeMessage {
     /// An error occurred
     Error {
         entity: Entity,
-        error: Report<Error>,
+        error:  Report<Error>,
     },
 }
 
@@ -65,18 +65,18 @@ pub fn setup_visualization_runtime(
     async_runtime: &AsyncRuntime,
 ) -> (RuntimeTaskSender, RuntimeMessageReceiver) {
     // Create shared state for the worker
-    let state = Arc::new(Mutex::new(Visualizations::new()));
+    let visualizations = Arc::new(Mutex::new(Visualizations::new()));
 
     // Use the create_worker method from AsyncRuntime
     let (cmd_sender, event_receiver) = async_runtime.create_worker(move |command: RuntimeTask| {
-        let state = Arc::clone(&state);
+        let visualizations = Arc::clone(&visualizations);
         async move {
             match command {
                 RuntimeTask::Start {
                     entity,
                     path,
                     env_filter,
-                } => match handle_start(state.clone(), entity, path, env_filter).await {
+                } => match handle_start(visualizations.clone(), entity, path, env_filter).await {
                     Ok(()) => vec![RuntimeOutcomeMessage::Started { entity }],
                     Err(err) => vec![RuntimeOutcomeMessage::Error { entity, error: err }],
                 },
@@ -87,7 +87,7 @@ pub fn setup_visualization_runtime(
                     let instruction_clone = instruction.clone();
                     let was_shutdown = matches!(instruction, Instruction::Shutdown);
 
-                    match handle_send(state.clone(), entity, instruction).await {
+                    match handle_send(visualizations.clone(), entity, instruction).await {
                         Ok(()) => {
                             let mut events = vec![RuntimeOutcomeMessage::InstructionSent {
                                 entity,
@@ -104,7 +104,7 @@ pub fn setup_visualization_runtime(
                     }
                 }
                 RuntimeTask::Terminate { entity, timeout } => {
-                    match handle_terminate(state.clone(), entity, timeout).await {
+                    match handle_terminate(visualizations.clone(), entity, timeout).await {
                         Ok(()) => vec![RuntimeOutcomeMessage::Shutdown { entity }],
                         Err(err) => vec![RuntimeOutcomeMessage::Error { entity, error: err }],
                     }
@@ -120,6 +120,8 @@ pub fn setup_visualization_runtime(
 }
 
 /// current list of active visualizations
+/// we keep a reference to the entity, its running process and the hana side of the networking
+/// endpoint
 struct Visualizations {
     active_visualizations: HashMap<Entity, (Process, HanaEndpoint)>,
 }

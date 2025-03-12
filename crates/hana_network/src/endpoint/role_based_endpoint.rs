@@ -54,6 +54,7 @@ impl<R: Role, T: crate::transport::Transport> DerefMut for RoleBasedEndpoint<R, 
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests_endpoint {
     use super::*;

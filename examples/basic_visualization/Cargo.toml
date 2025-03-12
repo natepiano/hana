@@ -1,6 +1,6 @@
 [package]
 edition.workspace = true
-name    = "basic-visualization"
+name              = "basic-visualization"
 version.workspace = true
 
 

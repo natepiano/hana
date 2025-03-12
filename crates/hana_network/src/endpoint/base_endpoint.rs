@@ -8,9 +8,11 @@ use crate::prelude::*;
 use crate::role::Role;
 use crate::transport::Transport;
 
+const LENGTH_PREFIX_SIZE: usize = 4;
+
 /// A network endpoint in the Hana system using the generic transport abstraction
 pub struct Endpoint<R: Role, T: Transport> {
-    role:      std::marker::PhantomData<R>,
+    role: std::marker::PhantomData<R>,
     transport: T,
 }
 
@@ -66,7 +68,7 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
     where
         R: Receiver<M>,
     {
-        let mut len_bytes = [0u8; 4];
+        let mut len_bytes = [0u8; LENGTH_PREFIX_SIZE];
         match self.transport.read_exact(&mut len_bytes).await {
             Ok(_) => {
                 let len = u32::from_le_bytes(len_bytes) as usize;
@@ -106,6 +108,7 @@ impl<R: Role, T: Transport> Endpoint<R, T> {
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests_transport {
     use super::*;

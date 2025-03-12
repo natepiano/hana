@@ -1,0 +1,9 @@
+[package]
+edition.workspace = true
+name              = "hana_const"
+version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

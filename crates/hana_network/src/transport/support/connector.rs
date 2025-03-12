@@ -33,7 +33,7 @@ pub async fn connect_with_retry<T, E, F, Fut>(
 ) -> Result<T>
 where
     F: Fn() -> Fut + Send,
-    Fut: std::future::Future<Output = std::result::Result<T, E>> + Send,
+    Fut: Future<Output = std::result::Result<T, E>> + Send,
     E: Debug,
 {
     let mut attempts = 0;
