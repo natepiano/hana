@@ -1,3 +1,6 @@
+//! This module contains the mapping of keyboard input to actions in the hana app
+//! such as Ping, Start and Shutdown of visualizations
+//! much much more to come
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use strum::{EnumIter, IntoEnumIterator};

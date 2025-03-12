@@ -2,9 +2,13 @@ use bevy::color::palettes::tailwind::*;
 use bevy::prelude::*;
 use error_stack::Report;
 use hana_viz::Disconnected;
-//use hana_viz::VisualizationStateChanged;
 
 use crate::error::{Error, Severity};
+
+const ERROR_MESSAGE_LEFT_OFFSET: f32 = 10.0;
+const ERROR_MESSAGE_BOTTOM_BASE: f32 = 10.0;
+const ERROR_MESSAGE_SPACING: f32 = 20.0;
+const ERROR_MESSAGE_FONT_SIZE: f32 = 16.0;
 
 pub struct ErrorHandlingPlugin;
 
@@ -113,15 +117,15 @@ pub fn update_error_display(
             // Position with Node component
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(10.0 + (idx as f32 * 20.0)),
-                left: Val::Px(10.0),
+                bottom: Val::Px(ERROR_MESSAGE_SPACING + (idx as f32 * ERROR_MESSAGE_BOTTOM_BASE)),
+                left: Val::Px(ERROR_MESSAGE_LEFT_OFFSET),
                 ..default()
             },
             // Text color component
             TextColor(color.into()),
             // Font size component
             TextFont {
-                font_size: 16.0,
+                font_size: ERROR_MESSAGE_FONT_SIZE,
                 ..default()
             },
             // Our marker component

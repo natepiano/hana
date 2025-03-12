@@ -7,6 +7,8 @@ use tracing::info;
 
 use crate::action::*;
 
+const VISUALIZATION_SHUTDOWN_TIMEOUT_MS: u64 = 5000;
+
 /// Proof of concept plugin to control a visualization for basic functionality
 pub struct BasicVizPlugin;
 
@@ -64,7 +66,7 @@ fn shutdown_system(
         // Send shutdown event
         shutdown_events.send(ShutdownVisualization {
             entity,
-            timeout_ms: 5000, // 5 seconds timeout
+            timeout_ms: VISUALIZATION_SHUTDOWN_TIMEOUT_MS, // 5 seconds timeout
         });
     } else {
         warn!("No connected visualization to shut down");

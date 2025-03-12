@@ -1,3 +1,5 @@
+//! async runtime - covering networking, process managemnt,
+//! and channels to bridge between sync and async code
 use std::future::Future;
 use std::sync::Arc;
 

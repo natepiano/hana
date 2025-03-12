@@ -3,6 +3,10 @@ use bevy::prelude::*;
 
 pub struct OscillatingGizmoPlugin;
 
+const DEFAULT_MIN_SCALE: f32 = 0.4;
+const DEFAULT_MAX_SCALE: f32 = 0.45;
+const DEFAULT_FREQUENCY: f32 = 5.0;
+
 impl Plugin for OscillatingGizmoPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
@@ -20,9 +24,9 @@ struct CircleGizmoParams {
 fn setup(mut commands: Commands) {
     // Parameters for our oscillating circle
     commands.insert_resource(CircleGizmoParams {
-        min_scale: 0.4,
-        max_scale: 0.45,
-        frequency: 5.0,
+        min_scale: DEFAULT_MIN_SCALE,
+        max_scale: DEFAULT_MAX_SCALE,
+        frequency: DEFAULT_FREQUENCY,
     });
 }
 

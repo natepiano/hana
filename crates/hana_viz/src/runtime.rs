@@ -65,7 +65,7 @@ pub fn setup_visualization_runtime(
     async_runtime: &AsyncRuntime,
 ) -> (RuntimeTaskSender, RuntimeMessageReceiver) {
     // Create shared state for the worker
-    let state = Arc::new(Mutex::new(VisualizationState::new()));
+    let state = Arc::new(Mutex::new(Visualizations::new()));
 
     // Use the create_worker method from AsyncRuntime
     let (cmd_sender, event_receiver) = async_runtime.create_worker(move |command: RuntimeTask| {
@@ -119,12 +119,12 @@ pub fn setup_visualization_runtime(
     )
 }
 
-/// Internal state for the visualization worker
-struct VisualizationState {
+/// current list of active visualizations
+struct Visualizations {
     active_visualizations: HashMap<Entity, (Process, HanaEndpoint)>,
 }
 
-impl VisualizationState {
+impl Visualizations {
     fn new() -> Self {
         Self {
             active_visualizations: HashMap::new(),
@@ -134,7 +134,7 @@ impl VisualizationState {
 
 /// Handle starting a visualization
 async fn handle_start(
-    state: Arc<Mutex<VisualizationState>>,
+    state: Arc<Mutex<Visualizations>>,
     entity: Entity,
     path: PathBuf,
     env_filter: String,
@@ -180,7 +180,7 @@ async fn handle_start(
 
 /// Handle terminating a visualization process
 async fn handle_terminate(
-    state: Arc<Mutex<VisualizationState>>,
+    state: Arc<Mutex<Visualizations>>,
     entity: Entity,
     timeout: Duration,
 ) -> Result<()> {
@@ -213,7 +213,7 @@ async fn handle_terminate(
 
 /// Handle sending an instruction to the visualization
 async fn handle_send(
-    state: Arc<Mutex<VisualizationState>>,
+    state: Arc<Mutex<Visualizations>>,
     entity: Entity,
     instruction: Instruction,
 ) -> Result<()> {
