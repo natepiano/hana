@@ -1,6 +1,6 @@
 # Node Editor
 ## General
-- Nodes, cables, controls should be meshes that look real - with lighting and shadows and physics as appropriate. Graviy would be off for nodes but on for cables maybe - so the physics engine would be what makes them hang - they'd need to be articulated cables for that to work, I believe.
+- Nodes, cables, controls should be meshes that look real - with lighting and shadows and physics as appropriate. Gravity would be off for nodes but on for cables maybe - so the physics engine would be what makes them hang - they'd need to be articulated cables for that to work, I believe.
 
 ## Node
 - nodes are cubes with controls, visualizations, connectors on different faces
@@ -22,7 +22,7 @@
 - cables automatically route
 - cables can be tensioned differently
 - moving connected nodes can either cause the cables to extend - or you could lock the section of nodes (or all nodes) and pulling on a cable pulls everything it's attached to - physics engine can manage this
-- cables can have transparency (including invsisible)
+- cables can have transparency (including invisible)
 
 ## Navigation
 - Essentially it's a voxel world - you can zoom in and out, rotate and move to any position around it - very fast and responsive.

@@ -7,5 +7,5 @@ Editors (Node, Environment, Player?) will share functionality - inventory comes 
 
 
 ## Inventory
-- In the node editor, add nodes with [command paelette](./design/command_palette) or from an inventory - maybe both are available. Potentially you could intermix command palette and a visual representation so taht when you choose a category you fly (whoosh) to that area - or directly to a searched for item.
+- In the node editor, add nodes with [command palette](../design/command_palette.md) or from an inventory - maybe both are available. Potentially you could intermix command palette and a visual representation so that when you choose a category you fly (whoosh) to that area - or directly to a searched for item.
 - Probably more generally, we're will be inventory management in the various editors so why not make them work the same way
