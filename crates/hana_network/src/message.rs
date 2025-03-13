@@ -13,7 +13,7 @@
 //! # }
 //!
 //! // create a message type
-//! #[derive(Serialize, Deserialize)]
+//! #[derive(Encode, Decode)]
 //! pub enum VisualizationStatus {
 //!     Visualizing,
 //!     DoingOtherStuff,
