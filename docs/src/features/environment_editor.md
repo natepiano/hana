@@ -1,0 +1,3 @@
+# Environment Editor
+## inspiration
+https://www.configura.com/products/cet/commercial-interiors - imagine configura as the environment editor. they have an sdk but it's all c/c++. they mention windows a lot...

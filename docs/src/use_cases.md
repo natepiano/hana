@@ -1,5 +1,8 @@
 # Use Cases
 
+## generative art
+think touchdesigner or artmatic - but much much much easier to use - you don't need a tutorial for every single operation
+
 ## live music
 A band is playing live music and is projecting visuals onto a screen behind the stage. The keyboard player has hooked up their MPE keyboard to their laptop which is also running hana and controlling a visualization. With the MPE keyboard (such as a ROLI Seaboard), they can use pressure, velocity, sliding on the keys to control the visualization - rotating, zooming, panning, increasing or decreasing complexity, speeding up or slowing down, changing color, changing shape, changing texture, changing material, changing lighting changing everything. Individual keys can easily be mapped to visualization parameters to give full control over the visualization from a player on stage.
 

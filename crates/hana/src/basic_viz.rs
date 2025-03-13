@@ -30,9 +30,9 @@ fn start_system(mut start_events: EventWriter<StartVisualization>) {
 
     // Create event to start visualization
     start_events.send(StartVisualization {
-        entity:     None, // Create a new entity
-        path:       Some(PathBuf::from("./target/debug/basic-visualization")),
-        name:       Some("basic-visualization".to_string()),
+        entity: None, // Create a new entity
+        path: Some(PathBuf::from("./target/debug/basic-visualization")),
+        name: Some("basic-visualization".to_string()),
         env_filter: Some(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())),
     });
 }
@@ -44,14 +44,16 @@ fn ping_system(
     info!("Pinging visualization via hana_viz...");
 
     // Find first connected visualization
-    if let Some(entity) = viz_query.iter().next() {
-        // Send ping instruction
-        instruction_events.send(SendInstruction {
-            entity,
-            instruction: Instruction::Ping,
-        });
-    } else {
-        warn!("No connected visualization to ping");
+    match viz_query.iter().next() {
+        Some(entity) => {
+            instruction_events.send(SendInstruction {
+                entity,
+                instruction: Instruction::Ping,
+            });
+        }
+        None => {
+            warn!("No connected visualization to ping");
+        }
     }
 }
 
