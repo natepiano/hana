@@ -1,5 +1,6 @@
 # Summary
 [Introduction](./README.md)
+[Script](./script.md)
 [Use Cases](./use_cases.md)
 [Hana in Other Languages](./hana_in_other_languages.md)
 [Design Overview](./design/overview.md)
@@ -8,6 +9,8 @@
   - [Collaboration](./features/collaboration.md)
   - [Environment Editor](./features/environment_editor.md)
   - [Node Editor](./features/node_editor.md)
+  - [Node Types](./features/node_types.md)
+  - [Displays](./features/displays.md)
   - [General](./features/general.md)
   - [Mobile](./features/mobile.md)
   - [Player](./features/player.md)
