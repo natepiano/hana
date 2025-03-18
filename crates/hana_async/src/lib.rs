@@ -1,5 +1,8 @@
 //! async runtime - covering networking, process management,
 //! and channels to bridge between sync and async code
+mod error;
+mod worker;
+
 use std::future::Future;
 use std::sync::Arc;
 
@@ -8,14 +11,8 @@ use error_stack::{Result, ResultExt};
 use flume::{Receiver, Sender};
 use tokio::runtime::Runtime;
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("Runtime channel closed")]
-    ChannelClosed,
-
-    #[error("Tokio runtime creation failed")]
-    RuntimeCreationFailed,
-}
+use crate::error::Error;
+pub use crate::worker::{CommandSender, MessageReceiver, Worker};
 
 /// Plugin that adds async runtime support to a Bevy app
 pub struct AsyncRuntimePlugin;
@@ -122,34 +119,5 @@ impl AsyncRuntime {
         T: Send + 'static,
     {
         self.runtime.block_on(future)
-    }
-}
-
-/// Typed wrapper for command senders
-#[derive(Clone)]
-pub struct CommandSender<T>(Sender<T>);
-
-impl<T> CommandSender<T>
-where
-    T: Send + Clone + std::fmt::Debug + 'static,
-{
-    pub fn send(&self, command: T) -> std::result::Result<(), flume::SendError<T>> {
-        self.0.send(command)
-    }
-}
-
-/// Typed wrapper for event receivers
-pub struct MessageReceiver<T>(Receiver<T>);
-
-impl<T> MessageReceiver<T>
-where
-    T: Send + 'static,
-{
-    pub fn try_recv(&self) -> Option<T> {
-        self.0.try_recv().ok()
-    }
-
-    pub fn receiver(&self) -> &Receiver<T> {
-        &self.0
     }
 }

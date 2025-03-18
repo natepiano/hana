@@ -1,8 +1,13 @@
+//! basic visualization handler
+//! actions from leafwing are handled and sent as events which will be read in hana_viz
+//! to get
 use std::path::PathBuf;
 
 use bevy::prelude::*;
 use hana_network::Instruction;
-use hana_viz::{Connected, SendInstruction, ShutdownVisualization, StartVisualization};
+use hana_viz::{
+    Connected, SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent,
+};
 use tracing::info;
 
 use crate::action::*;
@@ -25,11 +30,11 @@ impl Plugin for BasicVizPlugin {
     }
 }
 
-fn start_system(mut start_events: EventWriter<StartVisualization>) {
-    info!("Starting visualization via hana_viz...");
+fn start_system(mut start_writer: EventWriter<StartVisualizationEvent>) {
+    info!("F1 press sends StartVisualizationEvent");
 
     // Create event to start visualization
-    start_events.send(StartVisualization {
+    start_writer.send(StartVisualizationEvent {
         entity: None, // Create a new entity
         path: Some(PathBuf::from("./target/debug/basic-visualization")),
         name: Some("basic-visualization".to_string()),
@@ -39,14 +44,14 @@ fn start_system(mut start_events: EventWriter<StartVisualization>) {
 
 fn ping_system(
     viz_query: Query<Entity, With<Connected>>,
-    mut instruction_events: EventWriter<SendInstruction>,
+    mut instruction_writer: EventWriter<SendInstructionEvent>,
 ) {
     info!("Pinging visualization via hana_viz...");
 
     // Find first connected visualization
     match viz_query.iter().next() {
         Some(entity) => {
-            instruction_events.send(SendInstruction {
+            instruction_writer.send(SendInstructionEvent {
                 entity,
                 instruction: Instruction::Ping,
             });
@@ -59,14 +64,14 @@ fn ping_system(
 
 fn shutdown_system(
     viz_query: Query<Entity, With<Connected>>,
-    mut shutdown_events: EventWriter<ShutdownVisualization>,
+    mut shutdown_writer: EventWriter<ShutdownVisualizationEvent>,
 ) {
-    info!("Shutting down visualization via hana_viz...");
+    info!("F2 press sends ShutdownVisualizationEvent");
 
     // Find first connected visualization
     if let Some(entity) = viz_query.iter().next() {
         // Send shutdown event
-        shutdown_events.send(ShutdownVisualization {
+        shutdown_writer.send(ShutdownVisualizationEvent {
             entity,
             timeout_ms: VISUALIZATION_SHUTDOWN_TIMEOUT_MS, // 5 seconds timeout
         });

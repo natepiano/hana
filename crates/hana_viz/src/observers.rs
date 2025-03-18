@@ -1,87 +1,93 @@
 //! Observer functions for visualization state transitions
+//! at this point, this is more of a debugging tool but very helpful for that
+//! in the future observed behavior probably can and should cause subsequent
+//! changes in the UI
 use bevy::prelude::*;
 
-use crate::entity::*;
+use crate::visualization::{
+    Connected, Disconnected, ShuttingDown, Starting, Unstarted, Visualization,
+};
 
-/// Observer for when a visualization starts (Unstarted is removed)
-pub fn on_visualization_start(
-    trigger: Trigger<OnRemove, Unstarted>,
+/// Observer for when a visualization enters the Starting state
+pub fn on_visualization_starting(
+    trigger: Trigger<OnAdd, Starting>,
     visualizations: Query<&Visualization>,
 ) {
     let entity = trigger.entity();
     if let Ok(visualization) = visualizations.get(entity) {
         info!(
-            "Starting visualization: {} from {:?}",
-            visualization.name, visualization.path
+            "observing Trigger<OnAdd, Starting>: {} (path: {:?}, entity: {:?})",
+            visualization.name, visualization.path, entity
         );
-
-        // Starting is added by the system that processes the StartVisualization event
+    } else {
+        info!("Visualization starting: entity {:?}", entity);
     }
 }
 
 /// Observer for when a visualization becomes connected
-pub fn on_visualization_connected(trigger: Trigger<OnAdd, NetworkHandle>, mut commands: Commands) {
+pub fn on_visualization_connected(
+    trigger: Trigger<OnAdd, Connected>,
+    visualizations: Query<&Visualization>,
+) {
     let entity = trigger.entity();
-
-    info!("Visualization connected: {:?}", entity);
-
-    commands
-        .entity(entity)
-        .remove::<Starting>()
-        .insert(Connected);
+    if let Ok(visualization) = visualizations.get(entity) {
+        info!(
+            "observing Trigger<OnAdd, Connected>: {} (entity: {:?})",
+            visualization.name, entity
+        );
+    } else {
+        info!("Visualization connected: entity {:?}", entity);
+    }
 }
 
 /// Observer for when a visualization is disconnected
 pub fn on_visualization_disconnected(
     trigger: Trigger<OnAdd, Disconnected>,
-    disconnected: Query<&Disconnected>,
+    visualizations: Query<(&Disconnected, Option<&Visualization>)>,
 ) {
     let entity = trigger.entity();
-    let error_str = disconnected.get(entity).ok().and_then(|d| d.error.clone());
-
-    info!(
-        "Visualization disconnected: {:?} (error: {:?})",
-        entity, error_str
-    );
-}
-
-/// Observer for when a process handle is removed (process terminated)
-pub fn on_process_terminated(
-    trigger: Trigger<OnRemove, ProcessHandle>,
-    mut commands: Commands,
-    network_handles: Query<Entity, With<NetworkHandle>>,
-    shutting_down: Query<(), With<ShuttingDown>>,
-) {
-    let entity = trigger.entity();
-
-    info!("Visualization process terminated: {:?}", entity);
-
-    // If the entity still has a network handle, remove it
-    if network_handles.get(entity).is_ok() {
-        commands.entity(entity).remove::<NetworkHandle>();
-    }
-
-    // Add Disconnected if not already shutting down
-    if shutting_down.get(entity).is_err() {
-        commands.entity(entity).insert(Disconnected {
-            error: Some("Process terminated unexpectedly".to_string()),
-        });
+    if let Ok((disconnected, maybe_viz)) = visualizations.get(entity) {
+        let name = maybe_viz.map(|v| v.name.as_str()).unwrap_or("Unknown");
+        info!(
+            "observing Trigger<OnAdd, Disconnected>: {} (entity: {:?}, error: {:?})",
+            name, entity, disconnected.error
+        );
+    } else {
+        info!("Visualization disconnected: entity {:?}", entity);
     }
 }
 
-/// Observer for when a visualization finishes shutting down
-pub fn on_visualization_shutdown_complete(
-    trigger: Trigger<OnRemove, ShuttingDown>,
-    mut commands: Commands,
+/// Observer for when a visualization enters the shutting down state
+pub fn on_visualization_shutting_down(
+    trigger: Trigger<OnAdd, ShuttingDown>,
+    visualizations: Query<&Visualization>,
 ) {
     let entity = trigger.entity();
+    if let Ok(visualization) = visualizations.get(entity) {
+        info!(
+            "observing Trigger<OnAdd, ShuttingDown>: {} (entity: {:?})",
+            visualization.name, entity
+        );
+    } else {
+        info!("Visualization shutting down: entity {:?}", entity);
+    }
+}
 
-    info!("Visualization shutdown complete: {:?}", entity);
-
-    // Return to unstarted state
-    commands
-        .entity(entity)
-        .insert(Unstarted)
-        .remove::<Connected>()
-        .remove::<Disconnected>();
+/// Observer for when a visualization returns to unstarted state
+pub fn on_visualization_unstarted(
+    trigger: Trigger<OnAdd, Unstarted>,
+    visualizations: Query<&Visualization>,
+) {
+    let entity = trigger.entity();
+    if let Ok(visualization) = visualizations.get(entity) {
+        info!(
+            "observing Trigger<OnAdd, Unstarted>: {} (entity: {:?})",
+            visualization.name, entity
+        );
+    } else {
+        info!(
+            "observing Trigger<OnAdd, Unstarted> (else block of if let Ok()): entity {:?}",
+            entity
+        );
+    }
 }

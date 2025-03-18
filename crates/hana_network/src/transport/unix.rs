@@ -33,7 +33,7 @@ impl fmt::Debug for UnixTransport {
 
 pub struct UnixListener {
     listener: TokioUnixListener,
-    path:     PathBuf,
+    path: PathBuf,
 }
 
 impl UnixListener {
@@ -115,7 +115,7 @@ impl TransportConnector for UnixConnector {
     type Transport = UnixTransport;
 
     async fn connect(&self) -> Result<Self::Transport> {
-        debug!("Connecting via Unix Sockets to {:?}", &self.path);
+        tracing::info!("Connecting via Unix Sockets to {:?}", &self.path);
 
         let path = self.path.clone();
 

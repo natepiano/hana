@@ -1,8 +1,21 @@
+//! visualization entity states and events that correspond
+//! to instructions that can be sent to the visualization
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use hana_network::HanaEndpoint;
-use hana_process::Process;
+
+/// Main component for visualization metadata
+#[derive(Component, Debug)]
+pub struct Visualization {
+    /// Path to the visualization executable
+    pub path: PathBuf,
+
+    /// Human-readable name for the visualization
+    pub name: String,
+
+    /// Environment filter for logging
+    pub env_filter: String,
+}
 
 // --- State Marker Components ---
 
@@ -29,40 +42,10 @@ pub struct Disconnected {
 #[derive(Component, Debug)]
 pub struct ShuttingDown;
 
-// --- Core Components ---
-
-/// Main component for visualization metadata
-#[derive(Component, Debug)]
-pub struct Visualization {
-    /// Path to the visualization executable
-    pub path: PathBuf,
-
-    /// Human-readable name for the visualization
-    pub name: String,
-
-    /// Environment filter for logging
-    pub env_filter: String,
-}
-
-/// Component to hold the process when started
-#[derive(Component)]
-pub struct ProcessHandle {
-    /// The underlying process
-    pub process: Process,
-}
-
-/// Component to hold the network connection when established
-#[derive(Component)]
-pub struct NetworkHandle {
-    /// The network endpoint
-    pub endpoint: HanaEndpoint,
-}
-
 // --- Events ---
-
 /// Event to request starting a visualization
 #[derive(Event, Debug, Clone)]
-pub struct StartVisualization {
+pub struct StartVisualizationEvent {
     /// Target entity to start (if None, creates a new visualization)
     pub entity: Option<Entity>,
 
@@ -78,7 +61,7 @@ pub struct StartVisualization {
 
 /// Event to request shutting down a visualization
 #[derive(Event, Debug, Clone)]
-pub struct ShutdownVisualization {
+pub struct ShutdownVisualizationEvent {
     /// Target entity to shut down
     pub entity: Entity,
 
@@ -88,7 +71,7 @@ pub struct ShutdownVisualization {
 
 /// Event to request sending an instruction to a visualization
 #[derive(Event, Debug, Clone)]
-pub struct SendInstruction {
+pub struct SendInstructionEvent {
     /// Target entity
     pub entity: Entity,
 

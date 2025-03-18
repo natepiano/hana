@@ -1,48 +1,41 @@
 //! Main plugin for hana_viz
-use bevy::prelude::*;
-use hana_async::AsyncRuntime;
 
-use crate::entity::*;
-use crate::observers::*;
-use crate::runtime::*;
-use crate::systems::*;
+use bevy::prelude::*;
+
+use crate::{
+    SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent, async_handlers,
+    event_systems, observers,
+};
 
 /// Main plugin for visualization management
 pub struct HanaVizPlugin;
 
 impl Plugin for HanaVizPlugin {
     fn build(&self, app: &mut App) {
-        // Setup runtime resources (using the on_startup pattern)
-        app.add_systems(Startup, setup_viz_runtime);
+        // Setup runtime resources
+        app.add_systems(Startup, async_handlers::setup_visualization_worker);
 
         // Register events
-        app.add_event::<StartVisualization>()
-            .add_event::<ShutdownVisualization>()
-            .add_event::<SendInstruction>();
+        app.add_event::<StartVisualizationEvent>()
+            .add_event::<ShutdownVisualizationEvent>()
+            .add_event::<SendInstructionEvent>();
 
-        // Add systems when they're created
+        // Add systems
         app.add_systems(
             Update,
             (
-                process_outcomes_from_runtime,
-                handle_start_visualization_requests,
-                handle_shutdown_visualization_requests,
-                handle_send_instruction_requests,
+                event_systems::process_worker_outcomes,
+                event_systems::handle_start_visualization_event,
+                event_systems::handle_shutdown_visualization_event,
+                event_systems::handle_send_instruction_event,
             ),
         );
 
         // Add observers
-        app.add_observer(on_visualization_start);
-        app.add_observer(on_visualization_connected);
-        app.add_observer(on_visualization_disconnected);
-        app.add_observer(on_process_terminated);
-        app.add_observer(on_visualization_shutdown_complete);
+        app.add_observer(observers::on_visualization_starting);
+        app.add_observer(observers::on_visualization_connected);
+        app.add_observer(observers::on_visualization_disconnected);
+        app.add_observer(observers::on_visualization_shutting_down);
+        app.add_observer(observers::on_visualization_unstarted);
     }
-}
-
-/// System to initialize the visualization runtime
-fn setup_viz_runtime(mut commands: Commands, async_runtime: Res<AsyncRuntime>) {
-    let (cmd_sender, event_receiver) = setup_visualization_runtime(&async_runtime);
-    commands.insert_resource(cmd_sender);
-    commands.insert_resource(event_receiver);
 }

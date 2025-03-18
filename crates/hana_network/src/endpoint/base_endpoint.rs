@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use bincode::{config, Decode, Encode};
+use bincode::{Decode, Encode, config};
 use error_stack::{Report, ResultExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
