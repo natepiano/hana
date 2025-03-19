@@ -13,7 +13,12 @@ use crate::process_control::ProcessControl;
 #[derive(Debug, Component)]
 pub struct Process<P: ProcessControl> {
     pub child: P,
-    path:      PathBuf,
+    path: PathBuf,
+}
+
+pub enum RunningState {
+    Running,
+    Exited,
 }
 
 // Provide a concrete implementation for the common case
@@ -66,10 +71,10 @@ impl<P: ProcessControl> Process<P> {
     // because is questions imply immutability
     // try_wait() requires &mut self so let's just override it
     #[allow(clippy::wrong_self_convention)]
-    pub async fn is_running(&mut self) -> Result<bool> {
+    pub async fn is_running(&mut self) -> Result<RunningState> {
         match self.child.try_wait() {
-            Ok(Some(_)) => Ok(false), // Process has exited
-            Ok(None) => Ok(true),     // Process is still running
+            Ok(Some(_)) => Ok(RunningState::Exited), // Process has exited
+            Ok(None) => Ok(RunningState::Running),   // Process is still running
             Err(e) => Err(Report::new(e).change_context(Error::ProcessCheckFailed {
                 path: self.path.clone(),
             })),
@@ -96,7 +101,7 @@ async fn test_is_running_error() {
 
     let mut process = Process {
         child: mock,
-        path:  test_path.clone(),
+        path: test_path.clone(),
     };
 
     let result = process.is_running().await;

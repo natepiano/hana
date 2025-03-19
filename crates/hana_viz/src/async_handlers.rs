@@ -30,7 +30,6 @@ use crate::visualizations::Visualizations;
 pub fn setup_visualization_worker(mut commands: Commands, async_runtime: Res<AsyncRuntime>) {
     // Create the hashmap of visualizations that we will interact with for networking and process management
     let visualizations = Arc::new(Mutex::new(Visualizations::new()));
-
     // Create the worker using the new pattern
     // currently returning a  because within handle_send_instruction we check if it was a shutdown message
     // and we add an extra AsyncOutcome::Shutdown that goes along with the AsyncOutcome::Instruction
@@ -124,66 +123,41 @@ pub async fn handle_shutdown(
     timeout: Duration,
 ) -> Result<()> {
     debug!(
-        "Attempting to terminate visualization for entity {:?} with timeout: {:?}",
+        "AsyncInstruction::Shutdown - attempting to terminate visualization for entity {:?} with timeout: {:?}",
         entity, timeout
     );
 
-    // Start time for tracking timeout
-    let start_time = std::time::Instant::now();
-
-    // First, try to wait for graceful shutdown
-    loop {
-        // Check if timeout elapsed
-        if start_time.elapsed() >= timeout {
-            debug!(
-                "Timeout reached for entity {:?}, forcing termination",
-                entity
-            );
-            break;
-        }
-
-        // Check process status
-        let mut visualizations_guard = visualizations.lock().await;
-        if let Some(entry) = visualizations_guard.active_visualizations.get_mut(&entity) {
-            let (process, _) = entry;
-            match process.is_running().await {
-                Ok(false) => {
-                    // Process has already exited gracefully
-                    debug!("Process for entity {:?} has gracefully shutdown", entity);
-                    // Remove it from active_visualizations and return success
-                    visualizations_guard.active_visualizations.remove(&entity);
-                    return Ok(());
-                }
-                Ok(true) => {
-                    // Still running, release lock and wait a bit
-                    drop(visualizations_guard);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    continue;
-                }
-                Err(e) => {
-                    // Error checking status, log and break to force termination
-                    debug!("Error checking process status: {:?}", e);
-                    break;
-                }
+    // Get the process, removing it from visualizations map
+    let process = {
+        let mut vis_guard = visualizations.lock().await;
+        match vis_guard.active_visualizations.remove(&entity) {
+            Some((process, _)) => process,
+            None => {
+                debug!(
+                    "AsyncInstruction::Shutdown - no active visualization found for entity {:?}",
+                    entity
+                );
+                return Ok(()); // Already removed
             }
-        } else {
-            // Process already removed
-            debug!("No active visualization found for entity {:?}", entity);
-            return Ok(());
         }
-    }
-
-    // If we reach here, we need to force termination
-    // Take the visualization out of the map
-    let viz_option = {
-        let mut visualizations_guard = visualizations.lock().await;
-        visualizations_guard.active_visualizations.remove(&entity)
     };
 
-    if let Some((process, _)) = viz_option {
-        debug!("Forcefully terminating process for entity {:?}", entity);
-        // The process will be dropped here, which should clean up resources
-        drop(process);
+    // Use the existing ensure_shutdown method
+    match process.ensure_shutdown(timeout).await {
+        Ok(()) => {
+            debug!(
+                "AsyncInstruction::Shutdown - process for entity {:?} exited gracefully",
+                entity
+            );
+        }
+        Err(err) => {
+            // This happens when the timeout was reached and the process was killed
+            debug!(
+                "AsyncInstruction::Shutdown - process for entity {:?} timed out and was forcibly terminated: {:?}",
+                entity, err
+            );
+            // We don't propagate this error since the process was successfully killed
+        }
     }
 
     Ok(())
@@ -200,7 +174,7 @@ pub async fn handle_send_instruction(
 
     if let Some((_, endpoint)) = visualizations_guard.active_visualizations.get_mut(&entity) {
         debug!(
-            "Sending instruction to entity {:?}: {:?}",
+            "AsyncInstruction::SendInstruction to entity {:?}: {:?}",
             entity, instruction
         );
 
@@ -214,7 +188,10 @@ pub async fn handle_send_instruction(
                 instruction, entity
             ))?;
 
-        debug!("Instruction sent successfully to entity {:?}", entity);
+        debug!(
+            "AsyncInstruction::SendInstruction - sent successfully to entity {:?}",
+            entity
+        );
 
         // Remove the cleanup for shutdown instructions - this is now handled by terminate
         // This is the key change - we're not removing the visualization immediately

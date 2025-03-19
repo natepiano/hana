@@ -25,7 +25,7 @@ impl Plugin for HanaVizPlugin {
         app.add_systems(
             Update,
             (
-                event_systems::process_worker_outcomes,
+                event_systems::process_async_outcomes,
                 event_systems::handle_start_visualization_event,
                 event_systems::handle_shutdown_visualization_event,
                 event_systems::handle_send_instruction_event,

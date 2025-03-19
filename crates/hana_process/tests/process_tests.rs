@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use error_stack::ResultExt;
-use hana_process::{Error, Process};
+use hana_process::{Error, Process, RunningState};
 
 const TEST_LOG_FILTER: &str = "warn,hana=warn";
 
@@ -57,8 +57,14 @@ async fn test_is_running() -> Result<(), Box<dyn std::error::Error>> {
     let mut process = Process::run(helper_path, TEST_LOG_FILTER).await?;
 
     // Check that it's running
-    let running = process.is_running().await?;
-    assert!(running, "Process should be running initially");
+    match process.is_running().await? {
+        RunningState::Running => {
+            // This is expected, process should be running initially
+        }
+        RunningState::Exited => {
+            panic!("Process should be running initially");
+        }
+    }
 
     // Kill the process and handle io::Error conversion
     process.child.kill().await?;
@@ -67,11 +73,14 @@ async fn test_is_running() -> Result<(), Box<dyn std::error::Error>> {
     process.child.wait().await?;
 
     // Now we can be sure the process has exited
-    let running = process.is_running().await?;
-    assert!(
-        !running,
-        "Process should not be running after kill and wait"
-    );
+    match process.is_running().await? {
+        RunningState::Exited => {
+            // This is expected, process should not be running after kill and wait
+        }
+        RunningState::Running => {
+            panic!("Process should not be running after kill and wait");
+        }
+    }
 
     Ok(())
 }

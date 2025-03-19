@@ -45,7 +45,7 @@ impl InstructionReceiver {
 
     /// bind to the port and attempt to connect to listen for a hana app
     async fn run_network(tx: mpsc::Sender<Instruction>) -> Result<()> {
-        info!("checking for hana app");
+        info!("viz_plugin: checking for hana app");
         match tokio::time::timeout(
             Duration::from_secs(5),
             VisualizationEndpoint::listen_for_hana(),
@@ -53,7 +53,7 @@ impl InstructionReceiver {
         .await
         {
             Ok(Ok(endpoint)) => {
-                info!("hana app connected successfully");
+                info!("viz_plugin: hana app connected successfully");
                 Self::forward_instruction_to_channel(endpoint, tx).await
             }
             Ok(Err(e)) => Err(e
@@ -79,11 +79,11 @@ impl InstructionReceiver {
             {
                 Some(instruction) => match instruction {
                     Instruction::Shutdown => {
-                        debug!("Gracefully shutting down Visualization");
+                        debug!("viz_plugin: gracefully shutting down");
                         std::process::exit(0);
                     }
                     instruction => {
-                        tracing::debug!("Received instruction {:?}", instruction);
+                        tracing::debug!("viz_plugin: received instruction {:?}", instruction);
 
                         tx.send(instruction)
                             .await
@@ -92,7 +92,7 @@ impl InstructionReceiver {
                     }
                 },
                 None => {
-                    debug!("hana app disconnected");
+                    debug!("viz_plugin: hana app disconnected");
                     return Ok(());
                 }
             }

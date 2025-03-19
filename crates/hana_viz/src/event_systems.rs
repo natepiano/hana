@@ -38,7 +38,7 @@ pub fn handle_start_visualization_event(
         );
 
         info!(
-            "Starting visualization: {} (path: {:?})",
+            "StartVisualizationEvent: {} (path: {:?})",
             event.name, event.path
         );
 
@@ -64,7 +64,7 @@ pub fn handle_shutdown_visualization_event(
     for event in shutdown_events.read() {
         // Check if the entity exists and has a Visualization component
         if visualizations.get(event.entity).is_ok() {
-            info!("Shutting down visualization: entity {:?}", event.entity);
+            info!("ShutdownVisualizationEvent: entity {:?}", event.entity);
 
             // First send shutdown instruction to worker for graceful shutdown
             if let Err(e) = worker.send(AsyncInstruction::SendInstruction {
@@ -95,10 +95,7 @@ pub fn handle_send_instruction_event(
     for event in instruction_events.read() {
         // Check if the entity exists and has a Visualization component
         if visualizations.get(event.entity).is_ok() {
-            info!(
-                "Sending instruction to visualization: {:?}",
-                event.instruction
-            );
+            info!("SendInstructionEvent: {:?}", event.instruction);
 
             // Send command to worker
             if let Err(e) = worker.send(AsyncInstruction::SendInstruction {
@@ -111,11 +108,11 @@ pub fn handle_send_instruction_event(
     }
 }
 
-/// process_worker_outcome moves our entity states along
-/// which makes it easy for observers to track where we're at and take action
-/// action that doesn't have to be taken here as this basically just handles
-/// the component state changes
-pub fn process_worker_outcomes(
+/// process_async_outcome handles the ECS side of things
+/// it receives all the AsyncOutcomes and does things like
+/// taking the pending entity and adding a Visualization to it for real so
+/// that now it can be used in an ECS system
+pub fn process_async_outcomes(
     mut commands: Commands,
     mut pending_connections: ResMut<PendingConnections>,
     worker: Res<VisualizationWorker>,
@@ -124,10 +121,10 @@ pub fn process_worker_outcomes(
     while let Some(outcome) = worker.try_receive() {
         match outcome {
             AsyncOutcome::Started { entity } => {
-                // Now populate the entity with components
+                // remove it from Pending and populate it with its visualization
                 if let Some(details) = pending_connections.pending.remove(&entity) {
                     info!(
-                        "Visualization connected: {} (entity: {:?})",
+                        "AsyncOutcome::Started: {} (entity: {:?})",
                         details.name, entity
                     );
 
@@ -142,19 +139,25 @@ pub fn process_worker_outcomes(
                 entity,
                 instruction,
             } => {
+                // currently we don't do anyting but log that this happened
+                // possibly in the future there would be some use for this
                 debug!(
-                    "Instruction sent to visualization: {:?} (entity: {:?})",
+                    "AsyncOutcome::InstructionSent to visualization: {:?} (entity: {:?})",
                     instruction, entity
                 );
             }
             AsyncOutcome::Shutdown { entity } => {
-                info!("Visualization shutdown: entity {:?}", entity);
+                info!(
+                    "AsyncOutcome::Shutdown: entity {:?} - despawning entity",
+                    entity
+                );
 
-                // Remove the entity entirely
+                // back here in ECS world, with the process shutdown, we need to despawn the visualization to clean
+                // everything up
                 commands.entity(entity).despawn();
             }
             AsyncOutcome::Error { entity, error } => {
-                error!("Visualization error: {:?} (entity: {:?})", error, entity);
+                error!("AsyncOutcome::Error: {:?} (entity: {:?})", error, entity);
 
                 // Add to failed list if it was a pending connection
                 if let Some(details) = pending_connections.pending.remove(&entity) {
