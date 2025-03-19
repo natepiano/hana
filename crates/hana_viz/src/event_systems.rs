@@ -12,103 +12,61 @@ use hana_network::Instruction;
 use crate::async_messages::{AsyncInstruction, AsyncOutcome};
 use crate::async_worker::VisualizationWorker;
 use crate::visualization::{
-    Connected, Disconnected, SendInstructionEvent, ShutdownVisualizationEvent, ShuttingDown,
-    StartVisualizationEvent, Starting, Unstarted, Visualization,
+    SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent, Visualization,
 };
+use crate::visualizations::{PendingConnections, VisualizationDetails};
 
 /// Handles StartVisualization events by creating or updating visualization entities
 pub fn handle_start_visualization_event(
     mut commands: Commands,
     mut start_events: EventReader<StartVisualizationEvent>,
-    unstarted: Query<&Visualization, With<Unstarted>>,
+    mut pending_connections: ResMut<PendingConnections>,
     worker: Res<VisualizationWorker>,
 ) {
     for event in start_events.read() {
-        match event.entity {
-            // Update existing visualization
-            Some(entity) => {
-                if let Ok(viz) = unstarted.get(entity) {
-                    info!("Starting existing visualization: {}", viz.name);
+        // Reserve an entity ID but don't populate it yet
+        let entity = commands.spawn_empty().id();
 
-                    // Update entity state
-                    commands
-                        .entity(entity)
-                        .remove::<Unstarted>()
-                        .insert(Starting);
+        // Store details for when connection completes
+        pending_connections.pending.insert(
+            entity,
+            VisualizationDetails {
+                path: event.path.clone(),
+                name: event.name.clone(),
+                env_filter: event.env_filter.clone(),
+            },
+        );
 
-                    // Send command to worker
-                    if let Err(e) = worker.send(AsyncInstruction::Start {
-                        entity,
-                        path: viz.path.clone(),
-                        env_filter: viz.env_filter.clone(),
-                    }) {
-                        error!("Failed to send start command: {:?}", e);
-                    }
-                }
-            }
-            // Create new visualization
-            None => {
-                if let Some(path) = &event.path {
-                    let name = event.name.clone().unwrap_or_else(|| {
-                        path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("Unnamed Visualization")
-                            .to_string()
-                    });
+        info!(
+            "Starting visualization: {} (path: {:?})",
+            event.name, event.path
+        );
 
-                    let env_filter = event.env_filter.clone().unwrap_or_else(|| {
-                        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())
-                    });
-
-                    let visualization = Visualization {
-                        path: path.clone(),
-                        name: name.clone(),
-                        env_filter: env_filter.clone(),
-                    };
-
-                    // Spawn entity first
-                    let entity = commands.spawn((visualization, Starting)).id();
-
-                    info!(
-                        "StartVisualizationEvent received for: {} - sending AsyncInstruction::Start",
-                        name
-                    );
-
-                    // Send command to worker
-                    if let Err(e) = worker.send(AsyncInstruction::Start {
-                        entity,
-                        path: path.clone(),
-                        env_filter,
-                    }) {
-                        error!(
-                            "Failed to send start command for new visualization: {:?}",
-                            e
-                        );
-                    }
-                }
-            }
+        // Send command to worker
+        if let Err(e) = worker.send(AsyncInstruction::Start {
+            entity,
+            path: event.path.clone(),
+            env_filter: event.env_filter.clone(),
+        }) {
+            error!("Failed to send start command: {:?}", e);
+            commands.entity(entity).despawn();
+            pending_connections.pending.remove(&entity);
         }
     }
 }
 
 /// Handles ShutdownVisualization events
 pub fn handle_shutdown_visualization_event(
-    mut commands: Commands,
     mut shutdown_events: EventReader<ShutdownVisualizationEvent>,
-    connected: Query<Entity, With<Connected>>,
+    visualizations: Query<&Visualization>,
     worker: Res<VisualizationWorker>,
 ) {
     for event in shutdown_events.read() {
-        if connected.get(event.entity).is_ok() {
-            info!("Shutting down visualization: {:?}", event.entity);
+        // Check if the entity exists and has a Visualization component
+        if visualizations.get(event.entity).is_ok() {
+            info!("Shutting down visualization: entity {:?}", event.entity);
 
-            // Update entity state
-            commands
-                .entity(event.entity)
-                .remove::<Connected>()
-                .insert(ShuttingDown);
-
-            // Send command to worker
+            // Send shutdown instruction to worker
             if let Err(e) = worker.send(AsyncInstruction::SendInstructions {
                 entity: event.entity,
                 instruction: Instruction::Shutdown,
@@ -130,11 +88,12 @@ pub fn handle_shutdown_visualization_event(
 /// Handles SendInstruction events
 pub fn handle_send_instruction_event(
     mut instruction_events: EventReader<SendInstructionEvent>,
-    connected: Query<Entity, With<Connected>>,
+    visualizations: Query<&Visualization>,
     worker: Res<VisualizationWorker>,
 ) {
     for event in instruction_events.read() {
-        if connected.get(event.entity).is_ok() {
+        // Check if the entity exists and has a Visualization component
+        if visualizations.get(event.entity).is_ok() {
             info!(
                 "Sending instruction to visualization: {:?}",
                 event.instruction
@@ -155,58 +114,56 @@ pub fn handle_send_instruction_event(
 /// which makes it easy for observers to track where we're at and take action
 /// action that doesn't have to be taken here as this basically just handles
 /// the component state changes
-pub fn process_worker_outcomes(mut commands: Commands, worker: Res<VisualizationWorker>) {
+pub fn process_worker_outcomes(
+    mut commands: Commands,
+    mut pending_connections: ResMut<PendingConnections>,
+    worker: Res<VisualizationWorker>,
+) {
     // Try to receive all pending messages
-    while let Some(event) = worker.try_receive() {
-        match event {
+    while let Some(outcome) = worker.try_receive() {
+        match outcome {
             AsyncOutcome::Started { entity } => {
-                info!(
-                    "AsyncOutcome::Started received from hana_async::Worker for entity: {:?} updating marker component to Connected",
-                    entity
-                );
+                // Now populate the entity with components
+                if let Some(details) = pending_connections.pending.remove(&entity) {
+                    info!(
+                        "Visualization connected: {} (entity: {:?})",
+                        details.name, entity
+                    );
 
-                // Update entity state - just mark as Connected
-                commands
-                    .entity(entity)
-                    .remove::<Starting>()
-                    .insert(Connected);
+                    commands.entity(entity).insert(Visualization {
+                        path: details.path,
+                        name: details.name,
+                        env_filter: details.env_filter,
+                    });
+                }
             }
             AsyncOutcome::InstructionSent {
                 entity,
                 instruction,
             } => {
                 debug!(
-                    "AsyncOutcome::InstructionSent received from hana_async::Worker: {:?} for entity {:?}",
+                    "Instruction sent to visualization: {:?} (entity: {:?})",
                     instruction, entity
                 );
-                // Could update UI or other state here if needed
             }
             AsyncOutcome::Shutdown { entity } => {
-                info!(
-                    "AsyncOutcome::Shutdown received from hana_async::Worker for entity: {:?} - moving to Unstarted state",
-                    entity
-                );
+                info!("Visualization shutdown: entity {:?}", entity);
 
-                commands
-                    .entity(entity)
-                    .remove::<Connected>()
-                    .remove::<ShuttingDown>()
-                    .insert(Unstarted);
+                // Remove the entity entirely
+                commands.entity(entity).despawn();
             }
             AsyncOutcome::Error { entity, error } => {
-                // Change from report to error
-                error!(
-                    "AsyncOutcome::Error received from hana_async::Worker for entity: {:?} error: {:?} moving to Disconnected state",
-                    entity, error
-                );
+                error!("Visualization error: {:?} (entity: {:?})", error, entity);
 
-                commands
-                    .entity(entity)
-                    .remove::<Starting>()
-                    .remove::<Connected>()
-                    .insert(Disconnected {
-                        error: Some(format!("{:?}", error)),
-                    });
+                // Add to failed list if it was a pending connection
+                if let Some(details) = pending_connections.pending.remove(&entity) {
+                    pending_connections
+                        .failed
+                        .push((details, format!("{:?}", error)));
+                }
+
+                // Clean up the entity
+                commands.entity(entity).despawn();
             }
         }
     }

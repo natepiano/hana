@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::{
     SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent, async_handlers,
-    event_systems, observers,
+    event_systems, observers, visualizations::PendingConnections,
 };
 
 /// Main plugin for visualization management
@@ -13,7 +13,8 @@ pub struct HanaVizPlugin;
 impl Plugin for HanaVizPlugin {
     fn build(&self, app: &mut App) {
         // Setup runtime resources
-        app.add_systems(Startup, async_handlers::setup_visualization_worker);
+        app.init_resource::<PendingConnections>()
+            .add_systems(Startup, async_handlers::setup_visualization_worker);
 
         // Register events
         app.add_event::<StartVisualizationEvent>()
@@ -32,10 +33,7 @@ impl Plugin for HanaVizPlugin {
         );
 
         // Add observers
-        app.add_observer(observers::on_visualization_starting);
-        app.add_observer(observers::on_visualization_connected);
-        app.add_observer(observers::on_visualization_disconnected);
-        app.add_observer(observers::on_visualization_shutting_down);
-        app.add_observer(observers::on_visualization_unstarted);
+        app.add_observer(observers::on_visualization_added);
+        app.add_observer(observers::on_visualization_removed);
     }
 }

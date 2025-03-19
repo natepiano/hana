@@ -13,6 +13,6 @@ pub(crate) mod visualizations;
 pub use error::{Error, Result};
 pub use plugin::HanaVizPlugin;
 pub use visualization::{
-    Connected, Disconnected, SendInstructionEvent, ShutdownVisualizationEvent,
-    StartVisualizationEvent,
+    SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent, Visualization,
 };
+pub use visualizations::PendingConnections;

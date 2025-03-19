@@ -1,7 +1,7 @@
 use bevy::color::palettes::tailwind::*;
 use bevy::prelude::*;
 use error_stack::Report;
-use hana_viz::Disconnected;
+use hana_viz::PendingConnections;
 
 use crate::error::{Error, Severity};
 
@@ -39,25 +39,29 @@ pub struct ErrorMessage {
 /// System to process visualization errors
 pub fn process_visualization_errors(
     mut error_state: ResMut<ErrorState>,
-    disconnected_query: Query<(Entity, &Disconnected), Added<Disconnected>>,
+    pending_connections: Res<PendingConnections>,
 ) {
-    for (entity, disconnected) in disconnected_query.iter() {
-        if let Some(error_msg) = &disconnected.error {
-            // Log the error
-            error!(
-                "Visualization {:?} disconnected with error: {}",
-                entity, error_msg
-            );
+    // Only process if the PendingConnections resource has changed
+    if !pending_connections.is_changed() {
+        return;
+    }
 
-            // Create an error report
-            let report = Report::new(Error::Visualization).attach_printable(format!(
-                "Visualization {:?} disconnected with error: {}",
-                entity, error_msg
-            ));
+    // Process any newly failed connections
+    for (details, error_msg) in &pending_connections.failed {
+        // Log the error
+        error!(
+            "Visualization '{}' failed with error: {}",
+            details.name, error_msg
+        );
 
-            // Add the report to our error history
-            error_state.errors.push(report);
-        }
+        // Create an error report
+        let report = Report::new(Error::Visualization).attach_printable(format!(
+            "Visualization '{}' failed with error: {}",
+            details.name, error_msg
+        ));
+
+        // Add the report to our error history
+        error_state.errors.push(report);
     }
 }
 
@@ -123,7 +127,7 @@ pub fn update_error_display(
             },
             // Text color component
             TextColor(color.into()),
-            // Font size component
+            // Text font component
             TextFont {
                 font_size: ERROR_MESSAGE_FONT_SIZE,
                 ..default()

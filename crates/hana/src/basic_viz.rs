@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use hana_network::Instruction;
 use hana_viz::{
-    Connected, SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent,
+    SendInstructionEvent, ShutdownVisualizationEvent, StartVisualizationEvent, Visualization,
 };
 use tracing::info;
 
@@ -35,15 +35,14 @@ fn start_system(mut start_writer: EventWriter<StartVisualizationEvent>) {
 
     // Create event to start visualization
     start_writer.send(StartVisualizationEvent {
-        entity: None, // Create a new entity
-        path: Some(PathBuf::from("./target/debug/basic-visualization")),
-        name: Some("basic-visualization".to_string()),
-        env_filter: Some(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string())),
+        path: PathBuf::from("./target/debug/basic-visualization"),
+        name: "basic-visualization".to_string(),
+        env_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     });
 }
 
 fn ping_system(
-    viz_query: Query<Entity, With<Connected>>,
+    viz_query: Query<Entity, With<Visualization>>,
     mut instruction_writer: EventWriter<SendInstructionEvent>,
 ) {
     info!("Pinging visualization via hana_viz...");
@@ -63,7 +62,7 @@ fn ping_system(
 }
 
 fn shutdown_system(
-    viz_query: Query<Entity, With<Connected>>,
+    viz_query: Query<Entity, With<Visualization>>,
     mut shutdown_writer: EventWriter<ShutdownVisualizationEvent>,
 ) {
     info!("F2 press sends ShutdownVisualizationEvent");
