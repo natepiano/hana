@@ -2,11 +2,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Command failed to send")]
-    CommandFailed,
     #[error("Visualization entity not found")]
     EntityNotFound,
-    #[error("Network error")]
+    #[error("Async worker error while attempting to send instruction to visualization")]
+    AsyncWorker,
+    #[error("Network error while sending instructions to visualization")]
     Network,
     #[error("No active visualization")]
     NoActiveVisualization,

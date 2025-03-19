@@ -12,13 +12,13 @@ use crate::error::Error;
 pub enum AsyncInstruction {
     /// Start a visualization process and connect to it
     Start {
-        entity: Entity,
-        path: PathBuf,
+        entity:     Entity,
+        path:       PathBuf,
         env_filter: String,
     },
     /// Send a network instruction to the running visualization
     SendInstruction {
-        entity: Entity,
+        entity:      Entity,
         instruction: Instruction,
     },
     /// Terminate the visualization process (with optional timeout)
@@ -36,7 +36,7 @@ pub enum AsyncOutcome {
     Started { entity: Entity },
     /// An instruction was sent successfully
     InstructionSent {
-        entity: Entity,
+        entity:      Entity,
         instruction: Instruction,
     },
     /// A visualization has shut down
@@ -44,6 +44,6 @@ pub enum AsyncOutcome {
     /// An error occurred
     Error {
         entity: Entity,
-        error: Report<Error>,
+        error:  Report<Error>,
     },
 }

@@ -1,25 +1,27 @@
 //! our specific async worker which wraps a hana_async::Worker and
 //! specifically has it work with AsyncInstruction and AsyncOutcome
 //! it then delegates the send and the try_receive methods to the underlying Worker
+//! we could just use worker directly but this way we have an explicit name
+//! for adding as a resource to bevy
 use bevy::prelude::*;
-use error_stack::Report;
-use hana_async::Worker;
+use error_stack::ResultExt;
+use hana_async::AsyncWorker;
 
 use crate::async_messages::{AsyncInstruction, AsyncOutcome};
 use crate::error::{Error, Result};
 
 /// Resource that manages the visualization worker
 #[derive(Resource)]
-pub struct VisualizationWorker(pub Worker<AsyncInstruction, AsyncOutcome>);
+pub struct VisualizationWorker(pub AsyncWorker<AsyncInstruction, AsyncOutcome>);
 
 impl VisualizationWorker {
-    /// Send a command to the visualization worker
-    pub fn send(&self, command: impl Into<AsyncInstruction>) -> Result<()> {
-        let command = command.into();
+    /// Send an instruction to the visualization worker
+    pub fn send_instruction(&self, instruction: impl Into<AsyncInstruction>) -> Result<()> {
+        let instruction = instruction.into();
 
         self.0
-            .send_command(command)
-            .map_err(|_| Report::new(Error::CommandFailed))
+            .send_instruction(instruction)
+            .change_context(Error::AsyncWorker)
     }
 
     /// Try to receive a message from the visualization worker

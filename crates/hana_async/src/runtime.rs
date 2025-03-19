@@ -1,5 +1,5 @@
-//! - `AsyncRuntime`: Manages the Tokio multithreaded async runtime
-//!    wrapped in an Arc and added to the world as a resource
+//! - `AsyncRuntime`: Manages the Tokio multithreaded async runtime wrapped in an Arc and added to
+//!   the world as a resource
 use std::sync::Arc;
 
 use bevy::prelude::*;

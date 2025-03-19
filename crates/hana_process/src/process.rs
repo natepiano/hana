@@ -13,7 +13,7 @@ use crate::process_control::ProcessControl;
 #[derive(Debug, Component)]
 pub struct Process<P: ProcessControl> {
     pub child: P,
-    path: PathBuf,
+    path:      PathBuf,
 }
 
 pub enum RunningState {
@@ -101,7 +101,7 @@ async fn test_is_running_error() {
 
     let mut process = Process {
         child: mock,
-        path: test_path.clone(),
+        path:  test_path.clone(),
     };
 
     let result = process.is_running().await;

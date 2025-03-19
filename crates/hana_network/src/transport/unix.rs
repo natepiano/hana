@@ -33,7 +33,7 @@ impl fmt::Debug for UnixTransport {
 
 pub struct UnixListener {
     listener: TokioUnixListener,
-    path: PathBuf,
+    path:     PathBuf,
 }
 
 impl UnixListener {

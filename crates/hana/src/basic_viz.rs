@@ -38,8 +38,8 @@ fn start_system(mut start_writer: EventWriter<StartVisualizationEvent>) {
 
     // Create event to start visualization
     start_writer.send(StartVisualizationEvent {
-        path: PathBuf::from("./target/debug/basic-visualization"),
-        name: "basic-visualization".to_string(),
+        path:       PathBuf::from("./target/debug/basic-visualization"),
+        name:       "basic-visualization".to_string(),
         env_filter: std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     });
 }
@@ -50,18 +50,6 @@ fn ping_system(
 ) {
     info!("P press sends SendInstructionEvent with Instruction::Ping");
 
-    // Find first connected visualization
-    // match viz_query.iter().next() {
-    //     Some(entity) => {
-    //         instruction_writer.send(SendInstructionEvent {
-    //             entity,
-    //             instruction: Instruction::Ping,
-    //         });
-    //     }
-    //     None => {
-    //         warn!("No connected visualization to ping");
-    //     }
-    // }
     for entity in viz_query.iter() {
         instruction_writer.send(SendInstructionEvent {
             entity,

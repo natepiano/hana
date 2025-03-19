@@ -28,47 +28,56 @@ use crate::visualizations::Visualizations;
 /// System to initialize the visualization worker
 /// all async handlers bubble up errors that are added to a
 pub fn setup_visualization_worker(mut commands: Commands, async_runtime: Res<AsyncRuntime>) {
-    // Create the hashmap of visualizations that we will interact with for networking and process management
+    // Create the hashmap of visualizations that we will interact with for networking and process
+    // management
     let visualizations = Arc::new(Mutex::new(Visualizations::new()));
-    // Create the worker using the new pattern
-    // currently returning a  because within handle_send_instruction we check if it was a shutdown message
-    // and we add an extra AsyncOutcome::Shutdown that goes along with the AsyncOutcome::Instruction
-    let worker = hana_async::Worker::new(&async_runtime, move |instruction: AsyncInstruction| {
-        let visualizations = Arc::clone(&visualizations);
-        async move {
-            match instruction {
-                AsyncInstruction::Start {
-                    entity,
-                    path,
-                    env_filter,
-                } => match handle_start(visualizations.clone(), entity, path, env_filter).await {
-                    Ok(()) => AsyncOutcome::Started { entity },
-                    Err(err) => AsyncOutcome::Error { entity, error: err },
-                },
-                AsyncInstruction::SendInstruction {
-                    entity,
-                    instruction,
-                } => {
-                    let instruction_clone = instruction.clone();
 
-                    match handle_send_instruction(visualizations.clone(), entity, instruction).await
+    // Create the worker using the new pattern
+    // a hana_async::Worker expects the current runtime which we've already inserted as a resource
+    // and a closure handling all of the messages coming from the ECS systems that want to talk the
+    // async runtime
+    //
+    // we create it here then we add it as a resource so it can be queried by the ECS systems in event_systems
+    // and used to call back into the async runtime
+    let worker =
+        hana_async::AsyncWorker::new(&async_runtime, move |instruction: AsyncInstruction| {
+            let visualizations = Arc::clone(&visualizations);
+            async move {
+                match instruction {
+                    AsyncInstruction::Start {
+                        entity,
+                        path,
+                        env_filter,
+                    } => match handle_start(visualizations.clone(), entity, path, env_filter).await
                     {
-                        Ok(()) => AsyncOutcome::InstructionSent {
-                            entity,
-                            instruction: instruction_clone,
-                        },
+                        Ok(()) => AsyncOutcome::Started { entity },
                         Err(err) => AsyncOutcome::Error { entity, error: err },
+                    },
+                    AsyncInstruction::SendInstruction {
+                        entity,
+                        instruction,
+                    } => {
+                        let instruction_clone = instruction.clone();
+
+                        match handle_send_instruction(visualizations.clone(), entity, instruction)
+                            .await
+                        {
+                            Ok(()) => AsyncOutcome::InstructionSent {
+                                entity,
+                                instruction: instruction_clone,
+                            },
+                            Err(err) => AsyncOutcome::Error { entity, error: err },
+                        }
                     }
-                }
-                AsyncInstruction::Shutdown { entity, timeout } => {
-                    match handle_shutdown(visualizations.clone(), entity, timeout).await {
-                        Ok(()) => AsyncOutcome::Shutdown { entity },
-                        Err(err) => AsyncOutcome::Error { entity, error: err },
+                    AsyncInstruction::Shutdown { entity, timeout } => {
+                        match handle_shutdown(visualizations.clone(), entity, timeout).await {
+                            Ok(()) => AsyncOutcome::Shutdown { entity },
+                            Err(err) => AsyncOutcome::Error { entity, error: err },
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
     // Insert the worker as a resource
     commands.insert_resource(VisualizationWorker(worker));

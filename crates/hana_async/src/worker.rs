@@ -1,7 +1,8 @@
 //! - `Worker<Cmd, Msg>`: Generic wrapper with type-safe send/receive capabilities
 //! - `CommandSender<T>` and `MessageReceiver<T>`: Typed wrappers around flume channels
 
-use std::{future::Future, sync::Arc};
+use std::future::Future;
+use std::sync::Arc;
 
 use error_stack::Report;
 use flume::{Receiver, Sender};
@@ -37,12 +38,12 @@ where
 
 /// our generic Worker can send and receive whatever types of messages we want
 /// subject to the trait bounds which aren't very limiting
-pub struct Worker<Cmd, Msg> {
+pub struct AsyncWorker<Cmd, Msg> {
     command_sender: CommandSender<Cmd>,
     message_receiver: MessageReceiver<Msg>,
 }
 
-impl<Cmd, Msg> Worker<Cmd, Msg>
+impl<Cmd, Msg> AsyncWorker<Cmd, Msg>
 where
     Cmd: Send + Clone + std::fmt::Debug + 'static,
     Msg: Send + 'static,
@@ -64,7 +65,7 @@ where
     }
 
     /// Send a command to the worker
-    pub fn send_command(&self, command: Cmd) -> error_stack::Result<(), Error> {
+    pub fn send_instruction(&self, command: Cmd) -> error_stack::Result<(), Error> {
         self.command_sender.send(command)
     }
 
@@ -93,6 +94,9 @@ where
 
     // Spawn the worker thread directly here instead of calling a separate function
     std::thread::spawn(move || {
+        // this is now a thread dedicated to handling whatever this worker handles
+        // in its process_fn - generally taking in a command and doing processing it
+        // and subsequently sending the results back to the main thread
         runtime.block_on(async {
             while let Ok(command) = cmd_rx.recv_async().await {
                 let message_sender = msg_tx.clone();

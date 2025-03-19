@@ -43,7 +43,7 @@ pub fn handle_start_visualization_event(
         );
 
         // Send command to worker
-        if let Err(e) = worker.send(AsyncInstruction::Start {
+        if let Err(e) = worker.send_instruction(AsyncInstruction::Start {
             entity,
             path: event.path.clone(),
             env_filter: event.env_filter.clone(),
@@ -67,7 +67,7 @@ pub fn handle_shutdown_visualization_event(
             info!("ShutdownVisualizationEvent: entity {:?}", event.entity);
 
             // First send shutdown instruction to worker for graceful shutdown
-            if let Err(e) = worker.send(AsyncInstruction::SendInstruction {
+            if let Err(e) = worker.send_instruction(AsyncInstruction::SendInstruction {
                 entity: event.entity,
                 instruction: Instruction::Shutdown,
             }) {
@@ -76,7 +76,7 @@ pub fn handle_shutdown_visualization_event(
 
             // Always follow up with a terminate command that will wait for graceful shutdown
             // and force terminate only if needed
-            if let Err(e) = worker.send(AsyncInstruction::Shutdown {
+            if let Err(e) = worker.send_instruction(AsyncInstruction::Shutdown {
                 entity: event.entity,
                 timeout: Duration::from_millis(event.timeout_ms),
             }) {
@@ -98,7 +98,7 @@ pub fn handle_send_instruction_event(
             info!("SendInstructionEvent: {:?}", event.instruction);
 
             // Send command to worker
-            if let Err(e) = worker.send(AsyncInstruction::SendInstruction {
+            if let Err(e) = worker.send_instruction(AsyncInstruction::SendInstruction {
                 entity: event.entity,
                 instruction: event.instruction.clone(),
             }) {
@@ -152,8 +152,8 @@ pub fn process_async_outcomes(
                     entity
                 );
 
-                // back here in ECS world, with the process shutdown, we need to despawn the visualization to clean
-                // everything up
+                // back here in ECS world, with the process shutdown, we need to despawn the
+                // visualization to clean everything up
                 commands.entity(entity).despawn();
             }
             AsyncOutcome::Error { entity, error } => {

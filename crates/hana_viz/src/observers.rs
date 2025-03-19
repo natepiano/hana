@@ -1,5 +1,6 @@
-use crate::visualization::Visualization;
 use bevy::prelude::*;
+
+use crate::visualization::Visualization;
 
 /// Observer for when a new visualization is connected
 pub fn on_visualization_added(

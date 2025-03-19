@@ -1,14 +1,12 @@
 //! async runtime - covering networking, process management,
 //! and channels to bridge between sync and async codea
-//!
 mod error;
 mod runtime;
 mod worker;
 
-pub use runtime::AsyncRuntime;
-pub use worker::Worker;
-
 use bevy::prelude::*;
+pub use runtime::AsyncRuntime;
+pub use worker::AsyncWorker;
 
 /// Plugin that adds async runtime support to a Bevy app
 pub struct AsyncRuntimePlugin;
