@@ -79,7 +79,7 @@ impl InstructionReceiver {
             {
                 Some(instruction) => match instruction {
                     Instruction::Shutdown => {
-                        debug!("Received shutdown instruction");
+                        debug!("Gracefully shutting down Visualization");
                         std::process::exit(0);
                     }
                     instruction => {

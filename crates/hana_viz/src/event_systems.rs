@@ -66,16 +66,17 @@ pub fn handle_shutdown_visualization_event(
         if visualizations.get(event.entity).is_ok() {
             info!("Shutting down visualization: entity {:?}", event.entity);
 
-            // Send shutdown instruction to worker
-            if let Err(e) = worker.send(AsyncInstruction::SendInstructions {
+            // First send shutdown instruction to worker for graceful shutdown
+            if let Err(e) = worker.send(AsyncInstruction::SendInstruction {
                 entity: event.entity,
                 instruction: Instruction::Shutdown,
             }) {
                 error!("Failed to send shutdown instruction: {:?}", e);
             }
 
-            // Set a timeout to force terminate if needed
-            if let Err(e) = worker.send(AsyncInstruction::Terminate {
+            // Always follow up with a terminate command that will wait for graceful shutdown
+            // and force terminate only if needed
+            if let Err(e) = worker.send(AsyncInstruction::Shutdown {
                 entity: event.entity,
                 timeout: Duration::from_millis(event.timeout_ms),
             }) {
@@ -100,7 +101,7 @@ pub fn handle_send_instruction_event(
             );
 
             // Send command to worker
-            if let Err(e) = worker.send(AsyncInstruction::SendInstructions {
+            if let Err(e) = worker.send(AsyncInstruction::SendInstruction {
                 entity: event.entity,
                 instruction: event.instruction.clone(),
             }) {

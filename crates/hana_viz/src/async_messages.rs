@@ -17,7 +17,7 @@ pub enum AsyncInstruction {
         env_filter: String,
     },
     /// Send a network instruction to the running visualization
-    SendInstructions {
+    SendInstruction {
         entity: Entity,
         instruction: Instruction,
     },
@@ -25,7 +25,7 @@ pub enum AsyncInstruction {
     /// only used when the Shutdown Instruction fails
     /// doing it this way allows sending the shutdown message for a graceful
     /// shutdown - Terminate is not graceful
-    Terminate { entity: Entity, timeout: Duration },
+    Shutdown { entity: Entity, timeout: Duration },
 }
 
 /// Messages sent from the async worker back to Bevy systems
