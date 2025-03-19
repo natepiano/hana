@@ -42,25 +42,6 @@ impl InstructionReceiver {
 
         Self { instruction_rx: rx }
     }
-    // pub fn spawn() -> Self {
-    //     let (tx, rx) = mpsc::channel(32);
-
-    //     std::thread::spawn(move || {
-    //         let rt = tokio::runtime::Builder::new_current_thread()
-    //             .enable_all()
-    //             .build()
-    //             .expect("Failed to create tokio runtime");
-
-    //         rt.block_on(async {
-    //             match Self::run_network(tx).await {
-    //                 Ok(()) => debug!("network connection closed normally"),
-    //                 Err(report) => info!("Visualization running without hana network: {report}"),
-    //             }
-    //         });
-    //     });
-
-    //     Self { instruction_rx: rx }
-    // }
 
     /// bind to the port and attempt to connect to listen for a hana app
     async fn run_network(tx: mpsc::Sender<Instruction>) -> Result<()> {
@@ -102,6 +83,8 @@ impl InstructionReceiver {
                         std::process::exit(0);
                     }
                     instruction => {
+                        tracing::debug!("Received instruction {:?}", instruction);
+
                         tx.send(instruction)
                             .await
                             .change_context(Error::Channel)

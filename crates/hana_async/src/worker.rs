@@ -37,7 +37,7 @@ where
 }
 
 pub struct Worker<Cmd, Msg> {
-    command_sender:   CommandSender<Cmd>,
+    command_sender: CommandSender<Cmd>,
     message_receiver: MessageReceiver<Msg>,
 }
 
@@ -47,6 +47,9 @@ where
     Msg: Send + 'static,
 {
     /// Create a new worker with the given process function
+    /// this just wraps the AsyncRuntime::create_worker which does all the things
+    /// including running the loop processing messages and sending them on the flume
+    /// channel between the sender and receiver
     pub fn new<F, Fut>(async_runtime: &crate::AsyncRuntime, process_fn: F) -> Self
     where
         F: Fn(Cmd) -> Fut + Send + Sync + Clone + 'static,

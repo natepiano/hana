@@ -96,6 +96,9 @@ impl AsyncRuntime {
                     let message_sender = msg_tx.clone();
                     let process = process_fn.clone();
 
+                    // process the command and send all msg results back
+                    // in hana_viz this is processing AsyncInstruction commands and sending back
+                    // AsyncOutcome messages (which are a Vec of AsyncOutcome)
                     runtime.spawn(async move {
                         let results = process(command).await;
                         for event in results {
