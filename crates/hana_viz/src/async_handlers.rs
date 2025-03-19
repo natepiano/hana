@@ -1,3 +1,14 @@
+//!  Communication Flow
+//! 1. **Command Flow (Bevy → Async)**:
+//!    - Bevy system calls `worker.send(someCommand)`
+//!    - Command is sent through channel to async context
+//!    - Worker processes command via the provided callback function
+//!
+//! 2. **Message Flow (Async → Bevy)**:
+//!    - Async operation completes and produces results
+//!    - Results are sent as messages through return channel
+//!    - Bevy polling system calls `worker.try_receive()` to collect messages
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,11 +28,11 @@ use crate::visualizations::Visualizations;
 /// System to initialize the visualization worker
 /// all async handlers bubble up errors that are added to a
 pub fn setup_visualization_worker(mut commands: Commands, async_runtime: Res<AsyncRuntime>) {
-    // Create shared state for the worker
+    // Create the hashmap of visualizations that we will interact with for networking and process management
     let visualizations = Arc::new(Mutex::new(Visualizations::new()));
 
     // Create the worker using the new pattern
-    // currently returning a vec because within handle_send_instruction we check if it was a shutdown message
+    // currently returning a  because within handle_send_instruction we check if it was a shutdown message
     // and we add an extra AsyncOutcome::Shutdown that goes along with the AsyncOutcome::Instruction
     let worker = hana_async::Worker::new(&async_runtime, move |instruction: AsyncInstruction| {
         let visualizations = Arc::clone(&visualizations);
@@ -32,8 +43,8 @@ pub fn setup_visualization_worker(mut commands: Commands, async_runtime: Res<Asy
                     path,
                     env_filter,
                 } => match handle_start(visualizations.clone(), entity, path, env_filter).await {
-                    Ok(()) => vec![AsyncOutcome::Started { entity }],
-                    Err(err) => vec![AsyncOutcome::Error { entity, error: err }],
+                    Ok(()) => AsyncOutcome::Started { entity },
+                    Err(err) => AsyncOutcome::Error { entity, error: err },
                 },
                 AsyncInstruction::SendInstruction {
                     entity,
@@ -43,17 +54,17 @@ pub fn setup_visualization_worker(mut commands: Commands, async_runtime: Res<Asy
 
                     match handle_send_instruction(visualizations.clone(), entity, instruction).await
                     {
-                        Ok(()) => vec![AsyncOutcome::InstructionSent {
+                        Ok(()) => AsyncOutcome::InstructionSent {
                             entity,
                             instruction: instruction_clone,
-                        }],
-                        Err(err) => vec![AsyncOutcome::Error { entity, error: err }],
+                        },
+                        Err(err) => AsyncOutcome::Error { entity, error: err },
                     }
                 }
                 AsyncInstruction::Shutdown { entity, timeout } => {
                     match handle_shutdown(visualizations.clone(), entity, timeout).await {
-                        Ok(()) => vec![AsyncOutcome::Shutdown { entity }],
-                        Err(err) => vec![AsyncOutcome::Error { entity, error: err }],
+                        Ok(()) => AsyncOutcome::Shutdown { entity },
+                        Err(err) => AsyncOutcome::Error { entity, error: err },
                     }
                 }
             }

@@ -1,18 +1,17 @@
-use std::future::Future;
+//! - `AsyncRuntime`: Manages the Tokio multithreaded async runtime
+//!    wrapped in an Arc and added to the world as a resource
 use std::sync::Arc;
 
 use bevy::prelude::*;
 use error_stack::{Result, ResultExt};
-use flume::{Receiver, Sender};
 use tokio::runtime::Runtime;
 
 use crate::error::Error;
-pub use crate::worker::{CommandSender, MessageReceiver};
 
 /// Resource that provides access to a Tokio runtime
 #[derive(Resource)]
 pub struct AsyncRuntime {
-    runtime: Arc<Runtime>,
+    pub(crate) runtime: Arc<Runtime>,
 }
 
 /// used to initialize the tokio async runtime and add it as a resource
@@ -34,66 +33,5 @@ impl AsyncRuntime {
     pub fn new() -> Result<Self, Error> {
         let runtime = Arc::new(Runtime::new().change_context(Error::RuntimeCreationFailed)?);
         Ok(Self { runtime })
-    }
-
-    /// Spawn a background task
-    pub fn spawn<F>(&self, future: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let rt = Arc::clone(&self.runtime);
-        rt.spawn(future);
-    }
-
-    /// Create a channel pair for async communication
-    pub fn create_channel<T>(&self) -> (Sender<T>, Receiver<T>)
-    where
-        T: Send + 'static,
-    {
-        flume::unbounded()
-    }
-
-    /// Helper method to create our bridge between the async worker and the main bevy ECS system
-    /// thread(s)
-    pub fn create_worker<Cmd, Msg, F, Fut>(
-        &self,
-        process_fn: F,
-    ) -> (CommandSender<Cmd>, MessageReceiver<Msg>)
-    where
-        Cmd: Send + Clone + std::fmt::Debug + 'static,
-        Msg: Send + 'static,
-        F: Fn(Cmd) -> Fut + Send + Sync + Clone + 'static,
-        Fut: Future<Output = Vec<Msg>> + Send + 'static,
-    {
-        let (cmd_tx, cmd_rx) = flume::unbounded();
-        let (msg_tx, msg_rx) = flume::unbounded();
-
-        let runtime = Arc::clone(&self.runtime);
-
-        // Spawn the worker thread directly here instead of calling a separate function
-        std::thread::spawn(move || {
-            runtime.block_on(async {
-                while let Ok(command) = cmd_rx.recv_async().await {
-                    let message_sender = msg_tx.clone();
-                    let process = process_fn.clone();
-
-                    // process the command and send all msg results back
-                    // in hana_viz this is processing AsyncInstruction commands and sending back
-                    // AsyncOutcome messages (which are a Vec of AsyncOutcome)
-                    runtime.spawn(async move {
-                        let results = process(command).await;
-                        for event in results {
-                            // todo: what do we do if we can't send?
-                            let _ = message_sender.send(event);
-                        }
-                    });
-                }
-            });
-        });
-
-        // give the other side of the communication channels
-        // back to the bevy side so they can send commands to the worker
-        // and receive messages from the worker
-        (CommandSender(cmd_tx), MessageReceiver(msg_rx))
     }
 }

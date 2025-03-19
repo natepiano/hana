@@ -1,5 +1,6 @@
 //! async runtime - covering networking, process management,
-//! and channels to bridge between sync and async code
+//! and channels to bridge between sync and async codea
+//!
 mod error;
 mod runtime;
 mod worker;
