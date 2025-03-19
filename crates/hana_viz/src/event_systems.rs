@@ -1,9 +1,9 @@
 //! visualization control bindings (typically to keyboard input) are
 //! turned into events in hana::basic_viz (currently)
 //! these events are handled with these systems
-//! the intent is that we can't have a Visualization in a state where the message
-//! will be "incorrect" so we have the various states for a visualization as defined
-//! in entity.rs
+//!
+//! handle_* sends messages to the async worker with worker.send
+//! process_worker_outcomes gets the messages back from the async worker with worker.try_receive
 use std::time::Duration;
 
 use bevy::prelude::*;

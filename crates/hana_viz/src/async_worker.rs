@@ -1,3 +1,6 @@
+//! our specific async worker which wraps a hana_async::Worker and
+//! specifically has it work with AsyncInstruction and AsyncOutcome
+//! it then delegates the send and the try_receive methods to the underlying Worker
 use bevy::prelude::*;
 use error_stack::Report;
 use hana_async::Worker;

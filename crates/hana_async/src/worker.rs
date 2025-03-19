@@ -36,6 +36,8 @@ where
     }
 }
 
+/// our generic Worker can send and receive whatever types of messages we want
+/// subject to the trait bounds which aren't very limiting
 pub struct Worker<Cmd, Msg> {
     command_sender: CommandSender<Cmd>,
     message_receiver: MessageReceiver<Msg>,
@@ -50,7 +52,7 @@ where
     /// this just wraps the AsyncRuntime::create_worker which does all the things
     /// including running the loop processing messages and sending them on the flume
     /// channel between the sender and receiver
-    pub fn new<F, Fut>(async_runtime: &crate::AsyncRuntime, process_fn: F) -> Self
+    pub fn new<F, Fut>(async_runtime: &crate::runtime::AsyncRuntime, process_fn: F) -> Self
     where
         F: Fn(Cmd) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = Vec<Msg>> + Send + 'static,
@@ -70,15 +72,5 @@ where
     /// Try to receive a message from the worker (non-blocking)
     pub fn try_receive(&self) -> Option<Msg> {
         self.message_receiver.try_recv()
-    }
-
-    /// Get the command sender
-    pub fn command_sender(&self) -> &CommandSender<Cmd> {
-        &self.command_sender
-    }
-
-    /// Get the message receiver
-    pub fn message_receiver(&self) -> &MessageReceiver<Msg> {
-        &self.message_receiver
     }
 }
