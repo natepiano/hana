@@ -9,6 +9,7 @@
   - [Environment Editor](./features/environment_editor.md)
   - [Node Editor](./features/node_editor.md)
   - [Node Types](./features/node_types.md)
+  - [Library](./features/library.md)
   - [Displays](./features/displays.md)
   - [General](./features/general.md)
   - [Mobile](./features/mobile.md)

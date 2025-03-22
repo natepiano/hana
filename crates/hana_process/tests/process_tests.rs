@@ -49,6 +49,7 @@ async fn test_ensure_shutdown() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+#[allow(clippy::panic)]
 async fn test_is_running() -> Result<(), Box<dyn std::error::Error>> {
     // Use Cargo's provided env var to determine the path of the built helper.
     let helper_path = PathBuf::from(env!("CARGO_BIN_EXE_hana_helper"));
