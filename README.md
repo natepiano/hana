@@ -1,10 +1,8 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/bevyengine/bevy#license)
-# Hana: Distributed Visualization Management
+# Hana: Generative Art and Distributed Performance Tool
 Hana (花) - Named after the Japanese word for "flower," reflecting the system's ability to let visualizations bloom across multiple displays.
 
-Hana is a distributed visualization management system that enables control and display of visualizations across multiple screens, devices and machines.
-
-Hana has aspirations to be a generative art system with a node editor and an environment editor as well.
+Hana is a generative art and distributed visualization performance system that enables creation, control and display of visualizations across multiple screens, devices and machines.
 
 ## Documentation
 [docs on github.io](https://natepiano.github.io/hana/)
