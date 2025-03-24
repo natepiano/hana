@@ -39,6 +39,7 @@
       - [Visualization Library](./design/visualization_library.md)
       - [Visualization SDK](./design/visualization_sdk.md)
 - [Developer Overview](./developer/developer.md)
+  - [Principles](./developer/principles.md)
   - [Contributing](./developer/contributing.md)
   - [Dependencies](./developer/dependencies.md)
   - [Workspace Organization](./developer/workspace_organization.md)
@@ -47,3 +48,5 @@
   - [Testing Approach](./developer/testing.md)
   - [Performance Testing](./developer/performance_testing.md)
   - [Versioning](./developer/versioning.md)
+- [Visualization SDK](./sdk/visualization_sdk.md)
+- [User](./user/getting_started.md)

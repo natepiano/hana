@@ -16,5 +16,9 @@ Editors (Node, Environment, Player?) will share functionality - inventory comes 
 ## Persistence
 Everything is always saved automatically but you can make a copy at any time. Explicit save is unnecessary. untitled.hana would be the default name for a new file.
 
+## Selection
+- when approaching something that is selectable (or if we're using a selection tool a la ultrahand) the closer you get to something selectable, it should give you some kind of visual, audio or haptic feedback.  When I back up my car in the garage, the action is more dangerous so the feedback is an audible beep that gets more frequent as I approach the back wall. Maybe this kind of affordance would be good for doing something that is a little more drastic than just selecting something.
+Some deep thought should go into selection for hana - in general.
+
 ## Undo/Redo
 Undo and Redo are available to the limit possible. Could we make the undo stack searchable? I.e., a list of operations?

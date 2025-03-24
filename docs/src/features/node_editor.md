@@ -16,10 +16,13 @@
 ## interaction
 there will have to be some kind of focus reticule, mouse cursor, something that indicates which control is being interacted with. I notice that changing the volume in the upper right hand control panel of AppleTV+ as you move the cursor over the volume, it grows to become easier to manipulate. This is a nice touch. Affordance that makes the control more obvious and also easier to interact with.
 
-## Node Groups
+## groups
 - You can group sections - and name them for convenience - a section container shouldn't get in the way of editing
 
-## Cables
+## minigame
+- Nodes could expose an entire mini-game environment where you dive in and configure. Maybe you dive ino the cube and it becomes bigger on the inside. as an example, an LFO might show a very much larger version of the wave form, hanging in space in front of you.  Waveform editing tools appear and you can freeze it and add control nodes to reshape the envelope - stair step, random, bezier, etc. - could all be available. You could stretch the weaveform to fit a time scale - or like ableton use the control points to stretch to a particular part of the time scale.
+- The basic idea of the minigame could be implemented in different ways by different nodes - allowing for a wide range of interactive experiences within the context of the node editor.
+## cables
 - cables connecting would look like real audio cables
 - when close enough to a cable, you can see a visualization representing the data that it carries. For example, if it's a audio, or control voltages, an oscilloscope view of the wave form can display. Midi data - maybe that shows the notes being played. If it's video, not sure...
 - and if you're looking at an oscilloscope view of a cable, you can expand it for control over the oscilloscope data. I like the idea that every single cable is automatically an oscilloscope without having to add one where you want to see one. Of course you can turn this (or any visualization) off.

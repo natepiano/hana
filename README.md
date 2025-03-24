@@ -4,6 +4,8 @@ Hana (花) - Named after the Japanese word for "flower," reflecting the system's
 
 Hana is a distributed visualization management system that enables control and display of visualizations across multiple screens, devices and machines.
 
+Hana has aspirations to be a generative art system with a node editor and an environment editor as well.
+
 ## Documentation
 [docs on github.io](https://natepiano.github.io/hana/)
 
@@ -16,11 +18,9 @@ cargo run
 ```
 we have the build --workspace to ensure the examples/basic-visualization is built before running
 
-As of the current version, the hana binary doesn't have any specific functionality yet. It just launches a separate basic visualization, sends it some commands and then shuts down the visualization automatically.
+As of the current version, the hana binary doesn't have any much functionality yet. It allows you to launch a basic visualization in a separate process, ping it with a command that speeds up the animation and then allows you to shut down the visualization.
 
-When it shuts down - you'll see an blank window which is the actual hana UI that will eventually be a real UI :)
-
-So that's intentional :) just shut down the blank window when you're ready to.
+So that's intentional :) just shut down main hana window when you're ready to.
 
 ## License
 Hana is free, open source and permissively licensed!
