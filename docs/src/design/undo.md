@@ -11,7 +11,7 @@ and [Network](network.md) systems to ensure synchronized operations across all p
 - Clear user feedback about available undo/redo operations
 - Preservation of causality in distributed operations
 ## Components
-### Operation System
+### Operations System
 - Each undoable operation encapsulated as an Operation
 - Operations contain both `apply`  and `reverse` methods
 - Metadata for tracking Operation relationships and dependencies

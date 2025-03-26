@@ -39,7 +39,7 @@ where
 /// our generic Worker can send and receive whatever types of messages we want
 /// subject to the trait bounds which aren't very limiting
 pub struct AsyncWorker<Cmd, Msg> {
-    command_sender: CommandSender<Cmd>,
+    command_sender:   CommandSender<Cmd>,
     message_receiver: MessageReceiver<Msg>,
 }
 

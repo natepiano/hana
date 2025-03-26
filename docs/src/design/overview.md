@@ -18,4 +18,4 @@ These docs provide a high level overview and design of the hana system component
 - It would be better to have fewer features that work incredibly well than to make hana feature rich
 
 ## use of AI
-Many of the docs have been generated through a dialog with AI and are just place holders for future actual work. We've flagged docs as such.
+Many of the docs have been generated through a dialog with AI and are just placeholders for future actual work. We've flagged docs as such.

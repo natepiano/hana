@@ -12,8 +12,8 @@ Aspirationally a marketplace could be created where visualizations can be sold a
 - Automated security scanning
 - Distribution infrastructure
 - User account management to keep track of which visualizations are in a user's library and allow for buying/selling visualizations
-- Ability to download your library to a local system when you login.
-- Ability to update local visualizations to a latest version.
+- Ability to download your library to a local system when you log in.
+- Ability to update local visualizations to the latest version.
 
 ## Visualization Lifecycle
 ### Development

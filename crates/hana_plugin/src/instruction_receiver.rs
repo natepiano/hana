@@ -83,7 +83,7 @@ impl InstructionReceiver {
                         std::process::exit(0);
                     }
                     instruction => {
-                        tracing::debug!("viz_plugin: received instruction {:?}", instruction);
+                        debug!("viz_plugin: received instruction {:?}", instruction);
 
                         tx.send(instruction)
                             .await

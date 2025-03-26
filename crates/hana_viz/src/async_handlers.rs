@@ -34,11 +34,11 @@ pub fn setup_visualization_worker(mut commands: Commands, async_runtime: Res<Asy
 
     // Create the worker using the new pattern
     // a hana_async::Worker expects the current runtime which we've already inserted as a resource
-    // and a closure handling all of the messages coming from the ECS systems that want to talk the
+    // and a closure handling all the messages coming from the ECS systems that want to talk the
     // async runtime
     //
-    // we create it here then we add it as a resource so it can be queried by the ECS systems in event_systems
-    // and used to call back into the async runtime
+    // we create it here then we add it as a resource so it can be queried by the ECS systems in
+    // event_systems and used to call back into the async runtime
     let worker =
         hana_async::AsyncWorker::new(&async_runtime, move |instruction: AsyncInstruction| {
             let visualizations = Arc::clone(&visualizations);

@@ -9,7 +9,6 @@
 //! in turn processes the instruction - the return values from those instructions are sent back
 //! where our worker can try_receive them to see if any async tasks have finished and it can
 //! then do the right next thing
-//!
 mod async_handlers;
 mod async_messages;
 mod async_worker;

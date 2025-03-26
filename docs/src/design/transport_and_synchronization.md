@@ -4,7 +4,7 @@
 ## Purpose
 Outline the transport control mechanism and timing synchronization for the hana system.
 
-By transport we mean play/pause/stop/seek/loop/rewind/etc. By synchronization we mean keeping the timing of the visualizations in sync across all displays.
+By transport, we mean play/pause/stop/seek/loop/rewind/etc. By synchronization, we mean keeping the timing of the visualizations in sync across all displays.
 
 ## Transport Requirements (options)
 - Transport controls for play/pause/stop/restart

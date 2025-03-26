@@ -1,6 +1,6 @@
-//! This module contains the mapping of keyboard input to actions in the hana app
-//! such as Ping, Start and Shutdown of visualizations
-//! much much more to come
+//! This module contains the mapping of input devices (keyboard, mouse, trackpad, etc.) to actions
+//! in the hana app such as Ping, Start and Shutdown of visualizations
+//! camera control
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use strum::{EnumIter, IntoEnumIterator};
@@ -16,6 +16,8 @@ use strum::{EnumIter, IntoEnumIterator};
 /// ```
 #[derive(Actionlike, EnumIter, Reflect, PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum Action {
+    CameraHome,
+    CameraInspect,
     Ping,
     Start,
     Shutdown,
@@ -42,6 +44,8 @@ impl Action {
         // statement and then return the map at the end of each iteration so the
         // accumulation works
         Self::iter().fold(InputMap::default(), |input_map, action| match action {
+            Self::CameraInspect => input_map.with(action, KeyCode::KeyC),
+            Self::CameraHome => input_map.with_one_to_many(action, [KeyCode::F12, KeyCode::Home]),
             Self::Ping => input_map.with(action, KeyCode::KeyP),
             Self::Start => input_map.with(action, KeyCode::F1),
             Self::Shutdown => input_map.with(action, KeyCode::F2),

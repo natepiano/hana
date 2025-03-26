@@ -32,5 +32,25 @@ fn main() {
             OscillatingGizmoPlugin,
             SplashPlugin,
         ))
+        .add_systems(Startup, setup)
         .run();
+}
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let cuboid = Cuboid {
+        half_size: Vec3::new(1.0, 1.0, 1.0) / 2.0,
+    };
+    let mesh = meshes.add(Mesh::from(cuboid));
+    let material = StandardMaterial::default();
+    let material_handle = materials.add(material);
+
+    let transform = Transform::from_xyz(2.0, 0.0, 0.0);
+    commands
+        .spawn(Mesh3d(mesh.clone()))
+        .insert(transform)
+        .insert(MeshMaterial3d(material_handle.clone()));
 }

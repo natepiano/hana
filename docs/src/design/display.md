@@ -14,25 +14,22 @@ and projectors. Or lasers. Or Lights. Or AR devices. Or VR headsets. Or whatever
 - Allow [state](state.md) to be saved and loaded
 ## Hierarchy
 1. **Environment**: The complete 3D space where displays exist
--   - Contains one or more Groups (fixtures? walls?) that define the physical space and on which Displays can be located
+    - Contains one or more Groups (fixtures? walls?) that define the physical space and on which Displays can be located
     - Contains one or more Displays
     - Defines the global coordinate system
     - Manages global properties (e.g., ambient lighting, scale)
     - Can be assigned a name - such as "Stage" or "Installation" or "Favorite Customer"
-
 2. **Display Groups**: A logical collection of displays with spatial relationship
     - Examples: "North Wall", "Stage Right", "Ceiling Array"
     - Defines relative positioning of member displays
     - Can be manipulated as a unit (move, rotate, etc.)
     - Can be assigned a name
-
 3. **Display**: A physical output device (monitor, projector)
     - Physical properties (resolution, dimensions)
     - Position and orientation in 3D space
     - Network location and status
     - Contains one or more windows
     - Can be assigned a name
-
 4. **Window**: A standard operating system window
    - Bounded area where plugins render
    - Managed by the operating system
@@ -47,7 +44,7 @@ and projectors. Or lasers. Or Lights. Or AR devices. Or VR headsets. Or whatever
 - Windows handle viewport calculations and plugin rendering
 
 ## Example Configuration
-think of this as pseudo code for example purposes only - names and fields will almost certainly change
+think of this as pseudocode for example purposes only - names and fields will almost certainly change
 
 ```rust
 struct Environment {

@@ -102,4 +102,4 @@ pub async fn is_running(&mut self) -> Result<bool> {
 In this case we're propagating the error ourselves so we create a new error-stack Report with the underlying error and then change_context to a fully qualified ProcessCheckFailed that includes that path information for the failed process.
 
 ## ? in tests
-To easily use ? in tests we can make the result for the test ```Result<(), Box<dyn std::error::Error>>``` which allows it to just pass through any error. We don't need special error handling machinery for tests as we just want to catch things if they fail and then make them pass.
+To easily use ? in tests, we can make the result for the test ```Result<(), Box<dyn std::error::Error>>``` which allows it to just pass through any error. We don't need special error handling machinery for tests as we just want to catch things if they fail and then make them pass.

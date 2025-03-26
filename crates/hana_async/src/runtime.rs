@@ -29,7 +29,7 @@ pub fn init_async_runtime(mut commands: Commands, mut exit: EventWriter<AppExit>
 }
 
 impl AsyncRuntime {
-    /// Create a new AsyncRuntime with a multi-threaded Tokio runtime
+    /// Create a new AsyncRuntime with a multithreaded Tokio runtime
     pub fn new() -> Result<Self, Error> {
         let runtime = Arc::new(Runtime::new().change_context(Error::RuntimeCreationFailed)?);
         Ok(Self { runtime })

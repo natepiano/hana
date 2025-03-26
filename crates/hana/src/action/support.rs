@@ -51,7 +51,7 @@ pub struct ToggleState {
 ///
 /// doing it in the run condition is probably not technically faster but it's more obvious that
 /// the ActionState is gating the entire system and you don't have to take up an argument
-/// and surround your code with an if statement if you in the simple case where the system
+/// and surround your code with an if statement in the simple case where the system
 /// is only invoked by a key press
 pub fn just_pressed<A: Actionlike>(action: A) -> impl Fn(Res<ActionState<A>>) -> bool {
     move |action_state: Res<ActionState<A>>| action_state.just_pressed(&action)

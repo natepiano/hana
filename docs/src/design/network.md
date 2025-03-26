@@ -2,7 +2,7 @@
 Overview of networking and security in hana. Our intent is to be able to create a mesh network of hana apps controlling visualizations whether the visualizations are local or remote. A hana app must be running to control a visualization and you can start a hana app on any machine on the network and it will automatically, safely and securely join the network to participate in visualization control.
 
 ## Current State
-Networking is implemented in hana_network crate. Currently we support TCP for remote comms for local, local comms over Unix Sockets on Mac/Linux
+Networking is implemented in hana_network crate. Currently, we support TCP for remote comms for local, local comms over Unix Sockets on Mac/Linux
 
 We want to make clients agnostic to the underlying transport and have networking just be easy to use.
 

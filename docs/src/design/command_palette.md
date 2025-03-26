@@ -6,7 +6,7 @@ With this, we need a Command Palette with fuzzy searching as is found in many ap
 
 ** note ** - recently used commands should be at the top of the list
 
-Seems to me that the command palette functionality could be it's own crate - i would use leafwing input manager for the commands. There can be a json keybindings file that maps all commands to keys - both default and user-defined which just overrides the default keybindings. Make it work like zed as much possible as there system is easy and intuitive.
+Seems to me that the command palette functionality could be its own crate - i would use leafwing input manager for the commands. There can be a json keybindings file that maps all commands to keys - both default and user-defined which just overrides the default keybindings. Make it work like zed as much possible as there system is easy and intuitive.
 
 Commands will have to be bound to actions that can be executed - there's a fair bit of code in this in zed to facilitate creation of actions - which ties directly to code in the app.  In zed a lot of it is tied to GPUI but i think not all of it. Given we're going to bind many things to bevy UI and even to visualizations, we'll need to implement our own action system on the hana side.
 

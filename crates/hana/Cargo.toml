@@ -8,12 +8,14 @@ version     = "0.1.0"
 workspace = true
 
 [dependencies]
-bevy.workspace         = true
-error-stack.workspace  = true
-hana_async.workspace   = true
+bevy.workspace = true
+bevy-inspector-egui = "0.30.0"
+bevy_panorbit_camera = { git = "https://github.com/natepiano/bevy_panorbit_camera.git", branch = "feature/blender-trackpad-controls", features = ["bevy_egui"] }
+error-stack.workspace = true
+hana_async.workspace = true
 hana_network.workspace = true
-hana_viz.workspace     = true
+hana_viz.workspace = true
 leafwing-input-manager = "0.16"
-strum                  = { version = "0.27.1", features = ["derive"] }
-thiserror.workspace    = true
-tracing.workspace      = true
+strum = { version = "0.27.1", features = ["derive"] }
+thiserror.workspace = true
+tracing.workspace = true

@@ -8,9 +8,9 @@
 - when engaging with a node, it should be obviously selected somehow, you can rotate faces to interact with the different controls it makes available.
 - Nodes appear with an animation - is there a distinct animation for each type? Is there an accompanying sound for each type?
 - There could be a visualization of what the node itself does
-- Could there be another visualization of what is done by the node up to that point? possibly. For example, if an LFO is a source, the you'd only see it's output waveform. But if there is an input to the LFO that's modifying it, you could see the combined effect to that point
+- Could there be another visualization of what is done by the node up to that point? possibly. For example, if an LFO is a source, then you'd only see it's output waveform. But if there is an input to the LFO that's modifying it, you could see the combined effect to that point
 - if appropriate, a node should automatically support multiple inputs and multiple outputs - self adapting without requiring extra configuration
-- nodes could have different looks - themes that could be add ons
+- nodes could have different looks - themes that could be add-ons
 - any control on a node can be modulated / parameterized by outputs from other nodes - which could be midi, or sensor values, or whatever has been transformed.
 
 ## interaction
@@ -20,11 +20,12 @@ there will have to be some kind of focus reticule, mouse cursor, something that 
 - You can group sections - and name them for convenience - a section container shouldn't get in the way of editing
 
 ## minigame
-- Nodes could expose an entire mini-game environment where you dive in and configure. Maybe you dive ino the cube and it becomes bigger on the inside. as an example, an LFO might show a very much larger version of the wave form, hanging in space in front of you.  Waveform editing tools appear and you can freeze it and add control nodes to reshape the envelope - stair step, random, bezier, etc. - could all be available. You could stretch the weaveform to fit a time scale - or like ableton use the control points to stretch to a particular part of the time scale.
+- Nodes could expose an entire mini-game environment where you dive in and configure. Maybe you dive ino the cube and it becomes bigger on the inside. as an example, an LFO might show a very much larger version of the wave form, hanging in space in front of you.  Waveform editing tools appear and you can freeze it and add control nodes to reshape the envelope - stair step, random, bezier, etc. - could all be available. You could stretch the waveform to fit a timescale - or like ableton use the control points to stretch to a particular part of the timescale.
 - The basic idea of the minigame could be implemented in different ways by different nodes - allowing for a wide range of interactive experiences within the context of the node editor.
+
 ## cables
 - cables connecting would look like real audio cables
-- when close enough to a cable, you can see a visualization representing the data that it carries. For example, if it's a audio, or control voltages, an oscilloscope view of the wave form can display. Midi data - maybe that shows the notes being played. If it's video, not sure...
+- when close enough to a cable, you can see a visualization representing the data that it carries. For example, if it's an audio, or control voltages, an oscilloscope view of the wave form can display. Midi data - maybe that shows the notes being played. If it's video, not sure...
 - and if you're looking at an oscilloscope view of a cable, you can expand it for control over the oscilloscope data. I like the idea that every single cable is automatically an oscilloscope without having to add one where you want to see one. Of course you can turn this (or any visualization) off.
 - when zoomed out, possibly the cables have light running through them so it looks cool - different visualizations could be applied
 - cables automatically route
@@ -39,7 +40,7 @@ there will have to be some kind of focus reticule, mouse cursor, something that 
 - there should be range selection
 
 ## global information
-- information like FPS - maybe on a glowing sphere (or data separated by glowing lines) - like a node, it could be a shape changer and people could customize what is visible, with intelligent defaults. Kind of like information on a car dashboard where you move the thumbwheel on the steering wheel to change the view to see global stats about what's happening.
+- information like FPS - maybe on a glowing sphere (or data separated by glowing lines) - like a node, it could be a shape changer and people could customize what is visible, with intelligent defaults. Kind of like information on a car dashboard where you move the thumb wheel on the steering wheel to change the view to see global stats about what's happening.
 - so yeah, probably the global information display shares something with nodes in terms of how they're constructed. And i suppose the output of the global information could be a feedback loop back into nodes...
 - along with FPS, for troubleshooting purposes we should also be able to see things such as
   - CPU use across cores

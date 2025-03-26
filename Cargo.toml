@@ -36,8 +36,8 @@ unwrap_used = "deny"
 #
 # Workspace member crates
 #
-hana_async   = { path = "crates/hana_async" }
-hana_const   = { path = "crates/hana_const" }
+hana_async = { path = "crates/hana_async" }
+hana_const = { path = "crates/hana_const" }
 # hana_input   = { path = "crates/hana_input" }
 hana_network = { path = "crates/hana_network" }
 hana_plugin  = { path = "crates/hana_plugin" }
@@ -47,51 +47,9 @@ hana_viz     = { path = "crates/hana_viz" }
 #
 # External dependencies
 #
-
-# this is the bevy prelude - trial and error to figure out the minimal
-# features needed to display basic_visualization
-# add other features as necessary - eventually we'll stabilize and maybe
-# that will require the whole prelude, we'll see
-bevy = { version = "^0.15.3", default-features = false, features = [
-  "bevy_gizmos",
-  "bevy_pbr",
-  "bevy_text",
-  "bevy_ui",
-  "bevy_winit",
-  "default_font",
-  "multi_threaded",
-  "tonemapping_luts",
-  "x11",
-  # "android-game-activity",
-  # "android-game-activity",
-  # "android_shared_stdcxx",
-  # "animation",
-  # "bevy_asset",
-  # "bevy_audio",
-  # "bevy_color",
-  # "bevy_core_pipeline",
-  # "bevy_gilrs",
-  # "bevy_gizmos",
-  # "bevy_gltf",
-  # "bevy_mesh_picking_backend",
-  # "bevy_picking",
-  # "bevy_render",
-  # "bevy_scene",
-  # "bevy_sprite",
-  # "bevy_sprite_picking_backend",
-  # "bevy_state",
-  # "bevy_ui_picking_backend",
-  # "bevy_window",
-  # "custom_cursor",
-  # "hdr",
-  # "png",
-  # "smaa_luts",
-  # "sysinfo_plugin",
-  # "vorbis",
-  # "webgl2",
-] }
+bevy        = "^0.15.3"
 error-stack = { version = "0.5.0", features = ["spantrace"] }
-flume = "0.11.1"
+flume       = "0.11.1"
 
 tempfile = "3.18.0"
 thiserror = "2.0.12"
@@ -100,7 +58,7 @@ tokio = { version = "1.44", default-features = false, features = [
   "macros",          # for #[tokio::main]
   "net",             # for TcpStream
   "process",         # for process::Command
-  "rt-multi-thread", # for multi-threaded runtime
+  "rt-multi-thread", # for multithreaded runtime
   "sync",            # for mpsc::channel
   "time",            # for sleep
 ] }

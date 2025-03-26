@@ -31,8 +31,8 @@ pub fn handle_start_visualization_event(
         pending_connections.pending.insert(
             entity,
             VisualizationDetails {
-                path: event.path.clone(),
-                name: event.name.clone(),
+                path:       event.path.clone(),
+                name:       event.name.clone(),
                 env_filter: event.env_filter.clone(),
             },
         );
@@ -68,7 +68,7 @@ pub fn handle_shutdown_visualization_event(
 
             // First send shutdown instruction to worker for graceful shutdown
             if let Err(e) = worker.send_instruction(AsyncInstruction::SendInstruction {
-                entity: event.entity,
+                entity:      event.entity,
                 instruction: Instruction::Shutdown,
             }) {
                 error!("Failed to send shutdown instruction: {:?}", e);
@@ -77,7 +77,7 @@ pub fn handle_shutdown_visualization_event(
             // Always follow up with a terminate command that will wait for graceful shutdown
             // and force terminate only if needed
             if let Err(e) = worker.send_instruction(AsyncInstruction::Shutdown {
-                entity: event.entity,
+                entity:  event.entity,
                 timeout: Duration::from_millis(event.timeout_ms),
             }) {
                 error!("Failed to send terminate command: {:?}", e);
@@ -99,7 +99,7 @@ pub fn handle_send_instruction_event(
 
             // Send command to worker
             if let Err(e) = worker.send_instruction(AsyncInstruction::SendInstruction {
-                entity: event.entity,
+                entity:      event.entity,
                 instruction: event.instruction.clone(),
             }) {
                 error!("Failed to send instruction: {:?}", e);
@@ -129,8 +129,8 @@ pub fn process_async_outcomes(
                     );
 
                     commands.entity(entity).insert(Visualization {
-                        path: details.path,
-                        name: details.name,
+                        path:       details.path,
+                        name:       details.name,
                         env_filter: details.env_filter,
                     });
                 }
@@ -139,7 +139,7 @@ pub fn process_async_outcomes(
                 entity,
                 instruction,
             } => {
-                // currently we don't do anyting but log that this happened
+                // currently we don't do anything but log that this happened
                 // possibly in the future there would be some use for this
                 debug!(
                     "AsyncOutcome::InstructionSent to visualization: {:?} (entity: {:?})",

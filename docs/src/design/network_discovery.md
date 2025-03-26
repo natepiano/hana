@@ -2,7 +2,7 @@
 
 To maximize compute and gpu - there shouldn't have to be a hana app running on a machine but the machine could just be running visualization(s). After all the hana app is a bevy app making heavy use of the local GPU - which may be fine but it would be nice to have the option for the visualization to assume full control of the GPU - especially when driving multiple screens/projectors.
 
-Additionally anyone that wants to control visualizations on the mesh needs to run a Hana App, connect to the network and start controlling visualizations (or even change the overall hana network configuration)
+Additionally, anyone that wants to control visualizations on the mesh needs to run a Hana App, connect to the network and start controlling visualizations (or even change the overall hana network configuration)
 
 To accomplish this, we propose a UDP discovery protocol for the mesh network.
 
@@ -419,7 +419,7 @@ struct TestMetricsCollector {
    - Test behavior under suboptimal network conditions
    - Verify recovery capabilities
 
-## Continuous Integration Integration
+## Continuous Integration
 
 Configure your CI pipeline to:
 

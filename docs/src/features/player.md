@@ -9,4 +9,4 @@ And possibly the node editor would allow you to tag parameters to automatically 
 
 And you can jump quickly back and forth between player and node editor so it is low friction to make a parameter available for the player
 
-Have to think hard about this - in VCV rack you see everything all the time. Which can be both an advantage and also overwhelming. Omri Cohen, et al, have come up with mechanisms to create meta modules that allow for playing so you don't have to drown in the complexity of all of the controls.  but they do take work to configure - so if we automate this and make it "the player" that could be a key feature.
+Have to think hard about this - in VCV rack you see everything all the time. Which can be both an advantage and also overwhelming. Omri Cohen et al., have come up with mechanisms to create meta modules that allow for playing so you don't have to drown in the complexity of all the controls.  but they do take work to configure - so if we automate this and make it "the player" that could be a key feature.

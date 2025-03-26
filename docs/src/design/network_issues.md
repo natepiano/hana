@@ -12,10 +12,10 @@ All of these are basically issues to implement - we can eventually migrate this 
   - lightweight and can easily just be started up and remain listening on any machine in the mesh
 - decide which or the capabilities from the network discussion below need to be implemented
 - support multiple simultaneous connections -
-  - mesh control for starting/stopping processes and heartbeat/health - one message at a time, must be reliable but doesn't have to be super fast
+  - mesh control for starting/stopping processes and heartbeat/health - one message at a time, must be reliable but doesn't have to be superfast
   - modulation control - probably more like a streaming protocol
   - timing and play/pause control - provided by ableton link (tbd)
   - communication between hana apps on the mesh
-  - connection of a particular hana app instance to a particular visualization to update it's modulation / play it in real time
+  - connection of a particular hana app instance to a particular visualization to update its modulation / play it in real time
   - decide whether messages (and roles?) need to come out of hana_network app as these are higher level constructs
   - decide whether a Visualization can implement their own message types (how would they define the hana app side?) possible use cases could be visualizations talking to each other on multiple machines in the mesh?

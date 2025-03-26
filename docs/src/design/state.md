@@ -4,7 +4,7 @@
 ## Purpose
 Manages the synchronization, versioning, and persistence of state across the hana system. Provides a robust foundation for maintaining consistency and handling state recovery across the distributed system.
 
-This document is really just some scratch notes about somethings we know we'll need (persisting the management app configuration) and the fact that if we have a mesh architecture we will need some way to synchronize system state across all nodes in the mesh.
+This document is really just some scratch notes about some things we know we'll need (persisting the management app configuration) and the fact that if we have a mesh architecture we will need some way to synchronize system state across all nodes in the mesh.
 
 Everything in this doc is subject to change - and speculative at this point.
 
