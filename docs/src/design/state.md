@@ -1,6 +1,12 @@
 # State Management
-{{#include ../ai.md}}
+There are a couple of areas to cover in state. One is saving the contents of the node editor/environment editor. Another is propagating state in the networking. I suppose there are other states - such as account, node library. Anyway - right now this is a page that is in serious need of disambiguation and splitting apart.
 
+# save hana
+first off - what is a save going to be called?
+## research
+- Bevy_serialization_extras - but more likely - bevy_save which seems to be pretty full-featured for game saves
+
+# Below is from an AI dialogue and is just kept around for historical reasons
 ## Purpose
 Manages the synchronization, versioning, and persistence of state across the hana system. Provides a robust foundation for maintaining consistency and handling state recovery across the distributed system.
 

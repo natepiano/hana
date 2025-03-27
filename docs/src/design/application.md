@@ -4,9 +4,9 @@
 ## Purpose
 The hana application serves as the central hub for configuring
 and controlling all aspects of the hana system. It provides
-a 3D game-like interface for managing the [Display Environment](display.md) and integrates with all core systems:
+a 3D game-like interface for managing the [Display Environment](environment_editor) and integrates with all core systems:
 - Management app [Configuration](configuration.md)
-- [Display Environment](display.md) management
+- [Display Environment](environment_editor) management
 - [Network](network.md) configuration and monitoring
 - [Input](input.md) controller setup (OSC, midi, keyboards, gamepads, sensors)
 - [Modulation](modulation.md) interface management
@@ -16,7 +16,7 @@ a 3D game-like interface for managing the [Display Environment](display.md) and 
 - Performance & Diagnostic tools
 ## 3D Interface
 - Built as a 3D bevy application
-- Visualizes the complete [display environment](display.md) - a representation of the actual "stage" or "space" that the displays are arranged in.:
+- Visualizes the complete [display environment](environment_editor) - a representation of the actual "stage" or "space" that the displays are arranged in.:
     - Global 3D environment space
     - Display or projected screen with relative positioning
     - Individual displays with physical properties

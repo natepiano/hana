@@ -1,7 +1,7 @@
 # Visualization Manager
 {{#include ../ai.md}}
 ## Purpose
-The Visualization Manager allows for instantiation and runtime management of visualizations. It handles loading, initialization, and lifecycle management of visualizations, including resource allocation and cleanup. Visualizations are rendered within windows in the [Display Environment](./display.md).
+The Visualization Manager allows for instantiation and runtime management of visualizations. It handles loading, initialization, and lifecycle management of visualizations, including resource allocation and cleanup. Visualizations are rendered within windows in the [Display Environment](./environment_editor).
 ## Architecture
 ### Core Components
 1. **Visualization Runtime**
