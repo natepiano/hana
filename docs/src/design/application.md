@@ -1,5 +1,5 @@
 # Hana Application
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 ## Purpose
 The hana application serves as the central hub for configuring

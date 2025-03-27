@@ -1,8 +1,8 @@
 # Summary
 [Introduction](./README.md)
-[Script](./script.md)
-[Use Cases](./use_cases.md)
-[Hana in Other Languages](./hana_in_other_languages.md)
+[Script](./misc/script.md)
+[Use Cases](./misc/use_cases.md)
+[Hana in Other Languages](./misc/hana_in_other_languages.md)
 // sections
 - [Features](./features/features.md)
   - [Collaboration](./features/collaboration.md)
@@ -15,6 +15,7 @@
   - [Mobile](./features/mobile.md)
   - [Player](./features/player.md)
   - [Themes](./features/themes.md)
+  - [Hardware](./features/hardware.md)
 - [Design Overview](./design/overview.md)
   - [Application](./design/application.md)
     - [UX](./design/ux.md)

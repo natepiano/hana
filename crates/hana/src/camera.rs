@@ -30,6 +30,7 @@ fn setup(mut commands: Commands, camera_config: Res<CameraConfig>) {
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_sensitivity: 1.5,
             trackpad_behavior: TrackpadBehavior::BlenderLike {
                 modifier_pan: Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),

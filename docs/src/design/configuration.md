@@ -1,5 +1,5 @@
 # Configuration Management
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 ## Purpose
 The configuration management system handles core system settings that determine how hana operates. It focuses on application configuration rather than user-created content or runtime state, which are managed by the [State Management](state.md) system.

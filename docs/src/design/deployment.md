@@ -1,5 +1,5 @@
 # Deployment System
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 ## Purpose
 There are a few areas covered under "deployment" - possibly this could be split into multiple sections

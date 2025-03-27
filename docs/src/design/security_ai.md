@@ -1,5 +1,5 @@
 # Security discussions with Claude 3.5
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 
 ## Purpose

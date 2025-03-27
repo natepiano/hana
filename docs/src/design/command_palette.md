@@ -12,13 +12,16 @@ Commands will have to be bound to actions that can be executed - there's a fair 
 
 Ideally this would be something built up front as a command system for "operating hana" will be useful for development, testing and debugging from jump.
 
-## textbox
+## research
+### textbox
 https://crates.io/crates/bevy_cosmic_edit - there is not any good solution outside of bevy_egui for an actual textbox input - we need one. Possibly this one: https://crates.io/crates/bevy_text_edit
+probably not: - https://github.com/shanecelis/bevy_minibuffer - connecting actions to commands in bevy...
+## fuzzy search
+- Nucleo fuzzy search - this could potentially be what powers a command-palette implementation
 
 
+{{#include ../misc/ai.md}}
 ## Here's a high-level approach for just the commands
-{{#include ../ai.md}}
-
 ```rust
 /// Each subsystem defines their commands as a strongly typed enum
 #[derive(Debug, Clone, PartialEq)]

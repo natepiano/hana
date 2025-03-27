@@ -1,5 +1,5 @@
 # Resource Management
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 ## Purpose
 The resource management system monitors and optimizes system resource usage across the hana network. It focuses on detection and reporting rather than direct control, working within bevy's constraints while providing useful insights and basic throttling capabilities.

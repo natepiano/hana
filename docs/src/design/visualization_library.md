@@ -1,5 +1,5 @@
 # Visualization Library
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 ## Purpose
 The idea of this is modified after the VCV Rack 2 library system. It will be a web-based system that allows users to discover, download, and install visualizations. It will also allow developers to submit their visualizations for review and distribution.

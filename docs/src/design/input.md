@@ -1,6 +1,6 @@
 # Input and Control Integration
 
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 
 ## Purpose
 The input and control system provides a standardized interface for integrating various input sources into the hana system. This allows for real-time control of visualizations and other parameters through external devices and sensors.

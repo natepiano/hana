@@ -1,5 +1,5 @@
 # Workspace Organization
-{{#include ../ai.md}}
+{{#include ../misc/ai.md}}
 ## Purpose
 We're using a workspace to save on compile times and to keep the code organized. The workspace is defined in the root `Cargo.toml` file.
 

@@ -1,6 +1,6 @@
 # Script for a generative art and performance tool
 
-Imaging this as a kickstarter video to get people to fund this project. A kickstarter video that raises a few million dollars.
+Imaging this as a kickstarter video to get people to fund this project. A kickstarter video that raises a few million dollars. This was produced and the current version is [here](https://www.youtube.com/watch?v=9IEJBfTn8Os)
 
 ## Script
 Most creative software today—video editors, 3D modeling apps, DAWs, virtual synthesizers, and generative art tools—can feel complex and overwhelming. You've probably experienced it: hours spent clicking through menus, wrestling with interfaces, watching tutorial videos. Contrast that with the playful simplicity of games like "Tears of the Kingdom," where Link's UltraHand lets you intuitively combine and manipulate objects to build creations effortlessly. Or think of Iron Man's holographic interface, where Tony Stark arranges and uses digital elements with ease.
