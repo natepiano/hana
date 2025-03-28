@@ -2,7 +2,14 @@
 There are a couple of areas to cover in state. One is saving the contents of the node editor/environment editor. Another is propagating state in the networking. I suppose there are other states - such as account, node library. Anyway - right now this is a page that is in serious need of disambiguation and splitting apart.
 
 # save hana
-first off - what is a save going to be called?
+First off - what is a save going to be called? Probably just save. But do we save node editor and environment editor separately? I don't think so - at least not by default but probably we allow it for sharing/training purposes
+
+And onto design considerations - one key design decision up front is to establish a versioned format that allows us to preserve backwards compatibility without having to add a lot of visible boilerplate.
+
+And ideally it should be human readable although it might get long. Seems to me TOML is a natural format for this purpose.
+
+If a save is human-readable text, it opens up the possibilities of people writing node generators that simply output a node graph or environment representation file.
+
 ## research
 - Bevy_serialization_extras - but more likely - bevy_save which seems to be pretty full-featured for game saves
 

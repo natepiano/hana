@@ -1,16 +1,37 @@
-[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/bevyengine/bevy#license)
-# Hana: Distributed Visualization Management
-Hana (花) - Named after the Japanese word for "flower," reflecting the system's ability to let visualizations bloom across multiple displays.
+# Hana - Create Visualizations
+Hana (花) - Named after the Japanese word for "flower," reflecting the system's ability to let visualizations bloom in a rich multi-device environment.
 
-Imagine a large scale music performance with video walls, lighting, lasers, and interactive visuals all in sync. You can set it up with ease, synchronize the visuals to the music, and control them with input from keyboards, microphones, sensors and apps. Play and improvise the visualizations just as you do the music - controlling color, complexity, movement, rotation, zoom, transitions and more.
+Imagine a large scale music performance with video walls, lighting, lasers, and interactive visuals all in sync. You can set it up with ease, synchronize the visuals to the music, control them with input from keyboards, microphones, sensors and apps. Play and improvise the visualizations just as you do the music - controlling color, complexity, movement, rotation, zoom, transitions and more.
 
-Hana is a distributed visualization management system that enables control and display of visualizations across multiple screens, devices and machines.
+Hana allows you to make these visualizations in a game-like environment where everything just works as you expect. And delights you with thoughtfulness in ease of use.
+
+Hana allows you to work together in a multi-creator environment.
+
+Hana is a distributed visualization management system that enables efficient and intuitive control and display of visualizations across multiple screens, devices and machines.
 ## Overview
-Built in [rust](https://www.rust-lang.org) using the [bevy](https://bevyengine.org/) game engine, hana consists of a management app that controls both local and remote devices (typically screens or projectors). The management app can run on multiple machines in a mesh network, with any management app instance capable of acting as a controller. The idea is that as you need additional GPUs, or you need to support local sensors or input devices, you add additional machines to the mesh.
+Built in [rust](https://www.rust-lang.org) using the [bevy](https://bevyengine.org/) game engine, hana consists of a `node editor`, an `environment editor`, and a `player`.
 
-Visualizations are implemented as standalone binaries that can be locally or remotely controlled by the management app. Visualizations are developed and distributed independently - using a hana SDK.
+The node editor is the heart - allowing you to make beautiful visualizations.
 
-The intent is to create an open source library of visualizations, ready to use and easy to integrate into the system. The system is designed to be modular and extensible, with a focus on ease of use and performance.
+Nodes themselves can be implemented as plugins, allowing for people to create open source versions and allow also for a marketplace to emerge.
+
+The environment editor is where you place screens, projectors, lights, lasers, sensors. The environment editor is also where you attach machines to devices so that you can visualize the network both in terms of assignment of compute responsibilities but also in terms of physical location.
+
+The player runs visualizations on devices like screens and projectors. The player can run on multiple machines in a mesh network synchronizing timing with each other and controlling their own local devices. If you need additional GPUs, or device connections, just add more machines running player.
+
+Visualizations will either run in a player - or bevy authors can use a plugin crate that provides the network and control protocol so that people can code their own visualizations however they like.
+
+Potentially we can make a library that provides the wire protocol in a way that can be linked into programs written in other languages - aspirational.
+
+Hana will have a cloud-based library for people to find open source nodes to install or commercial nodes to purchase.
+
+The library can also host saved node graphs and environments to allow for content sharing and examples for many purposes.
+
+The intent is to create an open source library of nodes, environments and visualizations (node graphs), ready to use and easy to integrate into their system.
+
+Hana is designed to be modular and extensible, with a focus on ease of use and performance.
+
+Everything should just work as you expect.
 ## Inspiration
 The hana system is meant to be pluggable and modular - drawing inspiration from the plugin system, modularity, simplicity and ease of use of [vcv rack](https://vcvrack.com) software as well as inspiration from bevy to make a management app that is as easy to use as a game.
 ## Repository
