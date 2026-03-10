@@ -1,0 +1,47 @@
+//! Render commands produced by the layout engine.
+
+use super::types::BackgroundColor;
+use super::types::Border;
+use super::types::BoundingBox;
+use super::types::TextConfig;
+
+/// A single render command produced by the layout pass.
+///
+/// The layout engine outputs a flat, ordered list of these commands.
+/// Consumers iterate them to draw rectangles, text, borders, and clip regions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderCommand {
+    /// Computed bounding box in layout coordinates.
+    pub bounds: BoundingBox,
+    /// What to render.
+    pub kind: RenderCommandKind,
+    /// Index of the source element in the `LayoutTree`.
+    pub element_idx: usize,
+}
+
+/// The specific visual to render.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenderCommandKind {
+    /// A filled rectangle.
+    Rectangle {
+        /// Fill color.
+        color: BackgroundColor,
+    },
+    /// A text string.
+    Text {
+        /// The text content.
+        text: String,
+        /// Text configuration (font, size, etc.).
+        config: TextConfig,
+    },
+    /// A border outline.
+    Border {
+        /// Border specification.
+        border: Border,
+    },
+    /// Begin a clipping region. All subsequent commands until the matching
+    /// [`ScissorEnd`](Self::ScissorEnd) are clipped to this bounding box.
+    ScissorStart,
+    /// End the most recent clipping region.
+    ScissorEnd,
+}
