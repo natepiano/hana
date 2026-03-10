@@ -4,7 +4,8 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -30,7 +31,7 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
-        run: cargo +nightly fmt --all --check
+        run: cargo +nightly fmt -- --check
 
       - name: Check TOML formatting
         run: taplo fmt --check
@@ -60,7 +61,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   build:
     name: Build Check
@@ -86,33 +87,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build release
-        run: cargo build --release --all-targets
-
-  bench:
-    name: Benchmark Smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-
-      - name: Install mold linker
-        uses: rui314/setup-mold@v1
-
-      - name: Install and cache Linux dependencies
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: pkg-config clang libwayland-dev libxkbcommon-dev
-          version: 1.0
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Run Criterion benchmark smoke
-        run: cargo bench --bench layout_perf -- --noplot
+        run: cargo build --release --workspace --all-features --examples
 
   test:
     name: Test Suite
@@ -141,9 +116,41 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo nextest run --all-features
+        run: cargo nextest run --workspace --all-features
         env:
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+          WGPU_BACKEND: gl
+          WINIT_UNIX_BACKEND: x11
+          RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
+  bench:
+    name: Benchmark Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Install and cache Linux dependencies
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: pkg-config clang libwayland-dev libxkbcommon-dev
+          version: 1.0
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Criterion benchmark smoke
+        run: cargo bench --bench layout_perf
+        env:
+          WGPU_BACKEND: gl
+          WINIT_UNIX_BACKEND: x11
+          RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
   mend:
     name: Mend Check
@@ -155,9 +162,10 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+          components: rust-src, rustc-dev, llvm-tools-preview
 
-      - name: Install cargo-mend
-        run: cargo install --git https://github.com/natepiano/cargo-mend cargo-mend
+      - name: Clone cargo-mend
+        run: git clone https://github.com/natepiano/cargo-mend.git /tmp/cargo-mend
 
       - name: Install mold linker
         uses: rui314/setup-mold@v1
@@ -172,6 +180,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run cargo mend
-        run: cargo mend
+        run: cargo run --manifest-path /tmp/cargo-mend/Cargo.toml -- --fail-on-warn
         env:
+          RUSTC_BOOTSTRAP: "1"
           CARGO_TERM_COLOR: never
