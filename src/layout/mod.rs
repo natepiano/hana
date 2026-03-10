@@ -63,3 +63,4 @@ pub use types::Padding;
 pub use types::Sizing;
 pub use types::TextConfig;
 pub use types::TextDimensions;
+pub use types::TextWrap;

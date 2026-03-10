@@ -1,18 +1,36 @@
-//! Core layout types for the diegetic UI layout engine.
+//! Core layout types shared across the layout engine.
+//!
+//! This module defines the fundamental building blocks for layout configuration:
+//! [`Sizing`], [`Direction`], [`AlignX`]/[`AlignY`], [`Padding`], [`Border`],
+//! and [`TextConfig`].
 
 use bevy::color::Color;
 
-/// Axis-specific sizing rule for a layout element.
+/// Sizing behavior for a layout element along one axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sizing {
     /// Shrink-wrap to content, clamped to `[min, max]`.
+    ///
+    /// The element's content size is computed first (e.g. via text measurement
+    /// or children accumulation), then clamped to the `[min, max]` range.
+    /// If content is smaller than `min`, the element grows to `min`.
+    /// If content is larger than `max`, the element is capped at `max`.
     Fit {
         /// Minimum size in layout units.
         min: f32,
         /// Maximum size in layout units.
         max: f32,
     },
-    /// Expand to fill available space, clamped to `[min, max]`.
+    /// Expand to fill remaining parent space, clamped to `[min, max]`.
+    ///
+    /// After all non-`Grow` siblings are sized, remaining space is distributed
+    /// among `Grow` siblings using a smallest-first equalising heuristic:
+    /// the smallest `Grow` elements receive space first until they match the
+    /// next-smallest, then all are grown together, repeating until space is
+    /// exhausted or every element hits its `max`.
+    ///
+    /// `min` acts as a guaranteed floor -- the element never shrinks below it.
+    /// `max` caps expansion -- the element stops growing once it reaches `max`.
     Grow {
         /// Minimum size in layout units.
         min: f32,
@@ -21,7 +39,10 @@ pub enum Sizing {
     },
     /// Exact size in layout units.
     Fixed(f32),
-    /// Fraction of parent's available space (0.0–1.0).
+    /// Fraction of the parent's size along this axis (0.0--1.0).
+    ///
+    /// Along the parent's layout direction, padding and child gaps are
+    /// subtracted before computing the fraction.
     Percent(f32),
 }
 
@@ -35,49 +56,66 @@ impl Default for Sizing {
 }
 
 impl Sizing {
-    /// `Fit` with no bounds.
+    /// Shrink-wrap to content with no size constraints.
+    ///
+    /// The element's content size is computed first (e.g. via text measurement
+    /// or children accumulation) and used as-is — there is no minimum floor
+    /// and no maximum cap.
     pub const FIT: Self = Self::Fit {
         min: 0.0,
         max: f32::MAX,
     };
 
-    /// `Grow` with no bounds.
+    /// Expand to fill available space with no size constraints.
+    ///
+    /// After all non-`Grow` siblings are sized, remaining space is distributed
+    /// among `Grow` siblings using a smallest-first equalising heuristic.
+    /// With no constraints, this element will absorb as much space as possible.
     pub const GROW: Self = Self::Grow {
         min: 0.0,
         max: f32::MAX,
     };
 
-    /// `Fit` with a minimum.
+    /// Shrink-wrap to content with a minimum floor.
+    ///
+    /// The element will never be smaller than `min`, even if content is smaller.
     #[must_use]
     pub const fn fit_min(min: f32) -> Self {
         Self::Fit { min, max: f32::MAX }
     }
 
-    /// `Fit` with a minimum and maximum.
+    /// Shrink-wrap to content, clamped to `[min, max]`.
+    ///
+    /// Content smaller than `min` grows to `min`; content larger than `max`
+    /// is capped at `max`.
     #[must_use]
     pub const fn fit_range(min: f32, max: f32) -> Self {
         Self::Fit { min, max }
     }
 
-    /// `Grow` with a minimum.
+    /// Expand to fill available space with a minimum floor.
+    ///
+    /// The element is guaranteed at least `min` even if no space remains.
     #[must_use]
     pub const fn grow_min(min: f32) -> Self {
         Self::Grow { min, max: f32::MAX }
     }
 
-    /// `Grow` with a minimum and maximum.
+    /// Expand to fill available space, clamped to `[min, max]`.
+    ///
+    /// `min` is a guaranteed floor; `max` caps expansion.
     #[must_use]
     pub const fn grow_range(min: f32, max: f32) -> Self {
         Self::Grow { min, max }
     }
 
-    /// `Fixed` size.
+    /// Exact size in layout units, ignoring content and siblings.
     #[must_use]
     pub const fn fixed(size: f32) -> Self {
         Self::Fixed(size)
     }
 
-    /// `Percent` of parent (0.0–1.0).
+    /// Fraction of the parent's content area (0.0–1.0).
     #[must_use]
     pub const fn percent(fraction: f32) -> Self {
         Self::Percent(fraction)
@@ -133,6 +171,11 @@ pub enum Direction {
 }
 
 /// Horizontal alignment of children within their parent.
+///
+/// When [`Direction::LeftToRight`], this controls main-axis alignment (distributes
+/// extra space before/after the row of children). When [`Direction::TopToBottom`],
+/// this controls cross-axis alignment (positions each child horizontally within
+/// the parent's content area).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AlignX {
     /// Align to the left edge.
@@ -145,6 +188,11 @@ pub enum AlignX {
 }
 
 /// Vertical alignment of children within their parent.
+///
+/// When [`Direction::TopToBottom`], this controls main-axis alignment (distributes
+/// extra space before/after the column of children). When [`Direction::LeftToRight`],
+/// this controls cross-axis alignment (positions each child vertically within
+/// the parent's content area).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AlignY {
     /// Align to the top edge.
@@ -157,6 +205,9 @@ pub enum AlignY {
 }
 
 /// Interior padding between an element's edges and its children.
+///
+/// Note: [`Sizing::Percent`] on child elements is computed against the parent's
+/// content area (i.e., after this padding and child gap are subtracted).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Padding {
     /// Left padding in layout units.
@@ -237,11 +288,43 @@ impl BoundingBox {
     }
 }
 
+/// Controls how the layout engine breaks text across lines.
+///
+/// The engine splits text according to this mode and measures individual
+/// runs via the [`MeasureTextFn`](super::engine::MeasureTextFn) callback
+/// to determine break points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextWrap {
+    /// Break at word boundaries when text exceeds the element's width.
+    ///
+    /// Words are split on ASCII whitespace. The engine measures each word
+    /// individually, accumulates widths on a line, and breaks when the
+    /// next word would exceed the available width.
+    #[default]
+    Words,
+    /// Break only at explicit `\n` characters.
+    ///
+    /// Each line between newlines is measured as a single run. The element's
+    /// width is the widest line; height is the sum of all line heights.
+    Newlines,
+    /// Never wrap. The full text is measured as a single run and may
+    /// overflow the element's bounds.
+    None,
+}
+
 /// Configuration for how text is measured and rendered.
+///
+/// Text color is not configured here — it is handled by the rendering layer.
+///
+/// Per-element text alignment (left/center/right) is not currently supported.
 #[must_use]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextConfig {
     /// Font identifier (application-defined).
+    ///
+    /// The layout engine does not manage fonts. The application must assign a
+    /// unique ID to each font and provide matching measurements via the
+    /// [`MeasureTextFn`](super::engine::MeasureTextFn) callback.
     pub font_id: u16,
     /// Font size in layout units.
     pub font_size: u16,
@@ -249,8 +332,11 @@ pub struct TextConfig {
     pub line_height: u16,
     /// Letter spacing in layout units.
     pub letter_spacing: u16,
-    /// Whether to wrap text at element boundaries.
-    pub wrap: bool,
+    /// Text wrapping mode.
+    ///
+    /// Controls whether and how the layout engine breaks text across
+    /// multiple lines. Defaults to [`TextWrap::Words`].
+    pub wrap: TextWrap,
 }
 
 impl Default for TextConfig {
@@ -260,7 +346,7 @@ impl Default for TextConfig {
             font_size: 16,
             line_height: 0,
             letter_spacing: 0,
-            wrap: true,
+            wrap: TextWrap::Words,
         }
     }
 }
@@ -273,31 +359,37 @@ impl TextConfig {
             font_size,
             line_height: 0,
             letter_spacing: 0,
-            wrap: true,
+            wrap: TextWrap::Words,
         }
     }
 
-    /// Sets the font id.
+    /// Sets the font identifier.
     pub const fn with_font_id(mut self, font_id: u16) -> Self {
         self.font_id = font_id;
         self
     }
 
-    /// Sets the line height.
+    /// Sets the line height in layout units.
     pub const fn with_line_height(mut self, line_height: u16) -> Self {
         self.line_height = line_height;
         self
     }
 
-    /// Sets the letter spacing.
+    /// Sets the letter spacing in layout units.
     pub const fn with_letter_spacing(mut self, letter_spacing: u16) -> Self {
         self.letter_spacing = letter_spacing;
         self
     }
 
-    /// Disables text wrapping.
+    /// Disables text wrapping (text may overflow the element).
     pub const fn no_wrap(mut self) -> Self {
-        self.wrap = false;
+        self.wrap = TextWrap::None;
+        self
+    }
+
+    /// Sets the text wrapping mode.
+    pub const fn wrap_mode(mut self, mode: TextWrap) -> Self {
+        self.wrap = mode;
         self
     }
 

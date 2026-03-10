@@ -25,6 +25,7 @@ use bevy_diegetic::RenderCommandKind;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
+use bevy_diegetic::TextWrap;
 
 const VIEWPORT: f32 = 200.0;
 
@@ -535,8 +536,9 @@ fn overflow_compression_largest_first() {
             .direction(Direction::LeftToRight),
         |b| {
             // Total: 60 + 60 = 120, but parent is 100 wide.
-            // Both are Fit, so both get compressed.
-            // Both at same size (60), so compressed evenly: 50 each.
+            // Both are Fit with Fixed(60) content. Clay's `minDimensions`
+            // propagates 60 from each child, so neither can compress below 60.
+            // Result: both stay at 60, overflowing the parent by 20.
             b.with(
                 El::new()
                     .width(Sizing::fit_range(0.0, 60.0))
@@ -570,9 +572,9 @@ fn overflow_compression_largest_first() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
 
-    // Children should be compressed to 50 each (indices 2 and 4, not 3 which is a grandchild).
-    assert!(approx_eq(result.computed[2].width, 50.0));
-    assert!(approx_eq(result.computed[4].width, 50.0));
+    // `minDimensions` floor prevents compression below content size.
+    assert!(approx_eq(result.computed[2].width, 60.0));
+    assert!(approx_eq(result.computed[4].width, 60.0));
 }
 
 // ── Render commands ──────────────────────────────────────────────────────────
@@ -934,5 +936,464 @@ fn between_children_borders_emitted() {
         rect_commands.len(),
         2,
         "Should have 2 between-children border rectangles"
+    );
+}
+
+// ── Text wrapping ─────────────────────────────────────────────────────────────
+
+#[test]
+fn text_wraps_at_word_boundaries() {
+    // "Hello World Test" = 16 chars * 16 * 0.6 = 153.6 unwrapped width.
+    // Container is 80 wide — should force word wrapping.
+    // "Hello" = 48.0, "World" = 48.0, "Test" = 38.4
+    // Line 1: "Hello World" = 48 + 9.6(space) + 48 = 105.6 > 80, so:
+    // Line 1: "Hello" (48.0), Line 2: "World" (48.0), Line 3: "Test" (38.4)
+    let mut b = LayoutBuilder::new(80.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text("Hello World Test", TextConfig::new(16));
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 80.0, 200.0);
+
+    // Text element is index 2. Height should be 3 lines * 16 = 48.
+    assert!(approx_eq(result.computed[2].height, 48.0));
+
+    // Should emit 3 text render commands for the wrapped lines.
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .collect();
+    assert_eq!(text_commands.len(), 3, "Should have 3 wrapped text lines");
+}
+
+#[test]
+fn text_no_wrap_overflows() {
+    // "Hello World" in a narrow container with TextWrap::None.
+    let mut b = LayoutBuilder::new(40.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text("Hello World", TextConfig::new(16).no_wrap());
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 40.0, 200.0);
+
+    // Height should remain single-line (16.0).
+    assert!(approx_eq(result.computed[2].height, 16.0));
+
+    // Single text command emitted (no wrapping).
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .collect();
+    assert_eq!(text_commands.len(), 1);
+}
+
+#[test]
+fn text_wraps_at_newlines_only() {
+    // "Line1\nLine2\nLine3" with TextWrap::Newlines in a wide container.
+    let mut b = LayoutBuilder::new(500.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text(
+                "Line1\nLine2\nLine3",
+                TextConfig::new(16).wrap_mode(TextWrap::Newlines),
+            );
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 500.0, 200.0);
+
+    // 3 lines * 16 = 48.
+    assert!(approx_eq(result.computed[2].height, 48.0));
+
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .collect();
+    assert_eq!(text_commands.len(), 3);
+}
+
+#[test]
+fn word_wrap_long_word_does_not_break() {
+    // "Supercalifragilistic" = 20 chars * 16 * 0.6 = 192.0 wide.
+    // Container is only 80 wide. The word should NOT be broken — stays on one line.
+    let mut b = LayoutBuilder::new(80.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text("Supercalifragilistic", TextConfig::new(16));
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 80.0, 200.0);
+
+    // Should be a single line (word never broken mid-word).
+    assert!(approx_eq(result.computed[2].height, 16.0));
+
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .collect();
+    assert_eq!(text_commands.len(), 1);
+}
+
+#[test]
+fn word_wrap_preserves_explicit_newlines() {
+    // "AA BB\nCC DD" with Words wrap in a container that fits "AA BB" but not all four.
+    // "AA" = 19.2, "BB" = 19.2, space = 9.6. "AA BB" = 48.0.
+    // Container is 50 wide — "AA BB" fits on one line, "CC DD" fits on one line.
+    let mut b = LayoutBuilder::new(50.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text("AA BB\nCC DD", TextConfig::new(16));
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 50.0, 200.0);
+
+    // 2 paragraphs, each fits on one line = 2 lines * 16 = 32.
+    assert!(approx_eq(result.computed[2].height, 32.0));
+
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .collect();
+    assert_eq!(text_commands.len(), 2);
+}
+
+#[test]
+fn word_wrap_empty_string() {
+    let mut b = LayoutBuilder::new(200.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text("", TextConfig::new(16));
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 200.0, 200.0);
+
+    // Empty text produces one empty line — height = 1 * line_height = 16.
+    assert!(approx_eq(result.computed[2].height, 16.0));
+}
+
+#[test]
+fn word_wrap_updates_parent_fit_height() {
+    // Parent is Fit-height, child text wraps to 3 lines.
+    // Parent height should grow to accommodate.
+    let mut b = LayoutBuilder::new(80.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.text("Hello World Test", TextConfig::new(16));
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 80.0, 200.0);
+
+    // Text wraps to 3 lines (see text_wraps_at_word_boundaries test).
+    // Parent Fit height should be 48 (3 * 16).
+    assert!(approx_eq(result.computed[1].height, 48.0));
+}
+
+#[test]
+fn word_wrap_render_commands_per_line() {
+    // Verify each wrapped line has correct bounds positioning.
+    let mut b = LayoutBuilder::new(50.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            // "AA BB CC" — each word ~19.2 wide, space ~9.6.
+            // "AA BB" = 48.0 < 50, "CC" = 19.2 < 50.
+            // Line 1: "AA BB" at y=0, Line 2: "CC" at y=16.
+            b.text("AA BB CC", TextConfig::new(16));
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 50.0, 200.0);
+
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .collect();
+
+    assert_eq!(text_commands.len(), 2);
+
+    // First line starts at y=0 (relative to parent).
+    assert!(approx_eq(text_commands[0].bounds.y, 0.0));
+
+    // Second line starts at y=16 (one line height down).
+    assert!(approx_eq(text_commands[1].bounds.y, 16.0));
+}
+
+// ── Fit parent with Grow children propagation ─────────────────────────────
+
+#[test]
+fn fit_parent_sees_grow_children_content_height() {
+    // Reproduces the header vertical-centering bug: a Fit-height parent
+    // with Grow-height children that contain text. The Fit parent must
+    // propagate the children's content size upward so it gets a real
+    // height, not collapse to the spacer's 1.0.
+    //
+    // Layout (mirrors the status panel header):
+    //   header_container (Grow height, padding 4/4, align_y=Center)
+    //     text_row (Fit height, LeftToRight)
+    //       title_slot (Fit width, Grow height) → text "STATUS" (font 7)
+    //       spacer (Grow width, Fixed height=1)
+    //       subtitle_slot (Fit width, Grow height) → text "SUB" (font 4)
+    //
+    // "STATUS" = 6 chars * 7 * 0.6 = 25.2 wide, 7.0 tall.
+    // "SUB" = 3 chars * 4 * 0.6 = 7.2 wide, 4.0 tall.
+    // text_row Fit height should be max(7.0, 1.0, 4.0) = 7.0, NOT 1.0.
+    let mut b = LayoutBuilder::new(160.0, 160.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(20.0))
+            .padding(Padding::new(0.0, 0.0, 4.0, 4.0))
+            .child_align_y(AlignY::Center),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight),
+                |b| {
+                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                        b.text("STATUS", TextConfig::new(7));
+                    });
+                    b.with(
+                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                        |_| {},
+                    );
+                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                        b.text("SUB", TextConfig::new(4));
+                    });
+                },
+            );
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 160.0, 160.0);
+
+    // text_row is index 2.
+    let text_row_height = result.computed[2].height;
+    assert!(
+        text_row_height >= 7.0 - 0.01,
+        "Fit text_row height should be >= 7.0 (text content), got {text_row_height}"
+    );
+
+    // text_row should be vertically centered in header_container.
+    // header_container is 20.0 tall with 4+4=8 vertical padding → 12 content area.
+    // Center offset = (12 - text_row_height) / 2 + 4 (top padding).
+    let text_row_bounds = result.computed[2].bounds;
+    let expected_y = (12.0 - text_row_height) * 0.5 + 4.0;
+    assert!(
+        approx_eq(text_row_bounds.y, expected_y),
+        "text_row should be centered: expected y={expected_y}, got y={}",
+        text_row_bounds.y
+    );
+}
+
+// ── Clay parity: minDimensions propagation ────────────────────────────────
+//
+// Clay tracks a propagated `minDimensions` field on every element — the
+// recursive minimum size derived from nested content. Our engine does not
+// track this yet. These tests encode Clay's correct behavior and will fail
+// until we implement `minDimensions`.
+
+#[test]
+fn compression_respects_content_minimum_symmetric() {
+    // Two Fit siblings each containing a Fixed(50) child in an 80-wide parent.
+    // Total content = 100, overflow = 20.
+    //
+    // Clay: `minDimensions` = 50 for each Fit wrapper (propagated from the
+    // Fixed child). Compression cannot reduce either below 50. Both stay at
+    // 50 — the parent overflows by 20.
+    //
+    // Our engine: `min_size()` = 0 (default Fit), so compression squashes
+    // both to 40.
+    let mut b = LayoutBuilder::new(80.0, 100.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::LeftToRight),
+        |b| {
+            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(50.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            });
+            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(50.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            });
+        },
+    );
+    let tree = b.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 80.0, 100.0);
+
+    // Indices: 0=root, 1=container, 2=fit_a, 3=fixed_a, 4=fit_b, 5=fixed_b
+    let child_a = result.computed[2].width;
+    let child_b = result.computed[4].width;
+    assert!(
+        child_a >= 50.0 - 0.01,
+        "Fit child A should not compress below content minimum 50.0, got {child_a}"
+    );
+    assert!(
+        child_b >= 50.0 - 0.01,
+        "Fit child B should not compress below content minimum 50.0, got {child_b}"
+    );
+}
+
+#[test]
+fn compression_respects_content_minimum_asymmetric() {
+    // Fit child A has Fixed(60) content, Fit child B has Fixed(30). Parent is 80.
+    // Total = 90, overflow = 10.
+    //
+    // Clay: A has `minDimensions` = 60, B has `minDimensions` = 30. Compression
+    // targets the largest (A at 60) but `minDimensions` prevents any reduction.
+    // Both stay at their content size.
+    //
+    // Our engine: compresses A from 60 to 50 (largest-first, 10px distributed).
+    let mut b = LayoutBuilder::new(80.0, 100.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::LeftToRight),
+        |b| {
+            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(60.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            });
+            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(30.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            });
+        },
+    );
+    let tree = b.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 80.0, 100.0);
+
+    let child_a = result.computed[2].width;
+    assert!(
+        child_a >= 60.0 - 0.01,
+        "Fit child A should not compress below content minimum 60.0, got {child_a}"
+    );
+}
+
+#[test]
+fn cross_axis_grow_respects_content_minimum() {
+    // Clay's cross-axis sizing enforces `minDimensions` as a floor.
+    // A Grow child whose nested content is wider than the parent should
+    // not be squished below its content minimum.
+    //
+    // Layout: TopToBottom parent (30 wide), Grow-width child containing
+    // a Fixed(50) inner element.
+    //
+    // Clay: cross-axis sets Grow to `MIN(parent-padding, max)` = 30, then
+    // applies `MAX(minDimensions=50, 30)` = 50. Content minimum wins.
+    //
+    // Our engine: Grow fills parent = 30. No content floor.
+    let mut b = LayoutBuilder::new(30.0, 100.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom),
+        |b| {
+            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(50.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            });
+        },
+    );
+    let tree = b.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 30.0, 100.0);
+
+    // Index 2 is the Grow child.
+    let child_width = result.computed[2].width;
+    assert!(
+        child_width >= 50.0 - 0.01,
+        "Cross-axis Grow child should not shrink below content minimum 50.0, got {child_width}"
     );
 }

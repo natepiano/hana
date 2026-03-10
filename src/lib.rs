@@ -40,6 +40,7 @@ pub use layout::Padding;
 pub use layout::Sizing;
 pub use layout::TextConfig;
 pub use layout::TextDimensions;
+pub use layout::TextWrap;
 
 // Layout tree.
 pub use layout::El;

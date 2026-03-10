@@ -71,12 +71,16 @@ impl El {
     }
 
     /// Sets the width sizing rule.
+    ///
+    /// Common patterns: [`Sizing::GROW`], [`Sizing::FIT`], [`Sizing::fixed`], [`Sizing::percent`].
     pub const fn width(mut self, sizing: Sizing) -> Self {
         self.width = sizing;
         self
     }
 
     /// Sets the height sizing rule.
+    ///
+    /// Common patterns: [`Sizing::GROW`], [`Sizing::FIT`], [`Sizing::fixed`], [`Sizing::percent`].
     pub const fn height(mut self, sizing: Sizing) -> Self {
         self.height = sizing;
         self
@@ -88,7 +92,7 @@ impl El {
         self
     }
 
-    /// Sets the gap between children.
+    /// Sets the gap between adjacent children along the layout direction.
     pub const fn child_gap(mut self, gap: f32) -> Self {
         self.child_gap = gap;
         self
