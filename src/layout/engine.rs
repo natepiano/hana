@@ -20,13 +20,17 @@ use super::types::Direction;
 use super::types::Sizing;
 use super::types::TextConfig;
 use super::types::TextDimensions;
+use std::sync::Arc;
 
 /// Callback type for measuring text dimensions.
 ///
 /// Given a text string and its configuration, returns the measured dimensions
 /// in layout units. The layout engine calls this during sizing to determine
 /// how much space text elements need.
-pub type MeasureTextFn = Box<dyn Fn(&str, &TextConfig) -> TextDimensions>;
+///
+/// Uses `Arc` so the function can be shared across threads and cloned cheaply
+/// (e.g. stored in a Bevy `Resource` and cloned to create `LayoutEngine` instances).
+pub type MeasureTextFn = Arc<dyn Fn(&str, &TextConfig) -> TextDimensions + Send + Sync>;
 
 /// Computed layout data for a single element.
 #[derive(Clone, Copy, Debug, Default)]
@@ -528,13 +532,13 @@ fn compute_child_positions(
     let extra_main = (main_available - children_main_size - gap_total).max(0.0);
 
     let main_offset = if is_horizontal {
-        match parent.align_x {
+        match parent.child_align_x {
             AlignX::Left => 0.0,
             AlignX::Center => extra_main * 0.5,
             AlignX::Right => extra_main,
         }
     } else {
-        match parent.align_y {
+        match parent.child_align_y {
             AlignY::Top => 0.0,
             AlignY::Center => extra_main * 0.5,
             AlignY::Bottom => extra_main,
@@ -550,7 +554,7 @@ fn compute_child_positions(
 
         let (cx, cy) = if is_horizontal {
             let cross_available = parent_h - parent.padding.vertical();
-            let cross_offset = match parent.align_y {
+            let cross_offset = match parent.child_align_y {
                 AlignY::Top => 0.0,
                 AlignY::Center => (cross_available - child_h).max(0.0) * 0.5,
                 AlignY::Bottom => (cross_available - child_h).max(0.0),
@@ -561,7 +565,7 @@ fn compute_child_positions(
             (x, y)
         } else {
             let cross_available = parent_w - parent.padding.horizontal();
-            let cross_offset = match parent.align_x {
+            let cross_offset = match parent.child_align_x {
                 AlignX::Left => 0.0,
                 AlignX::Center => (cross_available - child_w).max(0.0) * 0.5,
                 AlignX::Right => (cross_available - child_w).max(0.0),

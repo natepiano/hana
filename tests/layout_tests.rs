@@ -8,25 +8,28 @@
 //! bounding boxes match expectations. A simple monospace text measurement function
 //! is used throughout: each character is `font_size * 0.6` wide, one line tall.
 
-use bevy_diegetic::layout::AlignX;
-use bevy_diegetic::layout::AlignY;
-use bevy_diegetic::layout::BackgroundColor;
-use bevy_diegetic::layout::Border;
-use bevy_diegetic::layout::Direction;
-use bevy_diegetic::layout::El;
-use bevy_diegetic::layout::LayoutBuilder;
-use bevy_diegetic::layout::LayoutEngine;
-use bevy_diegetic::layout::MeasureTextFn;
-use bevy_diegetic::layout::Padding;
-use bevy_diegetic::layout::RenderCommandKind;
-use bevy_diegetic::layout::Sizing;
-use bevy_diegetic::layout::TextConfig;
-use bevy_diegetic::layout::TextDimensions;
+use std::sync::Arc;
+
+use bevy::color::Color;
+use bevy_diegetic::AlignX;
+use bevy_diegetic::AlignY;
+use bevy_diegetic::Border;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutEngine;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::MeasureTextFn;
+use bevy_diegetic::Padding;
+use bevy_diegetic::RenderCommandKind;
+use bevy_diegetic::Sizing;
+use bevy_diegetic::TextConfig;
+use bevy_diegetic::TextDimensions;
 
 const VIEWPORT: f32 = 200.0;
 
 fn monospace_measure() -> MeasureTextFn {
-    Box::new(|text: &str, config: &TextConfig| {
+    Arc::new(|text: &str, config: &TextConfig| {
         let line_height = config.effective_line_height();
         let char_width = f32::from(config.font_size) * 0.6;
         let mut max_line_width: f32 = 0.0;
@@ -346,7 +349,7 @@ fn center_alignment_horizontal() {
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
-            .align_x(AlignX::Center),
+            .child_align_x(AlignX::Center),
         |b| {
             b.with(
                 El::new()
@@ -375,7 +378,7 @@ fn right_alignment_horizontal() {
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
-            .align_x(AlignX::Right),
+            .child_align_x(AlignX::Right),
         |b| {
             b.with(
                 El::new()
@@ -402,7 +405,7 @@ fn center_alignment_vertical() {
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
-            .align_y(AlignY::Center),
+            .child_align_y(AlignY::Center),
         |b| {
             b.with(
                 El::new()
@@ -430,7 +433,7 @@ fn bottom_alignment_vertical() {
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
-            .align_y(AlignY::Bottom),
+            .child_align_y(AlignY::Bottom),
         |b| {
             b.with(
                 El::new()
@@ -581,7 +584,7 @@ fn render_commands_include_rectangles() {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .background(BackgroundColor::rgb(255, 0, 0)),
+            .background(Color::srgb_u8(255, 0, 0)),
         |_| {},
     );
     let tree = b.build();
@@ -629,7 +632,7 @@ fn render_commands_include_borders() {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .border(Border::all(2.0, BackgroundColor::rgb(255, 255, 255))),
+            .border(Border::all(2.0, Color::srgb_u8(255, 255, 255))),
         |_| {},
     );
     let tree = b.build();
@@ -668,7 +671,7 @@ fn nested_layout_header_body() {
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::fixed(20.0))
-                    .background(BackgroundColor::rgb(52, 98, 90)),
+                    .background(Color::srgb_u8(52, 98, 90)),
                 |b| {
                     b.text("STATUS", TextConfig::new(7));
                 },
@@ -678,7 +681,7 @@ fn nested_layout_header_body() {
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::fixed(4.0))
-                    .background(BackgroundColor::rgb(74, 196, 172)),
+                    .background(Color::srgb_u8(74, 196, 172)),
                 |_| {},
             );
             // Body: grows to fill remaining space.
@@ -686,7 +689,7 @@ fn nested_layout_header_body() {
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .background(BackgroundColor::rgb(22, 28, 34)),
+                    .background(Color::srgb_u8(22, 28, 34)),
                 |_| {},
             );
         },
@@ -881,7 +884,7 @@ fn clip_emits_scissor_commands() {
 
 #[test]
 fn empty_tree_produces_no_commands() {
-    let tree = bevy_diegetic::layout::LayoutTree::new();
+    let tree = LayoutTree::new();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
 
@@ -904,7 +907,7 @@ fn between_children_borders_emitted() {
                 right: 0.0,
                 top: 0.0,
                 bottom: 0.0,
-                color: BackgroundColor::rgb(255, 255, 255),
+                color: Color::srgb_u8(255, 255, 255),
                 between_children: 2.0,
             }),
         |b| {

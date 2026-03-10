@@ -1,15 +1,24 @@
 //! Ergonomic builder for constructing layout trees.
 //!
-//! The builder uses a closure-based nesting API inspired by Clay's C API:
+//! [`El`] is a lightweight builder that mirrors every layout property on
+//! [`Element`](super::element::Element) but exposes them as a fluent chain. When added to the
+//! tree, `El` converts itself into an `Element` via `into_element()` — it exists purely for
+//! ergonomics so users never have to construct `Element` or `ElementContent` by hand.
+//!
+//! [`LayoutBuilder`] manages parent-child nesting with an internal stack. Calling
+//! `.with(el, |b| { ... })` pushes a parent, runs the closure, and pops — so there are no
+//! open/close pairs to get wrong.
+//!
+//! The closure-based nesting API is inspired by Clay's C API:
 //!
 //! ```ignore
 //! let tree = LayoutBuilder::new(160.0, 160.0)
 //!     .with(El::new().width(Sizing::GROW).height(Sizing::GROW).padding(Padding::all(8.0))
-//!           .direction(Direction::TopToBottom).background(BackgroundColor::rgb(180, 96, 122)),
+//!           .direction(Direction::TopToBottom).background(Color::srgb_u8(180, 96, 122)),
 //!         |b| {
 //!             b.text("STATUS", TextConfig::new(7));
 //!             b.with(El::new().width(Sizing::GROW).height(Sizing::fixed(4.0))
-//!                    .background(BackgroundColor::rgb(74, 196, 172)),
+//!                    .background(Color::srgb_u8(74, 196, 172)),
 //!                 |_| {},
 //!             );
 //!         },
@@ -22,12 +31,12 @@ use super::element::ElementContent;
 use super::element::LayoutTree;
 use super::types::AlignX;
 use super::types::AlignY;
-use super::types::BackgroundColor;
 use super::types::Border;
 use super::types::Direction;
 use super::types::Padding;
 use super::types::Sizing;
 use super::types::TextConfig;
+use bevy::color::Color;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -42,9 +51,9 @@ pub struct El {
     padding: Padding,
     child_gap: f32,
     direction: Direction,
-    align_x: AlignX,
-    align_y: AlignY,
-    background: Option<BackgroundColor>,
+    child_align_x: AlignX,
+    child_align_y: AlignY,
+    background: Option<Color>,
     border: Option<Border>,
     clip: bool,
 }
@@ -91,20 +100,27 @@ impl El {
         self
     }
 
+    /// Sets both horizontal and vertical child alignment.
+    pub const fn child_alignment(mut self, x: AlignX, y: AlignY) -> Self {
+        self.child_align_x = x;
+        self.child_align_y = y;
+        self
+    }
+
     /// Sets horizontal child alignment.
-    pub const fn align_x(mut self, align: AlignX) -> Self {
-        self.align_x = align;
+    pub const fn child_align_x(mut self, align: AlignX) -> Self {
+        self.child_align_x = align;
         self
     }
 
     /// Sets vertical child alignment.
-    pub const fn align_y(mut self, align: AlignY) -> Self {
-        self.align_y = align;
+    pub const fn child_align_y(mut self, align: AlignY) -> Self {
+        self.child_align_y = align;
         self
     }
 
     /// Sets a background color.
-    pub const fn background(mut self, color: BackgroundColor) -> Self {
+    pub const fn background(mut self, color: Color) -> Self {
         self.background = Some(color);
         self
     }
@@ -130,8 +146,8 @@ impl El {
             padding: self.padding,
             child_gap: self.child_gap,
             direction: self.direction,
-            align_x: self.align_x,
-            align_y: self.align_y,
+            child_align_x: self.child_align_x,
+            child_align_y: self.child_align_y,
             background: self.background,
             border: self.border,
             clip: self.clip,

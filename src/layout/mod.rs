@@ -3,12 +3,38 @@
 //! This module provides a Clay-inspired layout algorithm implemented in pure Rust
 //! with no global state, no unsafe code, and full thread safety.
 //!
+//! # Retained-mode vs immediate-mode
+//!
+//! Clay is immediate-mode: the `Clay` object is both builder and engine — you call
+//! `clay.begin()`, build the tree with `clay.with(...)`, and get layout results in one shot.
+//! The tree is ephemeral and rebuilt from scratch every frame.
+//!
+//! This engine is retained-mode: tree construction and layout computation are separate steps.
+//! [`LayoutBuilder`] produces a [`LayoutTree`] that persists across frames, and
+//! [`LayoutEngine`] recomputes positions only when the tree changes. This means:
+//!
+//! - The tree is built once and **reused** — not rebuilt every frame.
+//! - Layout can be recomputed without rebuilding the tree (e.g., panel resized but content
+//!   unchanged).
+//! - Construction and computation are independently testable.
+//!
+//! The tradeoff is an extra [`LayoutBuilder`] step at construction time, but you pay it once,
+//! not every frame.
+//!
+//! Retained mode is the natural fit for Bevy. The entire ECS is built around doing nothing
+//! unless something changed — `Changed<T>`, `Added<T>`, `Res::is_changed()`, observers.
+//! An immediate-mode layout engine would fight the framework by recomputing unconditionally
+//! every frame. Retained mode lets Bevy's change detection skip layout entirely on frames
+//! where the tree hasn't been touched.
+//!
 //! # Architecture
 //!
 //! - [`types`] — Core layout types: `Sizing`, `Direction`, `Padding`, `BoundingBox`, etc.
-//! - [`element`] — Element tree representation (`LayoutTree`, `Element`).
-//! - [`builder`] — Ergonomic closure-based API for constructing trees.
-//! - [`engine`] — The layout computation engine.
+//! - [`element`] — Arena-based element tree ([`LayoutTree`], [`Element`]). [`Element`] is the
+//!   canonical storage format; users construct elements via [`El`] instead.
+//! - [`builder`] — [`El`] is the ergonomic fluent builder that converts into [`Element`].
+//!   [`LayoutBuilder`] manages parent-child nesting via a closure API — no open/close pairs.
+//! - [`engine`] — Two-pass layout computation (BFS sizing, DFS positioning).
 //! - [`render`] — Render commands output by the engine.
 
 mod builder;
@@ -30,7 +56,6 @@ pub use render::RenderCommand;
 pub use render::RenderCommandKind;
 pub use types::AlignX;
 pub use types::AlignY;
-pub use types::BackgroundColor;
 pub use types::Border;
 pub use types::BoundingBox;
 pub use types::Direction;

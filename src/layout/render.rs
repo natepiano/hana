@@ -1,9 +1,9 @@
 //! Render commands produced by the layout engine.
 
-use super::types::BackgroundColor;
 use super::types::Border;
 use super::types::BoundingBox;
 use super::types::TextConfig;
+use bevy::color::Color;
 
 /// A single render command produced by the layout pass.
 ///
@@ -25,7 +25,7 @@ pub enum RenderCommandKind {
     /// A filled rectangle.
     Rectangle {
         /// Fill color.
-        color: BackgroundColor,
+        color: Color,
     },
     /// A text string.
     Text {

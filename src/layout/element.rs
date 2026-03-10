@@ -1,13 +1,21 @@
 //! Element tree representation for layout computation.
+//!
+//! [`Element`] is the data struct stored in the arena-based [`LayoutTree`]. It holds every
+//! layout property (sizing, padding, direction, background, border, etc.) plus an
+//! [`ElementContent`] that determines whether the node is a container, a text leaf, or empty.
+//!
+//! Users rarely construct `Element` directly. Instead, the [`El`](super::builder::El) builder
+//! provides a fluent API that converts into an `Element` via `into_element()`. Think of `El`
+//! as the ergonomic front door and `Element` as the canonical storage format.
 
 use super::types::AlignX;
 use super::types::AlignY;
-use super::types::BackgroundColor;
 use super::types::Border;
 use super::types::Direction;
 use super::types::Padding;
 use super::types::Sizing;
 use super::types::TextConfig;
+use bevy::color::Color;
 
 /// A single element in the layout tree.
 ///
@@ -28,11 +36,11 @@ pub struct Element {
     /// Direction children are laid out.
     pub direction: Direction,
     /// Horizontal alignment of children.
-    pub align_x: AlignX,
+    pub child_align_x: AlignX,
     /// Vertical alignment of children.
-    pub align_y: AlignY,
+    pub child_align_y: AlignY,
     /// Optional background color.
-    pub background: Option<BackgroundColor>,
+    pub background: Option<Color>,
     /// Optional border.
     pub border: Option<Border>,
     /// Whether this element clips overflowing children.
@@ -66,8 +74,8 @@ impl Default for Element {
             padding: Padding::default(),
             child_gap: 0.0,
             direction: Direction::default(),
-            align_x: AlignX::default(),
-            align_y: AlignY::default(),
+            child_align_x: AlignX::default(),
+            child_align_y: AlignY::default(),
             background: None,
             border: None,
             clip: false,

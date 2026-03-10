@@ -1,5 +1,7 @@
 //! Core layout types for the diegetic UI layout engine.
 
+use bevy::color::Color;
+
 /// Axis-specific sizing rule for a layout element.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sizing {
@@ -319,33 +321,6 @@ pub struct TextDimensions {
     pub height: f32,
 }
 
-/// Visual configuration for an element's background.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BackgroundColor {
-    /// Red channel (0–255).
-    pub r: u8,
-    /// Green channel (0–255).
-    pub g: u8,
-    /// Blue channel (0–255).
-    pub b: u8,
-    /// Alpha channel (0–255).
-    pub a: u8,
-}
-
-impl BackgroundColor {
-    /// Creates an opaque color.
-    #[must_use]
-    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
-        Self { r, g, b, a: 255 }
-    }
-
-    /// Creates a color with alpha.
-    #[must_use]
-    pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
-        Self { r, g, b, a }
-    }
-}
-
 /// Border widths for an element.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Border {
@@ -358,15 +333,28 @@ pub struct Border {
     /// Bottom border width.
     pub bottom: f32,
     /// Color of the border.
-    pub color: BackgroundColor,
+    pub color: Color,
     /// Width of lines drawn between children (0 = none).
     pub between_children: f32,
 }
 
 impl Border {
+    /// Creates a border with all widths at zero and default color.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            left: 0.0,
+            right: 0.0,
+            top: 0.0,
+            bottom: 0.0,
+            color: Color::BLACK,
+            between_children: 0.0,
+        }
+    }
+
     /// Uniform border on all sides.
     #[must_use]
-    pub const fn all(width: f32, color: BackgroundColor) -> Self {
+    pub const fn all(width: f32, color: Color) -> Self {
         Self {
             left: width,
             right: width,
@@ -375,5 +363,47 @@ impl Border {
             color,
             between_children: 0.0,
         }
+    }
+
+    /// Sets the left border width.
+    #[must_use]
+    pub const fn left(mut self, width: f32) -> Self {
+        self.left = width;
+        self
+    }
+
+    /// Sets the right border width.
+    #[must_use]
+    pub const fn right(mut self, width: f32) -> Self {
+        self.right = width;
+        self
+    }
+
+    /// Sets the top border width.
+    #[must_use]
+    pub const fn top(mut self, width: f32) -> Self {
+        self.top = width;
+        self
+    }
+
+    /// Sets the bottom border width.
+    #[must_use]
+    pub const fn bottom(mut self, width: f32) -> Self {
+        self.bottom = width;
+        self
+    }
+
+    /// Sets the border color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Sets the width of lines drawn between children.
+    #[must_use]
+    pub const fn between_children(mut self, width: f32) -> Self {
+        self.between_children = width;
+        self
     }
 }
