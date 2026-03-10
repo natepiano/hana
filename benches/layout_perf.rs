@@ -8,6 +8,7 @@
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout engines on identical
 //! complex layouts. Run with `cargo bench`.
 
+use std::hint::black_box;
 use std::sync::Arc;
 
 use bevy_diegetic::AlignX;
@@ -36,7 +37,6 @@ use clay_layout::layout::LayoutDirection;
 use clay_layout::math::Dimensions;
 use clay_layout::render_commands::RenderCommandConfig;
 use criterion::Criterion;
-use criterion::black_box;
 use criterion::criterion_group;
 use criterion::criterion_main;
 

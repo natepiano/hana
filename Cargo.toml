@@ -1,9 +1,9 @@
 [package]
-name = "bevy_diegetic"
-version = "0.1.0"
-edition = "2024"
 description = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
-license = "MIT OR Apache-2.0"
+edition     = "2024"
+license     = "MIT OR Apache-2.0"
+name        = "bevy_diegetic"
+version     = "0.1.0"
 
 [lints.clippy]
 # Our strict lints
@@ -22,20 +22,20 @@ cargo_common_metadata   = "allow"
 multiple_crate_versions = "allow"
 needless_pass_by_value  = "allow"
 option_if_let_else      = "allow"
-wildcard_imports         = "allow"
+wildcard_imports        = "allow"
 
 [lints.rust]
 missing_docs = "deny"
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
-    "bevy_gizmos",
+  "bevy_gizmos",
 ] }
 
 [dev-dependencies]
 clay-layout = { path = "../hana/crates/clay-layout" }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion   = { version = "0.8.2", features = ["html_reports"] }
 
 [[bench]]
-name = "layout_perf"
 harness = false
+name    = "layout_perf"
