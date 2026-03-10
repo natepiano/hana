@@ -16,6 +16,7 @@ use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
 use super::types::BoundingBox;
+use super::types::Culling;
 use super::types::Direction;
 use super::types::Sizing;
 use super::types::TextConfig;
@@ -50,6 +51,12 @@ pub struct ComputedLayout {
     min_width: f32,
     /// Propagated minimum height from children's content.
     min_height: f32,
+    /// Cached natural (unwrapped) text width from `initialize_leaf_sizes`.
+    ///
+    /// Stored once during initial measurement so that `rewrap_text_elements`
+    /// can check whether wrapping is needed without re-calling the measure
+    /// function. Zero for non-text elements.
+    natural_text_width: f32,
 }
 
 /// The layout engine. Thread-safe, no global state.
@@ -57,18 +64,32 @@ pub struct ComputedLayout {
 /// # Usage
 ///
 /// ```ignore
-/// let mut engine = LayoutEngine::new(measure_fn);
-/// let commands = engine.compute(&tree, 800.0, 600.0);
+/// let engine = LayoutEngine::new(measure_fn);
+/// let result = engine.compute(&tree, 800.0, 600.0);
 /// ```
+///
+/// Viewport culling is enabled by default. Use [`set_culling`](Self::set_culling)
+/// to disable it when you need the complete render command list.
 pub struct LayoutEngine {
     measure_text: MeasureTextFn,
+    culling: Culling,
 }
 
 impl LayoutEngine {
     /// Creates a new layout engine with the given text measurement callback.
+    ///
+    /// Culling is [`Enabled`](Culling::Enabled) by default.
     #[must_use]
     pub fn new(measure_text: MeasureTextFn) -> Self {
-        Self { measure_text }
+        Self {
+            measure_text,
+            culling: Culling::default(),
+        }
+    }
+
+    /// Sets whether off-screen elements are culled from render output.
+    pub fn set_culling(&mut self, culling: Culling) {
+        self.culling = culling;
     }
 
     /// Computes layout for the given tree within the specified viewport dimensions.
@@ -112,7 +133,15 @@ impl LayoutEngine {
         size_along_axis(tree, &mut computed, root, false, viewport_height);
 
         // Phase 4: Position elements and generate render commands (DFS).
-        let commands = position_and_render(tree, &mut computed, root, &wrapped);
+        let commands = position_and_render(
+            tree,
+            &mut computed,
+            root,
+            &wrapped,
+            viewport_width,
+            viewport_height,
+            self.culling,
+        );
 
         LayoutResult { computed, commands }
     }
@@ -130,13 +159,15 @@ impl LayoutEngine {
                 _ => 0.0,
             };
 
-            // Measure text content.
+            // Measure text content and cache the natural width for the
+            // rewrap fast-path (avoids re-measuring every text element later).
             if let ElementContent::Text {
                 ref text,
                 ref config,
             } = element.content
             {
                 let dims = (self.measure_text)(text, config);
+                computed[index].natural_text_width = dims.width;
                 if element.width.is_fit() {
                     computed[index].width = dims
                         .width
@@ -286,6 +317,18 @@ fn wrap_text_newlines(text: &str, config: &TextConfig, measure: &MeasureTextFn) 
 /// Returns per-element wrapped text data (indexed by element index) and a flag
 /// indicating whether any computed sizes actually changed (used to skip
 /// redundant re-propagation).
+///
+/// Two key optimizations avoid work in the common case (short text that fits):
+///
+/// 1. **Cached natural width** — uses the `natural_text_width` stored during
+///    `initialize_leaf_sizes` instead of re-calling the measure function.
+///    If the cached width fits within the element's post-sizing width, the
+///    text won't reflow, so we skip wrapping entirely.
+///
+/// 2. **Lazy `parent_of`** — the parent lookup table (one `Vec<Option<usize>>`
+///    the size of the element array) is only built if a text element actually
+///    needs wrapping. For layouts where all text fits without reflowing, this
+///    allocation and O(N) build cost are avoided completely.
 fn rewrap_text_elements(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
@@ -294,13 +337,10 @@ fn rewrap_text_elements(
     let mut wrapped: Vec<Option<WrappedText>> = (0..tree.len()).map(|_| None).collect();
     let mut any_changed = false;
 
-    // Build parent lookup so we can find each text element's container width.
-    let mut parent_of: Vec<Option<usize>> = vec![None; tree.len()];
-    for idx in 0..tree.len() {
-        for &child in tree.children_of(idx) {
-            parent_of[child] = Some(idx);
-        }
-    }
+    // Parent lookup for finding each text element's container width.
+    // Cheap O(N) build — far less expensive than the ~1000 measure() calls
+    // that the cached-width fast path eliminates.
+    let parent_of = build_parent_of(tree);
 
     for (index, element) in tree.elements.iter().enumerate() {
         if let ElementContent::Text {
@@ -310,17 +350,15 @@ fn rewrap_text_elements(
         {
             let result = match config.wrap {
                 TextWrap::Words => {
-                    // Wrap within the parent's content area, not the element's
-                    // own Fit width (which is the unwrapped natural width).
                     let max_width = parent_content_width(tree, computed, &parent_of, index);
-                    // Fast path: if text has no newlines and its natural width
-                    // fits within the parent, wrapping produces a single
-                    // identical line — skip the full word-splitting logic.
-                    if !text.contains('\n') {
-                        let natural_width = measure(text, config).width;
-                        if natural_width <= max_width {
-                            continue;
-                        }
+                    // Fast path: compare the cached natural text width (measured
+                    // once in `initialize_leaf_sizes`) against the parent's
+                    // content area. If the text fits and has no explicit
+                    // newlines, wrapping would produce one identical line — skip.
+                    // Uses the cached width to avoid re-calling the measure fn.
+                    let natural_width = computed[index].natural_text_width;
+                    if !text.contains('\n') && natural_width <= max_width {
+                        continue;
                     }
                     wrap_text_words(text, config, max_width, measure)
                 }
@@ -364,6 +402,17 @@ fn rewrap_text_elements(
     (wrapped, any_changed)
 }
 
+/// Builds a parent-index lookup table (child index → parent index).
+fn build_parent_of(tree: &LayoutTree) -> Vec<Option<usize>> {
+    let mut parent_of: Vec<Option<usize>> = vec![None; tree.len()];
+    for idx in 0..tree.len() {
+        for &child in tree.children_of(idx) {
+            parent_of[child] = Some(idx);
+        }
+    }
+    parent_of
+}
+
 /// Returns the available content width from the parent of element at `index`.
 ///
 /// Falls back to the element's own computed width if it has no parent.
@@ -403,12 +452,23 @@ fn propagate_fit_sizes(
     let children = tree.children_of(index);
     let sizing = get_sizing(element, x_axis);
 
-    // Leaf node: set min_dimensions from clamping 0 to [sizing.min, sizing.max]
-    // (mirrors Clay: Fixed(50) leaf → minDimensions = clamp(0, 50, 50) = 50).
+    // Leaf node: set `minDimensions` from the element's content.
+    //
+    // For text elements, Clay sets `minDimensions = { minWidth, height }`:
+    // - height: measured height — text can't be compressed vertically.
+    // - width: shortest word width — text can wrap horizontally.
+    // We use the measured height for Y and the sizing floor for X (since we
+    // don't yet track per-word minimum width).
     if children.is_empty() {
-        let leaf_min = 0.0_f32.clamp(sizing.min_size(), sizing.max_size());
+        let current_size = get_size(computed[index], x_axis);
+        let leaf_min = if !x_axis && matches!(element.content, ElementContent::Text { .. }) {
+            // Text min height = measured height (matches Clay line 2003).
+            current_size.clamp(sizing.min_size(), sizing.max_size())
+        } else {
+            0.0_f32.clamp(sizing.min_size(), sizing.max_size())
+        };
         set_min_size(&mut computed[index], x_axis, leaf_min);
-        return get_size(computed[index], x_axis);
+        return current_size;
     }
 
     let is_along = is_layout_axis(element.direction, x_axis);
@@ -464,9 +524,18 @@ fn propagate_fit_sizes(
         return clamped;
     }
 
-    // Grow/Percent elements: return content size so ancestor Fit elements
-    // can account for it, but don't set the computed size yet —
-    // `size_along_axis` handles that.
+    // Grow elements: set initial computed size from content, clamped to [min, max].
+    // This matches Clay's `CloseElement` which initializes dimensions for all element
+    // types from their children before `SizeContainersAlongAxis`. Without this, GROW
+    // elements start at 0, masking overflow and preventing compression from triggering.
+    if sizing.is_grow() {
+        let clamped = content_size.clamp(sizing.min_size(), sizing.max_size());
+        set_size(&mut computed[index], x_axis, clamped);
+        return clamped;
+    }
+
+    // Percent elements: return content size so ancestor Fit elements
+    // can account for it, but don't set the computed size yet.
     content_size
 }
 
@@ -634,12 +703,24 @@ fn size_children_cross_axis(
     }
 }
 
+/// Returns true if the bounding box is entirely outside the viewport.
+const fn is_offscreen(x: f32, y: f32, w: f32, h: f32, vp_w: f32, vp_h: f32) -> bool {
+    x > vp_w || y > vp_h || x + w < 0.0 || y + h < 0.0
+}
+
 /// DFS positioning pass. Computes final bounding boxes and emits render commands.
+///
+/// When `culling` is [`Enabled`](Culling::Enabled), elements whose bounding box
+/// lies entirely outside the viewport are omitted from the command list.
+#[allow(clippy::too_many_arguments)]
 fn position_and_render(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
+    viewport_width: f32,
+    viewport_height: f32,
+    culling: Culling,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
 
@@ -654,7 +735,10 @@ fn position_and_render(
 
         if *visited {
             // Second visit (up-traversal): emit borders and scissor end.
-            if let Some(ref border) = element.border {
+            let offscreen = culling == Culling::Enabled
+                && is_offscreen(x, y, width, height, viewport_width, viewport_height);
+
+            if !offscreen && let Some(ref border) = element.border {
                 commands.push(RenderCommand {
                     bounds: BoundingBox {
                         x,
@@ -689,7 +773,8 @@ fn position_and_render(
         } else {
             *visited = true;
 
-            // Store the final bounding box.
+            // Store the final bounding box (always, even if culled — computed
+            // layout is the full picture, only render commands are filtered).
             computed[index].bounds = BoundingBox {
                 x,
                 y,
@@ -697,8 +782,14 @@ fn position_and_render(
                 height,
             };
 
+            // Cull off-screen elements: skip render commands but still recurse
+            // into children (a parent can be off-screen while children are on-screen
+            // due to overflow).
+            let offscreen = culling == Culling::Enabled
+                && is_offscreen(x, y, width, height, viewport_width, viewport_height);
+
             // Emit rectangle if background is set.
-            if let Some(color) = element.background {
+            if !offscreen && let Some(color) = element.background {
                 commands.push(RenderCommand {
                     bounds: BoundingBox {
                         x,
@@ -711,7 +802,8 @@ fn position_and_render(
                 });
             }
 
-            // Emit scissor start if clipping.
+            // Emit scissor start if clipping (always emit — scissor regions
+            // must be balanced even when the parent is off-screen).
             if element.clip {
                 commands.push(RenderCommand {
                     bounds: BoundingBox {
@@ -726,10 +818,11 @@ fn position_and_render(
             }
 
             // Emit text render commands.
-            if let ElementContent::Text {
-                ref config,
-                ref text,
-            } = element.content
+            if !offscreen
+                && let ElementContent::Text {
+                    ref config,
+                    ref text,
+                } = element.content
             {
                 if let Some(ref wrap_result) = wrapped[index] {
                     // Wrapped text: emit one command per line.

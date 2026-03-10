@@ -35,6 +35,7 @@ pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Border;
 pub use layout::BoundingBox;
+pub use layout::Culling;
 pub use layout::Direction;
 pub use layout::Padding;
 pub use layout::Sizing;

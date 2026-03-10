@@ -1397,3 +1397,123 @@ fn cross_axis_grow_respects_content_minimum() {
         "Cross-axis Grow child should not shrink below content minimum 50.0, got {child_width}"
     );
 }
+
+#[test]
+fn grow_body_compression_20_rows() {
+    // Reproduces the benchmark parity failure: root 160x160, TopToBottom,
+    // with header(Grow 10..20), divider(Fixed 4), body(Grow).
+    // 20 rows of text overflow the available space. Clay keeps body at its
+    // content height (248), header at content height (18). We should match.
+    let size = 160.0_f32;
+    let measure = monospace_measure();
+
+    let rows: Vec<(&str, &str)> = (0..20)
+        .map(|i| {
+            let labels = ["fps:", "frame ms:", "radius:", "entities:", "triangles:"];
+            let values = ["60", "16.7", "0.3", "1024", "128000"];
+            (labels[i % 5], values[i % 5])
+        })
+        .collect();
+
+    let mut b = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fixed(size))
+            .height(Sizing::fixed(size))
+            .padding(Padding::all(8.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(5.0),
+    );
+    // Header: Grow height 10..20
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::grow_range(10.0, 20.0))
+            .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
+            .child_align_y(AlignY::Center),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight),
+                |b| {
+                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                        b.text("STATUS", TextConfig::new(10));
+                    });
+                    b.with(
+                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                        |_| {},
+                    );
+                    b.with(
+                        El::new()
+                            .width(Sizing::FIT)
+                            .height(Sizing::GROW)
+                            .child_align_x(AlignX::Right),
+                        |b| {
+                            b.text("BENCH", TextConfig::new(10));
+                        },
+                    );
+                },
+            );
+        },
+    );
+    // Divider: Fixed 4
+    b.with(
+        El::new().width(Sizing::GROW).height(Sizing::fixed(4.0)),
+        |_| {},
+    );
+    // Body: Grow
+    b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(
+            El::new()
+                .width(Sizing::GROW)
+                .padding(Padding::all(5.0))
+                .direction(Direction::TopToBottom)
+                .child_gap(2.0),
+            |b| {
+                for (label, value) in &rows {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .direction(Direction::LeftToRight),
+                        |b| {
+                            b.text(*label, TextConfig::new(10));
+                            b.with(
+                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                |_| {},
+                            );
+                            b.text(*value, TextConfig::new(10));
+                        },
+                    );
+                }
+            },
+        );
+    });
+    let tree = b.build();
+    let engine = LayoutEngine::new(measure);
+    let result = engine.compute(&tree, size, size);
+
+    // Root children by builder order: header (1), divider (8), body (9).
+    // Available height = 160 - 16 (padding) - 10 (2 gaps) = 134.
+    // Header: GROW(10..20), content = 18 (4+10+4 padding + 10px text) → 18.
+    // Divider: Fixed(4) → 4.
+    // Body: GROW, 20 rows of text → content height 248.
+    // Content overflows the panel (18 + 4 + 248 = 270 > 134). Clay handles this
+    // by keeping the content height and culling off-screen render commands rather
+    // than compressing the body. This matches Clay's `CloseElement` behavior where
+    // GROW elements are initialized from their children's content size.
+    let header = &result.computed[1];
+    let divider = &result.computed[8];
+    let body = &result.computed[9];
+
+    assert_eq!(
+        header.bounds.height, 18.0,
+        "header height (content within [10, 20])"
+    );
+    assert_eq!(divider.bounds.height, 4.0, "divider height (Fixed)");
+    assert_eq!(
+        body.bounds.height, 248.0,
+        "body height (full content, overflows panel)"
+    );
+}
