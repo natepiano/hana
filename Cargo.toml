@@ -28,6 +28,8 @@ wildcard_imports         = "allow"
 missing_docs = "deny"
 
 [dependencies]
-bevy = "0.18.1"
+bevy = { version = "0.18.1", default-features = false, features = [
+    "bevy_gizmos",
+] }
 
 [dev-dependencies]
