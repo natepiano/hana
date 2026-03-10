@@ -8,6 +8,8 @@
 //! provides a fluent API that converts into an `Element` via `into_element()`. Think of `El`
 //! as the ergonomic front door and `Element` as the canonical storage format.
 
+use bevy::color::Color;
+
 use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
@@ -15,7 +17,6 @@ use super::types::Direction;
 use super::types::Padding;
 use super::types::Sizing;
 use super::types::TextConfig;
-use bevy::color::Color;
 
 /// A single element in the layout tree.
 ///
@@ -24,29 +25,29 @@ use bevy::color::Color;
 #[derive(Clone, Debug)]
 pub struct Element {
     /// Optional debug name for this element.
-    pub name: Option<String>,
+    pub name:          Option<String>,
     /// Width sizing rule.
-    pub width: Sizing,
+    pub width:         Sizing,
     /// Height sizing rule.
-    pub height: Sizing,
+    pub height:        Sizing,
     /// Interior padding.
-    pub padding: Padding,
+    pub padding:       Padding,
     /// Gap between children along the layout axis.
-    pub child_gap: f32,
+    pub child_gap:     f32,
     /// Direction children are laid out.
-    pub direction: Direction,
+    pub direction:     Direction,
     /// Horizontal alignment of children.
     pub child_align_x: AlignX,
     /// Vertical alignment of children.
     pub child_align_y: AlignY,
     /// Optional background color.
-    pub background: Option<Color>,
+    pub background:    Option<Color>,
     /// Optional border.
-    pub border: Option<Border>,
+    pub border:        Option<Border>,
     /// Whether this element clips overflowing children.
-    pub clip: bool,
+    pub clip:          bool,
     /// Content of this element.
-    pub content: ElementContent,
+    pub content:       ElementContent,
 }
 
 /// What an element contains.
@@ -57,7 +58,7 @@ pub enum ElementContent {
     /// Text leaf.
     Text {
         /// The text string.
-        text: String,
+        text:   String,
         /// Text configuration.
         config: TextConfig,
     },
@@ -68,18 +69,18 @@ pub enum ElementContent {
 impl Default for Element {
     fn default() -> Self {
         Self {
-            name: None,
-            width: Sizing::FIT,
-            height: Sizing::FIT,
-            padding: Padding::default(),
-            child_gap: 0.0,
-            direction: Direction::default(),
+            name:          None,
+            width:         Sizing::FIT,
+            height:        Sizing::FIT,
+            padding:       Padding::default(),
+            child_gap:     0.0,
+            direction:     Direction::default(),
             child_align_x: AlignX::default(),
             child_align_y: AlignY::default(),
-            background: None,
-            border: None,
-            clip: false,
-            content: ElementContent::Empty,
+            background:    None,
+            border:        None,
+            clip:          false,
+            content:       ElementContent::Empty,
         }
     }
 }
@@ -93,15 +94,13 @@ pub struct LayoutTree {
     /// All elements in insertion order.
     pub elements: Vec<Element>,
     /// Index of the root element.
-    pub root: Option<usize>,
+    pub root:     Option<usize>,
 }
 
 impl LayoutTree {
     /// Creates a new empty layout tree.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Adds an element and returns its index.
     pub fn add(&mut self, element: Element) -> usize {
@@ -119,24 +118,22 @@ impl LayoutTree {
             match &mut parent_element.content {
                 ElementContent::Children(children) => {
                     children.push(child_index);
-                }
+                },
                 ElementContent::Empty => {
                     parent_element.content = ElementContent::Children(vec![child_index]);
-                }
+                },
                 ElementContent::Text { .. } => {
                     // Text elements cannot have children — this is a programming error.
                     // In release builds we silently ignore it; debug builds will catch it
                     // via the orphan check in layout computation.
-                }
+                },
             }
         }
         child_index
     }
 
     /// Sets the root element index.
-    pub const fn set_root(&mut self, index: usize) {
-        self.root = Some(index);
-    }
+    pub const fn set_root(&mut self, index: usize) { self.root = Some(index); }
 
     /// Returns an iterator over child indices of the given element.
     #[must_use]
@@ -151,13 +148,9 @@ impl LayoutTree {
 
     /// Returns the number of elements in the tree.
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.elements.len()
-    }
+    pub const fn len(&self) -> usize { self.elements.len() }
 
     /// Returns `true` if the tree has no elements.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.elements.is_empty()
-    }
+    pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
 }

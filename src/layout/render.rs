@@ -1,9 +1,10 @@
 //! Render commands produced by the layout engine.
 
+use bevy::color::Color;
+
 use super::types::Border;
 use super::types::BoundingBox;
 use super::types::TextConfig;
-use bevy::color::Color;
 
 /// A single render command produced by the layout pass.
 ///
@@ -12,9 +13,9 @@ use bevy::color::Color;
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderCommand {
     /// Computed bounding box in layout coordinates.
-    pub bounds: BoundingBox,
+    pub bounds:      BoundingBox,
     /// What to render.
-    pub kind: RenderCommandKind,
+    pub kind:        RenderCommandKind,
     /// Index of the source element in the `LayoutTree`.
     pub element_idx: usize,
 }
@@ -30,7 +31,7 @@ pub enum RenderCommandKind {
     /// A text string.
     Text {
         /// The text content.
-        text: String,
+        text:   String,
         /// Text configuration (font, size, etc.).
         config: TextConfig,
     },

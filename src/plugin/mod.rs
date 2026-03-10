@@ -6,11 +6,10 @@
 mod components;
 mod systems;
 
+use bevy::prelude::*;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
 pub use components::DiegeticTextMeasurer;
-
-use bevy::prelude::*;
 use systems::compute_panel_layouts;
 use systems::render_panel_gizmos;
 

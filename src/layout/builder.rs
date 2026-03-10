@@ -26,6 +26,8 @@
 //!     .build();
 //! ```
 
+use bevy::color::Color;
+
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
@@ -36,7 +38,6 @@ use super::types::Direction;
 use super::types::Padding;
 use super::types::Sizing;
 use super::types::TextConfig;
-use bevy::color::Color;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -45,24 +46,22 @@ use bevy::color::Color;
 #[must_use]
 #[derive(Clone, Debug, Default)]
 pub struct El {
-    name: Option<String>,
-    width: Sizing,
-    height: Sizing,
-    padding: Padding,
-    child_gap: f32,
-    direction: Direction,
+    name:          Option<String>,
+    width:         Sizing,
+    height:        Sizing,
+    padding:       Padding,
+    child_gap:     f32,
+    direction:     Direction,
     child_align_x: AlignX,
     child_align_y: AlignY,
-    background: Option<Color>,
-    border: Option<Border>,
-    clip: bool,
+    background:    Option<Color>,
+    border:        Option<Border>,
+    clip:          bool,
 }
 
 impl El {
     /// Creates a new element declaration with default settings.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Sets the element name (for debugging).
     pub fn name(mut self, name: impl Into<String>) -> Self {
@@ -162,7 +161,7 @@ impl El {
 
 /// Builds a [`LayoutTree`] using a closure-based nesting API.
 pub struct LayoutBuilder {
-    tree: LayoutTree,
+    tree:         LayoutTree,
     /// Stack of parent indices for nesting.
     parent_stack: Vec<usize>,
 }
@@ -228,12 +227,8 @@ impl LayoutBuilder {
 
     /// Finishes building and returns the layout tree.
     #[must_use]
-    pub fn build(self) -> LayoutTree {
-        self.tree
-    }
+    pub fn build(self) -> LayoutTree { self.tree }
 
     /// Returns the current parent index.
-    fn current_parent(&self) -> usize {
-        self.parent_stack.last().copied().unwrap_or(0)
-    }
+    fn current_parent(&self) -> usize { self.parent_stack.last().copied().unwrap_or(0) }
 }

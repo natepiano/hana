@@ -98,46 +98,34 @@ impl Sizing {
     ///
     /// The element will never be smaller than `min`, even if content is smaller.
     #[must_use]
-    pub const fn fit_min(min: f32) -> Self {
-        Self::Fit { min, max: f32::MAX }
-    }
+    pub const fn fit_min(min: f32) -> Self { Self::Fit { min, max: f32::MAX } }
 
     /// Shrink-wrap to content, clamped to `[min, max]`.
     ///
     /// Content smaller than `min` grows to `min`; content larger than `max`
     /// is capped at `max`.
     #[must_use]
-    pub const fn fit_range(min: f32, max: f32) -> Self {
-        Self::Fit { min, max }
-    }
+    pub const fn fit_range(min: f32, max: f32) -> Self { Self::Fit { min, max } }
 
     /// Expand to fill available space with a minimum floor.
     ///
     /// The element is guaranteed at least `min` even if no space remains.
     #[must_use]
-    pub const fn grow_min(min: f32) -> Self {
-        Self::Grow { min, max: f32::MAX }
-    }
+    pub const fn grow_min(min: f32) -> Self { Self::Grow { min, max: f32::MAX } }
 
     /// Expand to fill available space, clamped to `[min, max]`.
     ///
     /// `min` is a guaranteed floor; `max` caps expansion.
     #[must_use]
-    pub const fn grow_range(min: f32, max: f32) -> Self {
-        Self::Grow { min, max }
-    }
+    pub const fn grow_range(min: f32, max: f32) -> Self { Self::Grow { min, max } }
 
     /// Exact size in layout units, ignoring content and siblings.
     #[must_use]
-    pub const fn fixed(size: f32) -> Self {
-        Self::Fixed(size)
-    }
+    pub const fn fixed(size: f32) -> Self { Self::Fixed(size) }
 
     /// Fraction of the parent's content area (0.0–1.0).
     #[must_use]
-    pub const fn percent(fraction: f32) -> Self {
-        Self::Percent(fraction)
-    }
+    pub const fn percent(fraction: f32) -> Self { Self::Percent(fraction) }
 
     /// Returns the minimum bound for this sizing rule.
     #[must_use]
@@ -161,15 +149,11 @@ impl Sizing {
 
     /// Returns `true` if this is a `Grow` variant.
     #[must_use]
-    pub const fn is_grow(&self) -> bool {
-        matches!(self, Self::Grow { .. })
-    }
+    pub const fn is_grow(&self) -> bool { matches!(self, Self::Grow { .. }) }
 
     /// Returns `true` if this is a `Fit` variant.
     #[must_use]
-    pub const fn is_fit(&self) -> bool {
-        matches!(self, Self::Fit { .. })
-    }
+    pub const fn is_fit(&self) -> bool { matches!(self, Self::Fit { .. }) }
 
     /// Returns `true` if this element can be compressed during overflow.
     #[must_use]
@@ -229,11 +213,11 @@ pub enum AlignY {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Padding {
     /// Left padding in layout units.
-    pub left: f32,
+    pub left:   f32,
     /// Right padding in layout units.
-    pub right: f32,
+    pub right:  f32,
     /// Top padding in layout units.
-    pub top: f32,
+    pub top:    f32,
     /// Bottom padding in layout units.
     pub bottom: f32,
 }
@@ -243,9 +227,9 @@ impl Padding {
     #[must_use]
     pub const fn all(value: f32) -> Self {
         Self {
-            left: value,
-            right: value,
-            top: value,
+            left:   value,
+            right:  value,
+            top:    value,
             bottom: value,
         }
     }
@@ -254,9 +238,9 @@ impl Padding {
     #[must_use]
     pub const fn xy(x: f32, y: f32) -> Self {
         Self {
-            left: x,
-            right: x,
-            top: y,
+            left:   x,
+            right:  x,
+            top:    y,
             bottom: y,
         }
     }
@@ -274,26 +258,22 @@ impl Padding {
 
     /// Total horizontal padding (left + right).
     #[must_use]
-    pub const fn horizontal(&self) -> f32 {
-        self.left + self.right
-    }
+    pub const fn horizontal(&self) -> f32 { self.left + self.right }
 
     /// Total vertical padding (top + bottom).
     #[must_use]
-    pub const fn vertical(&self) -> f32 {
-        self.top + self.bottom
-    }
+    pub const fn vertical(&self) -> f32 { self.top + self.bottom }
 }
 
 /// Computed axis-aligned bounding box in layout coordinates (top-left origin).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BoundingBox {
     /// X position of the top-left corner.
-    pub x: f32,
+    pub x:      f32,
     /// Y position of the top-left corner.
-    pub y: f32,
+    pub y:      f32,
     /// Width of the bounding box.
-    pub width: f32,
+    pub width:  f32,
     /// Height of the bounding box.
     pub height: f32,
 }
@@ -343,28 +323,28 @@ pub struct TextConfig {
     /// The layout engine does not manage fonts. The application must assign a
     /// unique ID to each font and provide matching measurements via the
     /// [`MeasureTextFn`](super::engine::MeasureTextFn) callback.
-    pub font_id: u16,
+    pub font_id:        u16,
     /// Font size in layout units.
-    pub font_size: u16,
+    pub font_size:      u16,
     /// Line height in layout units (0 = use `font_size`).
-    pub line_height: u16,
+    pub line_height:    u16,
     /// Letter spacing in layout units.
     pub letter_spacing: u16,
     /// Text wrapping mode.
     ///
     /// Controls whether and how the layout engine breaks text across
     /// multiple lines. Defaults to [`TextWrap::Words`].
-    pub wrap: TextWrap,
+    pub wrap:           TextWrap,
 }
 
 impl Default for TextConfig {
     fn default() -> Self {
         Self {
-            font_id: 0,
-            font_size: 16,
-            line_height: 0,
+            font_id:        0,
+            font_size:      16,
+            line_height:    0,
             letter_spacing: 0,
-            wrap: TextWrap::Words,
+            wrap:           TextWrap::Words,
         }
     }
 }
@@ -426,7 +406,7 @@ impl TextConfig {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextDimensions {
     /// Width in layout units.
-    pub width: f32,
+    pub width:  f32,
     /// Height in layout units.
     pub height: f32,
 }
@@ -435,15 +415,15 @@ pub struct TextDimensions {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Border {
     /// Left border width.
-    pub left: f32,
+    pub left:             f32,
     /// Right border width.
-    pub right: f32,
+    pub right:            f32,
     /// Top border width.
-    pub top: f32,
+    pub top:              f32,
     /// Bottom border width.
-    pub bottom: f32,
+    pub bottom:           f32,
     /// Color of the border.
-    pub color: Color,
+    pub color:            Color,
     /// Width of lines drawn between children (0 = none).
     pub between_children: f32,
 }
@@ -453,11 +433,11 @@ impl Border {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            left: 0.0,
-            right: 0.0,
-            top: 0.0,
-            bottom: 0.0,
-            color: Color::BLACK,
+            left:             0.0,
+            right:            0.0,
+            top:              0.0,
+            bottom:           0.0,
+            color:            Color::BLACK,
             between_children: 0.0,
         }
     }

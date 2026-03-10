@@ -54,7 +54,7 @@ fn monospace_measure() -> MeasureTextFn {
             line_count = 1;
         }
         TextDimensions {
-            width: max_line_width,
+            width:  max_line_width,
             height: line_height * line_count as f32,
         }
     })
@@ -84,7 +84,7 @@ fn clay_monospace_measure(
         line_count = 1;
     }
     Dimensions {
-        width: max_line_width,
+        width:  max_line_width,
         height: line_height * line_count as f32,
     }
 }
@@ -94,10 +94,10 @@ fn clay_monospace_measure(
 /// A simplified bounding box for comparison between the two engines.
 #[derive(Debug, Clone, Copy)]
 struct Bbox {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    x:    f32,
+    y:    f32,
+    w:    f32,
+    h:    f32,
     kind: BboxKind,
 }
 
@@ -107,9 +107,7 @@ enum BboxKind {
     Text,
 }
 
-fn approx_eq(a: f32, b: f32) -> bool {
-    (a - b).abs() < 0.5
-}
+fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < 0.5 }
 
 fn assert_bboxes_match(clay_boxes: &[Bbox], diegetic_boxes: &[Bbox], kind: BboxKind) {
     let clay_filtered: Vec<_> = clay_boxes.iter().filter(|b| b.kind == kind).collect();
@@ -206,7 +204,7 @@ fn parity_fixed_root_with_grow_child() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -214,7 +212,7 @@ fn parity_fixed_root_with_grow_child() {
             .background_color((255, 0, 0).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -256,7 +254,7 @@ fn parity_header_body_divider() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -268,7 +266,7 @@ fn parity_header_body_divider() {
         |clay| {
             // Header
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(20.0))
@@ -278,7 +276,7 @@ fn parity_header_body_divider() {
             );
             // Divider
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(4.0))
@@ -288,7 +286,7 @@ fn parity_header_body_divider() {
             );
             // Body
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -347,7 +345,7 @@ fn parity_key_value_row_with_spacer() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -362,7 +360,7 @@ fn parity_key_value_row_with_spacer() {
                     .end(),
             );
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(1.0))
@@ -410,7 +408,7 @@ fn parity_vertical_center_alignment() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -423,7 +421,7 @@ fn parity_vertical_center_alignment() {
             .background_color((52, 98, 90).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(fixed!(40.0))
                     .height(fixed!(20.0))
@@ -460,6 +458,7 @@ fn parity_vertical_center_alignment() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn parity_fit_parent_with_grow_children_centering() {
     // The header vertical-centering bug: Fit-height parent, Grow-height
     // children containing text, centered vertically in a fixed container.
@@ -469,7 +468,7 @@ fn parity_fit_parent_with_grow_children_centering() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -477,7 +476,7 @@ fn parity_fit_parent_with_grow_children_centering() {
         |clay| {
             // Header container: fixed height, centers child vertically.
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(30.0))
@@ -491,7 +490,7 @@ fn parity_fit_parent_with_grow_children_centering() {
                 |clay| {
                     // Text row: Fit height, LeftToRight.
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .height(fit!())
@@ -501,7 +500,7 @@ fn parity_fit_parent_with_grow_children_centering() {
                         |clay| {
                             // Title slot: Grow height.
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(fit!())
                                     .height(grow!())
@@ -517,7 +516,7 @@ fn parity_fit_parent_with_grow_children_centering() {
                             );
                             // Spacer.
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(grow!())
                                     .height(fixed!(1.0))
@@ -526,7 +525,7 @@ fn parity_fit_parent_with_grow_children_centering() {
                             );
                             // Subtitle slot: Grow height.
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(fit!())
                                     .height(grow!())
@@ -602,7 +601,7 @@ fn parity_compression_with_content_minimum() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(100.0))
@@ -611,7 +610,7 @@ fn parity_compression_with_content_minimum() {
             .background_color((22, 28, 34).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(fit!())
                     .height(grow!())
@@ -619,7 +618,7 @@ fn parity_compression_with_content_minimum() {
                     .background_color((255, 0, 0).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(fixed!(50.0))
                             .height(fixed!(10.0))
@@ -630,7 +629,7 @@ fn parity_compression_with_content_minimum() {
                 },
             );
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(fit!())
                     .height(grow!())
@@ -638,7 +637,7 @@ fn parity_compression_with_content_minimum() {
                     .background_color((0, 0, 255).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(fixed!(50.0))
                             .height(fixed!(10.0))
@@ -710,7 +709,7 @@ fn parity_cross_axis_grow_with_large_content() {
     clay.set_measure_text_function_user_data((), clay_monospace_measure);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(width))
             .height(fixed!(height))
@@ -719,7 +718,7 @@ fn parity_cross_axis_grow_with_large_content() {
             .background_color((22, 28, 34).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -727,7 +726,7 @@ fn parity_cross_axis_grow_with_large_content() {
                     .background_color((255, 0, 0).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(fixed!(50.0))
                             .height(fixed!(10.0))
@@ -780,7 +779,7 @@ fn parity_two_grow_children_horizontal() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(100.0))
@@ -789,7 +788,7 @@ fn parity_two_grow_children_horizontal() {
             .background_color((22, 28, 34).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -798,7 +797,7 @@ fn parity_two_grow_children_horizontal() {
                 |_| {},
             );
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -848,7 +847,7 @@ fn parity_padding_and_child_gap() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -859,7 +858,7 @@ fn parity_padding_and_child_gap() {
             .background_color((22, 28, 34).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(30.0))
@@ -868,7 +867,7 @@ fn parity_padding_and_child_gap() {
                 |_| {},
             );
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -920,7 +919,7 @@ fn parity_right_alignment() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(100.0))
@@ -933,7 +932,7 @@ fn parity_right_alignment() {
             .background_color((22, 28, 34).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(fixed!(50.0))
                     .height(fixed!(30.0))
@@ -970,6 +969,7 @@ fn parity_right_alignment() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn parity_status_panel_full_layout() {
     // The full status panel layout from the actual application.
     let size = 160.0;
@@ -980,7 +980,7 @@ fn parity_status_panel_full_layout() {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -992,7 +992,7 @@ fn parity_status_panel_full_layout() {
         |clay| {
             // Header
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!(f32::from(FONT_SIZE), 20.0))
@@ -1005,7 +1005,7 @@ fn parity_status_panel_full_layout() {
                     .background_color((52, 98, 90).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .height(fit!())
@@ -1013,7 +1013,7 @@ fn parity_status_panel_full_layout() {
                             .end(),
                         |clay| {
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(fit!())
                                     .height(grow!())
@@ -1028,7 +1028,7 @@ fn parity_status_panel_full_layout() {
                                 },
                             );
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(grow!())
                                     .height(fixed!(1.0))
@@ -1036,7 +1036,7 @@ fn parity_status_panel_full_layout() {
                                 |_| {},
                             );
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(fit!())
                                     .height(grow!())
@@ -1060,7 +1060,7 @@ fn parity_status_panel_full_layout() {
             );
             // Divider
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(4.0))
@@ -1070,7 +1070,7 @@ fn parity_status_panel_full_layout() {
             );
             // Body
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -1078,7 +1078,7 @@ fn parity_status_panel_full_layout() {
                     .background_color((22, 28, 34).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .padding(clay_layout::layout::Padding::all(5))
@@ -1088,7 +1088,7 @@ fn parity_status_panel_full_layout() {
                         |clay| {
                             for (label, value) in &labels {
                                 clay.with(
-                                    &Declaration::new()
+                                    Declaration::new()
                                         .layout()
                                         .width(grow!())
                                         .height(fit!())
@@ -1096,17 +1096,17 @@ fn parity_status_panel_full_layout() {
                                         .end(),
                                     |clay| {
                                         clay.text(
-                                            *label,
+                                            label,
                                             clay_layout::text::TextConfig::new()
                                                 .font_size(FONT_SIZE)
                                                 .end(),
                                         );
                                         clay.with(
-                                            &Declaration::new().layout().width(grow!()).end(),
+                                            Declaration::new().layout().width(grow!()).end(),
                                             |_| {},
                                         );
                                         clay.text(
-                                            *value,
+                                            value,
                                             clay_layout::text::TextConfig::new()
                                                 .font_size(FONT_SIZE)
                                                 .end(),

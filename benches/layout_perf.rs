@@ -5,7 +5,7 @@
 #![allow(missing_docs)]
 #![allow(clippy::too_many_lines)]
 
-//! Benchmark comparing Clay (FFI) and bevy_diegetic layout engines on identical
+//! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout engines on identical
 //! complex layouts. Run with `cargo bench`.
 
 use std::sync::Arc;
@@ -60,7 +60,7 @@ fn monospace_measure() -> MeasureTextFn {
             line_count = 1;
         }
         TextDimensions {
-            width: max_line_width,
+            width:  max_line_width,
             height: line_height * line_count as f32,
         }
     })
@@ -89,7 +89,7 @@ fn clay_monospace_measure(
         line_count = 1;
     }
     Dimensions {
-        width: max_line_width,
+        width:  max_line_width,
         height: line_height * line_count as f32,
     }
 }
@@ -136,10 +136,10 @@ fn generate_rows(count: usize) -> Vec<(&'static str, &'static str)> {
 
 #[derive(Debug, Clone, Copy)]
 struct Bbox {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    x:    f32,
+    y:    f32,
+    w:    f32,
+    h:    f32,
     kind: BboxKind,
 }
 
@@ -149,9 +149,7 @@ enum BboxKind {
     Text,
 }
 
-fn approx_eq(a: f32, b: f32) -> bool {
-    (a - b).abs() < 0.5
-}
+fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < 0.5 }
 
 fn collect_clay_bboxes<'a>(
     commands: impl IntoIterator<Item = clay_layout::render_commands::RenderCommand<'a, (), ()>>,
@@ -260,7 +258,7 @@ fn build_clay_panel<'a>(
     size: f32,
 ) {
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(size))
             .height(fixed!(size))
@@ -272,7 +270,7 @@ fn build_clay_panel<'a>(
         |clay| {
             // Header
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!(f32::from(FONT_SIZE), 20.0))
@@ -285,7 +283,7 @@ fn build_clay_panel<'a>(
                     .background_color((52, 98, 90).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .height(fit!())
@@ -293,7 +291,7 @@ fn build_clay_panel<'a>(
                             .end(),
                         |clay| {
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(fit!())
                                     .height(grow!())
@@ -308,7 +306,7 @@ fn build_clay_panel<'a>(
                                 },
                             );
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(grow!())
                                     .height(fixed!(1.0))
@@ -316,7 +314,7 @@ fn build_clay_panel<'a>(
                                 |_| {},
                             );
                             clay.with(
-                                &Declaration::new()
+                                Declaration::new()
                                     .layout()
                                     .width(fit!())
                                     .height(grow!())
@@ -336,7 +334,7 @@ fn build_clay_panel<'a>(
             );
             // Divider
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fixed!(4.0))
@@ -346,7 +344,7 @@ fn build_clay_panel<'a>(
             );
             // Body
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -354,7 +352,7 @@ fn build_clay_panel<'a>(
                     .background_color((22, 28, 34).into()),
                 |clay| {
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .padding(clay_layout::layout::Padding::all(5))
@@ -364,7 +362,7 @@ fn build_clay_panel<'a>(
                         |clay| {
                             for (label, value) in rows {
                                 clay.with(
-                                    &Declaration::new()
+                                    Declaration::new()
                                         .layout()
                                         .width(grow!())
                                         .height(fit!())
@@ -372,17 +370,17 @@ fn build_clay_panel<'a>(
                                         .end(),
                                     |clay| {
                                         clay.text(
-                                            *label,
+                                            label,
                                             clay_layout::text::TextConfig::new()
                                                 .font_size(FONT_SIZE)
                                                 .end(),
                                         );
                                         clay.with(
-                                            &Declaration::new().layout().width(grow!()).end(),
+                                            Declaration::new().layout().width(grow!()).end(),
                                             |_| {},
                                         );
                                         clay.text(
-                                            *value,
+                                            value,
                                             clay_layout::text::TextConfig::new()
                                                 .font_size(FONT_SIZE)
                                                 .end(),
@@ -492,8 +490,8 @@ fn run_clay_layout(rows: &[(&str, &str)], size: f32) {
     clay.set_measure_text_function_user_data((), clay_monospace_measure);
     let mut layout = clay.begin::<(), ()>();
     build_clay_panel(&mut layout, rows, size);
-    let _cmds: Vec<_> = layout.end().collect();
-    black_box(&_cmds);
+    let cmds: Vec<_> = layout.end().collect();
+    black_box(&cmds);
 }
 
 fn run_diegetic_layout(rows: &[(&str, &str)], size: f32, measure: &MeasureTextFn) {

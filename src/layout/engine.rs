@@ -7,6 +7,8 @@
 //! The engine is fully self-contained with no global state. Multiple instances can run
 //! concurrently on different threads without interference.
 
+use std::sync::Arc;
+
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
@@ -22,7 +24,6 @@ use super::types::Sizing;
 use super::types::TextConfig;
 use super::types::TextDimensions;
 use super::types::TextWrap;
-use std::sync::Arc;
 
 /// Callback type for measuring text dimensions.
 ///
@@ -38,19 +39,19 @@ pub type MeasureTextFn = Arc<dyn Fn(&str, &TextConfig) -> TextDimensions + Send 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ComputedLayout {
     /// Final bounding box in layout coordinates.
-    pub bounds: BoundingBox,
+    pub bounds:         BoundingBox,
     /// Resolved width before positioning.
-    pub width: f32,
+    pub width:          f32,
     /// Resolved height before positioning.
-    pub height: f32,
+    pub height:         f32,
     /// Propagated minimum width from children's content.
     ///
     /// Computed bottom-up alongside `propagate_fit_sizes`. Used as a hard
     /// floor during overflow compression and cross-axis sizing — an element
     /// must never shrink below its children's irreducible content size.
-    min_width: f32,
+    min_width:          f32,
     /// Propagated minimum height from children's content.
-    min_height: f32,
+    min_height:         f32,
     /// Cached natural (unwrapped) text width from `initialize_leaf_sizes`.
     ///
     /// Stored once during initial measurement so that `rewrap_text_elements`
@@ -72,7 +73,7 @@ pub struct ComputedLayout {
 /// to disable it when you need the complete render command list.
 pub struct LayoutEngine {
     measure_text: MeasureTextFn,
-    culling: Culling,
+    culling:      Culling,
 }
 
 impl LayoutEngine {
@@ -88,9 +89,7 @@ impl LayoutEngine {
     }
 
     /// Sets whether off-screen elements are culled from render output.
-    pub fn set_culling(&mut self, culling: Culling) {
-        self.culling = culling;
-    }
+    pub const fn set_culling(&mut self, culling: Culling) { self.culling = culling; }
 
     /// Computes layout for the given tree within the specified viewport dimensions.
     ///
@@ -196,13 +195,13 @@ pub struct LayoutResult {
 
 /// A single line of wrapped text with its measured width.
 struct WrappedLine {
-    text: String,
+    text:  String,
     width: f32,
 }
 
 /// Pre-computed word-wrap results for a text element.
 struct WrappedText {
-    lines: Vec<WrappedLine>,
+    lines:       Vec<WrappedLine>,
     line_height: f32,
 }
 
@@ -226,7 +225,7 @@ fn wrap_text_words(
 
         if words.is_empty() {
             all_lines.push(WrappedLine {
-                text: String::new(),
+                text:  String::new(),
                 width: 0.0,
             });
             continue;
@@ -250,7 +249,7 @@ fn wrap_text_words(
                     // kerning and glyph bearings that word-level accumulation misses.
                     let line_width = measure(&current_text, config).width;
                     all_lines.push(WrappedLine {
-                        text: current_text,
+                        text:  current_text,
                         width: line_width,
                     });
                     current_text = word.to_string();
@@ -270,14 +269,14 @@ fn wrap_text_words(
             measure(&current_text, config).width
         };
         all_lines.push(WrappedLine {
-            text: current_text,
+            text:  current_text,
             width: line_width,
         });
     }
 
     if all_lines.is_empty() {
         all_lines.push(WrappedLine {
-            text: String::new(),
+            text:  String::new(),
             width: 0.0,
         });
     }
@@ -303,7 +302,7 @@ fn wrap_text_newlines(text: &str, config: &TextConfig, measure: &MeasureTextFn) 
 
     if lines.is_empty() {
         lines.push(WrappedLine {
-            text: String::new(),
+            text:  String::new(),
             width: 0.0,
         });
     }
@@ -321,14 +320,12 @@ fn wrap_text_newlines(text: &str, config: &TextConfig, measure: &MeasureTextFn) 
 /// Two key optimizations avoid work in the common case (short text that fits):
 ///
 /// 1. **Cached natural width** — uses the `natural_text_width` stored during
-///    `initialize_leaf_sizes` instead of re-calling the measure function.
-///    If the cached width fits within the element's post-sizing width, the
-///    text won't reflow, so we skip wrapping entirely.
+///    `initialize_leaf_sizes` instead of re-calling the measure function. If the cached width fits
+///    within the element's post-sizing width, the text won't reflow, so we skip wrapping entirely.
 ///
-/// 2. **Lazy `parent_of`** — the parent lookup table (one `Vec<Option<usize>>`
-///    the size of the element array) is only built if a text element actually
-///    needs wrapping. For layouts where all text fits without reflowing, this
-///    allocation and O(N) build cost are avoided completely.
+/// 2. **Lazy `parent_of`** — the parent lookup table (one `Vec<Option<usize>>` the size of the
+///    element array) is only built if a text element actually needs wrapping. For layouts where all
+///    text fits without reflowing, this allocation and O(N) build cost are avoided completely.
 fn rewrap_text_elements(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
@@ -361,14 +358,14 @@ fn rewrap_text_elements(
                         continue;
                     }
                     wrap_text_words(text, config, max_width, measure)
-                }
+                },
                 TextWrap::Newlines => {
                     // Fast path: no explicit newlines means a single line.
                     if !text.contains('\n') {
                         continue;
                     }
                     wrap_text_newlines(text, config, measure)
-                }
+                },
                 TextWrap::None => continue,
             };
 
@@ -692,7 +689,7 @@ fn size_children_cross_axis(
                 } else {
                     min
                 }
-            }
+            },
             Sizing::Fixed(size) => size,
             Sizing::Percent(frac) => (parent_size * frac).max(0.0),
         };
@@ -712,7 +709,7 @@ const fn is_offscreen(x: f32, y: f32, w: f32, h: f32, vp_w: f32, vp_h: f32) -> b
 ///
 /// When `culling` is [`Enabled`](Culling::Enabled), elements whose bounding box
 /// lies entirely outside the viewport are omitted from the command list.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn position_and_render(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
@@ -740,13 +737,13 @@ fn position_and_render(
 
             if !offscreen && let Some(ref border) = element.border {
                 commands.push(RenderCommand {
-                    bounds: BoundingBox {
+                    bounds:      BoundingBox {
                         x,
                         y,
                         width,
                         height,
                     },
-                    kind: RenderCommandKind::Border { border: *border },
+                    kind:        RenderCommandKind::Border { border: *border },
                     element_idx: index,
                 });
 
@@ -758,13 +755,13 @@ fn position_and_render(
 
             if element.clip {
                 commands.push(RenderCommand {
-                    bounds: BoundingBox {
+                    bounds:      BoundingBox {
                         x,
                         y,
                         width,
                         height,
                     },
-                    kind: RenderCommandKind::ScissorEnd,
+                    kind:        RenderCommandKind::ScissorEnd,
                     element_idx: index,
                 });
             }
@@ -791,13 +788,13 @@ fn position_and_render(
             // Emit rectangle if background is set.
             if !offscreen && let Some(color) = element.background {
                 commands.push(RenderCommand {
-                    bounds: BoundingBox {
+                    bounds:      BoundingBox {
                         x,
                         y,
                         width,
                         height,
                     },
-                    kind: RenderCommandKind::Rectangle { color },
+                    kind:        RenderCommandKind::Rectangle { color },
                     element_idx: index,
                 });
             }
@@ -806,13 +803,13 @@ fn position_and_render(
             // must be balanced even when the parent is off-screen).
             if element.clip {
                 commands.push(RenderCommand {
-                    bounds: BoundingBox {
+                    bounds:      BoundingBox {
                         x,
                         y,
                         width,
                         height,
                     },
-                    kind: RenderCommandKind::ScissorStart,
+                    kind:        RenderCommandKind::ScissorStart,
                     element_idx: index,
                 });
             }
@@ -828,16 +825,16 @@ fn position_and_render(
                     // Wrapped text: emit one command per line.
                     for (line_idx, line) in wrap_result.lines.iter().enumerate() {
                         #[allow(clippy::cast_precision_loss)]
-                        let line_y = y + wrap_result.line_height * line_idx as f32;
+                        let line_y = wrap_result.line_height.mul_add(line_idx as f32, y);
                         commands.push(RenderCommand {
-                            bounds: BoundingBox {
+                            bounds:      BoundingBox {
                                 x,
                                 y: line_y,
                                 width: line.width,
                                 height: wrap_result.line_height,
                             },
-                            kind: RenderCommandKind::Text {
-                                text: line.text.clone(),
+                            kind:        RenderCommandKind::Text {
+                                text:   line.text.clone(),
                                 config: config.clone(),
                             },
                             element_idx: index,
@@ -846,14 +843,14 @@ fn position_and_render(
                 } else {
                     // Unwrapped text (TextWrap::None): single command.
                     commands.push(RenderCommand {
-                        bounds: BoundingBox {
+                        bounds:      BoundingBox {
                             x,
                             y,
                             width,
                             height,
                         },
-                        kind: RenderCommandKind::Text {
-                            text: text.clone(),
+                        kind:        RenderCommandKind::Text {
+                            text:   text.clone(),
                             config: config.clone(),
                         },
                         element_idx: index,
@@ -984,13 +981,13 @@ fn emit_between_borders(
                 .mul_add(0.5, a_bounds.x + a_bounds.width);
             let line_x = border.between_children.mul_add(-0.5, midpoint);
             commands.push(RenderCommand {
-                bounds: BoundingBox {
-                    x: line_x,
-                    y: parent_bounds.y + parent.padding.top,
-                    width: border.between_children,
+                bounds:      BoundingBox {
+                    x:      line_x,
+                    y:      parent_bounds.y + parent.padding.top,
+                    width:  border.between_children,
                     height: parent_bounds.height - parent.padding.vertical(),
                 },
-                kind: RenderCommandKind::Rectangle {
+                kind:        RenderCommandKind::Rectangle {
                     color: border.color,
                 },
                 element_idx: parent_idx,
@@ -1000,13 +997,13 @@ fn emit_between_borders(
                 .mul_add(0.5, a_bounds.y + a_bounds.height);
             let line_y = border.between_children.mul_add(-0.5, midpoint);
             commands.push(RenderCommand {
-                bounds: BoundingBox {
-                    x: parent_bounds.x + parent.padding.left,
-                    y: line_y,
-                    width: parent_bounds.width - parent.padding.horizontal(),
+                bounds:      BoundingBox {
+                    x:      parent_bounds.x + parent.padding.left,
+                    y:      line_y,
+                    width:  parent_bounds.width - parent.padding.horizontal(),
                     height: border.between_children,
                 },
-                kind: RenderCommandKind::Rectangle {
+                kind:        RenderCommandKind::Rectangle {
                     color: border.color,
                 },
                 element_idx: parent_idx,

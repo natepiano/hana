@@ -44,15 +44,13 @@ fn monospace_measure() -> MeasureTextFn {
             line_count = 1;
         }
         TextDimensions {
-            width: max_line_width,
+            width:  max_line_width,
             height: line_height * line_count as f32,
         }
     })
 }
 
-fn approx_eq(a: f32, b: f32) -> bool {
-    (a - b).abs() < 0.01
-}
+fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < 0.01 }
 
 // ── Fixed sizing ─────────────────────────────────────────────────────────────
 
@@ -905,11 +903,11 @@ fn between_children_borders_emitted() {
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
             .border(Border {
-                left: 0.0,
-                right: 0.0,
-                top: 0.0,
-                bottom: 0.0,
-                color: Color::srgb_u8(255, 255, 255),
+                left:             0.0,
+                right:            0.0,
+                top:              0.0,
+                bottom:           0.0,
+                color:            Color::srgb_u8(255, 255, 255),
                 between_children: 2.0,
             }),
         |b| {
@@ -1242,7 +1240,7 @@ fn fit_parent_sees_grow_children_content_height() {
     // header_container is 20.0 tall with 4+4=8 vertical padding → 12 content area.
     // Center offset = (12 - text_row_height) / 2 + 4 (top padding).
     let text_row_bounds = result.computed[2].bounds;
-    let expected_y = (12.0 - text_row_height) * 0.5 + 4.0;
+    let expected_y = (12.0 - text_row_height).mul_add(0.5, 4.0);
     assert!(
         approx_eq(text_row_bounds.y, expected_y),
         "text_row should be centered: expected y={expected_y}, got y={}",

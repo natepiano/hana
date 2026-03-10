@@ -21,15 +21,15 @@ use crate::layout::TextDimensions;
 #[require(ComputedDiegeticPanel, Transform)]
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
-    pub tree: LayoutTree,
+    pub tree:          LayoutTree,
     /// Width in abstract layout units (viewport width for the layout engine).
-    pub layout_width: f32,
+    pub layout_width:  f32,
     /// Height in abstract layout units (viewport height for the layout engine).
     pub layout_height: f32,
     /// Width of the panel in world units.
-    pub world_width: f32,
+    pub world_width:   f32,
     /// Height of the panel in world units.
-    pub world_height: f32,
+    pub world_height:  f32,
 }
 
 /// Computed layout result for a [`DiegeticPanel`].

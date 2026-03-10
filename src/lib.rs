@@ -35,31 +35,27 @@ pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Border;
 pub use layout::BoundingBox;
+// Layout engine.
+pub use layout::ComputedLayout;
 pub use layout::Culling;
 pub use layout::Direction;
-pub use layout::Padding;
-pub use layout::Sizing;
-pub use layout::TextConfig;
-pub use layout::TextDimensions;
-pub use layout::TextWrap;
-
 // Layout tree.
 pub use layout::El;
 pub use layout::Element;
 pub use layout::ElementContent;
 pub use layout::LayoutBuilder;
-pub use layout::LayoutTree;
-
-// Layout engine.
-pub use layout::ComputedLayout;
 pub use layout::LayoutEngine;
 pub use layout::LayoutResult;
+pub use layout::LayoutTree;
 pub use layout::MeasureTextFn;
-
+pub use layout::Padding;
 // Render commands.
 pub use layout::RenderCommand;
 pub use layout::RenderCommandKind;
-
+pub use layout::Sizing;
+pub use layout::TextConfig;
+pub use layout::TextDimensions;
+pub use layout::TextWrap;
 // Bevy plugin.
 pub use plugin::ComputedDiegeticPanel;
 pub use plugin::DiegeticPanel;
