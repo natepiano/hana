@@ -1,7 +1,7 @@
 # bevy_diegetic
 
 [![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/bevy_diegetic#license)
-[![CI](https://github.com/natepiano/bevy_diegetic/workflows/CI/badge.svg)](https://github.com/natepiano/bevy_diegetic/actions)
+[![CI](https://github.com/natepiano/bevy_diegetic/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/bevy_diegetic/actions/workflows/ci.yml)
 
 Diegetic UI layout engine for [Bevy](https://bevyengine.org/), implemented in pure Rust.
 
