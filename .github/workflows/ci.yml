@@ -166,16 +166,13 @@ jobs:
     name: Mend Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
           components: rust-src, rustc-dev, llvm-tools-preview
-
-      - name: Clone cargo-mend
-        run: git clone https://github.com/natepiano/cargo-mend.git /tmp/cargo-mend
 
       - name: Install mold linker
         uses: rui314/setup-mold@v1
@@ -189,8 +186,13 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run cargo mend
-        run: cargo run --manifest-path /tmp/cargo-mend/Cargo.toml -- --fail-on-warn
+      - name: Install cargo-mend
+        run: cargo install cargo-mend
         env:
-          RUSTC_BOOTSTRAP: "1"
+          RUSTC_BOOTSTRAP: 1
+
+      - name: Run cargo mend
+        run: cargo mend --fail-on-warn
+        env:
+          CARGO_TERM_COLOR: never
           CARGO_TERM_COLOR: never
