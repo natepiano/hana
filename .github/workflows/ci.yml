@@ -195,4 +195,3 @@ jobs:
         run: cargo mend --fail-on-warn
         env:
           CARGO_TERM_COLOR: never
-          CARGO_TERM_COLOR: never
