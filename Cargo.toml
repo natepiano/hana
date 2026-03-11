@@ -33,7 +33,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-clay-layout = { path = "../hana/crates/clay-layout" }
+clay-layout = { path = "./clay-layout" }
 criterion   = { version = "0.8.2", features = ["html_reports"] }
 
 [[bench]]

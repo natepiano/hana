@@ -1,5 +1,8 @@
 # bevy_diegetic
 
+[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/bevy_diegetic#license)
+[![CI](https://github.com/natepiano/bevy_diegetic/workflows/CI/badge.svg)](https://github.com/natepiano/bevy_diegetic/actions)
+
 Diegetic UI layout engine for [Bevy](https://bevyengine.org/), implemented in pure Rust.
 
 Diegetic UI lives inside the game world — panels on surfaces, status displays on objects, HUDs that exist as physical things characters can see. This crate provides the layout engine and Bevy integration to build those interfaces.
@@ -123,6 +126,10 @@ The plugin handles layout computation automatically. Gizmo wireframes visualize 
 - **Animation** — smooth transitions when layout properties change.
 - **Retained layout diffing** — skip recomputation when the tree hasn't changed, diff render commands to minimize entity updates.
 - **Builder ergonomics** — macro sugar or proc-macro for more concise tree construction if the closure-based API proves too verbose at scale.
+
+## Vendored `clay-layout`
+
+The `clay-layout/` directory contains a patched copy of [`clay-layout 0.4.0`](https://crates.io/crates/clay-layout) from crates.io, used only as a dev-dependency for parity testing and benchmarking. The crates.io release has two bugs — missing `Clay_SetCurrentContext` calls (causing SIGABRT on every use) and an unsound callback drop — that prevent it from working at all. Our patched copy fixes both. See [`hanadocs/clay-layout-problem.md`](https://github.com/natepiano/hanadocs/blob/main/clay-layout-problem.md) for details. `clay-layout` is licensed under zlib/libpng, which is compatible with this crate's MIT/Apache-2.0 license.
 
 ## License
 
