@@ -1,3 +1,9 @@
+## [Unreleased]
+
+- Add optional `extras` feature: zoom-to-fit, queued camera animations, event-driven camera control
+- Add optional `extras_debug` feature: debug visualization of fit targets with gizmos and screen-space labels
+- Add 4 examples: `extras_zoom_to_fit`, `extras_animate_to_fit`, `extras_play_animation`, `extras_look_at`
+
 ## 0.34.0
 
 - Update to Bevy 0.18

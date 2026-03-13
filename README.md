@@ -22,6 +22,7 @@ Use it to quickly prototype, experiment, for model viewers, and more!
 - Works with multiple viewports and/or windows
 - Easy to control manually, e.g. for keyboard control or animation
 - Can control cameras that render to a texture
+- Zoom-to-fit, camera animations, and debug visualization (optional `extras` feature)
 
 ## Controls
 
@@ -63,6 +64,49 @@ all the possible configuration options.
 
 - `bevy_egui` (optional): Makes `PanOrbitCamera` ignore any input that `egui` uses, thus preventing moving the camera
   when interacting with egui windows
+- `extras` (optional): Zoom-to-fit, queued camera animations, and event-driven camera control
+- `extras_debug` (optional, implies `extras`): Debug visualization of fit targets with gizmos and screen-space labels
+
+## Extras
+
+Enable the `extras` feature for zoom-to-fit, queued camera animations, and event-driven camera control:
+
+```toml
+bevy_panorbit_camera = { version = "0.35", features = ["extras"] }
+```
+
+Trigger a zoom-to-fit:
+
+```rust ignore
+commands.entity(camera).trigger(ZoomToFit {
+    target,
+    margin: 0.15,
+    ..default()
+});
+```
+
+Queue camera animations:
+
+```rust ignore
+commands.entity(camera).trigger(PlayAnimation {
+    moves: vec![CameraMove::ToOrbit { .. }],
+    ..default()
+});
+```
+
+Look at a target:
+
+```rust ignore
+commands.entity(camera).trigger(LookAt { target, duration, easing });
+```
+
+For debug visualization of fit targets, enable `extras_debug`:
+
+```toml
+bevy_panorbit_camera = { version = "0.35", features = ["extras_debug"] }
+```
+
+See the `extras_*` examples for more.
 
 ## Version Compatibility
 

@@ -13,6 +13,16 @@ readme = "README.md"
 
 [features]
 bevy_egui = ["dep:bevy_egui"]
+extras = ["bevy/bevy_asset", "bevy/bevy_log", "bevy/bevy_mesh"]
+extras_debug = [
+    "extras",
+    "bevy/bevy_gizmos",
+    "bevy/bevy_pbr",
+    "bevy/bevy_picking",
+    "bevy/bevy_state",
+    "bevy/bevy_text",
+    "bevy/bevy_ui",
+]
 
 [dependencies]
 bevy = { version = "0.18", default-features = false, features = [
@@ -37,3 +47,19 @@ required-features = ["bevy_egui"]
 [[example]]
 name = "egui_multiple_windows"
 required-features = ["bevy_egui"]
+
+[[example]]
+name = "extras_zoom_to_fit"
+required-features = ["extras"]
+
+[[example]]
+name = "extras_animate_to_fit"
+required-features = ["extras"]
+
+[[example]]
+name = "extras_play_animation"
+required-features = ["extras"]
+
+[[example]]
+name = "extras_look_at"
+required-features = ["extras"]
