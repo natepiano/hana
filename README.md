@@ -65,7 +65,7 @@ all the possible configuration options.
 - `bevy_egui` (optional): Makes `PanOrbitCamera` ignore any input that `egui` uses, thus preventing moving the camera
   when interacting with egui windows
 - `extras` (optional): Zoom-to-fit, queued camera animations, and event-driven camera control
-- `extras_debug` (optional, implies `extras`): Debug visualization of fit targets with gizmos and screen-space labels
+- `extras_debug` (optional, enabling this implicitly enables `extras`): Debug visualization of fit targets with gizmos and screen-space labels
 
 ## Extras
 
