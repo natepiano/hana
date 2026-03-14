@@ -187,7 +187,7 @@ impl MoveState {
 /// The system will automatically process them one by one, removing the component
 /// when the queue is empty.
 ///
-/// Camera smoothing is automatically disabled while camera_moves are in progress and
+/// Camera smoothing is automatically disabled while `camera_moves` are in progress and
 /// restored when the queue completes via the `restore_camera_state` observer.
 #[derive(Component, Reflect, Default)]
 #[require(CameraInputInterruptBehavior)]
@@ -207,7 +207,7 @@ impl CameraMoveList {
         }
     }
 
-    /// Calculates total remaining time in milliseconds for all queued camera_moves.
+    /// Calculates total remaining time in milliseconds for all queued `camera_moves`.
     pub fn remaining_time_ms(&self) -> f32 {
         // Get remaining time for current move
         let current_remaining = match &self.state {

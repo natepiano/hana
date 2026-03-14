@@ -319,7 +319,7 @@ fn build_test_projection(projection: &Projection, test_radius: f32) -> Projectio
 /// For perspective, each correction step uses the harmonic mean of the depths of the two
 /// extreme points per dimension. This is the exact inverse of perspective projection.
 ///
-/// For orthographic, centering is depth-independent (centering_depth = 1.0), so the shift
+/// For orthographic, centering is depth-independent (`centering_depth` = 1.0), so the shift
 /// is a direct 1:1 world-unit correction.
 #[allow(clippy::too_many_arguments)]
 fn refine_focus_centering(

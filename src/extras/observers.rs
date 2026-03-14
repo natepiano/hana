@@ -95,7 +95,7 @@ fn stash_camera_state(
     }
 }
 
-/// Shared fit preparation used by both ZoomToFit and AnimateToFit observers.
+/// Shared fit preparation used by both `ZoomToFit` and `AnimateToFit` observers.
 /// Extracts target mesh vertices and computes the fit solution for the requested
 /// camera orientation.
 #[allow(clippy::too_many_arguments)]

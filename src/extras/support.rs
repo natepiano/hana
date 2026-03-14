@@ -38,9 +38,9 @@ pub(super) const MIN_VISIBLE_DEPTH: f32 = 0.1;
 /// Projection-derived parameters for screen-space normalization.
 /// Consolidates the extraction of half extents and projection type from a `Projection`.
 pub(super) struct ProjectionParams {
-    /// Half visible extent in x (perspective: half_tan_hfov, ortho: area.width()/2)
+    /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
     pub half_extent_x: f32,
-    /// Half visible extent in y (perspective: half_tan_vfov, ortho: area.height()/2)
+    /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
     pub half_extent_y: f32,
     /// Whether this uses orthographic projection
     pub is_ortho: bool,
@@ -152,9 +152,9 @@ pub(super) struct ScreenSpaceBounds {
     pub min_norm_y: f32,
     /// Maximum normalized y coordinate in screen space
     pub max_norm_y: f32,
-    /// Half visible extent in x (perspective: half_tan_hfov, ortho: area.width()/2)
+    /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
     pub half_extent_x: f32,
-    /// Half visible extent in y (perspective: half_tan_vfov, ortho: area.height()/2)
+    /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
     pub half_extent_y: f32,
 }
 
