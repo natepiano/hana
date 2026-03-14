@@ -612,8 +612,14 @@ impl LookAtAndZoomToFit {
     }
 }
 
-/// `SetFitTarget` — sets the visualization target without triggering a zoom. Allows you
-/// to inspect bounds before triggering [`ZoomToFit`].
+/// Sets the debug visualization target without triggering a zoom.
+///
+/// Only useful with the `extras_debug` feature enabled. This lets you point the
+/// debug overlay (`FitVisualization`) at a specific entity so you can inspect its
+/// screen-space bounds before (or without) triggering [`ZoomToFit`].
+///
+/// You do not need to call this when using [`ZoomToFit`], [`AnimateToFit`], or
+/// [`LookAtAndZoomToFit`] — those events set the fit target automatically.
 #[derive(EntityEvent, Reflect)]
 #[reflect(Event, FromReflect)]
 pub struct SetFitTarget {

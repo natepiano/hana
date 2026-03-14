@@ -63,7 +63,7 @@ pub use extras::events::LookAt;
 pub use extras::events::LookAtAndZoomToFit;
 #[cfg(feature = "extras")]
 pub use extras::events::PlayAnimation;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::SetFitTarget;
 #[cfg(feature = "extras")]
 pub use extras::events::ZoomBegin;
