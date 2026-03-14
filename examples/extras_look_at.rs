@@ -1,11 +1,14 @@
-//! Demonstrates `LookAt` and `LookAtAndZoomToFit`.
+//! Demonstrates `LookAt`, `LookAtAndZoomToFit`, and `ZoomToFit`.
 //!
 //! Controls:
-//!   L — LookAt the target (rotates camera in place)
-//!   K — LookAtAndZoomToFit (rotates + frames the target)
+//!   L — LookAt the red cube (rotates camera in place)
+//!   K — LookAtAndZoomToFit the red cube (rotates + frames)
+//!   Z — ZoomToFit the red cube (frames without changing look direction)
 //!   R — Reset camera
 //!
-//! Shows the difference: LookAt only rotates, LookAtAndZoomToFit also adjusts radius.
+//! Compare K vs Z: both frame the target, but LookAtAndZoomToFit also
+//! changes the orbit focus to the target, while ZoomToFit keeps the
+//! current focus and only adjusts radius.
 
 use std::time::Duration;
 
@@ -16,6 +19,11 @@ use bevy_panorbit_camera::LookAt;
 use bevy_panorbit_camera::LookAtAndZoomToFit;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
+use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_panorbit_camera::ZoomToFit;
+
+// Camera starts close to the gray cube, with the red cube barely visible on the right
+const START_POS: Vec3 = Vec3::new(0.0, 1.5, 3.0);
 
 #[derive(Component)]
 struct Target;
@@ -41,14 +49,14 @@ fn setup(
         Mesh3d(meshes.add(Plane3d::default().mesh().size(10.0, 10.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
     ));
-    // Target sphere — off to the side so LookAt is visible
+    // Target cube — off to the right so it's barely in view
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.5).mesh().uv(32, 18))),
-        MeshMaterial3d(materials.add(Color::srgb(0.9, 0.3, 0.1))),
-        Transform::from_xyz(4.0, 1.0, -3.0),
+        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        Transform::from_xyz(3.5, 0.5, 0.0),
         Target,
     ));
-    // Reference cube at origin
+    // Gray cube near origin — what the camera starts focused on
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(0.5, 0.5, 0.5))),
         MeshMaterial3d(materials.add(Color::srgb(0.5, 0.5, 0.5))),
@@ -62,13 +70,26 @@ fn setup(
         },
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
-    // Camera — pointed at origin, target is off to the side
+    // Camera — close to the gray cube, red cube just visible on the right
     commands.spawn((
-        Transform::from_xyz(0.0, 3.0, 8.0),
-        PanOrbitCamera::default(),
+        Transform::from_translation(START_POS),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
     ));
 
-    info!("Press L to LookAt, K to LookAtAndZoomToFit, R to reset");
+    // Instructions
+    commands.spawn(Text::new(
+        "L - LookAt the cube (rotates camera only)\n\
+         K - LookAtAndZoomToFit the cube (rotates + frames)\n\
+         Z - ZoomToFit the cube (frames without rotating)\n\
+         R - Reset camera",
+    ));
 }
 
 fn keyboard_input(
@@ -87,24 +108,34 @@ fn keyboard_input(
 
     if keys.just_pressed(KeyCode::KeyL) {
         commands.trigger(LookAt::new(camera, target).duration(Duration::from_millis(600)));
-        info!("LookAt triggered — camera rotates to face target");
+        info!("LookAt triggered");
     }
 
     if keys.just_pressed(KeyCode::KeyK) {
         commands.trigger(
             LookAtAndZoomToFit::new(camera, target)
-                .margin(0.2)
+                .margin(0.15)
                 .duration(Duration::from_millis(800)),
         );
-        info!("LookAtAndZoomToFit triggered — camera rotates and frames target");
+        info!("LookAtAndZoomToFit triggered");
+    }
+
+    if keys.just_pressed(KeyCode::KeyZ) {
+        commands.trigger(
+            ZoomToFit::new(camera, target)
+                .margin(0.15)
+                .duration(Duration::from_millis(800)),
+        );
+        info!("ZoomToFit triggered");
     }
 
     if keys.just_pressed(KeyCode::KeyR) {
         if let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera) {
+            let radius = START_POS.length();
             pan_orbit.target_focus = Vec3::ZERO;
-            pan_orbit.target_yaw = 0.0;
-            pan_orbit.target_pitch = 0.0;
-            pan_orbit.target_radius = 8.0;
+            pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
+            pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
+            pan_orbit.target_radius = radius;
             pan_orbit.force_update = true;
             info!("Camera reset");
         }

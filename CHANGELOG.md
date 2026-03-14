@@ -2,7 +2,8 @@
 
 - Add optional `extras` feature: zoom-to-fit, queued camera animations, event-driven camera control
 - Add optional `extras_debug` feature: debug visualization of fit targets with gizmos and screen-space labels
-- Add 4 examples: `extras_zoom_to_fit`, `extras_animate_to_fit`, `extras_play_animation`, `extras_look_at`
+- Add `extras` example: full showcase with mesh picking, multi-window, animations, and debug visualization
+- Add 4 focused examples: `extras_zoom_to_fit`, `extras_animate_to_fit`, `extras_play_animation`, `extras_look_at`
 
 ## 0.34.0
 

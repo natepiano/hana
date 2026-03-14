@@ -16,6 +16,9 @@ use bevy_panorbit_camera::AnimationBegin;
 use bevy_panorbit_camera::AnimationEnd;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
+use bevy_panorbit_camera::TrackpadBehavior;
+
+const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
 
 #[derive(Component)]
 struct Target;
@@ -44,7 +47,7 @@ fn setup(
     // Target cube
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(1.5, 1.5, 1.5))),
-        MeshMaterial3d(materials.add(Color::srgb(0.2, 0.4, 0.8))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         Transform::from_xyz(0.0, 0.75, 0.0),
         Target,
     ));
@@ -58,11 +61,21 @@ fn setup(
     ));
     // Camera
     commands.spawn((
-        Transform::from_xyz(0.0, 3.0, 8.0),
-        PanOrbitCamera::default(),
+        Transform::from_translation(START_POS),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
     ));
 
-    info!("Press Space to AnimateToFit (yaw=45 pitch=30), R to reset");
+    // Instructions
+    commands.spawn(Text::new(
+        "Space - AnimateToFit the cube (yaw=45 pitch=30)\nR - Reset camera",
+    ));
 }
 
 fn keyboard_input(
@@ -91,10 +104,11 @@ fn keyboard_input(
 
     if keys.just_pressed(KeyCode::KeyR) {
         if let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera) {
+            let radius = START_POS.length();
             pan_orbit.target_focus = Vec3::ZERO;
-            pan_orbit.target_yaw = 0.0;
-            pan_orbit.target_pitch = 0.0;
-            pan_orbit.target_radius = 8.0;
+            pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
+            pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
+            pan_orbit.target_radius = radius;
             pan_orbit.force_update = true;
             info!("Camera reset");
         }

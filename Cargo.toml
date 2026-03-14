@@ -39,6 +39,9 @@ bevy_egui = { version = "0.39", default-features = false, features = [
     "render",
     "default_fonts",
 ] }
+bevy_brp_extras = "0.18.7"
+bevy_window_manager = "0.18.3"
+bevy_panorbit_camera = { path = ".", features = ["extras_debug"] }
 
 [[example]]
 name = "egui"
@@ -49,8 +52,12 @@ name = "egui_multiple_windows"
 required-features = ["bevy_egui"]
 
 [[example]]
+name = "extras"
+required-features = ["extras_debug"]
+
+[[example]]
 name = "extras_zoom_to_fit"
-required-features = ["extras"]
+required-features = ["extras_debug"]
 
 [[example]]
 name = "extras_animate_to_fit"

@@ -1,7 +1,7 @@
 //! Demonstrates `PlayAnimation` — plays a queued sequence of camera movements.
 //!
 //! Controls:
-//!   Space — Play a 3-step camera animation sequence
+//!   Space — Play a 5-step camera animation sequence
 //!   R     — Reset camera
 //!
 //! Observe CameraMoveBegin/CameraMoveEnd for each step via info!() logging.
@@ -16,6 +16,9 @@ use bevy_panorbit_camera::CameraMoveEnd;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::PlayAnimation;
+use bevy_panorbit_camera::TrackpadBehavior;
+
+const START_POS: Vec3 = Vec3::new(0.0, 2.0, 6.0);
 
 fn main() {
     App::new()
@@ -54,11 +57,21 @@ fn setup(
     ));
     // Camera
     commands.spawn((
-        Transform::from_xyz(0.0, 2.0, 6.0),
-        PanOrbitCamera::default(),
+        Transform::from_translation(START_POS),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
     ));
 
-    info!("Press Space to play a 3-step animation, R to reset");
+    // Instructions
+    commands.spawn(Text::new(
+        "Space - Play 5-step animation sequence\nR - Reset camera",
+    ));
 }
 
 fn keyboard_input(
@@ -72,33 +85,52 @@ fn keyboard_input(
     };
 
     if keys.just_pressed(KeyCode::Space) {
+        let focus = Vec3::new(0.0, 0.5, 0.0);
         let moves = [
-            // Step 1: orbit to the right
+            // Step 1: orbit to the side and slightly closer
             CameraMove::ToOrbit {
-                focus: Vec3::new(0.0, 0.5, 0.0),
-                yaw: 1.2,
-                pitch: 0.3,
-                radius: 5.0,
+                focus,
+                yaw: 1.5,
+                pitch: 0.2,
+                radius: 4.0,
                 duration: Duration::from_millis(800),
                 easing: EaseFunction::CubicInOut,
             },
-            // Step 2: swoop up high
+            // Step 2: dramatic zoom out — pull way back and high overhead
             CameraMove::ToOrbit {
-                focus: Vec3::new(0.0, 0.5, 0.0),
+                focus,
                 yaw: 2.5,
-                pitch: 1.0,
-                radius: 4.0,
-                duration: Duration::from_millis(600),
+                pitch: 1.3,
+                radius: 20.0,
+                duration: Duration::from_millis(1200),
+                easing: EaseFunction::CubicIn,
+            },
+            // Step 3: sweep around to the opposite side while staying wide
+            CameraMove::ToOrbit {
+                focus,
+                yaw: 4.5,
+                pitch: 0.6,
+                radius: 14.0,
+                duration: Duration::from_millis(1200),
                 easing: EaseFunction::SineInOut,
             },
-            // Step 3: settle back to front view
+            // Step 4: dramatic zoom back in — swoop down close
             CameraMove::ToOrbit {
-                focus: Vec3::new(0.0, 0.5, 0.0),
+                focus,
+                yaw: 5.5,
+                pitch: 0.1,
+                radius: 2.0,
+                duration: Duration::from_millis(1000),
+                easing: EaseFunction::CubicIn,
+            },
+            // Step 5: bounce back to starting view
+            CameraMove::ToOrbit {
+                focus,
                 yaw: 0.0,
                 pitch: 0.3,
                 radius: 6.0,
-                duration: Duration::from_millis(1000),
-                easing: EaseFunction::CubicOut,
+                duration: Duration::from_millis(1200),
+                easing: EaseFunction::BounceOut,
             },
         ];
 
@@ -107,10 +139,11 @@ fn keyboard_input(
 
     if keys.just_pressed(KeyCode::KeyR) {
         if let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera) {
+            let radius = START_POS.length();
             pan_orbit.target_focus = Vec3::ZERO;
-            pan_orbit.target_yaw = 0.0;
-            pan_orbit.target_pitch = 0.0;
-            pan_orbit.target_radius = 6.0;
+            pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
+            pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
+            pan_orbit.target_radius = radius;
             pan_orbit.force_update = true;
             info!("Camera reset");
         }
