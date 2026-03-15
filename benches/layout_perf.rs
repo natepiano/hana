@@ -24,6 +24,7 @@ use bevy_diegetic::RenderCommandKind;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
+use bevy_diegetic::TextMeasure;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -42,13 +43,14 @@ use criterion::criterion_main;
 
 // ── Shared measurement ──────────────────────────────────────────────────
 
-const FONT_SIZE: u16 = 10;
+const FONT_SIZE: f32 = 10.0;
+const CLAY_FONT_SIZE: u16 = 10;
 const CHAR_WIDTH_FACTOR: f32 = 0.6;
 
 fn monospace_measure() -> MeasureTextFn {
-    Arc::new(|text: &str, config: &TextConfig| {
-        let line_height = config.effective_line_height();
-        let char_width = f32::from(config.font_size) * CHAR_WIDTH_FACTOR;
+    Arc::new(|text: &str, measure: &TextMeasure| {
+        let line_height = measure.effective_line_height();
+        let char_width = measure.size * CHAR_WIDTH_FACTOR;
         let mut max_line_width: f32 = 0.0;
         let mut line_count = 0_u32;
         for line in text.lines() {
@@ -273,7 +275,7 @@ fn build_clay_panel<'a>(
                 Declaration::new()
                     .layout()
                     .width(grow!())
-                    .height(grow!(f32::from(FONT_SIZE), 20.0))
+                    .height(grow!(FONT_SIZE, 20.0))
                     .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
                     .child_alignment(Alignment::new(
                         LayoutAlignmentX::Left,
@@ -300,7 +302,7 @@ fn build_clay_panel<'a>(
                                     clay.text(
                                         "STATUS",
                                         clay_layout::text::TextConfig::new()
-                                            .font_size(FONT_SIZE)
+                                            .font_size(CLAY_FONT_SIZE)
                                             .end(),
                                     );
                                 },
@@ -323,7 +325,7 @@ fn build_clay_panel<'a>(
                                     clay.text(
                                         "BENCH",
                                         clay_layout::text::TextConfig::new()
-                                            .font_size(FONT_SIZE)
+                                            .font_size(CLAY_FONT_SIZE)
                                             .end(),
                                     );
                                 },
@@ -372,7 +374,7 @@ fn build_clay_panel<'a>(
                                         clay.text(
                                             label,
                                             clay_layout::text::TextConfig::new()
-                                                .font_size(FONT_SIZE)
+                                                .font_size(CLAY_FONT_SIZE)
                                                 .end(),
                                         );
                                         clay.with(
@@ -382,7 +384,7 @@ fn build_clay_panel<'a>(
                                         clay.text(
                                             value,
                                             clay_layout::text::TextConfig::new()
-                                                .font_size(FONT_SIZE)
+                                                .font_size(CLAY_FONT_SIZE)
                                                 .end(),
                                         );
                                     },
@@ -409,7 +411,7 @@ fn build_diegetic_panel(rows: &[(&str, &str)], size: f32) -> LayoutTree {
     b.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::grow_range(f32::from(FONT_SIZE), 20.0))
+            .height(Sizing::grow_range(FONT_SIZE, 20.0))
             .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
             .child_align_y(AlignY::Center)
             .background(bevy::color::Color::srgb_u8(52, 98, 90)),

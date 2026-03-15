@@ -31,6 +31,7 @@ missing_docs = "deny"
 bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_gizmos",
 ] }
+parley = { version = "0.7.0", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 bevy                 = { version = "0.18.1", features = ["default_font"] }

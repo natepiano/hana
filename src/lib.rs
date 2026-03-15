@@ -29,6 +29,7 @@
 
 mod layout;
 mod plugin;
+mod text;
 
 // Layout types.
 pub use layout::AlignX;
@@ -43,6 +44,10 @@ pub use layout::Direction;
 pub use layout::El;
 pub use layout::Element;
 pub use layout::ElementContent;
+pub use layout::FontSlant;
+pub use layout::FontWeight;
+pub use layout::ForLayout;
+pub use layout::ForStandalone;
 pub use layout::LayoutBuilder;
 pub use layout::LayoutEngine;
 pub use layout::LayoutResult;
@@ -53,8 +58,13 @@ pub use layout::Padding;
 pub use layout::RenderCommand;
 pub use layout::RenderCommandKind;
 pub use layout::Sizing;
+pub use layout::TextAlign;
+pub use layout::TextAnchor;
 pub use layout::TextConfig;
 pub use layout::TextDimensions;
+pub use layout::TextMeasure;
+pub use layout::TextProps;
+pub use layout::TextStyle;
 pub use layout::TextWrap;
 // Bevy plugin.
 pub use plugin::ComputedDiegeticPanel;
@@ -62,3 +72,6 @@ pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelGizmoGroup;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
+// Text.
+pub use text::FontId;
+pub use text::FontRegistry;

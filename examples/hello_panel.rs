@@ -81,7 +81,7 @@ fn setup(mut commands: Commands) {
                             .color(Color::srgb_u8(40, 100, 160)),
                     ),
                 |b| {
-                    b.text("STATUS", TextConfig::new(12));
+                    b.text("STATUS", TextConfig::new(12.0));
                 },
             );
 
@@ -106,7 +106,7 @@ fn setup(mut commands: Commands) {
                     .height(Sizing::fixed(16.0))
                     .background(Color::srgb_u8(80, 80, 90)),
                 |b| {
-                    b.text("v0.1.0", TextConfig::new(8));
+                    b.text("v0.1.0", TextConfig::new(8.0));
                 },
             );
         },
@@ -135,12 +135,12 @@ fn key_value_row(b: &mut LayoutBuilder, label: &str, value: &str) {
             .height(Sizing::fixed(14.0))
             .direction(Direction::LeftToRight),
         |b| {
-            b.text(label, TextConfig::new(9));
+            b.text(label, TextConfig::new(9.0));
             b.with(
                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                 |_| {},
             );
-            b.text(value, TextConfig::new(9));
+            b.text(value, TextConfig::new(9.0));
         },
     );
 }

@@ -23,17 +23,21 @@ use super::types::Direction;
 use super::types::Sizing;
 use super::types::TextConfig;
 use super::types::TextDimensions;
+use super::types::TextMeasure;
 use super::types::TextWrap;
 
 /// Callback type for measuring text dimensions.
 ///
-/// Given a text string and its configuration, returns the measured dimensions
-/// in layout units. The layout engine calls this during sizing to determine
-/// how much space text elements need.
+/// Given a text string and its measurement properties, returns the measured
+/// dimensions in layout units. The layout engine calls this during sizing to
+/// determine how much space text elements need.
+///
+/// Takes [`TextMeasure`] (a generic-free extraction from [`TextConfig`]) to
+/// avoid leaking the typestate generic into the measurement function.
 ///
 /// Uses `Arc` so the function can be shared across threads and cloned cheaply
 /// (e.g. stored in a Bevy `Resource` and cloned to create `LayoutEngine` instances).
-pub type MeasureTextFn = Arc<dyn Fn(&str, &TextConfig) -> TextDimensions + Send + Sync>;
+pub type MeasureTextFn = Arc<dyn Fn(&str, &TextMeasure) -> TextDimensions + Send + Sync>;
 
 /// Computed layout data for a single element.
 #[derive(Clone, Copy, Debug, Default)]
@@ -165,7 +169,7 @@ impl LayoutEngine {
                 ref config,
             } = element.content
             {
-                let dims = (self.measure_text)(text, config);
+                let dims = (self.measure_text)(text, &config.as_measure());
                 computed[index].natural_text_width = dims.width;
                 if element.width.is_fit() {
                     computed[index].width = dims
@@ -217,7 +221,8 @@ fn wrap_text_words(
     measure: &MeasureTextFn,
 ) -> WrappedText {
     let line_height = config.effective_line_height();
-    let space_width = measure(" ", config).width;
+    let text_measure = config.as_measure();
+    let space_width = measure(" ", &text_measure).width;
     let mut all_lines = Vec::new();
 
     for paragraph in text.split('\n') {
@@ -235,7 +240,7 @@ fn wrap_text_words(
         let mut current_width: f32 = 0.0;
 
         for word in words {
-            let word_width = measure(word, config).width;
+            let word_width = measure(word, &text_measure).width;
 
             if current_text.is_empty() {
                 // First word on this line — always take it, even if it overflows.
@@ -247,7 +252,7 @@ fn wrap_text_words(
                     // Break: emit current line, start new line with this word.
                     // Re-measure the complete line text so the width accounts for
                     // kerning and glyph bearings that word-level accumulation misses.
-                    let line_width = measure(&current_text, config).width;
+                    let line_width = measure(&current_text, &text_measure).width;
                     all_lines.push(WrappedLine {
                         text:  current_text,
                         width: line_width,
@@ -266,7 +271,7 @@ fn wrap_text_words(
         let line_width = if current_text.is_empty() {
             0.0
         } else {
-            measure(&current_text, config).width
+            measure(&current_text, &text_measure).width
         };
         all_lines.push(WrappedLine {
             text:  current_text,
@@ -290,10 +295,11 @@ fn wrap_text_words(
 /// Splits text at explicit `\n` characters and measures each line as a single run.
 fn wrap_text_newlines(text: &str, config: &TextConfig, measure: &MeasureTextFn) -> WrappedText {
     let line_height = config.effective_line_height();
+    let text_measure = config.as_measure();
     let mut lines = Vec::new();
 
     for line in text.split('\n') {
-        let width = measure(line, config).width;
+        let width = measure(line, &text_measure).width;
         lines.push(WrappedLine {
             text: line.to_string(),
             width,
@@ -345,7 +351,7 @@ fn rewrap_text_elements(
             ref config,
         } = element.content
         {
-            let result = match config.wrap {
+            let result = match config.wrap_mode() {
                 TextWrap::Words => {
                     let max_width = parent_content_width(tree, computed, &parent_of, index);
                     // Fast path: compare the cached natural text width (measured

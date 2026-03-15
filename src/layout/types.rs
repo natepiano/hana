@@ -2,9 +2,17 @@
 //!
 //! This module defines the fundamental building blocks for layout configuration:
 //! [`Sizing`], [`Direction`], [`AlignX`]/[`AlignY`], [`Padding`], [`Border`],
-//! [`TextConfig`], and [`Culling`].
+//! [`TextProps`], and [`Culling`].
+//!
+//! [`TextProps`] uses a typestate pattern parameterized by context markers
+//! ([`ForLayout`] / [`ForStandalone`]) to enforce compile-time validity.
+//! Type aliases [`TextConfig`] and [`TextStyle`] provide ergonomic names.
+
+use std::marker::PhantomData;
 
 use bevy::color::Color;
+use bevy::prelude::Component;
+use bevy::prelude::Reflect;
 
 /// Controls whether the layout engine culls off-screen render commands.
 ///
@@ -291,7 +299,7 @@ impl BoundingBox {
 /// The engine splits text according to this mode and measures individual
 /// runs via the [`MeasureTextFn`](super::engine::MeasureTextFn) callback
 /// to determine break points.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum TextWrap {
     /// Break at word boundaries when text exceeds the element's width.
     ///
@@ -310,94 +318,419 @@ pub enum TextWrap {
     None,
 }
 
-/// Configuration for how text is measured and rendered.
+// ── Font property types ──────────────────────────────────────────────────────
+
+/// Font weight (boldness) as a numeric value on the 1–1000 scale.
 ///
-/// Text color is not configured here — it is handled by the rendering layer.
-///
-/// Per-element text alignment (left/center/right) is not currently supported.
-#[must_use]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TextConfig {
-    /// Font identifier (application-defined).
-    ///
-    /// The layout engine does not manage fonts. The application must assign a
-    /// unique ID to each font and provide matching measurements via the
-    /// [`MeasureTextFn`](super::engine::MeasureTextFn) callback.
-    pub font_id:        u16,
-    /// Font size in layout units.
-    pub font_size:      u16,
-    /// Line height in layout units (0 = use `font_size`).
-    pub line_height:    u16,
-    /// Letter spacing in layout units.
-    pub letter_spacing: u16,
-    /// Text wrapping mode.
-    ///
-    /// Controls whether and how the layout engine breaks text across
-    /// multiple lines. Defaults to [`TextWrap::Words`].
-    pub wrap:           TextWrap,
+/// Standard weights: 100 (Thin) through 900 (Black). `400` is normal, `700` is bold.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct FontWeight(pub f32);
+
+impl FontWeight {
+    /// Normal weight (400).
+    pub const NORMAL: Self = Self(400.0);
+    /// Bold weight (700).
+    pub const BOLD: Self = Self(700.0);
+    /// Light weight (300).
+    pub const LIGHT: Self = Self(300.0);
 }
 
-impl Default for TextConfig {
-    fn default() -> Self {
-        Self {
-            font_id:        0,
-            font_size:      16,
-            line_height:    0,
-            letter_spacing: 0,
-            wrap:           TextWrap::Words,
-        }
+impl Default for FontWeight {
+    fn default() -> Self { Self::NORMAL }
+}
+
+/// Font slant (posture).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum FontSlant {
+    /// Upright (roman) style.
+    #[default]
+    Normal,
+    /// Italic style (true italic glyphs).
+    Italic,
+    /// Oblique style (slanted roman glyphs).
+    Oblique,
+}
+
+/// Horizontal text alignment within bounds.
+///
+/// Used by [`TextProps<ForStandalone>`] for standalone text rendering.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum TextAlign {
+    /// Align to the left edge.
+    #[default]
+    Left,
+    /// Center horizontally.
+    Center,
+    /// Align to the right edge.
+    Right,
+}
+
+/// Anchor point for standalone text positioning.
+///
+/// Determines which point of the text block's bounding box is placed
+/// at the entity's [`Transform`] position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum TextAnchor {
+    /// Top-left corner at the transform position.
+    TopLeft,
+    /// Top-center at the transform position.
+    TopCenter,
+    /// Top-right corner at the transform position.
+    TopRight,
+    /// Center-left at the transform position.
+    CenterLeft,
+    /// Center of the text block at the transform position.
+    #[default]
+    Center,
+    /// Center-right at the transform position.
+    CenterRight,
+    /// Bottom-left corner at the transform position.
+    BottomLeft,
+    /// Bottom-center at the transform position.
+    BottomCenter,
+    /// Bottom-right corner at the transform position.
+    BottomRight,
+}
+
+// ── Typestate markers ────────────────────────────────────────────────────────
+
+/// Context marker: text properties for the layout engine.
+///
+/// [`TextProps<ForLayout>`] (aliased as [`TextConfig`]) exposes wrapping
+/// controls but not color, alignment, or anchor.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Reflect)]
+pub struct ForLayout;
+
+/// Context marker: text properties for standalone 3D text rendering.
+///
+/// [`TextProps<ForStandalone>`] (aliased as [`TextStyle`]) exposes color,
+/// alignment, and anchor but not wrapping.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Reflect)]
+pub struct ForStandalone;
+
+// ── TextProps<C> ─────────────────────────────────────────────────────────────
+
+/// Type alias for layout engine text configuration.
+pub type TextConfig = TextProps<ForLayout>;
+
+/// Type alias for standalone text styling (Bevy `Component`).
+pub type TextStyle = TextProps<ForStandalone>;
+
+/// Default font size in layout units.
+const DEFAULT_FONT_SIZE: f32 = 16.0;
+
+/// Unified text properties parameterized by usage context.
+///
+/// `TextProps<ForLayout>` is used by the layout engine for measurement
+/// and wrapping. `TextProps<ForStandalone>` is used as a Bevy `Component`
+/// for standalone `Text3d` entities.
+///
+/// All fields are private. Context-appropriate builder methods expose
+/// only the fields that make sense for each context. Shared measurement
+/// fields are accessible on both via the `impl<C>` block.
+///
+/// ```ignore
+/// // Layout (aliased as TextConfig):
+/// TextConfig::new(14.0).with_font(FontId::MONOSPACE.0).bold().no_wrap()
+///
+/// // Standalone (aliased as TextStyle):
+/// TextStyle::new().with_font(FontId::MONOSPACE.0).with_size(24.0).bold().with_color(Color::RED)
+/// ```
+#[derive(Component, Clone, Debug, Reflect)]
+pub struct TextProps<C: Send + Sync + 'static> {
+    font_id:        u16,
+    size:           f32,
+    weight:         FontWeight,
+    slant:          FontSlant,
+    line_height:    f32,
+    letter_spacing: f32,
+    word_spacing:   f32,
+    wrap:           TextWrap,
+    color:          Color,
+    align:          TextAlign,
+    anchor:         TextAnchor,
+    #[reflect(ignore)]
+    _context:       PhantomData<C>,
+}
+
+impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
+    fn eq(&self, other: &Self) -> bool {
+        self.font_id == other.font_id
+            && self.size == other.size
+            && self.weight == other.weight
+            && self.slant == other.slant
+            && self.line_height == other.line_height
+            && self.letter_spacing == other.letter_spacing
+            && self.word_spacing == other.word_spacing
+            && self.wrap == other.wrap
+            && self.color == other.color
+            && self.align == other.align
+            && self.anchor == other.anchor
     }
 }
 
-impl TextConfig {
-    /// Creates a new text config with the given font size.
-    pub const fn new(font_size: u16) -> Self {
-        Self {
-            font_id: 0,
-            font_size,
-            line_height: 0,
-            letter_spacing: 0,
-            wrap: TextWrap::Words,
+// ── Shared methods (both contexts) ───────────────────────────────────────────
+
+impl<C: Send + Sync + 'static> TextProps<C> {
+    /// Returns the font identifier.
+    #[must_use]
+    pub const fn font_id(&self) -> u16 { self.font_id }
+
+    /// Returns the font size in layout units.
+    #[must_use]
+    pub const fn size(&self) -> f32 { self.size }
+
+    /// Returns the font weight.
+    #[must_use]
+    pub const fn weight(&self) -> FontWeight { self.weight }
+
+    /// Returns the font slant.
+    #[must_use]
+    pub const fn slant(&self) -> FontSlant { self.slant }
+
+    /// Returns the line height in layout units (0.0 = use `size`).
+    #[must_use]
+    pub const fn line_height_raw(&self) -> f32 { self.line_height }
+
+    /// Returns the letter spacing in layout units.
+    #[must_use]
+    pub const fn letter_spacing(&self) -> f32 { self.letter_spacing }
+
+    /// Returns the word spacing in layout units.
+    #[must_use]
+    pub const fn word_spacing(&self) -> f32 { self.word_spacing }
+
+    /// Returns the effective line height (falls back to `size` if 0.0).
+    #[must_use]
+    pub const fn effective_line_height(&self) -> f32 {
+        if self.line_height == 0.0 {
+            self.size
+        } else {
+            self.line_height
         }
     }
 
     /// Sets the font identifier.
-    pub const fn with_font_id(mut self, font_id: u16) -> Self {
+    #[must_use]
+    pub const fn with_font(mut self, font_id: u16) -> Self {
         self.font_id = font_id;
         self
     }
 
-    /// Sets the line height in layout units.
-    pub const fn with_line_height(mut self, line_height: u16) -> Self {
+    /// Sets the font size in layout units.
+    #[must_use]
+    pub const fn with_size(mut self, size: f32) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Sets the font weight.
+    #[must_use]
+    pub const fn with_weight(mut self, weight: FontWeight) -> Self {
+        self.weight = weight;
+        self
+    }
+
+    /// Shorthand for `with_weight(FontWeight::BOLD)`.
+    #[must_use]
+    pub const fn bold(mut self) -> Self {
+        self.weight = FontWeight::BOLD;
+        self
+    }
+
+    /// Sets the font slant.
+    #[must_use]
+    pub const fn with_slant(mut self, slant: FontSlant) -> Self {
+        self.slant = slant;
+        self
+    }
+
+    /// Shorthand for `with_slant(FontSlant::Italic)`.
+    #[must_use]
+    pub const fn italic(mut self) -> Self {
+        self.slant = FontSlant::Italic;
+        self
+    }
+
+    /// Sets the line height in layout units. `0.0` = use `size`.
+    #[must_use]
+    pub const fn with_line_height(mut self, line_height: f32) -> Self {
         self.line_height = line_height;
         self
     }
 
-    /// Sets the letter spacing in layout units.
-    pub const fn with_letter_spacing(mut self, letter_spacing: u16) -> Self {
-        self.letter_spacing = letter_spacing;
+    /// Sets extra spacing between characters in layout units.
+    #[must_use]
+    pub const fn with_letter_spacing(mut self, spacing: f32) -> Self {
+        self.letter_spacing = spacing;
         self
     }
 
-    /// Disables text wrapping (text may overflow the element).
-    pub const fn no_wrap(mut self) -> Self {
-        self.wrap = TextWrap::None;
+    /// Sets extra spacing between words in layout units.
+    #[must_use]
+    pub const fn with_word_spacing(mut self, spacing: f32) -> Self {
+        self.word_spacing = spacing;
         self
     }
+
+    /// Extracts measurement-relevant fields as a [`TextMeasure`].
+    ///
+    /// Used by [`MeasureTextFn`](super::engine::MeasureTextFn) — no generic
+    /// parameter, no infection into the layout engine.
+    #[must_use]
+    pub const fn as_measure(&self) -> TextMeasure {
+        TextMeasure {
+            font_id:        self.font_id,
+            size:           self.size,
+            weight:         self.weight,
+            slant:          self.slant,
+            line_height:    self.line_height,
+            letter_spacing: self.letter_spacing,
+            word_spacing:   self.word_spacing,
+        }
+    }
+}
+
+// ── Layout-only methods ──────────────────────────────────────────────────────
+
+impl TextProps<ForLayout> {
+    /// Creates a new layout config with the given font size.
+    ///
+    /// Defaults to word wrapping, normal weight, normal slant.
+    #[must_use]
+    pub const fn new(size: f32) -> Self {
+        Self {
+            font_id: 0,
+            size,
+            weight: FontWeight::NORMAL,
+            slant: FontSlant::Normal,
+            line_height: 0.0,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            wrap: TextWrap::Words,
+            color: Color::WHITE,
+            align: TextAlign::Left,
+            anchor: TextAnchor::Center,
+            _context: PhantomData,
+        }
+    }
+
+    /// Returns the text wrapping mode.
+    #[must_use]
+    pub const fn wrap_mode(&self) -> TextWrap { self.wrap }
 
     /// Sets the text wrapping mode.
-    pub const fn wrap_mode(mut self, mode: TextWrap) -> Self {
+    #[must_use]
+    pub const fn wrap(mut self, mode: TextWrap) -> Self {
         self.wrap = mode;
         self
     }
 
-    /// Returns the effective line height (falls back to `font_size` if 0).
+    /// Disables text wrapping (text may overflow the element).
+    #[must_use]
+    pub const fn no_wrap(mut self) -> Self {
+        self.wrap = TextWrap::None;
+        self
+    }
+}
+
+impl Default for TextProps<ForLayout> {
+    fn default() -> Self { Self::new(DEFAULT_FONT_SIZE) }
+}
+
+// ── Standalone-only methods ──────────────────────────────────────────────────
+
+impl TextProps<ForStandalone> {
+    /// Creates a new style with all defaults (16-unit white monospace, centered anchor).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            font_id:        0,
+            size:           DEFAULT_FONT_SIZE,
+            weight:         FontWeight::NORMAL,
+            slant:          FontSlant::Normal,
+            line_height:    0.0,
+            letter_spacing: 0.0,
+            word_spacing:   0.0,
+            wrap:           TextWrap::None,
+            color:          Color::WHITE,
+            align:          TextAlign::Left,
+            anchor:         TextAnchor::Center,
+            _context:       PhantomData,
+        }
+    }
+
+    /// Returns the fill color.
+    #[must_use]
+    pub const fn color(&self) -> Color { self.color }
+
+    /// Returns the text alignment.
+    #[must_use]
+    pub const fn text_align(&self) -> TextAlign { self.align }
+
+    /// Returns the anchor point.
+    #[must_use]
+    pub const fn anchor(&self) -> TextAnchor { self.anchor }
+
+    /// Sets the fill color.
+    #[must_use]
+    pub const fn with_color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Sets horizontal text alignment within bounds.
+    #[must_use]
+    pub const fn with_align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Sets the anchor point within the text block's bounding box.
+    #[must_use]
+    pub const fn with_anchor(mut self, anchor: TextAnchor) -> Self {
+        self.anchor = anchor;
+        self
+    }
+}
+
+impl Default for TextProps<ForStandalone> {
+    fn default() -> Self { Self::new() }
+}
+
+// ── TextMeasure ──────────────────────────────────────────────────────────────
+
+/// The subset of text properties needed for measurement.
+///
+/// Extracted from [`TextProps<C>`] via [`as_measure()`](TextProps::as_measure).
+/// This is what [`MeasureTextFn`](super::engine::MeasureTextFn) receives — no
+/// generic parameter, no infection into the layout engine.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextMeasure {
+    /// Font identifier.
+    pub font_id:        u16,
+    /// Font size in layout units.
+    pub size:           f32,
+    /// Font weight.
+    pub weight:         FontWeight,
+    /// Font slant.
+    pub slant:          FontSlant,
+    /// Line height (0.0 = use `size`).
+    pub line_height:    f32,
+    /// Letter spacing in layout units.
+    pub letter_spacing: f32,
+    /// Word spacing in layout units.
+    pub word_spacing:   f32,
+}
+
+impl TextMeasure {
+    /// Returns the effective line height (falls back to `size` if 0.0).
     #[must_use]
     pub const fn effective_line_height(&self) -> f32 {
-        if self.line_height == 0 {
-            self.font_size as f32
+        if self.line_height == 0.0 {
+            self.size
         } else {
-            self.line_height as f32
+            self.line_height
         }
     }
 }

@@ -7,8 +7,8 @@ use bevy::prelude::*;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
-use crate::layout::TextConfig;
 use crate::layout::TextDimensions;
+use crate::layout::TextMeasure;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///
@@ -52,11 +52,11 @@ pub struct DiegeticTextMeasurer(pub MeasureTextFn);
 
 impl Default for DiegeticTextMeasurer {
     fn default() -> Self {
-        Self(Arc::new(|text: &str, config: &TextConfig| {
-            let char_width = f32::from(config.font_size) * 0.6;
+        Self(Arc::new(|text: &str, measure: &TextMeasure| {
+            let char_width = measure.size * 0.6;
             #[allow(clippy::cast_precision_loss)]
             let width = char_width * text.len() as f32;
-            let height = config.effective_line_height();
+            let height = measure.effective_line_height();
             TextDimensions { width, height }
         }))
     }

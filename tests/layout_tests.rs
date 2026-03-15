@@ -25,14 +25,15 @@ use bevy_diegetic::RenderCommandKind;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
+use bevy_diegetic::TextMeasure;
 use bevy_diegetic::TextWrap;
 
 const VIEWPORT: f32 = 200.0;
 
 fn monospace_measure() -> MeasureTextFn {
-    Arc::new(|text: &str, config: &TextConfig| {
-        let line_height = config.effective_line_height();
-        let char_width = f32::from(config.font_size) * 0.6;
+    Arc::new(|text: &str, measure: &TextMeasure| {
+        let line_height = measure.effective_line_height();
+        let char_width = measure.size * 0.6;
         let mut max_line_width: f32 = 0.0;
         let mut line_count = 0_u32;
         for line in text.lines() {
@@ -178,7 +179,7 @@ fn grow_with_min_max() {
 fn fit_wraps_text_content() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
     // "Hello" = 5 chars * 16 * 0.6 = 48.0 wide, 16.0 tall.
-    b.text("Hello", TextConfig::new(16));
+    b.text("Hello", TextConfig::new(16.0));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -197,7 +198,7 @@ fn fit_with_min_respects_minimum() {
             .height(Sizing::fixed(20.0)),
         |b| {
             // Content is only 48px wide but min is 100.
-            b.text("Hello", TextConfig::new(16));
+            b.text("Hello", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -607,7 +608,7 @@ fn render_commands_include_rectangles() {
 #[test]
 fn render_commands_include_text() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    b.text("Hello", TextConfig::new(16));
+    b.text("Hello", TextConfig::new(16.0));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -673,7 +674,7 @@ fn nested_layout_header_body() {
                     .height(Sizing::fixed(20.0))
                     .background(Color::srgb_u8(52, 98, 90)),
                 |b| {
-                    b.text("STATUS", TextConfig::new(7));
+                    b.text("STATUS", TextConfig::new(7.0));
                 },
             );
             // Divider.
@@ -792,8 +793,8 @@ fn text_positioned_correctly() {
             .padding(Padding::all(10.0))
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello", TextConfig::new(16));
-            b.text("World", TextConfig::new(16));
+            b.text("Hello", TextConfig::new(16.0));
+            b.text("World", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -822,12 +823,12 @@ fn key_value_row_layout() {
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight),
         |b| {
-            b.text("fps:", TextConfig::new(7));
+            b.text("fps:", TextConfig::new(7.0));
             b.with(
                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                 |_| {},
             );
-            b.text("60", TextConfig::new(7));
+            b.text("60", TextConfig::new(7.0));
         },
     );
     let tree = b.build();
@@ -953,7 +954,7 @@ fn text_wraps_at_word_boundaries() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World Test", TextConfig::new(16));
+            b.text("Hello World Test", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -983,7 +984,7 @@ fn text_no_wrap_overflows() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World", TextConfig::new(16).no_wrap());
+            b.text("Hello World", TextConfig::new(16.0).no_wrap());
         },
     );
     let tree = b.build();
@@ -1015,7 +1016,7 @@ fn text_wraps_at_newlines_only() {
         |b| {
             b.text(
                 "Line1\nLine2\nLine3",
-                TextConfig::new(16).wrap_mode(TextWrap::Newlines),
+                TextConfig::new(16.0).wrap(TextWrap::Newlines),
             );
         },
     );
@@ -1046,7 +1047,7 @@ fn word_wrap_long_word_does_not_break() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Supercalifragilistic", TextConfig::new(16));
+            b.text("Supercalifragilistic", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -1077,7 +1078,7 @@ fn word_wrap_preserves_explicit_newlines() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("AA BB\nCC DD", TextConfig::new(16));
+            b.text("AA BB\nCC DD", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -1105,7 +1106,7 @@ fn word_wrap_empty_string() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("", TextConfig::new(16));
+            b.text("", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -1128,7 +1129,7 @@ fn word_wrap_updates_parent_fit_height() {
             .height(Sizing::FIT)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World Test", TextConfig::new(16));
+            b.text("Hello World Test", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -1154,7 +1155,7 @@ fn word_wrap_render_commands_per_line() {
             // "AA BB CC" — each word ~19.2 wide, space ~9.6.
             // "AA BB" = 48.0 < 50, "CC" = 19.2 < 50.
             // Line 1: "AA BB" at y=0, Line 2: "CC" at y=16.
-            b.text("AA BB CC", TextConfig::new(16));
+            b.text("AA BB CC", TextConfig::new(16.0));
         },
     );
     let tree = b.build();
@@ -1211,14 +1212,14 @@ fn fit_parent_sees_grow_children_content_height() {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextConfig::new(7));
+                        b.text("STATUS", TextConfig::new(7.0));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                         |_| {},
                     );
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("SUB", TextConfig::new(4));
+                        b.text("SUB", TextConfig::new(4.0));
                     });
                 },
             );
@@ -1436,7 +1437,7 @@ fn grow_body_compression_20_rows() {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextConfig::new(10));
+                        b.text("STATUS", TextConfig::new(10.0));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -1448,7 +1449,7 @@ fn grow_body_compression_20_rows() {
                             .height(Sizing::GROW)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            b.text("BENCH", TextConfig::new(10));
+                            b.text("BENCH", TextConfig::new(10.0));
                         },
                     );
                 },
@@ -1476,12 +1477,12 @@ fn grow_body_compression_20_rows() {
                             .height(Sizing::FIT)
                             .direction(Direction::LeftToRight),
                         |b| {
-                            b.text(*label, TextConfig::new(10));
+                            b.text(*label, TextConfig::new(10.0));
                             b.with(
                                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                 |_| {},
                             );
-                            b.text(*value, TextConfig::new(10));
+                            b.text(*value, TextConfig::new(10.0));
                         },
                     );
                 }
