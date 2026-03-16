@@ -43,6 +43,7 @@ use bevy_diegetic::RenderCommandKind;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
+use bevy_diegetic::TextMeasure;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -78,8 +79,10 @@ const PANEL_SCALE: f32 = PANEL_WORLD_SIZE / LAYOUT_SIZE;
 const PANEL_FACE_OFFSET: f32 = 0.001;
 const HEADER_HEIGHT: f32 = 20.0;
 const DIVIDER_HEIGHT: f32 = 4.0;
-const FONT_SIZE: u16 = 7;
-const SUBTITLE_FONT_SIZE: u16 = 4;
+const FONT_SIZE: f32 = 7.0;
+const SUBTITLE_FONT_SIZE: f32 = 4.0;
+const CLAY_FONT_SIZE: u16 = 7;
+const CLAY_SUBTITLE_FONT_SIZE: u16 = 4;
 const CHAR_WIDTH_FACTOR: f32 = 0.6;
 const RASTER_SIZE: f32 = 64.0;
 const MIN_MEASUREMENT_THRESHOLD: f32 = 0.1;
@@ -112,7 +115,7 @@ struct LayoutTextEntity;
 #[derive(Component)]
 struct RenderedTextMeta {
     text:        String,
-    font_size:   u16,
+    font_size:   f32,
     world_scale: f32,
 }
 
@@ -234,9 +237,9 @@ fn main() {
 
 // ── Text measurement ─────────────────────────────────────────────────────────
 
-fn fallback_measure(text: &str, config: &TextConfig) -> TextDimensions {
-    let line_height = config.effective_line_height();
-    let char_width = f32::from(config.font_size) * CHAR_WIDTH_FACTOR;
+fn fallback_measure(text: &str, measure: &TextMeasure) -> TextDimensions {
+    let line_height = measure.effective_line_height();
+    let char_width = measure.size * CHAR_WIDTH_FACTOR;
     let mut max_line_width: f32 = 0.0;
     let mut line_count = 0_u32;
     for line in text.lines() {
@@ -255,12 +258,13 @@ fn fallback_measure(text: &str, config: &TextConfig) -> TextDimensions {
 
 fn create_measure_fn(cache: &TextMeasurementCache) -> MeasureTextFn {
     let lookup = cache.measurements.clone();
-    Arc::new(move |text: &str, config: &TextConfig| {
-        let key = MeasurementKey::new(text, config.font_size);
+    Arc::new(move |text: &str, measure: &TextMeasure| {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let key = MeasurementKey::new(text, measure.size as u16);
         lookup
             .get(&key)
             .copied()
-            .unwrap_or_else(|| fallback_measure(text, config))
+            .unwrap_or_else(|| fallback_measure(text, measure))
     })
 }
 
@@ -324,7 +328,8 @@ fn update_measurement_cache(
             continue;
         }
 
-        let key = MeasurementKey::new(&meta.text, meta.font_size);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let key = MeasurementKey::new(&meta.text, meta.font_size as u16);
         cache.measurements.insert(
             key,
             TextDimensions {
@@ -489,11 +494,11 @@ fn spawn_text_entities(
         for (panel_gt, _) in &diegetic_panels {
             for cmd in &result.commands {
                 let (text, font_size) = match &cmd.kind {
-                    RenderCommandKind::Text { text, config } => (text.clone(), config.font_size),
+                    RenderCommandKind::Text { text, config } => (text.clone(), config.size()),
                     _ => continue,
                 };
 
-                let world_scale = f32::from(font_size) * PANEL_SCALE;
+                let world_scale = font_size * PANEL_SCALE;
                 let local_pos = layout_to_face_position(&cmd.bounds);
                 let world_pos = panel_gt.transform_point(local_pos);
 
@@ -527,11 +532,11 @@ fn spawn_text_entities(
     for (panel_gt, _) in &clay_panels {
         for rect in &clay_result.0 {
             let (text, font_size) = match &rect.kind {
-                ClayRectKind::Text(text, font_size) => (text.clone(), *font_size),
+                ClayRectKind::Text(text, font_size) => (text.clone(), f32::from(*font_size)),
                 _ => continue,
             };
 
-            let world_scale = f32::from(font_size) * PANEL_SCALE;
+            let world_scale = font_size * PANEL_SCALE;
             let bounds = BoundingBox {
                 x:      rect.x,
                 y:      rect.y,
@@ -597,7 +602,7 @@ fn compute_diegetic_layout(
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::grow_range(f32::from(FONT_SIZE), HEADER_HEIGHT))
+                    .height(Sizing::grow_range(FONT_SIZE, HEADER_HEIGHT))
                     .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
                     .child_align_y(AlignY::Center)
                     .background(Color::srgb_u8(52, 98, 90)),
@@ -728,7 +733,7 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
                         &Declaration::new()
                             .layout()
                             .width(grow!())
-                            .height(grow!(f32::from(FONT_SIZE), HEADER_HEIGHT))
+                            .height(grow!(FONT_SIZE, HEADER_HEIGHT))
                             .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
                             .child_alignment(Alignment::new(
                                 LayoutAlignmentX::Left,
@@ -757,7 +762,7 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
                                             clay.text(
                                                 "STATUS",
                                                 clay_layout::text::TextConfig::new()
-                                                    .font_size(FONT_SIZE)
+                                                    .font_size(CLAY_FONT_SIZE)
                                                     .wrap_mode(TextElementConfigWrapMode::None)
                                                     .end(),
                                             );
@@ -787,7 +792,7 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
                                             clay.text(
                                                 "CLAY",
                                                 clay_layout::text::TextConfig::new()
-                                                    .font_size(SUBTITLE_FONT_SIZE)
+                                                    .font_size(CLAY_SUBTITLE_FONT_SIZE)
                                                     .wrap_mode(TextElementConfigWrapMode::None)
                                                     .end(),
                                             );
@@ -840,7 +845,7 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
                                                 clay.text(
                                                     label,
                                                     clay_layout::text::TextConfig::new()
-                                                        .font_size(FONT_SIZE)
+                                                        .font_size(CLAY_FONT_SIZE)
                                                         .wrap_mode(TextElementConfigWrapMode::None)
                                                         .end(),
                                                 );
@@ -855,7 +860,7 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
                                                 clay.text(
                                                     value,
                                                     clay_layout::text::TextConfig::new()
-                                                        .font_size(FONT_SIZE)
+                                                        .font_size(CLAY_FONT_SIZE)
                                                         .wrap_mode(TextElementConfigWrapMode::None)
                                                         .end(),
                                                 );
