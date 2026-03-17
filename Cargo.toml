@@ -31,7 +31,13 @@ missing_docs = "deny"
 bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_gizmos",
 ] }
+etagere = "0.2"
+fdsm = "0.8"
+fdsm-ttf-parser = "0.2"
+image = { version = "0.25", default-features = false }
+nalgebra = "0.34"
 parley = { version = "0.7.0", default-features = false, features = ["std"] }
+ttf-parser = "0.25"
 
 [dev-dependencies]
 bevy                 = { version = "0.18.1", features = ["default_font"] }
@@ -41,6 +47,7 @@ bevy_rich_text3d     = "0.6"
 bevy_window_manager  = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }
 clay-layout          = { path = "./clay-layout" }
 criterion            = { version = "0.8.2", features = ["html_reports"] }
+image                = { version = "0.25", features = ["png"] }
 
 [[example]]
 name = "hello_panel"

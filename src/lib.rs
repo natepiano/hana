@@ -75,4 +75,9 @@ pub use plugin::DiegeticUiPlugin;
 // Text.
 pub use text::FontId;
 pub use text::FontRegistry;
+pub use text::GlyphKey;
+pub use text::GlyphMetrics;
+pub use text::MsdfAtlas;
+pub use text::MsdfBitmap;
 pub use text::create_parley_measurer;
+pub use text::rasterize_glyph;
