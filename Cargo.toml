@@ -48,6 +48,8 @@ bevy_window_manager  = { git = "https://github.com/natepiano/bevy_window_manager
 clay-layout          = { path = "./clay-layout" }
 criterion            = { version = "0.8.2", features = ["html_reports"] }
 image                = { version = "0.25", features = ["png"] }
+msdfgen              = "0.2"
+ttf-parser_018       = { package = "ttf-parser", version = "0.18" }
 
 [[example]]
 name = "hello_panel"
@@ -58,3 +60,7 @@ name = "side_by_side"
 [[bench]]
 harness = false
 name    = "layout_perf"
+
+[[bench]]
+harness = false
+name    = "msdf_perf"
