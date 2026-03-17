@@ -75,3 +75,4 @@ pub use plugin::DiegeticUiPlugin;
 // Text.
 pub use text::FontId;
 pub use text::FontRegistry;
+pub use text::create_parley_measurer;

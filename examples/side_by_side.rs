@@ -72,11 +72,19 @@ use clay_layout::text::TextElementConfigWrapMode;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const LAYOUT_SIZE: f32 = 160.0;
-const PANEL_WORLD_SIZE: f32 = 1.5;
-const PANEL_SPACING: f32 = 0.3;
-const PANEL_SCALE: f32 = PANEL_WORLD_SIZE / LAYOUT_SIZE;
 const PANEL_FACE_OFFSET: f32 = 0.001;
+
+/// Layout-unit presets cycled with 'S'. World size is computed from the camera.
+const LAYOUT_PRESETS: &[(f32, &str)] = &[(100.0, "small"), (160.0, "medium"), (240.0, "large")];
+
+/// Number of gutter-width gaps: left margin + center gutter + right margin.
+const GUTTER_COUNT: f32 = 3.0;
+
+/// Fraction of visible width used as each gutter/margin.
+const GUTTER_FRACTION: f32 = 0.06;
+
+/// Panel height-to-width ratio (taller than wide to fit wrapped text).
+const PANEL_ASPECT: f32 = 1.4;
 const HEADER_HEIGHT: f32 = 20.0;
 const DIVIDER_HEIGHT: f32 = 4.0;
 const FONT_SIZE: f32 = 7.0;
@@ -88,8 +96,9 @@ const RASTER_SIZE: f32 = 64.0;
 const MIN_MEASUREMENT_THRESHOLD: f32 = 0.1;
 const FONT_FAMILY: &str = "JetBrains Mono";
 
-const STATIC_ROWS: &[(&str, &str)] = &[("movables:", "128"), ("selection:", "3"), ("ux:", "12")];
+const STATIC_ROWS: &[(&str, &str)] = &[("ux:", "12")];
 const DYNAMIC_UPDATE_INTERVAL: f32 = 1.0;
+const WRAP_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit";
 
 // ── Gizmo groups ─────────────────────────────────────────────────────────────
 
@@ -169,6 +178,59 @@ enum ClayRectKind {
 #[derive(Resource)]
 struct TextMaterialHandle(Handle<StandardMaterial>);
 
+/// Current panel sizing. Cycled with 'S'.
+///
+/// `world_size` is computed from the camera's visible width so panels
+/// always fit on screen with equal gutters.
+#[derive(Resource)]
+struct PanelSizing {
+    index:       usize,
+    layout_size: f32,
+    world_size:  f32,
+    gutter:      f32,
+}
+
+impl PanelSizing {
+    fn scale(&self) -> f32 { self.world_size / self.layout_size }
+
+    fn cycle(&mut self) {
+        self.index = (self.index + 1) % LAYOUT_PRESETS.len();
+        self.layout_size = LAYOUT_PRESETS[self.index].0;
+    }
+
+    fn label(&self) -> &'static str { LAYOUT_PRESETS[self.index].1 }
+
+    fn layout_units_label(&self) -> String { format!("{:.0}", self.layout_size) }
+
+    /// Recompute `world_size` and `gutter` from the visible area at z=0.
+    fn fit_to_view(&mut self, visible_width: f32, visible_height: f32) {
+        // Compute the world size that makes the *largest* preset fill the view.
+        // Smaller presets then get proportionally smaller panels at the same
+        // world-units-per-layout-unit scale, so content stays the same physical
+        // size and only the panel boundary shrinks.
+        self.gutter = visible_width * GUTTER_FRACTION;
+        let from_width = GUTTER_COUNT.mul_add(-self.gutter, visible_width) / 2.0;
+        let from_height = self.gutter.mul_add(-2.0, visible_height) / PANEL_ASPECT;
+        let max_world_size = from_width.min(from_height);
+        let max_layout_size = LAYOUT_PRESETS
+            .iter()
+            .map(|(s, _)| *s)
+            .fold(0.0_f32, f32::max);
+        self.world_size = max_world_size * (self.layout_size / max_layout_size);
+    }
+}
+
+impl Default for PanelSizing {
+    fn default() -> Self {
+        Self {
+            index:       1,
+            layout_size: LAYOUT_PRESETS[1].0,
+            world_size:  1.5,
+            gutter:      0.3,
+        }
+    }
+}
+
 /// Whether text bounding-box debug gizmos are visible. Toggled with 'D'.
 #[derive(Resource)]
 struct ShowTextDebug(bool);
@@ -218,13 +280,17 @@ fn main() {
         .init_resource::<ClayLayoutResult>()
         .init_resource::<TextMeasurementCache>()
         .init_resource::<DynamicRows>()
+        .init_resource::<PanelSizing>()
         .init_resource::<ShowTextDebug>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
+                cycle_panel_size,
                 update_dynamic_rows,
-                rebuild_layouts.after(update_dynamic_rows),
+                rebuild_layouts
+                    .after(update_dynamic_rows)
+                    .after(cycle_panel_size),
                 spawn_text_entities.after(rebuild_layouts),
                 toggle_text_debug,
                 draw_clay_gizmos,
@@ -316,13 +382,15 @@ fn update_measurement_cache(
         Changed<Text3dDimensionOut>,
     >,
     mut cache: ResMut<TextMeasurementCache>,
+    sizing: Res<PanelSizing>,
 ) {
+    let panel_scale = sizing.scale();
     for (meta, dim_out, styling) in &query {
         let raster_size = styling.size;
 
         // Convert: raster pixels → world units → layout units.
-        let layout_width = (dim_out.dimension.x * meta.world_scale / raster_size) / PANEL_SCALE;
-        let layout_height = (dim_out.dimension.y * meta.world_scale / raster_size) / PANEL_SCALE;
+        let layout_width = (dim_out.dimension.x * meta.world_scale / raster_size) / panel_scale;
+        let layout_height = (dim_out.dimension.y * meta.world_scale / raster_size) / panel_scale;
 
         if layout_width < MIN_MEASUREMENT_THRESHOLD || layout_height < MIN_MEASUREMENT_THRESHOLD {
             continue;
@@ -342,7 +410,11 @@ fn update_measurement_cache(
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 
-fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn setup(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    sizing: Res<PanelSizing>,
+) {
     // Camera.
     let midpoint = Vec3::ZERO;
     commands.spawn((
@@ -357,7 +429,7 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>
     ));
 
     // Panel entities.
-    let offset = f32::midpoint(PANEL_WORLD_SIZE, PANEL_SPACING);
+    let offset = panel_offset(&sizing);
 
     commands.spawn((ClayPanelMarker, Transform::from_xyz(-offset, 0.0, 0.0)));
 
@@ -375,7 +447,7 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>
 
     // Help text overlay.
     commands.spawn((
-        Text::new("'D' toggle text debug gizmos"),
+        Text::new("'D' toggle debug  'S' cycle size"),
         TextFont {
             font_size: 14.0,
             ..default()
@@ -388,6 +460,61 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>
             ..default()
         },
     ));
+}
+
+/// Half-width of one panel plus half the gutter.
+const fn panel_offset(sizing: &PanelSizing) -> f32 {
+    f32::midpoint(sizing.world_size, sizing.gutter)
+}
+
+fn cycle_panel_size(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut sizing: ResMut<PanelSizing>,
+    camera: Query<(&GlobalTransform, &Projection)>,
+    mut clay_panels: Query<&mut Transform, (With<ClayPanelMarker>, Without<DiegeticPanelMarker>)>,
+    mut diegetic_panels: Query<
+        &mut Transform,
+        (With<DiegeticPanelMarker>, Without<ClayPanelMarker>),
+    >,
+    mut initialized: Local<bool>,
+) {
+    let pressed = keyboard.just_pressed(KeyCode::KeyS);
+    if pressed {
+        sizing.cycle();
+    }
+
+    // Refit on first frame (camera projection now available) or on key press.
+    if !*initialized || pressed {
+        *initialized = true;
+        refit_panels(&camera, &mut sizing, &mut clay_panels, &mut diegetic_panels);
+    }
+}
+
+/// Compute visible width at z=0 from the camera and refit panels.
+#[allow(clippy::too_many_arguments)]
+fn refit_panels(
+    camera: &Query<(&GlobalTransform, &Projection)>,
+    sizing: &mut PanelSizing,
+    clay_panels: &mut Query<&mut Transform, (With<ClayPanelMarker>, Without<DiegeticPanelMarker>)>,
+    diegetic_panels: &mut Query<
+        &mut Transform,
+        (With<DiegeticPanelMarker>, Without<ClayPanelMarker>),
+    >,
+) {
+    if let Ok((gt, Projection::Perspective(persp))) = camera.single() {
+        let distance = gt.translation().z.abs();
+        let half_height = distance * (persp.fov * 0.5).tan();
+        let visible_height = half_height * 2.0;
+        let visible_width = visible_height * persp.aspect_ratio;
+        sizing.fit_to_view(visible_width, visible_height);
+    }
+    let offset = panel_offset(sizing);
+    for mut t in clay_panels {
+        t.translation.x = -offset;
+    }
+    for mut t in diegetic_panels {
+        t.translation.x = offset;
+    }
 }
 
 // ── Dynamic row updates ──────────────────────────────────────────────────────
@@ -418,11 +545,15 @@ fn update_dynamic_rows(
     }
 }
 
-fn build_rows(dynamic: &DynamicRows) -> Vec<(String, String)> {
-    let mut rows: Vec<(String, String)> = STATIC_ROWS
-        .iter()
-        .map(|(l, v)| ((*l).to_string(), (*v).to_string()))
-        .collect();
+fn build_rows(dynamic: &DynamicRows, sizing: &PanelSizing) -> Vec<(String, String)> {
+    let mut rows = vec![
+        ("panel size:".to_string(), sizing.label().to_string()),
+        ("layout units:".to_string(), sizing.layout_units_label()),
+    ];
+
+    for (l, v) in STATIC_ROWS {
+        rows.push(((*l).to_string(), (*v).to_string()));
+    }
 
     rows.push(("radius:".to_string(), dynamic.radius.clone()));
     rows.push(("fps:".to_string(), dynamic.fps.clone()));
@@ -441,8 +572,8 @@ fn build_rows(dynamic: &DynamicRows) -> Vec<(String, String)> {
 /// piece — giving accurate widths from cosmic-text's real advance metrics.
 fn spaces_to_nbsp(text: &str) -> String { text.replace(' ', "\u{00a0}") }
 
-fn build_clay_rows(dynamic: &DynamicRows) -> Vec<(String, String)> {
-    build_rows(dynamic)
+fn build_clay_rows(dynamic: &DynamicRows, sizing: &PanelSizing) -> Vec<(String, String)> {
+    build_rows(dynamic, sizing)
         .into_iter()
         .map(|(l, v)| (spaces_to_nbsp(&l), spaces_to_nbsp(&v)))
         .collect()
@@ -453,26 +584,29 @@ fn build_clay_rows(dynamic: &DynamicRows) -> Vec<(String, String)> {
 fn rebuild_layouts(
     dynamic: Res<DynamicRows>,
     cache: Res<TextMeasurementCache>,
+    sizing: Res<PanelSizing>,
     mut diegetic_result: ResMut<DiegeticLayoutResult>,
     mut clay_result: ResMut<ClayLayoutResult>,
 ) {
-    let rows = build_rows(&dynamic);
-    let clay_rows = build_clay_rows(&dynamic);
-    diegetic_result.0 = Some(compute_diegetic_layout(&rows, &cache));
-    clay_result.0 = compute_clay_layout(&clay_rows, &cache);
+    let rows = build_rows(&dynamic, &sizing);
+    let clay_rows = build_clay_rows(&dynamic, &sizing);
+    let layout_size = sizing.layout_size;
+    diegetic_result.0 = Some(compute_diegetic_layout(&rows, &cache, layout_size));
+    clay_result.0 = compute_clay_layout(&clay_rows, &cache, layout_size);
 }
 
 // ── Spawn 3D text entities from layout results ──────────────────────────────
 
-fn layout_to_face_position(bounds: &BoundingBox) -> Vec3 {
-    let center_x =
-        (-PANEL_WORLD_SIZE).mul_add(0.5, bounds.width.mul_add(0.5, bounds.x) * PANEL_SCALE);
-    let center_y =
-        PANEL_WORLD_SIZE.mul_add(0.5, -(bounds.height.mul_add(0.5, bounds.y) * PANEL_SCALE));
+fn layout_to_face_position(bounds: &BoundingBox, sizing: &PanelSizing) -> Vec3 {
+    let scale = sizing.scale();
+    let half_w = sizing.world_size * 0.5;
+    let half_h = sizing.world_size * PANEL_ASPECT * 0.5;
+    let center_x = bounds.width.mul_add(0.5, bounds.x).mul_add(scale, -half_w);
+    let center_y = bounds.height.mul_add(0.5, bounds.y).mul_add(-scale, half_h);
     Vec3::new(center_x, center_y, PANEL_FACE_OFFSET)
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn spawn_text_entities(
     mut commands: Commands,
     old_text: Query<Entity, With<LayoutTextEntity>>,
@@ -481,6 +615,7 @@ fn spawn_text_entities(
     diegetic_result: Res<DiegeticLayoutResult>,
     clay_result: Res<ClayLayoutResult>,
     text_material: Res<TextMaterialHandle>,
+    sizing: Res<PanelSizing>,
 ) {
     // Despawn previous frame's text entities.
     for entity in &old_text {
@@ -498,8 +633,8 @@ fn spawn_text_entities(
                     _ => continue,
                 };
 
-                let world_scale = font_size * PANEL_SCALE;
-                let local_pos = layout_to_face_position(&cmd.bounds);
+                let world_scale = font_size * sizing.scale();
+                let local_pos = layout_to_face_position(&cmd.bounds, &sizing);
                 let world_pos = panel_gt.transform_point(local_pos);
 
                 commands.spawn((
@@ -536,14 +671,14 @@ fn spawn_text_entities(
                 _ => continue,
             };
 
-            let world_scale = font_size * PANEL_SCALE;
+            let world_scale = font_size * sizing.scale();
             let bounds = BoundingBox {
                 x:      rect.x,
                 y:      rect.y,
                 width:  rect.width,
                 height: rect.height,
             };
-            let local_pos = layout_to_face_position(&bounds);
+            let local_pos = layout_to_face_position(&bounds, &sizing);
             let world_pos = panel_gt.transform_point(local_pos);
 
             commands.spawn((
@@ -577,11 +712,13 @@ fn spawn_text_entities(
 fn compute_diegetic_layout(
     rows: &[(String, String)],
     cache: &TextMeasurementCache,
+    layout_size: f32,
 ) -> LayoutResult {
+    let layout_height = layout_size * PANEL_ASPECT;
     let mut builder = LayoutBuilder::with_root(
         El::new()
-            .width(Sizing::fixed(LAYOUT_SIZE))
-            .height(Sizing::fixed(LAYOUT_SIZE))
+            .width(Sizing::fixed(layout_size))
+            .height(Sizing::fixed(layout_height))
             .padding(Padding::all(8.0))
             .direction(Direction::TopToBottom)
             .background(Color::srgb_u8(180, 96, 122)),
@@ -680,6 +817,16 @@ fn compute_diegetic_layout(
                                     },
                                 );
                             }
+
+                            // Spacer.
+                            b.with(
+                                El::new().width(Sizing::GROW).height(Sizing::fixed(4.0)),
+                                |_| {},
+                            );
+
+                            // Word-wrap cell: validates that wrapping
+                            // measures spaces correctly.
+                            b.text(WRAP_TEXT, TextConfig::new(FONT_SIZE));
                         },
                     );
                 },
@@ -689,14 +836,19 @@ fn compute_diegetic_layout(
 
     let tree = builder.build();
     let engine = LayoutEngine::new(create_measure_fn(cache));
-    engine.compute(&tree, LAYOUT_SIZE, LAYOUT_SIZE)
+    engine.compute(&tree, layout_size, layout_height)
 }
 
 // ── Clay layout ──────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_lines)]
-fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) -> Vec<ClayRect> {
-    let mut clay = Clay::new((LAYOUT_SIZE, LAYOUT_SIZE).into());
+fn compute_clay_layout(
+    rows: &[(String, String)],
+    cache: &TextMeasurementCache,
+    layout_size: f32,
+) -> Vec<ClayRect> {
+    let layout_height = layout_size * PANEL_ASPECT;
+    let mut clay = Clay::new((layout_size, layout_height).into());
     let lookup = create_clay_measure_fn(cache);
     clay.set_measure_text_function_user_data(lookup, clay_measure_with_cache);
 
@@ -705,8 +857,8 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
     layout.with(
         &Declaration::new()
             .layout()
-            .width(fixed!(LAYOUT_SIZE))
-            .height(fixed!(LAYOUT_SIZE))
+            .width(fixed!(layout_size))
+            .height(fixed!(layout_height))
             .padding(clay_layout::layout::Padding::all(8))
             .direction(LayoutDirection::TopToBottom)
             .end()
@@ -867,6 +1019,27 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
                                             },
                                         );
                                     }
+
+                                    // Spacer.
+                                    clay.with(
+                                        &Declaration::new()
+                                            .layout()
+                                            .width(grow!())
+                                            .height(fixed!(4.0))
+                                            .end(),
+                                        |_| {},
+                                    );
+
+                                    // Word-wrap cell: uses regular spaces (no
+                                    // nbsp) so Clay actually word-wraps. This
+                                    // exposes Clay's space-token measurement
+                                    // weakness vs diegetic's full-string path.
+                                    clay.text(
+                                        WRAP_TEXT,
+                                        clay_layout::text::TextConfig::new()
+                                            .font_size(CLAY_FONT_SIZE)
+                                            .end(),
+                                    );
                                 },
                             );
                         },
@@ -897,6 +1070,7 @@ fn compute_clay_layout(rows: &[(String, String)], cache: &TextMeasurementCache) 
 
 // ── Gizmo rendering ──────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn draw_rect_on_panel(
     gizmos: &mut Gizmos<impl GizmoConfigGroup>,
     panel_transform: &GlobalTransform,
@@ -905,13 +1079,16 @@ fn draw_rect_on_panel(
     bounds_w: f32,
     bounds_h: f32,
     color: Color,
+    sizing: &PanelSizing,
 ) {
-    let half = PANEL_WORLD_SIZE * 0.5;
+    let half_w = sizing.world_size * 0.5;
+    let half_h = sizing.world_size * PANEL_ASPECT * 0.5;
+    let scale = sizing.scale();
 
-    let left = bounds_x.mul_add(PANEL_SCALE, -half);
-    let right = (bounds_x + bounds_w).mul_add(PANEL_SCALE, -half);
-    let top = (-bounds_y).mul_add(PANEL_SCALE, half);
-    let bottom = (-(bounds_y + bounds_h)).mul_add(PANEL_SCALE, half);
+    let left = bounds_x.mul_add(scale, -half_w);
+    let right = (bounds_x + bounds_w).mul_add(scale, -half_w);
+    let top = (-bounds_y).mul_add(scale, half_h);
+    let bottom = (-(bounds_y + bounds_h)).mul_add(scale, half_h);
 
     let tl = panel_transform.transform_point(Vec3::new(left, top, 0.0));
     let tr = panel_transform.transform_point(Vec3::new(right, top, 0.0));
@@ -935,6 +1112,7 @@ fn draw_diegetic_gizmos(
     panels: Query<&GlobalTransform, With<DiegeticPanelMarker>>,
     result: Res<DiegeticLayoutResult>,
     debug: Res<ShowTextDebug>,
+    sizing: Res<PanelSizing>,
 ) {
     let Some(result) = &result.0 else { return };
     for panel_transform in &panels {
@@ -958,6 +1136,7 @@ fn draw_diegetic_gizmos(
                 cmd.bounds.width,
                 cmd.bounds.height,
                 color,
+                &sizing,
             );
         }
     }
@@ -968,6 +1147,7 @@ fn draw_clay_gizmos(
     panels: Query<&GlobalTransform, With<ClayPanelMarker>>,
     result: Res<ClayLayoutResult>,
     debug: Res<ShowTextDebug>,
+    sizing: Res<PanelSizing>,
 ) {
     for panel_transform in &panels {
         for rect in &result.0 {
@@ -989,6 +1169,7 @@ fn draw_clay_gizmos(
                 rect.width,
                 rect.height,
                 color,
+                &sizing,
             );
         }
     }
