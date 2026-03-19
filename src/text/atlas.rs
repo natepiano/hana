@@ -2,6 +2,13 @@
 
 use std::collections::HashMap;
 
+use bevy::image::Image;
+use bevy::prelude::Assets;
+use bevy::prelude::Handle;
+use bevy::prelude::Resource;
+use bevy::render::render_resource::Extent3d;
+use bevy::render::render_resource::TextureDimension;
+use bevy::render::render_resource::TextureFormat;
 use etagere::AllocId;
 use etagere::AtlasAllocator;
 use etagere::size2;
@@ -49,17 +56,22 @@ pub struct GlyphMetrics {
 /// Stores an RGBA texture containing MSDF glyph bitmaps and a lookup table
 /// mapping [`GlyphKey`] to [`GlyphMetrics`]. The atlas packs glyphs on demand
 /// using `etagere`'s shelf-packing algorithm.
+#[derive(Resource)]
 pub struct MsdfAtlas {
     /// Raw pixel data (RGBA8, row-major).
-    pixels:    Vec<u8>,
+    pixels:       Vec<u8>,
     /// Rectangle allocator for packing glyphs.
-    allocator: AtlasAllocator,
+    allocator:    AtlasAllocator,
     /// Cached glyph metrics, keyed by `GlyphKey`.
-    glyphs:    HashMap<GlyphKey, GlyphMetrics>,
+    glyphs:       HashMap<GlyphKey, GlyphMetrics>,
     /// Atlas width in pixels.
-    width:     u32,
+    width:        u32,
     /// Atlas height in pixels.
-    height:    u32,
+    height:       u32,
+    /// Handle to the GPU image (populated after `upload_to_gpu`).
+    image_handle: Option<Handle<Image>>,
+    /// Whether the CPU pixel data has changed since last GPU upload.
+    dirty:        bool,
 }
 
 impl MsdfAtlas {
@@ -78,6 +90,8 @@ impl MsdfAtlas {
             glyphs: HashMap::new(),
             width,
             height,
+            image_handle: None,
+            dirty: false,
         }
     }
 
@@ -96,6 +110,50 @@ impl MsdfAtlas {
     /// Returns the number of cached glyphs.
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.glyphs.len() }
+
+    /// Returns the SDF range used for glyph generation.
+    #[must_use]
+    pub const fn sdf_range(&self) -> f64 { DEFAULT_SDF_RANGE }
+
+    /// Returns the GPU image handle.
+    ///
+    /// Returns `None` if [`upload_to_gpu`](Self::upload_to_gpu) has not been called.
+    #[must_use]
+    pub const fn image_handle(&self) -> Option<&Handle<Image>> { self.image_handle.as_ref() }
+
+    /// Creates a Bevy `Image` from the atlas pixel data and stores the handle.
+    ///
+    /// Call once during plugin initialization after prepopulating glyphs.
+    pub fn upload_to_gpu(&mut self, images: &mut Assets<Image>) {
+        let image = Image::new(
+            Extent3d {
+                width:                 self.width,
+                height:                self.height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            self.pixels.clone(),
+            TextureFormat::Rgba8Unorm,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        self.image_handle = Some(images.add(image));
+        self.dirty = false;
+    }
+
+    /// Syncs CPU pixel data to the GPU image if the atlas has changed.
+    ///
+    /// Call each frame (or when needed) to push new glyphs to the GPU.
+    pub fn sync_to_gpu(&mut self, images: &mut Assets<Image>) {
+        if !self.dirty {
+            return;
+        }
+        if let Some(handle) = &self.image_handle
+            && let Some(image) = images.get_mut(handle)
+        {
+            image.data = Some(self.pixels.clone());
+            self.dirty = false;
+        }
+    }
 
     /// Looks up cached metrics for a glyph.
     #[must_use]
@@ -215,6 +273,7 @@ impl MsdfAtlas {
         };
 
         self.glyphs.insert(key, metrics);
+        self.dirty = true;
         Some(metrics)
     }
 }

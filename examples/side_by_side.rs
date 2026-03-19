@@ -690,6 +690,7 @@ fn spawn_text_entities(
                 },
                 Text3d::new(text),
                 Text3dStyling {
+                    font: FONT_FAMILY.into(),
                     size: RASTER_SIZE,
                     color: bevy::color::Srgba::new(0.85, 0.95, 0.55, 1.0),
                     align: TextAlign::Left,
@@ -836,7 +837,28 @@ fn compute_diegetic_layout(
 
     let tree = builder.build();
     let engine = LayoutEngine::new(create_measure_fn(cache));
-    engine.compute(&tree, layout_size, layout_height)
+    let result = engine.compute(&tree, layout_size, layout_height);
+
+    // Debug: print root and first-level children bounds.
+    for (i, cmd) in result.commands.iter().enumerate() {
+        if i < 15 {
+            bevy::log::debug!(
+                "DIEGETIC cmd[{i}]: {:?} bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+                match &cmd.kind {
+                    RenderCommandKind::Rectangle { .. } => "Rect",
+                    RenderCommandKind::Text { .. } => "Text",
+                    RenderCommandKind::Border { .. } => "Border",
+                    _ => "Other",
+                },
+                cmd.bounds.x,
+                cmd.bounds.y,
+                cmd.bounds.width,
+                cmd.bounds.height,
+            );
+        }
+    }
+
+    result
 }
 
 // ── Clay layout ──────────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@
 
 mod layout;
 mod plugin;
+mod render;
 mod text;
 
 // Layout types.
@@ -72,7 +73,13 @@ pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelGizmoGroup;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
+// Render.
+pub use render::GlyphQuadData;
+pub use render::MsdfTextMaterial;
+pub use render::TextRenderPlugin;
+pub use render::build_glyph_mesh;
 // Text.
+pub use text::EMBEDDED_FONT;
 pub use text::FontId;
 pub use text::FontRegistry;
 pub use text::GlyphKey;

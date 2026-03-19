@@ -18,7 +18,7 @@ use crate::layout::TextMeasure;
 ///
 /// Requires a [`Transform`] for world-space positioning.
 #[derive(Component)]
-#[require(ComputedDiegeticPanel, Transform)]
+#[require(ComputedDiegeticPanel, Transform, Visibility)]
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     pub tree:          LayoutTree,

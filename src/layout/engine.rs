@@ -220,8 +220,8 @@ fn wrap_text_words(
     max_width: f32,
     measure: &MeasureTextFn,
 ) -> WrappedText {
-    let line_height = config.effective_line_height();
     let text_measure = config.as_measure();
+    let line_height = config.effective_line_height();
     let space_width = measure(" ", &text_measure).width;
     let mut all_lines = Vec::new();
 

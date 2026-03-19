@@ -13,7 +13,7 @@ use crate::layout::LayoutEngine;
 use crate::layout::RenderCommandKind;
 
 /// Recomputes layout for panels whose [`DiegeticPanel`] component has changed.
-pub(super) fn compute_panel_layouts(
+pub fn compute_panel_layouts(
     mut panels: Query<(&DiegeticPanel, &mut ComputedDiegeticPanel), Changed<DiegeticPanel>>,
     measurer: Res<DiegeticTextMeasurer>,
 ) {

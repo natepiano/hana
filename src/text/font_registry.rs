@@ -10,7 +10,7 @@ use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;
 
 /// Embedded `JetBrains Mono` Regular font binary (SIL Open Font License).
-const EMBEDDED_FONT: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+pub const EMBEDDED_FONT: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 
 /// Default font family name.
 const DEFAULT_FAMILY: &str = "JetBrains Mono";

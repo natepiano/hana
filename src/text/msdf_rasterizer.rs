@@ -111,8 +111,10 @@ pub fn rasterize_glyph(
     correct_sign_msdf(&mut image, &prepared, FillRule::Nonzero);
 
     // Bearing offsets in em units (fraction of units_per_em).
-    let bearing_x = f64::from(bbox.x_min) / units_per_em;
-    let bearing_y = f64::from(bbox.y_max) / units_per_em;
+    // Include SDF padding so the quad is positioned correctly — the bitmap
+    // extends `total_pad` pixels beyond the glyph bounding box on each side.
+    let bearing_x = f64::from(bbox.x_min) / units_per_em - total_pad / f64::from(px_size);
+    let bearing_y = f64::from(bbox.y_max) / units_per_em + total_pad / f64::from(px_size);
 
     Some(MsdfBitmap {
         data: image.into_raw(),

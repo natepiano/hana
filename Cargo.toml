@@ -29,7 +29,11 @@ missing_docs = "deny"
 
 [dependencies]
 bevy = { version = "0.18.1", default-features = false, features = [
+  "bevy_asset",
   "bevy_gizmos",
+  "bevy_image",
+  "bevy_pbr",
+  "bevy_render",
 ] }
 etagere = "0.2"
 fdsm = "0.8"
@@ -40,22 +44,25 @@ parley = { version = "0.7.0", default-features = false, features = ["std"] }
 ttf-parser = "0.25"
 
 [dev-dependencies]
-bevy                 = { version = "0.18.1", features = ["default_font"] }
-bevy_brp_extras      = "0.18.7"
-bevy_panorbit_camera = "0.34.0"
-bevy_rich_text3d     = "0.6"
-bevy_window_manager  = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }
-clay-layout          = { path = "./clay-layout" }
-criterion            = { version = "0.8.2", features = ["html_reports"] }
-image                = { version = "0.25", features = ["png"] }
-msdfgen              = "0.2"
-ttf-parser_018       = { package = "ttf-parser", version = "0.18" }
-
-[[example]]
-name = "hello_panel"
+bevy                     = { version = "0.18.1", features = ["default_font"] }
+bevy_brp_extras          = "0.18.7"
+bevy_panorbit_camera     = "0.34.0"
+bevy_panorbit_camera_ext = { git = "https://github.com/natepiano/bevy_panorbit_camera_ext" }
+bevy_rich_text3d         = "0.6"
+bevy_window_manager      = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }
+clay-layout              = { path = "./clay-layout" }
+criterion                = { version = "0.8.2", features = ["html_reports"] }
+image                    = { version = "0.25", features = ["png"] }
+msdfgen                  = "0.2"
+# msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
+# Renamed import so parity tests can use both versions side by side.
+ttf-parser_018           = { package = "ttf-parser", version = "0.18" }
 
 [[example]]
 name = "side_by_side"
+
+[[example]]
+name = "text_test"
 
 [[bench]]
 harness = false
