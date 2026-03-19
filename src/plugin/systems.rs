@@ -47,15 +47,16 @@ pub fn compute_panel_layouts(
         });
 
     for (panel, mut computed) in &mut panels {
-        let t0 = std::time::Instant::now();
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(&panel.tree, panel.layout_width, panel.layout_height);
-        let elapsed = t0.elapsed();
-        bevy::log::info!(
-            "compute_panel_layouts: {} elements, {} commands | {elapsed:?}",
-            panel.tree.len(),
-            result.commands.len(),
-        );
+
+        if let Some(root) = result.computed.first() {
+            let scale_x = panel.world_width / panel.layout_width;
+            let scale_y = panel.world_height / panel.layout_height;
+            computed.world_width = root.bounds.width * scale_x;
+            computed.world_height = root.bounds.height * scale_y;
+        }
+
         computed.result = Some(result);
     }
 }

@@ -167,7 +167,24 @@ pub struct LayoutBuilder {
 }
 
 impl LayoutBuilder {
-    /// Creates a new builder with a root element sized to the given dimensions.
+    /// Creates a new builder with an implicit fixed-size root.
+    ///
+    /// This is the "layout inside a viewport/canvas" constructor. The builder
+    /// inserts a root element whose width and height are [`Sizing::Fixed`],
+    /// using the provided `width` and `height`.
+    ///
+    /// That means the returned tree always has an outer box of exactly this
+    /// size, even if the visible content inside it shrink-wraps smaller. This
+    /// is useful when you want a stable layout viewport for:
+    ///
+    /// - mapping layout units to world-space dimensions,
+    /// - wrapping text against a known maximum width,
+    /// - `Grow` / `Percent` sizing against a known parent size,
+    /// - keeping panel dimensions stable while content changes.
+    ///
+    /// Use [`Self::with_root`] instead when you do not want this extra fixed
+    /// wrapper and want the root element itself to be content-driven (`Fit`),
+    /// growable, or otherwise fully caller-defined.
     #[must_use]
     pub fn new(width: f32, height: f32) -> Self {
         let mut tree = LayoutTree::new();
@@ -184,7 +201,23 @@ impl LayoutBuilder {
         }
     }
 
-    /// Creates a builder with a custom root element declaration.
+    /// Creates a new builder with a caller-supplied root element.
+    ///
+    /// This is the "my visible panel *is* the root" constructor. Unlike
+    /// [`Self::new`], it does not insert an implicit fixed-size wrapper first.
+    /// The `El` you provide becomes the actual root of the layout tree.
+    ///
+    /// Use this when you want the root itself to control sizing, for example:
+    ///
+    /// - a `Fit` root that grows with its content,
+    /// - a root with its own border/background/padding,
+    /// - a root constrained by `fit_range` rather than fixed dimensions,
+    /// - a tree where the computed root bounds should reflect the visible panel rather than an
+    ///   invisible outer viewport.
+    ///
+    /// Note that this only changes the layout tree structure. It does not
+    /// remove the need for higher-level code to decide how layout units map to
+    /// world space.
     #[must_use]
     pub fn with_root(el: El) -> Self {
         let mut tree = LayoutTree::new();
@@ -197,7 +230,22 @@ impl LayoutBuilder {
         }
     }
 
-    /// Adds a container element with children defined by the closure.
+    /// Adds a child container under the current parent, then fills it in.
+    ///
+    /// The passed `El` is converted into an [`Element`] and inserted as a
+    /// child of whatever the current parent is:
+    ///
+    /// - after [`Self::new`], the initial current parent is the implicit fixed-size root inserted
+    ///   by the builder,
+    /// - after [`Self::with_root`], the initial current parent is the custom root you supplied.
+    ///
+    /// The closure runs with this newly inserted child pushed as the current
+    /// parent, so nested calls to `.with(...)` or `.text(...)` add descendants
+    /// inside it. When the closure returns, the parent stack is restored.
+    ///
+    /// In other words, `.with(...)` always creates another node in the tree.
+    /// It does not modify the existing root element; choose that root up front
+    /// with [`Self::new`] or [`Self::with_root`].
     pub fn with(&mut self, el: El, children: impl FnOnce(&mut Self)) -> &mut Self {
         let parent = self.current_parent();
         let index = self
@@ -209,7 +257,18 @@ impl LayoutBuilder {
         self
     }
 
-    /// Adds a text element as a child of the current parent.
+    /// Adds a text leaf as a child of the current parent.
+    ///
+    /// Like [`Self::with`], this inserts a new node under the current parent:
+    ///
+    /// - after [`Self::new`], that initially means the implicit fixed-size root,
+    /// - after [`Self::with_root`], that initially means your custom root,
+    /// - inside a `.with(...)` closure, it means the container introduced by that `.with(...)`
+    ///   call.
+    ///
+    /// Text nodes are leaves, not containers, so they cannot receive children
+    /// of their own. Use [`Self::with`] when you want to create another nested
+    /// container instead of a text leaf.
     pub fn text(&mut self, text: impl Into<String>, config: TextConfig) -> &mut Self {
         let parent = self.current_parent();
         self.tree.add_child(

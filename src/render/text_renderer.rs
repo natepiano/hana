@@ -199,13 +199,7 @@ fn extract_text_meshes(
         ));
 
         // Batch all text quads into a single mesh per panel.
-        let t0 = std::time::Instant::now();
         let mut all_quads = Vec::new();
-        let text_count = result
-            .commands
-            .iter()
-            .filter(|c| matches!(c.kind, RenderCommandKind::Text { .. }))
-            .count();
         for cmd in &result.commands {
             let (text, config) = match &cmd.kind {
                 RenderCommandKind::Text { text, config } => (text.as_str(), config),
@@ -228,12 +222,9 @@ fn extract_text_meshes(
 
             all_quads.extend_from_slice(&quads);
         }
-        let shape_elapsed = t0.elapsed();
 
         if !all_quads.is_empty() {
-            let t1 = std::time::Instant::now();
             let mesh = build_glyph_mesh(&all_quads);
-            let mesh_elapsed = t1.elapsed();
             let mesh_handle = meshes.add(mesh);
 
             commands.entity(panel_entity).with_child((
@@ -242,11 +233,6 @@ fn extract_text_meshes(
                 MeshMaterial3d(material_handle.clone()),
                 Transform::IDENTITY,
             ));
-
-            bevy::log::info!(
-                "extract_text_meshes: {text_count} texts, {} glyphs | shape={shape_elapsed:?} mesh={mesh_elapsed:?}",
-                all_quads.len(),
-            );
         }
     }
 }

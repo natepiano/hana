@@ -1,13 +1,13 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
-#![allow(clippy::missing_docs_in_private_items)]
-#![allow(missing_docs)]
 #![allow(clippy::unwrap_used)]
 
 //! Benchmark comparing fdsm (pure Rust) and msdfgen (C++ FFI) MSDF generation.
 //!
-//! Run with `cargo bench --bench msdf_perf`.
+//! MSDF = multi-channel signed distance field
+//!
+//! Run with `cargo bench --bench msdf_comparison`.
 
 use bevy_diegetic::MsdfAtlas;
 use bevy_diegetic::rasterize_glyph;
@@ -64,6 +64,7 @@ fn msdfgen_single(ch: char) {
 
 fn bench_single_glyph(c: &mut Criterion) {
     let mut group = c.benchmark_group("single_glyph");
+    group.measurement_time(std::time::Duration::from_secs(20));
 
     for ch in ['A', 'W', '@'] {
         group.bench_function(format!("fdsm_{ch}"), |b| b.iter(|| fdsm_single(ch)));
@@ -79,6 +80,7 @@ fn bench_ascii_batch(c: &mut Criterion) {
     let ascii: Vec<char> = (33_u8..=126).map(|c| c as char).collect();
 
     let mut group = c.benchmark_group("ascii_batch");
+    group.measurement_time(std::time::Duration::from_secs(20));
 
     group.bench_function("fdsm_94_glyphs", |b| {
         b.iter(|| {

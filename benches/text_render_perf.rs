@@ -1,6 +1,4 @@
 #![allow(clippy::cast_precision_loss)]
-#![allow(clippy::missing_docs_in_private_items)]
-#![allow(missing_docs)]
 #![allow(clippy::unwrap_used)]
 
 //! Benchmark for per-frame text rendering costs: parley shaping, quad

@@ -1,8 +1,6 @@
 #![allow(clippy::float_cmp)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::missing_docs_in_private_items)]
-#![allow(missing_docs)]
 #![allow(clippy::too_many_lines)]
 
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout engines on identical

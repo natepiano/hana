@@ -17,10 +17,12 @@ use crate::layout::TextMeasure;
 /// when this component changes, storing results in [`ComputedDiegeticPanel`].
 ///
 /// Requires a [`Transform`] for world-space positioning.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 #[require(ComputedDiegeticPanel, Transform, Visibility)]
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
+    #[reflect(ignore)]
     pub tree:          LayoutTree,
     /// Width in abstract layout units (viewport width for the layout engine).
     pub layout_width:  f32,
@@ -36,10 +38,16 @@ pub struct DiegeticPanel {
 ///
 /// Automatically added via required components when a [`DiegeticPanel`] is inserted.
 /// Updated by the layout system whenever the panel changes.
-#[derive(Component, Default)]
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
 pub struct ComputedDiegeticPanel {
     /// The computed layout result, populated after the first layout pass.
-    pub result: Option<LayoutResult>,
+    #[reflect(ignore)]
+    pub result:       Option<LayoutResult>,
+    /// Actual computed content width in world units.
+    pub world_width:  f32,
+    /// Actual computed content height in world units.
+    pub world_height: f32,
 }
 
 /// Resource providing text measurement for layout computation.

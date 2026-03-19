@@ -55,7 +55,7 @@ image                    = { version = "0.25", features = ["png"] }
 msdfgen                  = "0.2"
 # msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
 # Renamed import so parity tests can use both versions side by side.
-ttf-parser_018           = { package = "ttf-parser", version = "0.18" }
+ttf-parser_018 = { package = "ttf-parser", version = "0.18" }
 
 [[example]]
 name = "side_by_side"
@@ -65,11 +65,11 @@ name = "text_panel"
 
 [[bench]]
 harness = false
-name    = "layout_perf"
+name    = "layout_comparison"
 
 [[bench]]
 harness = false
-name    = "msdf_perf"
+name    = "msdf_comparison"
 
 [[bench]]
 harness = false
