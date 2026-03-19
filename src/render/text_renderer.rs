@@ -1,5 +1,6 @@
 //! Text rendering system — extracts text from layout results and builds glyph meshes.
 
+use std::sync::Mutex;
 use std::sync::PoisonError;
 
 use bevy::prelude::*;
@@ -20,6 +21,25 @@ use crate::text::MsdfAtlas;
 /// Z offset for text layer (above rectangles, below borders).
 const TEXT_Z_OFFSET: f32 = 0.001;
 
+/// Reusable parley shaping buffers.
+///
+/// Avoids reallocating `LayoutContext` and `Layout` on every
+/// `shape_text_to_quads` call. Wrapped in `Mutex` for `Send + Sync`.
+#[derive(Resource)]
+pub struct TextShapingContext {
+    layout_cx: Mutex<parley::LayoutContext<()>>,
+    layout:    Mutex<parley::Layout<()>>,
+}
+
+impl Default for TextShapingContext {
+    fn default() -> Self {
+        Self {
+            layout_cx: Mutex::new(parley::LayoutContext::default()),
+            layout:    Mutex::new(parley::Layout::new()),
+        }
+    }
+}
+
 /// Marker component for text mesh entities spawned by the renderer.
 #[derive(Component)]
 struct DiegeticTextMesh;
@@ -33,6 +53,7 @@ pub struct TextRenderPlugin;
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
+        app.init_resource::<TextShapingContext>();
         app.add_systems(
             PostUpdate,
             extract_text_meshes.after(crate::plugin::compute_panel_layouts),
@@ -48,6 +69,7 @@ fn extract_text_meshes(
     old_text: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
+    shaping_cx: Res<TextShapingContext>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut commands: Commands,
@@ -94,6 +116,7 @@ fn extract_text_meshes(
                 &cmd.bounds,
                 &font_registry,
                 &mut atlas,
+                &shaping_cx,
                 scale_x,
                 scale_y,
                 half_w,
@@ -105,7 +128,10 @@ fn extract_text_meshes(
                 continue;
             }
             let min_x = quads.iter().map(|q| q.position[0]).fold(f32::MAX, f32::min);
-            let max_x = quads.iter().map(|q| q.position[0] + q.size[0]).fold(f32::MIN, f32::max);
+            let max_x = quads
+                .iter()
+                .map(|q| q.position[0] + q.size[0])
+                .fold(f32::MIN, f32::max);
             let extent_w = max_x - min_x;
             let layout_w = cmd.bounds.width * scale_x;
             bevy::log::debug!(
@@ -129,13 +155,18 @@ fn extract_text_meshes(
 }
 
 /// Shapes text and produces glyph quads in panel-local coordinates.
+///
+/// Converts layout-space text into positioned glyph quads using parley for
+/// shaping and the MSDF atlas for glyph metrics. The returned quads are in
+/// panel-local space (center origin, Y-up) ready for mesh construction.
 #[allow(clippy::too_many_arguments)]
-fn shape_text_to_quads(
+pub fn shape_text_to_quads(
     text: &str,
     config: &TextConfig,
     bounds: &crate::layout::BoundingBox,
     font_registry: &FontRegistry,
     atlas: &mut MsdfAtlas,
+    shaping_cx: &TextShapingContext,
     scale_x: f32,
     scale_y: f32,
     half_w: f32,
@@ -143,14 +174,18 @@ fn shape_text_to_quads(
 ) -> Vec<GlyphQuadData> {
     let font_cx = font_registry.font_context();
     let mut font_cx = font_cx.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut layout_cx = shaping_cx
+        .layout_cx
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let mut layout = shaping_cx
+        .layout
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
 
     let family_name = font_registry
         .family_name(FontId(config.font_id()))
         .unwrap_or("JetBrains Mono");
-
-    // Use parley to shape the text and get glyph positions.
-    let mut layout_cx = parley::LayoutContext::<()>::default();
-    let mut layout = parley::Layout::<()>::new();
 
     let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
     builder.push_default(parley::style::StyleProperty::FontSize(config.size()));
@@ -166,7 +201,7 @@ fn shape_text_to_quads(
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
 
-    // Drop locks before iterating.
+    // Drop font and layout context locks before iterating glyph runs.
     drop(font_cx);
     drop(layout_cx);
 

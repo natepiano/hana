@@ -24,10 +24,24 @@ pub fn compute_panel_layouts(
     }
 }
 
+/// Controls whether text bounding-box gizmos are drawn.
+///
+/// When `false` (the default), only rectangles and borders are shown.
+/// Toggle at runtime to debug text measurement and positioning.
+#[derive(Resource)]
+pub struct ShowTextGizmos(pub bool);
+
+impl Default for ShowTextGizmos {
+    fn default() -> Self { Self(false) }
+}
+
 /// Renders debug gizmo wireframes for all panels with computed layouts.
+///
+/// Skips text bounding boxes unless [`ShowTextGizmos`] is enabled.
 pub(super) fn render_panel_gizmos(
     panels: Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
     mut gizmos: Gizmos<DiegeticPanelGizmoGroup>,
+    show_text: Res<ShowTextGizmos>,
 ) {
     for (panel, computed, global_transform) in &panels {
         let Some(result) = &computed.result else {
@@ -42,7 +56,12 @@ pub(super) fn render_panel_gizmos(
         for cmd in &result.commands {
             let z_offset = match &cmd.kind {
                 RenderCommandKind::Rectangle { .. } => 0.0,
-                RenderCommandKind::Text { .. } => 0.001,
+                RenderCommandKind::Text { .. } => {
+                    if !show_text.0 {
+                        continue;
+                    }
+                    0.001
+                },
                 RenderCommandKind::Border { .. } => 0.002,
                 RenderCommandKind::ScissorStart | RenderCommandKind::ScissorEnd => continue,
             };

@@ -10,6 +10,7 @@ use bevy::prelude::*;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
 pub use components::DiegeticTextMeasurer;
+pub use systems::ShowTextGizmos;
 pub use systems::compute_panel_layouts;
 use systems::render_panel_gizmos;
 
@@ -59,6 +60,7 @@ impl Plugin for DiegeticUiPlugin {
         app.insert_resource(registry)
             .insert_resource(measurer)
             .insert_resource(atlas)
+            .init_resource::<ShowTextGizmos>()
             .register_type::<TextProps<ForLayout>>()
             .register_type::<TextProps<ForStandalone>>()
             .add_plugins(TextRenderPlugin)

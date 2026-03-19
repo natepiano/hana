@@ -65,9 +65,7 @@ pub fn create_parley_measurer(
         }
 
         let line_height = measure.effective_line_height();
-        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-            line_height,
-        )));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line_height)));
 
         builder.build_into(&mut layout, text);
         layout.break_all_lines(None);

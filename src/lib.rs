@@ -73,11 +73,14 @@ pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelGizmoGroup;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
+pub use plugin::ShowTextGizmos;
 // Render.
 pub use render::GlyphQuadData;
 pub use render::MsdfTextMaterial;
 pub use render::TextRenderPlugin;
+pub use render::TextShapingContext;
 pub use render::build_glyph_mesh;
+pub use render::shape_text_to_quads;
 // Text.
 pub use text::EMBEDDED_FONT;
 pub use text::FontId;

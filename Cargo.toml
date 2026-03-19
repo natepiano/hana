@@ -48,7 +48,6 @@ bevy                     = { version = "0.18.1", features = ["default_font"] }
 bevy_brp_extras          = "0.18.7"
 bevy_panorbit_camera     = "0.34.0"
 bevy_panorbit_camera_ext = { git = "https://github.com/natepiano/bevy_panorbit_camera_ext" }
-bevy_rich_text3d         = "0.6"
 bevy_window_manager      = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }
 clay-layout              = { path = "./clay-layout" }
 criterion                = { version = "0.8.2", features = ["html_reports"] }
@@ -62,7 +61,7 @@ ttf-parser_018           = { package = "ttf-parser", version = "0.18" }
 name = "side_by_side"
 
 [[example]]
-name = "text_test"
+name = "text_panel"
 
 [[bench]]
 harness = false
