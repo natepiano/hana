@@ -83,14 +83,14 @@ const SOURCE_TEXT: &str = "bevy diegetic layout engine text rendering msdf atlas
 // ── Resources / components ───────────────────────────────────────────────────
 
 #[derive(Resource)]
-struct StressState {
+struct StressControls {
     repeat_timer:    Timer,
     repeat_interval: f32,
     hold_duration:   f32,
     row_count:       usize,
 }
 
-impl Default for StressState {
+impl Default for StressControls {
     fn default() -> Self {
         Self {
             repeat_timer:    Timer::from_seconds(REPEAT_START, TimerMode::Repeating),
@@ -115,7 +115,7 @@ fn main() {
         .add_plugins(BrpExtrasPlugin::default())
         .add_plugins(DiegeticUiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
-        .init_resource::<StressState>()
+        .init_resource::<StressControls>()
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_input, update_fps_overlay, update_panels))
         .run();
@@ -201,7 +201,7 @@ fn setup(
 fn handle_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    mut state: ResMut<StressState>,
+    mut state: ResMut<StressControls>,
 ) {
     let adding = keyboard.pressed(KeyCode::Equal);
     let removing = keyboard.pressed(KeyCode::Minus);
@@ -255,7 +255,7 @@ fn handle_input(
 fn update_fps_overlay(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
-    state: Res<StressState>,
+    state: Res<StressControls>,
     mut overlay: Query<&mut Text, With<FpsOverlay>>,
     mut timer: Local<Option<Timer>>,
 ) {
@@ -300,7 +300,7 @@ fn rows_per_panel() -> usize {
 }
 
 fn update_panels(
-    state: Res<StressState>,
+    state: Res<StressControls>,
     existing: Query<(Entity, &StressPanel)>,
     mut panels: Query<(&mut DiegeticPanel, &mut Transform)>,
     mut commands: Commands,
@@ -380,7 +380,7 @@ fn panel_transform(
 }
 
 fn build_panel_tree(
-    state: &StressState,
+    state: &StressControls,
     panel_idx: usize,
     rpp: usize,
     words: &[&str],
