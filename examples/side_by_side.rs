@@ -22,8 +22,8 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 
-use bevy::color::Color;
 use bevy::color::palettes::css;
+use bevy::color::Color;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
@@ -57,8 +57,6 @@ use bevy_rich_text3d::TextAlign;
 use bevy_rich_text3d::TextAnchor;
 use bevy_rich_text3d::TextAtlas;
 use bevy_window_manager::WindowManagerPlugin;
-use clay_layout::Clay;
-use clay_layout::Declaration;
 use clay_layout::fit;
 use clay_layout::fixed;
 use clay_layout::grow;
@@ -69,6 +67,8 @@ use clay_layout::layout::LayoutDirection;
 use clay_layout::math::Dimensions;
 use clay_layout::render_commands::RenderCommandConfig;
 use clay_layout::text::TextElementConfigWrapMode;
+use clay_layout::Clay;
+use clay_layout::Declaration;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -412,14 +412,54 @@ fn update_measurement_cache(
 
 fn setup(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     sizing: Res<PanelSizing>,
 ) {
+    // Ground plane.
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.5, 0.3),
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -1.2, 0.0),
+    ));
+
+    // White backdrop behind the panels.
+    commands.spawn((
+        Mesh3d(meshes.add(Rectangle::new(2.9, 2.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.0, -0.5),
+    ));
+
+    // Point light.
+    commands.spawn((
+        PointLight {
+            intensity: 500_000.0,
+            shadows_enabled: true,
+            range: 30.0,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 1.5, 2.5),
+    ));
+
     // Camera.
     let midpoint = Vec3::ZERO;
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 0.0, 3.0).looking_at(midpoint, Vec3::Y),
+        Transform {
+            translation: Vec3::new(0.00, 0.15, 2.7),
+            rotation: Quat::from_xyzw(0.00, 0.0, 0.0, 1.0),
+            ..default()
+        },
         PanOrbitCamera {
             focus: midpoint,
             trackpad_behavior: TrackpadBehavior::blender_default(),
@@ -648,7 +688,7 @@ fn spawn_text_entities(
                     Text3dStyling {
                         font: FONT_FAMILY.into(),
                         size: RASTER_SIZE,
-                        color: bevy::color::Srgba::new(0.85, 0.95, 0.55, 1.0),
+                        color: bevy::color::Srgba::new(0.0, 0.6, 1.0, 1.0),
                         align: TextAlign::Left,
                         anchor: TextAnchor::CENTER,
                         world_scale: Some(Vec2::splat(world_scale)),
@@ -692,7 +732,7 @@ fn spawn_text_entities(
                 Text3dStyling {
                     font: FONT_FAMILY.into(),
                     size: RASTER_SIZE,
-                    color: bevy::color::Srgba::new(0.85, 0.95, 0.55, 1.0),
+                    color: bevy::color::Srgba::new(0.0, 0.6, 1.0, 1.0),
                     align: TextAlign::Left,
                     anchor: TextAnchor::CENTER,
                     world_scale: Some(Vec2::splat(world_scale)),
