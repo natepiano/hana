@@ -45,5 +45,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    return vec4<f32>(material.color.rgb, material.color.a * alpha);
+    // Use vertex color if available, otherwise fall back to material color.
+    let color = select(material.color, in.color, in.color.a > 0.0);
+    return vec4<f32>(color.rgb, color.a * alpha);
 }

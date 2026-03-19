@@ -573,6 +573,17 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns the text color.
+    #[must_use]
+    pub const fn color(&self) -> Color { self.color }
+
+    /// Sets the text color.
+    #[must_use]
+    pub const fn with_color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
     /// Extracts measurement-relevant fields as a [`TextMeasure`].
     ///
     /// Used by [`MeasureTextFn`](super::engine::MeasureTextFn) — no generic
@@ -660,10 +671,6 @@ impl TextProps<ForStandalone> {
         }
     }
 
-    /// Returns the fill color.
-    #[must_use]
-    pub const fn color(&self) -> Color { self.color }
-
     /// Returns the text alignment.
     #[must_use]
     pub const fn text_align(&self) -> TextAlign { self.align }
@@ -671,13 +678,6 @@ impl TextProps<ForStandalone> {
     /// Returns the anchor point.
     #[must_use]
     pub const fn anchor(&self) -> TextAnchor { self.anchor }
-
-    /// Sets the fill color.
-    #[must_use]
-    pub const fn with_color(mut self, color: Color) -> Self {
-        self.color = color;
-        self
-    }
 
     /// Sets horizontal text alignment within bounds.
     #[must_use]

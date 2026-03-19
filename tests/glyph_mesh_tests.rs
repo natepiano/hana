@@ -15,16 +15,19 @@ fn mesh_vertex_and_index_counts() {
             position: [0.0, 1.0, 0.0],
             size:     [0.5, 0.8],
             uv_rect:  [0.0, 0.0, 0.1, 0.1],
+            color:    [1.0, 1.0, 1.0, 1.0],
         },
         GlyphQuadData {
             position: [0.6, 1.0, 0.0],
             size:     [0.5, 0.8],
             uv_rect:  [0.1, 0.0, 0.2, 0.1],
+            color:    [1.0, 1.0, 1.0, 1.0],
         },
         GlyphQuadData {
             position: [1.2, 1.0, 0.0],
             size:     [0.5, 0.8],
             uv_rect:  [0.2, 0.0, 0.3, 0.1],
+            color:    [1.0, 1.0, 1.0, 1.0],
         },
     ];
 
@@ -45,6 +48,7 @@ fn mesh_single_quad_has_uvs() {
         position: [0.0, 1.0, 0.0],
         size:     [1.0, 1.0],
         uv_rect:  [0.25, 0.5, 0.75, 1.0],
+        color:    [1.0, 0.0, 0.0, 1.0],
     }];
 
     let mesh = build_glyph_mesh(&quads);

@@ -25,7 +25,8 @@ const MARGIN: f32 = 0.1;
 /// Fixed scale: layout units per world unit. Never changes with window size.
 const SCALE: f32 = 300.0 / 3.0;
 const ROW_HEIGHT: f32 = FONT_SIZE + 1.0;
-const HEADER_HEIGHT: f32 = ROW_HEIGHT * 4.0 + 1.0;
+/// Header: controls text + divider.
+const HEADER_HEIGHT: f32 = ROW_HEIGHT + 1.0;
 const COLUMN_PADDING: f32 = 5.0;
 const ROW_GAP: f32 = 5.0;
 
@@ -47,10 +48,7 @@ const DIVIDER_COLOR: bevy::color::Color = bevy::color::Color::srgb(0.235, 0.51, 
 
 #[derive(Resource)]
 struct StressState {
-    fps_timer:     Timer,
     repeat_timer:  Timer,
-    fps:           String,
-    frame_ms:      String,
     row_count:     usize,
     /// Cached layout/world dimensions from window size.
     layout_width:  f32,
@@ -62,10 +60,7 @@ struct StressState {
 impl Default for StressState {
     fn default() -> Self {
         Self {
-            fps_timer:     Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating),
             repeat_timer:  Timer::from_seconds(KEY_REPEAT_SECS, TimerMode::Repeating),
-            fps:           "--".to_string(),
-            frame_ms:      "--".to_string(),
             row_count:     0,
             layout_width:  200.0,
             layout_height: 300.0,
@@ -88,11 +83,39 @@ fn main() {
         .add_plugins(DiegeticUiPlugin)
         .init_resource::<StressState>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (handle_input, handle_resize, update_panel))
+        .add_systems(
+            Update,
+            (
+                handle_input,
+                handle_resize,
+                update_fps_overlay,
+                update_panel,
+            ),
+        )
         .run();
 }
 
+#[derive(Component)]
+struct FpsOverlay;
+
 fn setup(mut commands: Commands) {
+    // 2D FPS overlay — uses Bevy's native text, no panel rebuild.
+    commands.spawn((
+        FpsOverlay,
+        Text::new("fps: --  ms: --"),
+        TextFont {
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(8.0),
+            right: Val::Px(8.0),
+            ..default()
+        },
+    ));
+
     commands.spawn((
         StressCamera,
         Camera3d::default(),
@@ -209,30 +232,41 @@ fn rows_per_column(layout_height: f32, is_first: bool) -> usize {
     count.max(1)
 }
 
-fn update_panel(
+fn update_fps_overlay(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
-    mut state: ResMut<StressState>,
-    mut panels: Query<&mut DiegeticPanel, With<StressPanel>>,
+    state: Res<StressState>,
+    mut overlay: Query<&mut Text, With<FpsOverlay>>,
+    mut timer: Local<Option<Timer>>,
 ) {
-    state.fps_timer.tick(time.delta());
-
-    if state.fps_timer.just_finished() {
-        let fps = diagnostics
-            .get(&FrameTimeDiagnosticsPlugin::FPS)
-            .and_then(bevy::diagnostic::Diagnostic::smoothed);
-        let frame_ms = diagnostics
-            .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
-            .and_then(bevy::diagnostic::Diagnostic::smoothed);
-        state.fps = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
-        state.frame_ms = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
+    let timer =
+        timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
+    timer.tick(time.delta());
+    if !timer.just_finished() {
+        return;
     }
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(bevy::diagnostic::Diagnostic::smoothed);
+    let frame_ms = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(bevy::diagnostic::Diagnostic::smoothed);
+    let fps_str = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
+    let ms_str = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
+    for mut text in &mut overlay {
+        **text = format!("fps: {fps_str}  ms: {ms_str}  rows: {}", state.row_count);
+    }
+}
 
+fn update_panel(state: Res<StressState>, mut panels: Query<&mut DiegeticPanel, With<StressPanel>>) {
     if !state.is_changed() {
         return;
     }
 
+    let t0 = std::time::Instant::now();
     let tree = build_tree(&state);
+    let tree_elapsed = t0.elapsed();
+    bevy::log::info!("build_tree: {} rows | {tree_elapsed:?}", state.row_count);
     for mut panel in &mut panels {
         panel.tree = tree.clone();
     }
@@ -277,19 +311,7 @@ fn build_tree(state: &StressState) -> bevy_diegetic::LayoutTree {
                     |b| {
                         // First column gets the header.
                         if col_idx == 0 {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .height(Sizing::FIT)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(1.0),
-                                |b| {
-                                    key_value_row(b, "fps:", &state.fps);
-                                    key_value_row(b, "ms:", &state.frame_ms);
-                                },
-                            );
                             b.text("'+' add  '-' remove", TextConfig::new(FONT_SIZE));
-                            key_value_row(b, "rows:", &format!("{}", state.row_count));
                             b.with(
                                 El::new()
                                     .width(Sizing::GROW)
@@ -311,7 +333,15 @@ fn build_tree(state: &StressState) -> bevy_diegetic::LayoutTree {
                         for i in start..end {
                             let label = format!("item {i}:");
                             let value = words[i % words.len()];
-                            key_value_row(b, &label, value);
+                            // Rainbow hue based on item index across total row count.
+                            #[allow(clippy::cast_precision_loss)]
+                            let hue = if state.row_count > 0 {
+                                360.0 * (i as f32 / state.row_count as f32)
+                            } else {
+                                0.0
+                            };
+                            let color = Color::hsl(hue, 0.8, 0.6);
+                            key_value_row_colored(b, &label, value, color);
                         }
                     },
                 );
@@ -322,7 +352,8 @@ fn build_tree(state: &StressState) -> bevy_diegetic::LayoutTree {
     builder.build()
 }
 
-fn key_value_row(b: &mut LayoutBuilder, label: &str, value: &str) {
+fn key_value_row_colored(b: &mut LayoutBuilder, label: &str, value: &str, color: Color) {
+    let config = TextConfig::new(FONT_SIZE).with_color(color);
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -330,14 +361,12 @@ fn key_value_row(b: &mut LayoutBuilder, label: &str, value: &str) {
             .direction(Direction::LeftToRight)
             .child_gap(ROW_GAP),
         |b| {
-            b.text(label, TextConfig::new(FONT_SIZE));
-            // Grow spacer pushes value to the right edge.
-            // The `child_gap` on the parent guarantees minimum separation.
+            b.text(label, config.clone());
             b.with(
                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                 |_| {},
             );
-            b.text(value, TextConfig::new(FONT_SIZE));
+            b.text(value, config);
         },
     );
 }

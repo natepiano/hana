@@ -1,6 +1,8 @@
 //! Systems for diegetic UI panel layout computation and debug rendering.
 
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use bevy::prelude::*;
 
@@ -11,15 +13,49 @@ use super::components::DiegeticTextMeasurer;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
 use crate::layout::RenderCommandKind;
+use crate::render::ShapedTextCache;
 
 /// Recomputes layout for panels whose [`DiegeticPanel`] component has changed.
+///
+/// Uses the [`ShapedTextCache`] for measurement: if a text string has already
+/// been shaped (by a previous layout or render pass), its dimensions are
+/// returned from the cache without calling parley. On cache miss, falls back
+/// to the parley-backed [`DiegeticTextMeasurer`].
 pub fn compute_panel_layouts(
     mut panels: Query<(&DiegeticPanel, &mut ComputedDiegeticPanel), Changed<DiegeticPanel>>,
     measurer: Res<DiegeticTextMeasurer>,
+    cache: Res<ShapedTextCache>,
 ) {
+    if panels.is_empty() {
+        return;
+    }
+
+    // Wrap the cache in Arc<Mutex<>> so the MeasureTextFn closure can capture it.
+    let cache_ref = Arc::new(Mutex::new(cache.clone()));
+    let parley_fn = Arc::clone(&measurer.0);
+
+    let cached_measure: crate::layout::MeasureTextFn =
+        Arc::new(move |text: &str, measure: &crate::layout::TextMeasure| {
+            // Check cache first.
+            let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(dims) = cache_guard.get_measurement(text, measure) {
+                return dims;
+            }
+            drop(cache_guard);
+            // Cache miss — fall back to parley.
+            parley_fn(text, measure)
+        });
+
     for (panel, mut computed) in &mut panels {
-        let engine = LayoutEngine::new(Arc::clone(&measurer.0));
+        let t0 = std::time::Instant::now();
+        let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(&panel.tree, panel.layout_width, panel.layout_height);
+        let elapsed = t0.elapsed();
+        bevy::log::info!(
+            "compute_panel_layouts: {} elements, {} commands | {elapsed:?}",
+            panel.tree.len(),
+            result.commands.len(),
+        );
         computed.result = Some(result);
     }
 }

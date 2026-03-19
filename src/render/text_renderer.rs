@@ -1,5 +1,9 @@
 //! Text rendering system — extracts text from layout results and builds glyph meshes.
 
+use std::collections::HashMap;
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
@@ -10,6 +14,7 @@ use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextConfig;
+use crate::layout::TextMeasure;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::text::DEFAULT_CANONICAL_SIZE;
@@ -20,6 +25,93 @@ use crate::text::MsdfAtlas;
 
 /// Z offset for text layer (above rectangles, below borders).
 const TEXT_Z_OFFSET: f32 = 0.001;
+
+// ── Shaped text cache ────────────────────────────────────────────────────────
+
+/// A single shaped glyph from parley — glyph ID plus its position relative to
+/// the text origin. This is the parley shaping output, independent of layout
+/// bounds or panel scale.
+#[derive(Clone, Debug)]
+pub struct ShapedGlyph {
+    /// Glyph index within the font.
+    pub glyph_id: u16,
+    /// X position relative to the text origin (accumulated advance + fine offset).
+    pub x:        f32,
+    /// Y position relative to the text origin (baseline-relative).
+    pub y:        f32,
+    /// Baseline of the line this glyph belongs to.
+    pub baseline: f32,
+}
+
+/// Cached shaping result for a text string at a specific font configuration.
+#[derive(Clone, Debug)]
+pub struct ShapedTextRun {
+    /// The shaped glyphs in order.
+    pub glyphs: Vec<ShapedGlyph>,
+}
+
+/// Cache key: hash of the text string + the full `TextMeasure` identity.
+#[derive(Clone, Eq, PartialEq, Hash)]
+struct ShapedCacheKey {
+    text_hash: u64,
+    font_id:   u16,
+    /// Size quantized to avoid floating-point hash issues (size * 100 as u32).
+    size_q:    u32,
+    weight_q:  u32,
+    slant:     u8,
+    lh_q:      u32,
+    ls_q:      i32,
+    ws_q:      i32,
+}
+
+impl ShapedCacheKey {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn new(text: &str, m: &TextMeasure) -> Self {
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        Self {
+            text_hash: hasher.finish(),
+            font_id:   m.font_id,
+            size_q:    (m.size * 100.0) as u32,
+            weight_q:  (m.weight.0 * 10.0) as u32,
+            slant:     match m.slant {
+                crate::layout::FontSlant::Normal => 0,
+                crate::layout::FontSlant::Italic => 1,
+                crate::layout::FontSlant::Oblique => 2,
+            },
+            lh_q:      (m.line_height * 100.0) as u32,
+            ls_q:      (m.letter_spacing * 100.0) as i32,
+            ws_q:      (m.word_spacing * 100.0) as i32,
+        }
+    }
+}
+
+/// Caches shaped text runs and measurement results to avoid redundant parley
+/// shaping.
+///
+/// Keyed by `(text_content, TextMeasure)`. Stores both the shaped glyph
+/// positions (for rendering) and the `TextDimensions` (for layout measurement).
+/// Shared between the layout engine's `MeasureTextFn` and the renderer's
+/// `shape_text_to_quads` via `Arc<Mutex<>>`.
+#[derive(Resource, Clone, Default)]
+pub struct ShapedTextCache {
+    entries:      HashMap<ShapedCacheKey, ShapedTextRun>,
+    measurements: HashMap<ShapedCacheKey, crate::layout::TextDimensions>,
+}
+
+impl ShapedTextCache {
+    /// Returns cached measurement dimensions for the given text + config,
+    /// or `None` if not yet cached.
+    #[must_use]
+    pub fn get_measurement(
+        &self,
+        text: &str,
+        measure: &TextMeasure,
+    ) -> Option<crate::layout::TextDimensions> {
+        let key = ShapedCacheKey::new(text, measure);
+        self.measurements.get(&key).copied()
+    }
+}
 
 /// Reusable parley shaping buffers.
 ///
@@ -54,6 +146,7 @@ impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
         app.init_resource::<TextShapingContext>();
+        app.init_resource::<ShapedTextCache>();
         app.add_systems(
             PostUpdate,
             extract_text_meshes.after(crate::plugin::compute_panel_layouts),
@@ -70,6 +163,7 @@ fn extract_text_meshes(
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
+    mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut commands: Commands,
@@ -104,6 +198,14 @@ fn extract_text_meshes(
             atlas_image,
         ));
 
+        // Batch all text quads into a single mesh per panel.
+        let t0 = std::time::Instant::now();
+        let mut all_quads = Vec::new();
+        let text_count = result
+            .commands
+            .iter()
+            .filter(|c| matches!(c.kind, RenderCommandKind::Text { .. }))
+            .count();
         for cmd in &result.commands {
             let (text, config) = match &cmd.kind {
                 RenderCommandKind::Text { text, config } => (text.as_str(), config),
@@ -117,31 +219,21 @@ fn extract_text_meshes(
                 &font_registry,
                 &mut atlas,
                 &shaping_cx,
+                &mut cache,
                 scale_x,
                 scale_y,
                 half_w,
                 half_h,
             );
 
-            if quads.is_empty() {
-                bevy::log::debug!("text_renderer: no quads for '{text}'");
-                continue;
-            }
-            let min_x = quads.iter().map(|q| q.position[0]).fold(f32::MAX, f32::min);
-            let max_x = quads
-                .iter()
-                .map(|q| q.position[0] + q.size[0])
-                .fold(f32::MIN, f32::max);
-            let extent_w = max_x - min_x;
-            let layout_w = cmd.bounds.width * scale_x;
-            bevy::log::debug!(
-                "text_renderer: '{text}' → {} quads | render_w={extent_w:.3} layout_w={layout_w:.3} ratio={:.2} | first size={:?}",
-                quads.len(),
-                extent_w / layout_w,
-                quads[0].size,
-            );
+            all_quads.extend_from_slice(&quads);
+        }
+        let shape_elapsed = t0.elapsed();
 
-            let mesh = build_glyph_mesh(&quads);
+        if !all_quads.is_empty() {
+            let t1 = std::time::Instant::now();
+            let mesh = build_glyph_mesh(&all_quads);
+            let mesh_elapsed = t1.elapsed();
             let mesh_handle = meshes.add(mesh);
 
             commands.entity(panel_entity).with_child((
@@ -150,28 +242,33 @@ fn extract_text_meshes(
                 MeshMaterial3d(material_handle.clone()),
                 Transform::IDENTITY,
             ));
+
+            bevy::log::info!(
+                "extract_text_meshes: {text_count} texts, {} glyphs | shape={shape_elapsed:?} mesh={mesh_elapsed:?}",
+                all_quads.len(),
+            );
         }
     }
 }
 
-/// Shapes text and produces glyph quads in panel-local coordinates.
+/// Shapes text via parley, using the cache when possible.
 ///
-/// Converts layout-space text into positioned glyph quads using parley for
-/// shaping and the MSDF atlas for glyph metrics. The returned quads are in
-/// panel-local space (center origin, Y-up) ready for mesh construction.
-#[allow(clippy::too_many_arguments)]
-pub fn shape_text_to_quads(
+/// On cache hit, returns the stored glyph run directly. On miss, shapes via
+/// parley and inserts into the cache.
+fn shape_text_cached(
     text: &str,
     config: &TextConfig,
-    bounds: &crate::layout::BoundingBox,
     font_registry: &FontRegistry,
-    atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
-    scale_x: f32,
-    scale_y: f32,
-    half_w: f32,
-    half_h: f32,
-) -> Vec<GlyphQuadData> {
+    cache: &mut ShapedTextCache,
+) -> ShapedTextRun {
+    let key = ShapedCacheKey::new(text, &config.as_measure());
+
+    if let Some(cached) = cache.entries.get(&key) {
+        return cached.clone();
+    }
+
+    // Cache miss — shape via parley.
     let font_cx = font_registry.font_context();
     let mut font_cx = font_cx.lock().unwrap_or_else(PoisonError::into_inner);
     let mut layout_cx = shaping_cx
@@ -192,8 +289,6 @@ pub fn shape_text_to_quads(
     builder.push_default(parley::style::StyleProperty::FontStack(
         parley::style::FontStack::Single(parley::style::FontFamily::Named(family_name.into())),
     ));
-    // Must match the measurer's line height so baseline positions agree
-    // with the layout engine's bounding boxes.
     let line_height = config.effective_line_height();
     builder.push_default(parley::style::StyleProperty::LineHeight(
         parley::style::LineHeight::Absolute(line_height),
@@ -201,81 +296,105 @@ pub fn shape_text_to_quads(
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
 
-    // Drop font and layout context locks before iterating glyph runs.
     drop(font_cx);
     drop(layout_cx);
 
-    let mut quads = Vec::new();
-    let font_data = crate::text::EMBEDDED_FONT;
-
+    let mut glyphs = Vec::new();
     for line in layout.lines() {
-        bevy::log::debug!(
-            "  line metrics: baseline={:.2} ascent={:.2} descent={:.2} line_height={:.2} bounds_y={:.2}",
-            line.metrics().baseline,
-            line.metrics().ascent,
-            line.metrics().descent,
-            line.metrics().line_height,
-            bounds.y,
-        );
         for item in line.items() {
             let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
                 continue;
             };
             let glyph_run = run.run();
-
             let mut advance_x = 0.0_f32;
             for cluster in glyph_run.clusters() {
                 for glyph in cluster.glyphs() {
                     #[allow(clippy::cast_possible_truncation)]
-                    let key = GlyphKey {
-                        font_id:     config.font_id(),
-                        glyph_index: glyph.id as u16,
-                    };
-
-                    let Some(metrics) = atlas.get_or_insert(key, font_data) else {
-                        advance_x += glyph.advance;
-                        continue;
-                    };
-
-                    // Glyph position in layout coordinates (Y-down).
-                    // run.offset() = x start of run, advance_x = accumulated advance,
-                    // glyph.x/y = fine offset within cluster.
-                    let glyph_x = bounds.x + run.offset() + advance_x + glyph.x;
-                    let glyph_y = bounds.y + run.baseline() - glyph.y;
-
-                    // Scale from canonical atlas pixels to layout units.
-                    #[allow(clippy::cast_precision_loss)]
-                    let em_scale = config.size() / DEFAULT_CANONICAL_SIZE as f32;
-
-                    // Glyph quad size in layout units.
-                    #[allow(clippy::cast_precision_loss)]
-                    let quad_w = metrics.pixel_width as f32 * em_scale;
-                    #[allow(clippy::cast_precision_loss)]
-                    let quad_h = metrics.pixel_height as f32 * em_scale;
-
-                    // Quad top-left in layout coordinates:
-                    // X: glyph origin + bearing (shifts left for SDF padding)
-                    // Y: baseline - bearing_y (shifts up from baseline to quad top)
-                    let quad_layout_x = metrics.bearing_x.mul_add(config.size(), glyph_x);
-                    let quad_layout_y = (-metrics.bearing_y).mul_add(config.size(), glyph_y);
-
-                    // Convert layout coordinates to panel-local (center origin, Y-up).
-                    let local_x = quad_layout_x.mul_add(scale_x, -half_w);
-                    let local_y = (-quad_layout_y).mul_add(scale_y, half_h);
-
-                    let quad_world_w = quad_w * scale_x;
-                    let quad_world_h = quad_h * scale_y;
-
-                    quads.push(GlyphQuadData {
-                        position: [local_x, local_y, TEXT_Z_OFFSET],
-                        size:     [quad_world_w, quad_world_h],
-                        uv_rect:  metrics.uv_rect,
+                    glyphs.push(ShapedGlyph {
+                        glyph_id: glyph.id as u16,
+                        x:        run.offset() + advance_x + glyph.x,
+                        y:        glyph.y,
+                        baseline: run.baseline(),
                     });
-
                     advance_x += glyph.advance;
                 }
             }
         }
+    }
+
+    // Store measurement alongside the shaped run.
+    let dims = crate::layout::TextDimensions {
+        width:  layout.full_width(),
+        height: layout.height(),
+    };
+    let run = ShapedTextRun { glyphs };
+    cache.measurements.insert(key.clone(), dims);
+    cache.entries.insert(key, run.clone());
+    run
+}
+
+/// Shapes text and produces glyph quads in panel-local coordinates.
+///
+/// Uses the [`ShapedTextCache`] to avoid redundant parley shaping. Quad
+/// construction from cached glyphs + atlas metrics is cheap arithmetic.
+#[allow(clippy::too_many_arguments)]
+pub fn shape_text_to_quads(
+    text: &str,
+    config: &TextConfig,
+    bounds: &crate::layout::BoundingBox,
+    font_registry: &FontRegistry,
+    atlas: &mut MsdfAtlas,
+    shaping_cx: &TextShapingContext,
+    cache: &mut ShapedTextCache,
+    scale_x: f32,
+    scale_y: f32,
+    half_w: f32,
+    half_h: f32,
+) -> Vec<GlyphQuadData> {
+    let shaped = shape_text_cached(text, config, font_registry, shaping_cx, cache);
+
+    let font_data = crate::text::EMBEDDED_FONT;
+    let linear: LinearRgba = config.color().into();
+    let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
+
+    #[allow(clippy::cast_precision_loss)]
+    let em_scale = config.size() / DEFAULT_CANONICAL_SIZE as f32;
+
+    let mut quads = Vec::with_capacity(shaped.glyphs.len());
+    for sg in &shaped.glyphs {
+        let glyph_key = GlyphKey {
+            font_id:     config.font_id(),
+            glyph_index: sg.glyph_id,
+        };
+
+        let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) else {
+            continue;
+        };
+
+        // Glyph position in layout coordinates (Y-down).
+        let glyph_x = bounds.x + sg.x;
+        let glyph_y = bounds.y + sg.baseline - sg.y;
+
+        // Glyph quad size in layout units.
+        #[allow(clippy::cast_precision_loss)]
+        let quad_w = metrics.pixel_width as f32 * em_scale;
+        #[allow(clippy::cast_precision_loss)]
+        let quad_h = metrics.pixel_height as f32 * em_scale;
+
+        // Quad top-left in layout coordinates.
+        let quad_layout_x = metrics.bearing_x.mul_add(config.size(), glyph_x);
+        let quad_layout_y = (-metrics.bearing_y).mul_add(config.size(), glyph_y);
+
+        // Convert to panel-local (center origin, Y-up).
+        let local_x = quad_layout_x.mul_add(scale_x, -half_w);
+        let local_y = (-quad_layout_y).mul_add(scale_y, half_h);
+
+        quads.push(GlyphQuadData {
+            position: [local_x, local_y, TEXT_Z_OFFSET],
+            size:     [quad_w * scale_x, quad_h * scale_y],
+            uv_rect:  metrics.uv_rect,
+            color:    color_arr,
+        });
     }
 
     quads

@@ -7,6 +7,7 @@ mod text_renderer;
 pub use glyph_quad::GlyphQuadData;
 pub use glyph_quad::build_glyph_mesh;
 pub use msdf_material::MsdfTextMaterial;
+pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;
 pub use text_renderer::TextShapingContext;
 pub use text_renderer::shape_text_to_quads;

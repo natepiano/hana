@@ -77,6 +77,7 @@ pub use plugin::ShowTextGizmos;
 // Render.
 pub use render::GlyphQuadData;
 pub use render::MsdfTextMaterial;
+pub use render::ShapedTextCache;
 pub use render::TextRenderPlugin;
 pub use render::TextShapingContext;
 pub use render::build_glyph_mesh;

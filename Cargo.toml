@@ -70,3 +70,7 @@ name    = "layout_perf"
 [[bench]]
 harness = false
 name    = "msdf_perf"
+
+[[bench]]
+harness = false
+name    = "text_render_perf"

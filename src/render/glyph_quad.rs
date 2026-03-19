@@ -12,6 +12,8 @@ pub struct GlyphQuadData {
     pub size:     [f32; 2],
     /// UV rectangle in the atlas: `[u_min, v_min, u_max, v_max]`.
     pub uv_rect:  [f32; 4],
+    /// RGBA color for this glyph (written as vertex color).
+    pub color:    [f32; 4],
 }
 
 /// Builds a `Mesh` from a list of glyph quads.
@@ -30,6 +32,7 @@ pub fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
     let mut positions = Vec::with_capacity(vertex_count);
     let mut normals = Vec::with_capacity(vertex_count);
     let mut uvs = Vec::with_capacity(vertex_count);
+    let mut colors = Vec::with_capacity(vertex_count);
     let mut indices = Vec::with_capacity(index_count);
 
     for (idx, quad) in quads.iter().enumerate() {
@@ -58,6 +61,12 @@ pub fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
         uvs.push([u_max, v_max]); // BR
         uvs.push([u_min, v_max]); // BL
 
+        // Per-glyph vertex color.
+        colors.push(quad.color);
+        colors.push(quad.color);
+        colors.push(quad.color);
+        colors.push(quad.color);
+
         // Two triangles (CCW winding for front-face toward +Z):
         // TL-BL-BR and TL-BR-TR.
         indices.push(base);
@@ -75,6 +84,7 @@ pub fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }
