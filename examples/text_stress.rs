@@ -6,12 +6,15 @@
 //! Rows fill columns left-to-right within a panel. When the panel reaches
 //! screen width, it pushes backward and a new panel spawns in front.
 
+use std::time::Instant;
+
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -107,6 +110,14 @@ struct StressPanel(usize);
 #[derive(Component)]
 struct FpsOverlay;
 
+#[derive(Resource, Default)]
+struct StressPerfStats {
+    last_panel_update_ms: f32,
+    last_tree_build_ms:   f32,
+    last_tree_builds:     usize,
+    last_panel_count:     usize,
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -116,6 +127,7 @@ fn main() {
         .add_plugins(DiegeticUiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .init_resource::<StressControls>()
+        .init_resource::<StressPerfStats>()
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_input, update_fps_overlay, update_panels))
         .run();
@@ -256,6 +268,8 @@ fn update_fps_overlay(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
     state: Res<StressControls>,
+    stress_perf: Res<StressPerfStats>,
+    diegetic_perf: Res<DiegeticPerfStats>,
     mut overlay: Query<&mut Text, With<FpsOverlay>>,
     mut timer: Local<Option<Timer>>,
 ) {
@@ -274,7 +288,18 @@ fn update_fps_overlay(
     let fps_str = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
     let ms_str = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
     for mut text in &mut overlay {
-        **text = format!("fps: {fps_str}  ms: {ms_str}  rows: {}", state.row_count);
+        **text = format!(
+            "fps: {fps_str}  ms: {ms_str}  rows: {}  panels: {}  upd: {:.1}ms  tree: {:.1}ms/{}  layout: {:.1}ms/{}  text: {:.1}ms/{}",
+            state.row_count,
+            stress_perf.last_panel_count,
+            stress_perf.last_panel_update_ms,
+            stress_perf.last_tree_build_ms,
+            stress_perf.last_tree_builds,
+            diegetic_perf.last_compute_ms,
+            diegetic_perf.last_compute_panels,
+            diegetic_perf.last_text_extract_ms,
+            diegetic_perf.last_text_extract_panels,
+        );
     }
 }
 
@@ -304,6 +329,7 @@ fn update_panels(
     existing: Query<(Entity, &StressPanel)>,
     mut panels: Query<(&mut DiegeticPanel, &mut Transform)>,
     mut commands: Commands,
+    mut perf: ResMut<StressPerfStats>,
     mut last_panel_count: Local<usize>,
     mut last_row_count: Local<Option<usize>>,
 ) {
@@ -311,6 +337,9 @@ fn update_panels(
         return;
     }
     *last_row_count = Some(state.row_count);
+    let update_start = Instant::now();
+    let mut tree_build_ms = 0.0_f32;
+    let mut tree_builds = 0_usize;
 
     let rpp = rows_per_panel();
     let words: Vec<&str> = SOURCE_TEXT.split_whitespace().collect();
@@ -333,14 +362,18 @@ fn update_panels(
 
     // Spawn missing.
     for idx in *last_panel_count..needed {
+        let tree_start = Instant::now();
+        let tree = build_panel_tree(&state, idx, rpp, &words);
+        tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
+        tree_builds += 1;
         commands.spawn((
             StressPanel(idx),
             DiegeticPanel {
-                tree:          build_panel_tree(&state, idx, rpp, &words),
-                layout_width:  MAX_LAYOUT_WIDTH,
+                tree,
+                layout_width: MAX_LAYOUT_WIDTH,
                 layout_height: LAYOUT_HEIGHT,
-                world_width:   ww,
-                world_height:  wh,
+                world_width: ww,
+                world_height: wh,
             },
             panel_transform(idx, needed, ww, wh),
         ));
@@ -351,12 +384,20 @@ fn update_panels(
     for (entity, sp) in &existing {
         if sp.0 < needed {
             if let Ok((mut panel, mut transform)) = panels.get_mut(entity) {
+                let tree_start = Instant::now();
                 panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
+                tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
+                tree_builds += 1;
                 // Only update transform for Z-depth repositioning.
                 *transform = panel_transform(sp.0, needed, ww, wh);
             }
         }
     }
+
+    perf.last_panel_update_ms = update_start.elapsed().as_secs_f32() * 1000.0;
+    perf.last_tree_build_ms = tree_build_ms;
+    perf.last_tree_builds = tree_builds;
+    perf.last_panel_count = needed;
 }
 
 /// Panel position — aligned with the ground plane's X axis.

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use std::time::Instant;
 
 use bevy::prelude::*;
 
@@ -15,6 +16,24 @@ use crate::layout::LayoutEngine;
 use crate::layout::RenderCommandKind;
 use crate::render::ShapedTextCache;
 
+/// Lightweight timing data for diegetic UI systems.
+///
+/// These values are updated by the built-in layout and text extraction systems
+/// so examples and applications can inspect where time is being spent during
+/// content-heavy updates.
+#[derive(Resource, Clone, Debug, Default, Reflect)]
+#[reflect(Resource)]
+pub struct DiegeticPerfStats {
+    /// Duration of the most recent `compute_panel_layouts` run, in milliseconds.
+    pub last_compute_ms:          f32,
+    /// Number of panels processed by the most recent layout run.
+    pub last_compute_panels:      usize,
+    /// Duration of the most recent text extraction run, in milliseconds.
+    pub last_text_extract_ms:     f32,
+    /// Number of panels processed by the most recent text extraction run.
+    pub last_text_extract_panels: usize,
+}
+
 /// Recomputes layout for panels whose [`DiegeticPanel`] component has changed.
 ///
 /// Uses the [`ShapedTextCache`] for measurement: if a text string has already
@@ -25,10 +44,16 @@ pub fn compute_panel_layouts(
     mut panels: Query<(&DiegeticPanel, &mut ComputedDiegeticPanel), Changed<DiegeticPanel>>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
+    mut perf: ResMut<DiegeticPerfStats>,
 ) {
     if panels.is_empty() {
+        perf.last_compute_ms = 0.0;
+        perf.last_compute_panels = 0;
         return;
     }
+
+    let start = Instant::now();
+    let mut panel_count = 0_usize;
 
     // Wrap the cache in Arc<Mutex<>> so the MeasureTextFn closure can capture it.
     let cache_ref = Arc::new(Mutex::new(cache.clone()));
@@ -47,18 +72,22 @@ pub fn compute_panel_layouts(
         });
 
     for (panel, mut computed) in &mut panels {
+        panel_count += 1;
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(&panel.tree, panel.layout_width, panel.layout_height);
 
-        if let Some(root) = result.computed.first() {
+        if let Some(bounds) = result.content_bounds() {
             let scale_x = panel.world_width / panel.layout_width;
             let scale_y = panel.world_height / panel.layout_height;
-            computed.world_width = root.bounds.width * scale_x;
-            computed.world_height = root.bounds.height * scale_y;
+            computed.world_width = bounds.width * scale_x;
+            computed.world_height = bounds.height * scale_y;
         }
 
         computed.result = Some(result);
     }
+
+    perf.last_compute_ms = start.elapsed().as_secs_f32() * 1000.0;
+    perf.last_compute_panels = panel_count;
 }
 
 /// Controls whether text bounding-box gizmos are drawn.

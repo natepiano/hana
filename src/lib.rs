@@ -71,6 +71,7 @@ pub use layout::TextWrap;
 pub use plugin::ComputedDiegeticPanel;
 pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelGizmoGroup;
+pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
 pub use plugin::ShowTextGizmos;

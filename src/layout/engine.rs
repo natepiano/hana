@@ -195,6 +195,18 @@ pub struct LayoutResult {
     pub commands: Vec<RenderCommand>,
 }
 
+impl LayoutResult {
+    /// Returns the bounding box of the first user-defined element.
+    ///
+    /// Element 0 is the implicit viewport-sized root created by
+    /// [`LayoutBuilder`]. The actual content starts at element 1 — the first
+    /// child passed to `builder.with()`. With `Sizing::FIT`, this element's
+    /// bounds reflect the real content size rather than the full viewport.
+    ///
+    /// Returns `None` if no user-defined element exists.
+    pub fn content_bounds(&self) -> Option<BoundingBox> { self.computed.get(1).map(|c| c.bounds) }
+}
+
 // ── Text wrapping ─────────────────────────────────────────────────────────────
 
 /// A single line of wrapped text with its measured width.

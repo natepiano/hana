@@ -6,6 +6,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use std::time::Instant;
 
 use bevy::prelude::*;
 
@@ -17,6 +18,7 @@ use crate::layout::TextConfig;
 use crate::layout::TextMeasure;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
+use crate::plugin::DiegeticPerfStats;
 use crate::text::DEFAULT_CANONICAL_SIZE;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -167,8 +169,19 @@ fn extract_text_meshes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut commands: Commands,
+    mut perf: ResMut<DiegeticPerfStats>,
 ) {
+    if panels.is_empty() {
+        perf.last_text_extract_ms = 0.0;
+        perf.last_text_extract_panels = 0;
+        return;
+    }
+
+    let start = Instant::now();
+    let mut panel_count = 0_usize;
+
     for (panel_entity, panel, computed) in &panels {
+        panel_count += 1;
         let Some(result) = &computed.result else {
             continue;
         };
@@ -235,6 +248,9 @@ fn extract_text_meshes(
             ));
         }
     }
+
+    perf.last_text_extract_ms = start.elapsed().as_secs_f32() * 1000.0;
+    perf.last_text_extract_panels = panel_count;
 }
 
 /// Shapes text via parley, using the cache when possible.
