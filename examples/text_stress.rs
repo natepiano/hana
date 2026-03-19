@@ -6,6 +6,7 @@
 //! Rows fill columns left-to-right within a panel. When the panel reaches
 //! screen width, it pushes backward and a new panel spawns in front.
 
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use bevy::diagnostic::DiagnosticsStore;
@@ -66,6 +67,7 @@ const REPEAT_START: f32 = 0.12;
 const REPEAT_MIN: f32 = 0.01;
 const REPEAT_ACCEL: f32 = 0.85;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
+const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +120,22 @@ struct StressPerfStats {
     last_panel_count:     usize,
 }
 
+#[derive(Clone, Copy)]
+struct PerfSnapshot {
+    timestamp:     f32,
+    fps:           f32,
+    frame_ms:      f32,
+    rows:          usize,
+    panels:        usize,
+    update_ms:     f32,
+    tree_ms:       f32,
+    tree_builds:   usize,
+    layout_ms:     f32,
+    layout_panels: usize,
+    text_ms:       f32,
+    text_panels:   usize,
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -134,15 +152,19 @@ fn main() {
 }
 
 fn setup(
+    asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let mono_font = asset_server.load("fonts/JetBrainsMono-Regular.ttf");
+
     // FPS overlay.
     commands.spawn((
         FpsOverlay,
         Text::new("fps: --  ms: --  rows: 0"),
         TextFont {
+            font: mono_font.clone(),
             font_size: 16.0,
             ..default()
         },
@@ -195,6 +217,7 @@ fn setup(
     commands.spawn((
         Text::new("'+' add  '-' remove  (hold to accelerate)"),
         TextFont {
+            font: mono_font,
             font_size: 14.0,
             ..default()
         },
@@ -272,6 +295,7 @@ fn update_fps_overlay(
     diegetic_perf: Res<DiegeticPerfStats>,
     mut overlay: Query<&mut Text, With<FpsOverlay>>,
     mut timer: Local<Option<Timer>>,
+    mut history: Local<VecDeque<PerfSnapshot>>,
 ) {
     let timer =
         timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
@@ -286,19 +310,82 @@ fn update_fps_overlay(
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
     let fps_str = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
+    #[allow(clippy::cast_possible_truncation)]
+    let fps_value = fps.unwrap_or(0.0) as f32;
+    #[allow(clippy::cast_possible_truncation)]
+    let frame_ms_value = frame_ms.unwrap_or(0.0) as f32;
     let ms_str = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
+
+    history.push_back(PerfSnapshot {
+        timestamp:     time.elapsed_secs(),
+        fps:           fps_value,
+        frame_ms:      frame_ms_value,
+        rows:          state.row_count,
+        panels:        stress_perf.last_panel_count,
+        update_ms:     stress_perf.last_panel_update_ms,
+        tree_ms:       stress_perf.last_tree_build_ms,
+        tree_builds:   stress_perf.last_tree_builds,
+        layout_ms:     diegetic_perf.last_compute_ms,
+        layout_panels: diegetic_perf.last_compute_panels,
+        text_ms:       diegetic_perf.last_text_extract_ms,
+        text_panels:   diegetic_perf.last_text_extract_panels,
+    });
+
+    let cutoff = time.elapsed_secs() - PERF_PEAK_WINDOW_SECS;
+    while history
+        .front()
+        .is_some_and(|sample| sample.timestamp < cutoff)
+    {
+        history.pop_front();
+    }
+
+    let mut max_fps = 0.0_f32;
+    let mut max_frame_ms = 0.0_f32;
+    let mut max_rows = 0_usize;
+    let mut max_panels = 0_usize;
+    let mut max_update_ms = 0.0_f32;
+    let mut max_tree_ms = 0.0_f32;
+    let mut max_tree_builds = 0_usize;
+    let mut max_layout_ms = 0.0_f32;
+    let mut max_layout_panels = 0_usize;
+    let mut max_text_ms = 0.0_f32;
+    let mut max_text_panels = 0_usize;
+    for sample in history.iter() {
+        max_fps = max_fps.max(sample.fps);
+        max_frame_ms = max_frame_ms.max(sample.frame_ms);
+        max_rows = max_rows.max(sample.rows);
+        max_panels = max_panels.max(sample.panels);
+        max_update_ms = max_update_ms.max(sample.update_ms);
+        max_tree_ms = max_tree_ms.max(sample.tree_ms);
+        max_tree_builds = max_tree_builds.max(sample.tree_builds);
+        max_layout_ms = max_layout_ms.max(sample.layout_ms);
+        max_layout_panels = max_layout_panels.max(sample.layout_panels);
+        max_text_ms = max_text_ms.max(sample.text_ms);
+        max_text_panels = max_text_panels.max(sample.text_panels);
+    }
+
     for mut text in &mut overlay {
         **text = format!(
-            "fps: {fps_str}  ms: {ms_str}  rows: {}  panels: {}  upd: {:.1}ms  tree: {:.1}ms/{}  layout: {:.1}ms/{}  text: {:.1}ms/{}",
-            state.row_count,
-            stress_perf.last_panel_count,
-            stress_perf.last_panel_update_ms,
-            stress_perf.last_tree_build_ms,
-            stress_perf.last_tree_builds,
-            diegetic_perf.last_compute_ms,
-            diegetic_perf.last_compute_panels,
-            diegetic_perf.last_text_extract_ms,
-            diegetic_perf.last_text_extract_panels,
+            "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms\n--------------------------------------------------------------------------\n{tag_state:<7} rows: {rows:>5} / {max_rows:>5}  panels: {panels:>3} / {max_panels:>3}",
+            tag_now = "now",
+            tag_max = "5s max",
+            tag_state = "count",
+            fps = fps_str,
+            frame = ms_str,
+            upd = format!("{:.1}", stress_perf.last_panel_update_ms),
+            tree = format!("{:.1}", stress_perf.last_tree_build_ms),
+            layout = format!("{:.1}", diegetic_perf.last_compute_ms),
+            text_ms = format!("{:.1}", diegetic_perf.last_text_extract_ms),
+            max_fps = format!("{:.0}", max_fps),
+            max_frame = format!("{:.1}", max_frame_ms),
+            max_upd = format!("{:.1}", max_update_ms),
+            max_tree = format!("{:.1}", max_tree_ms),
+            max_layout = format!("{:.1}", max_layout_ms),
+            max_text = format!("{:.1}", max_text_ms),
+            rows = state.row_count,
+            max_rows = max_rows,
+            panels = stress_perf.last_panel_count,
+            max_panels = max_panels,
         );
     }
 }
