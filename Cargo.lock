@@ -722,9 +722,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_brp_extras"
-version = "0.18.7"
+version = "0.18.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b3552a5537d0e8c6f14474297e6307e13449a9b1e32ae4c5a657e20da51fd49"
+checksum = "a02ba4aae38b176a1e0d942ea8736cec6b9eadeb7a1c9479078a0bdc8ac1366e"
 dependencies = [
  "bevy",
  "bevy_remote",
@@ -870,6 +870,7 @@ dependencies = [
 name = "bevy_diegetic"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "bevy",
  "bevy-inspector-egui",
  "bevy_brp_extras",
@@ -885,6 +886,7 @@ dependencies = [
  "msdfgen",
  "nalgebra",
  "parley",
+ "smallvec",
  "ttf-parser 0.18.1",
  "ttf-parser 0.25.1",
 ]
@@ -2954,19 +2956,18 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "etagere"
-version = "0.2.15"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc89bf99e5dc15954a60f707c1e09d7540e5cd9af85fa75caa0b510bc08c5342"
+checksum = "7ecb5c40d5683a270e077688f53a99eac51c1cb1ae5ba63b55590370cb3536bf"
 dependencies = [
  "euclid",
- "svg_fmt",
 ]
 
 [[package]]
 name = "euclid"
-version = "0.22.13"
+version = "0.22.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df61bf483e837f88d5c2291dcf55c67be7e676b3a51acc48db3a7b163b91ed63"
+checksum = "f1a05365e3b1c6d1650318537c7460c6923f1abdd272ad6842baa2b509957a06"
 dependencies = [
  "num-traits",
 ]

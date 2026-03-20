@@ -26,7 +26,6 @@
 //!     .build();
 //! ```
 
-use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
 
@@ -318,7 +317,7 @@ impl LayoutBuilder {
 /// a compiler error. Render-only fields (colors) are explicitly ignored
 /// with a comment — everything else is hashed.
 fn compute_layout_hash(tree: &LayoutTree) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = ahash::AHasher::default();
 
     tree.root.hash(&mut hasher);
     tree.elements.len().hash(&mut hasher);

@@ -9,6 +9,7 @@
 //! as the ergonomic front door and `Element` as the canonical storage format.
 
 use bevy::color::Color;
+use smallvec::SmallVec;
 
 use super::types::AlignX;
 use super::types::AlignY;
@@ -48,11 +49,16 @@ pub(super) struct Element {
     pub(super) content:       ElementContent,
 }
 
+/// Inline capacity for child index lists. Most elements have 1–4 children;
+/// only top-level containers (e.g., a column of many rows) exceed this and
+/// spill to the heap.
+const INLINE_CHILDREN: usize = 4;
+
 /// What an element contains.
 #[derive(Clone, Debug)]
 pub(super) enum ElementContent {
     /// Container with child element indices.
-    Children(Vec<usize>),
+    Children(SmallVec<[usize; INLINE_CHILDREN]>),
     /// Text leaf.
     Text {
         /// The text string.
@@ -136,7 +142,8 @@ impl LayoutTree {
                     children.push(child_index);
                 },
                 ElementContent::Empty => {
-                    parent_element.content = ElementContent::Children(vec![child_index]);
+                    parent_element.content =
+                        ElementContent::Children(SmallVec::from_elem(child_index, 1));
                 },
                 ElementContent::Text { .. } => {
                     // Text elements cannot have children — this is a programming error.

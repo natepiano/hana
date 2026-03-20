@@ -28,6 +28,7 @@ wildcard_imports        = "allow"
 missing_docs = "deny"
 
 [dependencies]
+ahash = "0.8"
 bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_asset",
   "bevy_gizmos",
@@ -35,18 +36,19 @@ bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_pbr",
   "bevy_render",
 ] }
-etagere = "0.2"
+etagere = "0.3.0"
 fdsm = "0.8"
 fdsm-ttf-parser = "0.2"
 image = { version = "0.25", default-features = false }
 nalgebra = "0.34"
 parley = { version = "0.7.0", default-features = false, features = ["std"] }
+smallvec = "1"
 ttf-parser = "0.25"
 
 [dev-dependencies]
 bevy                     = { version = "0.18.1", features = ["default_font"] }
 bevy-inspector-egui      = "0.36.0"
-bevy_brp_extras          = "0.18.7"
+bevy_brp_extras          = "0.18.8"
 bevy_panorbit_camera     = "0.34.0"
 bevy_panorbit_camera_ext = { path = "../bevy_panorbit_camera_ext" }
 bevy_window_manager      = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }

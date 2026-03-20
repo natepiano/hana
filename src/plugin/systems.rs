@@ -499,7 +499,41 @@ mod tests {
             },
         );
 
-        // 3. Tree build with pre-allocated capacity.
+        // 3. Builder only — no build() call — isolates hash cost.
+        run_timing(&format!("tree_build_no_hash_{rows}_rows"), iters, || {
+            let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(2.0)
+                    .padding(Padding::all(4.0))
+                    .border(Border::all(1.0, bevy::color::Color::WHITE)),
+                |b| {
+                    for label in &labels {
+                        b.with(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::FIT)
+                                .direction(Direction::LeftToRight)
+                                .child_gap(4.0),
+                            |b| {
+                                b.text(label, TextConfig::new(PERF_FONT_SIZE));
+                                b.with(
+                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                    |_| {},
+                                );
+                                b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                            },
+                        );
+                    }
+                },
+            );
+            std::hint::black_box(builder);
+        });
+
+        // 4. Tree build with pre-allocated capacity.
         run_timing(
             &format!("tree_build_preallocated_{rows}_rows"),
             iters,
