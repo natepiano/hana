@@ -330,4 +330,259 @@ mod tests {
             "dimension change must trigger full recompute, not color-only path"
         );
     }
+
+    // ── Performance timing tests (run with --run-ignored all) ────────
+
+    use crate::layout::Border;
+    use crate::layout::Direction;
+    use crate::layout::Padding;
+
+    const PERF_FONT_SIZE: f32 = 7.0;
+    const PERF_LAYOUT_WIDTH: f32 = 800.0;
+    const PERF_LAYOUT_HEIGHT: f32 = 1200.0;
+
+    fn build_stress_tree(row_count: usize) -> crate::layout::LayoutTree {
+        let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::FIT)
+                .direction(Direction::TopToBottom)
+                .child_gap(2.0)
+                .padding(Padding::all(4.0))
+                .border(Border::all(1.0, bevy::color::Color::WHITE)),
+            |b| {
+                for i in 0..row_count {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(4.0),
+                        |b| {
+                            b.text(&format!("item {i}:"), TextConfig::new(PERF_FONT_SIZE));
+                            b.with(
+                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                |_| {},
+                            );
+                            b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                        },
+                    );
+                }
+            },
+        );
+        builder.build()
+    }
+
+    fn build_stress_tree_colored(row_count: usize, hue_offset: f32) -> crate::layout::LayoutTree {
+        let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::FIT)
+                .direction(Direction::TopToBottom)
+                .child_gap(2.0)
+                .padding(Padding::all(4.0))
+                .border(Border::all(1.0, bevy::color::Color::WHITE)),
+            |b| {
+                #[allow(clippy::cast_precision_loss)]
+                for i in 0..row_count {
+                    let hue = (360.0 * (i as f32 / row_count as f32) + hue_offset) % 360.0;
+                    let color = bevy::color::Color::hsl(hue, 0.8, 0.6);
+                    let config = TextConfig::new(PERF_FONT_SIZE).with_color(color);
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(4.0),
+                        |b| {
+                            b.text(&format!("item {i}:"), config.clone());
+                            b.with(
+                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                |_| {},
+                            );
+                            b.text("value", config);
+                        },
+                    );
+                }
+            },
+        );
+        builder.build()
+    }
+
+    fn run_timing(label: &str, iterations: usize, mut f: impl FnMut()) {
+        // Warm up.
+        for _ in 0..5 {
+            f();
+        }
+        let start = std::time::Instant::now();
+        for _ in 0..iterations {
+            f();
+        }
+        let elapsed = start.elapsed();
+        let per_iter = elapsed / iterations as u32;
+        println!(
+            "{label}: {per_iter:?} per iteration ({iterations} iterations, {elapsed:?} total)"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_element_sizes() {
+        println!(
+            "TextConfig size: {} bytes",
+            std::mem::size_of::<TextConfig>()
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_tree_build() {
+        for &rows in &[10, 100, 500, 1000] {
+            let iters = if rows <= 100 { 1000 } else { 100 };
+            run_timing(&format!("tree_build_{rows}_rows"), iters, || {
+                std::hint::black_box(build_stress_tree(rows));
+            });
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_tree_build_breakdown() {
+        let rows = 1000;
+        let iters = 100;
+
+        // 1. Just the string formatting cost.
+        run_timing(&format!("string_format_{rows}_rows"), iters, || {
+            for i in 0..rows {
+                std::hint::black_box(format!("item {i}:"));
+            }
+        });
+
+        // 2. Tree build with pre-built strings (no format! per row).
+        let labels: Vec<String> = (0..rows).map(|i| format!("item {i}:")).collect();
+        run_timing(
+            &format!("tree_build_prebuilt_strings_{rows}_rows"),
+            iters,
+            || {
+                let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::FIT)
+                        .direction(Direction::TopToBottom)
+                        .child_gap(2.0)
+                        .padding(Padding::all(4.0))
+                        .border(Border::all(1.0, bevy::color::Color::WHITE)),
+                    |b| {
+                        for label in &labels {
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::FIT)
+                                    .direction(Direction::LeftToRight)
+                                    .child_gap(4.0),
+                                |b| {
+                                    b.text(label, TextConfig::new(PERF_FONT_SIZE));
+                                    b.with(
+                                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                        |_| {},
+                                    );
+                                    b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                                },
+                            );
+                        }
+                    },
+                );
+                std::hint::black_box(builder.build());
+            },
+        );
+
+        // 3. Tree build with pre-allocated capacity.
+        run_timing(
+            &format!("tree_build_preallocated_{rows}_rows"),
+            iters,
+            || {
+                let capacity = rows * 4 + 2;
+                let mut builder =
+                    LayoutBuilder::with_capacity(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT, capacity);
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::FIT)
+                        .direction(Direction::TopToBottom)
+                        .child_gap(2.0)
+                        .padding(Padding::all(4.0))
+                        .border(Border::all(1.0, bevy::color::Color::WHITE)),
+                    |b| {
+                        for label in &labels {
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::FIT)
+                                    .direction(Direction::LeftToRight)
+                                    .child_gap(4.0),
+                                |b| {
+                                    b.text(label, TextConfig::new(PERF_FONT_SIZE));
+                                    b.with(
+                                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                        |_| {},
+                                    );
+                                    b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                                },
+                            );
+                        }
+                    },
+                );
+                std::hint::black_box(builder.build());
+            },
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_engine_compute() {
+        let measure = monospace_measure();
+        for &rows in &[10, 100, 500, 1000] {
+            let tree = build_stress_tree(rows);
+            let engine = LayoutEngine::new(Arc::clone(&measure));
+            let iters = if rows <= 100 { 1000 } else { 100 };
+            run_timing(&format!("engine_compute_{rows}_rows"), iters, || {
+                std::hint::black_box(engine.compute(&tree, PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT));
+            });
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_patch_colors() {
+        let measure = monospace_measure();
+        for &rows in &[10, 100, 500, 1000] {
+            let tree = build_stress_tree(rows);
+            let engine = LayoutEngine::new(Arc::clone(&measure));
+            let mut result = engine.compute(&tree, PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
+
+            // Build a tree with different colors but same structure.
+            let colored_tree = build_stress_tree_colored(rows, 90.0);
+
+            let iters = if rows <= 100 { 10000 } else { 1000 };
+            run_timing(&format!("patch_colors_{rows}_rows"), iters, || {
+                patch_colors(&colored_tree, &mut result);
+            });
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn perf_layout_hash() {
+        for &rows in &[10, 100, 500, 1000] {
+            let tree = build_stress_tree(rows);
+            let hash = tree.layout_hash();
+            let iters = if rows <= 100 { 10000 } else { 1000 };
+            run_timing(&format!("layout_hash_compare_{rows}_rows"), iters, || {
+                std::hint::black_box(hash == tree.layout_hash());
+            });
+        }
+    }
 }

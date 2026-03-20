@@ -197,6 +197,26 @@ impl LayoutBuilder {
         }
     }
 
+    /// Like [`Self::new`] but pre-allocates capacity for the element vec.
+    ///
+    /// Each row of content typically creates 3–5 elements. Pre-allocating
+    /// avoids repeated vec reallocations during tree construction.
+    #[must_use]
+    pub fn with_capacity(width: f32, height: f32, capacity: usize) -> Self {
+        let mut tree = LayoutTree::with_capacity(capacity);
+        let root = tree.add(Element {
+            width: Sizing::Fixed(width),
+            height: Sizing::Fixed(height),
+            ..Element::default()
+        });
+        tree.set_root(root);
+
+        Self {
+            tree,
+            parent_stack: vec![root],
+        }
+    }
+
     /// Creates a new builder with a caller-supplied root element.
     ///
     /// This is the "my visible panel *is* the root" constructor. Unlike

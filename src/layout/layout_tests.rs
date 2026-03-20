@@ -1513,3 +1513,29 @@ fn grow_body_compression_20_rows() {
         "body height (full content, overflows panel)"
     );
 }
+
+#[test]
+#[ignore]
+fn perf_element_sizes() {
+    use super::element::Element;
+    use super::element::ElementContent;
+    println!("Element: {} bytes", std::mem::size_of::<Element>());
+    println!(
+        "ElementContent: {} bytes",
+        std::mem::size_of::<ElementContent>()
+    );
+    println!("TextConfig: {} bytes", std::mem::size_of::<TextConfig>());
+    println!("Border: {} bytes", std::mem::size_of::<Border>());
+    println!("Sizing: {} bytes", std::mem::size_of::<Sizing>());
+    println!("Padding: {} bytes", std::mem::size_of::<Padding>());
+    println!("String: {} bytes", std::mem::size_of::<String>());
+    println!("Vec<usize>: {} bytes", std::mem::size_of::<Vec<usize>>());
+    println!(
+        "Option<Color>: {} bytes",
+        std::mem::size_of::<Option<Color>>()
+    );
+    println!(
+        "Option<Border>: {} bytes",
+        std::mem::size_of::<Option<Border>>()
+    );
+}

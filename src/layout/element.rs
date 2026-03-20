@@ -105,6 +105,19 @@ impl LayoutTree {
     #[must_use]
     pub fn new() -> Self { Self::default() }
 
+    /// Creates a new empty layout tree with pre-allocated capacity.
+    ///
+    /// Use this when you know the approximate element count upfront to
+    /// avoid reallocation during tree construction.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            elements:    Vec::with_capacity(capacity),
+            root:        None,
+            layout_hash: 0,
+        }
+    }
+
     /// Adds an element and returns its index.
     pub(super) fn add(&mut self, element: Element) -> usize {
         let index = self.elements.len();
