@@ -43,11 +43,53 @@ pub struct DiegeticPanel {
 pub struct ComputedDiegeticPanel {
     /// The computed layout result, populated after the first layout pass.
     #[reflect(ignore)]
-    pub result:       Option<LayoutResult>,
+    pub result:             Option<LayoutResult>,
     /// Actual computed content width in world units.
-    pub world_width:  f32,
+    pub world_width:        f32,
     /// Actual computed content height in world units.
-    pub world_height: f32,
+    pub world_height:       f32,
+    /// Hash of the last fully computed layout (excludes colors).
+    ///
+    /// Used by `compute_panel_layouts` to skip layout recomputation when only
+    /// render-only properties (like text color) changed.
+    #[reflect(ignore)]
+    pub last_layout_hash:   u64,
+    /// `true` when the most recent update only changed colors, not layout.
+    ///
+    /// Set by `compute_panel_layouts` so the text renderer can take a fast
+    /// path (patch vertex colors) instead of rebuilding meshes from scratch.
+    #[reflect(ignore)]
+    pub color_only:         bool,
+    /// Layout width used for the last full computation.
+    #[reflect(ignore)]
+    pub last_layout_width:  f32,
+    /// Layout height used for the last full computation.
+    #[reflect(ignore)]
+    pub last_layout_height: f32,
+}
+
+impl ComputedDiegeticPanel {
+    /// Returns `true` when the panel's tree has only changed render-only
+    /// properties (colors) since the last full layout computation.
+    ///
+    /// The guard checks that:
+    /// - The tree has a valid (non-zero) layout hash.
+    /// - The hash matches the last fully computed layout.
+    /// - The panel dimensions haven't changed since the last computation.
+    /// - A previous layout result exists to patch into.
+    #[must_use]
+    pub(super) fn is_color_only_change(
+        &self,
+        tree_layout_hash: u64,
+        layout_width: f32,
+        layout_height: f32,
+    ) -> bool {
+        tree_layout_hash != 0
+            && tree_layout_hash == self.last_layout_hash
+            && (self.last_layout_width - layout_width).abs() < f32::EPSILON
+            && (self.last_layout_height - layout_height).abs() < f32::EPSILON
+            && self.result.is_some()
+    }
 }
 
 /// Resource providing text measurement for layout computation.

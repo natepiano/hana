@@ -45,8 +45,7 @@ mod types;
 
 pub use builder::El;
 pub use builder::LayoutBuilder;
-pub use element::Element;
-pub use element::ElementContent;
+pub use element::ElementColors;
 pub use element::LayoutTree;
 pub use engine::ComputedLayout;
 pub use engine::LayoutEngine;

@@ -577,6 +577,9 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
 
+    /// Sets the text color (mutable reference variant).
+    pub const fn set_color(&mut self, color: Color) { self.color = color; }
+
     /// Sets the text color.
     #[must_use]
     pub const fn with_color(mut self, color: Color) -> Self {
@@ -696,6 +699,26 @@ impl TextProps<ForStandalone> {
 
 impl Default for TextProps<ForStandalone> {
     fn default() -> Self { Self::new() }
+}
+
+impl TextProps<ForStandalone> {
+    /// Converts to a [`TextConfig`] for use with the shaping/rendering pipeline.
+    ///
+    /// Copies all shared measurement fields and color. The layout-specific
+    /// `wrap` field is set to [`TextWrap::None`] since standalone text does
+    /// not word-wrap by default.
+    #[must_use]
+    pub fn as_layout_config(&self) -> TextProps<ForLayout> {
+        TextProps::<ForLayout>::new(self.size)
+            .with_font(self.font_id)
+            .with_weight(self.weight)
+            .with_slant(self.slant)
+            .with_line_height(self.line_height)
+            .with_letter_spacing(self.letter_spacing)
+            .with_word_spacing(self.word_spacing)
+            .with_color(self.color)
+            .no_wrap()
+    }
 }
 
 // ── TextMeasure ──────────────────────────────────────────────────────────────

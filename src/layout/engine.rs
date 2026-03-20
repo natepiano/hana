@@ -852,8 +852,9 @@ fn position_and_render(
                                 height: wrap_result.line_height,
                             },
                             kind:        RenderCommandKind::Text {
-                                text:   line.text.clone(),
-                                config: config.clone(),
+                                text:       line.text.clone(),
+                                config:     config.clone(),
+                                quad_count: 0,
                             },
                             element_idx: index,
                         });
@@ -868,8 +869,9 @@ fn position_and_render(
                             height,
                         },
                         kind:        RenderCommandKind::Text {
-                            text:   text.clone(),
-                            config: config.clone(),
+                            text:       text.clone(),
+                            config:     config.clone(),
+                            quad_count: 0,
                         },
                         element_idx: index,
                     });

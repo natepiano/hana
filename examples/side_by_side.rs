@@ -603,6 +603,7 @@ fn clay_rects_to_render_commands(rects: &[ClayRect]) -> Vec<bevy_diegetic::Rende
                 kind:        RenderCommandKind::Text {
                     text,
                     config: TextConfig::new(font_size),
+                    quad_count: 0,
                 },
                 element_idx: 0,
             })
@@ -628,7 +629,7 @@ fn spawn_msdf_text_from_commands(
 ) {
     for cmd in render_commands {
         let (text, config) = match &cmd.kind {
-            RenderCommandKind::Text { text, config } => (text.as_str(), config),
+            RenderCommandKind::Text { text, config, .. } => (text.as_str(), config),
             _ => continue,
         };
 

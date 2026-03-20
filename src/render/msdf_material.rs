@@ -20,8 +20,29 @@ pub struct MsdfTextUniform {
     pub atlas_width:  f32,
     /// Atlas texture height in pixels.
     pub atlas_height: f32,
-    /// Padding for 16-byte alignment.
-    _padding:         f32,
+    /// Hue rotation applied to every vertex color, in radians (0.0 = none).
+    ///
+    /// Rotates the hue of all vertex colors in the mesh by this angle using
+    /// Rodrigues' rotation in RGB space. The rotation is performed entirely
+    /// on the GPU — changing this value has zero CPU cost and does not
+    /// trigger mesh rebuilds or change detection.
+    ///
+    /// The rotation is relative to whatever vertex colors are already baked
+    /// into the mesh. A value of `TAU / 3` (~2.09) shifts reds to greens,
+    /// greens to blues, blues to reds. A full `TAU` (6.28) completes the
+    /// cycle back to the original colors.
+    ///
+    /// Example uses:
+    /// - Scrolling a rainbow color scheme across text by incrementing the offset each frame.
+    /// - Pulsing or cycling a highlight color on selected text.
+    /// - Theming — shifting all text toward a warm or cool palette without rebuilding the layout
+    ///   tree or mesh.
+    /// - Damage/status effects — temporarily shifting text hue to indicate state changes in-game.
+    ///
+    /// Has no effect on text using the material's base `color` uniform
+    /// (white vertex colors). Only affects text with per-vertex colors set
+    /// via [`TextConfig::with_color`](crate::TextConfig::with_color).
+    pub hue_offset:   f32,
 }
 
 /// Material for rendering MSDF text glyphs.
@@ -56,7 +77,7 @@ impl MsdfTextMaterial {
                 sdf_range,
                 atlas_width: atlas_width as f32,
                 atlas_height: atlas_height as f32,
-                _padding: 0.0,
+                hue_offset: 0.0,
             },
             atlas_texture,
         }

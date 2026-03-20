@@ -23,36 +23,34 @@ use super::types::TextConfig;
 /// Elements are either containers (with children) or text leaves. The tree
 /// is built via [`LayoutTree`] and then sized/positioned by the layout engine.
 #[derive(Clone, Debug)]
-pub struct Element {
-    /// Optional debug name for this element.
-    pub name:          Option<String>,
+pub(super) struct Element {
     /// Width sizing rule.
-    pub width:         Sizing,
+    pub(super) width:         Sizing,
     /// Height sizing rule.
-    pub height:        Sizing,
+    pub(super) height:        Sizing,
     /// Interior padding.
-    pub padding:       Padding,
+    pub(super) padding:       Padding,
     /// Gap between children along the layout axis.
-    pub child_gap:     f32,
+    pub(super) child_gap:     f32,
     /// Direction children are laid out.
-    pub direction:     Direction,
+    pub(super) direction:     Direction,
     /// Horizontal alignment of children.
-    pub child_align_x: AlignX,
+    pub(super) child_align_x: AlignX,
     /// Vertical alignment of children.
-    pub child_align_y: AlignY,
+    pub(super) child_align_y: AlignY,
     /// Optional background color.
-    pub background:    Option<Color>,
+    pub(super) background:    Option<Color>,
     /// Optional border.
-    pub border:        Option<Border>,
+    pub(super) border:        Option<Border>,
     /// Whether this element clips overflowing children.
-    pub clip:          bool,
+    pub(super) clip:          bool,
     /// Content of this element.
-    pub content:       ElementContent,
+    pub(super) content:       ElementContent,
 }
 
 /// What an element contains.
 #[derive(Clone, Debug)]
-pub enum ElementContent {
+pub(super) enum ElementContent {
     /// Container with child element indices.
     Children(Vec<usize>),
     /// Text leaf.
@@ -69,7 +67,6 @@ pub enum ElementContent {
 impl Default for Element {
     fn default() -> Self {
         Self {
-            name:          None,
             width:         Sizing::FIT,
             height:        Sizing::FIT,
             padding:       Padding::default(),
@@ -92,9 +89,15 @@ impl Default for Element {
 #[derive(Clone, Debug, Default)]
 pub struct LayoutTree {
     /// All elements in insertion order.
-    pub elements: Vec<Element>,
+    pub(super) elements:    Vec<Element>,
     /// Index of the root element.
-    pub root:     Option<usize>,
+    pub(super) root:        Option<usize>,
+    /// Hash of layout-relevant fields (excludes colors).
+    ///
+    /// Computed once by [`LayoutBuilder::build()`]. Two trees with the same
+    /// `layout_hash` have identical structure and sizing — only render-only
+    /// properties like text color or background color may differ.
+    pub(super) layout_hash: u64,
 }
 
 impl LayoutTree {
@@ -103,7 +106,7 @@ impl LayoutTree {
     pub fn new() -> Self { Self::default() }
 
     /// Adds an element and returns its index.
-    pub fn add(&mut self, element: Element) -> usize {
+    pub(super) fn add(&mut self, element: Element) -> usize {
         let index = self.elements.len();
         self.elements.push(element);
         index
@@ -112,7 +115,7 @@ impl LayoutTree {
     /// Adds an element as a child of the given parent.
     ///
     /// Returns the child's index.
-    pub fn add_child(&mut self, parent: usize, element: Element) -> usize {
+    pub(super) fn add_child(&mut self, parent: usize, element: Element) -> usize {
         let child_index = self.add(element);
         if let Some(parent_element) = self.elements.get_mut(parent) {
             match &mut parent_element.content {
@@ -133,11 +136,11 @@ impl LayoutTree {
     }
 
     /// Sets the root element index.
-    pub const fn set_root(&mut self, index: usize) { self.root = Some(index); }
+    pub(super) const fn set_root(&mut self, index: usize) { self.root = Some(index); }
 
     /// Returns an iterator over child indices of the given element.
     #[must_use]
-    pub fn children_of(&self, index: usize) -> &[usize] {
+    pub(super) fn children_of(&self, index: usize) -> &[usize] {
         self.elements
             .get(index)
             .map_or(&[], |element| match &element.content {
@@ -153,4 +156,81 @@ impl LayoutTree {
     /// Returns `true` if the tree has no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
+
+    /// Returns the layout hash (excludes colors).
+    ///
+    /// Two trees with the same hash have identical structure and sizing —
+    /// only render-only properties like text color may differ.
+    #[must_use]
+    pub const fn layout_hash(&self) -> u64 { self.layout_hash }
+
+    /// Returns the render-only colors for the element at `index`, or `None`
+    /// if the index is out of bounds.
+    #[must_use]
+    pub fn element_colors_at(&self, index: usize) -> Option<ElementColors> {
+        let element = self.elements.get(index)?;
+        Some(ElementColors {
+            text:       match &element.content {
+                ElementContent::Text { config, .. } => Some(config.color()),
+                _ => None,
+            },
+            background: element.background,
+            border:     element.border.map(|b| b.color),
+        })
+    }
+
+    /// Visits every element and lets the caller update render-only colors.
+    ///
+    /// The closure receives the element index and an [`ElementColors`] view
+    /// that exposes text color, background color, and border color. Mutating
+    /// these does not affect layout — the [`layout_hash`](Self::layout_hash)
+    /// remains unchanged, so the layout system will take the color-only fast
+    /// path automatically.
+    ///
+    /// ```ignore
+    /// tree.recolor(|idx, colors| {
+    ///     colors.set_text(Color::RED);
+    ///     colors.set_background(Some(Color::BLUE));
+    ///     colors.set_border(Color::BLACK);
+    /// });
+    /// ```
+    pub fn recolor(&mut self, mut f: impl FnMut(usize, &mut ElementColors)) {
+        for (idx, element) in self.elements.iter_mut().enumerate() {
+            let mut colors = ElementColors {
+                text:       match &element.content {
+                    ElementContent::Text { config, .. } => Some(config.color()),
+                    _ => None,
+                },
+                background: element.background,
+                border:     element.border.map(|b| b.color),
+            };
+            f(idx, &mut colors);
+            // Write back.
+            if let ElementContent::Text { config, .. } = &mut element.content {
+                if let Some(c) = colors.text {
+                    config.set_color(c);
+                }
+            }
+            element.background = colors.background;
+            if let Some(border) = &mut element.border {
+                if let Some(c) = colors.border {
+                    border.color = c;
+                }
+            }
+        }
+    }
+}
+
+/// Mutable view of an element's render-only color properties.
+///
+/// Passed to the closure in [`LayoutTree::recolor`]. Only non-`None` fields
+/// are applicable — `text` is `None` for non-text elements, `border` is
+/// `None` for elements without a border.
+pub struct ElementColors {
+    /// Text color (`None` for non-text elements).
+    pub text:       Option<Color>,
+    /// Background fill color.
+    pub background: Option<Color>,
+    /// Border color (`None` for elements without a border).
+    pub border:     Option<Color>,
 }

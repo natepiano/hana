@@ -162,6 +162,11 @@ impl MsdfAtlas {
     /// Looks up or rasterizes a glyph, returning its metrics.
     ///
     /// If the glyph is not cached, uses `fdsm` to generate the MSDF bitmap,
+    /// Returns metrics for a previously inserted glyph, or `None` if it
+    /// hasn't been rasterized yet.
+    #[must_use]
+    pub fn peek(&self, key: GlyphKey) -> Option<GlyphMetrics> { self.glyphs.get(&key).copied() }
+
     /// packs it into the atlas via `etagere`, and copies the pixel data.
     ///
     /// Returns `None` if the glyph has no outline (e.g., space) or if the

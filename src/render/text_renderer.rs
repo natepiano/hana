@@ -151,17 +151,27 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<ShapedTextCache>();
         app.add_systems(
             PostUpdate,
-            extract_text_meshes.after(crate::plugin::compute_panel_layouts),
+            (
+                extract_text_meshes.after(crate::plugin::compute_panel_layouts),
+                super::world_text::render_world_text,
+            ),
         );
     }
 }
 
 /// Extracts `RenderCommandKind::Text` entries from computed panels and
 /// builds glyph mesh entities with [`MsdfTextMaterial`].
+///
+/// When `ComputedDiegeticPanel::color_only` is set, takes a fast path that
+/// patches vertex colors on the existing mesh instead of rebuilding from
+/// scratch.
 #[allow(clippy::too_many_arguments)]
 fn extract_text_meshes(
-    panels: Query<(Entity, &DiegeticPanel, &ComputedDiegeticPanel), Changed<ComputedDiegeticPanel>>,
-    old_text: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
+    mut panels: Query<
+        (Entity, &DiegeticPanel, &mut ComputedDiegeticPanel),
+        Changed<ComputedDiegeticPanel>,
+    >,
+    old_text: Query<(Entity, &ChildOf, &DiegeticTextMesh, &Mesh3d)>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -180,14 +190,34 @@ fn extract_text_meshes(
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
-    for (panel_entity, panel, computed) in &panels {
+    for (panel_entity, panel, mut computed) in &mut panels {
         panel_count += 1;
         let Some(result) = &computed.result else {
             continue;
         };
 
+        // ── Color-only fast path ─────────────────────────────────────────
+        if computed.color_only {
+            if let Some(mesh_handle) = find_text_mesh_handle(&old_text, panel_entity) {
+                if let Some(mesh) = meshes.get_mut(&mesh_handle) {
+                    let colors = build_color_array(result);
+                    debug_assert_eq!(
+                        colors.len(),
+                        mesh.count_vertices(),
+                        "color array must match mesh vertex count"
+                    );
+                    if !colors.is_empty() {
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // ── Full rebuild path ────────────────────────────────────────────
+
         // Despawn previous text mesh children for this panel.
-        for (entity, child_of) in &old_text {
+        for (entity, child_of, _, _) in &old_text {
             if child_of.parent() == panel_entity {
                 commands.entity(entity).despawn();
             }
@@ -211,17 +241,19 @@ fn extract_text_meshes(
             atlas_image,
         ));
 
-        // Batch all text quads into a single mesh per panel.
+        // Batch all text quads into a single mesh per panel, and record the
+        // emitted quad count on each text command for the color-only fast path.
+        let result_mut = computed.result.as_mut().unwrap();
         let mut all_quads = Vec::new();
-        for cmd in &result.commands {
+        for cmd in &mut result_mut.commands {
             let (text, config) = match &cmd.kind {
-                RenderCommandKind::Text { text, config } => (text.as_str(), config),
+                RenderCommandKind::Text { text, config, .. } => (text.as_str(), config.clone()),
                 _ => continue,
             };
 
             let quads = shape_text_to_quads(
                 text,
-                config,
+                &config,
                 &cmd.bounds,
                 &font_registry,
                 &mut atlas,
@@ -232,6 +264,10 @@ fn extract_text_meshes(
                 half_w,
                 half_h,
             );
+
+            if let RenderCommandKind::Text { quad_count, .. } = &mut cmd.kind {
+                *quad_count = quads.len();
+            }
 
             all_quads.extend_from_slice(&quads);
         }
@@ -253,11 +289,54 @@ fn extract_text_meshes(
     perf.last_text_extract_panels = panel_count;
 }
 
+/// Finds the mesh handle of the existing text mesh child for a panel entity.
+fn find_text_mesh_handle(
+    old_text: &Query<(Entity, &ChildOf, &DiegeticTextMesh, &Mesh3d)>,
+    panel_entity: Entity,
+) -> Option<Handle<Mesh>> {
+    old_text
+        .iter()
+        .find(|(_, child_of, _, _)| child_of.parent() == panel_entity)
+        .map(|(_, _, _, mesh3d)| mesh3d.0.clone())
+}
+
+/// Builds a flat vertex color array from render commands using the stored
+/// `quad_count` on each text command.
+///
+/// Each quad produces 4 vertices, all sharing the same color. The order
+/// matches the original mesh construction in [`build_glyph_mesh`].
+///
+/// Uses the `quad_count` recorded during the last full mesh build rather
+/// than the shaped glyph count, because `shape_text_to_quads` skips glyphs
+/// without atlas entries (spaces, etc.). Using the shaped count would
+/// misalign colors across text commands.
+fn build_color_array(result: &crate::layout::LayoutResult) -> Vec<[f32; 4]> {
+    let mut colors = Vec::new();
+    for cmd in &result.commands {
+        let (config, quad_count) = match &cmd.kind {
+            RenderCommandKind::Text {
+                config, quad_count, ..
+            } => (config, *quad_count),
+            _ => continue,
+        };
+        let linear: LinearRgba = config.color().into();
+        let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
+        for _ in 0..quad_count {
+            // 4 vertices per quad.
+            colors.push(color_arr);
+            colors.push(color_arr);
+            colors.push(color_arr);
+            colors.push(color_arr);
+        }
+    }
+    colors
+}
+
 /// Shapes text via parley, using the cache when possible.
 ///
 /// On cache hit, returns the stored glyph run directly. On miss, shapes via
 /// parley and inserts into the cache.
-fn shape_text_cached(
+pub(crate) fn shape_text_cached(
     text: &str,
     config: &TextConfig,
     font_registry: &FontRegistry,

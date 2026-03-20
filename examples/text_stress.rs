@@ -20,6 +20,7 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::MsdfTextMaterial;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
@@ -63,10 +64,12 @@ const STACK_DEPTH: f32 = 1.25;
 
 // ── Key repeat ───────────────────────────────────────────────────────────────
 
-const REPEAT_START: f32 = 0.12;
-const REPEAT_MIN: f32 = 0.01;
-const REPEAT_ACCEL: f32 = 0.85;
+const REPEAT_START: f32 = 0.08;
+const REPEAT_MIN: f32 = 0.001;
+const REPEAT_ACCEL: f32 = 0.75;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
+/// Frozen panels recolor every N row changes to avoid per-frame GPU re-uploads.
+const RECOLOR_BATCH_SIZE: usize = 20;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -93,6 +96,11 @@ struct StressControls {
     repeat_interval: f32,
     hold_duration:   f32,
     row_count:       usize,
+    /// Color rotation angle in radians. Single source of truth for both
+    /// the GPU shader path (idle) and CPU recoloring path (key-held).
+    hue_angle:       f32,
+    /// Whether the key is currently held (pauses color rotation).
+    key_held:        bool,
 }
 
 impl Default for StressControls {
@@ -102,6 +110,8 @@ impl Default for StressControls {
             repeat_interval: REPEAT_START,
             hold_duration:   0.0,
             row_count:       0,
+            hue_angle:       0.0,
+            key_held:        false,
         }
     }
 }
@@ -110,7 +120,13 @@ impl Default for StressControls {
 struct StressPanel(usize);
 
 #[derive(Component)]
+struct GroundPlane;
+
+#[derive(Component)]
 struct FpsOverlay;
+
+#[derive(Component)]
+struct StatsOverlay;
 
 #[derive(Resource, Default)]
 struct StressPerfStats {
@@ -147,7 +163,19 @@ fn main() {
         .init_resource::<StressControls>()
         .init_resource::<StressPerfStats>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (handle_input, update_fps_overlay, update_panels))
+        .add_systems(
+            Update,
+            (
+                handle_input,
+                advance_color_rotation,
+                update_fps_overlay,
+                update_stats_overlay,
+                update_panels,
+                resize_ground_plane,
+            )
+                .chain(),
+        )
+        .add_systems(Last, sync_hue_offset)
         .run();
 }
 
@@ -179,7 +207,8 @@ fn setup(
 
     // Ground plane.
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        GroundPlane,
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, STACK_DEPTH))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.3, 0.5, 0.3),
             double_sided: true,
@@ -217,7 +246,7 @@ fn setup(
     commands.spawn((
         Text::new("'+' add  '-' remove  (hold to accelerate)"),
         TextFont {
-            font: mono_font,
+            font: mono_font.clone(),
             font_size: 14.0,
             ..default()
         },
@@ -226,6 +255,24 @@ fn setup(
             position_type: PositionType::Absolute,
             bottom: Val::Px(12.0),
             left: Val::Px(12.0),
+            ..default()
+        },
+    ));
+
+    // Stats overlay (bottom right).
+    commands.spawn((
+        StatsOverlay,
+        Text::new("rows: 0  panels: 0"),
+        TextFont {
+            font: mono_font,
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(12.0),
+            right: Val::Px(12.0),
             ..default()
         },
     ));
@@ -242,6 +289,7 @@ fn handle_input(
     let removing = keyboard.pressed(KeyCode::Minus);
 
     if !adding && !removing {
+        state.key_held = false;
         if state.hold_duration != 0.0 || (state.repeat_interval - REPEAT_START).abs() > f32::EPSILON
         {
             state.hold_duration = 0.0;
@@ -252,15 +300,18 @@ fn handle_input(
         }
         return;
     }
+    state.key_held = true;
 
     if keyboard.just_pressed(KeyCode::Equal) {
         state.row_count += 1;
+        advance_hue(&mut *state);
         state.hold_duration = 0.0;
         state.repeat_timer.reset();
         return;
     }
     if keyboard.just_pressed(KeyCode::Minus) && state.row_count > 0 {
         state.row_count -= 1;
+        advance_hue(&mut *state);
         state.hold_duration = 0.0;
         state.repeat_timer.reset();
         return;
@@ -282,7 +333,104 @@ fn handle_input(
         } else if state.row_count > 0 {
             state.row_count -= 1;
         }
+        advance_hue(&mut *state);
     }
+}
+
+/// Advances `hue_angle` by one row's worth of hue.
+#[allow(clippy::cast_precision_loss)]
+fn advance_hue(state: &mut StressControls) {
+    if state.row_count > 0 {
+        let step = std::f32::consts::TAU / state.row_count as f32;
+        state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
+    }
+}
+
+// ── Color rotation ──────────────────────────────────────────────────────────
+
+/// Advances the rainbow hue angle when idle (no key held, after 1s delay).
+///
+/// `hue_angle` is the single source of truth for rotation. The shader
+/// `hue_offset` is kept in sync by [`sync_hue_offset`].
+#[allow(clippy::cast_precision_loss)]
+fn advance_color_rotation(
+    mut state: ResMut<StressControls>,
+    time: Res<Time>,
+    mut idle_timer: Local<f32>,
+) {
+    if state.row_count == 0 || state.key_held {
+        *idle_timer = 0.0;
+        return;
+    }
+
+    *idle_timer += time.delta_secs();
+    if *idle_timer < 1.0 {
+        return;
+    }
+
+    // Advance by one row's worth of hue per frame.
+    let step = std::f32::consts::TAU / state.row_count as f32;
+    state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
+}
+
+/// Keeps the shader `hue_offset` in sync with `hue_angle` on all text
+/// materials every frame. Runs in `PostUpdate` so newly spawned text
+/// meshes also pick up the current angle.
+fn sync_hue_offset(
+    state: Res<StressControls>,
+    children: Query<(&ChildOf, &MeshMaterial3d<MsdfTextMaterial>)>,
+    panels: Query<Entity, With<StressPanel>>,
+    mut materials: ResMut<Assets<MsdfTextMaterial>>,
+) {
+    if state.hue_angle.abs() < f32::EPSILON {
+        return;
+    }
+
+    for panel_entity in &panels {
+        for (child_of, mat_handle) in &children {
+            if child_of.parent() == panel_entity {
+                if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                    if (mat.uniforms.hue_offset - state.hue_angle).abs() > f32::EPSILON {
+                        mat.uniforms.hue_offset = state.hue_angle;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Recolors text in a panel tree using global row indices.
+#[allow(clippy::cast_precision_loss)]
+fn recolor_with_offset(
+    tree: &mut bevy_diegetic::LayoutTree,
+    state: &StressControls,
+    panel_start: usize,
+    has_header: bool,
+) {
+    let mut text_idx = 0_usize;
+
+    tree.recolor(|_element_idx, colors| {
+        if colors.text.is_none() {
+            return;
+        }
+
+        // Skip the header text in panel 0.
+        if has_header && text_idx == 0 {
+            text_idx += 1;
+            return;
+        }
+
+        let data_text_idx = if has_header { text_idx - 1 } else { text_idx };
+        let row_global = panel_start + data_text_idx / 2;
+
+        let hue = if state.row_count > 0 {
+            360.0 * (row_global as f32 / state.row_count as f32)
+        } else {
+            0.0
+        };
+        colors.text = Some(Color::hsl(hue, 0.8, 0.6));
+        text_idx += 1;
+    });
 }
 
 // ── FPS overlay ──────────────────────────────────────────────────────────────
@@ -366,10 +514,9 @@ fn update_fps_overlay(
 
     for mut text in &mut overlay {
         **text = format!(
-            "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms\n--------------------------------------------------------------------------\n{tag_state:<7} rows: {rows:>5} / {max_rows:>5}  panels: {panels:>3} / {max_panels:>3}",
+            "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms",
             tag_now = "now",
             tag_max = "5s max",
-            tag_state = "count",
             fps = fps_str,
             frame = ms_str,
             upd = format!("{:.1}", stress_perf.last_panel_update_ms),
@@ -382,10 +529,19 @@ fn update_fps_overlay(
             max_tree = format!("{:.1}", max_tree_ms),
             max_layout = format!("{:.1}", max_layout_ms),
             max_text = format!("{:.1}", max_text_ms),
-            rows = state.row_count,
-            max_rows = max_rows,
-            panels = stress_perf.last_panel_count,
-            max_panels = max_panels,
+        );
+    }
+}
+
+fn update_stats_overlay(
+    state: Res<StressControls>,
+    stress_perf: Res<StressPerfStats>,
+    mut overlay: Query<&mut Text, With<StatsOverlay>>,
+) {
+    for mut text in &mut overlay {
+        **text = format!(
+            "panels: {}  rows: {}",
+            stress_perf.last_panel_count, state.row_count,
         );
     }
 }
@@ -419,6 +575,7 @@ fn update_panels(
     mut perf: ResMut<StressPerfStats>,
     mut last_panel_count: Local<usize>,
     mut last_row_count: Local<Option<usize>>,
+    mut last_recolor_row_count: Local<usize>,
 ) {
     if last_row_count.as_ref() == Some(&state.row_count) {
         return;
@@ -467,15 +624,26 @@ fn update_panels(
     }
     *last_panel_count = needed;
 
-    // Update existing.
+    // Update existing panels.
+    let active_panel_idx = needed - 1;
+    let recolor_frozen = state.row_count.abs_diff(*last_recolor_row_count) >= RECOLOR_BATCH_SIZE;
+    if recolor_frozen {
+        *last_recolor_row_count = state.row_count;
+    }
+
     for (entity, sp) in &existing {
         if sp.0 < needed {
             if let Ok((mut panel, mut transform)) = panels.get_mut(entity) {
-                let tree_start = Instant::now();
-                panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
-                tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
-                tree_builds += 1;
-                // Only update transform for Z-depth repositioning.
+                if sp.0 == active_panel_idx {
+                    // Active panel — content changed, rebuild tree.
+                    let tree_start = Instant::now();
+                    panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
+                    tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
+                    tree_builds += 1;
+                } else if recolor_frozen {
+                    // Frozen panel — batch recolor every N rows.
+                    recolor_frozen_panel(&mut panel.tree, &state, sp.0, rpp);
+                }
                 *transform = panel_transform(sp.0, needed, ww, wh);
             }
         }
@@ -485,6 +653,33 @@ fn update_panels(
     perf.last_tree_build_ms = tree_build_ms;
     perf.last_tree_builds = tree_builds;
     perf.last_panel_count = needed;
+}
+
+/// Resizes and repositions the ground plane to cover all stacked panels.
+#[allow(clippy::cast_precision_loss)]
+fn resize_ground_plane(
+    perf: Res<StressPerfStats>,
+    mut ground: Query<(&mut Mesh3d, &mut Transform), With<GroundPlane>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut last_panel_count: Local<usize>,
+) {
+    if perf.last_panel_count == *last_panel_count {
+        return;
+    }
+    *last_panel_count = perf.last_panel_count;
+
+    // Shallow plane: just deep enough to reach one STACK_DEPTH behind the
+    // last panel so shadows land on the ground.
+    let depth = (perf.last_panel_count.max(1)) as f32 * STACK_DEPTH;
+    let width = GROUND_SIZE;
+
+    for (mut mesh3d, mut transform) in &mut ground {
+        mesh3d.0 = meshes.add(Plane3d::default().mesh().size(width, depth));
+        // Center the plane under the panels. Front edge at z = GROUND_SIZE/2,
+        // back edge at z = GROUND_SIZE/2 - depth.
+        let center_z = GROUND_SIZE * 0.5 - depth * 0.5;
+        transform.translation.z = center_z;
+    }
 }
 
 /// Panel position — aligned with the ground plane's X axis.
@@ -602,4 +797,14 @@ fn build_panel_tree(
     );
 
     builder.build()
+}
+
+/// Recolors text elements in a frozen panel's tree without rebuilding it.
+fn recolor_frozen_panel(
+    tree: &mut bevy_diegetic::LayoutTree,
+    state: &StressControls,
+    panel_idx: usize,
+    rpp: usize,
+) {
+    recolor_with_offset(tree, state, panel_idx * rpp, panel_idx == 0);
 }

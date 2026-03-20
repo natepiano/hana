@@ -15,7 +15,19 @@ struct MsdfTextMaterial {
     sdf_range: f32,
     atlas_width: f32,
     atlas_height: f32,
-    _padding: f32,
+    hue_offset: f32,
+}
+
+/// Rotates a color's hue by the given angle in radians.
+///
+/// Uses Rodrigues' rotation formula to rotate the RGB vector around
+/// the gray axis (1,1,1), which is equivalent to hue rotation in
+/// color space.
+fn rotate_hue(color: vec3<f32>, angle: f32) -> vec3<f32> {
+    let k = vec3<f32>(0.57735, 0.57735, 0.57735);
+    let cos_a = cos(angle);
+    let sin_a = sin(angle);
+    return color * cos_a + cross(k, color) * sin_a + k * dot(k, color) * (1.0 - cos_a);
 }
 
 fn median(r: f32, g: f32, b: f32) -> f32 {
@@ -46,6 +58,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Use vertex color if available, otherwise fall back to material color.
-    let color = select(material.color, in.color, in.color.a > 0.0);
+    var color = select(material.color, in.color, in.color.a > 0.0);
+
+    // Apply hue rotation if set.
+    if material.hue_offset != 0.0 {
+        color = vec4<f32>(rotate_hue(color.rgb, material.hue_offset), color.a);
+    }
+
     return vec4<f32>(color.rgb, color.a * alpha);
 }

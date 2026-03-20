@@ -26,6 +26,10 @@
 //!     .build();
 //! ```
 
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
+
 use bevy::color::Color;
 
 use super::element::Element;
@@ -46,7 +50,6 @@ use super::types::TextConfig;
 #[must_use]
 #[derive(Clone, Debug, Default)]
 pub struct El {
-    name:          Option<String>,
     width:         Sizing,
     height:        Sizing,
     padding:       Padding,
@@ -62,12 +65,6 @@ pub struct El {
 impl El {
     /// Creates a new element declaration with default settings.
     pub fn new() -> Self { Self::default() }
-
-    /// Sets the element name (for debugging).
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
 
     /// Sets the width sizing rule.
     ///
@@ -143,7 +140,6 @@ impl El {
     /// Converts this declaration into an [`Element`] with the given content.
     fn into_element(self, content: ElementContent) -> Element {
         Element {
-            name: self.name,
             width: self.width,
             height: self.height,
             padding: self.padding,
@@ -286,8 +282,149 @@ impl LayoutBuilder {
 
     /// Finishes building and returns the layout tree.
     #[must_use]
-    pub fn build(self) -> LayoutTree { self.tree }
+    pub fn build(mut self) -> LayoutTree {
+        self.tree.layout_hash = compute_layout_hash(&self.tree);
+        self.tree
+    }
 
     /// Returns the current parent index.
     fn current_parent(&self) -> usize { self.parent_stack.last().copied().unwrap_or(0) }
+}
+
+/// Computes a hash of all layout-relevant fields in the tree.
+///
+/// Excludes render-only properties (text color, background color, border color)
+/// so that color-only changes produce the same hash and allow the layout system
+/// to skip recomputation.
+fn compute_layout_hash(tree: &LayoutTree) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    tree.root.hash(&mut hasher);
+    tree.elements.len().hash(&mut hasher);
+
+    for element in &tree.elements {
+        hash_sizing(&element.width, &mut hasher);
+        hash_sizing(&element.height, &mut hasher);
+        hash_padding(&element.padding, &mut hasher);
+        element.child_gap.to_bits().hash(&mut hasher);
+        hash_direction(&element.direction, &mut hasher);
+        hash_align_x(&element.child_align_x, &mut hasher);
+        hash_align_y(&element.child_align_y, &mut hasher);
+        element.clip.hash(&mut hasher);
+
+        // Border widths affect layout, border color does not.
+        if let Some(border) = &element.border {
+            1_u8.hash(&mut hasher);
+            border.left.to_bits().hash(&mut hasher);
+            border.right.to_bits().hash(&mut hasher);
+            border.top.to_bits().hash(&mut hasher);
+            border.bottom.to_bits().hash(&mut hasher);
+            border.between_children.to_bits().hash(&mut hasher);
+        } else {
+            0_u8.hash(&mut hasher);
+        }
+
+        match &element.content {
+            ElementContent::Children(children) => {
+                0_u8.hash(&mut hasher);
+                children.hash(&mut hasher);
+            },
+            ElementContent::Text { text, config } => {
+                1_u8.hash(&mut hasher);
+                text.hash(&mut hasher);
+                hash_text_config(config, &mut hasher);
+            },
+            ElementContent::Empty => {
+                2_u8.hash(&mut hasher);
+            },
+        }
+    }
+
+    hasher.finish()
+}
+
+/// Hashes layout-relevant fields of a [`TextConfig`], excluding color.
+fn hash_text_config(config: &TextConfig, hasher: &mut DefaultHasher) {
+    config.font_id().hash(hasher);
+    config.size().to_bits().hash(hasher);
+    config.weight().0.to_bits().hash(hasher);
+    hash_font_slant(&config.slant(), hasher);
+    config.effective_line_height().to_bits().hash(hasher);
+    config.letter_spacing().to_bits().hash(hasher);
+    config.word_spacing().to_bits().hash(hasher);
+    hash_text_wrap(&config.wrap_mode(), hasher);
+}
+
+fn hash_sizing(sizing: &Sizing, hasher: &mut DefaultHasher) {
+    match sizing {
+        Sizing::Fit { min, max } => {
+            0_u8.hash(hasher);
+            min.to_bits().hash(hasher);
+            max.to_bits().hash(hasher);
+        },
+        Sizing::Grow { min, max } => {
+            1_u8.hash(hasher);
+            min.to_bits().hash(hasher);
+            max.to_bits().hash(hasher);
+        },
+        Sizing::Fixed(v) => {
+            2_u8.hash(hasher);
+            v.to_bits().hash(hasher);
+        },
+        Sizing::Percent(v) => {
+            3_u8.hash(hasher);
+            v.to_bits().hash(hasher);
+        },
+    }
+}
+
+fn hash_padding(padding: &Padding, hasher: &mut DefaultHasher) {
+    padding.left.to_bits().hash(hasher);
+    padding.right.to_bits().hash(hasher);
+    padding.top.to_bits().hash(hasher);
+    padding.bottom.to_bits().hash(hasher);
+}
+
+fn hash_direction(direction: &Direction, hasher: &mut DefaultHasher) {
+    match direction {
+        Direction::LeftToRight => 0_u8,
+        Direction::TopToBottom => 1,
+    }
+    .hash(hasher);
+}
+
+fn hash_align_x(align: &AlignX, hasher: &mut DefaultHasher) {
+    match align {
+        AlignX::Left => 0_u8,
+        AlignX::Center => 1,
+        AlignX::Right => 2,
+    }
+    .hash(hasher);
+}
+
+fn hash_align_y(align: &AlignY, hasher: &mut DefaultHasher) {
+    match align {
+        AlignY::Top => 0_u8,
+        AlignY::Center => 1,
+        AlignY::Bottom => 2,
+    }
+    .hash(hasher);
+}
+
+fn hash_font_slant(slant: &super::types::FontSlant, hasher: &mut DefaultHasher) {
+    match slant {
+        super::types::FontSlant::Normal => 0_u8,
+        super::types::FontSlant::Italic => 1,
+        super::types::FontSlant::Oblique => 2,
+    }
+    .hash(hasher);
+}
+
+fn hash_text_wrap(wrap: &super::types::TextWrap, hasher: &mut DefaultHasher) {
+    match wrap {
+        super::types::TextWrap::Words => 0_u8,
+        super::types::TextWrap::Newlines => 1,
+        super::types::TextWrap::None => 2,
+    }
+    .hash(hasher);
 }

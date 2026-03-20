@@ -31,9 +31,16 @@ pub enum RenderCommandKind {
     /// A text string.
     Text {
         /// The text content.
-        text:   String,
+        text:       String,
         /// Text configuration (font, size, etc.).
-        config: TextConfig,
+        config:     TextConfig,
+        /// Number of quads emitted during the last full mesh build.
+        ///
+        /// Set by the text renderer after `shape_text_to_quads` — which skips
+        /// glyphs without atlas entries (spaces, etc.) — so this count may be
+        /// less than the shaped glyph count. The color-only fast path uses
+        /// this to produce a correctly aligned vertex color array.
+        quad_count: usize,
     },
     /// A border outline.
     Border {
