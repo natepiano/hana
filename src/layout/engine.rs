@@ -812,7 +812,10 @@ fn position_and_render(
                         width,
                         height,
                     },
-                    kind:        RenderCommandKind::Rectangle { color },
+                    kind:        RenderCommandKind::Rectangle {
+                        color,
+                        source: super::render::RectangleSource::Background,
+                    },
                     element_idx: index,
                 });
             }
@@ -1008,7 +1011,8 @@ fn emit_between_borders(
                     height: parent_bounds.height - parent.padding.vertical(),
                 },
                 kind:        RenderCommandKind::Rectangle {
-                    color: border.color,
+                    color:  border.color,
+                    source: super::render::RectangleSource::BetweenChildrenBorder,
                 },
                 element_idx: parent_idx,
             });
@@ -1024,7 +1028,8 @@ fn emit_between_borders(
                     height: border.between_children,
                 },
                 kind:        RenderCommandKind::Rectangle {
-                    color: border.color,
+                    color:  border.color,
+                    source: super::render::RectangleSource::BetweenChildrenBorder,
                 },
                 element_idx: parent_idx,
             });

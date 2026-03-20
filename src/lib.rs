@@ -54,6 +54,7 @@ pub use layout::LayoutResult;
 pub use layout::LayoutTree;
 pub use layout::MeasureTextFn;
 pub use layout::Padding;
+pub use layout::RectangleSource;
 // Render commands.
 pub use layout::RenderCommand;
 pub use layout::RenderCommandKind;

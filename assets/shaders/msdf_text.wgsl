@@ -76,29 +76,20 @@ fn fragment(
     }
 
     // Standard PBR input — handles double-sided, normals, lighting, everything.
+    // After this call, pbr_input.material.base_color = vertex_color * material.base_color
+    // (including alpha), so the material's alpha is already baked in.
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
-    // Read material alpha from the StandardMaterial uniform directly, because
-    // pbr_input_from_standard_material overwrites base_color with vertex color
-    // when VERTEX_COLORS is defined.
-#ifdef BINDLESS
-    let base_alpha = pbr_bindings::material_array[material_indices[slot].material].base_color.a;
-#else
-    let base_alpha = pbr_bindings::material.base_color.a;
-#endif
+    // Apply hue rotation to vertex color if needed.
 #ifdef VERTEX_COLORS
-    if in.color.a > 0.0 {
-        var vc = in.color;
-        if msdf.hue_offset != 0.0 {
-            vc = vec4<f32>(rotate_hue(vc.rgb, msdf.hue_offset), vc.a);
-        }
-        pbr_input.material.base_color = vec4<f32>(vc.rgb, vc.a * base_alpha * msdf_alpha);
-    } else {
-        pbr_input.material.base_color.a = base_alpha * msdf_alpha;
+    if in.color.a > 0.0 && msdf.hue_offset != 0.0 {
+        let rotated = rotate_hue(pbr_input.material.base_color.rgb, msdf.hue_offset);
+        pbr_input.material.base_color = vec4<f32>(rotated, pbr_input.material.base_color.a);
     }
-#else
-    pbr_input.material.base_color.a = base_alpha * msdf_alpha;
 #endif
+
+    // Apply MSDF alpha on top.
+    pbr_input.material.base_color.a *= msdf_alpha;
 
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material,

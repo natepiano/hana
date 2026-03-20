@@ -15,6 +15,7 @@ use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
+use crate::layout::RectangleSource;
 use crate::layout::RenderCommandKind;
 use crate::render::ShapedTextCache;
 
@@ -125,10 +126,17 @@ fn patch_colors(tree: &LayoutTree, result: &mut LayoutResult) {
                     config.set_color(c);
                 }
             },
-            RenderCommandKind::Rectangle { color } => {
-                if let Some(bg) = colors.background {
-                    *color = bg;
-                }
+            RenderCommandKind::Rectangle { color, source } => match source {
+                RectangleSource::Background => {
+                    if let Some(bg) = colors.background {
+                        *color = bg;
+                    }
+                },
+                RectangleSource::BetweenChildrenBorder => {
+                    if let Some(c) = colors.border {
+                        *color = c;
+                    }
+                },
             },
             RenderCommandKind::Border { border } => {
                 if let Some(c) = colors.border {
@@ -183,7 +191,7 @@ pub(super) fn render_panel_gizmos(
             };
 
             let color = match &cmd.kind {
-                RenderCommandKind::Rectangle { color } => color.with_alpha(0.2),
+                RenderCommandKind::Rectangle { color, .. } => color.with_alpha(0.2),
                 RenderCommandKind::Text { .. } => Color::srgba(0.9, 0.9, 0.2, 0.2),
                 RenderCommandKind::Border { border } => border.color.with_alpha(0.2),
                 _ => continue,

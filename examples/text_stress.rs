@@ -231,6 +231,11 @@ fn setup(
     // Camera.
     commands.spawn((
         Camera3d::default(),
+        AmbientLight {
+            color: Color::WHITE,
+            brightness: 1000.0,
+            ..default()
+        },
         PanOrbitCamera {
             focus: Vec3::new(0.0, 1.0, GROUND_SIZE * 0.25),
             radius: Some(8.0),
@@ -376,6 +381,10 @@ fn advance_color_rotation(
 /// Keeps the shader `hue_offset` in sync with `hue_angle` on all text
 /// materials every frame. Runs in `PostUpdate` so newly spawned text
 /// meshes also pick up the current angle.
+///
+/// Uses a single pass through children to collect panel → material handle,
+/// then a second pass to update. O(children + panels) instead of
+/// O(children × panels).
 fn sync_hue_offset(
     state: Res<StressControls>,
     children: Query<(&ChildOf, &MeshMaterial3d<MsdfTextMaterial>)>,
@@ -386,14 +395,20 @@ fn sync_hue_offset(
         return;
     }
 
-    for panel_entity in &panels {
-        for (child_of, mat_handle) in &children {
-            if child_of.parent() == panel_entity {
-                if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                    if (mat.extension.uniforms.hue_offset - state.hue_angle).abs() > f32::EPSILON {
-                        mat.extension.uniforms.hue_offset = state.hue_angle;
-                    }
-                }
+    // One pass: collect panel → material handle.
+    let mut panel_materials = std::collections::HashMap::<Entity, Handle<MsdfTextMaterial>>::new();
+    for (child_of, mat_handle) in &children {
+        let parent = child_of.parent();
+        if panels.contains(parent) {
+            panel_materials.insert(parent, mat_handle.0.clone());
+        }
+    }
+
+    // One pass: update each material.
+    for handle in panel_materials.values() {
+        if let Some(mat) = materials.get_mut(handle) {
+            if (mat.extension.uniforms.hue_offset - state.hue_angle).abs() > f32::EPSILON {
+                mat.extension.uniforms.hue_offset = state.hue_angle;
             }
         }
     }
@@ -428,7 +443,7 @@ fn recolor_with_offset(
         } else {
             0.0
         };
-        colors.text = Some(Color::hsl(hue, 0.8, 0.6));
+        colors.text = Some(Color::hsl(hue, 1.0, 0.7));
         text_idx += 1;
     });
 }
@@ -769,7 +784,7 @@ fn build_panel_tree(
                             } else {
                                 0.0
                             };
-                            let color = Color::hsl(hue, 0.8, 0.6);
+                            let color = Color::hsl(hue, 1.0, 0.7);
                             let label = format!("item {i}:");
                             let value = words[i % words.len()];
                             let config = TextConfig::new(FONT_SIZE).with_color(color);

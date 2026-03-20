@@ -1,49 +1,23 @@
 //! `WorldText` example — standalone MSDF text in world space.
 //!
 //! Demonstrates `WorldText` on a ground plane and on the front face of a cube.
+//! Click the cube to zoom in, click the plane to zoom back out.
 
 use std::time::Duration;
 
-use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::MsdfTextMaterial;
 use bevy_diegetic::TextAnchor;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::msdf_text_material;
-use bevy_inspector_egui::bevy_egui::EguiPlugin;
-use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
-use bevy_inspector_egui::prelude::*;
-use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
 use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
 use bevy_panorbit_camera_ext::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
-
-#[derive(Resource, Reflect, InspectorOptions)]
-#[reflect(Resource, InspectorOptions)]
-struct TextMaterialSettings {
-    #[inspector(min = 0.0, max = 1.0, speed = 0.01, display = NumberDisplay::Slider)]
-    text_alpha:  f32,
-    #[inspector(min = 0.0, max = 1.0, speed = 0.01, display = NumberDisplay::Slider)]
-    plane_alpha: f32,
-    unlit:       bool,
-}
-
-impl Default for TextMaterialSettings {
-    fn default() -> Self {
-        Self {
-            text_alpha:  1.0,
-            plane_alpha: 1.0,
-            unlit:       false,
-        }
-    }
-}
 
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
@@ -52,8 +26,26 @@ const ZOOM_DURATION_MS: u64 = 1000;
 #[derive(Resource)]
 struct SceneBounds(Entity);
 
+/// Marker for anchor demo text entities that can be rotated with 'R'.
 #[derive(Component)]
-struct GroundPlane;
+struct AnchorDemoText {
+    /// The world-space position of the anchor point (stays fixed during rotation).
+    anchor_pos:    Vec3,
+    /// The base rotation of the demo panel.
+    base_rotation: Quat,
+}
+
+#[derive(Resource, Default)]
+struct AnchorRotation {
+    /// Current rotation angle in radians (0..TAU). `None` = not rotating.
+    angle: Option<f32>,
+    /// Which local axis to rotate around.
+    axis:  Vec3,
+}
+
+/// Marker for the cube entity so the rotation system can find it.
+#[derive(Component)]
+struct DemoCube;
 
 fn main() {
     App::new()
@@ -65,12 +57,10 @@ fn main() {
             BrpExtrasPlugin::default(),
             WindowManagerPlugin,
             MeshPickingPlugin,
-            EguiPlugin::default(),
-            ResourceInspectorPlugin::<TextMaterialSettings>::default(),
         ))
-        .init_resource::<TextMaterialSettings>()
+        .init_resource::<AnchorRotation>()
         .add_systems(Startup, setup)
-        .add_systems(Update, apply_material_settings)
+        .add_systems(Update, rotate_anchor_demo)
         .run();
 }
 
@@ -78,17 +68,14 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    _msdf_materials: ResMut<Assets<MsdfTextMaterial>>,
-    _atlas: Res<bevy_diegetic::MsdfAtlas>,
 ) {
-    // Ground plane
+    // Ground plane.
     let ground = commands
         .spawn((
-            GroundPlane,
             Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 8.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.15, 0.15, 0.2, 1.8),
-                alpha_mode: AlphaMode::Opaque,
+                base_color: Color::srgba(0.15, 0.15, 0.2, 0.5),
+                alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
                 ..default()
@@ -99,146 +86,192 @@ fn setup(
 
     commands.insert_resource(SceneBounds(ground));
 
-    // Cube
+    // Cube.
     commands
         .spawn((
+            DemoCube,
             Mesh3d(meshes.add(Cuboid::default())),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.8, 0.7, 0.6),
                 ..default()
             })),
-            Transform::from_xyz(0.0, 1.0, 0.0),
+            Transform::from_xyz(-2.5, 1.0, 2.5)
+                .with_rotation(Quat::from_rotation_y(20.0_f32.to_radians())),
         ))
-        .observe(on_mesh_clicked);
+        .observe(on_mesh_clicked)
+        .with_children(|parent| {
+            let face_style = TextStyle::new()
+                .with_size(20.0)
+                .with_color(Color::srgb(0.9, 0.3, 0.1));
 
-    // Text on the ground plane (lying flat, facing up).
-    commands.spawn((
-        WorldText::new("GROUND"),
-        TextStyle::new()
-            .with_size(48.0)
-            .with_color(Color::srgb(0.9, 0.9, 0.1)),
-        Transform::from_xyz(0.0, 0.001, 1.5)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
+            // Front face (+Z).
+            parent
+                .spawn((
+                    WorldText::new("FRONT"),
+                    face_style.clone(),
+                    Transform::from_xyz(0.0, 0.0, 0.501),
+                ))
+                .observe(on_text_clicked);
 
-    // Instructions on the upper-left of the plane surface.
-    commands.spawn((
-        WorldText::new("click the box to zoom in\nclick the plane to zoom back out"),
-        TextStyle::new()
-            .with_size(16.0)
-            .with_color(Color::WHITE)
-            .with_anchor(TextAnchor::TopLeft),
-        Transform::from_xyz(-3.8, 0.001, -3.8)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
+            // Back face (-Z).
+            parent
+                .spawn((
+                    WorldText::new("BACK"),
+                    face_style.clone(),
+                    Transform::from_xyz(0.0, 0.0, -0.501)
+                        .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+                ))
+                .observe(on_text_clicked);
 
-    // Debug: plain StandardMaterial quad ON the transparent plane.
-    commands.spawn((
-        Mesh3d(meshes.add(Rectangle::new(0.3, 0.3))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(0.9, 0.3, 0.1, 0.5),
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::from_xyz(-1.5, 0.001, 1.5)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
+            // Top face (+Y).
+            parent
+                .spawn((
+                    WorldText::new("TOP"),
+                    face_style.clone(),
+                    Transform::from_xyz(0.0, 0.501, 0.0)
+                        .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+                ))
+                .observe(on_text_clicked);
 
-    // Debug: opaque peach quad parallel to plane at y=1.0 for comparison.
-    commands.spawn((
-        Mesh3d(meshes.add(Rectangle::new(0.3, 0.3))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.9, 0.3, 0.1),
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        })),
-        Transform::from_xyz(-2.0, 1.0, 1.5)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
+            // Bottom face (-Y).
+            parent
+                .spawn((
+                    WorldText::new("BOTTOM"),
+                    face_style.clone(),
+                    Transform::from_xyz(0.0, -0.501, 0.0)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ))
+                .observe(on_text_clicked);
 
-    // Debug: plain quad as CHILD with MsdfTextMaterial.
-    // Deferred to first Update frame so the atlas GPU image is ready.
-    commands.queue(move |world: &mut World| {
-        let atlas = world.resource::<bevy_diegetic::MsdfAtlas>();
-        let Some(atlas_image) = atlas.image_handle().cloned() else {
-            return;
-        };
-        #[allow(clippy::cast_possible_truncation)]
-        let msdf_mat = msdf_text_material(
-            atlas.sdf_range() as f32,
-            atlas.width(),
-            atlas.height(),
-            atlas_image,
-        );
-        let mesh = world
-            .resource_mut::<Assets<Mesh>>()
-            .add(Rectangle::new(0.3, 0.3));
-        let mat = world
-            .resource_mut::<Assets<MsdfTextMaterial>>()
-            .add(msdf_mat);
-        world
-            .spawn((Transform::from_xyz(0.8, 1.0, 0.55), Visibility::default()))
-            .with_child((Mesh3d(mesh), MeshMaterial3d(mat), Transform::IDENTITY));
+            // Left face (-X).
+            parent
+                .spawn((
+                    WorldText::new("LEFT"),
+                    face_style.clone(),
+                    Transform::from_xyz(-0.501, 0.0, 0.0)
+                        .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+                ))
+                .observe(on_text_clicked);
+
+            // Right face (+X).
+            parent
+                .spawn((
+                    WorldText::new("RIGHT"),
+                    face_style,
+                    Transform::from_xyz(0.501, 0.0, 0.0)
+                        .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+                ))
+                .observe(on_text_clicked);
+        });
+
+    // ── Anchor demo ───────────────────────────────────────────────────────
+    // A plane to the right with 9 anchor points, each showing the anchor
+    // name. The plane is angled slightly toward the default camera.
+    let demo_center = Vec3::new(2.0, 1.5, -0.5);
+    let demo_rotation = Quat::from_rotation_y(-15.0_f32.to_radians());
+
+    // Title.
+    commands
+        .spawn((
+            WorldText::new("Text Anchors"),
+            TextStyle::new()
+                .with_size(16.0)
+                .with_color(Color::srgb(0.7, 0.8, 1.0))
+                .with_anchor(TextAnchor::TopCenter),
+            Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.4, 0.0))
+                .with_rotation(demo_rotation),
+        ))
+        .observe(on_text_clicked);
+
+    // Instructions.
+    commands
+        .spawn((
+            WorldText::new("red dot = Transform translation\n'X' 'Y' 'Z' to rotate around axis"),
+            TextStyle::new()
+                .with_size(10.0)
+                .with_color(Color::WHITE)
+                .with_anchor(TextAnchor::TopCenter),
+            Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.15, 0.0))
+                .with_rotation(demo_rotation),
+        ))
+        .observe(on_text_clicked);
+
+    let anchor_demo = [
+        (TextAnchor::TopLeft, "TopLeft", -1.3, 0.5),
+        (TextAnchor::TopCenter, "TopCenter", 0.0, 0.5),
+        (TextAnchor::TopRight, "TopRight", 1.3, 0.5),
+        (TextAnchor::CenterLeft, "CenterLeft", -1.3, -0.2),
+        (TextAnchor::Center, "Center", 0.0, -0.2),
+        (TextAnchor::CenterRight, "CenterRight", 1.3, -0.2),
+        (TextAnchor::BottomLeft, "BottomLeft", -1.3, -0.9),
+        (TextAnchor::BottomCenter, "BottomCenter", 0.0, -0.9),
+        (TextAnchor::BottomRight, "BottomRight", 1.3, -0.9),
+    ];
+
+    let sphere_mesh = meshes.add(Sphere::new(0.025));
+    let sphere_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.2, 0.2),
+        unlit: true,
+        ..default()
     });
 
-    let face_style = TextStyle::new()
-        .with_size(20.0)
-        .with_color(Color::srgb(0.9, 0.3, 0.1));
+    for (anchor, text, local_x, local_y) in anchor_demo {
+        let local_offset = Vec3::new(local_x, local_y, 0.01);
+        let world_pos = demo_center + demo_rotation * local_offset;
 
-    // Front face (+Z).
-    commands.spawn((
-        WorldText::new("FRONT"),
-        face_style.clone(),
-        Transform::from_xyz(0.0, 1.0, 0.55),
-    ));
+        // Sphere at the anchor origin.
+        commands.spawn((
+            Mesh3d(sphere_mesh.clone()),
+            MeshMaterial3d(sphere_material.clone()),
+            Transform::from_translation(world_pos),
+        ));
 
-    // Back face (-Z).
-    commands.spawn((
-        WorldText::new("BACK"),
-        face_style.clone(),
-        Transform::from_xyz(0.0, 1.0, -0.55)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
-    ));
+        // Text with the given anchor.
+        commands
+            .spawn((
+                WorldText::new(text),
+                TextStyle::new()
+                    .with_size(12.5)
+                    .with_color(Color::WHITE)
+                    .with_anchor(anchor),
+                Transform::from_translation(world_pos).with_rotation(demo_rotation),
+                AnchorDemoText {
+                    anchor_pos:    world_pos,
+                    base_rotation: demo_rotation,
+                },
+            ))
+            .observe(on_text_clicked);
+    }
 
-    // Top face (+Y).
-    commands.spawn((
-        WorldText::new("TOP"),
-        face_style.clone(),
-        Transform::from_xyz(0.0, 1.55, 0.0)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
+    // Text on the ground plane (lying flat, facing up).
+    commands
+        .spawn((
+            WorldText::new("GROUND"),
+            TextStyle::new()
+                .with_size(48.0)
+                .with_color(Color::srgb(0.9, 0.9, 0.1)),
+            Transform::from_xyz(0.0, 0.001, 1.5)
+                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        ))
+        .observe(on_text_clicked);
 
-    // Bottom face (-Y).
-    commands.spawn((
-        WorldText::new("BOTTOM"),
-        face_style.clone(),
-        Transform::from_xyz(0.0, 0.45, 0.0)
-            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-    ));
-
-    // Left face (-X).
-    commands.spawn((
-        WorldText::new("LEFT"),
-        face_style.clone(),
-        Transform::from_xyz(-0.55, 1.0, 0.0)
-            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
-    ));
-
-    // Right face (+X).
-    commands.spawn((
-        WorldText::new("RIGHT"),
-        face_style,
-        Transform::from_xyz(0.51, 1.0, 0.0)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-    ));
+    // Instructions on the upper-left of the plane surface.
+    commands
+        .spawn((
+            WorldText::new("click the box to zoom in\nclick the text to zoom in\nclick the plane to zoom back out"),
+            TextStyle::new()
+                .with_size(16.0)
+                .with_color(Color::WHITE)
+                .with_anchor(TextAnchor::TopLeft),
+            Transform::from_xyz(-3.8, 0.001, -3.8)
+                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        ))
+        .observe(on_text_clicked);
 
     // Ambient light so text is always readable.
     commands.insert_resource(GlobalAmbientLight {
         color:                      Color::WHITE,
-        brightness:                 5_000.0,
+        brightness:                 1_000.0,
         affects_lightmapped_meshes: true,
     });
 
@@ -251,21 +284,22 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Camera
-    commands.spawn((
-        PanOrbitCamera {
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
-            ..default()
+    // Camera.
+    commands.spawn((PanOrbitCamera {
+        focus: Vec3::ZERO,
+        radius: Some(11.33),
+        yaw: Some(0.015),
+        pitch: Some(0.667),
+        button_orbit: MouseButton::Middle,
+        button_pan: MouseButton::Middle,
+        modifier_pan: Some(KeyCode::ShiftLeft),
+        trackpad_behavior: TrackpadBehavior::BlenderLike {
+            modifier_pan:  Some(KeyCode::ShiftLeft),
+            modifier_zoom: Some(KeyCode::ControlLeft),
         },
-        Transform::from_xyz(0.0, 3.0, 5.0).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y),
-    ));
+        trackpad_pinch_to_zoom_enabled: true,
+        ..default()
+    },));
 }
 
 fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
@@ -286,34 +320,93 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
     );
 }
 
-/// Applies inspector settings to all MSDF text materials.
+/// Zooms to fit the clicked `WorldText` entity.
 ///
-/// Runs every frame for the first few frames to catch materials created
-/// after startup, then only on inspector changes.
-fn apply_material_settings(
-    settings: Res<TextMaterialSettings>,
-    mut msdf_materials: ResMut<Assets<MsdfTextMaterial>>,
-    mut std_materials: ResMut<Assets<StandardMaterial>>,
-    plane: Query<&MeshMaterial3d<StandardMaterial>, With<GroundPlane>>,
-    mut frame_count: Local<u32>,
+/// Attached per-entity via `.observe()`. Pointer events bubble up from the
+/// child mesh, so this fires even though the mesh is on a child entity.
+fn on_text_clicked(
+    mut click: On<Pointer<Click>>,
+    children: Query<&Children>,
+    meshes: Query<(), With<Mesh3d>>,
+    mut commands: Commands,
 ) {
-    if !settings.is_changed() {
+    click.propagate(false);
+    let camera = click.hit.camera;
+    let target = children
+        .get(click.entity)
+        .ok()
+        .and_then(|kids| kids.iter().find(|&kid| meshes.contains(kid)))
+        .unwrap_or(click.entity);
+    commands.trigger(
+        ZoomToFit::new(camera, target)
+            .margin(ZOOM_MARGIN_MESH)
+            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+    );
+}
+
+/// Press X, Y, or Z to start a full rotation around that local axis.
+/// Anchor demo texts rotate around their anchor point (red dot stays fixed).
+/// The cube rotates around its own center on the same axis simultaneously.
+fn rotate_anchor_demo(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut state: ResMut<AnchorRotation>,
+    mut texts: Query<(&AnchorDemoText, &mut Transform), Without<DemoCube>>,
+    mut cube: Query<&mut Transform, With<DemoCube>>,
+    mut cube_base_rotation: Local<Option<Quat>>,
+) {
+    if state.angle.is_none() {
+        let axis = if keyboard.just_pressed(KeyCode::KeyX) {
+            Some(Vec3::X)
+        } else if keyboard.just_pressed(KeyCode::KeyY) {
+            Some(Vec3::Y)
+        } else if keyboard.just_pressed(KeyCode::KeyZ) {
+            Some(Vec3::Z)
+        } else {
+            None
+        };
+        if let Some(axis) = axis {
+            state.angle = Some(0.0);
+            state.axis = axis;
+            // Capture the cube's current rotation as its base.
+            if let Ok(cube_t) = cube.single() {
+                *cube_base_rotation = Some(cube_t.rotation);
+            }
+        }
+    }
+
+    let Some(angle) = state.angle.as_mut() else {
+        return;
+    };
+
+    let speed = 1.5;
+    *angle += time.delta_secs() * speed;
+    let current_angle = *angle;
+    let axis = state.axis;
+
+    if current_angle >= std::f32::consts::TAU {
+        // Snap back to start.
+        for (demo, mut transform) in &mut texts {
+            *transform =
+                Transform::from_translation(demo.anchor_pos).with_rotation(demo.base_rotation);
+        }
+        if let (Ok(mut cube_t), Some(base)) = (cube.single_mut(), *cube_base_rotation) {
+            cube_t.rotation = base;
+        }
+        state.angle = None;
+        *cube_base_rotation = None;
         return;
     }
-    for (_, mat) in msdf_materials.iter_mut() {
-        mat.base.base_color = Color::srgba(1.0, 1.0, 1.0, settings.text_alpha);
-        mat.base.alpha_mode = AlphaMode::Blend;
-        mat.base.unlit = settings.unlit;
+
+    let rot = Quat::from_axis_angle(axis, current_angle);
+
+    // Rotate anchor demo texts around their anchor point.
+    for (demo, mut transform) in &mut texts {
+        transform.rotation = demo.base_rotation * rot;
     }
-    // Update ground plane alpha.
-    for mat_handle in &plane {
-        if let Some(mat) = std_materials.get_mut(&mat_handle.0) {
-            mat.base_color = mat.base_color.with_alpha(settings.plane_alpha);
-            mat.alpha_mode = if settings.plane_alpha < 1.0 {
-                AlphaMode::Blend
-            } else {
-                AlphaMode::Opaque
-            };
-        }
+
+    // Rotate cube on the same local axis.
+    if let (Ok(mut cube_t), Some(base)) = (cube.single_mut(), *cube_base_rotation) {
+        cube_t.rotation = base * rot;
     }
 }

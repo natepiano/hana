@@ -48,7 +48,7 @@ bevy                     = { version = "0.18.1", features = ["default_font"] }
 bevy-inspector-egui      = "0.36.0"
 bevy_brp_extras          = "0.18.7"
 bevy_panorbit_camera     = "0.34.0"
-bevy_panorbit_camera_ext = { git = "https://github.com/natepiano/bevy_panorbit_camera_ext" }
+bevy_panorbit_camera_ext = { path = "../bevy_panorbit_camera_ext" }
 bevy_window_manager      = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }
 clay-layout              = { path = "./clay-layout" }
 criterion                = { version = "0.8.2", features = ["html_reports"] }

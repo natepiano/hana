@@ -77,6 +77,7 @@ pub struct MsdfExtension {
 
 impl MaterialExtension for MsdfExtension {
     fn fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
+
 }
 
 /// Creates a new [`MsdfTextMaterial`] with sensible defaults.
@@ -96,7 +97,7 @@ pub fn msdf_text_material(
 ) -> MsdfTextMaterial {
     ExtendedMaterial {
         base:      StandardMaterial {
-            alpha_mode: AlphaMode::Opaque,
+            alpha_mode: AlphaMode::Blend,
             double_sided: true,
             cull_mode: None,
             ..StandardMaterial::default()

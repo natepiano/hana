@@ -587,6 +587,42 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Hashes all layout-affecting fields into `hasher`, excluding color.
+    ///
+    /// Uses exhaustive destructuring so that adding a new field to
+    /// [`TextProps`] without updating this method is a compiler error.
+    pub fn hash_layout(&self, hasher: &mut impl std::hash::Hasher) {
+        use std::hash::Hash;
+
+        // Destructure exhaustively — compiler error if a field is added.
+        let Self {
+            font_id,
+            size,
+            weight,
+            slant,
+            line_height,
+            letter_spacing,
+            word_spacing,
+            wrap,
+            align,
+            anchor,
+            // Render-only — explicitly skipped.
+            color: _,
+            _context: _,
+        } = self;
+
+        font_id.hash(hasher);
+        size.to_bits().hash(hasher);
+        weight.0.to_bits().hash(hasher);
+        (*slant as u8).hash(hasher);
+        line_height.to_bits().hash(hasher);
+        letter_spacing.to_bits().hash(hasher);
+        word_spacing.to_bits().hash(hasher);
+        (*wrap as u8).hash(hasher);
+        (*align as u8).hash(hasher);
+        (*anchor as u8).hash(hasher);
+    }
+
     /// Extracts measurement-relevant fields as a [`TextMeasure`].
     ///
     /// Used by [`MeasureTextFn`](super::engine::MeasureTextFn) — no generic

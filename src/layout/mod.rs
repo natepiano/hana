@@ -51,6 +51,7 @@ pub use engine::ComputedLayout;
 pub use engine::LayoutEngine;
 pub use engine::LayoutResult;
 pub use engine::MeasureTextFn;
+pub use render::RectangleSource;
 pub use render::RenderCommand;
 pub use render::RenderCommandKind;
 pub use types::AlignX;

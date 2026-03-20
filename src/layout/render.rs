@@ -20,13 +20,28 @@ pub struct RenderCommand {
     pub element_idx: usize,
 }
 
+/// Distinguishes the origin of a [`RenderCommandKind::Rectangle`] command.
+///
+/// Matching Clay, both element backgrounds and [`Border::between_children`]
+/// lines are emitted as `Rectangle` commands. This enum lets consumers
+/// (like the color-only fast path) apply the correct color source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RectangleSource {
+    /// Element background fill.
+    Background,
+    /// Line drawn between children from a [`Border::between_children`] width.
+    BetweenChildrenBorder,
+}
+
 /// The specific visual to render.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RenderCommandKind {
     /// A filled rectangle.
     Rectangle {
         /// Fill color.
-        color: Color,
+        color:  Color,
+        /// Whether this rectangle is a background or a between-children border.
+        source: RectangleSource,
     },
     /// A text string.
     Text {

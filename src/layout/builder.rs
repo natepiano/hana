@@ -293,9 +293,10 @@ impl LayoutBuilder {
 
 /// Computes a hash of all layout-relevant fields in the tree.
 ///
-/// Excludes render-only properties (text color, background color, border color)
-/// so that color-only changes produce the same hash and allow the layout system
-/// to skip recomputation.
+/// Uses exhaustive destructuring on [`Element`], [`ElementContent`], and
+/// [`Border`] so that adding a new field without updating this function is
+/// a compiler error. Render-only fields (colors) are explicitly ignored
+/// with a comment — everything else is hashed.
 fn compute_layout_hash(tree: &LayoutTree) -> u64 {
     let mut hasher = DefaultHasher::new();
 
@@ -303,28 +304,57 @@ fn compute_layout_hash(tree: &LayoutTree) -> u64 {
     tree.elements.len().hash(&mut hasher);
 
     for element in &tree.elements {
-        hash_sizing(&element.width, &mut hasher);
-        hash_sizing(&element.height, &mut hasher);
-        hash_padding(&element.padding, &mut hasher);
-        element.child_gap.to_bits().hash(&mut hasher);
-        hash_direction(&element.direction, &mut hasher);
-        hash_align_x(&element.child_align_x, &mut hasher);
-        hash_align_y(&element.child_align_y, &mut hasher);
-        element.clip.hash(&mut hasher);
+        // Destructure exhaustively — adding a field to `Element` without
+        // updating this match is a compiler error.
+        let Element {
+            width,
+            height,
+            padding,
+            child_gap,
+            direction,
+            child_align_x,
+            child_align_y,
+            clip,
+            border,
+            content,
+            // Render-only — explicitly skipped.
+            background: _,
+        } = element;
+
+        hash_sizing(width, &mut hasher);
+        hash_sizing(height, &mut hasher);
+        padding.left.to_bits().hash(&mut hasher);
+        padding.right.to_bits().hash(&mut hasher);
+        padding.top.to_bits().hash(&mut hasher);
+        padding.bottom.to_bits().hash(&mut hasher);
+        child_gap.to_bits().hash(&mut hasher);
+        (*direction as u8).hash(&mut hasher);
+        (*child_align_x as u8).hash(&mut hasher);
+        (*child_align_y as u8).hash(&mut hasher);
+        clip.hash(&mut hasher);
 
         // Border widths affect layout, border color does not.
-        if let Some(border) = &element.border {
+        if let Some(b) = border {
+            let Border {
+                left,
+                right,
+                top,
+                bottom,
+                between_children,
+                // Render-only — explicitly skipped.
+                color: _,
+            } = b;
             1_u8.hash(&mut hasher);
-            border.left.to_bits().hash(&mut hasher);
-            border.right.to_bits().hash(&mut hasher);
-            border.top.to_bits().hash(&mut hasher);
-            border.bottom.to_bits().hash(&mut hasher);
-            border.between_children.to_bits().hash(&mut hasher);
+            left.to_bits().hash(&mut hasher);
+            right.to_bits().hash(&mut hasher);
+            top.to_bits().hash(&mut hasher);
+            bottom.to_bits().hash(&mut hasher);
+            between_children.to_bits().hash(&mut hasher);
         } else {
             0_u8.hash(&mut hasher);
         }
 
-        match &element.content {
+        match content {
             ElementContent::Children(children) => {
                 0_u8.hash(&mut hasher);
                 children.hash(&mut hasher);
@@ -332,7 +362,7 @@ fn compute_layout_hash(tree: &LayoutTree) -> u64 {
             ElementContent::Text { text, config } => {
                 1_u8.hash(&mut hasher);
                 text.hash(&mut hasher);
-                hash_text_config(config, &mut hasher);
+                config.hash_layout(&mut hasher);
             },
             ElementContent::Empty => {
                 2_u8.hash(&mut hasher);
@@ -343,19 +373,7 @@ fn compute_layout_hash(tree: &LayoutTree) -> u64 {
     hasher.finish()
 }
 
-/// Hashes layout-relevant fields of a [`TextConfig`], excluding color.
-fn hash_text_config(config: &TextConfig, hasher: &mut DefaultHasher) {
-    config.font_id().hash(hasher);
-    config.size().to_bits().hash(hasher);
-    config.weight().0.to_bits().hash(hasher);
-    hash_font_slant(&config.slant(), hasher);
-    config.effective_line_height().to_bits().hash(hasher);
-    config.letter_spacing().to_bits().hash(hasher);
-    config.word_spacing().to_bits().hash(hasher);
-    hash_text_wrap(&config.wrap_mode(), hasher);
-}
-
-fn hash_sizing(sizing: &Sizing, hasher: &mut DefaultHasher) {
+fn hash_sizing(sizing: &Sizing, hasher: &mut impl Hasher) {
     match sizing {
         Sizing::Fit { min, max } => {
             0_u8.hash(hasher);
@@ -376,55 +394,4 @@ fn hash_sizing(sizing: &Sizing, hasher: &mut DefaultHasher) {
             v.to_bits().hash(hasher);
         },
     }
-}
-
-fn hash_padding(padding: &Padding, hasher: &mut DefaultHasher) {
-    padding.left.to_bits().hash(hasher);
-    padding.right.to_bits().hash(hasher);
-    padding.top.to_bits().hash(hasher);
-    padding.bottom.to_bits().hash(hasher);
-}
-
-fn hash_direction(direction: &Direction, hasher: &mut DefaultHasher) {
-    match direction {
-        Direction::LeftToRight => 0_u8,
-        Direction::TopToBottom => 1,
-    }
-    .hash(hasher);
-}
-
-fn hash_align_x(align: &AlignX, hasher: &mut DefaultHasher) {
-    match align {
-        AlignX::Left => 0_u8,
-        AlignX::Center => 1,
-        AlignX::Right => 2,
-    }
-    .hash(hasher);
-}
-
-fn hash_align_y(align: &AlignY, hasher: &mut DefaultHasher) {
-    match align {
-        AlignY::Top => 0_u8,
-        AlignY::Center => 1,
-        AlignY::Bottom => 2,
-    }
-    .hash(hasher);
-}
-
-fn hash_font_slant(slant: &super::types::FontSlant, hasher: &mut DefaultHasher) {
-    match slant {
-        super::types::FontSlant::Normal => 0_u8,
-        super::types::FontSlant::Italic => 1,
-        super::types::FontSlant::Oblique => 2,
-    }
-    .hash(hasher);
-}
-
-fn hash_text_wrap(wrap: &super::types::TextWrap, hasher: &mut DefaultHasher) {
-    match wrap {
-        super::types::TextWrap::Words => 0_u8,
-        super::types::TextWrap::Newlines => 1,
-        super::types::TextWrap::None => 2,
-    }
-    .hash(hasher);
 }

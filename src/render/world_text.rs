@@ -139,8 +139,10 @@ fn shape_world_text(
     let em_scale = style.size() / DEFAULT_CANONICAL_SIZE as f32;
 
     // Measure total dimensions for anchor offset.
+    // Width: rightmost glyph extent. Height: use the font's line height for
+    // consistency — glyph-specific extents vary per string and cause anchors
+    // at the same row to sit at different baselines.
     let mut max_x = 0.0_f32;
-    let mut max_y = 0.0_f32;
     for sg in &shaped.glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
@@ -150,13 +152,15 @@ fn shape_world_text(
             #[allow(clippy::cast_precision_loss)]
             let right =
                 sg.x + metrics.bearing_x * style.size() + metrics.pixel_width as f32 * em_scale;
-            #[allow(clippy::cast_precision_loss)]
-            let bottom = sg.baseline - sg.y - metrics.bearing_y * style.size()
-                + metrics.pixel_height as f32 * em_scale;
             max_x = max_x.max(right);
-            max_y = max_y.max(bottom);
         }
     }
+    // Count lines from distinct baselines in the shaped output.
+    let mut baselines: Vec<f32> = shaped.glyphs.iter().map(|g| g.baseline).collect();
+    baselines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+    let line_count = baselines.len().max(1);
+    #[allow(clippy::cast_precision_loss)]
+    let max_y = style.effective_line_height() * line_count as f32;
 
     // Scale: layout units to world units.
     let scale = 0.01_f32;
