@@ -193,12 +193,12 @@ fn extract_text_meshes(
 
     for (panel_entity, panel, mut computed) in &mut panels {
         panel_count += 1;
-        let Some(result) = &computed.result else {
+        let Some(result) = computed.result() else {
             continue;
         };
 
         // ── Color-only fast path ─────────────────────────────────────────
-        if computed.color_only {
+        if computed.color_only() {
             if let Some(mesh_handle) = find_text_mesh_handle(&old_text, panel_entity) {
                 if let Some(mesh) = meshes.get_mut(&mesh_handle) {
                     let colors = build_color_array(result);
@@ -244,7 +244,7 @@ fn extract_text_meshes(
 
         // Batch all text quads into a single mesh per panel, and record the
         // emitted quad count on each text command for the color-only fast path.
-        let result_mut = computed.result.as_mut().unwrap();
+        let result_mut = computed.result_mut().unwrap();
         let mut all_quads = Vec::new();
         for cmd in &mut result_mut.commands {
             let (text, config) = match &cmd.kind {

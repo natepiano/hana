@@ -24,6 +24,11 @@ use crate::render::ShapedTextCache;
 /// These values are updated by the built-in layout and text extraction systems
 /// so examples and applications can inspect where time is being spent during
 /// content-heavy updates.
+///
+/// **Note:** This API is provisional. Field names and structure are coupled
+/// to the current internal system architecture and may change as the
+/// library matures. Consider using Bevy's `DiagnosticsStore` for
+/// production profiling.
 #[derive(Resource, Clone, Debug, Default, Reflect)]
 #[reflect(Resource)]
 pub struct DiegeticPerfStats {
@@ -85,8 +90,8 @@ pub fn compute_panel_layouts(
             // Layout structure is identical — only render properties (colors)
             // changed. Patch colors in the existing render commands and skip
             // the expensive `engine.compute()` call.
-            patch_colors(&panel.tree, computed.result.as_mut().unwrap());
-            computed.color_only = true;
+            patch_colors(&panel.tree, computed.result_mut().unwrap());
+            computed.set_color_only(true);
         } else {
             // Full layout recomputation.
             let engine = LayoutEngine::new(Arc::clone(&cached_measure));
@@ -95,15 +100,16 @@ pub fn compute_panel_layouts(
             if let Some(bounds) = result.content_bounds() {
                 let scale_x = panel.world_width / panel.layout_width;
                 let scale_y = panel.world_height / panel.layout_height;
-                computed.world_width = bounds.width * scale_x;
-                computed.world_height = bounds.height * scale_y;
+                computed.set_content_size(bounds.width * scale_x, bounds.height * scale_y);
             }
 
-            computed.last_layout_hash = panel.tree.layout_hash();
-            computed.last_layout_width = panel.layout_width;
-            computed.last_layout_height = panel.layout_height;
-            computed.result = Some(result);
-            computed.color_only = false;
+            computed.set_last_layout(
+                panel.tree.layout_hash(),
+                panel.layout_width,
+                panel.layout_height,
+            );
+            computed.set_result(result);
+            computed.set_color_only(false);
         }
     }
 
@@ -152,6 +158,10 @@ fn patch_colors(tree: &LayoutTree, result: &mut LayoutResult) {
 ///
 /// When `false` (the default), only rectangles and borders are shown.
 /// Toggle at runtime to debug text measurement and positioning.
+///
+/// **Note:** This API is provisional. Once panels render real geometry
+/// (Phase 4), debug visualization will likely move to a per-panel debug
+/// mode rather than a global resource.
 #[derive(Resource)]
 pub struct ShowTextGizmos(pub bool);
 
@@ -168,7 +178,7 @@ pub(super) fn render_panel_gizmos(
     show_text: Res<ShowTextGizmos>,
 ) {
     for (panel, computed, global_transform) in &panels {
-        let Some(result) = &computed.result else {
+        let Some(result) = computed.result() else {
             continue;
         };
 
@@ -300,15 +310,11 @@ mod tests {
         let engine = LayoutEngine::new(monospace_measure());
         let result = engine.compute(&tree, 800.0, 400.0);
 
-        let computed = ComputedDiegeticPanel {
-            result:             Some(result),
-            world_width:        1.0,
-            world_height:       1.0,
-            last_layout_hash:   hash,
-            last_layout_width:  800.0,
-            last_layout_height: 400.0,
-            color_only:         false,
-        };
+        let mut computed = ComputedDiegeticPanel::default();
+        computed.set_result(result);
+        computed.set_content_size(1.0, 1.0);
+        computed.set_last_layout(hash, 800.0, 400.0);
+        computed.set_color_only(false);
 
         // Same hash, same dimensions — guard should say color-only.
         assert!(

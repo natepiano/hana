@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
+use crate::layout::BoundingBox;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
@@ -55,44 +56,69 @@ pub struct DiegeticPanel {
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
 pub struct ComputedDiegeticPanel {
-    /// The computed layout result, populated after the first layout pass.
     #[reflect(ignore)]
-    pub result:             Option<LayoutResult>,
-    /// Actual computed content width in world units.
-    pub world_width:        f32,
-    /// Actual computed content height in world units.
-    pub world_height:       f32,
-    /// Hash of the last fully computed layout (excludes colors).
-    ///
-    /// Used by `compute_panel_layouts` to skip layout recomputation when only
-    /// render-only properties (like text color) changed.
+    result:             Option<LayoutResult>,
+    content_width:      f32,
+    content_height:     f32,
     #[reflect(ignore)]
-    pub last_layout_hash:   u64,
-    /// `true` when the most recent update only changed colors, not layout.
-    ///
-    /// Set by `compute_panel_layouts` so the text renderer can take a fast
-    /// path (patch vertex colors) instead of rebuilding meshes from scratch.
+    last_layout_hash:   u64,
     #[reflect(ignore)]
-    pub color_only:         bool,
-    /// Layout width used for the last full computation.
+    color_only:         bool,
     #[reflect(ignore)]
-    pub last_layout_width:  f32,
-    /// Layout height used for the last full computation.
+    last_layout_width:  f32,
     #[reflect(ignore)]
-    pub last_layout_height: f32,
+    last_layout_height: f32,
 }
 
 impl ComputedDiegeticPanel {
-    /// Returns `true` when the panel's tree has only changed render-only
-    /// properties (colors) since the last full layout computation.
+    // ── Public read-only accessors ───────────────────────────────────────
+
+    /// Actual computed content width in world units.
     ///
-    /// The guard checks that:
-    /// - The tree has a valid (non-zero) layout hash.
-    /// - The hash matches the last fully computed layout.
-    /// - The panel dimensions haven't changed since the last computation.
-    /// - A previous layout result exists to patch into.
+    /// This is the width of the first user-defined element (the content),
+    /// not the full viewport. With `Sizing::FIT`, this shrinks to fit.
     #[must_use]
-    pub(super) fn is_color_only_change(
+    pub fn content_width(&self) -> f32 { self.content_width }
+
+    /// Actual computed content height in world units.
+    #[must_use]
+    pub fn content_height(&self) -> f32 { self.content_height }
+
+    /// Returns the bounding box of the panel's content in layout units,
+    /// or `None` if layout has not yet been computed.
+    #[must_use]
+    pub fn content_bounds(&self) -> Option<BoundingBox> {
+        self.result.as_ref().and_then(LayoutResult::content_bounds)
+    }
+
+    // ── Crate-internal accessors ─────────────────────────────────────────
+
+    #[must_use]
+    pub(crate) fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
+
+    #[must_use]
+    pub(crate) fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
+
+    pub(crate) fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }
+
+    #[must_use]
+    pub(crate) fn color_only(&self) -> bool { self.color_only }
+
+    pub(crate) fn set_color_only(&mut self, value: bool) { self.color_only = value; }
+
+    pub(crate) fn set_content_size(&mut self, width: f32, height: f32) {
+        self.content_width = width;
+        self.content_height = height;
+    }
+
+    pub(crate) fn set_last_layout(&mut self, hash: u64, layout_width: f32, layout_height: f32) {
+        self.last_layout_hash = hash;
+        self.last_layout_width = layout_width;
+        self.last_layout_height = layout_height;
+    }
+
+    #[must_use]
+    pub(crate) fn is_color_only_change(
         &self,
         tree_layout_hash: u64,
         layout_width: f32,
