@@ -5,7 +5,7 @@
 /// This struct is used on the CPU to build per-glyph quad vertices within
 /// a batched `Mesh`. Each glyph becomes 4 vertices + 6 indices (two triangles).
 #[derive(Clone, Copy, Debug)]
-pub struct GlyphQuadData {
+pub(super) struct GlyphQuadData {
     /// Position of the glyph quad's top-left corner in panel-local space.
     pub position: [f32; 3],
     /// Size of the glyph quad in panel-local units (width, height).
@@ -21,7 +21,7 @@ pub struct GlyphQuadData {
 /// Each glyph produces 4 vertices (quad corners) and 6 indices (two triangles).
 /// UV coordinates map into the MSDF atlas texture.
 #[must_use]
-pub fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
+pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
     use bevy::mesh::Indices;
     use bevy::prelude::Mesh;
     use bevy::render::render_resource::PrimitiveTopology;

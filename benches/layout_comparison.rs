@@ -68,24 +68,26 @@ const CLAY_FONT_SIZE: u16 = 10;
 const CHAR_WIDTH_FACTOR: f32 = 0.6;
 
 fn monospace_measurer() -> DiegeticTextMeasurer {
-    DiegeticTextMeasurer(Arc::new(|text: &str, measure: &TextMeasure| {
-        let line_height = measure.effective_line_height();
-        let char_width = measure.size * CHAR_WIDTH_FACTOR;
-        let mut max_line_width: f32 = 0.0;
-        let mut line_count = 0_u32;
-        for line in text.lines() {
-            line_count += 1;
-            let width = line.chars().count() as f32 * char_width;
-            max_line_width = max_line_width.max(width);
-        }
-        if line_count == 0 {
-            line_count = 1;
-        }
-        TextDimensions {
-            width:  max_line_width,
-            height: line_height * line_count as f32,
-        }
-    }))
+    DiegeticTextMeasurer {
+        measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
+            let line_height = measure.effective_line_height();
+            let char_width = measure.size * CHAR_WIDTH_FACTOR;
+            let mut max_line_width: f32 = 0.0;
+            let mut line_count = 0_u32;
+            for line in text.lines() {
+                line_count += 1;
+                let width = line.chars().count() as f32 * char_width;
+                max_line_width = max_line_width.max(width);
+            }
+            if line_count == 0 {
+                line_count = 1;
+            }
+            TextDimensions {
+                width:  max_line_width,
+                height: line_height * line_count as f32,
+            }
+        }),
+    }
 }
 
 fn clay_monospace_measure(

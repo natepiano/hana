@@ -72,10 +72,9 @@ impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
         // Initialize font registry and wire up parley-backed text measurement.
         let registry = FontRegistry::new();
-        let measurer = DiegeticTextMeasurer(create_parley_measurer(
-            registry.font_context(),
-            registry.family_names(),
-        ));
+        let measurer = DiegeticTextMeasurer {
+            measure_fn: create_parley_measurer(registry.font_context(), registry.family_names()),
+        };
 
         // Initialize MSDF atlas and prepopulate ASCII glyphs.
         let mut atlas = MsdfAtlas::new();

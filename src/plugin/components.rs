@@ -94,20 +94,46 @@ impl ComputedDiegeticPanel {
 
 /// Resource providing text measurement for layout computation.
 ///
-/// Insert this resource before adding [`DiegeticUiPlugin`] to override the default
-/// monospace approximation with a real text measurement function (e.g. backed by
-/// `bevy_rich_text3d`).
+/// Insert this resource before adding [`DiegeticUiPlugin`] to override the
+/// default monospace approximation with a real text measurement function.
+///
+/// The default measurer estimates text dimensions using a fixed character
+/// width (60% of font size). For accurate measurement backed by real font
+/// shaping, the plugin automatically replaces this with a parley-backed
+/// measurer when [`DiegeticUiPlugin`] is added.
+///
+/// Custom measurers are useful when bridging to external layout engines
+/// that need text measurement callbacks. See the `side_by_side` example
+/// for a real-world case where clay-layout delegates measurement through
+/// this interface.
+///
+/// # Example
+///
+/// ```ignore
+/// app.insert_resource(DiegeticTextMeasurer {
+///     measure_fn: Arc::new(|text, measure| {
+///         // Custom measurement logic here.
+///         TextDimensions { width: 100.0, height: 12.0 }
+///     }),
+/// });
+/// ```
 #[derive(Resource)]
-pub struct DiegeticTextMeasurer(pub MeasureTextFn);
+pub struct DiegeticTextMeasurer {
+    /// The measurement function. Takes a text string and a [`TextMeasure`]
+    /// describing the font configuration, returns [`TextDimensions`].
+    pub measure_fn: MeasureTextFn,
+}
 
 impl Default for DiegeticTextMeasurer {
     fn default() -> Self {
-        Self(Arc::new(|text: &str, measure: &TextMeasure| {
-            let char_width = measure.size * 0.6;
-            #[allow(clippy::cast_precision_loss)]
-            let width = char_width * text.len() as f32;
-            let height = measure.effective_line_height();
-            TextDimensions { width, height }
-        }))
+        Self {
+            measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
+                let char_width = measure.size * 0.6;
+                #[allow(clippy::cast_precision_loss)]
+                let width = char_width * text.len() as f32;
+                let height = measure.effective_line_height();
+                TextDimensions { width, height }
+            }),
+        }
     }
 }

@@ -1,13 +1,21 @@
-//! Side-by-side layout comparison example.
+//! Side-by-side layout comparison: Clay (C FFI) vs bevy_diegetic (Rust).
 //!
-//! Renders the same status panel layout using both `clay-layout` (C FFI) and
-//! `bevy_diegetic` (pure Rust), side by side.
+//! Renders the same status panel using two layout engines side by side.
+//! Both use the same parley-backed text measurement, so any visual
+//! differences expose real layout bugs rather than measurement drift.
 //!
-//! - **Left (Clay)**: Clay layout engine + parley measurer + `WorldText` renderer.
-//! - **Right (Diegetic)**: `DiegeticPanel` plugin (layout + MSDF rendering + gizmos).
+//! - **Right (Diegetic)**: Uses [`DiegeticPanel`] — the plugin handles layout computation, MSDF
+//!   text rendering, and debug gizmos. This is the standard usage pattern for `bevy_diegetic`.
 //!
-//! This is the layout parity test. Both sides use the same measurement and
-//! rendering, so layout differences are real bugs.
+//! - **Left (Clay)**: Uses `clay-layout` (C FFI) for layout, then spawns [`WorldText`] entities at
+//!   the positions clay computed. This side demonstrates how to use [`DiegeticTextMeasurer`] as a
+//!   bridge: clay calls its own measurement callback, which delegates to our parley-backed measurer
+//!   via [`TextMeasure`] and [`TextDimensions`]. This pattern works for any external layout engine
+//!   that needs a text measurement callback.
+//!
+//! Controls:
+//! - `S` — cycle panel size (small / medium / large)
+//! - `D` — toggle text bounding-box debug gizmos
 //!
 //! Run with:
 //! ```sh
@@ -675,7 +683,7 @@ fn compute_clay_layout(
 ) -> Vec<ClayRect> {
     let layout_height = layout_size * PANEL_ASPECT;
     let mut clay = Clay::new((layout_size, layout_height).into());
-    let measure_fn = Arc::clone(&measurer.0);
+    let measure_fn = Arc::clone(&measurer.measure_fn);
     clay.set_measure_text_function_user_data(measure_fn, clay_measure_with_parley);
 
     let mut layout = clay.begin::<(), ()>();

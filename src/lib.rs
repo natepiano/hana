@@ -48,17 +48,23 @@ pub use layout::ForLayout;
 pub use layout::ForStandalone;
 pub use layout::LayoutBuilder;
 pub use layout::LayoutTree;
+/// Function signature for custom text measurement. Takes a text string and
+/// a [`TextMeasure`] describing the font configuration, returns
+/// [`TextDimensions`]. See [`DiegeticTextMeasurer`] and the `side_by_side`
+/// example for usage.
 pub use layout::MeasureTextFn;
 pub use layout::Padding;
 pub use layout::RectangleSource;
-// Render commands.
-pub use layout::RenderCommand;
-pub use layout::RenderCommandKind;
 pub use layout::Sizing;
 pub use layout::TextAlign;
 pub use layout::TextAnchor;
 pub use layout::TextConfig;
+/// Measured width and height of a text string, returned by [`MeasureTextFn`].
 pub use layout::TextDimensions;
+/// Font configuration passed to [`MeasureTextFn`]: font ID, size, weight,
+/// slant, line height, letter/word spacing. See the `side_by_side` example
+/// for a real-world custom measurer that bridges clay-layout to our
+/// parley-backed measurement via this type.
 pub use layout::TextMeasure;
 pub use layout::TextProps;
 pub use layout::TextStyle;

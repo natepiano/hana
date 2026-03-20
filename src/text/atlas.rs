@@ -103,13 +103,20 @@ impl MsdfAtlas {
     #[must_use]
     pub const fn height(&self) -> u32 { self.height }
 
-    /// Returns the raw RGBA pixel data.
+    /// Returns the raw RGBA pixel data. Test-only.
+    #[cfg(test)]
     #[must_use]
     pub fn pixels(&self) -> &[u8] { &self.pixels }
 
-    /// Returns the number of cached glyphs.
+    /// Returns the number of cached glyphs. Test-only.
+    #[cfg(test)]
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.glyphs.len() }
+
+    /// Looks up cached metrics for a glyph. Test-only.
+    #[cfg(test)]
+    #[must_use]
+    pub fn get(&self, key: &GlyphKey) -> Option<&GlyphMetrics> { self.glyphs.get(key) }
 
     /// Returns the SDF range used for glyph generation.
     #[must_use]
@@ -139,25 +146,6 @@ impl MsdfAtlas {
         self.image_handle = Some(images.add(image));
         self.dirty = false;
     }
-
-    /// Syncs CPU pixel data to the GPU image if the atlas has changed.
-    ///
-    /// Call each frame (or when needed) to push new glyphs to the GPU.
-    pub fn sync_to_gpu(&mut self, images: &mut Assets<Image>) {
-        if !self.dirty {
-            return;
-        }
-        if let Some(handle) = &self.image_handle
-            && let Some(image) = images.get_mut(handle)
-        {
-            image.data = Some(self.pixels.clone());
-            self.dirty = false;
-        }
-    }
-
-    /// Looks up cached metrics for a glyph.
-    #[must_use]
-    pub fn get(&self, key: &GlyphKey) -> Option<&GlyphMetrics> { self.glyphs.get(key) }
 
     /// Looks up or rasterizes a glyph, returning its metrics.
     ///

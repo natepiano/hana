@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::PoisonError;
 
 use bevy::prelude::Resource;
 use parley::FontContext;
@@ -60,25 +59,6 @@ impl FontRegistry {
             font_cx:  Arc::new(Mutex::new(font_cx)),
             families: vec![(*DEFAULT_FAMILY).to_string()],
         }
-    }
-
-    /// Registers a font from raw TTF/OTF bytes. Returns the assigned [`FontId`].
-    pub fn register_font(&mut self, bytes: &[u8], family_name: &str) -> FontId {
-        {
-            let mut font_cx = self.font_cx.lock().unwrap_or_else(PoisonError::into_inner);
-            font_cx.collection.register_fonts(
-                Blob::from(bytes.to_vec()),
-                Some(FontInfoOverride {
-                    family_name: Some(family_name),
-                    ..Default::default()
-                }),
-            );
-        }
-
-        #[allow(clippy::cast_possible_truncation)]
-        let id = FontId(self.families.len() as u16);
-        self.families.push((*family_name).to_string());
-        id
     }
 
     /// Returns the family name for a given [`FontId`].

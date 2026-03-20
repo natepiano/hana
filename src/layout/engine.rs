@@ -92,9 +92,6 @@ impl LayoutEngine {
         }
     }
 
-    /// Sets whether off-screen elements are culled from render output.
-    pub const fn set_culling(&mut self, culling: Culling) { self.culling = culling; }
-
     /// Computes layout for the given tree within the specified viewport dimensions.
     ///
     /// Returns a list of render commands in draw order, and the computed layout

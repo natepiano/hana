@@ -60,7 +60,7 @@ pub fn compute_panel_layouts(
 
     // Wrap the cache in Arc<Mutex<>> so the MeasureTextFn closure can capture it.
     let cache_ref = Arc::new(Mutex::new(cache.clone()));
-    let parley_fn = Arc::clone(&measurer.0);
+    let parley_fn = Arc::clone(&measurer.measure_fn);
 
     let cached_measure: crate::layout::MeasureTextFn =
         Arc::new(move |text: &str, measure: &crate::layout::TextMeasure| {

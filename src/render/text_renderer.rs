@@ -418,7 +418,7 @@ pub(crate) fn shape_text_cached(
 /// Uses the [`ShapedTextCache`] to avoid redundant parley shaping. Quad
 /// construction from cached glyphs + atlas metrics is cheap arithmetic.
 #[allow(clippy::too_many_arguments)]
-pub fn shape_text_to_quads(
+fn shape_text_to_quads(
     text: &str,
     config: &TextConfig,
     bounds: &crate::layout::BoundingBox,
