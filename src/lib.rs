@@ -75,13 +75,16 @@ pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
 pub use plugin::ShowTextGizmos;
 pub use render::GlyphQuadData;
+pub use render::MsdfExtension;
 pub use render::MsdfTextMaterial;
+pub use render::MsdfTextUniform;
 pub use render::ShapedTextCache;
 pub use render::TextRenderPlugin;
 pub use render::TextShapingContext;
 // Render.
 pub use render::WorldText;
 pub use render::build_glyph_mesh;
+pub use render::msdf_text_material;
 pub use render::shape_text_to_quads;
 // Text.
 pub use text::EMBEDDED_FONT;

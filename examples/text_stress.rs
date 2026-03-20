@@ -390,8 +390,8 @@ fn sync_hue_offset(
         for (child_of, mat_handle) in &children {
             if child_of.parent() == panel_entity {
                 if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                    if (mat.uniforms.hue_offset - state.hue_angle).abs() > f32::EPSILON {
-                        mat.uniforms.hue_offset = state.hue_angle;
+                    if (mat.extension.uniforms.hue_offset - state.hue_angle).abs() > f32::EPSILON {
+                        mat.extension.uniforms.hue_offset = state.hue_angle;
                     }
                 }
             }

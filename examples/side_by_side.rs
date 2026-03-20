@@ -536,8 +536,8 @@ fn spawn_text_entities(
         return;
     };
     #[allow(clippy::cast_possible_truncation)]
-    let msdf_mat = MeshMaterial3d(msdf_materials.add(MsdfTextMaterial::new(
-        LinearRgba::new(0.85, 0.95, 0.55, 1.0),
+    #[allow(clippy::cast_possible_truncation)]
+    let msdf_mat = MeshMaterial3d(msdf_materials.add(bevy_diegetic::msdf_text_material(
         atlas.sdf_range() as f32,
         atlas.width(),
         atlas.height(),

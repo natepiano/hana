@@ -7,7 +7,10 @@ mod world_text;
 
 pub use glyph_quad::GlyphQuadData;
 pub use glyph_quad::build_glyph_mesh;
+pub use msdf_material::MsdfExtension;
 pub use msdf_material::MsdfTextMaterial;
+pub use msdf_material::MsdfTextUniform;
+pub use msdf_material::msdf_text_material;
 pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;
 pub use text_renderer::TextShapingContext;

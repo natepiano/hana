@@ -94,8 +94,7 @@ pub(super) fn render_world_text(
         };
 
         #[allow(clippy::cast_possible_truncation)]
-        let material_handle = materials.add(MsdfTextMaterial::new(
-            LinearRgba::WHITE,
+        let material_handle = materials.add(super::msdf_material::msdf_text_material(
             atlas.sdf_range() as f32,
             atlas.width(),
             atlas.height(),

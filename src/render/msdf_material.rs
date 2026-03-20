@@ -1,19 +1,32 @@
-//! MSDF text material for GPU rendering.
+//! MSDF text material — extends `StandardMaterial` with MSDF atlas decoding.
+//!
+//! Uses Bevy's [`ExtendedMaterial`] to layer MSDF glyph rendering on top of the
+//! full PBR pipeline. This gives text correct lighting, shadows, double-sided
+//! normals, and all `StandardMaterial` properties for free.
 
 use bevy::asset::Asset;
-use bevy::color::LinearRgba;
 use bevy::image::Image;
-use bevy::pbr::Material;
+use bevy::pbr::ExtendedMaterial;
+use bevy::pbr::MaterialExtension;
+use bevy::pbr::StandardMaterial;
+use bevy::prelude::AlphaMode;
 use bevy::prelude::Handle;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
+use bevy::shader::ShaderRef;
 
-/// Uniform data for the MSDF text shader.
+/// The full MSDF text material type: `StandardMaterial` extended with MSDF
+/// atlas decoding.
+///
+/// Use `MsdfTextMaterial::new(...)` to create instances. The `base` field
+/// exposes all `StandardMaterial` properties (metallic, roughness, emissive,
+/// double_sided, etc.) for full PBR control.
+pub type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
+
+/// Uniform data for the MSDF extension shader.
 #[derive(Clone, Debug, ShaderType)]
 pub struct MsdfTextUniform {
-    /// Base text color (linear RGBA).
-    pub color:        LinearRgba,
     /// SDF range in atlas pixels.
     pub sdf_range:    f32,
     /// Atlas texture width in pixels.
@@ -45,58 +58,57 @@ pub struct MsdfTextUniform {
     pub hue_offset:   f32,
 }
 
-/// Material for rendering MSDF text glyphs.
+/// MSDF atlas extension for `StandardMaterial`.
 ///
-/// Implements Bevy's [`Material`] trait with a custom fragment shader
-/// that performs MSDF decoding and adaptive anti-aliasing.
+/// Adds MSDF glyph decoding on top of Bevy's PBR pipeline. The extension
+/// shader reads the MSDF atlas texture, computes per-pixel alpha from the
+/// signed distance field, and modifies the PBR input's base color before
+/// lighting is applied.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-pub struct MsdfTextMaterial {
-    /// Shader uniforms: color, SDF range, atlas dimensions.
-    #[uniform(0)]
+pub struct MsdfExtension {
+    /// MSDF shader uniforms.
+    #[uniform(100)]
     pub uniforms:      MsdfTextUniform,
     /// The MSDF atlas texture.
-    #[texture(1)]
-    #[sampler(2)]
+    #[texture(101)]
+    #[sampler(102)]
     pub atlas_texture: Handle<Image>,
 }
 
-impl MsdfTextMaterial {
-    /// Creates a new material with the given color and atlas texture.
-    #[must_use]
-    #[allow(clippy::cast_precision_loss)]
-    pub const fn new(
-        color: LinearRgba,
-        sdf_range: f32,
-        atlas_width: u32,
-        atlas_height: u32,
-        atlas_texture: Handle<Image>,
-    ) -> Self {
-        Self {
+impl MaterialExtension for MsdfExtension {
+    fn fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
+}
+
+/// Creates a new [`MsdfTextMaterial`] with sensible defaults.
+///
+/// The base `StandardMaterial` is configured for text rendering:
+/// - `alpha_mode: Blend` for smooth edges
+/// - `double_sided: true` for visibility from both sides
+/// - `cull_mode: None` (no back-face culling)
+/// - White base color (vertex colors override per-glyph)
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub fn msdf_text_material(
+    sdf_range: f32,
+    atlas_width: u32,
+    atlas_height: u32,
+    atlas_texture: Handle<Image>,
+) -> MsdfTextMaterial {
+    ExtendedMaterial {
+        base:      StandardMaterial {
+            alpha_mode: AlphaMode::Opaque,
+            double_sided: true,
+            cull_mode: None,
+            ..StandardMaterial::default()
+        },
+        extension: MsdfExtension {
             uniforms: MsdfTextUniform {
-                color,
                 sdf_range,
                 atlas_width: atlas_width as f32,
                 atlas_height: atlas_height as f32,
                 hue_offset: 0.0,
             },
             atlas_texture,
-        }
-    }
-}
-
-impl Material for MsdfTextMaterial {
-    fn fragment_shader() -> bevy::shader::ShaderRef { "shaders/msdf_text.wgsl".into() }
-
-    fn alpha_mode(&self) -> bevy::prelude::AlphaMode { bevy::prelude::AlphaMode::Blend }
-
-    fn specialize(
-        _pipeline: &bevy::pbr::MaterialPipeline,
-        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
-        _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
-        _key: bevy::pbr::MaterialPipelineKey<Self>,
-    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
-        // Disable back-face culling so text is visible from both sides.
-        descriptor.primitive.cull_mode = None;
-        Ok(())
+        },
     }
 }
