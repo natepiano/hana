@@ -37,8 +37,6 @@ pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Border;
 pub use layout::BoundingBox;
-// Layout engine.
-pub use layout::ComputedLayout;
 pub use layout::Culling;
 pub use layout::Direction;
 // Layout tree.
@@ -49,8 +47,6 @@ pub use layout::FontWeight;
 pub use layout::ForLayout;
 pub use layout::ForStandalone;
 pub use layout::LayoutBuilder;
-pub use layout::LayoutEngine;
-pub use layout::LayoutResult;
 pub use layout::LayoutTree;
 pub use layout::MeasureTextFn;
 pub use layout::Padding;
@@ -74,26 +70,10 @@ pub use plugin::DiegeticPanelGizmoGroup;
 pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
+pub use plugin::LayoutPlugin;
 pub use plugin::ShowTextGizmos;
-pub use render::GlyphQuadData;
-pub use render::MsdfExtension;
 pub use render::MsdfTextMaterial;
-pub use render::MsdfTextUniform;
-pub use render::ShapedTextCache;
-pub use render::TextRenderPlugin;
-pub use render::TextShapingContext;
 // Render.
 pub use render::WorldText;
-pub use render::build_glyph_mesh;
-pub use render::msdf_text_material;
-pub use render::shape_text_to_quads;
 // Text.
-pub use text::EMBEDDED_FONT;
 pub use text::FontId;
-pub use text::FontRegistry;
-pub use text::GlyphKey;
-pub use text::GlyphMetrics;
-pub use text::MsdfAtlas;
-pub use text::MsdfBitmap;
-pub use text::create_parley_measurer;
-pub use text::rasterize_glyph;

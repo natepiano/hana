@@ -1,16 +1,15 @@
-#![allow(clippy::float_cmp)]
-
 //! Tests for the parley-backed text measurer.
 //!
 //! Verifies that real font measurement via parley produces reasonable dimensions
 //! from the embedded `JetBrains Mono` font.
 
-use bevy_diegetic::FontRegistry;
-use bevy_diegetic::TextConfig;
-use bevy_diegetic::TextMeasure;
-use bevy_diegetic::create_parley_measurer;
+use super::FontRegistry;
+use super::create_parley_measurer;
+use crate::MeasureTextFn;
+use crate::TextConfig;
+use crate::TextMeasure;
 
-fn measurer() -> (FontRegistry, bevy_diegetic::MeasureTextFn) {
+fn measurer() -> (FontRegistry, MeasureTextFn) {
     let registry = FontRegistry::new();
     let measure_fn = create_parley_measurer(registry.font_context(), registry.family_names());
     (registry, measure_fn)

@@ -1,18 +1,14 @@
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::panic)]
-#![allow(clippy::unwrap_used)]
-
 //! Tests for the MSDF rasterizer and atlas.
 //!
 //! Validates that `fdsm` produces usable MSDF bitmaps from the embedded
 //! `JetBrains Mono` font and that the atlas packs glyphs correctly.
 
-use bevy_diegetic::GlyphKey;
-use bevy_diegetic::MsdfAtlas;
-use bevy_diegetic::rasterize_glyph;
+use super::atlas::GlyphKey;
+use super::atlas::MsdfAtlas;
+use super::msdf_rasterizer::rasterize_glyph;
 
 /// Embedded font data for tests.
-const FONT_DATA: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
+const FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 
 /// Resolve a character to a glyph index via `ttf-parser`.
 fn glyph_index(ch: char) -> u16 {

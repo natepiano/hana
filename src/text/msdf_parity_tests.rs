@@ -1,9 +1,3 @@
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::panic)]
-#![allow(clippy::unwrap_used)]
-
 //! MSDF parity tests: `fdsm` (pure Rust) vs `msdfgen` (C++ reference).
 //!
 //! Both engines use different framing (fdsm: tight bounding box, msdfgen:
@@ -17,7 +11,6 @@
 
 use std::fmt::Write;
 
-use bevy_diegetic::rasterize_glyph;
 use msdfgen::Bitmap;
 use msdfgen::FontExt;
 use msdfgen::MsdfGeneratorConfig;
@@ -25,9 +18,11 @@ use msdfgen::Range;
 use msdfgen::Rgb;
 use ttf_parser_018 as ttf018;
 
+use super::msdf_rasterizer::rasterize_glyph;
+
 /// Embedded font data.
-const JETBRAINS_MONO: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
-const NOTO_SANS: &[u8] = include_bytes!("../assets/fonts/NotoSans-Regular.ttf");
+const JETBRAINS_MONO: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+const NOTO_SANS: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 
 /// SDF range in pixels.
 const SDF_RANGE: f64 = 4.0;

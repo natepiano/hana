@@ -77,7 +77,6 @@ pub struct MsdfExtension {
 
 impl MaterialExtension for MsdfExtension {
     fn fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
-
 }
 
 /// Creates a new [`MsdfTextMaterial`] with sensible defaults.

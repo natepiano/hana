@@ -1,12 +1,9 @@
-#![allow(clippy::float_cmp)]
-#![allow(clippy::redundant_closure_for_method_calls)]
-#![allow(clippy::unwrap_used)]
-
 //! Unit tests for glyph mesh construction.
 
 use bevy::prelude::Mesh;
-use bevy_diegetic::GlyphQuadData;
-use bevy_diegetic::build_glyph_mesh;
+
+use super::glyph_quad::GlyphQuadData;
+use super::glyph_quad::build_glyph_mesh;
 
 #[test]
 fn mesh_vertex_and_index_counts() {

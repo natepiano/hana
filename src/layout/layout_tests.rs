@@ -1,7 +1,3 @@
-#![allow(clippy::float_cmp)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::needless_collect)]
-
 //! Layout engine integration tests.
 //!
 //! Each test constructs a layout tree, runs the engine, and verifies the computed
@@ -11,22 +7,23 @@
 use std::sync::Arc;
 
 use bevy::color::Color;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Border;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutEngine;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::MeasureTextFn;
-use bevy_diegetic::Padding;
-use bevy_diegetic::RenderCommandKind;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
-use bevy_diegetic::TextDimensions;
-use bevy_diegetic::TextMeasure;
-use bevy_diegetic::TextWrap;
+
+use super::AlignX;
+use super::AlignY;
+use super::Border;
+use super::Direction;
+use super::El;
+use super::LayoutBuilder;
+use super::LayoutEngine;
+use super::LayoutTree;
+use super::MeasureTextFn;
+use super::Padding;
+use super::RenderCommandKind;
+use super::Sizing;
+use super::TextConfig;
+use super::TextDimensions;
+use super::TextMeasure;
+use super::TextWrap;
 
 const VIEWPORT: f32 = 200.0;
 

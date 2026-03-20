@@ -1,7 +1,3 @@
-#![allow(clippy::float_cmp)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::needless_pass_by_value)]
-
 //! Clay parity tests.
 //!
 //! Each test builds the same layout in both Clay (via `clay-layout` FFI) and
@@ -10,18 +6,6 @@
 
 use std::sync::Arc;
 
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::LayoutEngine;
-use bevy_diegetic::MeasureTextFn;
-use bevy_diegetic::Padding;
-use bevy_diegetic::RenderCommandKind;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
-use bevy_diegetic::TextDimensions;
-use bevy_diegetic::TextMeasure;
 use clay_layout::Clay;
 use clay_layout::Declaration;
 use clay_layout::fit;
@@ -33,6 +17,21 @@ use clay_layout::layout::LayoutAlignmentY;
 use clay_layout::layout::LayoutDirection;
 use clay_layout::math::Dimensions;
 use clay_layout::render_commands::RenderCommandConfig;
+
+use super::AlignX;
+use super::AlignY;
+use super::Direction;
+use super::El;
+use super::LayoutBuilder;
+use super::LayoutEngine;
+use super::LayoutResult;
+use super::MeasureTextFn;
+use super::Padding;
+use super::RenderCommandKind;
+use super::Sizing;
+use super::TextConfig;
+use super::TextDimensions;
+use super::TextMeasure;
 
 // ── Shared measurement ────────────────────────────────────────────────────
 
@@ -177,7 +176,7 @@ fn collect_clay_bboxes<'a>(
 
 // ── Diegetic helper ───────────────────────────────────────────────────────
 
-fn collect_diegetic_bboxes(result: &bevy_diegetic::LayoutResult) -> Vec<Bbox> {
+fn collect_diegetic_bboxes(result: &LayoutResult) -> Vec<Bbox> {
     let mut out = Vec::new();
     for cmd in &result.commands {
         let kind = match &cmd.kind {
@@ -227,7 +226,7 @@ fn parity_fixed_root_with_grow_child() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))
@@ -301,7 +300,7 @@ fn parity_header_body_divider() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))
@@ -380,7 +379,7 @@ fn parity_key_value_row_with_spacer() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))
@@ -436,7 +435,7 @@ fn parity_vertical_center_alignment() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))
@@ -550,7 +549,7 @@ fn parity_fit_parent_with_grow_children_centering() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size)),
@@ -654,7 +653,7 @@ fn parity_compression_with_content_minimum() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(100.0))
@@ -743,7 +742,7 @@ fn parity_cross_axis_grow_with_large_content() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(width))
             .height(Sizing::fixed(height))
@@ -812,7 +811,7 @@ fn parity_two_grow_children_horizontal() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(100.0))
@@ -882,7 +881,7 @@ fn parity_padding_and_child_gap() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))
@@ -947,7 +946,7 @@ fn parity_right_alignment() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(100.0))
@@ -1125,7 +1124,7 @@ fn parity_status_panel_full_layout() {
     let clay_bboxes = collect_clay_bboxes(layout.end());
 
     // Diegetic
-    let mut b = bevy_diegetic::LayoutBuilder::with_root(
+    let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))

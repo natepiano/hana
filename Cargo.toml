@@ -70,8 +70,4 @@ name    = "layout_comparison"
 
 [[bench]]
 harness = false
-name    = "msdf_comparison"
-
-[[bench]]
-harness = false
-name    = "text_render_perf"
+name    = "panel_perf"

@@ -1,11 +1,10 @@
 //! Side-by-side layout comparison example.
 //!
 //! Renders the same status panel layout using both `clay-layout` (C FFI) and
-//! `bevy_diegetic` (pure Rust), side by side as 3D gizmo wireframes.
-//! Both sides use MSDF text rendering.
+//! `bevy_diegetic` (pure Rust), side by side.
 //!
-//! - **Left (Clay)**: Clay layout engine + parley measurer + MSDF renderer.
-//! - **Right (Diegetic)**: Our layout engine + parley measurer + MSDF renderer.
+//! - **Left (Clay)**: Clay layout engine + parley measurer + `WorldText` renderer.
+//! - **Right (Diegetic)**: `DiegeticPanel` plugin (layout + MSDF rendering + gizmos).
 //!
 //! This is the layout parity test. Both sides use the same measurement and
 //! rendering, so layout differences are real bugs.
@@ -21,7 +20,6 @@
 use std::sync::Arc;
 
 use bevy::color::Color;
-use bevy::color::LinearRgba;
 use bevy::color::palettes::css;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -30,25 +28,20 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
-use bevy_diegetic::BoundingBox;
+use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticTextMeasurer;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
-use bevy_diegetic::FontRegistry;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutEngine;
-use bevy_diegetic::LayoutResult;
-use bevy_diegetic::MsdfAtlas;
-use bevy_diegetic::MsdfTextMaterial;
+use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
-use bevy_diegetic::RenderCommandKind;
+use bevy_diegetic::ShowTextGizmos;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
-use bevy_diegetic::TextShapingContext;
-use bevy_diegetic::build_glyph_mesh;
-use bevy_diegetic::shape_text_to_quads;
+use bevy_diegetic::TextStyle;
+use bevy_diegetic::WorldText;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -90,30 +83,25 @@ const DIEGETIC_RENDERER: &str = "diegetic";
 const DYNAMIC_UPDATE_INTERVAL: f32 = 1.0;
 const WRAP_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit";
 
+/// WorldText uses a fixed scale of 0.01 (layout units → world units).
+const WORLD_TEXT_SCALE: f32 = 0.01;
+
 // ── Gizmo groups ─────────────────────────────────────────────────────────────
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct ClayGizmoGroup;
-
-#[derive(Default, Reflect, GizmoConfigGroup)]
-struct DiegeticGizmoGroup;
 
 // ── Marker components ────────────────────────────────────────────────────────
 
 #[derive(Component)]
 struct ClayPanelMarker;
 
+/// Marker for `WorldText` entities spawned by the clay side, so we can
+/// despawn them on rebuild.
 #[derive(Component)]
-struct DiegeticPanelMarker;
-
-/// Marker for text entities that get despawned and respawned on content change.
-#[derive(Component)]
-struct LayoutTextEntity;
+struct ClayTextEntity;
 
 // ── Stored layout results ────────────────────────────────────────────────────
-
-#[derive(Resource, Default)]
-struct DiegeticLayoutResult(Option<LayoutResult>);
 
 #[derive(Resource, Default)]
 struct ClayLayoutResult(Vec<ClayRect>);
@@ -158,10 +146,6 @@ impl PanelSizing {
 
     /// Recompute `world_size` and `gutter` from the visible area at z=0.
     fn fit_to_view(&mut self, visible_width: f32, visible_height: f32) {
-        // Compute the world size that makes the *largest* preset fill the view.
-        // Smaller presets then get proportionally smaller panels at the same
-        // world-units-per-layout-unit scale, so content stays the same physical
-        // size and only the panel boundary shrinks.
         self.gutter = visible_width * GUTTER_FRACTION;
         let from_width = GUTTER_COUNT.mul_add(-self.gutter, visible_width) / 2.0;
         let from_height = self.gutter.mul_add(-2.0, visible_height) / PANEL_ASPECT;
@@ -223,8 +207,7 @@ fn main() {
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(WindowManagerPlugin)
         .init_gizmo_group::<ClayGizmoGroup>()
-        .init_gizmo_group::<DiegeticGizmoGroup>()
-        .init_resource::<DiegeticLayoutResult>()
+        .insert_resource(ShowTextGizmos(true))
         .init_resource::<ClayLayoutResult>()
         .init_resource::<DynamicRows>()
         .init_resource::<PanelSizing>()
@@ -235,13 +218,15 @@ fn main() {
             (
                 cycle_panel_size,
                 update_dynamic_rows,
-                rebuild_layouts
+                rebuild_diegetic_panel
                     .after(update_dynamic_rows)
                     .after(cycle_panel_size),
-                spawn_text_entities.after(rebuild_layouts),
+                rebuild_clay_layout
+                    .after(update_dynamic_rows)
+                    .after(cycle_panel_size),
+                spawn_clay_text.after(rebuild_clay_layout),
                 toggle_text_debug,
                 draw_clay_gizmos,
-                draw_diegetic_gizmos,
             ),
         )
         .run();
@@ -249,11 +234,6 @@ fn main() {
 
 // ── Clay text measurement ────────────────────────────────────────────────────
 
-/// Creates a clay measurement function backed by the parley measurer.
-///
-/// Clay's measurement callback receives `clay_layout::text::TextConfig` (with
-/// `u16` font_size). We convert to our `TextMeasure` and delegate to the
-/// parley-backed `DiegeticTextMeasurer`.
 fn clay_measure_with_parley(
     text: &str,
     config: &clay_layout::text::TextConfig,
@@ -282,6 +262,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     sizing: Res<PanelSizing>,
+    dynamic: Res<DynamicRows>,
 ) {
     // Ground plane.
     commands.spawn((
@@ -295,11 +276,11 @@ fn setup(
         Transform::from_xyz(0.0, -1.2, 0.0),
     ));
 
-    // White backdrop behind the panels.
+    // Dark backdrop behind the panels.
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(2.9, 2.0))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
+            base_color: Color::srgb(0.15, 0.15, 0.15),
             double_sided: true,
             cull_mode: None,
             ..default()
@@ -310,7 +291,7 @@ fn setup(
     // Point light.
     commands.spawn((
         PointLight {
-            intensity: 500_000.0,
+            intensity: 200_000.0,
             shadows_enabled: true,
             range: 30.0,
             ..default()
@@ -337,10 +318,27 @@ fn setup(
 
     // Panel entities.
     let offset = panel_offset(&sizing);
+    let layout_size = sizing.layout_size;
+    let layout_height = layout_size * PANEL_ASPECT;
+    let world_size = sizing.world_size;
+    let world_height = world_size * PANEL_ASPECT;
 
+    // Clay panel (left) — just a marker entity for positioning + gizmo drawing.
     commands.spawn((ClayPanelMarker, Transform::from_xyz(-offset, 0.0, 0.0)));
 
-    commands.spawn((DiegeticPanelMarker, Transform::from_xyz(offset, 0.0, 0.0)));
+    // Diegetic panel (right) — uses the plugin for layout + text rendering.
+    let diegetic_rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
+    let tree = build_diegetic_tree(&diegetic_rows, layout_size);
+    commands.spawn((
+        DiegeticPanel {
+            tree,
+            layout_width: layout_size,
+            layout_height,
+            world_width: world_size,
+            world_height,
+        },
+        Transform::from_xyz(offset, 0.0, 0.0),
+    ));
 
     // Help text overlay.
     commands.spawn((
@@ -368,11 +366,8 @@ fn cycle_panel_size(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut sizing: ResMut<PanelSizing>,
     camera: Query<(&GlobalTransform, &Projection)>,
-    mut clay_panels: Query<&mut Transform, (With<ClayPanelMarker>, Without<DiegeticPanelMarker>)>,
-    mut diegetic_panels: Query<
-        &mut Transform,
-        (With<DiegeticPanelMarker>, Without<ClayPanelMarker>),
-    >,
+    mut clay_panels: Query<&mut Transform, (With<ClayPanelMarker>, Without<DiegeticPanel>)>,
+    mut diegetic_panels: Query<(&mut Transform, &mut DiegeticPanel), Without<ClayPanelMarker>>,
     mut initialized: Local<bool>,
 ) {
     let pressed = keyboard.just_pressed(KeyCode::KeyS);
@@ -383,34 +378,25 @@ fn cycle_panel_size(
     // Refit on first frame (camera projection now available) or on key press.
     if !*initialized || pressed {
         *initialized = true;
-        refit_panels(&camera, &mut sizing, &mut clay_panels, &mut diegetic_panels);
-    }
-}
-
-/// Compute visible width at z=0 from the camera and refit panels.
-#[allow(clippy::too_many_arguments)]
-fn refit_panels(
-    camera: &Query<(&GlobalTransform, &Projection)>,
-    sizing: &mut PanelSizing,
-    clay_panels: &mut Query<&mut Transform, (With<ClayPanelMarker>, Without<DiegeticPanelMarker>)>,
-    diegetic_panels: &mut Query<
-        &mut Transform,
-        (With<DiegeticPanelMarker>, Without<ClayPanelMarker>),
-    >,
-) {
-    if let Ok((gt, Projection::Perspective(persp))) = camera.single() {
-        let distance = gt.translation().z.abs();
-        let half_height = distance * (persp.fov * 0.5).tan();
-        let visible_height = half_height * 2.0;
-        let visible_width = visible_height * persp.aspect_ratio;
-        sizing.fit_to_view(visible_width, visible_height);
-    }
-    let offset = panel_offset(sizing);
-    for mut t in clay_panels {
-        t.translation.x = -offset;
-    }
-    for mut t in diegetic_panels {
-        t.translation.x = offset;
+        if let Ok((gt, Projection::Perspective(persp))) = camera.single() {
+            let distance = gt.translation().z.abs();
+            let half_height = distance * (persp.fov * 0.5).tan();
+            let visible_height = half_height * 2.0;
+            let visible_width = visible_height * persp.aspect_ratio;
+            sizing.fit_to_view(visible_width, visible_height);
+        }
+        let offset = panel_offset(&sizing);
+        for mut t in &mut clay_panels {
+            t.translation.x = -offset;
+        }
+        for (mut t, mut panel) in &mut diegetic_panels {
+            t.translation.x = offset;
+            // Update panel dimensions to match new sizing.
+            panel.layout_width = sizing.layout_size;
+            panel.layout_height = sizing.layout_size * PANEL_ASPECT;
+            panel.world_width = sizing.world_size;
+            panel.world_height = sizing.world_size * PANEL_ASPECT;
+        }
     }
 }
 
@@ -422,12 +408,10 @@ fn update_dynamic_rows(
     camera: Query<&PanOrbitCamera>,
     mut dynamic: ResMut<DynamicRows>,
 ) {
-    // Radius updates every frame (follows camera orbit).
     if let Ok(cam) = camera.single() {
         dynamic.radius = format!("{:.1}", cam.radius.unwrap_or(3.0));
     }
 
-    // FPS and frame ms update on a timer.
     dynamic.timer.tick(time.delta());
     if dynamic.timer.just_finished() {
         let fps = diagnostics
@@ -447,27 +431,17 @@ fn build_rows(
     sizing: &PanelSizing,
     renderer: &str,
 ) -> Vec<(String, String)> {
-    let mut rows = vec![
+    vec![
         ("panel size:".to_string(), sizing.label().to_string()),
         ("layout units:".to_string(), sizing.layout_units_label()),
         ("renderer:".to_string(), renderer.to_string()),
-    ];
-
-    rows.push(("radius:".to_string(), dynamic.radius.clone()));
-    rows.push(("fps:".to_string(), dynamic.fps.clone()));
-    rows.push(("frame ms:".to_string(), dynamic.frame_ms.clone()));
-
-    rows
+        ("radius:".to_string(), dynamic.radius.clone()),
+        ("fps:".to_string(), dynamic.fps.clone()),
+        ("frame ms:".to_string(), dynamic.frame_ms.clone()),
+    ]
 }
 
 /// Replaces ASCII spaces with non-breaking spaces (`\u{00a0}`) for Clay text.
-///
-/// Clay tokenizes text at word boundaries (spaces) and measures each token via
-/// the measurement callback. `bevy_rich_text3d` produces near-zero
-/// `Text3dDimensionOut` for space-only text (no visible glyphs), so the callback
-/// can never return an accurate width for the space token. Non-breaking spaces
-/// prevent Clay from splitting the text, so the full string is measured as one
-/// piece — giving accurate widths from cosmic-text's real advance metrics.
 fn spaces_to_nbsp(text: &str) -> String { text.replace(' ', "\u{00a0}") }
 
 fn build_clay_rows(dynamic: &DynamicRows, sizing: &PanelSizing) -> Vec<(String, String)> {
@@ -477,52 +451,53 @@ fn build_clay_rows(dynamic: &DynamicRows, sizing: &PanelSizing) -> Vec<(String, 
         .collect()
 }
 
-// ── Rebuild layouts each frame ───────────────────────────────────────────────
+// ── Diegetic panel update ────────────────────────────────────────────────────
 
-fn rebuild_layouts(
+/// Updates the diegetic panel's tree when dynamic data or sizing changes.
+fn rebuild_diegetic_panel(
+    dynamic: Res<DynamicRows>,
+    sizing: Res<PanelSizing>,
+    mut panels: Query<&mut DiegeticPanel>,
+) {
+    if !dynamic.is_changed() && !sizing.is_changed() {
+        return;
+    }
+    let rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
+    for mut panel in &mut panels {
+        panel.tree = build_diegetic_tree(&rows, sizing.layout_size);
+    }
+}
+
+// ── Clay layout + WorldText spawning ─────────────────────────────────────────
+
+/// Recomputes the clay layout when dynamic data or sizing changes.
+fn rebuild_clay_layout(
     dynamic: Res<DynamicRows>,
     measurer: Res<DiegeticTextMeasurer>,
     sizing: Res<PanelSizing>,
-    mut diegetic_result: ResMut<DiegeticLayoutResult>,
     mut clay_result: ResMut<ClayLayoutResult>,
 ) {
     if !dynamic.is_changed() && !sizing.is_changed() {
         return;
     }
-    let diegetic_rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
     let clay_rows = build_clay_rows(&dynamic, &sizing);
-    let layout_size = sizing.layout_size;
-    diegetic_result.0 = Some(compute_diegetic_layout(
-        &diegetic_rows,
-        &measurer,
-        layout_size,
-    ));
-    clay_result.0 = compute_clay_layout(&clay_rows, &measurer, layout_size);
+    clay_result.0 = compute_clay_layout(&clay_rows, &measurer, sizing.layout_size);
 }
 
-// ── Spawn text entities from layout results ──────────────────────────────────
-
-#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
-fn spawn_text_entities(
+/// Spawns `WorldText` entities for clay text at positions computed from the
+/// clay layout. Each text rect becomes a `WorldText` child of the clay panel.
+fn spawn_clay_text(
     mut commands: Commands,
-    old_text: Query<Entity, With<LayoutTextEntity>>,
-    diegetic_panels: Query<(&GlobalTransform, Entity), With<DiegeticPanelMarker>>,
-    clay_panels: Query<(&GlobalTransform, Entity), With<ClayPanelMarker>>,
-    diegetic_result: Res<DiegeticLayoutResult>,
+    old_text: Query<Entity, With<ClayTextEntity>>,
+    clay_panels: Query<&GlobalTransform, With<ClayPanelMarker>>,
     clay_result: Res<ClayLayoutResult>,
     sizing: Res<PanelSizing>,
-    font_registry: Res<FontRegistry>,
-    shaping_cx: Res<TextShapingContext>,
-    mut cache: ResMut<bevy_diegetic::ShapedTextCache>,
-    mut atlas: ResMut<MsdfAtlas>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut msdf_materials: ResMut<Assets<MsdfTextMaterial>>,
 ) {
-    if !diegetic_result.is_changed() && !clay_result.is_changed() {
+    if !clay_result.is_changed() {
         return;
     }
 
-    // Despawn previous text entities.
+    // Despawn previous clay text entities.
     for entity in &old_text {
         commands.entity(entity).despawn();
     }
@@ -531,146 +506,43 @@ fn spawn_text_entities(
     let half_w = sizing.world_size * 0.5;
     let half_h = sizing.world_size * PANEL_ASPECT * 0.5;
 
-    // Create shared MSDF material from atlas.
-    let Some(atlas_image) = atlas.image_handle().cloned() else {
-        return;
-    };
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_possible_truncation)]
-    let msdf_mat = MeshMaterial3d(msdf_materials.add(bevy_diegetic::msdf_text_material(
-        atlas.sdf_range() as f32,
-        atlas.width(),
-        atlas.height(),
-        atlas_image,
-    )));
+    // Scale factor: WorldText uses 0.01, panel uses `scale`.
+    let text_entity_scale = scale / WORLD_TEXT_SCALE;
 
-    // Spawn diegetic text via MSDF.
-    if let Some(result) = &diegetic_result.0 {
-        for (panel_gt, _) in &diegetic_panels {
-            spawn_msdf_text_from_commands(
-                &mut commands,
-                &result.commands,
-                panel_gt,
-                &font_registry,
-                &mut atlas,
-                &shaping_cx,
-                &mut cache,
-                &msdf_mat,
-                &mut meshes,
-                scale,
-                half_w,
-                half_h,
-            );
-        }
-    }
-
-    // Spawn clay text via MSDF.
-    for (panel_gt, _) in &clay_panels {
-        let clay_commands = clay_rects_to_render_commands(&clay_result.0);
-        spawn_msdf_text_from_commands(
-            &mut commands,
-            &clay_commands,
-            panel_gt,
-            &font_registry,
-            &mut atlas,
-            &shaping_cx,
-            &mut cache,
-            &msdf_mat,
-            &mut meshes,
-            scale,
-            half_w,
-            half_h,
-        );
-    }
-}
-
-/// Converts `ClayRect` text entries to `RenderCommand` for uniform MSDF rendering.
-fn clay_rects_to_render_commands(rects: &[ClayRect]) -> Vec<bevy_diegetic::RenderCommand> {
-    rects
-        .iter()
-        .filter_map(|rect| {
+    for panel_gt in &clay_panels {
+        for rect in &clay_result.0 {
             let (text, font_size) = match &rect.kind {
-                ClayRectKind::Text(text, font_size) => (text.clone(), *font_size),
-                _ => return None,
+                ClayRectKind::Text(text, font_size) => (text.as_str(), *font_size),
+                _ => continue,
             };
-            Some(bevy_diegetic::RenderCommand {
-                bounds:      BoundingBox {
-                    x:      rect.x,
-                    y:      rect.y,
-                    width:  rect.width,
-                    height: rect.height,
-                },
-                kind:        RenderCommandKind::Text {
-                    text,
-                    config: TextConfig::new(font_size),
-                    quad_count: 0,
-                },
-                element_idx: 0,
-            })
-        })
-        .collect()
-}
 
-/// Spawns MSDF text mesh entities for a set of render commands on a panel.
-#[allow(clippy::too_many_arguments)]
-fn spawn_msdf_text_from_commands(
-    commands: &mut Commands,
-    render_commands: &[bevy_diegetic::RenderCommand],
-    panel_gt: &GlobalTransform,
-    font_registry: &FontRegistry,
-    atlas: &mut MsdfAtlas,
-    shaping_cx: &TextShapingContext,
-    cache: &mut bevy_diegetic::ShapedTextCache,
-    msdf_mat: &MeshMaterial3d<MsdfTextMaterial>,
-    meshes: &mut Assets<Mesh>,
-    scale: f32,
-    half_w: f32,
-    half_h: f32,
-) {
-    for cmd in render_commands {
-        let (text, config) = match &cmd.kind {
-            RenderCommandKind::Text { text, config, .. } => (text.as_str(), config),
-            _ => continue,
-        };
+            // Convert layout coords to panel-local world coords.
+            // Layout: top-left origin, Y-down.
+            // Panel-local: center origin, Y-up.
+            let local_x = rect.x.mul_add(scale, -half_w);
+            let local_y = (-rect.y).mul_add(scale, half_h);
 
-        let quads = shape_text_to_quads(
-            text,
-            config,
-            &cmd.bounds,
-            font_registry,
-            atlas,
-            shaping_cx,
-            cache,
-            scale,
-            scale,
-            half_w,
-            half_h,
-        );
+            // Transform to world space.
+            let world_pos = panel_gt.transform_point(Vec3::new(local_x, local_y, 0.001));
 
-        if quads.is_empty() {
-            continue;
+            commands.spawn((
+                ClayTextEntity,
+                WorldText::new(text),
+                TextStyle::new()
+                    .with_size(font_size)
+                    .with_anchor(bevy_diegetic::TextAnchor::TopLeft),
+                Transform::from_translation(world_pos).with_scale(Vec3::splat(text_entity_scale)),
+            ));
         }
-
-        let mesh = build_glyph_mesh(&quads);
-        let mesh_handle = meshes.add(mesh);
-
-        commands.spawn((
-            LayoutTextEntity,
-            Mesh3d(mesh_handle),
-            msdf_mat.clone(),
-            Transform::from_translation(panel_gt.translation()),
-        ));
     }
 }
 
-// ── Diegetic layout ──────────────────────────────────────────────────────────
+// ── Diegetic tree builder ────────────────────────────────────────────────────
 
+/// Builds the diegetic layout tree. Returns a `LayoutTree`.
+/// The plugin handles layout computation and text rendering.
 #[allow(clippy::too_many_lines)]
-fn compute_diegetic_layout(
-    rows: &[(String, String)],
-    measurer: &DiegeticTextMeasurer,
-    layout_size: f32,
-) -> LayoutResult {
+fn build_diegetic_tree(rows: &[(String, String)], layout_size: f32) -> LayoutTree {
     let layout_height = layout_size * PANEL_ASPECT;
     let mut builder = LayoutBuilder::with_root(
         El::new()
@@ -781,8 +653,7 @@ fn compute_diegetic_layout(
                                 |_| {},
                             );
 
-                            // Word-wrap cell: validates that wrapping
-                            // measures spaces correctly.
+                            // Word-wrap cell.
                             b.text(WRAP_TEXT, TextConfig::new(FONT_SIZE));
                         },
                     );
@@ -791,30 +662,7 @@ fn compute_diegetic_layout(
         },
     );
 
-    let tree = builder.build();
-    let engine = LayoutEngine::new(Arc::clone(&measurer.0));
-    let result = engine.compute(&tree, layout_size, layout_height);
-
-    // Debug: print root and first-level children bounds.
-    for (i, cmd) in result.commands.iter().enumerate() {
-        if i < 15 {
-            bevy::log::debug!(
-                "DIEGETIC cmd[{i}]: {:?} bounds=({:.1}, {:.1}, {:.1}, {:.1})",
-                match &cmd.kind {
-                    RenderCommandKind::Rectangle { .. } => "Rect",
-                    RenderCommandKind::Text { .. } => "Text",
-                    RenderCommandKind::Border { .. } => "Border",
-                    _ => "Other",
-                },
-                cmd.bounds.x,
-                cmd.bounds.y,
-                cmd.bounds.width,
-                cmd.bounds.height,
-            );
-        }
-    }
-
-    result
+    builder.build()
 }
 
 // ── Clay layout ──────────────────────────────────────────────────────────────
@@ -1008,10 +856,7 @@ fn compute_clay_layout(
                                         |_| {},
                                     );
 
-                                    // Word-wrap cell: uses regular spaces (no
-                                    // nbsp) so Clay actually word-wraps. This
-                                    // exposes Clay's space-token measurement
-                                    // weakness vs diegetic's full-string path.
+                                    // Word-wrap cell.
                                     clay.text(
                                         WRAP_TEXT,
                                         clay_layout::text::TextConfig::new()
@@ -1081,44 +926,14 @@ fn draw_rect_on_panel(
     gizmos.line(bl, tl, color);
 }
 
-fn toggle_text_debug(keyboard: Res<ButtonInput<KeyCode>>, mut debug: ResMut<ShowTextDebug>) {
+fn toggle_text_debug(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut debug: ResMut<ShowTextDebug>,
+    mut show_text: ResMut<ShowTextGizmos>,
+) {
     if keyboard.just_pressed(KeyCode::KeyD) {
         debug.0 = !debug.0;
-    }
-}
-
-fn draw_diegetic_gizmos(
-    mut gizmos: Gizmos<DiegeticGizmoGroup>,
-    panels: Query<&GlobalTransform, With<DiegeticPanelMarker>>,
-    result: Res<DiegeticLayoutResult>,
-    debug: Res<ShowTextDebug>,
-    sizing: Res<PanelSizing>,
-) {
-    let Some(result) = &result.0 else { return };
-    for panel_transform in &panels {
-        for cmd in &result.commands {
-            let color = match &cmd.kind {
-                RenderCommandKind::Rectangle { .. } => Color::from(css::AQUA),
-                RenderCommandKind::Text { .. } => {
-                    if !debug.0 {
-                        continue;
-                    }
-                    Color::from(css::SPRING_GREEN)
-                },
-                RenderCommandKind::Border { .. } => Color::from(css::CORAL),
-                _ => continue,
-            };
-            draw_rect_on_panel(
-                &mut gizmos,
-                panel_transform,
-                cmd.bounds.x,
-                cmd.bounds.y,
-                cmd.bounds.width,
-                cmd.bounds.height,
-                color,
-                &sizing,
-            );
-        }
+        show_text.0 = debug.0;
     }
 }
 

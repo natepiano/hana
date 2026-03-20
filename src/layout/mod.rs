@@ -38,8 +38,12 @@
 //! - [`render`] — Render commands output by the engine.
 
 mod builder;
+#[cfg(test)]
+mod clay_parity_tests;
 mod element;
 mod engine;
+#[cfg(test)]
+mod layout_tests;
 mod render;
 mod types;
 
