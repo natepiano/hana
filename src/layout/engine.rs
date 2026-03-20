@@ -18,7 +18,6 @@ use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
 use super::types::BoundingBox;
-use super::types::Culling;
 use super::types::Direction;
 use super::types::Sizing;
 use super::types::TextConfig;
@@ -73,24 +72,16 @@ pub struct ComputedLayout {
 /// let result = engine.compute(&tree, 800.0, 600.0);
 /// ```
 ///
-/// Viewport culling is enabled by default. Use [`set_culling`](Self::set_culling)
-/// to disable it when you need the complete render command list.
+/// Viewport culling is always enabled — elements whose bounding box lies
+/// entirely outside the viewport are omitted from the render command list.
 pub struct LayoutEngine {
     measure_text: MeasureTextFn,
-    culling:      Culling,
 }
 
 impl LayoutEngine {
     /// Creates a new layout engine with the given text measurement callback.
-    ///
-    /// Culling is [`Enabled`](Culling::Enabled) by default.
     #[must_use]
-    pub fn new(measure_text: MeasureTextFn) -> Self {
-        Self {
-            measure_text,
-            culling: Culling::default(),
-        }
-    }
+    pub fn new(measure_text: MeasureTextFn) -> Self { Self { measure_text } }
 
     /// Computes layout for the given tree within the specified viewport dimensions.
     ///
@@ -140,7 +131,6 @@ impl LayoutEngine {
             &wrapped,
             viewport_width,
             viewport_height,
-            self.culling,
         );
 
         LayoutResult { computed, commands }
@@ -722,8 +712,8 @@ const fn is_offscreen(x: f32, y: f32, w: f32, h: f32, vp_w: f32, vp_h: f32) -> b
 
 /// DFS positioning pass. Computes final bounding boxes and emits render commands.
 ///
-/// When `culling` is [`Enabled`](Culling::Enabled), elements whose bounding box
-/// lies entirely outside the viewport are omitted from the command list.
+/// Elements whose bounding box lies entirely outside the viewport are
+/// omitted from the command list (viewport culling).
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn position_and_render(
     tree: &LayoutTree,
@@ -732,7 +722,6 @@ fn position_and_render(
     wrapped: &[Option<WrappedText>],
     viewport_width: f32,
     viewport_height: f32,
-    culling: Culling,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
 
@@ -747,8 +736,7 @@ fn position_and_render(
 
         if *visited {
             // Second visit (up-traversal): emit borders and scissor end.
-            let offscreen = culling == Culling::Enabled
-                && is_offscreen(x, y, width, height, viewport_width, viewport_height);
+            let offscreen = is_offscreen(x, y, width, height, viewport_width, viewport_height);
 
             if !offscreen && let Some(ref border) = element.border {
                 commands.push(RenderCommand {
@@ -797,8 +785,7 @@ fn position_and_render(
             // Cull off-screen elements: skip render commands but still recurse
             // into children (a parent can be off-screen while children are on-screen
             // due to overflow).
-            let offscreen = culling == Culling::Enabled
-                && is_offscreen(x, y, width, height, viewport_width, viewport_height);
+            let offscreen = is_offscreen(x, y, width, height, viewport_width, viewport_height);
 
             // Emit rectangle if background is set.
             if !offscreen && let Some(color) = element.background {

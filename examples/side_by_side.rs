@@ -344,6 +344,7 @@ fn setup(
             layout_height,
             world_width: world_size,
             world_height,
+            hue_offset: 0.0,
         },
         Transform::from_xyz(offset, 0.0, 0.0),
     ));

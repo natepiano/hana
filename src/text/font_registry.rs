@@ -14,15 +14,22 @@ pub const EMBEDDED_FONT: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMon
 /// Default font family name.
 const DEFAULT_FAMILY: &str = "JetBrains Mono";
 
-/// Unique identifier for a loaded font family within the diegetic UI system.
+/// Unique identifier for a loaded font family.
 ///
-/// Maps to [`TextConfig::font_id`](crate::TextConfig). The registry assigns
-/// these sequentially as fonts are registered.
+/// Used with [`TextConfig::with_font`](crate::TextConfig::with_font) and
+/// [`TextStyle::with_font`](crate::TextStyle::with_font) to select which
+/// font a text element uses.
+///
+/// Currently the only available font is [`MONOSPACE`](Self::MONOSPACE)
+/// (JetBrains Mono), which is embedded in the library and used by default.
+/// Custom font loading will be added in a future release.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FontId(pub u16);
 
 impl FontId {
     /// The built-in monospace font (`JetBrains Mono`).
+    ///
+    /// This is the default font used by all text when no font is specified.
     pub const MONOSPACE: Self = Self(0);
 }
 

@@ -7,7 +7,6 @@ mod msdf_material;
 mod text_renderer;
 mod world_text;
 
-pub use msdf_material::MsdfTextMaterial;
 pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;
 pub use world_text::WorldText;

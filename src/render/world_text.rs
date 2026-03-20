@@ -99,6 +99,7 @@ pub(super) fn render_world_text(
             atlas.width(),
             atlas.height(),
             atlas_image,
+            0.0,
         ));
 
         let mesh = build_glyph_mesh(&quads);

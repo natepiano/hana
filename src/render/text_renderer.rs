@@ -120,7 +120,7 @@ impl ShapedTextCache {
 /// Avoids reallocating `LayoutContext` and `Layout` on every
 /// `shape_text_to_quads` call. Wrapped in `Mutex` for `Send + Sync`.
 #[derive(Resource)]
-pub struct TextShapingContext {
+pub(super) struct TextShapingContext {
     layout_cx: Mutex<parley::LayoutContext<()>>,
     layout:    Mutex<parley::Layout<()>>,
 }
@@ -153,6 +153,7 @@ impl Plugin for TextRenderPlugin {
             PostUpdate,
             (
                 extract_text_meshes.after(crate::plugin::compute_panel_layouts),
+                sync_panel_hue_offset.after(extract_text_meshes),
                 super::world_text::render_world_text,
             ),
         );
@@ -238,6 +239,7 @@ fn extract_text_meshes(
             atlas.width(),
             atlas.height(),
             atlas_image,
+            panel.hue_offset,
         ));
 
         // Batch all text quads into a single mesh per panel, and record the
@@ -335,7 +337,7 @@ fn build_color_array(result: &crate::layout::LayoutResult) -> Vec<[f32; 4]> {
 ///
 /// On cache hit, returns the stored glyph run directly. On miss, shapes via
 /// parley and inserts into the cache.
-pub(crate) fn shape_text_cached(
+pub(super) fn shape_text_cached(
     text: &str,
     config: &TextConfig,
     font_registry: &FontRegistry,
@@ -478,4 +480,27 @@ fn shape_text_to_quads(
     }
 
     quads
+}
+
+/// Syncs `DiegeticPanel::hue_offset` to the text material on child meshes.
+///
+/// Runs every frame in `PostUpdate` after `extract_text_meshes`. Only touches
+/// materials whose `hue_offset` differs from the panel's current value,
+/// avoiding unnecessary GPU re-uploads.
+fn sync_panel_hue_offset(
+    panels: Query<(Entity, &DiegeticPanel)>,
+    children: Query<(&ChildOf, &MeshMaterial3d<MsdfTextMaterial>)>,
+    mut materials: ResMut<Assets<MsdfTextMaterial>>,
+) {
+    for (panel_entity, panel) in &panels {
+        for (child_of, mat_handle) in &children {
+            if child_of.parent() == panel_entity {
+                if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                    if (mat.extension.uniforms.hue_offset - panel.hue_offset).abs() > f32::EPSILON {
+                        mat.extension.uniforms.hue_offset = panel.hue_offset;
+                    }
+                }
+            }
+        }
+    }
 }

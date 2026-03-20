@@ -17,7 +17,7 @@ use crate::layout::TextMeasure;
 /// when this component changes, storing results in [`ComputedDiegeticPanel`].
 ///
 /// Requires a [`Transform`] for world-space positioning.
-#[derive(Component, Reflect)]
+#[derive(Component, Default, Reflect)]
 #[reflect(Component)]
 #[require(ComputedDiegeticPanel, Transform, Visibility)]
 pub struct DiegeticPanel {
@@ -32,6 +32,20 @@ pub struct DiegeticPanel {
     pub world_width:   f32,
     /// Height of the panel in world units.
     pub world_height:  f32,
+    /// Hue rotation applied to all text in this panel, in radians.
+    ///
+    /// Rotates the hue of every vertex color in the panel's text mesh
+    /// uniformly. This is a GPU-side effect — changing it has zero CPU
+    /// cost and does not trigger layout recomputation or mesh rebuilds.
+    ///
+    /// Individual text elements retain their per-element colors set via
+    /// [`TextConfig::with_color`]. This rotation shifts all of them by
+    /// the same amount. A value of `TAU / 3` (~2.09) shifts reds to
+    /// greens, greens to blues, etc. A full `TAU` (6.28) cycles back
+    /// to the original colors. Defaults to `0.0` (no rotation).
+    ///
+    /// See the `text_stress` example for usage.
+    pub hue_offset:    f32,
 }
 
 /// Computed layout result for a [`DiegeticPanel`].

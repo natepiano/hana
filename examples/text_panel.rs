@@ -127,6 +127,7 @@ fn setup(
                 layout_height: LAYOUT_HEIGHT,
                 world_width: panel_w,
                 world_height: panel_h,
+                hue_offset: 0.0,
             },
             // Transparent quad for picking / zoom-to-fit.
             Mesh3d(meshes.add(Rectangle::new(panel_w, panel_h))),
@@ -171,6 +172,7 @@ fn setup(
             layout_height: CONTROLS_LAYOUT_HEIGHT,
             world_width:   CONTROLS_WORLD_WIDTH,
             world_height:  CONTROLS_WORLD_HEIGHT,
+            hue_offset:    0.0,
         },
         Transform::from_xyz(-2.0, 2.5, 0.5),
     ));

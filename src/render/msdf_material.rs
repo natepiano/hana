@@ -88,11 +88,12 @@ impl MaterialExtension for MsdfExtension {
 /// - White base color (vertex colors override per-glyph)
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
-pub fn msdf_text_material(
+pub(super) fn msdf_text_material(
     sdf_range: f32,
     atlas_width: u32,
     atlas_height: u32,
     atlas_texture: Handle<Image>,
+    hue_offset: f32,
 ) -> MsdfTextMaterial {
     ExtendedMaterial {
         base:      StandardMaterial {
@@ -106,7 +107,7 @@ pub fn msdf_text_material(
                 sdf_range,
                 atlas_width: atlas_width as f32,
                 atlas_height: atlas_height as f32,
-                hue_offset: 0.0,
+                hue_offset,
             },
             atlas_texture,
         },

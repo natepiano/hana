@@ -5,6 +5,15 @@
 //!
 //! Rows fill columns left-to-right within a panel. When the panel reaches
 //! screen width, it pushes backward and a new panel spawns in front.
+//!
+//! ## `hue_offset` demo
+//!
+//! When idle (1 second after releasing keys), the rainbow color scheme
+//! scrolls across all panels using [`DiegeticPanel::hue_offset`]. This is
+//! a GPU-side effect — the shader rotates all vertex colors uniformly,
+//! so the animation has zero CPU cost (no tree rebuilds, no mesh changes).
+//! This is a niche feature for animating color schemes without touching
+//! layout or mesh data.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -20,7 +29,6 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::MsdfTextMaterial;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
@@ -175,7 +183,6 @@ fn main() {
             )
                 .chain(),
         )
-        .add_systems(Last, sync_hue_offset)
         .run();
 }
 
@@ -355,11 +362,13 @@ fn advance_hue(state: &mut StressControls) {
 
 /// Advances the rainbow hue angle when idle (no key held, after 1s delay).
 ///
-/// `hue_angle` is the single source of truth for rotation. The shader
-/// `hue_offset` is kept in sync by [`sync_hue_offset`].
+/// Sets `hue_offset` on all stress panels. The library's internal
+/// `sync_panel_hue_offset` system propagates this to the GPU material
+/// automatically — no direct material access needed.
 #[allow(clippy::cast_precision_loss)]
 fn advance_color_rotation(
     mut state: ResMut<StressControls>,
+    mut panels: Query<&mut DiegeticPanel, With<StressPanel>>,
     time: Res<Time>,
     mut idle_timer: Local<f32>,
 ) {
@@ -376,41 +385,9 @@ fn advance_color_rotation(
     // Advance by one row's worth of hue per frame.
     let step = std::f32::consts::TAU / state.row_count as f32;
     state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
-}
 
-/// Keeps the shader `hue_offset` in sync with `hue_angle` on all text
-/// materials every frame. Runs in `PostUpdate` so newly spawned text
-/// meshes also pick up the current angle.
-///
-/// Uses a single pass through children to collect panel → material handle,
-/// then a second pass to update. O(children + panels) instead of
-/// O(children × panels).
-fn sync_hue_offset(
-    state: Res<StressControls>,
-    children: Query<(&ChildOf, &MeshMaterial3d<MsdfTextMaterial>)>,
-    panels: Query<Entity, With<StressPanel>>,
-    mut materials: ResMut<Assets<MsdfTextMaterial>>,
-) {
-    if state.hue_angle.abs() < f32::EPSILON {
-        return;
-    }
-
-    // One pass: collect panel → material handle.
-    let mut panel_materials = std::collections::HashMap::<Entity, Handle<MsdfTextMaterial>>::new();
-    for (child_of, mat_handle) in &children {
-        let parent = child_of.parent();
-        if panels.contains(parent) {
-            panel_materials.insert(parent, mat_handle.0.clone());
-        }
-    }
-
-    // One pass: update each material.
-    for handle in panel_materials.values() {
-        if let Some(mat) = materials.get_mut(handle) {
-            if (mat.extension.uniforms.hue_offset - state.hue_angle).abs() > f32::EPSILON {
-                mat.extension.uniforms.hue_offset = state.hue_angle;
-            }
-        }
+    for mut panel in &mut panels {
+        panel.hue_offset = state.hue_angle;
     }
 }
 
@@ -633,6 +610,7 @@ fn update_panels(
                 layout_height: LAYOUT_HEIGHT,
                 world_width: ww,
                 world_height: wh,
+                hue_offset: 0.0,
             },
             panel_transform(idx, needed, ww, wh),
         ));

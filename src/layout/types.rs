@@ -2,7 +2,7 @@
 //!
 //! This module defines the fundamental building blocks for layout configuration:
 //! [`Sizing`], [`Direction`], [`AlignX`]/[`AlignY`], [`Padding`], [`Border`],
-//! [`TextProps`], and [`Culling`].
+//! and [`TextProps`].
 //!
 //! [`TextProps`] uses a typestate pattern parameterized by context markers
 //! ([`ForLayout`] / [`ForStandalone`]) to enforce compile-time validity.
@@ -13,24 +13,6 @@ use std::marker::PhantomData;
 use bevy::color::Color;
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
-
-/// Controls whether the layout engine culls off-screen render commands.
-///
-/// When enabled (the default), elements whose bounding box lies entirely
-/// outside the viewport are omitted from the render command list. This
-/// matches Clay's default behavior and avoids unnecessary draw calls.
-///
-/// Disable culling when you need the full command list regardless of
-/// viewport position — for example, when pre-computing a layout that
-/// will be scrolled into view later.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Culling {
-    /// Skip render commands for elements fully outside the viewport.
-    #[default]
-    Enabled,
-    /// Emit render commands for all elements regardless of position.
-    Disabled,
-}
 
 /// Sizing behavior for a layout element along one axis.
 #[derive(Clone, Copy, Debug, PartialEq)]

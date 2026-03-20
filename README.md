@@ -86,6 +86,7 @@ commands.spawn((
         layout_height: 120.0,
         world_width: 1.0,
         world_height: 0.75,
+        hue_offset: 0.0,
     },
     Transform::from_xyz(0.0, 1.0, -2.0),
 ));
