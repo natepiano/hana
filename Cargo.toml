@@ -28,7 +28,6 @@ wildcard_imports        = "allow"
 missing_docs = "deny"
 
 [dependencies]
-ahash = "0.8"
 bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_asset",
   "bevy_gizmos",

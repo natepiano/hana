@@ -13,9 +13,6 @@ use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
-use crate::layout::LayoutResult;
-use crate::layout::LayoutTree;
-use crate::layout::RectangleSource;
 use crate::layout::RenderCommandKind;
 use crate::render::ShapedTextCache;
 
@@ -82,76 +79,20 @@ pub fn compute_panel_layouts(
     for (panel, mut computed) in &mut panels {
         panel_count += 1;
 
-        if computed.is_color_only_change(
-            panel.tree.layout_hash(),
-            panel.layout_width,
-            panel.layout_height,
-        ) {
-            // Layout structure is identical — only render properties (colors)
-            // changed. Patch colors in the existing render commands and skip
-            // the expensive `engine.compute()` call.
-            patch_colors(&panel.tree, computed.result_mut().unwrap());
-            computed.set_color_only(true);
-        } else {
-            // Full layout recomputation.
-            let engine = LayoutEngine::new(Arc::clone(&cached_measure));
-            let result = engine.compute(&panel.tree, panel.layout_width, panel.layout_height);
+        let engine = LayoutEngine::new(Arc::clone(&cached_measure));
+        let result = engine.compute(&panel.tree, panel.layout_width, panel.layout_height);
 
-            if let Some(bounds) = result.content_bounds() {
-                let scale_x = panel.world_width / panel.layout_width;
-                let scale_y = panel.world_height / panel.layout_height;
-                computed.set_content_size(bounds.width * scale_x, bounds.height * scale_y);
-            }
-
-            computed.set_last_layout(
-                panel.tree.layout_hash(),
-                panel.layout_width,
-                panel.layout_height,
-            );
-            computed.set_result(result);
-            computed.set_color_only(false);
+        if let Some(bounds) = result.content_bounds() {
+            let scale_x = panel.world_width / panel.layout_width;
+            let scale_y = panel.world_height / panel.layout_height;
+            computed.set_content_size(bounds.width * scale_x, bounds.height * scale_y);
         }
+
+        computed.set_result(result);
     }
 
     perf.last_compute_ms = start.elapsed().as_secs_f32() * 1000.0;
     perf.last_compute_panels = panel_count;
-}
-
-/// Updates render command colors from the new tree without recomputing layout.
-///
-/// Each [`RenderCommand`] stores its source `element_idx`, so we can look up
-/// the current color from the tree and patch it into the existing command.
-fn patch_colors(tree: &LayoutTree, result: &mut LayoutResult) {
-    for cmd in &mut result.commands {
-        let Some(colors) = tree.element_colors_at(cmd.element_idx) else {
-            continue;
-        };
-        match &mut cmd.kind {
-            RenderCommandKind::Text { config, .. } => {
-                if let Some(c) = colors.text {
-                    config.set_color(c);
-                }
-            },
-            RenderCommandKind::Rectangle { color, source } => match source {
-                RectangleSource::Background => {
-                    if let Some(bg) = colors.background {
-                        *color = bg;
-                    }
-                },
-                RectangleSource::BetweenChildrenBorder => {
-                    if let Some(c) = colors.border {
-                        *color = c;
-                    }
-                },
-            },
-            RenderCommandKind::Border { border } => {
-                if let Some(c) = colors.border {
-                    border.color = c;
-                }
-            },
-            _ => {},
-        }
-    }
 }
 
 /// Controls whether text bounding-box gizmos are drawn.
@@ -286,51 +227,6 @@ mod tests {
         })
     }
 
-    /// The color-only guard must detect when panel dimensions change even
-    /// though the tree's `layout_hash` is unchanged. Without the dimension
-    /// check, resizing a panel reuses the old layout — wrong wrapping, wrong
-    /// bounds.
-    #[test]
-    fn dimension_change_not_treated_as_color_only() {
-        let mut b = LayoutBuilder::new(800.0, 400.0);
-        b.with(
-            El::new().width(Sizing::Grow {
-                min: 0.0,
-                max: f32::MAX,
-            }),
-            |b| {
-                b.text("some text", TextConfig::default());
-            },
-        );
-        let tree = b.build();
-        let hash = tree.layout_hash();
-        assert_ne!(hash, 0, "tree should have a valid layout hash");
-
-        // Simulate: first full layout completed and stored the hash.
-        let engine = LayoutEngine::new(monospace_measure());
-        let result = engine.compute(&tree, 800.0, 400.0);
-
-        let mut computed = ComputedDiegeticPanel::default();
-        computed.set_result(result);
-        computed.set_content_size(1.0, 1.0);
-        computed.set_last_layout(hash, 800.0, 400.0);
-        computed.set_color_only(false);
-
-        // Same hash, same dimensions — guard should say color-only.
-        assert!(
-            computed.is_color_only_change(hash, 800.0, 400.0),
-            "identical hash and dimensions should be detected as color-only"
-        );
-
-        // Panel dimensions changed (layout_width 800 → 200) but the tree
-        // object is the same so layout_hash is unchanged. The guard must
-        // NOT return true — layout needs recomputing for the new width.
-        assert!(
-            !computed.is_color_only_change(hash, 200.0, 400.0),
-            "dimension change must trigger full recompute, not color-only path"
-        );
-    }
-
     // ── Performance timing tests (run with --run-ignored all) ────────
 
     use crate::layout::Border;
@@ -366,43 +262,6 @@ mod tests {
                                 |_| {},
                             );
                             b.text("value", TextConfig::new(PERF_FONT_SIZE));
-                        },
-                    );
-                }
-            },
-        );
-        builder.build()
-    }
-
-    fn build_stress_tree_colored(row_count: usize, hue_offset: f32) -> crate::layout::LayoutTree {
-        let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
-        builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .height(Sizing::FIT)
-                .direction(Direction::TopToBottom)
-                .child_gap(2.0)
-                .padding(Padding::all(4.0))
-                .border(Border::all(1.0, bevy::color::Color::WHITE)),
-            |b| {
-                #[allow(clippy::cast_precision_loss)]
-                for i in 0..row_count {
-                    let hue = (360.0 * (i as f32 / row_count as f32) + hue_offset) % 360.0;
-                    let color = bevy::color::Color::hsl(hue, 0.8, 0.6);
-                    let config = TextConfig::new(PERF_FONT_SIZE).with_color(color);
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::FIT)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(4.0),
-                        |b| {
-                            b.text(&format!("item {i}:"), config.clone());
-                            b.with(
-                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                |_| {},
-                            );
-                            b.text("value", config);
                         },
                     );
                 }
@@ -584,38 +443,6 @@ mod tests {
             let iters = if rows <= 100 { 1000 } else { 100 };
             run_timing(&format!("engine_compute_{rows}_rows"), iters, || {
                 std::hint::black_box(engine.compute(&tree, PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT));
-            });
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn perf_patch_colors() {
-        let measure = monospace_measure();
-        for &rows in &[10, 100, 500, 1000] {
-            let tree = build_stress_tree(rows);
-            let engine = LayoutEngine::new(Arc::clone(&measure));
-            let mut result = engine.compute(&tree, PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
-
-            // Build a tree with different colors but same structure.
-            let colored_tree = build_stress_tree_colored(rows, 90.0);
-
-            let iters = if rows <= 100 { 10000 } else { 1000 };
-            run_timing(&format!("patch_colors_{rows}_rows"), iters, || {
-                patch_colors(&colored_tree, &mut result);
-            });
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn perf_layout_hash() {
-        for &rows in &[10, 100, 500, 1000] {
-            let tree = build_stress_tree(rows);
-            let hash = tree.layout_hash();
-            let iters = if rows <= 100 { 10000 } else { 1000 };
-            run_timing(&format!("layout_hash_compare_{rows}_rows"), iters, || {
-                std::hint::black_box(hash == tree.layout_hash());
             });
         }
     }

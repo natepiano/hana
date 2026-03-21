@@ -33,21 +33,23 @@ pub struct DiegeticPanel {
     pub world_width:   f32,
     /// Height of the panel in world units.
     pub world_height:  f32,
-    /// Hue rotation applied to all text in this panel, in radians.
-    ///
-    /// Rotates the hue of every vertex color in the panel's text mesh
-    /// uniformly. This is a GPU-side effect — changing it has zero CPU
-    /// cost and does not trigger layout recomputation or mesh rebuilds.
-    ///
-    /// Individual text elements retain their per-element colors set via
-    /// [`TextConfig::with_color`]. This rotation shifts all of them by
-    /// the same amount. A value of `TAU / 3` (~2.09) shifts reds to
-    /// greens, greens to blues, etc. A full `TAU` (6.28) cycles back
-    /// to the original colors. Defaults to `0.0` (no rotation).
-    ///
-    /// See the `text_stress` example for usage.
-    pub hue_offset:    f32,
 }
+
+/// Hue rotation applied to all text in a panel, in radians.
+///
+/// Attach to the same entity as a [`DiegeticPanel`] to rotate the hue of
+/// every vertex color in the panel's text mesh. This is a GPU-side effect —
+/// changing it does not trigger layout recomputation or mesh rebuilds.
+///
+/// Individual text elements retain their per-element colors set via
+/// [`TextConfig::with_color`]. This rotation shifts all of them by the
+/// same amount. A value of `TAU / 3` (~2.09) shifts reds to greens,
+/// greens to blues, etc. A full `TAU` (6.28) cycles back to the original
+/// colors.
+///
+/// See the `text_stress` example for usage.
+#[derive(Component, Default, Clone, Copy, Debug, Reflect)]
+pub struct HueOffset(pub f32);
 
 /// Computed layout result for a [`DiegeticPanel`].
 ///
@@ -57,17 +59,9 @@ pub struct DiegeticPanel {
 #[reflect(Component)]
 pub struct ComputedDiegeticPanel {
     #[reflect(ignore)]
-    result:             Option<LayoutResult>,
-    content_width:      f32,
-    content_height:     f32,
-    #[reflect(ignore)]
-    last_layout_hash:   u64,
-    #[reflect(ignore)]
-    color_only:         bool,
-    #[reflect(ignore)]
-    last_layout_width:  f32,
-    #[reflect(ignore)]
-    last_layout_height: f32,
+    result:         Option<LayoutResult>,
+    content_width:  f32,
+    content_height: f32,
 }
 
 impl ComputedDiegeticPanel {
@@ -96,39 +90,11 @@ impl ComputedDiegeticPanel {
     #[must_use]
     pub(crate) fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
 
-    #[must_use]
-    pub(crate) fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
-
     pub(crate) fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }
-
-    #[must_use]
-    pub(crate) fn color_only(&self) -> bool { self.color_only }
-
-    pub(crate) fn set_color_only(&mut self, value: bool) { self.color_only = value; }
 
     pub(crate) fn set_content_size(&mut self, width: f32, height: f32) {
         self.content_width = width;
         self.content_height = height;
-    }
-
-    pub(crate) fn set_last_layout(&mut self, hash: u64, layout_width: f32, layout_height: f32) {
-        self.last_layout_hash = hash;
-        self.last_layout_width = layout_width;
-        self.last_layout_height = layout_height;
-    }
-
-    #[must_use]
-    pub(crate) fn is_color_only_change(
-        &self,
-        tree_layout_hash: u64,
-        layout_width: f32,
-        layout_height: f32,
-    ) -> bool {
-        tree_layout_hash != 0
-            && tree_layout_hash == self.last_layout_hash
-            && (self.last_layout_width - layout_width).abs() < f32::EPSILON
-            && (self.last_layout_height - layout_height).abs() < f32::EPSILON
-            && self.result.is_some()
     }
 }
 

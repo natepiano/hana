@@ -26,9 +26,6 @@
 //!     .build();
 //! ```
 
-use std::hash::Hash;
-use std::hash::Hasher;
-
 use bevy::color::Color;
 
 use super::element::Element;
@@ -301,116 +298,8 @@ impl LayoutBuilder {
 
     /// Finishes building and returns the layout tree.
     #[must_use]
-    pub fn build(mut self) -> LayoutTree {
-        self.tree.layout_hash = compute_layout_hash(&self.tree);
-        self.tree
-    }
+    pub fn build(self) -> LayoutTree { self.tree }
 
     /// Returns the current parent index.
     fn current_parent(&self) -> usize { self.parent_stack.last().copied().unwrap_or(0) }
-}
-
-/// Computes a hash of all layout-relevant fields in the tree.
-///
-/// Uses exhaustive destructuring on [`Element`], [`ElementContent`], and
-/// [`Border`] so that adding a new field without updating this function is
-/// a compiler error. Render-only fields (colors) are explicitly ignored
-/// with a comment — everything else is hashed.
-fn compute_layout_hash(tree: &LayoutTree) -> u64 {
-    let mut hasher = ahash::AHasher::default();
-
-    tree.root.hash(&mut hasher);
-    tree.elements.len().hash(&mut hasher);
-
-    for element in &tree.elements {
-        // Destructure exhaustively — adding a field to `Element` without
-        // updating this match is a compiler error.
-        let Element {
-            width,
-            height,
-            padding,
-            child_gap,
-            direction,
-            child_align_x,
-            child_align_y,
-            clip,
-            border,
-            content,
-            // Render-only — explicitly skipped.
-            background: _,
-        } = element;
-
-        hash_sizing(width, &mut hasher);
-        hash_sizing(height, &mut hasher);
-        padding.left.to_bits().hash(&mut hasher);
-        padding.right.to_bits().hash(&mut hasher);
-        padding.top.to_bits().hash(&mut hasher);
-        padding.bottom.to_bits().hash(&mut hasher);
-        child_gap.to_bits().hash(&mut hasher);
-        (*direction as u8).hash(&mut hasher);
-        (*child_align_x as u8).hash(&mut hasher);
-        (*child_align_y as u8).hash(&mut hasher);
-        clip.hash(&mut hasher);
-
-        // Border widths affect layout, border color does not.
-        if let Some(b) = border {
-            let Border {
-                left,
-                right,
-                top,
-                bottom,
-                between_children,
-                // Render-only — explicitly skipped.
-                color: _,
-            } = b;
-            1_u8.hash(&mut hasher);
-            left.to_bits().hash(&mut hasher);
-            right.to_bits().hash(&mut hasher);
-            top.to_bits().hash(&mut hasher);
-            bottom.to_bits().hash(&mut hasher);
-            between_children.to_bits().hash(&mut hasher);
-        } else {
-            0_u8.hash(&mut hasher);
-        }
-
-        match content {
-            ElementContent::Children(children) => {
-                0_u8.hash(&mut hasher);
-                children.hash(&mut hasher);
-            },
-            ElementContent::Text { text, config } => {
-                1_u8.hash(&mut hasher);
-                text.hash(&mut hasher);
-                config.hash_layout(&mut hasher);
-            },
-            ElementContent::Empty => {
-                2_u8.hash(&mut hasher);
-            },
-        }
-    }
-
-    hasher.finish()
-}
-
-fn hash_sizing(sizing: &Sizing, hasher: &mut impl Hasher) {
-    match sizing {
-        Sizing::Fit { min, max } => {
-            0_u8.hash(hasher);
-            min.to_bits().hash(hasher);
-            max.to_bits().hash(hasher);
-        },
-        Sizing::Grow { min, max } => {
-            1_u8.hash(hasher);
-            min.to_bits().hash(hasher);
-            max.to_bits().hash(hasher);
-        },
-        Sizing::Fixed(v) => {
-            2_u8.hash(hasher);
-            v.to_bits().hash(hasher);
-        },
-        Sizing::Percent(v) => {
-            3_u8.hash(hasher);
-            v.to_bits().hash(hasher);
-        },
-    }
 }

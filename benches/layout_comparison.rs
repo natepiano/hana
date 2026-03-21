@@ -448,7 +448,6 @@ fn bench_status_panel(c: &mut Criterion) {
                     layout_height: size,
                     world_width: 1.0,
                     world_height: 1.0,
-                    hue_offset: 0.0,
                 })
                 .id();
             // First update to compute initial layout.

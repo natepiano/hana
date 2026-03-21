@@ -163,7 +163,6 @@ fn bench_panel_layout(c: &mut Criterion) {
                             layout_height: LAYOUT_SIZE,
                             world_width: 1.0,
                             world_height: 1.0,
-                            hue_offset: 0.0,
                         })
                         .id();
                     (app, entity)
@@ -187,7 +186,6 @@ fn bench_panel_layout(c: &mut Criterion) {
                     layout_height: LAYOUT_SIZE,
                     world_width: 1.0,
                     world_height: 1.0,
-                    hue_offset: 0.0,
                 })
                 .id();
             app.update(); // Initial layout.
@@ -217,7 +215,6 @@ fn bench_panel_layout(c: &mut Criterion) {
                     layout_height: LAYOUT_SIZE,
                     world_width: 1.0,
                     world_height: 1.0,
-                    hue_offset: 0.0,
                 })
                 .id();
             app.update(); // Initial layout.

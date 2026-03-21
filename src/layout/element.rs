@@ -95,15 +95,9 @@ impl Default for Element {
 #[derive(Clone, Debug, Default)]
 pub struct LayoutTree {
     /// All elements in insertion order.
-    pub(super) elements:    Vec<Element>,
+    pub(super) elements: Vec<Element>,
     /// Index of the root element.
-    pub(super) root:        Option<usize>,
-    /// Hash of layout-relevant fields (excludes colors).
-    ///
-    /// Computed once by [`LayoutBuilder::build()`]. Two trees with the same
-    /// `layout_hash` have identical structure and sizing — only render-only
-    /// properties like text color or background color may differ.
-    pub(super) layout_hash: u64,
+    pub(super) root:     Option<usize>,
 }
 
 impl LayoutTree {
@@ -118,9 +112,8 @@ impl LayoutTree {
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            elements:    Vec::with_capacity(capacity),
-            root:        None,
-            layout_hash: 0,
+            elements: Vec::with_capacity(capacity),
+            root:     None,
         }
     }
 
@@ -176,81 +169,4 @@ impl LayoutTree {
     /// Returns `true` if the tree has no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
-
-    /// Returns the layout hash (excludes colors).
-    ///
-    /// Two trees with the same hash have identical structure and sizing —
-    /// only render-only properties like text color may differ.
-    #[must_use]
-    pub const fn layout_hash(&self) -> u64 { self.layout_hash }
-
-    /// Returns the render-only colors for the element at `index`, or `None`
-    /// if the index is out of bounds.
-    #[must_use]
-    pub fn element_colors_at(&self, index: usize) -> Option<ElementColors> {
-        let element = self.elements.get(index)?;
-        Some(ElementColors {
-            text:       match &element.content {
-                ElementContent::Text { config, .. } => Some(config.color()),
-                _ => None,
-            },
-            background: element.background,
-            border:     element.border.map(|b| b.color),
-        })
-    }
-
-    /// Visits every element and lets the caller update render-only colors.
-    ///
-    /// The closure receives the element index and an [`ElementColors`] view
-    /// that exposes text color, background color, and border color. Mutating
-    /// these does not affect layout — the [`layout_hash`](Self::layout_hash)
-    /// remains unchanged, so the layout system will take the color-only fast
-    /// path automatically.
-    ///
-    /// ```ignore
-    /// tree.recolor(|idx, colors| {
-    ///     colors.set_text(Color::RED);
-    ///     colors.set_background(Some(Color::BLUE));
-    ///     colors.set_border(Color::BLACK);
-    /// });
-    /// ```
-    pub fn recolor(&mut self, mut f: impl FnMut(usize, &mut ElementColors)) {
-        for (idx, element) in self.elements.iter_mut().enumerate() {
-            let mut colors = ElementColors {
-                text:       match &element.content {
-                    ElementContent::Text { config, .. } => Some(config.color()),
-                    _ => None,
-                },
-                background: element.background,
-                border:     element.border.map(|b| b.color),
-            };
-            f(idx, &mut colors);
-            // Write back.
-            if let ElementContent::Text { config, .. } = &mut element.content {
-                if let Some(c) = colors.text {
-                    config.set_color(c);
-                }
-            }
-            element.background = colors.background;
-            if let Some(border) = &mut element.border {
-                if let Some(c) = colors.border {
-                    border.color = c;
-                }
-            }
-        }
-    }
-}
-
-/// Mutable view of an element's render-only color properties.
-///
-/// Passed to the closure in [`LayoutTree::recolor`]. Only non-`None` fields
-/// are applicable — `text` is `None` for non-text elements, `border` is
-/// `None` for elements without a border.
-pub struct ElementColors {
-    /// Text color (`None` for non-text elements).
-    pub text:       Option<Color>,
-    /// Background fill color.
-    pub background: Option<Color>,
-    /// Border color (`None` for elements without a border).
-    pub border:     Option<Color>,
 }

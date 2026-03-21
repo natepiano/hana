@@ -40,7 +40,6 @@ pub use layout::BoundingBox;
 pub use layout::Direction;
 // Layout tree.
 pub use layout::El;
-pub use layout::ElementColors;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;
@@ -53,7 +52,6 @@ pub use layout::LayoutTree;
 /// example for usage.
 pub use layout::MeasureTextFn;
 pub use layout::Padding;
-pub use layout::RectangleSource;
 pub use layout::Sizing;
 pub use layout::TextAlign;
 pub use layout::TextAnchor;
@@ -75,6 +73,7 @@ pub use plugin::DiegeticPanelGizmoGroup;
 pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
+pub use plugin::HueOffset;
 pub use plugin::LayoutPlugin;
 pub use plugin::ShowTextGizmos;
 // Render.

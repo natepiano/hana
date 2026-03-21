@@ -10,6 +10,7 @@ use bevy::prelude::*;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
 pub use components::DiegeticTextMeasurer;
+pub use components::HueOffset;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 pub(super) use systems::compute_panel_layouts;

@@ -28,6 +28,7 @@ use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
@@ -76,8 +77,6 @@ const REPEAT_START: f32 = 0.08;
 const REPEAT_MIN: f32 = 0.001;
 const REPEAT_ACCEL: f32 = 0.75;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
-/// Frozen panels recolor every N row changes to avoid per-frame GPU re-uploads.
-const RECOLOR_BATCH_SIZE: usize = 20;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -368,7 +367,8 @@ fn advance_hue(state: &mut StressControls) {
 #[allow(clippy::cast_precision_loss)]
 fn advance_color_rotation(
     mut state: ResMut<StressControls>,
-    mut panels: Query<&mut DiegeticPanel, With<StressPanel>>,
+    panels: Query<Entity, With<StressPanel>>,
+    mut commands: Commands,
     time: Res<Time>,
     mut idle_timer: Local<f32>,
 ) {
@@ -386,43 +386,9 @@ fn advance_color_rotation(
     let step = std::f32::consts::TAU / state.row_count as f32;
     state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
 
-    for mut panel in &mut panels {
-        panel.hue_offset = state.hue_angle;
+    for entity in &panels {
+        commands.entity(entity).insert(HueOffset(state.hue_angle));
     }
-}
-
-/// Recolors text in a panel tree using global row indices.
-#[allow(clippy::cast_precision_loss)]
-fn recolor_with_offset(
-    tree: &mut bevy_diegetic::LayoutTree,
-    state: &StressControls,
-    panel_start: usize,
-    has_header: bool,
-) {
-    let mut text_idx = 0_usize;
-
-    tree.recolor(|_element_idx, colors| {
-        if colors.text.is_none() {
-            return;
-        }
-
-        // Skip the header text in panel 0.
-        if has_header && text_idx == 0 {
-            text_idx += 1;
-            return;
-        }
-
-        let data_text_idx = if has_header { text_idx - 1 } else { text_idx };
-        let row_global = panel_start + data_text_idx / 2;
-
-        let hue = if state.row_count > 0 {
-            360.0 * (row_global as f32 / state.row_count as f32)
-        } else {
-            0.0
-        };
-        colors.text = Some(Color::hsl(hue, 1.0, 0.7));
-        text_idx += 1;
-    });
 }
 
 // ── FPS overlay ──────────────────────────────────────────────────────────────
@@ -567,7 +533,6 @@ fn update_panels(
     mut perf: ResMut<StressPerfStats>,
     mut last_panel_count: Local<usize>,
     mut last_row_count: Local<Option<usize>>,
-    mut last_recolor_row_count: Local<usize>,
 ) {
     if last_row_count.as_ref() == Some(&state.row_count) {
         return;
@@ -610,7 +575,7 @@ fn update_panels(
                 layout_height: LAYOUT_HEIGHT,
                 world_width: ww,
                 world_height: wh,
-                hue_offset: 0.0,
+                ..default()
             },
             panel_transform(idx, needed, ww, wh),
         ));
@@ -619,10 +584,7 @@ fn update_panels(
 
     // Update existing panels.
     let active_panel_idx = needed - 1;
-    let recolor_frozen = state.row_count.abs_diff(*last_recolor_row_count) >= RECOLOR_BATCH_SIZE;
-    if recolor_frozen {
-        *last_recolor_row_count = state.row_count;
-    }
+    let panel_count_changed = needed != existing.iter().count();
 
     for (entity, sp) in &existing {
         if sp.0 < needed {
@@ -633,9 +595,12 @@ fn update_panels(
                     panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
                     tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
                     tree_builds += 1;
-                } else if recolor_frozen {
-                    // Frozen panel — batch recolor every N rows.
-                    recolor_frozen_panel(&mut panel.tree, &state, sp.0, rpp);
+                } else if panel_count_changed {
+                    // Panel count changed — rebuild frozen panels once to
+                    // redistribute hue spacing against the new row_count.
+                    // Between boundary crossings, hue_offset on the shader
+                    // handles color rotation with zero CPU cost.
+                    panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
                 }
                 *transform = panel_transform(sp.0, needed, ww, wh);
             }
@@ -790,14 +755,4 @@ fn build_panel_tree(
     );
 
     builder.build()
-}
-
-/// Recolors text elements in a frozen panel's tree without rebuilding it.
-fn recolor_frozen_panel(
-    tree: &mut bevy_diegetic::LayoutTree,
-    state: &StressControls,
-    panel_idx: usize,
-    rpp: usize,
-) {
-    recolor_with_offset(tree, state, panel_idx * rpp, panel_idx == 0);
 }
