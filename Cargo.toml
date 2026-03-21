@@ -75,3 +75,6 @@ name    = "layout_comparison"
 [[bench]]
 harness = false
 name    = "panel_perf"
+
+[[example]]
+name = "typography"
