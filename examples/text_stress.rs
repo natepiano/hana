@@ -73,9 +73,8 @@ const STACK_DEPTH: f32 = 1.25;
 
 // ── Key repeat ───────────────────────────────────────────────────────────────
 
-const REPEAT_START: f32 = 0.08;
-const REPEAT_MIN: f32 = 0.001;
-const REPEAT_ACCEL: f32 = 0.75;
+/// Rows added per frame during animated column fill.
+const ROWS_PER_FRAME: usize = 20;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
@@ -99,26 +98,21 @@ const SOURCE_TEXT: &str = "bevy diegetic layout engine text rendering msdf atlas
 
 #[derive(Resource)]
 struct StressControls {
-    repeat_timer:    Timer,
-    repeat_interval: f32,
-    hold_duration:   f32,
-    row_count:       usize,
-    /// Color rotation angle in radians. Single source of truth for both
-    /// the GPU shader path (idle) and CPU recoloring path (key-held).
-    hue_angle:       f32,
-    /// Whether the key is currently held (pauses color rotation).
-    key_held:        bool,
+    row_count:        usize,
+    /// Target row count — the row count we're animating toward.
+    /// When `target > row_count`, rows are added at [`ROWS_PER_FRAME`].
+    /// When `target < row_count`, rows are removed at [`ROWS_PER_FRAME`].
+    target_row_count: usize,
+    /// Color rotation angle in radians.
+    hue_angle:        f32,
 }
 
 impl Default for StressControls {
     fn default() -> Self {
         Self {
-            repeat_timer:    Timer::from_seconds(REPEAT_START, TimerMode::Repeating),
-            repeat_interval: REPEAT_START,
-            hold_duration:   0.0,
-            row_count:       0,
-            hue_angle:       0.0,
-            key_held:        false,
+            row_count:        0,
+            target_row_count: 0,
+            hue_angle:        0.0,
         }
     }
 }
@@ -174,6 +168,7 @@ fn main() {
             Update,
             (
                 handle_input,
+                animate_row_count,
                 advance_color_rotation,
                 update_fps_overlay,
                 update_stats_overlay,
@@ -216,7 +211,8 @@ fn setup(
         GroundPlane,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, STACK_DEPTH))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.3, 0.5, 0.3),
+            base_color: Color::srgba(0.3, 0.5, 0.3, 0.5),
+            alpha_mode: AlphaMode::Blend,
             double_sided: true,
             cull_mode: None,
             ..default()
@@ -291,99 +287,61 @@ fn setup(
 
 // ── Input ────────────────────────────────────────────────────────────────────
 
-fn handle_input(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut state: ResMut<StressControls>,
-) {
+/// Sets the target row count. Each key press/hold advances the target by
+/// one column's worth of rows. The actual `row_count` animates toward the
+/// target at [`ROWS_PER_FRAME`] rows per frame.
+fn handle_input(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<StressControls>) {
     let adding = keyboard.pressed(KeyCode::Equal);
     let removing = keyboard.pressed(KeyCode::Minus);
 
     if !adding && !removing {
-        state.key_held = false;
-        if state.hold_duration != 0.0 || (state.repeat_interval - REPEAT_START).abs() > f32::EPSILON
-        {
-            state.hold_duration = 0.0;
-            state.repeat_interval = REPEAT_START;
-            state
-                .repeat_timer
-                .set_duration(std::time::Duration::from_secs_f32(REPEAT_START));
-        }
-        return;
-    }
-    state.key_held = true;
-
-    if keyboard.just_pressed(KeyCode::Equal) {
-        state.row_count += 1;
-        advance_hue(&mut *state);
-        state.hold_duration = 0.0;
-        state.repeat_timer.reset();
-        return;
-    }
-    if keyboard.just_pressed(KeyCode::Minus) && state.row_count > 0 {
-        state.row_count -= 1;
-        advance_hue(&mut *state);
-        state.hold_duration = 0.0;
-        state.repeat_timer.reset();
+        // Stop animation when key is released.
+        state.target_row_count = state.row_count;
         return;
     }
 
-    state.hold_duration += time.delta_secs();
-    let new_interval = (REPEAT_START * REPEAT_ACCEL.powf(state.hold_duration)).max(REPEAT_MIN);
-    if (new_interval - state.repeat_interval).abs() > 0.001 {
-        state.repeat_interval = new_interval;
-        state
-            .repeat_timer
-            .set_duration(std::time::Duration::from_secs_f32(new_interval));
-    }
+    let rpc = rows_per_column(state.target_row_count == 0);
 
-    state.repeat_timer.tick(time.delta());
-    if state.repeat_timer.just_finished() {
-        if adding {
-            state.row_count += 1;
-        } else if state.row_count > 0 {
-            state.row_count -= 1;
-        }
-        advance_hue(&mut *state);
+    if adding {
+        state.target_row_count += rpc;
+    }
+    if removing {
+        state.target_row_count = state.target_row_count.saturating_sub(rpc);
     }
 }
 
-/// Advances `hue_angle` by one row's worth of hue.
-#[allow(clippy::cast_precision_loss)]
-fn advance_hue(state: &mut StressControls) {
-    if state.row_count > 0 {
-        let step = std::f32::consts::TAU / state.row_count as f32;
-        state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
+/// Animates `row_count` toward `target_row_count` at [`ROWS_PER_FRAME`].
+fn animate_row_count(mut state: ResMut<StressControls>) {
+    if state.row_count < state.target_row_count {
+        let step = ROWS_PER_FRAME.min(state.target_row_count - state.row_count);
+        state.row_count += step;
+    } else if state.row_count > state.target_row_count {
+        let step = ROWS_PER_FRAME.min(state.row_count - state.target_row_count);
+        state.row_count -= step;
     }
 }
 
 // ── Color rotation ──────────────────────────────────────────────────────────
 
-/// Advances the rainbow hue angle when idle (no key held, after 1s delay).
+/// Advances the rainbow hue rotation every frame at a fixed angular velocity.
 ///
-/// Sets `hue_offset` on all stress panels. The library's internal
-/// `sync_panel_hue_offset` system propagates this to the GPU material
-/// automatically — no direct material access needed.
+/// Uses [`HueOffset`] component — a separate component from [`DiegeticPanel`],
+/// so changing it does not trigger layout recomputation or text mesh rebuilds.
+/// The library's `sync_panel_hue_offset` system propagates it to the shared
+/// GPU material automatically.
 #[allow(clippy::cast_precision_loss)]
 fn advance_color_rotation(
     mut state: ResMut<StressControls>,
     panels: Query<Entity, With<StressPanel>>,
     mut commands: Commands,
-    time: Res<Time>,
-    mut idle_timer: Local<f32>,
 ) {
-    if state.row_count == 0 || state.key_held {
-        *idle_timer = 0.0;
+    if state.row_count == 0 {
         return;
     }
 
-    *idle_timer += time.delta_secs();
-    if *idle_timer < 1.0 {
-        return;
-    }
-
-    // Advance by one row's worth of hue per frame.
-    let step = std::f32::consts::TAU / state.row_count as f32;
+    // Fixed angular velocity — visual speed stays constant regardless of
+    // row count. One full rotation every ~5 seconds at 60 FPS.
+    let step = std::f32::consts::TAU / 300.0;
     state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
 
     for entity in &panels {

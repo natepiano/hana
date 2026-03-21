@@ -139,6 +139,13 @@ impl Default for TextShapingContext {
 #[derive(Component)]
 struct DiegeticTextMesh;
 
+/// Cached default material handle shared across all panels without a
+/// [`HueOffset`] component. One GPU resource, one upload.
+#[derive(Resource, Default)]
+struct SharedMsdfMaterial {
+    handle: Option<Handle<MsdfTextMaterial>>,
+}
+
 /// Plugin that adds MSDF text rendering for diegetic panels.
 ///
 /// Registers the [`MsdfTextMaterial`], adds the text extraction system,
@@ -150,6 +157,7 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
+        app.init_resource::<SharedMsdfMaterial>();
         app.add_systems(
             PostUpdate,
             (
@@ -181,6 +189,7 @@ fn extract_text_meshes(
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
+    mut shared_mat: ResMut<SharedMsdfMaterial>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
@@ -193,13 +202,29 @@ fn extract_text_meshes(
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
+    // Ensure the shared default material exists.
+    let Some(atlas_image) = atlas.image_handle().cloned() else {
+        return;
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    let default_handle = shared_mat
+        .handle
+        .get_or_insert_with(|| {
+            materials.add(super::msdf_material::msdf_text_material(
+                atlas.sdf_range() as f32,
+                atlas.width(),
+                atlas.height(),
+                atlas_image.clone(),
+                0.0,
+            ))
+        })
+        .clone();
+
     for (panel_entity, panel, computed, hue_offset) in &panels {
         panel_count += 1;
         let Some(result) = computed.result() else {
             continue;
         };
-
-        // ── Full rebuild ─────────────────────────────────────────────────
 
         // Despawn previous text mesh children for this panel.
         for (entity, child_of, _) in &old_text {
@@ -213,18 +238,21 @@ fn extract_text_meshes(
         let half_w = panel.world_width * 0.5;
         let half_h = panel.world_height * 0.5;
 
-        // Get the shared material handle (create once per atlas state).
-        let Some(atlas_image) = atlas.image_handle().cloned() else {
-            continue;
-        };
+        // Panels without HueOffset (or HueOffset(0.0)) share the default
+        // material. Panels with non-zero HueOffset get their own.
+        let hue = hue_offset.map_or(0.0, |h| h.0);
         #[allow(clippy::cast_possible_truncation)]
-        let material_handle = materials.add(super::msdf_material::msdf_text_material(
-            atlas.sdf_range() as f32,
-            atlas.width(),
-            atlas.height(),
-            atlas_image,
-            hue_offset.map_or(0.0, |h| h.0),
-        ));
+        let material_handle = if hue.abs() < f32::EPSILON {
+            default_handle.clone()
+        } else {
+            materials.add(super::msdf_material::msdf_text_material(
+                atlas.sdf_range() as f32,
+                atlas.width(),
+                atlas.height(),
+                atlas_image.clone(),
+                hue,
+            ))
+        };
 
         // Batch all text quads into a single mesh per panel.
         let mut all_quads = Vec::new();
@@ -417,19 +445,101 @@ fn shape_text_to_quads(
     quads
 }
 
-/// Syncs `DiegeticPanel::hue_offset` to the text material on child meshes.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that the material sharing decision produces the expected
+    /// handle identity: zero hue → shared handle, non-zero hue → unique handle.
+    #[test]
+    fn material_sharing_by_hue_offset() {
+        let mut materials = Assets::<MsdfTextMaterial>::default();
+        let mut images = Assets::<Image>::default();
+
+        // Create a dummy atlas image.
+        let atlas_image = images.add(Image::default());
+
+        // Create the shared default material (hue_offset = 0).
+        let shared_handle = materials.add(super::super::msdf_material::msdf_text_material(
+            4.0,
+            256,
+            256,
+            atlas_image.clone(),
+            0.0,
+        ));
+
+        // Simulate the decision logic from extract_text_meshes.
+        let mut decide = |hue: f32| -> Handle<MsdfTextMaterial> {
+            if hue.abs() < f32::EPSILON {
+                shared_handle.clone()
+            } else {
+                materials.add(super::super::msdf_material::msdf_text_material(
+                    4.0,
+                    256,
+                    256,
+                    atlas_image.clone(),
+                    hue,
+                ))
+            }
+        };
+
+        // Panels with no hue offset get the shared handle.
+        let a = decide(0.0);
+        let b = decide(0.0);
+        assert_eq!(a.id(), b.id(), "zero-hue panels should share a handle");
+
+        // Panel with non-zero hue gets its own handle.
+        let c = decide(0.5);
+        assert_ne!(
+            a.id(),
+            c.id(),
+            "non-zero-hue panel should get a unique handle"
+        );
+
+        // Two non-zero panels get different handles (each call to
+        // materials.add creates a new asset).
+        let d = decide(0.5);
+        assert_ne!(
+            c.id(),
+            d.id(),
+            "each non-zero-hue panel gets its own handle"
+        );
+    }
+}
+
+/// Syncs [`HueOffset`] to text materials on child meshes.
 ///
-/// Runs every frame in `PostUpdate` after `extract_text_meshes`. Only touches
-/// materials whose `hue_offset` differs from the panel's current value,
-/// avoiding unnecessary GPU re-uploads.
+/// Panels using the shared material that receive a [`HueOffset`] are
+/// split off onto their own private material clone. Panels already on a
+/// private material are updated in place. This ensures that changing one
+/// panel's hue offset never affects other panels.
 fn sync_panel_hue_offset(
     panels: Query<(Entity, &HueOffset), Changed<HueOffset>>,
-    children: Query<(&ChildOf, &MeshMaterial3d<MsdfTextMaterial>)>,
+    mut children: Query<(&ChildOf, &mut MeshMaterial3d<MsdfTextMaterial>)>,
+    shared_mat: Res<SharedMsdfMaterial>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
 ) {
     for (panel_entity, hue_offset) in &panels {
-        for (child_of, mat_handle) in &children {
-            if child_of.parent() == panel_entity {
+        for (child_of, mut mat_handle) in &mut children {
+            if child_of.parent() != panel_entity {
+                continue;
+            }
+
+            let is_shared = shared_mat
+                .handle
+                .as_ref()
+                .is_some_and(|h| *h == mat_handle.0);
+
+            if is_shared {
+                // Panel is on the shared material — clone it into a
+                // private material with this panel's hue_offset.
+                if let Some(base) = materials.get(&mat_handle.0) {
+                    let mut private = base.clone();
+                    private.extension.uniforms.hue_offset = hue_offset.0;
+                    mat_handle.0 = materials.add(private);
+                }
+            } else {
+                // Already private — update in place.
                 if let Some(mat) = materials.get_mut(&mat_handle.0) {
                     mat.extension.uniforms.hue_offset = hue_offset.0;
                 }

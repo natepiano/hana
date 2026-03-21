@@ -49,7 +49,7 @@ bevy                     = { version = "0.18.1", features = ["default_font"] }
 bevy-inspector-egui      = "0.36.0"
 bevy_brp_extras          = "0.18.8"
 bevy_panorbit_camera     = "0.34.0"
-bevy_panorbit_camera_ext = { path = "../bevy_panorbit_camera_ext" }
+bevy_panorbit_camera_ext = { git = "https://github.com/natepiano/bevy_panorbit_camera_ext" }
 bevy_window_manager      = { git = "https://github.com/natepiano/bevy_window_manager", branch = "feat/multiple-windows" }
 clay-layout              = { path = "./clay-layout" }
 criterion                = { version = "0.8.2", features = ["html_reports"] }
@@ -58,6 +58,9 @@ msdfgen                  = "0.2"
 # msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
 # Renamed import so parity tests can use both versions side by side.
 ttf-parser_018 = { package = "ttf-parser", version = "0.18" }
+
+[[example]]
+name = "hue_offset"
 
 [[example]]
 name = "side_by_side"
