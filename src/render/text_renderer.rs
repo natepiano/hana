@@ -146,6 +146,18 @@ struct DiegeticTextMesh;
 #[derive(Component)]
 struct DiegeticShadowProxy;
 
+/// Set by [`poll_atlas_glyphs`] when new glyphs are inserted into the
+/// atlas. Text systems check this flag and rebuild all meshes when true.
+///
+/// **Optimization opportunity:** when this flag is set, ALL panels and
+/// `WorldText` entities are rebuilt — even those whose glyphs were
+/// already complete. A `HashSet<Entity>` tracking only panels/texts
+/// with missing glyphs (where `get_or_insert` returned `None`) would
+/// limit rebuilds to just the entities that need them. In practice the
+/// flag only fires 1–3 times during startup so the cost is low.
+#[derive(Resource, Default)]
+pub(super) struct GlyphsReady(pub(super) bool);
+
 /// Key for grouping text quads that share the same material configuration.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct TextBatchKey {
@@ -172,14 +184,37 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterial>();
+        app.init_resource::<GlyphsReady>();
         app.add_systems(
             PostUpdate,
             (
-                extract_text_meshes.after(crate::plugin::compute_panel_layouts),
+                poll_atlas_glyphs.before(extract_text_meshes),
+                extract_text_meshes,
                 sync_panel_hue_offset.after(extract_text_meshes),
-                super::world_text::render_world_text,
+                super::world_text::render_world_text.after(poll_atlas_glyphs),
             ),
         );
+    }
+}
+
+/// Polls completed async glyph rasterizations, inserts them into the
+/// atlas, syncs to GPU, and marks all panels/text as changed so the
+/// existing text systems re-extract meshes.
+fn poll_atlas_glyphs(
+    mut atlas: ResMut<MsdfAtlas>,
+    mut images: ResMut<Assets<Image>>,
+    mut ready: ResMut<GlyphsReady>,
+    mut shared_mat: ResMut<SharedMsdfMaterial>,
+) {
+    // Clear last frame's flag before polling new results.
+    ready.0 = false;
+
+    if atlas.poll_async_glyphs() {
+        atlas.sync_to_gpu(&mut images);
+        ready.0 = true;
+        // Invalidate the shared material so it gets recreated with the
+        // updated atlas texture on the next extract_text_meshes run.
+        shared_mat.handle = None;
     }
 }
 
@@ -187,7 +222,7 @@ impl Plugin for TextRenderPlugin {
 /// builds glyph mesh entities with [`MsdfTextMaterial`].
 #[allow(clippy::too_many_arguments)]
 fn extract_text_meshes(
-    panels: Query<
+    changed_panels: Query<
         (
             Entity,
             &DiegeticPanel,
@@ -196,6 +231,12 @@ fn extract_text_meshes(
         ),
         Changed<ComputedDiegeticPanel>,
     >,
+    all_panels: Query<(
+        Entity,
+        &DiegeticPanel,
+        &ComputedDiegeticPanel,
+        Option<&HueOffset>,
+    )>,
     old_text: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -206,8 +247,11 @@ fn extract_text_meshes(
     mut shared_mat: ResMut<SharedMsdfMaterial>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
+    ready: Res<GlyphsReady>,
 ) {
-    if panels.is_empty() {
+    let rebuild_all = ready.0;
+
+    if !rebuild_all && changed_panels.is_empty() {
         perf.last_text_extract_ms = 0.0;
         perf.last_text_extract_panels = 0;
         return;
@@ -216,7 +260,6 @@ fn extract_text_meshes(
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
-    // Ensure the shared default material exists.
     let Some(atlas_image) = atlas.image_handle().cloned() else {
         return;
     };
@@ -230,23 +273,23 @@ fn extract_text_meshes(
                 atlas.height(),
                 atlas_image.clone(),
                 0.0,
-                0,
+                GlyphRenderMode::Text as u32,
             ))
         })
         .clone();
 
-    for (panel_entity, panel, computed, hue_offset) in &panels {
+    let panels_iter: Vec<_> = if rebuild_all {
+        all_panels.iter().collect()
+    } else {
+        changed_panels.iter().collect()
+    };
+
+    for (panel_entity, panel, computed, hue_offset) in panels_iter {
         panel_count += 1;
+
         let Some(result) = computed.result() else {
             continue;
         };
-
-        // Despawn previous text mesh and shadow proxy children for this panel.
-        for (entity, child_of) in &old_text {
-            if child_of.parent() == panel_entity {
-                commands.entity(entity).despawn();
-            }
-        }
 
         let scale_x = panel.world_width / panel.layout_width;
         let scale_y = panel.world_height / panel.layout_height;
@@ -284,6 +327,22 @@ fn extract_text_meshes(
             );
 
             batches.entry(key).or_default().extend_from_slice(&quads);
+        }
+
+        let total_quads: usize = batches.values().map(Vec::len).sum();
+
+        // Only replace old meshes if we have content. Keeps partial
+        // text visible until a more complete replacement is ready.
+        if total_quads == 0 {
+            continue;
+        }
+
+        // Despawn previous text mesh children — safe because we have a
+        // non-empty replacement ready.
+        for (entity, child_of) in &old_text {
+            if child_of.parent() == panel_entity {
+                commands.entity(entity).despawn();
+            }
         }
 
         // Emit one visible mesh (+ optional shadow proxy) per batch.
@@ -429,10 +488,6 @@ pub(super) fn shape_text_cached(
     drop(font_cx);
     drop(layout_cx);
 
-    // Parse the font face to resolve cmap glyph IDs when GSUB substitutes
-    // glyphs that our MSDF rasterizer can't handle (no bounding box).
-    let face = ttf_parser::Face::parse(crate::text::EMBEDDED_FONT, 0).ok();
-
     let mut glyphs = Vec::new();
     for line in layout.lines() {
         for item in line.items() {
@@ -442,30 +497,12 @@ pub(super) fn shape_text_cached(
             let glyph_run = run.run();
             let mut advance_x = 0.0_f32;
             for cluster in glyph_run.clusters() {
-                // Get the source character for this cluster so we can
-                // fall back to the cmap glyph ID if GSUB substitutes a
-                // glyph our rasterizer can't handle.
-                let source_char = text
-                    .get(cluster.text_range())
-                    .and_then(|s| s.chars().next());
-
                 for glyph in cluster.glyphs() {
-                    // Use the cmap glyph ID for the source character
-                    // rather than the GSUB-substituted glyph ID. Parley's
-                    // shaping handles positioning via advance widths; we
-                    // just need the correct visual glyph from the atlas.
-                    // GSUB substitutions (ligatures, contextual alternates)
-                    // can produce glyph IDs with no bounding box or with
-                    // bearings that don't match our quad placement model.
                     #[allow(clippy::cast_possible_truncation)]
-                    let glyph_id = source_char
-                        .and_then(|ch| face.as_ref()?.glyph_index(ch))
-                        .map_or(glyph.id as u16, |id| id.0);
-
                     glyphs.push(ShapedGlyph {
-                        glyph_id,
-                        x: run.offset() + advance_x + glyph.x,
-                        y: glyph.y,
+                        glyph_id: glyph.id as u16,
+                        x:        run.offset() + advance_x + glyph.x,
+                        y:        glyph.y,
                         baseline: run.baseline(),
                     });
                     advance_x += glyph.advance;

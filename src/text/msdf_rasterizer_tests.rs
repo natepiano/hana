@@ -104,7 +104,7 @@ fn atlas_insert_single_glyph() {
         glyph_index: glyph_index('A'),
     };
 
-    let metrics = atlas.get_or_insert(key, FONT_DATA);
+    let metrics = atlas.get_or_insert_sync(key, FONT_DATA);
     assert!(metrics.is_some(), "should insert 'A' successfully");
     assert_eq!(atlas.glyph_count(), 1);
 }
@@ -117,8 +117,8 @@ fn atlas_deduplicates_same_glyph() {
         glyph_index: glyph_index('A'),
     };
 
-    let first = atlas.get_or_insert(key, FONT_DATA);
-    let second = atlas.get_or_insert(key, FONT_DATA);
+    let first = atlas.get_or_insert_sync(key, FONT_DATA);
+    let second = atlas.get_or_insert_sync(key, FONT_DATA);
     assert_eq!(atlas.glyph_count(), 1, "should not insert duplicate");
     assert_eq!(
         first.map(|m| m.uv_rect),
@@ -137,7 +137,7 @@ fn atlas_packs_many_glyphs_without_overlap() {
             font_id:     0,
             glyph_index: glyph_index(*ch),
         };
-        atlas.get_or_insert(key, FONT_DATA);
+        atlas.get_or_insert_sync(key, FONT_DATA);
     }
 
     // Verify no UV overlap. Collect all UV rects and check pairwise.
@@ -188,10 +188,20 @@ fn atlas_packs_many_glyphs_without_overlap() {
 }
 
 #[test]
-fn atlas_prepopulate_ascii() {
+fn atlas_on_demand_ascii() {
     let mut atlas = MsdfAtlas::new();
-    let ascii: String = (33..=126).map(|c: u8| c as char).collect();
-    atlas.prepopulate(0, FONT_DATA, &ascii);
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+
+    for c in (33_u8..=126).map(|c| c as char) {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        atlas.get_or_insert_sync(key, FONT_DATA);
+    }
 
     // ASCII printable range is 94 chars. Some may have no outline (unlikely
     // for `JetBrains Mono` which is a complete monospace font).
@@ -217,15 +227,15 @@ fn colon_glyph_rasterizes_and_has_metrics() {
     );
 
     let mut atlas = MsdfAtlas::new();
-    atlas.prepopulate(0, FONT_DATA, ":");
     let key = GlyphKey {
         font_id:     0,
         glyph_index: idx,
     };
+    atlas.get_or_insert_sync(key, FONT_DATA);
     let metrics = atlas.get(&key);
     assert!(
         metrics.is_some(),
-        "colon should be in atlas after prepopulate"
+        "colon should be in atlas after on-demand insert"
     );
 
     let m = metrics.unwrap();
@@ -345,8 +355,17 @@ fn parley_colon_glyph_ids_match_cmap() {
 #[test]
 fn dump_atlas_png() {
     let mut atlas = MsdfAtlas::new();
-    let ascii: String = (33..=126).map(|c: u8| c as char).collect();
-    atlas.prepopulate(0, FONT_DATA, &ascii);
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+    for c in (33_u8..=126).map(|c| c as char) {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        atlas.get_or_insert_sync(key, FONT_DATA);
+    }
 
     // Write the atlas as a PNG for visual inspection.
     let path = std::env::temp_dir().join("bevy_diegetic_msdf_atlas.png");

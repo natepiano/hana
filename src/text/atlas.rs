@@ -1,6 +1,9 @@
 //! MSDF glyph atlas — packs rasterized glyphs into a texture.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Mutex;
+use std::sync::mpsc;
 
 use bevy::image::Image;
 use bevy::prelude::Assets;
@@ -9,6 +12,7 @@ use bevy::prelude::Resource;
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::render::render_resource::TextureFormat;
+use bevy::tasks::AsyncComputeTaskPool;
 use etagere::AllocId;
 use etagere::AtlasAllocator;
 use etagere::size2;
@@ -51,11 +55,22 @@ pub struct GlyphMetrics {
     _alloc_id:        AllocId,
 }
 
+/// Completed async rasterization result.
+struct RasterizedGlyph {
+    key:    GlyphKey,
+    bitmap: MsdfBitmap,
+}
+
 /// MSDF glyph atlas.
 ///
 /// Stores an RGBA texture containing MSDF glyph bitmaps and a lookup table
 /// mapping [`GlyphKey`] to [`GlyphMetrics`]. The atlas packs glyphs on demand
 /// using `etagere`'s shelf-packing algorithm.
+///
+/// Glyph rasterization is asynchronous — cache misses spawn tasks on
+/// [`AsyncComputeTaskPool`] and return `None`. Call
+/// [`poll_async_glyphs`](Self::poll_async_glyphs) each frame to insert
+/// completed results.
 #[derive(Resource)]
 pub struct MsdfAtlas {
     /// Raw pixel data (RGBA8, row-major).
@@ -72,6 +87,12 @@ pub struct MsdfAtlas {
     image_handle: Option<Handle<Image>>,
     /// Whether the CPU pixel data has changed since last GPU upload.
     dirty:        bool,
+    /// Glyph keys currently being rasterized asynchronously.
+    in_flight:    HashSet<GlyphKey>,
+    /// Receiver for completed async rasterizations (Mutex for Sync).
+    rx:           Mutex<mpsc::Receiver<RasterizedGlyph>>,
+    /// Sender cloned into each async task.
+    tx:           mpsc::Sender<RasterizedGlyph>,
 }
 
 impl MsdfAtlas {
@@ -84,6 +105,7 @@ impl MsdfAtlas {
     #[allow(clippy::cast_possible_wrap)]
     pub fn with_size(width: u32, height: u32) -> Self {
         let pixel_count = (width * height * BYTES_PER_PIXEL) as usize;
+        let (tx, rx) = mpsc::channel();
         Self {
             pixels: vec![0; pixel_count],
             allocator: AtlasAllocator::new(size2(width as i32, height as i32)),
@@ -92,6 +114,9 @@ impl MsdfAtlas {
             height,
             image_handle: None,
             dirty: false,
+            in_flight: HashSet::new(),
+            rx: Mutex::new(rx),
+            tx,
         }
     }
 
@@ -130,7 +155,8 @@ impl MsdfAtlas {
 
     /// Creates a Bevy `Image` from the atlas pixel data and stores the handle.
     ///
-    /// Call once during plugin initialization after prepopulating glyphs.
+    /// Call once during plugin initialization. Subsequent changes are synced
+    /// via [`sync_to_gpu`](Self::sync_to_gpu).
     pub fn upload_to_gpu(&mut self, images: &mut Assets<Image>) {
         let image = Image::new(
             Extent3d {
@@ -147,23 +173,91 @@ impl MsdfAtlas {
         self.dirty = false;
     }
 
-    /// Looks up or rasterizes a glyph, returning its metrics.
+    /// Syncs changed CPU pixel data to the existing GPU `Image` asset.
     ///
-    /// If the glyph is not cached, uses `fdsm` to generate the MSDF bitmap,
-    /// Returns metrics for a previously inserted glyph, or `None` if it
-    /// hasn't been rasterized yet.
-    #[must_use]
-    pub fn peek(&self, key: GlyphKey) -> Option<GlyphMetrics> { self.glyphs.get(&key).copied() }
+    /// Call after new glyphs are inserted. Only copies data when the atlas
+    /// is dirty. Bevy's asset change detection handles the actual GPU upload.
+    pub fn sync_to_gpu(&mut self, images: &mut Assets<Image>) {
+        if !self.dirty {
+            return;
+        }
+        let Some(handle) = self.image_handle.as_ref() else {
+            return;
+        };
+        let Some(image) = images.get_mut(handle) else {
+            return;
+        };
+        image.data = Some(self.pixels.clone());
+        self.dirty = false;
+    }
 
-    /// packs it into the atlas via `etagere`, and copies the pixel data.
+    /// Returns cached metrics for a glyph, or `None` if not yet available.
     ///
-    /// Returns `None` if the glyph has no outline (e.g., space) or if the
-    /// atlas is full.
+    /// On cache miss, queues async rasterization on
+    /// [`AsyncComputeTaskPool`]. The glyph will be available after
+    /// [`poll_async_glyphs`](Self::poll_async_glyphs) picks up the
+    /// completed result.
     pub fn get_or_insert(&mut self, key: GlyphKey, font_data: &[u8]) -> Option<GlyphMetrics> {
         if let Some(metrics) = self.glyphs.get(&key) {
             return Some(*metrics);
         }
 
+        // Already queued — don't spawn a duplicate task.
+        if self.in_flight.contains(&key) {
+            return None;
+        }
+
+        // Queue async rasterization.
+        self.in_flight.insert(key);
+        let tx = self.tx.clone();
+        let glyph_index = key.glyph_index;
+        let font_data = font_data.to_vec();
+        AsyncComputeTaskPool::get()
+            .spawn(async move {
+                if let Some(bitmap) = rasterize_glyph(
+                    &font_data,
+                    glyph_index,
+                    DEFAULT_CANONICAL_SIZE,
+                    DEFAULT_SDF_RANGE,
+                    DEFAULT_GLYPH_PADDING,
+                ) {
+                    let _ = tx.send(RasterizedGlyph { key, bitmap });
+                }
+            })
+            .detach();
+
+        None
+    }
+
+    /// Drains completed async rasterizations and inserts them into the atlas.
+    ///
+    /// Returns `true` if any new glyphs were inserted (callers should
+    /// trigger text mesh rebuilds).
+    pub fn poll_async_glyphs(&mut self) -> bool {
+        let completed: Vec<_> = {
+            let rx = self.rx.lock().unwrap_or_else(|e| e.into_inner());
+            rx.try_iter().collect()
+        };
+        let mut any_inserted = false;
+        for result in completed {
+            self.in_flight.remove(&result.key);
+            if self.glyphs.contains_key(&result.key) {
+                continue;
+            }
+            if self.insert_bitmap(result.key, &result.bitmap).is_some() {
+                any_inserted = true;
+            }
+        }
+        any_inserted
+    }
+
+    /// Synchronously rasterizes and inserts a glyph. Used in tests and
+    /// startup prepopulation where blocking is acceptable.
+    #[cfg(test)]
+    pub fn get_or_insert_sync(&mut self, key: GlyphKey, font_data: &[u8]) -> Option<GlyphMetrics> {
+        if let Some(metrics) = self.glyphs.get(&key) {
+            return Some(*metrics);
+        }
         let bitmap = rasterize_glyph(
             font_data,
             key.glyph_index,
@@ -171,50 +265,7 @@ impl MsdfAtlas {
             DEFAULT_SDF_RANGE,
             DEFAULT_GLYPH_PADDING,
         )?;
-
         self.insert_bitmap(key, &bitmap)
-    }
-
-    /// Pre-populates the atlas with glyphs for the given character set.
-    ///
-    /// Call during startup for known text (e.g., ASCII) to avoid runtime
-    /// rasterization stalls. Glyphs that fail to rasterize (no outline)
-    /// are silently skipped.
-    pub fn prepopulate(&mut self, font_id: u16, font_data: &[u8], chars: &str) {
-        let Some(face) = ttf_parser::Face::parse(font_data, 0).ok() else {
-            return;
-        };
-
-        for ch in chars.chars() {
-            let Some(glyph_id) = face.glyph_index(ch) else {
-                continue;
-            };
-
-            let key = GlyphKey {
-                font_id,
-                glyph_index: glyph_id.0,
-            };
-
-            // Skip if already cached.
-            if self.glyphs.contains_key(&key) {
-                continue;
-            }
-
-            let Some(bitmap) = rasterize_glyph(
-                font_data,
-                glyph_id.0,
-                DEFAULT_CANONICAL_SIZE,
-                DEFAULT_SDF_RANGE,
-                DEFAULT_GLYPH_PADDING,
-            ) else {
-                continue;
-            };
-
-            // Stop if atlas is full.
-            if self.insert_bitmap(key, &bitmap).is_none() {
-                break;
-            }
-        }
     }
 
     /// Inserts a rasterized bitmap into the atlas, returns metrics.
