@@ -28,11 +28,11 @@ pub type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
 #[derive(Clone, Debug, ShaderType)]
 pub struct MsdfTextUniform {
     /// SDF range in atlas pixels.
-    pub sdf_range:    f32,
+    pub sdf_range:       f32,
     /// Atlas texture width in pixels.
-    pub atlas_width:  f32,
+    pub atlas_width:     f32,
     /// Atlas texture height in pixels.
-    pub atlas_height: f32,
+    pub atlas_height:    f32,
     /// Hue rotation applied to every vertex color, in radians (0.0 = none).
     ///
     /// Rotates the hue of all vertex colors in the mesh by this angle using
@@ -55,7 +55,13 @@ pub struct MsdfTextUniform {
     /// Has no effect on text using the material's base `color` uniform
     /// (white vertex colors). Only affects text with per-vertex colors set
     /// via [`TextConfig::with_color`](crate::TextConfig::with_color).
-    pub hue_offset:   f32,
+    pub hue_offset:      f32,
+    /// Glyph render mode (maps to [`GlyphRenderMode`](crate::GlyphRenderMode)):
+    /// 0 = Text, 1 = `PunchOut`, 2 = `SolidQuad`.
+    pub render_mode:     u32,
+    /// Whether this material is a shadow proxy (invisible in main pass,
+    /// contributes to the shadow prepass). 0 = visible, 1 = shadow-only.
+    pub is_shadow_proxy: u32,
 }
 
 /// MSDF atlas extension for `StandardMaterial`.
@@ -77,6 +83,12 @@ pub struct MsdfExtension {
 
 impl MaterialExtension for MsdfExtension {
     fn fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
+
+    /// Use the same MSDF shader for the depth/shadow prepass so that
+    /// `AlphaMode::Mask` can do per-pixel alpha testing via the MSDF
+    /// atlas. Without this, the prepass uses the default
+    /// `StandardMaterial` behavior and all shadows are rectangular.
+    fn prepass_fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
 }
 
 /// Creates a new [`MsdfTextMaterial`] with sensible defaults.
@@ -94,6 +106,7 @@ pub(super) fn msdf_text_material(
     atlas_height: u32,
     atlas_texture: Handle<Image>,
     hue_offset: f32,
+    render_mode: u32,
 ) -> MsdfTextMaterial {
     ExtendedMaterial {
         base:      StandardMaterial {
@@ -108,6 +121,44 @@ pub(super) fn msdf_text_material(
                 atlas_width: atlas_width as f32,
                 atlas_height: atlas_height as f32,
                 hue_offset,
+                render_mode,
+                is_shadow_proxy: 0,
+            },
+            atlas_texture,
+        },
+    }
+}
+
+/// Creates a shadow proxy [`MsdfTextMaterial`].
+///
+/// Same as [`msdf_text_material`] but configured for shadow-only rendering:
+/// - `alpha_mode: Mask(0.5)` so the shadow prepass runs the fragment shader
+/// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments (invisible)
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub(super) fn msdf_shadow_proxy_material(
+    sdf_range: f32,
+    atlas_width: u32,
+    atlas_height: u32,
+    atlas_texture: Handle<Image>,
+    hue_offset: f32,
+    render_mode: u32,
+) -> MsdfTextMaterial {
+    ExtendedMaterial {
+        base:      StandardMaterial {
+            alpha_mode: AlphaMode::Mask(0.5),
+            double_sided: true,
+            cull_mode: None,
+            ..StandardMaterial::default()
+        },
+        extension: MsdfExtension {
+            uniforms: MsdfTextUniform {
+                sdf_range,
+                atlas_width: atlas_width as f32,
+                atlas_height: atlas_height as f32,
+                hue_offset,
+                render_mode,
+                is_shadow_proxy: 1,
             },
             atlas_texture,
         },

@@ -78,3 +78,6 @@ name    = "panel_perf"
 
 [[example]]
 name = "typography"
+
+[[example]]
+name = "shadows"

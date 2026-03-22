@@ -374,6 +374,48 @@ pub enum TextAnchor {
     BottomRight,
 }
 
+/// How the visible glyph renders.
+///
+/// Controls the MSDF shader's alpha computation. All modes use
+/// `AlphaMode::Blend` for smooth anti-aliased edges.
+/// Discriminants are `#[repr(u32)]` and explicit because they map
+/// directly to shader constants in `msdf_text.wgsl`. Adding or
+/// reordering variants without updating the shader will cause a
+/// compile-time test failure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[repr(u32)]
+pub enum GlyphRenderMode {
+    /// No visible text — only the shadow proxy renders (if shadow mode
+    /// is not `None`). Useful for shadow-only effects.
+    Invisible = 0,
+    /// Normal MSDF text rendering — smooth alpha-blended edges.
+    #[default]
+    Text      = 1,
+    /// Background quad with the text shape cut out (inverted alpha).
+    PunchOut  = 2,
+    /// Opaque quad matching the glyph shape (no MSDF decode).
+    SolidQuad = 3,
+}
+
+/// What shape the shadow cast by glyphs takes.
+///
+/// Independent of [`GlyphRenderMode`] — the visible glyph and its shadow
+/// can use different shapes. Shaped shadows (`Text`, `PunchOut`) spawn a
+/// separate shadow proxy mesh with `AlphaMode::Mask` that is invisible
+/// in the main pass but contributes to the shadow prepass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+pub enum GlyphShadowMode {
+    /// No shadow casting.
+    None,
+    /// Rectangular shadow from quad geometry (default, current behavior).
+    #[default]
+    SolidQuad,
+    /// Shadow follows the text outline (MSDF-decoded in prepass).
+    Text,
+    /// Shadow follows the punch-out shape (inverted MSDF in prepass).
+    PunchOut,
+}
+
 // ── Typestate markers ────────────────────────────────────────────────────────
 
 /// Context marker: text properties for the layout engine.
@@ -431,6 +473,8 @@ pub struct TextProps<C: Send + Sync + 'static> {
     color:          Color,
     align:          TextAlign,
     anchor:         TextAnchor,
+    render_mode:    GlyphRenderMode,
+    shadow_mode:    GlyphShadowMode,
     #[reflect(ignore)]
     _context:       PhantomData<C>,
 }
@@ -448,6 +492,8 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.color == other.color
             && self.align == other.align
             && self.anchor == other.anchor
+            && self.render_mode == other.render_mode
+            && self.shadow_mode == other.shadow_mode
     }
 }
 
@@ -569,6 +615,28 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns the glyph render mode.
+    #[must_use]
+    pub const fn render_mode(&self) -> GlyphRenderMode { self.render_mode }
+
+    /// Sets the glyph render mode.
+    #[must_use]
+    pub const fn with_render_mode(mut self, mode: GlyphRenderMode) -> Self {
+        self.render_mode = mode;
+        self
+    }
+
+    /// Returns the glyph shadow mode.
+    #[must_use]
+    pub const fn shadow_mode(&self) -> GlyphShadowMode { self.shadow_mode }
+
+    /// Sets the glyph shadow mode.
+    #[must_use]
+    pub const fn with_shadow_mode(mut self, mode: GlyphShadowMode) -> Self {
+        self.shadow_mode = mode;
+        self
+    }
+
     /// Hashes all layout-affecting fields into `hasher`, excluding color.
     ///
     /// Uses exhaustive destructuring so that adding a new field to
@@ -590,6 +658,8 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             anchor,
             // Render-only — explicitly skipped.
             color: _,
+            render_mode: _,
+            shadow_mode: _,
             _context: _,
         } = self;
 
@@ -643,6 +713,8 @@ impl TextProps<ForLayout> {
             color: Color::WHITE,
             align: TextAlign::Left,
             anchor: TextAnchor::Center,
+            render_mode: GlyphRenderMode::Text,
+            shadow_mode: GlyphShadowMode::SolidQuad,
             _context: PhantomData,
         }
     }
@@ -688,6 +760,8 @@ impl TextProps<ForStandalone> {
             color:          Color::WHITE,
             align:          TextAlign::Left,
             anchor:         TextAnchor::Center,
+            render_mode:    GlyphRenderMode::Text,
+            shadow_mode:    GlyphShadowMode::SolidQuad,
             _context:       PhantomData,
         }
     }
@@ -735,6 +809,8 @@ impl TextProps<ForStandalone> {
             .with_letter_spacing(self.letter_spacing)
             .with_word_spacing(self.word_spacing)
             .with_color(self.color)
+            .with_render_mode(self.render_mode)
+            .with_shadow_mode(self.shadow_mode)
             .no_wrap()
     }
 }
@@ -871,3 +947,15 @@ impl Border {
         self
     }
 }
+
+// ── Shader discriminant assertions ──────────────────────────────────────────
+//
+// These compile-time assertions ensure that `GlyphRenderMode` discriminants
+// stay in sync with the constants in `assets/shaders/msdf_text.wgsl`.
+// If you add or reorder variants, update the shader constants to match
+// and adjust these assertions.
+
+const _: () = assert!(GlyphRenderMode::Invisible as u32 == 0);
+const _: () = assert!(GlyphRenderMode::Text as u32 == 1);
+const _: () = assert!(GlyphRenderMode::PunchOut as u32 == 2);
+const _: () = assert!(GlyphRenderMode::SolidQuad as u32 == 3);

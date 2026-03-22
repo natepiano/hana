@@ -44,6 +44,8 @@ pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;
 pub use layout::ForStandalone;
+pub use layout::GlyphRenderMode;
+pub use layout::GlyphShadowMode;
 pub use layout::LayoutBuilder;
 pub use layout::LayoutTree;
 /// Function signature for custom text measurement. Takes a text string and

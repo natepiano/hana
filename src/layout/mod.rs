@@ -63,6 +63,8 @@ pub use types::FontSlant;
 pub use types::FontWeight;
 pub use types::ForLayout;
 pub use types::ForStandalone;
+pub use types::GlyphRenderMode;
+pub use types::GlyphShadowMode;
 pub use types::Padding;
 pub use types::Sizing;
 pub use types::TextAlign;

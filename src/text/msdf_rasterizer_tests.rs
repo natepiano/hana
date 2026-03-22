@@ -202,6 +202,144 @@ fn atlas_prepopulate_ascii() {
     );
 }
 
+#[test]
+fn colon_glyph_rasterizes_and_has_metrics() {
+    let idx = glyph_index(':');
+    println!("colon glyph index: {idx}");
+
+    let bitmap = rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2);
+    assert!(bitmap.is_some(), "colon should rasterize (has outline)");
+
+    let bm = bitmap.unwrap();
+    println!(
+        "colon bitmap: {}x{}, bearing ({}, {})",
+        bm.width, bm.height, bm.bearing_x, bm.bearing_y
+    );
+
+    let mut atlas = MsdfAtlas::new();
+    atlas.prepopulate(0, FONT_DATA, ":");
+    let key = GlyphKey {
+        font_id:     0,
+        glyph_index: idx,
+    };
+    let metrics = atlas.get(&key);
+    assert!(
+        metrics.is_some(),
+        "colon should be in atlas after prepopulate"
+    );
+
+    let m = metrics.unwrap();
+    println!(
+        "colon metrics: pixel {}x{}, bearing ({}, {}), uv {:?}",
+        m.pixel_width, m.pixel_height, m.bearing_x, m.bearing_y, m.uv_rect
+    );
+    assert!(m.pixel_width > 0, "colon should have nonzero width");
+    assert!(m.pixel_height > 0, "colon should have nonzero height");
+}
+
+#[test]
+fn parley_colon_glyph_ids_match_cmap() {
+    use std::sync::PoisonError;
+
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+    let cmap_colon = face.glyph_index(':').unwrap().0;
+    println!("cmap colon glyph ID: {cmap_colon}");
+
+    // Shape "A::B" through parley and collect glyph IDs.
+    let mut font_cx = parley::FontContext::default();
+    font_cx
+        .collection
+        .register_fonts(FONT_DATA.to_vec().into(), None);
+    let font_cx = std::sync::Mutex::new(font_cx);
+
+    let layout_cx = std::sync::Mutex::new(parley::LayoutContext::<()>::default());
+    let mut layout = parley::Layout::<()>::new();
+
+    let mut fcx = font_cx.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut lcx = layout_cx.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let text = "A::B";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, true);
+    builder.push_default(parley::style::StyleProperty::FontSize(16.0));
+    builder.push_default(parley::style::StyleProperty::FontStack(
+        parley::style::FontStack::Single(parley::style::FontFamily::Named("JetBrains Mono".into())),
+    ));
+    builder.build_into(&mut layout, text);
+    layout.break_all_lines(None);
+
+    drop(fcx);
+    drop(lcx);
+
+    let mut glyph_ids = Vec::new();
+    for line in layout.lines() {
+        for item in line.items() {
+            let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
+                continue;
+            };
+            let glyph_run = run.run();
+            for cluster in glyph_run.clusters() {
+                for glyph in cluster.glyphs() {
+                    glyph_ids.push((glyph.id, glyph.advance));
+                }
+            }
+        }
+    }
+
+    println!("shaped glyph IDs for {text:?}:");
+    for (id, advance) in &glyph_ids {
+        println!("  glyph {id} advance {advance}");
+    }
+
+    // We expect 4 glyphs: A, :, :, B
+    assert_eq!(glyph_ids.len(), 4, "expected 4 glyphs for 'A::B'");
+
+    // Check that the colon glyph IDs from parley match the cmap lookup.
+    let parley_colon_1 = glyph_ids[1].0 as u16;
+    let parley_colon_2 = glyph_ids[2].0 as u16;
+    println!("parley colon glyph IDs: {parley_colon_1}, {parley_colon_2}");
+    println!("cmap colon glyph ID: {cmap_colon}");
+
+    if parley_colon_1 != cmap_colon {
+        println!(
+            "MISMATCH: parley returns glyph {parley_colon_1} but cmap has {cmap_colon} for ':'"
+        );
+    }
+
+    // Check if the substituted glyph IDs can be rasterized.
+    for &(gid, adv) in &glyph_ids {
+        let gid16 = gid as u16;
+        let result = rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
+        let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(gid16));
+        let has_shape =
+            fdsm_ttf_parser::load_shape_from_face(&face, ttf_parser::GlyphId(gid16)).is_some();
+        println!(
+            "  glyph {gid16}: rasterize={}, bbox={:?}, has_shape={has_shape}, advance={adv}",
+            result.is_some(),
+            bbox
+        );
+        if let Some(bm) = &result {
+            println!(
+                "    bitmap {}x{}, bearing ({}, {})",
+                bm.width, bm.height, bm.bearing_x, bm.bearing_y
+            );
+        }
+    }
+
+    // Also check the original cmap colon for comparison.
+    let cmap_result = rasterize_glyph(FONT_DATA, cmap_colon, 32, 4.0, 2);
+    let cmap_bbox = face.glyph_bounding_box(ttf_parser::GlyphId(cmap_colon));
+    println!(
+        "cmap colon (glyph {cmap_colon}): rasterize={}, bbox={cmap_bbox:?}",
+        cmap_result.is_some(),
+    );
+    if let Some(bm) = &cmap_result {
+        println!(
+            "    bitmap {}x{}, bearing ({}, {})",
+            bm.width, bm.height, bm.bearing_x, bm.bearing_y
+        );
+    }
+}
+
 // ── PNG dump (visual inspection) ─────────────────────────────────────────────
 
 #[test]
