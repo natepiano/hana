@@ -1,3 +1,4 @@
+//! @generated bevy_example_template
 //! Glyph render mode × shadow mode matrix.
 //!
 //! Displays a large "A" for every combination of [`GlyphRenderMode`] and

@@ -1,3 +1,4 @@
+//! @generated bevy_example_template
 //! Example scaffold — replace this doc comment with a description.
 
 use std::time::Duration;
