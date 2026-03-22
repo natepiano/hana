@@ -1,3 +1,4 @@
+//! @generated bevy_example_template
 //! `HueOffset` material sharing validation.
 //!
 //! Two panels side by side with identical content. The left panel has a

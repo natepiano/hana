@@ -1,3 +1,4 @@
+//! @generated bevy_example_template
 //! Example scaffold — replace this doc comment with a description.
 
 use std::time::Duration;
@@ -54,7 +55,7 @@ fn setup(
 
     commands.insert_resource(SceneBounds(ground));
 
-// Light
+    // Light
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
@@ -70,7 +71,7 @@ fn setup(
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
             trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
             },
             trackpad_pinch_to_zoom_enabled: true,
@@ -89,11 +90,7 @@ fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
     );
 }
 
-fn on_ground_clicked(
-    click: On<Pointer<Click>>,
-    mut commands: Commands,
-    scene: Res<SceneBounds>,
-) {
+fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, scene.0)

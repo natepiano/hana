@@ -60,7 +60,11 @@ pub(super) struct WorldTextShadowProxy;
 /// component changes.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_world_text(
-    texts: Query<(Entity, &WorldText, &TextStyle), Or<(Changed<WorldText>, Changed<TextStyle>)>>,
+    changed_texts: Query<
+        (Entity, &WorldText, &TextStyle),
+        Or<(Changed<WorldText>, Changed<TextStyle>)>,
+    >,
+    all_texts: Query<(Entity, &WorldText, &TextStyle)>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -69,16 +73,24 @@ pub(super) fn render_world_text(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut commands: Commands,
+    ready: Res<super::text_renderer::GlyphsReady>,
 ) {
-    for (entity, world_text, style) in &texts {
-        // Despawn previous mesh children.
-        for (mesh_entity, child_of) in &old_meshes {
-            if child_of.parent() == entity {
-                commands.entity(mesh_entity).despawn();
-            }
-        }
+    let rebuild_all = ready.0;
 
+    let texts_iter: Vec<_> = if rebuild_all {
+        all_texts.iter().collect()
+    } else {
+        changed_texts.iter().collect()
+    };
+
+    for (entity, world_text, style) in texts_iter {
         if world_text.0.is_empty() {
+            // Despawn old meshes for empty text.
+            for (mesh_entity, child_of) in &old_meshes {
+                if child_of.parent() == entity {
+                    commands.entity(mesh_entity).despawn();
+                }
+            }
             continue;
         }
 
@@ -92,8 +104,16 @@ pub(super) fn render_world_text(
             &mut cache,
         );
 
+        // Only replace old meshes if we have content.
         if quads.is_empty() {
             continue;
+        }
+
+        // Despawn previous mesh children — safe because we have content.
+        for (mesh_entity, child_of) in &old_meshes {
+            if child_of.parent() == entity {
+                commands.entity(mesh_entity).despawn();
+            }
         }
 
         let Some(atlas_image) = atlas.image_handle().cloned() else {
@@ -215,7 +235,7 @@ fn shape_world_text(
             font_id:     style.font_id(),
             glyph_index: sg.glyph_id,
         };
-        if let Some(metrics) = atlas.peek(glyph_key) {
+        if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {
             #[allow(clippy::cast_precision_loss)]
             let right =
                 sg.x + metrics.bearing_x * style.size() + metrics.pixel_width as f32 * em_scale;

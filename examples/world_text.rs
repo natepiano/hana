@@ -1,3 +1,4 @@
+//! @generated bevy_example_template
 //! `WorldText` example — standalone MSDF text in world space.
 //!
 //! Demonstrates `WorldText` on a ground plane and on the front face of a cube.

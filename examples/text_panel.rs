@@ -1,3 +1,4 @@
+//! @generated bevy_example_template
 //! MSDF text rendering test — Phase 3 visual validation gate.
 //!
 //! Same scene as the default scaffold (ground plane, light, orbit camera)

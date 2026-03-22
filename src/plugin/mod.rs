@@ -21,13 +21,16 @@ use crate::layout::ForStandalone;
 use crate::layout::TextProps;
 use crate::render::ShapedTextCache;
 use crate::render::TextRenderPlugin;
-use crate::text::EMBEDDED_FONT;
 use crate::text::FontRegistry;
 use crate::text::MsdfAtlas;
 use crate::text::create_parley_measurer;
 
-/// Uploads the MSDF atlas pixel data to a GPU image at startup.
-fn upload_atlas_to_gpu(mut atlas: ResMut<MsdfAtlas>, mut images: ResMut<Assets<Image>>) {
+/// Creates the empty GPU `Image` for the MSDF atlas at startup.
+///
+/// The atlas starts with no glyphs — they are rasterized on demand. But
+/// the `Image` handle must exist before any text extraction system runs
+/// so that materials can reference it.
+fn init_atlas_image(mut atlas: ResMut<MsdfAtlas>, mut images: ResMut<Assets<Image>>) {
     atlas.upload_to_gpu(&mut images);
 }
 
@@ -81,10 +84,8 @@ impl Plugin for DiegeticUiPlugin {
             measure_fn: create_parley_measurer(registry.font_context(), registry.family_names()),
         };
 
-        // Initialize MSDF atlas and prepopulate ASCII glyphs.
-        let mut atlas = MsdfAtlas::new();
-        let ascii: String = (33_u8..=126).map(|c| c as char).collect();
-        atlas.prepopulate(0, EMBEDDED_FONT, &ascii);
+        // Initialize empty MSDF atlas — glyphs are rasterized on demand.
+        let atlas = MsdfAtlas::new();
 
         app.insert_resource(registry)
             .insert_resource(measurer)
@@ -95,7 +96,7 @@ impl Plugin for DiegeticUiPlugin {
             .register_type::<TextProps<ForStandalone>>()
             .add_plugins(TextRenderPlugin)
             .init_gizmo_group::<DiegeticPanelGizmoGroup>()
-            .add_systems(Startup, upload_atlas_to_gpu)
+            .add_systems(Startup, init_atlas_image)
             .add_systems(Update, render_panel_gizmos.after(compute_panel_layouts));
     }
 }
