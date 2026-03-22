@@ -19,22 +19,23 @@ Build a feature-gated typography debug overlay into the library that can be atta
 | Where letters sit | **Baseline** | **Baseline** | `baseline` | Layout | Offset computed by parley per line |
 | Below-baseline depth | **Descent** | **Descent** | `descent` | Font | OS/2 or hhea table (positive = below baseline) |
 | Bottom of line box | *(not labeled)* | **Bottom** | `bottom` | Layout | `baseline + descent + half_leading` (parley `max_coord`) |
-| Inter-line spacing | **Line gap (leading)** | **Leading** | `line_gap` | Font | OS/2 or hhea table. Also called "leading" in typography |
-| Full line measure | **Line height** | **Line height** | `line_height` | Font | `ascent + descent + line_gap` |
+| Inter-line spacing | **Line gap (leading)** | **Leading** | `line_gap` (font) / `leading` (layout) | Font + Layout | Font: raw value from OS/2 or hhea table. Layout: parley splits this in half and absorbs it into `top`/`bottom` via half-leading model |
+| Full line measure | **Line height** | **Line height** | `line_height` | Font + Layout | Font: `ascent + descent + line_gap`. Layout: `top` to `bottom` (same value, parley distributes the line_gap as half-leading) |
 | Horizontal glyph width | **Advancement** | *(not shown)* | `advance_width` | Glyph | Per-glyph horizontal advance |
 | Glyph extents box | **Bounding rectangle** | *(not shown)* | `bounds` | Glyph | Per-glyph bounding rect (xmin, ymin, xmax, ymax) |
 | Glyph reference point | **Origin** | *(not shown)* | `bearing_x` / `bearing_y` | Glyph | Per-glyph bearing offsets |
-| Slant angle | **Italic angle** | *(not shown)* | `slant_angle` | Font | post table; default 0.0 for upright |
+| Slant angle | **Italic angle** | *(not shown)* | `italic_angle` | Font | post table; default 0.0 for upright |
 
 **References:**
 - https://developer.apple.com/library/mac/documentation/TextFonts/Conceptual/CocoaTextArchitecture/Art/glyph_metrics_2x.png
 - https://miro.medium.com/v2/resize:fit:1100/format:webp/1*v1FDlH-vFEnhXDFDxp6OXg.png
 
 **Notes:**
-- All `FontMetrics` fields are non-optional. When the font's OS/2 table lacks `x_height` or `cap_height`, we derive them by measuring the bounding box of the 'x' or 'H' glyph respectively. `slant_angle` defaults to 0.0 if missing.
-- `line_gap` is the canonical name in our API. Doc comments note it is also called "leading" in traditional typography.
+- All `FontMetrics` fields are non-optional. When the font's OS/2 table lacks `x_height` or `cap_height`, we derive them by measuring the bounding box of the 'x' or 'H' glyph respectively. `italic_angle` defaults to 0.0 if missing.
+- `line_gap` is the font-level name (raw table value). `leading` is the layout-level name (parley's term). They represent the same concept at different layers. Doc comments cross-reference both.
 - `ascent` vs `cap_height`: ascent is the font's full ascender line (includes room for accented characters like Â, É). Cap height is just the top of unadorned uppercase letters (H, E, T). Ascent >= cap height always.
-- `line_height = ascent + descent + line_gap` — both Apple and Medium diagrams agree on this formula. Medium distributes half the line_gap above and half below (shown as top/bottom), while Apple shows it as a single measurement.
+- `line_height = ascent + descent + line_gap` (Apple) = `half_leading + ascent + descent + half_leading` (parley). Same value, same formula. Apple draws line_gap as one chunk; parley distributes it as half above ascent (→ `top`) and half below descent (→ `bottom`). Line boxes have no external gap between them. This is the CSS/OpenType/DirectWrite/Core Text standard. Our overlay visualizes what parley actually computes — the half-leading is visible as the gap between `top` and `ascent`, and between `descent` and `bottom`.
+- `line_gap` is stored on `FontMetrics` as the raw font table value. It is not drawn as a separate line in the overlay because parley absorbs it into `top`/`bottom`. Users can see it as the two half-gaps.
 
 ## Three Levels of Metrics
 
@@ -50,17 +51,17 @@ Pre-parsed once at font registration from OS/2, hhea, and post tables. Scaled to
 | `line_height` | `ascent + descent + line_gap` |
 | `x_height` | Baseline → mean line (height of lowercase 'x') |
 | `cap_height` | Baseline → cap line (height of uppercase 'H') |
-| `slant_angle` | Degrees from vertical (0 for upright) |
-| `underline_position` | Distance below baseline |
-| `underline_thickness` | Stroke thickness |
-| `strikeout_position` | Distance above baseline |
-| `strikeout_thickness` | Stroke thickness |
+| `italic_angle` | Degrees from vertical (0 for upright) |
+| `underline_position` | `Option<f32>` — distance below baseline. Optional: no meaningful fallback when font lacks post table |
+| `underline_thickness` | `Option<f32>` — stroke thickness. Optional: same reason |
+| `strikeout_position` | `Option<f32>` — distance above baseline. Optional: no meaningful fallback when font lacks OS/2 table |
+| `strikeout_thickness` | `Option<f32>` — stroke thickness. Optional: same reason |
 | `font_size` | Size these metrics were computed for |
 | `units_per_em` | Raw design units per em |
 
 ### Layout-level metrics (`LineMetricsSnapshot`)
 
-Computed by parley for a specific text run via `layout.lines().metrics()`:
+Computed by parley for a specific text run via `layout.lines().metrics()`. Parley uses the CSS/OpenType **half-leading model**: the font's line gap is split in half, with half added above the ascent (into `top`) and half below the descent (into `bottom`). This means line boxes have no external gap between them — the leading is absorbed into each line box. This is the same model used by CSS `line-height`, DirectWrite, and Core Text. Our debug overlay visualizes this model directly so users see what parley actually computes.
 
 | Field | Description |
 |---|---|
@@ -80,9 +81,19 @@ Computed on the fly from font bytes — only when `TypographyOverlay` is active 
 | Field | Description |
 |---|---|
 | `advance_width` | Horizontal advance (Apple's "Advancement") |
-| `bounds` | Bounding rectangle (xmin, ymin, xmax, ymax) |
+| `bounds` | `GlyphBounds` struct (min_x, min_y, max_x, max_y) |
 | `bearing_x` | Left side bearing (origin to left edge) |
 | `bearing_y` | Top side bearing (baseline to top edge) |
+
+## Visibility
+
+- **`Font`** — all fields private. Users interact through methods only (`metrics()`, `name()`, `glyph_metrics()`). Raw design-unit values are implementation details.
+- **`FontMetrics`** — all fields `pub`. Read-only data struct returned by `Font::metrics()`.
+- **`GlyphTypographyMetrics`** — all fields `pub`. Read-only data struct returned by `Font::glyph_metrics()`.
+- **`GlyphBounds`** — all fields `pub`. Simple data struct (min_x, min_y, max_x, max_y).
+- **`TypographyOverlay`** — all fields `pub`. User-configurable component.
+- **`LineMetricsSnapshot`** — all fields `pub`. Read-only data struct from layout queries.
+- **`FontRegistry`** — fields private, public methods (`font()`, `family_name()`).
 
 ## Implementation Steps
 
@@ -90,29 +101,30 @@ Computed on the fly from font bytes — only when `TypographyOverlay` is active 
 
 **New file:** `src/text/font.rs`
 
-`Font` pre-parses raw design-unit metrics from the font file at creation time using `ttf_parser::Face`. Also stores font data bytes (`Arc<[u8]>`) for on-demand per-glyph metric queries.
+`Font` pre-parses raw design-unit metrics from the font file at creation time using `ttf_parser::Face`. The raw font bytes are only retained when `typography_debug` is enabled (for per-glyph queries).
 
 ```rust
 pub struct Font {
     name: String,
-    data: Arc<[u8]>,           // retained for per-glyph queries
     units_per_em: u16,
     raw_ascent: i16,
     raw_descent: i16,
     raw_line_gap: i16,
     raw_cap_height: i16,       // derived from 'H' bbox if OS/2 lacks it
     raw_x_height: i16,         // derived from 'x' bbox if OS/2 lacks it
-    raw_slant_angle: f32,      // default 0.0 if missing
+    raw_italic_angle: f32,      // default 0.0 if missing
     raw_underline_position: Option<i16>,
     raw_underline_thickness: Option<i16>,
     raw_strikeout_position: Option<i16>,
     raw_strikeout_thickness: Option<i16>,
+    #[cfg(feature = "typography_debug")]
+    data: Arc<[u8]>,           // retained for per-glyph queries, zero cost when feature disabled
 }
 ```
 
-- `Font::from_bytes(name, data)` — parses once, derives any missing metrics from glyph bboxes
+- `Font::from_bytes(name, data)` — parses once, derives any missing metrics from glyph bboxes. Only stores `Arc<[u8]>` when `typography_debug` feature is enabled.
 - `Font::metrics(size) -> FontMetrics` — scales by `size / units_per_em`, pure arithmetic
-- `Font::glyph_metrics(char, size) -> Option<GlyphTypographyMetrics>` — parses glyph on demand from stored `data`, behind `#[cfg(feature = "typography_debug")]`
+- `#[cfg(feature = "typography_debug")] Font::glyph_metrics(char, size) -> Option<GlyphTypographyMetrics>` — parses glyph on demand from stored `data`
 - `Font::name() -> &str`
 
 ### Step 2: Update `FontRegistry` to hold `Font` structs
@@ -155,12 +167,22 @@ pub struct TypographyOverlay {
     pub show_glyph_metrics: bool,
     /// Show text labels on the metric lines.
     pub show_labels: bool,
+    /// Color for overlay lines and labels (includes alpha).
+    pub color: Color,
+    /// Gizmo line thickness.
+    pub line_width: f32,
+    /// Font size for metric labels.
+    pub label_size: f32,
+    /// How far annotation lines extend beyond text bounds.
+    pub extend: f32,
 }
 ```
 
+Sensible `Default` impl provided (black, reasonable sizes).
+
 **System:** Queries `Query<(&WorldText, &TextStyle, &GlobalTransform, &TypographyOverlay)>`:
 - Calls `Font::metrics(size)` for font-level lines
-- Draws B&W gizmo lines with different dash patterns and weights
+- Draws gizmo lines using the configured `color`, `line_width`, and `extend`
 - If `show_glyph_metrics`: calls `Font::glyph_metrics(char, size)` per character, draws bounding boxes and advance markers
 - If `show_labels`: spawns/positions small `WorldText` labels at line ends
 
@@ -213,10 +235,8 @@ The example is now minimal — it demonstrates the library's debug overlay:
 
 ## Follow-up Items (before merging back to `feature/text-rendering`)
 
-These are out of scope for this branch but must be addressed before or shortly after the merge:
+Out of scope for this branch. Already tracked in `bevy_diegetic/design/features.md`:
 
-1. **`FontRegistry::register_font(name, bytes) -> FontId`** — Allow users to load custom TTF/OTF fonts at runtime. The `Font::from_bytes()` infrastructure is already in place; this just needs a public registration method that inserts into both parley's `FontContext` and `fonts: Vec<Font>`.
-
-2. **System font discovery** — Enumerate and load system-installed fonts. Would integrate with fontique's system font discovery. Each discovered font gets its own `FontId` via `register_font()`.
-
-3. **Font selection ergonomics** — Consider whether `FontId` should support string-based lookup (e.g., `registry.font_by_name("Helvetica")`) alongside the numeric ID pattern.
+- **Custom font loading / multi-font / system fonts** → Section 4 "Font system", row 1
+- **Font weight/variant enumeration and selection ergonomics** → Section 4, row 4
+- **Debug overlay evolution** → Section 1, row "Debug overlay"
