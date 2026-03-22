@@ -3,6 +3,13 @@
 //! Validates that `fdsm` produces usable MSDF bitmaps from the embedded
 //! `JetBrains Mono` font and that the atlas packs glyphs correctly.
 
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+
 use super::atlas::GlyphKey;
 use super::atlas::MsdfAtlas;
 use super::msdf_rasterizer::rasterize_glyph;
@@ -142,7 +149,7 @@ fn atlas_packs_many_glyphs_without_overlap() {
 
     // Verify no UV overlap. Collect all UV rects and check pairwise.
     let metrics: Vec<_> = atlas
-        .get(&GlyphKey {
+        .get(GlyphKey {
             font_id:     0,
             glyph_index: glyph_index('A'),
         })
@@ -163,7 +170,7 @@ fn atlas_packs_many_glyphs_without_overlap() {
             font_id:     0,
             glyph_index: glyph_index(*ch),
         };
-        if let Some(m) = atlas.get(&key) {
+        if let Some(m) = atlas.get(key) {
             assert!(
                 m.uv_rect[0] >= 0.0 && m.uv_rect[0] <= 1.0,
                 "u_min out of range"
@@ -232,7 +239,7 @@ fn colon_glyph_rasterizes_and_has_metrics() {
         glyph_index: idx,
     };
     atlas.get_or_insert_sync(key, FONT_DATA);
-    let metrics = atlas.get(&key);
+    let metrics = atlas.get(key);
     assert!(
         metrics.is_some(),
         "colon should be in atlas after on-demand insert"

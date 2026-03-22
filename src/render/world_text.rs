@@ -58,7 +58,7 @@ pub(super) struct WorldTextShadowProxy;
 ///
 /// Rebuilds the text mesh whenever the [`WorldText`] or [`TextStyle`]
 /// component changes.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn render_world_text(
     changed_texts: Query<
         (Entity, &WorldText, &TextStyle),
@@ -174,10 +174,9 @@ pub(super) fn render_world_text(
         // Shadow proxy for shaped shadows (or any shadow when Invisible).
         if needs_proxy {
             let shadow_render_mode = match style.shadow_mode() {
-                GlyphShadowMode::None => GlyphRenderMode::Text as u32,
                 GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
-                GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
                 GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
+                GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
             };
 
             #[allow(clippy::cast_possible_truncation)]
@@ -237,8 +236,8 @@ fn shape_world_text(
         };
         if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {
             #[allow(clippy::cast_precision_loss)]
-            let right =
-                sg.x + metrics.bearing_x * style.size() + metrics.pixel_width as f32 * em_scale;
+            let right = (metrics.pixel_width as f32)
+                .mul_add(em_scale, metrics.bearing_x.mul_add(style.size(), sg.x));
             max_x = max_x.max(right);
         }
     }
@@ -271,8 +270,8 @@ fn shape_world_text(
         #[allow(clippy::cast_precision_loss)]
         let quad_h = metrics.pixel_height as f32 * em_scale;
 
-        let quad_x = sg.x + metrics.bearing_x * style.size() - anchor_x;
-        let quad_y = -(sg.baseline - sg.y - metrics.bearing_y * style.size() - anchor_y);
+        let quad_x = metrics.bearing_x.mul_add(style.size(), sg.x) - anchor_x;
+        let quad_y = -(metrics.bearing_y.mul_add(-style.size(), sg.baseline - sg.y) - anchor_y);
 
         quads.push(GlyphQuadData {
             position: [quad_x * scale, quad_y * scale, 0.0],

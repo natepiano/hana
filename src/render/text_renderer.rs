@@ -220,7 +220,11 @@ fn poll_atlas_glyphs(
 
 /// Extracts `RenderCommandKind::Text` entries from computed panels and
 /// builds glyph mesh entities with [`MsdfTextMaterial`].
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::too_many_lines
+)]
 fn extract_text_meshes(
     changed_panels: Query<
         (
@@ -409,10 +413,9 @@ fn extract_text_meshes(
             // Spawn shadow proxy if needed.
             if needs_proxy {
                 let shadow_render_mode = match key.shadow_mode {
-                    GlyphShadowMode::None => GlyphRenderMode::Text as u32,
                     GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
-                    GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
                     GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
+                    GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
                 };
 
                 #[allow(clippy::cast_possible_truncation)]
@@ -516,6 +519,7 @@ pub(super) fn shape_text_cached(
         width:  layout.full_width(),
         height: layout.height(),
     };
+    drop(layout);
     let run = ShapedTextRun { glyphs };
     cache.measurements.insert(key.clone(), dims);
     cache.entries.insert(key, run.clone());
@@ -589,6 +593,47 @@ fn shape_text_to_quads(
     quads
 }
 
+/// Syncs [`HueOffset`] to text materials on child meshes.
+///
+/// Panels using the shared material that receive a [`HueOffset`] are
+/// split off onto their own private material clone. Panels already on a
+/// private material are updated in place. This ensures that changing one
+/// panel's hue offset never affects other panels.
+fn sync_panel_hue_offset(
+    panels: Query<(Entity, &HueOffset), Changed<HueOffset>>,
+    mut children: Query<(&ChildOf, &mut MeshMaterial3d<MsdfTextMaterial>)>,
+    shared_mat: Res<SharedMsdfMaterial>,
+    mut materials: ResMut<Assets<MsdfTextMaterial>>,
+) {
+    for (panel_entity, hue_offset) in &panels {
+        for (child_of, mut mat_handle) in &mut children {
+            if child_of.parent() != panel_entity {
+                continue;
+            }
+
+            let is_shared = shared_mat
+                .handle
+                .as_ref()
+                .is_some_and(|h| *h == mat_handle.0);
+
+            if is_shared {
+                // Panel is on the shared material — clone it into a
+                // private material with this panel's hue_offset.
+                if let Some(base) = materials.get(&mat_handle.0) {
+                    let mut private = base.clone();
+                    private.extension.uniforms.hue_offset = hue_offset.0;
+                    mat_handle.0 = materials.add(private);
+                }
+            } else {
+                // Already private — update in place.
+                if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                    mat.extension.uniforms.hue_offset = hue_offset.0;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,46 +695,5 @@ mod tests {
             d.id(),
             "each non-zero-hue panel gets its own handle"
         );
-    }
-}
-
-/// Syncs [`HueOffset`] to text materials on child meshes.
-///
-/// Panels using the shared material that receive a [`HueOffset`] are
-/// split off onto their own private material clone. Panels already on a
-/// private material are updated in place. This ensures that changing one
-/// panel's hue offset never affects other panels.
-fn sync_panel_hue_offset(
-    panels: Query<(Entity, &HueOffset), Changed<HueOffset>>,
-    mut children: Query<(&ChildOf, &mut MeshMaterial3d<MsdfTextMaterial>)>,
-    shared_mat: Res<SharedMsdfMaterial>,
-    mut materials: ResMut<Assets<MsdfTextMaterial>>,
-) {
-    for (panel_entity, hue_offset) in &panels {
-        for (child_of, mut mat_handle) in &mut children {
-            if child_of.parent() != panel_entity {
-                continue;
-            }
-
-            let is_shared = shared_mat
-                .handle
-                .as_ref()
-                .is_some_and(|h| *h == mat_handle.0);
-
-            if is_shared {
-                // Panel is on the shared material — clone it into a
-                // private material with this panel's hue_offset.
-                if let Some(base) = materials.get(&mat_handle.0) {
-                    let mut private = base.clone();
-                    private.extension.uniforms.hue_offset = hue_offset.0;
-                    mat_handle.0 = materials.add(private);
-                }
-            } else {
-                // Already private — update in place.
-                if let Some(mat) = materials.get_mut(&mat_handle.0) {
-                    mat.extension.uniforms.hue_offset = hue_offset.0;
-                }
-            }
-        }
     }
 }

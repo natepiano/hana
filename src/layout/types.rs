@@ -407,10 +407,10 @@ pub enum GlyphRenderMode {
 pub enum GlyphShadowMode {
     /// No shadow casting.
     None,
-    /// Rectangular shadow from quad geometry (default, current behavior).
-    #[default]
+    /// Rectangular shadow from quad geometry.
     SolidQuad,
     /// Shadow follows the text outline (MSDF-decoded in prepass).
+    #[default]
     Text,
     /// Shadow follows the punch-out shape (inverted MSDF in prepass).
     PunchOut,
@@ -800,7 +800,7 @@ impl TextProps<ForStandalone> {
     /// `wrap` field is set to [`TextWrap::None`] since standalone text does
     /// not word-wrap by default.
     #[must_use]
-    pub fn as_layout_config(&self) -> TextProps<ForLayout> {
+    pub const fn as_layout_config(&self) -> TextProps<ForLayout> {
         TextProps::<ForLayout>::new(self.size)
             .with_font(self.font_id)
             .with_weight(self.weight)

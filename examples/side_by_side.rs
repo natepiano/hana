@@ -1,4 +1,4 @@
-//! Side-by-side layout comparison: Clay (C FFI) vs bevy_diegetic (Rust).
+//! Side-by-side layout comparison: Clay (C FFI) vs `bevy_diegetic` (Rust).
 //!
 //! Renders the same status panel using two layout engines side by side.
 //! Both use the same parley-backed text measurement, so any visual
@@ -91,7 +91,7 @@ const DIEGETIC_RENDERER: &str = "diegetic";
 const DYNAMIC_UPDATE_INTERVAL: f32 = 1.0;
 const WRAP_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit";
 
-/// WorldText uses a fixed scale of 0.01 (layout units → world units).
+/// `WorldText` uses a fixed scale of 0.01 (layout units → world units).
 const WORLD_TEXT_SCALE: f32 = 0.01;
 
 // ── Gizmo groups ─────────────────────────────────────────────────────────────
@@ -242,6 +242,7 @@ fn main() {
 
 // ── Clay text measurement ────────────────────────────────────────────────────
 
+#[allow(clippy::type_complexity)]
 fn clay_measure_with_parley(
     text: &str,
     config: &clay_layout::text::TextConfig,

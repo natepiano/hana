@@ -51,6 +51,7 @@ fn mesh_single_quad_has_uvs() {
     let mesh = build_glyph_mesh(&quads);
 
     // Should have UV attribute with 4 vertices.
+    #[allow(clippy::redundant_closure_for_method_calls)]
     let uv_count = mesh
         .attribute(Mesh::ATTRIBUTE_UV_0)
         .map_or(0, |attr| attr.len());

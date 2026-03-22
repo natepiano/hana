@@ -1,4 +1,4 @@
-//! @generated bevy_example_template
+//! @generated `bevy_example_template`
 //! Example scaffold — replace this doc comment with a description.
 
 use std::time::Duration;
@@ -13,7 +13,6 @@ use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
 use bevy_panorbit_camera_ext::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
@@ -79,15 +78,6 @@ fn setup(
         },
         Transform::from_xyz(0.0, 8.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-}
-
-fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
-    let camera = click.hit.camera;
-    commands.trigger(
-        ZoomToFit::new(camera, click.entity)
-            .margin(ZOOM_MARGIN_MESH)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-    );
 }
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {

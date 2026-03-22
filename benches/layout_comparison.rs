@@ -2,6 +2,7 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::needless_pass_by_value)]
 #![allow(clippy::too_many_lines)]
+#![allow(clippy::expect_used)]
 
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout performance on
 //! identical panel layouts.

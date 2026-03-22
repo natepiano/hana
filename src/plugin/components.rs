@@ -72,11 +72,11 @@ impl ComputedDiegeticPanel {
     /// This is the width of the first user-defined element (the content),
     /// not the full viewport. With `Sizing::FIT`, this shrinks to fit.
     #[must_use]
-    pub fn content_width(&self) -> f32 { self.content_width }
+    pub const fn content_width(&self) -> f32 { self.content_width }
 
     /// Actual computed content height in world units.
     #[must_use]
-    pub fn content_height(&self) -> f32 { self.content_height }
+    pub const fn content_height(&self) -> f32 { self.content_height }
 
     /// Returns the bounding box of the panel's content in layout units,
     /// or `None` if layout has not yet been computed.
@@ -87,12 +87,15 @@ impl ComputedDiegeticPanel {
 
     // ── Crate-internal accessors ─────────────────────────────────────────
 
+    /// Returns the computed layout result, or `None` if not yet computed.
     #[must_use]
-    pub(crate) fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
+    pub const fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
 
-    pub(crate) fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }
+    /// Stores the computed layout result.
+    pub fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }
 
-    pub(crate) fn set_content_size(&mut self, width: f32, height: f32) {
+    /// Sets the content dimensions in world units.
+    pub const fn set_content_size(&mut self, width: f32, height: f32) {
         self.content_width = width;
         self.content_height = height;
     }

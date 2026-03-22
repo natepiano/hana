@@ -18,10 +18,10 @@ mod msdf_rasterizer_tests;
 #[cfg(test)]
 mod parley_measurer_tests;
 
-pub(super) use atlas::GlyphKey;
-pub(super) use atlas::MsdfAtlas;
-pub(super) use font_registry::EMBEDDED_FONT;
+pub use atlas::GlyphKey;
+pub use atlas::MsdfAtlas;
+pub use font_registry::EMBEDDED_FONT;
 pub use font_registry::FontId;
-pub(super) use font_registry::FontRegistry;
-pub(super) use measurer::create_parley_measurer;
-pub(super) use msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
+pub use font_registry::FontRegistry;
+pub use measurer::create_parley_measurer;
+pub use msdf_rasterizer::DEFAULT_CANONICAL_SIZE;

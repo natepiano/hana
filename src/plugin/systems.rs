@@ -103,12 +103,8 @@ pub fn compute_panel_layouts(
 /// **Note:** This API is provisional. Once panels render real geometry
 /// (Phase 4), debug visualization will likely move to a per-panel debug
 /// mode rather than a global resource.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct ShowTextGizmos(pub bool);
-
-impl Default for ShowTextGizmos {
-    fn default() -> Self { Self(false) }
-}
 
 /// Renders debug gizmo wireframes for all panels with computed layouts.
 ///
@@ -256,7 +252,7 @@ mod tests {
                             .direction(Direction::LeftToRight)
                             .child_gap(4.0),
                         |b| {
-                            b.text(&format!("item {i}:"), TextConfig::new(PERF_FONT_SIZE));
+                            b.text(format!("item {i}:"), TextConfig::new(PERF_FONT_SIZE));
                             b.with(
                                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                 |_| {},
@@ -280,6 +276,7 @@ mod tests {
             f();
         }
         let elapsed = start.elapsed();
+        #[allow(clippy::cast_possible_truncation)]
         let per_iter = elapsed / iterations as u32;
         println!(
             "{label}: {per_iter:?} per iteration ({iterations} iterations, {elapsed:?} total)"
@@ -287,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "manual perf benchmark — run with --ignored"]
     fn perf_element_sizes() {
         println!(
             "TextConfig size: {} bytes",
@@ -296,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "manual perf benchmark — run with --ignored"]
     fn perf_tree_build() {
         for &rows in &[10, 100, 500, 1000] {
             let iters = if rows <= 100 { 1000 } else { 100 };
@@ -307,7 +304,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "manual perf benchmark — run with --ignored"]
+    #[allow(clippy::too_many_lines)]
     fn perf_tree_build_breakdown() {
         let rows = 1000;
         let iters = 100;
@@ -434,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "manual perf benchmark — run with --ignored"]
     fn perf_engine_compute() {
         let measure = monospace_measure();
         for &rows in &[10, 100, 500, 1000] {

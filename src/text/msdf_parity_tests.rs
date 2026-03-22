@@ -9,6 +9,14 @@
 //! Also tests UTF-8 glyph rasterization across multiple scripts using
 //! `Noto Sans Regular`.
 
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+
 use std::fmt::Write;
 
 use msdfgen::Bitmap;
