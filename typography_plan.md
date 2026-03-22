@@ -101,7 +101,7 @@ Computed on the fly from font bytes — only when `TypographyOverlay` is active 
 
 **New file:** `src/text/font.rs`
 
-`Font` pre-parses raw design-unit metrics from the font file at creation time using `ttf_parser::Face`. The raw font bytes are only retained when `typography_debug` is enabled (for per-glyph queries).
+`Font` pre-parses raw design-unit metrics from the font file at creation time using `ttf_parser::Face`. The raw font bytes are only retained when `typography_overlay` is enabled (for per-glyph queries).
 
 ```rust
 pub struct Font {
@@ -117,14 +117,14 @@ pub struct Font {
     raw_underline_thickness: Option<i16>,
     raw_strikeout_position: Option<i16>,
     raw_strikeout_thickness: Option<i16>,
-    #[cfg(feature = "typography_debug")]
+    #[cfg(feature = "typography_overlay")]
     data: Arc<[u8]>,           // retained for per-glyph queries, zero cost when feature disabled
 }
 ```
 
-- `Font::from_bytes(name, data)` — parses once, derives any missing metrics from glyph bboxes. Only stores `Arc<[u8]>` when `typography_debug` feature is enabled.
+- `Font::from_bytes(name, data)` — parses once, derives any missing metrics from glyph bboxes. Only stores `Arc<[u8]>` when `typography_overlay` feature is enabled.
 - `Font::metrics(size) -> FontMetrics` — scales by `size / units_per_em`, pure arithmetic
-- `#[cfg(feature = "typography_debug")] Font::glyph_metrics(char, size) -> Option<GlyphTypographyMetrics>` — parses glyph on demand from stored `data`
+- `#[cfg(feature = "typography_overlay")] Font::glyph_metrics(char, size) -> Option<GlyphTypographyMetrics>` — parses glyph on demand from stored `data`
 - `Font::name() -> &str`
 
 ### Step 2: Update `FontRegistry` to hold `Font` structs
@@ -141,7 +141,7 @@ pub struct Font {
 
 - `src/text/mod.rs`: add `mod font;` with `pub use font::Font;` and `pub use font::FontMetrics;`
 - `src/lib.rs`: add `pub use text::Font;`, `pub use text::FontMetrics;`, promote `FontRegistry` to `pub use text::FontRegistry;`
-- Behind `#[cfg(feature = "typography_debug")]`: export `GlyphTypographyMetrics`, `TypographyOverlay`
+- Behind `#[cfg(feature = "typography_overlay")]`: export `GlyphTypographyMetrics`, `TypographyOverlay`
 
 ### Step 4: Expose Parley LineMetrics from the Library
 
@@ -153,7 +153,7 @@ Currently `shape_text_cached` in `src/render/text_renderer.rs` iterates `layout.
 
 ### Step 5: Create `TypographyOverlay` component and system
 
-**New file:** `src/render/typography_overlay.rs` — behind `#[cfg(feature = "typography_debug")]`
+**New file:** `src/debug/typography_overlay.rs` — behind `#[cfg(feature = "typography_overlay")]`
 
 **Component:**
 ```rust
@@ -190,8 +190,8 @@ Sensible `Default` impl provided (black, reasonable sizes).
 
 **File:** `src/plugin.rs`
 
-- Behind `#[cfg(feature = "typography_debug")]`: register the overlay system
-- Add `typography_debug` feature to `Cargo.toml`
+- Behind `#[cfg(feature = "typography_overlay")]`: register the overlay system
+- Add `typography_overlay` feature to `Cargo.toml`
 
 ### Step 7: Build the typography example
 
@@ -205,6 +205,16 @@ The example is now minimal — it demonstrates the library's debug overlay:
 4. Interactive controls: arrow keys to adjust font size/spacing, toggle overlay options
 5. Optional `DiegeticPanel` inspector showing numeric metric values
 
+**Cargo.toml example config:** The example enables the feature automatically so users just run `cargo run --example typography` without specifying `--features`:
+```toml
+[[example]]
+name = "typography"
+required-features = ["typography_overlay"]
+
+[features]
+typography_overlay = []
+```
+
 ## Key Files to Modify
 
 | File | Change |
@@ -212,20 +222,19 @@ The example is now minimal — it demonstrates the library's debug overlay:
 | `src/text/font.rs` | **New** — `Font`, `FontMetrics`, `GlyphTypographyMetrics` |
 | `src/text/font_registry.rs` | Replace `families` with `fonts: Vec<Font>`, add `.font()`, make public |
 | `src/text/mod.rs` | Add `mod font` + `pub use` for `Font`, `FontMetrics` |
-| `src/render/typography_overlay.rs` | **New** — `TypographyOverlay` component + gizmo drawing system |
-| `src/render/mod.rs` | Wire up overlay module (feature-gated) |
-| `src/plugin.rs` | Register overlay system (feature-gated) |
+| `src/debug/typography_overlay.rs` | **New** — `TypographyOverlay` component + gizmo drawing system |
+| `src/debug/mod.rs` | **New** — module root, feature-gated |
 | `src/lib.rs` | Re-export `Font`, `FontMetrics`, `FontRegistry`, `TypographyOverlay` |
 | `src/render/text_renderer.rs` | Expose line metrics query function |
-| `Cargo.toml` | Add `typography_debug` feature |
+| `Cargo.toml` | Add `typography_overlay` feature |
 | `examples/typography.rs` | Minimal: spawn text + overlay + interactive controls |
 
 ## Verification
 
 1. `cargo build` — library compiles with new `Font`/`FontMetrics` types (no feature flag needed)
-2. `cargo build --features typography_debug` — overlay code compiles
-3. `cargo build --example typography --features typography_debug` — example compiles
-4. `cargo run --example typography --features typography_debug` — shows:
+2. `cargo build --features typography_overlay` — overlay code compiles
+3. `cargo build --example typography --features typography_overlay` — example compiles
+4. `cargo run --example typography --features typography_overlay` — shows:
    - Large "Typography" word on clean background
    - B&W metric annotation lines with labels
    - Per-glyph bounding boxes and advance markers
@@ -239,4 +248,4 @@ Out of scope for this branch. Already tracked in `bevy_diegetic/design/features.
 
 - **Custom font loading / multi-font / system fonts** → Section 4 "Font system", row 1
 - **Font weight/variant enumeration and selection ergonomics** → Section 4, row 4
-- **Debug overlay evolution** → Section 1, row "Debug overlay"
+- **Panel layout overlay** → Section 1, row "Panel layout overlay" — `LayoutOverlay` component for visualizing sizing modes, padding, alignment, and layout decisions on `DiegeticPanel` entities
