@@ -8,11 +8,14 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Instant;
 
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::glyph_quad::GlyphQuadData;
 use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
+use crate::layout::GlyphRenderMode;
+use crate::layout::GlyphShadowMode;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextConfig;
 use crate::layout::TextMeasure;
@@ -139,6 +142,17 @@ impl Default for TextShapingContext {
 #[derive(Component)]
 struct DiegeticTextMesh;
 
+/// Marker component for shadow proxy mesh entities.
+#[derive(Component)]
+struct DiegeticShadowProxy;
+
+/// Key for grouping text quads that share the same material configuration.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct TextBatchKey {
+    render_mode: GlyphRenderMode,
+    shadow_mode: GlyphShadowMode,
+}
+
 /// Cached default material handle shared across all panels without a
 /// [`HueOffset`] component. One GPU resource, one upload.
 #[derive(Resource, Default)]
@@ -182,7 +196,7 @@ fn extract_text_meshes(
         ),
         Changed<ComputedDiegeticPanel>,
     >,
-    old_text: Query<(Entity, &ChildOf, &DiegeticTextMesh)>,
+    old_text: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -216,6 +230,7 @@ fn extract_text_meshes(
                 atlas.height(),
                 atlas_image.clone(),
                 0.0,
+                0,
             ))
         })
         .clone();
@@ -226,8 +241,8 @@ fn extract_text_meshes(
             continue;
         };
 
-        // Despawn previous text mesh children for this panel.
-        for (entity, child_of, _) in &old_text {
+        // Despawn previous text mesh and shadow proxy children for this panel.
+        for (entity, child_of) in &old_text {
             if child_of.parent() == panel_entity {
                 commands.entity(entity).despawn();
             }
@@ -238,28 +253,20 @@ fn extract_text_meshes(
         let half_w = panel.world_width * 0.5;
         let half_h = panel.world_height * 0.5;
 
-        // Panels without HueOffset (or HueOffset(0.0)) share the default
-        // material. Panels with non-zero HueOffset get their own.
         let hue = hue_offset.map_or(0.0, |h| h.0);
-        #[allow(clippy::cast_possible_truncation)]
-        let material_handle = if hue.abs() < f32::EPSILON {
-            default_handle.clone()
-        } else {
-            materials.add(super::msdf_material::msdf_text_material(
-                atlas.sdf_range() as f32,
-                atlas.width(),
-                atlas.height(),
-                atlas_image.clone(),
-                hue,
-            ))
-        };
 
-        // Batch all text quads into a single mesh per panel.
-        let mut all_quads = Vec::new();
+        // Group quads by (render_mode, shadow_mode) — each unique combo
+        // becomes its own mesh entity with the appropriate material.
+        let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
         for cmd in &result.commands {
             let (text, config) = match &cmd.kind {
                 RenderCommandKind::Text { text, config, .. } => (text.as_str(), config.clone()),
                 _ => continue,
+            };
+
+            let key = TextBatchKey {
+                render_mode: config.render_mode(),
+                shadow_mode: config.shadow_mode(),
             };
 
             let quads = shape_text_to_quads(
@@ -276,19 +283,97 @@ fn extract_text_meshes(
                 half_h,
             );
 
-            all_quads.extend_from_slice(&quads);
+            batches.entry(key).or_default().extend_from_slice(&quads);
         }
 
-        if !all_quads.is_empty() {
-            let mesh = build_glyph_mesh(&all_quads);
+        // Emit one visible mesh (+ optional shadow proxy) per batch.
+        for (key, quads) in &batches {
+            if quads.is_empty() {
+                continue;
+            }
+
+            let mesh = build_glyph_mesh(quads);
             let mesh_handle = meshes.add(mesh);
 
-            commands.entity(panel_entity).with_child((
-                DiegeticTextMesh,
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(material_handle.clone()),
-                Transform::IDENTITY,
-            ));
+            let is_invisible = key.render_mode == GlyphRenderMode::Invisible;
+
+            // Invisible render mode needs a proxy for any non-None shadow
+            // (including SolidQuad) since there's no visible mesh to cast.
+            let needs_proxy = if is_invisible {
+                key.shadow_mode != GlyphShadowMode::None
+            } else {
+                matches!(
+                    key.shadow_mode,
+                    GlyphShadowMode::Text | GlyphShadowMode::PunchOut
+                )
+            };
+            let suppress_shadow =
+                is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None;
+
+            // Spawn visible mesh (skip for Invisible render mode).
+            if !is_invisible {
+                let render_mode_u32 = key.render_mode as u32;
+
+                #[allow(clippy::cast_possible_truncation)]
+                let material_handle =
+                    if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
+                        default_handle.clone()
+                    } else {
+                        materials.add(super::msdf_material::msdf_text_material(
+                            atlas.sdf_range() as f32,
+                            atlas.width(),
+                            atlas.height(),
+                            atlas_image.clone(),
+                            hue,
+                            render_mode_u32,
+                        ))
+                    };
+
+                if suppress_shadow {
+                    commands.entity(panel_entity).with_child((
+                        DiegeticTextMesh,
+                        NotShadowCaster,
+                        Mesh3d(mesh_handle.clone()),
+                        MeshMaterial3d(material_handle),
+                        Transform::IDENTITY,
+                    ));
+                } else {
+                    commands.entity(panel_entity).with_child((
+                        DiegeticTextMesh,
+                        Mesh3d(mesh_handle.clone()),
+                        MeshMaterial3d(material_handle),
+                        Transform::IDENTITY,
+                    ));
+                }
+            }
+
+            // Spawn shadow proxy if needed.
+            if needs_proxy {
+                let shadow_render_mode = match key.shadow_mode {
+                    GlyphShadowMode::None => GlyphRenderMode::Text as u32,
+                    GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
+                    GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
+                    GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
+                };
+
+                #[allow(clippy::cast_possible_truncation)]
+                let proxy_material =
+                    materials.add(super::msdf_material::msdf_shadow_proxy_material(
+                        atlas.sdf_range() as f32,
+                        atlas.width(),
+                        atlas.height(),
+                        atlas_image.clone(),
+                        hue,
+                        shadow_render_mode,
+                    ));
+
+                commands.entity(panel_entity).with_child((
+                    DiegeticShadowProxy,
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(proxy_material),
+                    Transform::IDENTITY,
+                ));
+            }
         }
     }
 
@@ -344,6 +429,10 @@ pub(super) fn shape_text_cached(
     drop(font_cx);
     drop(layout_cx);
 
+    // Parse the font face to resolve cmap glyph IDs when GSUB substitutes
+    // glyphs that our MSDF rasterizer can't handle (no bounding box).
+    let face = ttf_parser::Face::parse(crate::text::EMBEDDED_FONT, 0).ok();
+
     let mut glyphs = Vec::new();
     for line in layout.lines() {
         for item in line.items() {
@@ -353,12 +442,30 @@ pub(super) fn shape_text_cached(
             let glyph_run = run.run();
             let mut advance_x = 0.0_f32;
             for cluster in glyph_run.clusters() {
+                // Get the source character for this cluster so we can
+                // fall back to the cmap glyph ID if GSUB substitutes a
+                // glyph our rasterizer can't handle.
+                let source_char = text
+                    .get(cluster.text_range())
+                    .and_then(|s| s.chars().next());
+
                 for glyph in cluster.glyphs() {
+                    // Use the cmap glyph ID for the source character
+                    // rather than the GSUB-substituted glyph ID. Parley's
+                    // shaping handles positioning via advance widths; we
+                    // just need the correct visual glyph from the atlas.
+                    // GSUB substitutions (ligatures, contextual alternates)
+                    // can produce glyph IDs with no bounding box or with
+                    // bearings that don't match our quad placement model.
                     #[allow(clippy::cast_possible_truncation)]
+                    let glyph_id = source_char
+                        .and_then(|ch| face.as_ref()?.glyph_index(ch))
+                        .map_or(glyph.id as u16, |id| id.0);
+
                     glyphs.push(ShapedGlyph {
-                        glyph_id: glyph.id as u16,
-                        x:        run.offset() + advance_x + glyph.x,
-                        y:        glyph.y,
+                        glyph_id,
+                        x: run.offset() + advance_x + glyph.x,
+                        y: glyph.y,
                         baseline: run.baseline(),
                     });
                     advance_x += glyph.advance;
@@ -466,6 +573,7 @@ mod tests {
             256,
             atlas_image.clone(),
             0.0,
+            0,
         ));
 
         // Simulate the decision logic from extract_text_meshes.
@@ -479,6 +587,7 @@ mod tests {
                     256,
                     atlas_image.clone(),
                     hue,
+                    0,
                 ))
             }
         };

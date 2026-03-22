@@ -4,19 +4,27 @@
 // technique for clean edges at any scale, with adaptive anti-aliasing
 // based on screen pixel range.
 //
+// Supports three render modes:
+//   0 = Text       — normal MSDF alpha (smooth text edges)
+//   1 = PunchOut   — inverted MSDF alpha (background with text cut out)
+//   2 = SolidQuad  — full opacity within glyph bounds
+//
+// Shadow proxy mode (is_shadow_proxy = 1): the mesh is invisible in the
+// main pass (all fragments discarded) but contributes shaped shadows via
+// the prepass using AlphaMode::Mask. The prepass only needs the alpha
+// test (discard or not) — depth is written by the hardware automatically.
+//
 // Extends StandardMaterial's PBR pipeline: all lighting, shadows, and
 // double-sided normal handling come from the base material.
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
-    pbr_bindings,
 }
 
 #ifdef PREPASS_PIPELINE
 #import bevy_pbr::{
-    prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
+    prepass_io::VertexOutput,
 }
 #else
 #import bevy_pbr::{
@@ -25,11 +33,19 @@
 }
 #endif
 
+// Render mode constants — must match GlyphRenderMode enum discriminants.
+// Invisible (0) never reaches the shader — the renderer skips the visible mesh.
+const RENDER_MODE_TEXT: u32       = 1u;
+const RENDER_MODE_PUNCH_OUT: u32  = 2u;
+const RENDER_MODE_SOLID_QUAD: u32 = 3u;
+
 struct MsdfTextUniform {
     sdf_range: f32,
     atlas_width: f32,
     atlas_height: f32,
     hue_offset: f32,
+    render_mode: u32,
+    is_shadow_proxy: u32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> msdf: MsdfTextUniform;
@@ -60,24 +76,69 @@ fn screen_px_range(uv: vec2<f32>) -> f32 {
     );
 }
 
+/// Computes the final alpha based on the render mode.
+fn compute_alpha(uv: vec2<f32>) -> f32 {
+    if msdf.render_mode == RENDER_MODE_SOLID_QUAD {
+        return 1.0;
+    }
+
+    let msdf_sample = textureSample(msdf_texture, msdf_sampler, uv);
+    let sd = median(msdf_sample.r, msdf_sample.g, msdf_sample.b) - 0.5;
+    let screen_px_dist = screen_px_range(uv) * sd;
+    let msdf_alpha = clamp(screen_px_dist + 0.5, 0.0, 1.0);
+
+    if msdf.render_mode == RENDER_MODE_PUNCH_OUT {
+        return 1.0 - msdf_alpha;
+    }
+
+    // RENDER_MODE_TEXT (default).
+    return msdf_alpha;
+}
+
+// ── Prepass entry point (shadow maps, depth prepass) ──────────────────
+//
+// Shadow maps only need depth + discard. No return value needed — the
+// hardware writes depth automatically for non-discarded fragments.
+// FragmentOutput is conditionally compiled behind PREPASS_FRAGMENT and
+// is not available for plain shadow passes.
+
+#ifdef PREPASS_PIPELINE
+@fragment
+fn fragment(
+    in: VertexOutput,
+    @builtin(front_facing) is_front: bool,
+) {
+    // Only shadow proxies need MSDF decode in the prepass. Non-proxy
+    // meshes pass through without texture sampling — the full quad
+    // writes depth, producing a rectangular shadow (SolidQuad behavior).
+    if msdf.is_shadow_proxy == 1u {
+        let final_alpha = compute_alpha(in.uv);
+        if final_alpha < 0.5 {
+            discard;
+        }
+    }
+}
+#else
+
+// ── Main pass entry point (forward rendering) ────────────────────────
+
 @fragment
 fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
-    // MSDF decode: compute per-pixel alpha from the signed distance field.
-    let msdf_sample = textureSample(msdf_texture, msdf_sampler, in.uv);
-    let sd = median(msdf_sample.r, msdf_sample.g, msdf_sample.b) - 0.5;
-    let screen_px_dist = screen_px_range(in.uv) * sd;
-    let msdf_alpha = clamp(screen_px_dist + 0.5, 0.0, 1.0);
+    // Shadow proxy: invisible in the main pass.
+    if msdf.is_shadow_proxy == 1u {
+        discard;
+    }
 
-    if msdf_alpha < 0.02 {
+    let final_alpha = compute_alpha(in.uv);
+
+    if final_alpha < 0.02 {
         discard;
     }
 
     // Standard PBR input — handles double-sided, normals, lighting, everything.
-    // After this call, pbr_input.material.base_color = vertex_color * material.base_color
-    // (including alpha), so the material's alpha is already baked in.
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
     // Apply hue rotation to vertex color if needed.
@@ -88,21 +149,18 @@ fn fragment(
     }
 #endif
 
-    // Apply MSDF alpha on top.
-    pbr_input.material.base_color.a *= msdf_alpha;
+    // Apply final alpha on top.
+    pbr_input.material.base_color.a *= final_alpha;
 
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material,
         pbr_input.material.base_color,
     );
 
-#ifdef PREPASS_PIPELINE
-    let out = deferred_output(in, pbr_input);
-#else
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
-#endif
 
     return out;
 }
+#endif
