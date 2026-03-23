@@ -70,7 +70,7 @@ fn setup(
 
     // Display word with typography overlay.
     commands.spawn((
-        WorldText::new("TypogrÂphy - x"),
+        WorldText::new("TypogrÂphy"),
         TextStyle::new()
             .with_size(DISPLAY_SIZE)
             .with_color(Color::srgb(0.9, 0.9, 0.9)),
@@ -109,6 +109,7 @@ fn setup(
             modifier_pan:  Some(KeyCode::ShiftLeft),
             modifier_zoom: Some(KeyCode::ControlLeft),
         },
+        trackpad_sensitivity: 0.5,
         trackpad_pinch_to_zoom_enabled: true,
         ..default()
     },));

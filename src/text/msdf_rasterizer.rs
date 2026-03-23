@@ -1,10 +1,13 @@
 //! Single-glyph MSDF rasterization via `fdsm` + `ttf-parser`.
 
 use fdsm::bezier::scanline::FillRule;
+use fdsm::correct_error::ErrorCorrectionConfig;
+use fdsm::correct_error::correct_error_msdf;
 use fdsm::generate::generate_msdf;
 use fdsm::render::correct_sign_msdf;
 use fdsm::shape::Shape;
 use fdsm::transform::Transform;
+use image::Rgb32FImage;
 use image::RgbImage;
 use nalgebra::Affine2;
 use nalgebra::Matrix3;
@@ -26,7 +29,7 @@ pub const DEFAULT_SDF_RANGE: f64 = 4.0;
 ///
 /// MSDF is resolution-independent, so all glyphs are generated at this
 /// single size. The shader handles scaling.
-pub const DEFAULT_CANONICAL_SIZE: u32 = 128;
+pub const DEFAULT_CANONICAL_SIZE: u32 = 64;
 
 /// Default padding around each glyph in pixels.
 pub const DEFAULT_GLYPH_PADDING: u32 = 2;
@@ -111,10 +114,36 @@ pub fn rasterize_glyph(
     colored.transform(&transform);
     let prepared = colored.prepare();
 
-    // Generate MSDF into an RGB image.
-    let mut image = RgbImage::new(img_w, img_h);
-    generate_msdf(&prepared, sdf_range, &mut image);
-    correct_sign_msdf(&mut image, &prepared, FillRule::Nonzero);
+    // Generate MSDF into a float image, apply error correction, then
+    // convert to u8. Error correction fixes artifacts at sharp corners
+    // where false edges in the multi-channel distance field produce
+    // visible spikes.
+    let mut image_f32 = Rgb32FImage::new(img_w, img_h);
+    generate_msdf(&prepared, sdf_range, &mut image_f32);
+    correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
+    {
+        let mut ec_config = ErrorCorrectionConfig::default();
+        // EdgePriority (default) fixes corner artifacts while preserving
+        // edge quality. At canonical size 64, the rounding from error
+        // correction is minimal.
+        correct_error_msdf(
+            &mut image_f32,
+            &colored,
+            &prepared,
+            sdf_range,
+            &ec_config,
+        );
+    }
+
+    // Convert f32 [0.0, 1.0] to u8 [0, 255].
+    let image = RgbImage::from_fn(img_w, img_h, |x, y| {
+        let p = image_f32.get_pixel(x, y);
+        image::Rgb([
+            (p[0].clamp(0.0, 1.0) * 255.0) as u8,
+            (p[1].clamp(0.0, 1.0) * 255.0) as u8,
+            (p[2].clamp(0.0, 1.0) * 255.0) as u8,
+        ])
+    });
 
     // Bearing offsets in em units (fraction of units_per_em).
     // Use `actual_pad` (which accounts for ceil() rounding) so the
