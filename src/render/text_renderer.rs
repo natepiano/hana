@@ -49,11 +49,36 @@ pub struct ShapedGlyph {
     pub baseline: f32,
 }
 
+/// Snapshot of parley's per-line metrics, captured during text shaping.
+///
+/// All values are in layout units (Y-down coordinate system).
+#[derive(Clone, Copy, Debug)]
+pub struct LineMetricsSnapshot {
+    /// Typographic ascent for this line.
+    pub ascent:    f32,
+    /// Typographic descent for this line.
+    pub descent:   f32,
+    /// Typographic leading for this line.
+    pub leading:   f32,
+    /// Absolute line height.
+    pub line_height: f32,
+    /// Offset to the baseline from the top of the layout.
+    pub baseline:  f32,
+    /// Full advance of the line including trailing whitespace.
+    pub advance:   f32,
+    /// Top of the line box (parley `min_coord`).
+    pub top:       f32,
+    /// Bottom of the line box (parley `max_coord`).
+    pub bottom:    f32,
+}
+
 /// Cached shaping result for a text string at a specific font configuration.
 #[derive(Clone, Debug)]
 pub struct ShapedTextRun {
     /// The shaped glyphs in order.
-    pub glyphs: Vec<ShapedGlyph>,
+    pub glyphs:       Vec<ShapedGlyph>,
+    /// Per-line metrics from parley, captured during shaping.
+    pub line_metrics: Vec<LineMetricsSnapshot>,
 }
 
 /// Cache key: hash of the text string + the full `TextMeasure` identity.
@@ -116,6 +141,14 @@ impl ShapedTextCache {
     ) -> Option<crate::layout::TextDimensions> {
         let key = ShapedCacheKey::new(text, measure);
         self.measurements.get(&key).copied()
+    }
+
+    /// Returns the cached shaped text run for the given text + config,
+    /// or `None` if not yet cached.
+    #[must_use]
+    pub fn get_shaped(&self, text: &str, measure: &TextMeasure) -> Option<&ShapedTextRun> {
+        let key = ShapedCacheKey::new(text, measure);
+        self.entries.get(&key)
     }
 }
 
@@ -489,7 +522,19 @@ pub(super) fn shape_text_cached(
     drop(layout_cx);
 
     let mut glyphs = Vec::new();
+    let mut line_metrics_list = Vec::new();
     for line in layout.lines() {
+        let lm = line.metrics();
+        line_metrics_list.push(LineMetricsSnapshot {
+            ascent:      lm.ascent,
+            descent:     lm.descent,
+            leading:     lm.leading,
+            line_height: lm.line_height,
+            baseline:    lm.baseline,
+            advance:     lm.advance,
+            top:         lm.min_coord,
+            bottom:      lm.max_coord,
+        });
         for item in line.items() {
             let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
                 continue;
@@ -516,7 +561,10 @@ pub(super) fn shape_text_cached(
         width:  layout.full_width(),
         height: layout.height(),
     };
-    let run = ShapedTextRun { glyphs };
+    let run = ShapedTextRun {
+        glyphs,
+        line_metrics: line_metrics_list,
+    };
     cache.measurements.insert(key.clone(), dims);
     cache.entries.insert(key, run.clone());
     run

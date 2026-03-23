@@ -26,7 +26,7 @@ pub const DEFAULT_SDF_RANGE: f64 = 4.0;
 ///
 /// MSDF is resolution-independent, so all glyphs are generated at this
 /// single size. The shader handles scaling.
-pub const DEFAULT_CANONICAL_SIZE: u32 = 32;
+pub const DEFAULT_CANONICAL_SIZE: u32 = 64;
 
 /// Default padding around each glyph in pixels.
 pub const DEFAULT_GLYPH_PADDING: u32 = 2;

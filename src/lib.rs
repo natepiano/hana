@@ -27,12 +27,17 @@
 //!     .run();
 //! ```
 
+#[cfg(feature = "typography_overlay")]
+mod debug;
 mod layout;
 mod plugin;
 mod render;
 mod text;
 
 // Layout types.
+// Debug overlay.
+#[cfg(feature = "typography_overlay")]
+pub use debug::TypographyOverlay;
 pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Border;
@@ -81,4 +86,11 @@ pub use plugin::ShowTextGizmos;
 // Render.
 pub use render::WorldText;
 // Text.
+pub use text::Font;
 pub use text::FontId;
+pub use text::FontMetrics;
+pub use text::FontRegistry;
+#[cfg(feature = "typography_overlay")]
+pub use text::GlyphBounds;
+#[cfg(feature = "typography_overlay")]
+pub use text::GlyphTypographyMetrics;

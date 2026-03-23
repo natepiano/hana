@@ -17,6 +17,25 @@ use crate::text::FontRegistry;
 use crate::text::GlyphKey;
 use crate::text::MsdfAtlas;
 
+/// Computed layout data for a [`WorldText`] entity, populated by the
+/// renderer. Used by the typography debug overlay to draw glyph bounding
+/// boxes and metric lines aligned with the rendered text.
+///
+/// Only available when the `typography_overlay` feature is enabled.
+#[cfg(feature = "typography_overlay")]
+#[derive(Component, Clone, Debug)]
+pub struct ComputedWorldText {
+    /// Anchor offset X in layout units (matches the renderer's anchor).
+    pub anchor_x: f32,
+    /// Anchor offset Y in layout units (matches the renderer's anchor).
+    pub anchor_y: f32,
+    /// Total text width in layout units (rightmost MSDF quad extent).
+    pub text_width: f32,
+    /// Per-glyph layout positions in layout units (before anchor/scale).
+    /// Each entry is `(glyph_x, baseline, glyph_id)` from parley shaping.
+    pub glyph_positions: Vec<(f32, f32, u16)>,
+}
+
 /// Standalone MSDF text rendered in world space.
 ///
 /// Attach to any entity with a [`Transform`] to place text in the 3D scene.
@@ -95,7 +114,7 @@ pub(super) fn render_world_text(
         }
 
         // Shape text and build quads in entity-local coordinates.
-        let quads = shape_world_text(
+        let (quads, _anchor_x, _anchor_y, _text_width, _glyph_positions) = shape_world_text(
             &world_text.0,
             style,
             &font_registry,
@@ -103,6 +122,15 @@ pub(super) fn render_world_text(
             &shaping_cx,
             &mut cache,
         );
+
+        // Store computed layout data for the typography overlay.
+        #[cfg(feature = "typography_overlay")]
+        commands.entity(entity).insert(ComputedWorldText {
+            anchor_x:        _anchor_x,
+            anchor_y:        _anchor_y,
+            text_width:      _text_width,
+            glyph_positions: _glyph_positions,
+        });
 
         // Only replace old meshes if we have content.
         if quads.is_empty() {
@@ -205,6 +233,11 @@ pub(super) fn render_world_text(
 /// Unlike panel text, standalone text has no layout bounds or panel scale.
 /// Glyphs are positioned relative to the origin, offset by the anchor point,
 /// with a fixed scale (1 layout unit = 0.01 world units by default).
+/// Returns `(quads, anchor_x, anchor_y, text_width, glyph_positions)`.
+///
+/// `glyph_positions` contains `(sg.x, sg.baseline, sg.glyph_id)` for each
+/// shaped glyph — used by the typography overlay to position bounding boxes
+/// using the same coordinate system as the renderer.
 fn shape_world_text(
     text: &str,
     style: &TextStyle,
@@ -212,7 +245,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> Vec<GlyphQuadData> {
+) -> (Vec<GlyphQuadData>, f32, f32, f32, Vec<(f32, f32, u16)>) {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
@@ -255,6 +288,13 @@ fn shape_world_text(
     // Anchor offset in layout units.
     let (anchor_x, anchor_y) = anchor_offset(style.anchor(), max_x, max_y);
 
+    // Capture glyph positions for the overlay.
+    let glyph_positions: Vec<(f32, f32, u16)> = shaped
+        .glyphs
+        .iter()
+        .map(|sg| (sg.x, sg.baseline, sg.glyph_id))
+        .collect();
+
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
     for sg in &shaped.glyphs {
         let glyph_key = GlyphKey {
@@ -282,7 +322,7 @@ fn shape_world_text(
         });
     }
 
-    quads
+    (quads, anchor_x, anchor_y, max_x, glyph_positions)
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.

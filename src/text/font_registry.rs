@@ -8,6 +8,8 @@ use parley::FontContext;
 use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;
 
+use super::font::Font;
+
 /// Embedded `JetBrains Mono` Regular font binary (SIL Open Font License).
 pub const EMBEDDED_FONT: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 
@@ -36,20 +38,36 @@ impl FontId {
 /// Resource managing font loading via parley's `FontContext`.
 ///
 /// Fonts are registered by embedding raw TTF/OTF bytes. The registry
-/// maps [`FontId`] values to font family names for lookup during
-/// text measurement.
+/// maps [`FontId`] values to [`Font`] structs that provide access to
+/// font-level typographic metrics.
 ///
 /// The embedded `JetBrains Mono` font is always available as [`FontId::MONOSPACE`].
+///
+/// Access the registry in Bevy systems via `Res<FontRegistry>`:
+///
+/// ```ignore
+/// fn my_system(registry: Res<FontRegistry>) {
+///     let font = registry.font(FontId::MONOSPACE).unwrap();
+///     let metrics = font.metrics(48.0);
+///     info!("ascent: {}", metrics.ascent);
+/// }
+/// ```
 #[derive(Resource)]
 pub struct FontRegistry {
     /// Shared font context — also held by the measurement closure.
-    font_cx:  Arc<Mutex<FontContext>>,
-    /// Map from `FontId` index to font family name.
-    families: Vec<String>,
+    font_cx: Arc<Mutex<FontContext>>,
+    /// Parsed fonts indexed by [`FontId`].
+    fonts:   Vec<Font>,
 }
 
 impl FontRegistry {
     /// Creates a new registry with the embedded default font.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the embedded `JetBrains Mono` font fails to parse. This is
+    /// infallible in practice because the font binary is compiled into the
+    /// library and is known to be valid.
     #[must_use]
     pub fn new() -> Self {
         let mut font_cx = FontContext::default();
@@ -62,17 +80,26 @@ impl FontRegistry {
             }),
         );
 
+        // Pre-parse the embedded font's metrics. This is infallible for our
+        // known-good embedded font, but we handle the Option for robustness.
+        let embedded_font = Font::from_bytes(DEFAULT_FAMILY, EMBEDDED_FONT)
+            .expect("embedded JetBrains Mono font should parse successfully");
+
         Self {
-            font_cx:  Arc::new(Mutex::new(font_cx)),
-            families: vec![(*DEFAULT_FAMILY).to_string()],
+            font_cx: Arc::new(Mutex::new(font_cx)),
+            fonts:   vec![embedded_font],
         }
+    }
+
+    /// Returns the [`Font`] for a given [`FontId`].
+    #[must_use]
+    pub fn font(&self, id: impl Into<FontId>) -> Option<&Font> {
+        self.fonts.get(id.into().0 as usize)
     }
 
     /// Returns the family name for a given [`FontId`].
     #[must_use]
-    pub fn family_name(&self, id: FontId) -> Option<&str> {
-        self.families.get(id.0 as usize).map(String::as_str)
-    }
+    pub fn family_name(&self, id: FontId) -> Option<&str> { self.font(id).map(Font::name) }
 
     /// Returns the shared font context for use by the measurement closure.
     #[must_use]
@@ -80,7 +107,9 @@ impl FontRegistry {
 
     /// Returns a cloned list of family names for the measurement closure.
     #[must_use]
-    pub fn family_names(&self) -> Vec<String> { self.families.clone() }
+    pub fn family_names(&self) -> Vec<String> {
+        self.fonts.iter().map(|f| (*f.name()).to_string()).collect()
+    }
 }
 
 impl Default for FontRegistry {
