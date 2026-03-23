@@ -122,10 +122,7 @@ pub fn rasterize_glyph(
     generate_msdf(&prepared, sdf_range, &mut image_f32);
     correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
     {
-        let mut ec_config = ErrorCorrectionConfig::default();
-        // EdgePriority (default) fixes corner artifacts while preserving
-        // edge quality. At canonical size 64, the rounding from error
-        // correction is minimal.
+        let ec_config = ErrorCorrectionConfig::default();
         correct_error_msdf(
             &mut image_f32,
             &colored,

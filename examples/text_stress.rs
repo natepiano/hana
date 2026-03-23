@@ -247,6 +247,7 @@ fn setup(
             yaw: Some(0.0),
             pitch: Some(0.35),
             trackpad_behavior: TrackpadBehavior::blender_default(),
+            trackpad_sensitivity: 0.5,
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
