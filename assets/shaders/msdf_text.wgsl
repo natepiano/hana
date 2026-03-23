@@ -46,13 +46,6 @@ struct MsdfTextUniform {
     hue_offset: f32,
     render_mode: u32,
     is_shadow_proxy: u32,
-    // Pre-computed tight ink bounding box in UV space.
-    // Computed on the CPU with bilinear filtering that matches the GPU.
-    // When ink_uv_max > ink_uv_min, the shader draws a 1px yellow
-    // rectangle at these UV coordinates.
-    ink_uv_min: vec2<f32>,
-    ink_uv_max: vec2<f32>,
-    ink_box_color: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> msdf: MsdfTextUniform;
@@ -81,31 +74,6 @@ fn screen_px_range(uv: vec2<f32>) -> f32 {
         0.5 * dot(unit_range, screen_tex_size),
         1.0,
     );
-}
-
-/// Returns the anti-aliased alpha for the ink bounding box line at
-/// the current UV. Computes a signed distance to the box boundary
-/// and uses a 1px-wide anti-aliased edge.
-fn ink_box_alpha(uv: vec2<f32>) -> f32 {
-    let box_u_min = msdf.ink_uv_min.x;
-    let box_v_min = msdf.ink_uv_min.y;
-    let box_u_max = msdf.ink_uv_max.x;
-    let box_v_max = msdf.ink_uv_max.y;
-
-    // Signed distance from the box boundary (negative = inside, positive = outside).
-    // This is the standard SDF for a rectangle.
-    let dx = max(box_u_min - uv.x, uv.x - box_u_max);
-    let dy = max(box_v_min - uv.y, uv.y - box_v_max);
-    let d_inside = min(max(dx, dy), 0.0);
-    let d_outside = length(max(vec2<f32>(dx, dy), vec2<f32>(0.0)));
-    let dist = d_inside + d_outside;
-
-    // Convert to screen pixels.
-    let grad = length(vec2<f32>(fwidth(uv.x), fwidth(uv.y)));
-    let screen_dist = abs(dist) / grad;
-
-    // 1px wide line at the boundary, anti-aliased.
-    return clamp(1.0 - screen_dist, 0.0, 1.0);
 }
 
 /// Computes the final alpha based on the render mode.
@@ -166,28 +134,8 @@ fn fragment(
 
     let final_alpha = compute_alpha(in.uv);
 
-    // Compute ink box line alpha (anti-aliased).
-    let box_active = msdf.ink_uv_max.x > msdf.ink_uv_min.x;
-    var box_alpha = 0.0;
-    if box_active {
-        box_alpha = ink_box_alpha(in.uv);
-    }
-
     if final_alpha < 0.02 {
-        // Even transparent fragments may need to draw the box line.
-        if box_alpha > 0.01 {
-            var out: FragmentOutput;
-            out.color = vec4<f32>(msdf.ink_box_color.rgb, box_alpha * msdf.ink_box_color.a);
-            return out;
-        }
         discard;
-    }
-
-    // Draw bounding box line if enabled (blended over glyph).
-    if box_alpha > 0.01 {
-        var out: FragmentOutput;
-        out.color = vec4<f32>(1.0, 1.0, 0.0, box_alpha);
-        return out;
     }
 
     // Standard PBR input — handles double-sided, normals, lighting, everything.

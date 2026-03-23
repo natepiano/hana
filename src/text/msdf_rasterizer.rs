@@ -144,7 +144,8 @@ pub fn rasterize_glyph(
 
             bevy::log::info!(
                 "MSDF_DUMP gid={glyph_index} img={}x{} pad_y={actual_pad_y:.1} top_row={outline_top_row} bot_row={outline_bot_row} col={sample_col} medians={col_medians:?}",
-                img_w, img_h,
+                img_w,
+                img_h,
             );
         }
     }

@@ -53,32 +53,31 @@ const LABEL_SIZE_RATIO: f32 = 0.08;
 pub struct TypographyOverlay {
     /// Show font-level metric lines (ascent, descent, cap height, x-height,
     /// baseline, top, bottom).
-    pub show_font_metrics: bool,
-    /// Show per-glyph bounding boxes drawn by the shader (uses CPU
-    /// bilinear scan to compute UV bounds, shader draws the lines).
-    pub show_shader_bbox:  bool,
+    pub show_font_metrics:  bool,
+    /// Show per-glyph bounding boxes as gizmo lines (from font bbox).
+    pub show_glyph_metrics: bool,
     /// Show text labels on the metric lines.
-    pub show_labels:       bool,
+    pub show_labels:        bool,
     /// Color for overlay lines and labels (includes alpha).
-    pub color:             Color,
+    pub color:              Color,
     /// Gizmo line width in pixels.
-    pub line_width:        f32,
+    pub line_width:         f32,
     /// Font size for metric labels.
-    pub label_size:        f32,
+    pub label_size:         f32,
     /// How far annotation lines extend beyond text bounds (in layout units).
-    pub extend:            f32,
+    pub extend:             f32,
 }
 
 impl Default for TypographyOverlay {
     fn default() -> Self {
         Self {
-            show_font_metrics: true,
-            show_shader_bbox:  true,
-            show_labels:       true,
-            color:             Color::from(WHITE),
-            line_width:        DEFAULT_LINE_WIDTH,
-            label_size:        6.0,
-            extend:            8.0,
+            show_font_metrics:  true,
+            show_glyph_metrics: true,
+            show_labels:        true,
+            color:              Color::from(WHITE),
+            line_width:         DEFAULT_LINE_WIDTH,
+            label_size:         6.0,
+            extend:             8.0,
         }
     }
 }
@@ -212,7 +211,45 @@ pub fn build_typography_overlay(
                 );
             }
         }
+
+        // Per-glyph bounding boxes from the font bbox.
+        if overlay.show_glyph_metrics {
+            let bbox_color = Color::srgba(1.0, 1.0, 0.6, 0.7);
+            let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects, bbox_color);
+
+            commands.entity(entity).with_child((
+                OverlayElement,
+                Gizmo {
+                    handle:      gizmo_assets.add(glyph_gizmo),
+                    line_config: GizmoLineConfig {
+                        width: overlay.line_width,
+                        ..default()
+                    },
+                    depth_bias:  -0.1,
+                },
+                Transform::IDENTITY,
+            ));
+        }
     }
+}
+
+/// Builds a gizmo with per-glyph bounding box rectangles.
+fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]], color: Color) -> GizmoAsset {
+    let mut gizmo = GizmoAsset::default();
+
+    for &[x, y, w, h] in glyph_rects {
+        let tl = Vec3::new(x, y, 0.002);
+        let tr = Vec3::new(x + w, y, 0.002);
+        let br = Vec3::new(x + w, y - h, 0.002);
+        let bl = Vec3::new(x, y - h, 0.002);
+
+        gizmo.line(tl, tr, color);
+        gizmo.line(tr, br, color);
+        gizmo.line(br, bl, color);
+        gizmo.line(bl, tl, color);
+    }
+
+    gizmo
 }
 
 /// Convert layout Y-down to world Y-up, with anchor offset.
@@ -251,7 +288,9 @@ fn build_metric_gizmos(
 
     bevy::log::info!(
         "METRICS baseline_layout={:.2} ascent_layout={:.2} descent_layout={:.2} baseline_world={:.4} x_height_world={:.4} anchor_y={:.2}",
-        baseline_y, ascent_y, descent_y,
+        baseline_y,
+        ascent_y,
+        descent_y,
         layout_to_world_y(baseline_y, anchor_y),
         layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y),
         anchor_y,

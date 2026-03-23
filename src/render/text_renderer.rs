@@ -224,11 +224,6 @@ impl Plugin for TextRenderPlugin {
                 super::world_text::render_world_text.after(poll_atlas_glyphs),
             ),
         );
-        #[cfg(feature = "typography_overlay")]
-        app.add_systems(
-            PostUpdate,
-            super::world_text::update_ink_bounds.after(super::world_text::render_world_text),
-        );
     }
 }
 

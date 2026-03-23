@@ -28,11 +28,15 @@ use crate::text::MsdfAtlas;
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
     /// Anchor offset X in layout units (matches the renderer's anchor).
-    pub anchor_x:   f32,
+    pub anchor_x:    f32,
     /// Anchor offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y:   f32,
+    pub anchor_y:    f32,
     /// Total text width in layout units (rightmost MSDF quad extent).
-    pub text_width: f32,
+    pub text_width:  f32,
+    /// Per-glyph ink bounding boxes `[x, y, width, height]` in world
+    /// units. Derived from the font's glyph bbox, positioned using the
+    /// same coordinate system as the renderer.
+    pub glyph_rects: Vec<[f32; 4]>,
 }
 
 /// Standalone MSDF text rendered in world space.
@@ -117,7 +121,7 @@ pub(super) fn render_world_text(
         }
 
         // Shape text and build quads in entity-local coordinates.
-        let (quads, anchor_x, anchor_y, text_width) = shape_world_text(
+        let (quads, anchor_x, anchor_y, text_width, glyph_rects) = shape_world_text(
             &world_text.0,
             style,
             &font_registry,
@@ -132,10 +136,11 @@ pub(super) fn render_world_text(
             anchor_x,
             anchor_y,
             text_width,
+            glyph_rects,
         });
         #[cfg(not(feature = "typography_overlay"))]
         {
-            let _ = (anchor_x, anchor_y, text_width);
+            let _ = (anchor_x, anchor_y, text_width, glyph_rects);
         }
 
         // Group quads by page.
@@ -191,11 +196,6 @@ pub(super) fn render_world_text(
                     0.0,
                     render_mode_u32,
                 );
-
-                // Ink bounds are computed by `update_ink_bounds` each
-                // frame and written to the material uniform. The shader
-                // reads the pre-computed UV bounds directly — no
-                // per-fragment scanning.
 
                 let material_handle = materials.add(mat);
 
@@ -260,7 +260,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32) {
+) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32, Vec<[f32; 4]>) {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
@@ -297,6 +297,7 @@ fn shape_world_text(
     let (anchor_x, anchor_y) = anchor_offset(style.anchor(), max_x, max_y);
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
+    let mut glyph_rects = Vec::with_capacity(shaped.glyphs.len());
     for sg in &shaped.glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
@@ -364,11 +365,19 @@ fn shape_world_text(
                     bevy::log::info!(
                         "VERIFY gid={} bbox=({},{},{},{}) upm={} outline_top_world={:.6} expected_top={:.6} diff={:.6} | outline_bot_world={:.6} expected_bot={:.6} diff={:.6} | baseline={:.6} x_height={:.6} | bbox_top_matches_xheight={} bbox_bot_matches_baseline={}",
                         sg.glyph_id,
-                        bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max,
+                        bbox.x_min,
+                        bbox.y_min,
+                        bbox.x_max,
+                        bbox.y_max,
                         upm,
-                        outline_top_layout * scale, expected_top_world, top_diff,
-                        outline_bot_layout * scale, expected_bot_world, bot_diff,
-                        baseline_world, x_height_world,
+                        outline_top_layout * scale,
+                        expected_top_world,
+                        top_diff,
+                        outline_bot_layout * scale,
+                        expected_bot_world,
+                        bot_diff,
+                        baseline_world,
+                        x_height_world,
                         (bbox_top_layout - x_height_layout).abs() < 0.01,
                         bbox_bot_layout.abs() < 0.01,
                     );
@@ -385,182 +394,37 @@ fn shape_world_text(
                 color:    color_arr,
             },
         ));
+
+        // Compute ink rect from the font's glyph bounding box.
+        {
+            let face = ttf_parser::Face::parse(font_data, 0).ok();
+            if let Some(face) = &face {
+                let gid = ttf_parser::GlyphId(sg.glyph_id);
+                if let Some(bbox) = face.glyph_bounding_box(gid) {
+                    #[allow(clippy::cast_precision_loss)]
+                    let upm = face.units_per_em() as f32;
+                    let font_scale = style.size() / upm;
+
+                    let ink_w = f32::from(bbox.x_max - bbox.x_min) * font_scale;
+                    let ink_h = f32::from(bbox.y_max - bbox.y_min) * font_scale;
+                    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, sg.x) - anchor_x;
+                    let ink_top =
+                        f32::from(bbox.y_max).mul_add(-font_scale, sg.baseline - sg.y) - anchor_y;
+
+                    glyph_rects.push([
+                        ink_x * scale,
+                        -ink_top * scale,
+                        ink_w * scale,
+                        ink_h * scale,
+                    ]);
+                }
+            }
+        }
     }
 
     clip_overlapping_quads(&mut quads);
 
-    (quads, anchor_x, anchor_y, max_x)
-}
-
-/// Layout-units-to-world-units conversion factor.
-#[cfg(feature = "typography_overlay")]
-const LAYOUT_TO_WORLD: f32 = 0.01;
-
-/// Marker component for overlay bounding box meshes spawned by
-/// `update_ink_bounds`. These are separate from the main text meshes
-/// and have per-glyph materials with `ink_uv_min`/`ink_uv_max` set.
-#[derive(Component)]
-pub struct InkBoxOverlayMesh;
-
-/// Spawns per-glyph overlay meshes that draw bounding boxes via the
-/// shader. Each glyph gets its own mesh and material so the shader
-/// can draw individual bounding boxes using the pre-computed UV bounds.
-///
-/// Runs when the camera moves or text/overlay changes. Despawns old
-/// overlay meshes and rebuilds them with updated bounds.
-#[cfg(feature = "typography_overlay")]
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-pub(super) fn update_ink_bounds(
-    texts: Query<(
-        Entity,
-        &WorldText,
-        &TextStyle,
-        &GlobalTransform,
-        &ComputedWorldText,
-        &crate::debug::TypographyOverlay,
-    )>,
-    old_overlays: Query<(Entity, &ChildOf), With<InkBoxOverlayMesh>>,
-    cameras: Query<(&GlobalTransform, &Projection, &Camera)>,
-    camera_changed: Query<Entity, (With<Camera>, Changed<GlobalTransform>)>,
-    text_changed: Query<
-        Entity,
-        (
-            With<crate::debug::TypographyOverlay>,
-            Or<(
-                Added<crate::debug::TypographyOverlay>,
-                Changed<crate::debug::TypographyOverlay>,
-                Changed<WorldText>,
-                Changed<TextStyle>,
-                Changed<ComputedWorldText>,
-            )>,
-        ),
-    >,
-    atlas: Res<MsdfAtlas>,
-    cache: Res<ShapedTextCache>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<MsdfTextMaterial>>,
-    mut commands: Commands,
-) {
-    // Only run when the camera moved or text changed.
-    if camera_changed.is_empty() && text_changed.is_empty() {
-        return;
-    }
-
-    for (entity, world_text, style, text_gtransform, computed, overlay) in &texts {
-        // Despawn previous overlay meshes for this entity.
-        for (overlay_entity, child_of) in &old_overlays {
-            if child_of.parent() == entity {
-                commands.entity(overlay_entity).despawn();
-            }
-        }
-
-        if !overlay.show_shader_bbox || world_text.0.is_empty() {
-            continue;
-        }
-
-        // Compute `screen_px_range` from camera state.
-        let Some((cam_gt, proj, cam)) = cameras.iter().next() else {
-            continue;
-        };
-
-        #[allow(clippy::cast_precision_loss)]
-        let viewport_height = cam
-            .physical_viewport_size()
-            .map_or(1080.0, |size| size.y as f32);
-        let dist = cam_gt.translation().distance(text_gtransform.translation());
-        let frustum_height = match proj {
-            Projection::Perspective(persp) => 2.0 * dist * (persp.fov / 2.0).tan(),
-            Projection::Orthographic(ortho) => ortho.area.height(),
-            Projection::Custom(_) => continue,
-        };
-
-        let world_per_screen_px = frustum_height / viewport_height;
-        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-        let sdf_range = atlas.sdf_range() as f32;
-        #[allow(clippy::cast_precision_loss)]
-        let canonical = atlas.canonical_size() as f32;
-        let font_size = style.size();
-        let em_scale = font_size / canonical;
-        let scale = LAYOUT_TO_WORLD;
-
-        // World units per bitmap pixel.
-        let world_per_bp = em_scale * scale;
-        // Screen pixels per bitmap pixel.
-        let screen_px_per_bp = world_per_bp / world_per_screen_px;
-        // screen_px_range (same formula as the shader).
-        let spr = (0.5 * sdf_range * screen_px_per_bp).max(1.0);
-
-        // Get shaped glyphs for positions.
-        let config = style.as_layout_config();
-        let measure = config.as_measure();
-        let Some(shaped) = cache.get_shaped(&world_text.0, &measure) else {
-            continue;
-        };
-
-        let anchor_x = computed.anchor_x;
-        let anchor_y = computed.anchor_y;
-
-        for sg in &shaped.glyphs {
-            let glyph_key = GlyphKey {
-                font_id:     style.font_id(),
-                glyph_index: sg.glyph_id,
-            };
-
-            let Some(metrics) = atlas.get_metrics(glyph_key) else {
-                continue;
-            };
-            let Some((ink_uv_min, ink_uv_max)) = atlas.scan_ink_bounds_uv(glyph_key, spr) else {
-                continue;
-            };
-            let Some(page_image) = atlas.image_handle(metrics.page_index).cloned() else {
-                continue;
-            };
-
-            // Build the same quad position as the main renderer.
-            #[allow(clippy::cast_precision_loss)]
-            let quad_w = metrics.pixel_width as f32 * em_scale;
-            #[allow(clippy::cast_precision_loss)]
-            let quad_h = metrics.pixel_height as f32 * em_scale;
-            let quad_x = metrics.bearing_x.mul_add(font_size, sg.x) - anchor_x;
-            let quad_y = -(metrics.bearing_y.mul_add(-font_size, sg.baseline - sg.y) - anchor_y);
-
-            let quad_data = GlyphQuadData {
-                position: [quad_x * scale, quad_y * scale, 0.001],
-                size:     [quad_w * scale, quad_h * scale],
-                uv_rect:  metrics.uv_rect,
-                color:    [0.0, 0.0, 0.0, 0.0], // Invisible glyph — only the box draws.
-            };
-
-            let mesh = build_glyph_mesh(&[quad_data]);
-            let mesh_handle = meshes.add(mesh);
-
-            // Per-glyph material with ink UV bounds set.
-            #[allow(clippy::cast_precision_loss)]
-            let mut mat = super::msdf_material::msdf_text_material(
-                sdf_range,
-                atlas.width(),
-                atlas.height(),
-                page_image,
-                0.0,
-                crate::layout::GlyphRenderMode::Text as u32,
-            );
-            mat.extension.uniforms.ink_uv_min = bevy::math::Vec2::new(ink_uv_min[0], ink_uv_min[1]);
-            mat.extension.uniforms.ink_uv_max = bevy::math::Vec2::new(ink_uv_max[0], ink_uv_max[1]);
-            let linear: LinearRgba = overlay.color.into();
-            mat.extension.uniforms.ink_box_color =
-                bevy::math::Vec4::new(linear.red, linear.green, linear.blue, linear.alpha);
-
-            let material_handle = materials.add(mat);
-
-            commands.entity(entity).with_child((
-                InkBoxOverlayMesh,
-                NotShadowCaster,
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(material_handle),
-                Transform::IDENTITY,
-            ));
-        }
-    }
+    (quads, anchor_x, anchor_y, max_x, glyph_rects)
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.
