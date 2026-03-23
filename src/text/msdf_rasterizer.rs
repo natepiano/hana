@@ -20,20 +20,20 @@ const EDGE_COLORING_SEED: u64 = 0;
 /// Default SDF range in pixels.
 ///
 /// Higher values = smoother edges at extreme zoom but less precision.
-pub const DEFAULT_SDF_RANGE: f64 = 4.0;
+pub(super) const DEFAULT_SDF_RANGE: f64 = 4.0;
 
 /// Default canonical pixel size for MSDF generation.
 ///
 /// MSDF is resolution-independent, so all glyphs are generated at this
 /// single size. The shader handles scaling.
-pub const DEFAULT_CANONICAL_SIZE: u32 = 64;
+pub(super) const DEFAULT_CANONICAL_SIZE: u32 = 64;
 
 /// Default padding around each glyph in pixels.
-pub const DEFAULT_GLYPH_PADDING: u32 = 2;
+pub(super) const DEFAULT_GLYPH_PADDING: u32 = 2;
 
 /// Raw MSDF bitmap output from rasterization.
 #[derive(Clone, Debug)]
-pub struct MsdfBitmap {
+pub(super) struct MsdfBitmap {
     /// Pixel data in RGB format (3 bytes per pixel, row-major).
     pub data:      Vec<u8>,
     /// Width in pixels.
@@ -54,7 +54,7 @@ pub struct MsdfBitmap {
 ///
 /// Returns `None` if the glyph has no outline (e.g., space character).
 #[must_use]
-pub fn rasterize_glyph(
+pub(super) fn rasterize_glyph(
     font_data: &[u8],
     glyph_index: u16,
     px_size: u32,

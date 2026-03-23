@@ -16,7 +16,7 @@ pub use config::AtlasConfig;
 pub use config::RasterQuality;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
-pub use systems::compute_panel_layouts;
+use systems::compute_panel_layouts;
 use systems::render_panel_gizmos;
 
 use crate::layout::ForLayout;
