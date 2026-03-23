@@ -267,23 +267,6 @@ impl MsdfAtlas {
         }
 
         if min_x <= max_x && min_y <= max_y {
-            // Debug: dump a row of median values across the middle
-            let mid_row = metrics.pixel_height / 2;
-            let mut row_vals = Vec::new();
-            for col in 0..metrics.pixel_width {
-                let px = x0 + col;
-                let py = y0 + mid_row;
-                let idx = ((py * self.width + px) * BYTES_PER_PIXEL) as usize;
-                let r = pixels[idx];
-                let g = pixels[idx + 1];
-                let b = pixels[idx + 2];
-                row_vals.push(median_u8(r, g, b));
-            }
-            bevy::log::info!(
-                "SCAN_DEBUG gid mid_row={mid_row} bounds=({min_x},{min_y},{max_x},{max_y}) bitmap={}x{} medians={row_vals:?}",
-                metrics.pixel_width, metrics.pixel_height,
-            );
-
             Some((min_x, min_y, max_x, max_y))
         } else {
             None

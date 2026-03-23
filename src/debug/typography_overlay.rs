@@ -245,11 +245,7 @@ pub fn build_typography_overlay(
                 // Extension beyond the outline in bitmap pixels.
                 let ext_bp = overlay.aa_factor / spr * sdf_range;
 
-                let result = ext_bp * world_per_bp;
-                bevy::log::info!(
-                    "AA: dist={dist:.3} frustum_h={frustum_height:.3} vp_h={viewport_height:.0} world/px={world_per_screen_px:.6} world/bp={world_per_bp:.6} px/bp={screen_px_per_bp:.2} spr={spr:.2} ext_bp={ext_bp:.3} ext_world={result:.6}"
-                );
-                result
+                ext_bp * world_per_bp
             });
 
             let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects, aa_expansion);
