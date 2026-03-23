@@ -205,78 +205,6 @@ impl MsdfAtlas {
         self.pages.get(page).map(|p| p.pixels.as_slice())
     }
 
-    /// Scans a glyph's MSDF bitmap to find the tight bounds of visible
-    /// pixels using the same alpha formula as the MSDF shader.
-    ///
-    /// `screen_px_range` controls how the SDF distance is converted to
-    /// alpha — it depends on the zoom level. The shader formula is:
-    /// `alpha = clamp(screen_px_range * (median - 0.5) + 0.5, 0, 1)`.
-    /// A pixel is visible when `alpha >= 0.02` (the discard threshold).
-    ///
-    /// Returns `(local_min_x, local_min_y, local_max_x, local_max_y)` in
-    /// pixels relative to the glyph's bitmap origin. Returns `None` if
-    /// the glyph is not cached or has no visible pixels.
-    #[must_use]
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    pub fn scan_visible_bounds(
-        &self,
-        key: GlyphKey,
-        screen_px_range: f32,
-    ) -> Option<(u32, u32, u32, u32)> {
-        let metrics = self.glyphs.get(&key)?;
-        let page = self.pages.get(metrics.page_index as usize)?;
-        let pixels = &page.pixels;
-
-        // Reverse UV coordinates to get the bitmap's pixel position in the
-        // atlas page. UVs were inset by half a texel during insertion, so
-        // we reverse that to find the interior origin.
-        let atlas_w = self.width as f32;
-        let atlas_h = self.height as f32;
-        let half_u = 0.5 / atlas_w;
-        let half_v = 0.5 / atlas_h;
-        let x0 = ((metrics.uv_rect[0] - half_u) * atlas_w).round() as u32;
-        let y0 = ((metrics.uv_rect[1] - half_v) * atlas_h).round() as u32;
-
-        let mut min_x = u32::MAX;
-        let mut min_y = u32::MAX;
-        let mut max_x = 0_u32;
-        let mut max_y = 0_u32;
-
-        for row in 0..metrics.pixel_height {
-            for col in 0..metrics.pixel_width {
-                let px = x0 + col;
-                let py = y0 + row;
-                let idx = ((py * self.width + px) * BYTES_PER_PIXEL) as usize;
-
-                let r = pixels[idx];
-                let g = pixels[idx + 1];
-                let b = pixels[idx + 2];
-                let med = median_u8(r, g, b);
-
-                // Same formula as the MSDF shader with screen_px_range=1.0
-                // (the shader's minimum). This gives the widest possible
-                // visible bounds — the box contains the glyph at any zoom.
-                // alpha = clamp(median/255, 0, 1) >= 0.02
-                // → median >= 5
-                let sd = med as f32 / 255.0 - 0.5;
-                let alpha = (screen_px_range * sd + 0.5).clamp(0.0, 1.0);
-
-                if alpha >= 0.02 {
-                    min_x = min_x.min(col);
-                    min_y = min_y.min(row);
-                    max_x = max_x.max(col);
-                    max_y = max_y.max(row);
-                }
-            }
-        }
-
-        if min_x <= max_x && min_y <= max_y {
-            Some((min_x, min_y, max_x, max_y))
-        } else {
-            None
-        }
-    }
-
     /// Scans a glyph's atlas region using bilinear-filtered UV sampling to
     /// find the tight bounding box of visible pixels. This replicates the
     /// GPU's `textureSample` (bilinear) behavior so the result matches the
@@ -716,9 +644,6 @@ impl MsdfAtlas {
 impl Default for MsdfAtlas {
     fn default() -> Self { Self::new() }
 }
-
-/// Returns the median of three `u8` values.
-fn median_u8(a: u8, b: u8, c: u8) -> u8 { a.max(b).min(c).max(a.min(b)) }
 
 /// Bilinear-filtered median sample at a UV coordinate in the atlas.
 ///

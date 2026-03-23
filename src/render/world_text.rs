@@ -17,8 +17,6 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
-#[cfg(feature = "typography_overlay")]
-use crate::text::GlyphMetrics;
 use crate::text::MsdfAtlas;
 
 /// Computed layout data for a [`WorldText`] entity, populated by the
@@ -30,16 +28,11 @@ use crate::text::MsdfAtlas;
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
     /// Anchor offset X in layout units (matches the renderer's anchor).
-    pub anchor_x:    f32,
+    pub anchor_x:   f32,
     /// Anchor offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y:    f32,
+    pub anchor_y:   f32,
     /// Total text width in layout units (rightmost MSDF quad extent).
-    pub text_width:  f32,
-    /// Per-glyph rendered quad rects in world units (after anchor, scale,
-    /// and overlap clipping). Each `[f32; 4]` is `[x, y, width, height]`
-    /// where `(x, y)` is the top-left corner. These are the exact rects
-    /// that the MSDF renderer draws — the overlay uses them directly.
-    pub glyph_rects: Vec<[f32; 4]>,
+    pub text_width: f32,
 }
 
 /// Standalone MSDF text rendered in world space.
@@ -124,7 +117,7 @@ pub(super) fn render_world_text(
         }
 
         // Shape text and build quads in entity-local coordinates.
-        let (quads, anchor_x, anchor_y, text_width, glyph_rects) = shape_world_text(
+        let (quads, anchor_x, anchor_y, text_width) = shape_world_text(
             &world_text.0,
             style,
             &font_registry,
@@ -139,11 +132,10 @@ pub(super) fn render_world_text(
             anchor_x,
             anchor_y,
             text_width,
-            glyph_rects,
         });
         #[cfg(not(feature = "typography_overlay"))]
         {
-            let _ = (anchor_x, anchor_y, text_width, glyph_rects);
+            let _ = (anchor_x, anchor_y, text_width);
         }
 
         // Group quads by page.
@@ -260,13 +252,7 @@ pub(super) fn render_world_text(
 /// Unlike panel text, standalone text has no layout bounds or panel scale.
 /// Glyphs are positioned relative to the origin, offset by the anchor point,
 /// with a fixed scale (1 layout unit = 0.01 world units by default).
-/// Returns `(quads, anchor_x, anchor_y, text_width, glyph_rects)`.
-///
-/// `glyph_rects` contains `[x, y, width, height]` for each rendered glyph
-/// quad in world units (after anchor offset, scale, and overlap clipping).
-/// Used by the typography overlay to draw bounding boxes that exactly match
-/// the rendered MSDF quads.
-#[allow(clippy::type_complexity)]
+/// Returns `(quads, anchor_x, anchor_y, text_width)`.
 fn shape_world_text(
     text: &str,
     style: &TextStyle,
@@ -274,7 +260,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32, Vec<[f32; 4]>) {
+) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32) {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
@@ -311,8 +297,6 @@ fn shape_world_text(
     let (anchor_x, anchor_y) = anchor_offset(style.anchor(), max_x, max_y);
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
-    #[cfg(feature = "typography_overlay")]
-    let mut ink_rects: Vec<[f32; 4]> = Vec::with_capacity(shaped.glyphs.len());
     for sg in &shaped.glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
@@ -340,96 +324,11 @@ fn shape_world_text(
                 color:    color_arr,
             },
         ));
-
-        #[cfg(feature = "typography_overlay")]
-        {
-            // Use bilinear-scan UV bounds converted to world via quad fractions.
-            let quad_world = [
-                quad_x * scale,
-                quad_y * scale,
-                quad_w * scale,
-                quad_h * scale,
-            ];
-            // spr=1.0 for widest bounds (conservative).
-            if let Some((ink_uv_min, ink_uv_max)) = atlas.scan_ink_bounds_uv(glyph_key, 1.0) {
-                let [u_min, v_min, u_max, v_max] = metrics.uv_rect;
-                let u_range = u_max - u_min;
-                let v_range = v_max - v_min;
-
-                let frac_left = (ink_uv_min[0] - u_min) / u_range;
-                let frac_top = (ink_uv_min[1] - v_min) / v_range;
-                let frac_right = (ink_uv_max[0] - u_min) / u_range;
-                let frac_bottom = (ink_uv_max[1] - v_min) / v_range;
-
-                let [qx, qy, qw, qh] = quad_world;
-                ink_rects.push([
-                    qx + frac_left * qw,
-                    qy - frac_top * qh,
-                    (frac_right - frac_left) * qw,
-                    (frac_bottom - frac_top) * qh,
-                ]);
-            }
-
-            // // Old font-bbox approach (commented out):
-            // let canonical = atlas.canonical_size() as f32;
-            // if let Some(ink) = compute_ink_rect_from_scan(
-            //     atlas, glyph_key, &metrics, sg, style, anchor_x, anchor_y, scale, canonical,
-            //     quad_world,
-            // ) {
-            //     ink_rects.push(ink);
-            // }
-        }
     }
 
     clip_overlapping_quads(&mut quads);
 
-    #[cfg(not(feature = "typography_overlay"))]
-    let ink_rects = Vec::new();
-
-    (quads, anchor_x, anchor_y, max_x, ink_rects)
-}
-
-/// Computes a glyph's outline bounding box from the font's glyph bbox.
-///
-/// Returns the mathematical outline boundary in world units. The MSDF
-/// shader renders visible pixels ~0.5 screen pixels beyond this boundary
-/// due to anti-aliasing — the caller should expand accordingly.
-///
-/// Returns `[x, y, width, height]` in world units where `(x, y)` is the
-/// top-left corner. Returns `None` if the font face can't be parsed or the
-/// glyph has no bounding box (e.g. space).
-#[cfg(feature = "typography_overlay")]
-fn compute_ink_rect_from_scan(
-    _atlas: &MsdfAtlas,
-    _glyph_key: GlyphKey,
-    _metrics: &GlyphMetrics,
-    sg: &super::text_renderer::ShapedGlyph,
-    style: &TextStyle,
-    anchor_x: f32,
-    anchor_y: f32,
-    scale: f32,
-    _canonical_size: f32,
-    _quad_world: [f32; 4],
-) -> Option<[f32; 4]> {
-    let font_data = crate::text::EMBEDDED_FONT;
-    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
-    let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(sg.glyph_id))?;
-
-    #[allow(clippy::cast_precision_loss)]
-    let upm = face.units_per_em() as f32;
-    let font_scale = style.size() / upm;
-
-    let ink_width = f32::from(bbox.x_max - bbox.x_min) * font_scale;
-    let ink_height = f32::from(bbox.y_max - bbox.y_min) * font_scale;
-    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, sg.x) - anchor_x;
-    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, sg.baseline - sg.y) - anchor_y;
-
-    Some([
-        ink_x * scale,
-        -ink_top * scale,
-        ink_width * scale,
-        ink_height * scale,
-    ])
+    (quads, anchor_x, anchor_y, max_x)
 }
 
 /// Layout-units-to-world-units conversion factor.
@@ -593,10 +492,12 @@ pub(super) fn update_ink_bounds(
                 0.0,
                 crate::layout::GlyphRenderMode::Text as u32,
             );
-            mat.extension.uniforms.ink_uv_min =
-                bevy::math::Vec2::new(ink_uv_min[0], ink_uv_min[1]);
-            mat.extension.uniforms.ink_uv_max =
-                bevy::math::Vec2::new(ink_uv_max[0], ink_uv_max[1]);
+            mat.extension.uniforms.ink_uv_min = bevy::math::Vec2::new(ink_uv_min[0], ink_uv_min[1]);
+            mat.extension.uniforms.ink_uv_max = bevy::math::Vec2::new(ink_uv_max[0], ink_uv_max[1]);
+            let linear: LinearRgba = overlay.color.into();
+            mat.extension.uniforms.ink_box_color = bevy::math::Vec4::new(
+                linear.red, linear.green, linear.blue, linear.alpha,
+            );
 
             let material_handle = materials.add(mat);
 

@@ -52,6 +52,7 @@ struct MsdfTextUniform {
     // rectangle at these UV coordinates.
     ink_uv_min: vec2<f32>,
     ink_uv_max: vec2<f32>,
+    ink_box_color: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> msdf: MsdfTextUniform;
@@ -80,12 +81,6 @@ fn screen_px_range(uv: vec2<f32>) -> f32 {
         0.5 * dot(unit_range, screen_tex_size),
         1.0,
     );
-}
-
-/// Returns the median SDF value at the given UV coordinate.
-fn sample_median(sample_uv: vec2<f32>) -> f32 {
-    let s = textureSample(msdf_texture, msdf_sampler, sample_uv);
-    return median(s.r, s.g, s.b);
 }
 
 /// Returns the anti-aliased alpha for the ink bounding box line at
@@ -182,7 +177,7 @@ fn fragment(
         // Even transparent fragments may need to draw the box line.
         if box_alpha > 0.01 {
             var out: FragmentOutput;
-            out.color = vec4<f32>(1.0, 1.0, 0.0, box_alpha);
+            out.color = vec4<f32>(msdf.ink_box_color.rgb, box_alpha * msdf.ink_box_color.a);
             return out;
         }
         discard;

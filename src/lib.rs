@@ -95,6 +95,7 @@ pub use text::FontMetrics;
 pub use text::FontRegistry;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphBounds;
+pub use text::GlyphMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
 pub use text::MsdfAtlas;
