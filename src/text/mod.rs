@@ -24,4 +24,3 @@ pub use font_registry::EMBEDDED_FONT;
 pub use font_registry::FontId;
 pub use font_registry::FontRegistry;
 pub use measurer::create_parley_measurer;
-pub use msdf_rasterizer::DEFAULT_CANONICAL_SIZE;

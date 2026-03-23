@@ -1,5 +1,7 @@
 //! Standalone world-space text component and rendering system.
 
+use std::collections::HashMap;
+
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
@@ -12,7 +14,6 @@ use super::text_renderer::shape_text_cached;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
-use crate::text::DEFAULT_CANONICAL_SIZE;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
 use crate::text::MsdfAtlas;
@@ -58,7 +59,11 @@ pub(super) struct WorldTextShadowProxy;
 ///
 /// Rebuilds the text mesh whenever the [`WorldText`] or [`TextStyle`]
 /// component changes.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::too_many_lines
+)]
 pub(super) fn render_world_text(
     changed_texts: Query<
         (Entity, &WorldText, &TextStyle),
@@ -104,8 +109,16 @@ pub(super) fn render_world_text(
             &mut cache,
         );
 
+        // Group quads by page.
+        let mut page_quads: HashMap<u32, Vec<GlyphQuadData>> = HashMap::new();
+        for (page_index, quad) in quads {
+            page_quads.entry(page_index).or_default().push(quad);
+        }
+
+        let total_quads: usize = page_quads.values().map(Vec::len).sum();
+
         // Only replace old meshes if we have content.
-        if quads.is_empty() {
+        if total_quads == 0 {
             continue;
         }
 
@@ -116,18 +129,7 @@ pub(super) fn render_world_text(
             }
         }
 
-        let Some(atlas_image) = atlas.image_handle().cloned() else {
-            continue;
-        };
-
-        let mesh = build_glyph_mesh(&quads);
-        let mesh_handle = meshes.add(mesh);
-
         let is_invisible = style.render_mode() == GlyphRenderMode::Invisible;
-
-        // Shadow behavior.
-        // Invisible render mode needs a proxy for any non-None shadow
-        // (including SolidQuad) since there's no visible mesh to cast.
         let needs_proxy = if is_invisible {
             style.shadow_mode() != GlyphShadowMode::None
         } else {
@@ -139,62 +141,72 @@ pub(super) fn render_world_text(
         let suppress_shadow =
             is_invisible || needs_proxy || style.shadow_mode() == GlyphShadowMode::None;
 
-        // Spawn visible mesh (skip for Invisible render mode).
-        if !is_invisible {
-            let render_mode_u32 = style.render_mode() as u32;
+        for (page_index, pq) in &page_quads {
+            let Some(page_image) = atlas.image_handle(*page_index).cloned() else {
+                continue;
+            };
 
-            #[allow(clippy::cast_possible_truncation)]
-            let material_handle = materials.add(super::msdf_material::msdf_text_material(
-                atlas.sdf_range() as f32,
-                atlas.width(),
-                atlas.height(),
-                atlas_image.clone(),
-                0.0,
-                render_mode_u32,
-            ));
+            let mesh = build_glyph_mesh(pq);
+            let mesh_handle = meshes.add(mesh);
 
-            if suppress_shadow {
-                commands.entity(entity).with_child((
-                    WorldTextMesh,
-                    NotShadowCaster,
-                    Mesh3d(mesh_handle.clone()),
-                    MeshMaterial3d(material_handle),
-                    Transform::IDENTITY,
+            // Spawn visible mesh (skip for Invisible render mode).
+            if !is_invisible {
+                let render_mode_u32 = style.render_mode() as u32;
+
+                #[allow(clippy::cast_possible_truncation)]
+                let material_handle = materials.add(super::msdf_material::msdf_text_material(
+                    atlas.sdf_range() as f32,
+                    atlas.width(),
+                    atlas.height(),
+                    page_image.clone(),
+                    0.0,
+                    render_mode_u32,
                 ));
-            } else {
+
+                if suppress_shadow {
+                    commands.entity(entity).with_child((
+                        WorldTextMesh,
+                        NotShadowCaster,
+                        Mesh3d(mesh_handle.clone()),
+                        MeshMaterial3d(material_handle),
+                        Transform::IDENTITY,
+                    ));
+                } else {
+                    commands.entity(entity).with_child((
+                        WorldTextMesh,
+                        Mesh3d(mesh_handle.clone()),
+                        MeshMaterial3d(material_handle),
+                        Transform::IDENTITY,
+                    ));
+                }
+            }
+
+            // Shadow proxy for shaped shadows (or any shadow when Invisible).
+            if needs_proxy {
+                let shadow_render_mode = match style.shadow_mode() {
+                    GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
+                    GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
+                    GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
+                };
+
+                #[allow(clippy::cast_possible_truncation)]
+                let proxy_material =
+                    materials.add(super::msdf_material::msdf_shadow_proxy_material(
+                        atlas.sdf_range() as f32,
+                        atlas.width(),
+                        atlas.height(),
+                        page_image,
+                        0.0,
+                        shadow_render_mode,
+                    ));
+
                 commands.entity(entity).with_child((
-                    WorldTextMesh,
-                    Mesh3d(mesh_handle.clone()),
-                    MeshMaterial3d(material_handle),
+                    WorldTextShadowProxy,
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(proxy_material),
                     Transform::IDENTITY,
                 ));
             }
-        }
-
-        // Shadow proxy for shaped shadows (or any shadow when Invisible).
-        if needs_proxy {
-            let shadow_render_mode = match style.shadow_mode() {
-                GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
-                GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
-                GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
-            };
-
-            #[allow(clippy::cast_possible_truncation)]
-            let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
-                atlas.sdf_range() as f32,
-                atlas.width(),
-                atlas.height(),
-                atlas_image,
-                0.0,
-                shadow_render_mode,
-            ));
-
-            commands.entity(entity).with_child((
-                WorldTextShadowProxy,
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(proxy_material),
-                Transform::IDENTITY,
-            ));
         }
     }
 }
@@ -211,7 +223,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> Vec<GlyphQuadData> {
+) -> Vec<(u32, GlyphQuadData)> {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
@@ -222,12 +234,9 @@ fn shape_world_text(
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 
     #[allow(clippy::cast_precision_loss)]
-    let em_scale = style.size() / DEFAULT_CANONICAL_SIZE as f32;
+    let em_scale = style.size() / atlas.canonical_size() as f32;
 
     // Measure total dimensions for anchor offset.
-    // Width: rightmost glyph extent. Height: use the font's line height for
-    // consistency — glyph-specific extents vary per string and cause anchors
-    // at the same row to sit at different baselines.
     let mut max_x = 0.0_f32;
     for sg in &shaped.glyphs {
         let glyph_key = GlyphKey {
@@ -241,17 +250,13 @@ fn shape_world_text(
             max_x = max_x.max(right);
         }
     }
-    // Count lines from distinct baselines in the shaped output.
     let mut baselines: Vec<f32> = shaped.glyphs.iter().map(|g| g.baseline).collect();
     baselines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
     let line_count = baselines.len().max(1);
     #[allow(clippy::cast_precision_loss)]
     let max_y = style.effective_line_height() * line_count as f32;
 
-    // Scale: layout units to world units.
     let scale = 0.01_f32;
-
-    // Anchor offset in layout units.
     let (anchor_x, anchor_y) = anchor_offset(style.anchor(), max_x, max_y);
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
@@ -273,12 +278,15 @@ fn shape_world_text(
         let quad_x = metrics.bearing_x.mul_add(style.size(), sg.x) - anchor_x;
         let quad_y = -(metrics.bearing_y.mul_add(-style.size(), sg.baseline - sg.y) - anchor_y);
 
-        quads.push(GlyphQuadData {
-            position: [quad_x * scale, quad_y * scale, 0.0],
-            size:     [quad_w * scale, quad_h * scale],
-            uv_rect:  metrics.uv_rect,
-            color:    color_arr,
-        });
+        quads.push((
+            metrics.page_index,
+            GlyphQuadData {
+                position: [quad_x * scale, quad_y * scale, 0.0],
+                size:     [quad_w * scale, quad_h * scale],
+                uv_rect:  metrics.uv_rect,
+                color:    color_arr,
+            },
+        ));
     }
 
     quads

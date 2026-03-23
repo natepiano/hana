@@ -23,7 +23,6 @@ use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
-use crate::text::DEFAULT_CANONICAL_SIZE;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
@@ -159,17 +158,21 @@ struct DiegeticShadowProxy;
 pub(super) struct GlyphsReady(pub(super) bool);
 
 /// Key for grouping text quads that share the same material configuration.
+/// Quads with different page indices produce separate meshes because each
+/// page has its own atlas texture.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct TextBatchKey {
     render_mode: GlyphRenderMode,
     shadow_mode: GlyphShadowMode,
+    page_index:  u32,
 }
 
-/// Cached default material handle shared across all panels without a
-/// [`HueOffset`] component. One GPU resource, one upload.
+/// Cached default material handles shared across panels without a
+/// [`HueOffset`] component. Keyed by atlas page index — each page
+/// has its own texture and needs its own material.
 #[derive(Resource, Default)]
-struct SharedMsdfMaterial {
-    handle: Option<Handle<MsdfTextMaterial>>,
+struct SharedMsdfMaterials {
+    handles: HashMap<u32, Handle<MsdfTextMaterial>>,
 }
 
 /// Plugin that adds MSDF text rendering for diegetic panels.
@@ -183,7 +186,7 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
-        app.init_resource::<SharedMsdfMaterial>();
+        app.init_resource::<SharedMsdfMaterials>();
         app.init_resource::<GlyphsReady>();
         app.add_systems(
             PostUpdate,
@@ -204,7 +207,7 @@ fn poll_atlas_glyphs(
     mut atlas: ResMut<MsdfAtlas>,
     mut images: ResMut<Assets<Image>>,
     mut ready: ResMut<GlyphsReady>,
-    mut shared_mat: ResMut<SharedMsdfMaterial>,
+    mut shared_mats: ResMut<SharedMsdfMaterials>,
 ) {
     // Clear last frame's flag before polling new results.
     ready.0 = false;
@@ -212,9 +215,9 @@ fn poll_atlas_glyphs(
     if atlas.poll_async_glyphs() {
         atlas.sync_to_gpu(&mut images);
         ready.0 = true;
-        // Invalidate the shared material so it gets recreated with the
-        // updated atlas texture on the next extract_text_meshes run.
-        shared_mat.handle = None;
+        // Invalidate all shared materials so they get recreated with
+        // updated atlas textures on the next extract_text_meshes run.
+        shared_mats.handles.clear();
     }
 }
 
@@ -248,7 +251,7 @@ fn extract_text_meshes(
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
-    mut shared_mat: ResMut<SharedMsdfMaterial>,
+    mut shared_mats: ResMut<SharedMsdfMaterials>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
     ready: Res<GlyphsReady>,
@@ -264,23 +267,10 @@ fn extract_text_meshes(
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
-    let Some(atlas_image) = atlas.image_handle().cloned() else {
+    // Ensure at least page 0 has a GPU image.
+    if atlas.image_handle(0).is_none() {
         return;
-    };
-    #[allow(clippy::cast_possible_truncation)]
-    let default_handle = shared_mat
-        .handle
-        .get_or_insert_with(|| {
-            materials.add(super::msdf_material::msdf_text_material(
-                atlas.sdf_range() as f32,
-                atlas.width(),
-                atlas.height(),
-                atlas_image.clone(),
-                0.0,
-                GlyphRenderMode::Text as u32,
-            ))
-        })
-        .clone();
+    }
 
     let panels_iter: Vec<_> = if rebuild_all {
         all_panels.iter().collect()
@@ -302,8 +292,9 @@ fn extract_text_meshes(
 
         let hue = hue_offset.map_or(0.0, |h| h.0);
 
-        // Group quads by (render_mode, shadow_mode) — each unique combo
-        // becomes its own mesh entity with the appropriate material.
+        // Group quads by (render_mode, shadow_mode, page_index) — each
+        // unique combo becomes its own mesh entity with the appropriate
+        // material bound to that atlas page's texture.
         let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
         for cmd in &result.commands {
             let (text, config) = match &cmd.kind {
@@ -311,12 +302,7 @@ fn extract_text_meshes(
                 _ => continue,
             };
 
-            let key = TextBatchKey {
-                render_mode: config.render_mode(),
-                shadow_mode: config.shadow_mode(),
-            };
-
-            let quads = shape_text_to_quads(
+            let tagged_quads = shape_text_to_quads(
                 text,
                 &config,
                 &cmd.bounds,
@@ -330,7 +316,14 @@ fn extract_text_meshes(
                 half_h,
             );
 
-            batches.entry(key).or_default().extend_from_slice(&quads);
+            for (page_index, quad) in tagged_quads {
+                let key = TextBatchKey {
+                    render_mode: config.render_mode(),
+                    shadow_mode: config.shadow_mode(),
+                    page_index,
+                };
+                batches.entry(key).or_default().push(quad);
+            }
         }
 
         let total_quads: usize = batches.values().map(Vec::len).sum();
@@ -354,6 +347,11 @@ fn extract_text_meshes(
             if quads.is_empty() {
                 continue;
             }
+
+            // Get the atlas image handle for this batch's page.
+            let Some(page_image) = atlas.image_handle(key.page_index).cloned() else {
+                continue;
+            };
 
             let mesh = build_glyph_mesh(quads);
             let mesh_handle = meshes.add(mesh);
@@ -380,13 +378,27 @@ fn extract_text_meshes(
                 #[allow(clippy::cast_possible_truncation)]
                 let material_handle =
                     if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
-                        default_handle.clone()
+                        // Shared material per page — reuse across panels.
+                        shared_mats
+                            .handles
+                            .entry(key.page_index)
+                            .or_insert_with(|| {
+                                materials.add(super::msdf_material::msdf_text_material(
+                                    atlas.sdf_range() as f32,
+                                    atlas.width(),
+                                    atlas.height(),
+                                    page_image.clone(),
+                                    0.0,
+                                    GlyphRenderMode::Text as u32,
+                                ))
+                            })
+                            .clone()
                     } else {
                         materials.add(super::msdf_material::msdf_text_material(
                             atlas.sdf_range() as f32,
                             atlas.width(),
                             atlas.height(),
-                            atlas_image.clone(),
+                            page_image.clone(),
                             hue,
                             render_mode_u32,
                         ))
@@ -424,7 +436,7 @@ fn extract_text_meshes(
                         atlas.sdf_range() as f32,
                         atlas.width(),
                         atlas.height(),
-                        atlas_image.clone(),
+                        page_image,
                         hue,
                         shadow_render_mode,
                     ));
@@ -543,7 +555,7 @@ fn shape_text_to_quads(
     scale_y: f32,
     half_w: f32,
     half_h: f32,
-) -> Vec<GlyphQuadData> {
+) -> Vec<(u32, GlyphQuadData)> {
     let shaped = shape_text_cached(text, config, font_registry, shaping_cx, cache);
 
     let font_data = crate::text::EMBEDDED_FONT;
@@ -551,7 +563,7 @@ fn shape_text_to_quads(
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 
     #[allow(clippy::cast_precision_loss)]
-    let em_scale = config.size() / DEFAULT_CANONICAL_SIZE as f32;
+    let em_scale = config.size() / atlas.canonical_size() as f32;
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
     for sg in &shaped.glyphs {
@@ -582,12 +594,15 @@ fn shape_text_to_quads(
         let local_x = quad_layout_x.mul_add(scale_x, -half_w);
         let local_y = (-quad_layout_y).mul_add(scale_y, half_h);
 
-        quads.push(GlyphQuadData {
-            position: [local_x, local_y, TEXT_Z_OFFSET],
-            size:     [quad_w * scale_x, quad_h * scale_y],
-            uv_rect:  metrics.uv_rect,
-            color:    color_arr,
-        });
+        quads.push((
+            metrics.page_index,
+            GlyphQuadData {
+                position: [local_x, local_y, TEXT_Z_OFFSET],
+                size:     [quad_w * scale_x, quad_h * scale_y],
+                uv_rect:  metrics.uv_rect,
+                color:    color_arr,
+            },
+        ));
     }
 
     quads
@@ -602,7 +617,7 @@ fn shape_text_to_quads(
 fn sync_panel_hue_offset(
     panels: Query<(Entity, &HueOffset), Changed<HueOffset>>,
     mut children: Query<(&ChildOf, &mut MeshMaterial3d<MsdfTextMaterial>)>,
-    shared_mat: Res<SharedMsdfMaterial>,
+    shared_mats: Res<SharedMsdfMaterials>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
 ) {
     for (panel_entity, hue_offset) in &panels {
@@ -611,10 +626,7 @@ fn sync_panel_hue_offset(
                 continue;
             }
 
-            let is_shared = shared_mat
-                .handle
-                .as_ref()
-                .is_some_and(|h| *h == mat_handle.0);
+            let is_shared = shared_mats.handles.values().any(|h| *h == mat_handle.0);
 
             if is_shared {
                 // Panel is on the shared material — clone it into a

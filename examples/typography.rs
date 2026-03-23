@@ -6,6 +6,7 @@ use std::time::Duration;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -25,7 +26,7 @@ fn main() {
             DefaultPlugins,
             PanOrbitCameraPlugin,
             PanOrbitCameraExtPlugin,
-            BrpExtrasPlugin::default(),
+            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))

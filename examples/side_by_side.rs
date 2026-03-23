@@ -33,6 +33,7 @@ use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
@@ -210,7 +211,7 @@ impl Default for DynamicRows {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault))
         .add_plugins(DiegeticUiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(WindowManagerPlugin)

@@ -9,6 +9,7 @@ use std::time::Duration;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::TextAnchor;
 use bevy_diegetic::TextStyle;
@@ -55,7 +56,7 @@ fn main() {
             DiegeticUiPlugin,
             PanOrbitCameraPlugin,
             PanOrbitCameraExtPlugin,
-            BrpExtrasPlugin::default(),
+            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))

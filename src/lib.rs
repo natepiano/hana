@@ -69,16 +69,20 @@ pub use layout::TextProps;
 pub use layout::TextStyle;
 pub use layout::TextWrap;
 // Bevy plugin.
+pub use plugin::AtlasConfig;
 pub use plugin::ComputedDiegeticPanel;
 pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelGizmoGroup;
 pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
+pub use plugin::DiegeticUiPluginConfigured;
 pub use plugin::HueOffset;
 pub use plugin::LayoutPlugin;
+pub use plugin::RasterQuality;
 pub use plugin::ShowTextGizmos;
 // Render.
 pub use render::WorldText;
 // Text.
 pub use text::FontId;
+pub use text::MsdfAtlas;
