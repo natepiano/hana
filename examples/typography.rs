@@ -124,6 +124,7 @@ fn on_text_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
     );
 }
 
+
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
     let camera = click.hit.camera;
     commands.trigger(

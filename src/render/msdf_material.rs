@@ -21,7 +21,7 @@ use bevy::shader::ShaderRef;
 ///
 /// Use `MsdfTextMaterial::new(...)` to create instances. The `base` field
 /// exposes all `StandardMaterial` properties (metallic, roughness, emissive,
-/// double_sided, etc.) for full PBR control.
+/// `double_sided`, etc.) for full PBR control.
 pub type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
 
 /// Uniform data for the MSDF extension shader.

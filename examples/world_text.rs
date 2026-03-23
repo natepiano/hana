@@ -1,4 +1,4 @@
-//! @generated bevy_example_template
+//! @generated `bevy_example_template`
 //! `WorldText` example — standalone MSDF text in world space.
 //!
 //! Demonstrates `WorldText` on a ground plane and on the front face of a cube.
@@ -65,6 +65,7 @@ fn main() {
         .run();
 }
 
+#[allow(clippy::too_many_lines)]
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,

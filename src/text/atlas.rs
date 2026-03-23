@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::sync::mpsc;
 
 use bevy::image::Image;
@@ -141,10 +142,11 @@ impl MsdfAtlas {
     /// Looks up cached metrics for a glyph. Test-only.
     #[cfg(test)]
     #[must_use]
-    pub fn get(&self, key: &GlyphKey) -> Option<&GlyphMetrics> { self.glyphs.get(key) }
+    pub fn get(&self, key: GlyphKey) -> Option<&GlyphMetrics> { self.glyphs.get(&key) }
 
     /// Returns the SDF range used for glyph generation.
     #[must_use]
+    #[allow(clippy::unused_self)]
     pub const fn sdf_range(&self) -> f64 { DEFAULT_SDF_RANGE }
 
     /// Returns the GPU image handle.
@@ -235,7 +237,7 @@ impl MsdfAtlas {
     /// trigger text mesh rebuilds).
     pub fn poll_async_glyphs(&mut self) -> bool {
         let completed: Vec<_> = {
-            let rx = self.rx.lock().unwrap_or_else(|e| e.into_inner());
+            let rx = self.rx.lock().unwrap_or_else(PoisonError::into_inner);
             rx.try_iter().collect()
         };
         let mut any_inserted = false;

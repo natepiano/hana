@@ -134,7 +134,7 @@ impl El {
     }
 
     /// Converts this declaration into an [`Element`] with the given content.
-    fn into_element(self, content: ElementContent) -> Element {
+    const fn into_element(self, content: ElementContent) -> Element {
         Element {
             width: self.width,
             height: self.height,

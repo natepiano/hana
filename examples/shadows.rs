@@ -1,4 +1,4 @@
-//! @generated bevy_example_template
+//! @generated `bevy_example_template`
 //! Glyph render mode × shadow mode matrix.
 //!
 //! Displays a large "A" for every combination of [`GlyphRenderMode`] and
@@ -64,7 +64,7 @@ fn main() {
         .run();
 }
 
-fn render_mode_label(mode: GlyphRenderMode) -> &'static str {
+const fn render_mode_label(mode: GlyphRenderMode) -> &'static str {
     match mode {
         GlyphRenderMode::Invisible => "Invisible",
         GlyphRenderMode::Text => "Text",
@@ -73,7 +73,7 @@ fn render_mode_label(mode: GlyphRenderMode) -> &'static str {
     }
 }
 
-fn shadow_mode_label(mode: GlyphShadowMode) -> &'static str {
+const fn shadow_mode_label(mode: GlyphShadowMode) -> &'static str {
     match mode {
         GlyphShadowMode::None => "None",
         GlyphShadowMode::SolidQuad => "SolidQuad",
@@ -153,7 +153,7 @@ fn setup(
     // Row headers (render mode labels on the left).
     #[allow(clippy::cast_precision_loss)]
     for (row, &render_mode) in render_modes.iter().enumerate() {
-        let y = grid_center_y + (rows - 1 - row) as f32 * ROW_SPACING - grid_height * 0.5;
+        let y = ((rows - 1 - row) as f32).mul_add(ROW_SPACING, grid_center_y) - grid_height * 0.5;
         spawn_label(
             &mut commands,
             ground,
@@ -162,15 +162,15 @@ fn setup(
             label_color,
             label_shadow_color,
             label_shadow_offset,
-            Vec3::new(-grid_width * 0.5 - 1.5, y, 0.0),
+            Vec3::new((-grid_width).mul_add(0.5, -1.5), y, 0.0),
         );
     }
 
     // Column headers (shadow mode labels on top).
     #[allow(clippy::cast_precision_loss)]
     for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-        let x = col as f32 * COL_SPACING - grid_width * 0.5;
-        let y = grid_center_y + grid_height * 0.5 + 0.8;
+        let x = (col as f32).mul_add(COL_SPACING, -(grid_width * 0.5));
+        let y = grid_center_y + grid_height.mul_add(0.5, 0.8);
         spawn_label(
             &mut commands,
             ground,
@@ -187,8 +187,9 @@ fn setup(
     #[allow(clippy::cast_precision_loss)]
     for (row, &render_mode) in render_modes.iter().enumerate() {
         for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-            let x = col as f32 * COL_SPACING - grid_width * 0.5;
-            let y = grid_center_y + (rows - 1 - row) as f32 * ROW_SPACING - grid_height * 0.5;
+            let x = (col as f32).mul_add(COL_SPACING, -(grid_width * 0.5));
+            let y =
+                ((rows - 1 - row) as f32).mul_add(ROW_SPACING, grid_center_y) - grid_height * 0.5;
 
             let glyph = commands
                 .spawn((

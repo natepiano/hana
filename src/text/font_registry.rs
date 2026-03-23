@@ -23,7 +23,7 @@ const DEFAULT_FAMILY: &str = "JetBrains Mono";
 /// font a text element uses.
 ///
 /// Currently the only available font is [`MONOSPACE`](Self::MONOSPACE)
-/// (JetBrains Mono), which is embedded in the library and used by default.
+/// (`JetBrains Mono`), which is embedded in the library and used by default.
 /// Custom font loading will be added in a future release.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FontId(pub u16);

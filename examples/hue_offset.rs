@@ -1,4 +1,4 @@
-//! @generated bevy_example_template
+//! @generated `bevy_example_template`
 //! `HueOffset` material sharing validation.
 //!
 //! Two panels side by side with identical content. The left panel has a
@@ -90,7 +90,7 @@ fn setup(
 
     // Dark backdrop — bottom edge sits on the ground plane.
     let panel_height = PANEL_ASPECT;
-    let panel_center_y = panel_height * 0.5 + 0.2;
+    let panel_center_y = panel_height.mul_add(0.5, 0.2);
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(3.0, panel_height + 0.4))),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -106,12 +106,11 @@ fn setup(
     commands.spawn((
         RotatingPanel,
         DiegeticPanel {
-            tree: tree.clone(),
-            layout_width: LAYOUT_SIZE,
+            tree:          tree.clone(),
+            layout_width:  LAYOUT_SIZE,
             layout_height: LAYOUT_SIZE * PANEL_ASPECT,
-            world_width: 1.0,
-            world_height: panel_height,
-            ..default()
+            world_width:   1.0,
+            world_height:  panel_height,
         },
         Transform::from_xyz(-0.6, panel_center_y, 0.0),
     ));
@@ -124,7 +123,6 @@ fn setup(
             layout_height: LAYOUT_SIZE * PANEL_ASPECT,
             world_width: 1.0,
             world_height: panel_height,
-            ..default()
         },
         Transform::from_xyz(0.6, panel_center_y, 0.0),
     ));
@@ -197,7 +195,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                         .height(Sizing::FIT)
                         .direction(Direction::LeftToRight),
                     |b| {
-                        b.text(&format!("row {i}:"), config.clone());
+                        b.text(format!("row {i}:"), config.clone());
                         b.with(
                             El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                             |_| {},

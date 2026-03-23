@@ -13,7 +13,7 @@ pub use components::DiegeticTextMeasurer;
 pub use components::HueOffset;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
-pub(super) use systems::compute_panel_layouts;
+pub use systems::compute_panel_layouts;
 use systems::render_panel_gizmos;
 
 use crate::layout::ForLayout;

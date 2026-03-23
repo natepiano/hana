@@ -28,6 +28,7 @@ use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
@@ -62,7 +63,7 @@ const PANEL_PADDING: f32 = 6.0;
 
 /// How many columns per panel.
 const MAX_COLUMNS: usize = 8;
-/// Max layout width — exactly fits MAX_COLUMNS with gaps and padding.
+/// Max layout width — exactly fits `MAX_COLUMNS` with gaps and padding.
 #[allow(clippy::cast_precision_loss)]
 const MAX_LAYOUT_WIDTH: f32 =
     COLUMN_WIDTH * MAX_COLUMNS as f32 + COLUMN_GAP * (MAX_COLUMNS - 1) as f32 + PANEL_PADDING * 2.0;
@@ -130,6 +131,7 @@ struct FpsOverlay;
 struct StatsOverlay;
 
 #[derive(Resource, Default)]
+#[allow(clippy::struct_field_names)]
 struct StressPerfStats {
     last_panel_update_ms: f32,
     last_tree_build_ms:   f32,
@@ -351,6 +353,7 @@ fn advance_color_rotation(
 
 // ── FPS overlay ──────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn update_fps_overlay(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
@@ -414,7 +417,7 @@ fn update_fps_overlay(
     let mut max_layout_panels = 0_usize;
     let mut max_text_ms = 0.0_f32;
     let mut max_text_panels = 0_usize;
-    for sample in history.iter() {
+    for sample in &history {
         max_fps = max_fps.max(sample.fps);
         max_frame_ms = max_frame_ms.max(sample.frame_ms);
         max_rows = max_rows.max(sample.rows);
@@ -476,7 +479,7 @@ fn rows_per_column(is_header_column: bool) -> usize {
     count.max(1)
 }
 
-/// Rows that fit in one full panel (all MAX_COLUMNS columns).
+/// Rows that fit in one full panel (all `MAX_COLUMNS` columns).
 fn rows_per_panel() -> usize {
     let first = rows_per_column(true);
     let other = rows_per_column(false);
@@ -506,7 +509,7 @@ fn update_panels(
     let needed = if state.row_count == 0 {
         1
     } else {
-        (state.row_count + rpp - 1) / rpp
+        state.row_count.div_ceil(rpp)
     };
 
     // Despawn excess.
@@ -533,7 +536,6 @@ fn update_panels(
                 layout_height: LAYOUT_HEIGHT,
                 world_width: ww,
                 world_height: wh,
-                ..default()
             },
             panel_transform(idx, needed, ww, wh),
         ));
@@ -545,23 +547,23 @@ fn update_panels(
     let panel_count_changed = needed != existing.iter().count();
 
     for (entity, sp) in &existing {
-        if sp.0 < needed {
-            if let Ok((mut panel, mut transform)) = panels.get_mut(entity) {
-                if sp.0 == active_panel_idx {
-                    // Active panel — content changed, rebuild tree.
-                    let tree_start = Instant::now();
-                    panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
-                    tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
-                    tree_builds += 1;
-                } else if panel_count_changed {
-                    // Panel count changed — rebuild frozen panels once to
-                    // redistribute hue spacing against the new row_count.
-                    // Between boundary crossings, hue_offset on the shader
-                    // handles color rotation with zero CPU cost.
-                    panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
-                }
-                *transform = panel_transform(sp.0, needed, ww, wh);
+        if sp.0 < needed
+            && let Ok((mut panel, mut transform)) = panels.get_mut(entity)
+        {
+            if sp.0 == active_panel_idx {
+                // Active panel — content changed, rebuild tree.
+                let tree_start = Instant::now();
+                panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
+                tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
+                tree_builds += 1;
+            } else if panel_count_changed {
+                // Panel count changed — rebuild frozen panels once to
+                // redistribute hue spacing against the new row_count.
+                // Between boundary crossings, hue_offset on the shader
+                // handles color rotation with zero CPU cost.
+                panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
             }
+            *transform = panel_transform(sp.0, needed, ww, wh);
         }
     }
 
@@ -593,7 +595,7 @@ fn resize_ground_plane(
         mesh3d.0 = meshes.add(Plane3d::default().mesh().size(width, depth));
         // Center the plane under the panels. Front edge at z = GROUND_SIZE/2,
         // back edge at z = GROUND_SIZE/2 - depth.
-        let center_z = GROUND_SIZE * 0.5 - depth * 0.5;
+        let center_z = GROUND_SIZE.mul_add(0.5, -(depth * 0.5));
         transform.translation.z = center_z;
     }
 }
@@ -609,12 +611,12 @@ fn panel_transform(
 ) -> Transform {
     let depth_from_front = (total - 1 - panel_idx) as f32;
     // Front panel at z=0 (forward edge of ground plane), older panels push back.
-    let z = GROUND_SIZE * 0.5 - depth_from_front * STACK_DEPTH;
+    let z = GROUND_SIZE.mul_add(0.5, -(depth_from_front * STACK_DEPTH));
     // Panel left edge aligns with plane left edge.
     let ww = MAX_LAYOUT_WIDTH * SCALE;
-    let x = -GROUND_SIZE * 0.5 + ww * 0.5;
+    let x = (-GROUND_SIZE).mul_add(0.5, ww * 0.5);
     // Panel bottom sits above the ground.
-    let y = world_height * 0.5 + 0.3;
+    let y = world_height.mul_add(0.5, 0.3);
     Transform::from_xyz(x, y, z)
 }
 
@@ -633,7 +635,7 @@ fn build_panel_tree(
         1
     } else {
         let remaining = panel_rows - first_col_rows;
-        1 + (remaining + other_col_rows - 1) / other_col_rows
+        1 + remaining.div_ceil(other_col_rows)
     };
 
     let mut builder = LayoutBuilder::new(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT);
@@ -668,7 +670,10 @@ fn build_panel_tree(
                         .border(Border::all(1.0, BORDER_COLOR)),
                     |b| {
                         if is_first {
-                            b.text("'+' add  '-' remove", TextConfig::new(FONT_SIZE));
+                            b.text(
+                                "'+' add  '-' remove",
+                                TextConfig::new(FONT_SIZE).with_shadow_mode(GlyphShadowMode::None),
+                            );
                             b.with(
                                 El::new()
                                     .width(Sizing::GROW)
@@ -688,7 +693,9 @@ fn build_panel_tree(
                             let color = Color::hsl(hue, 1.0, 0.7);
                             let label = format!("item {i}:");
                             let value = words[i % words.len()];
-                            let config = TextConfig::new(FONT_SIZE).with_color(color);
+                            let config = TextConfig::new(FONT_SIZE)
+                                .with_color(color)
+                                .with_shadow_mode(GlyphShadowMode::None);
                             b.with(
                                 El::new()
                                     .width(Sizing::GROW)

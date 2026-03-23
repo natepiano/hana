@@ -1,4 +1,4 @@
-#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_precision_loss, clippy::expect_used)]
 
 //! Benchmark for `DiegeticPanel` layout performance at various sizes.
 //!
@@ -8,8 +8,8 @@
 //! Three scenarios per row count:
 //! - **cold**: First layout — full engine computation.
 //! - **warm**: Same tree reassigned — full engine computation (change detected).
-//! - **color_only**: Tree rebuilt with different colors, same structure — layout hash matches, only
-//!   render command colors are patched.
+//! - **`color_only`**: Tree rebuilt with different colors, same structure — layout hash matches,
+//!   only render command colors are patched.
 //!
 //! Run with `cargo bench --bench panel_perf`.
 
