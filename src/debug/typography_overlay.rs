@@ -249,6 +249,14 @@ fn build_metric_gizmos(
     let top_y = line_metrics.top;
     let bottom_y = line_metrics.bottom;
 
+    bevy::log::info!(
+        "METRICS baseline_layout={:.2} ascent_layout={:.2} descent_layout={:.2} baseline_world={:.4} x_height_world={:.4} anchor_y={:.2}",
+        baseline_y, ascent_y, descent_y,
+        layout_to_world_y(baseline_y, anchor_y),
+        layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y),
+        anchor_y,
+    );
+
     // The dimension arrows sit to the left of the text. Labels sit
     // further left. All metric lines extend past the arrows.
     let arrow_x = -extend * 1.5;

@@ -552,16 +552,16 @@ impl MsdfAtlas {
             g,
         );
 
-        // Compute UV coordinates inset by half a texel so the sampler
-        // hits texel centers, not the border between texels.
+        // UV coordinates map the full bitmap extent. The atlas gutter
+        // (replicated border texels) handles edge sampling — no half-texel
+        // inset needed. Insetting would stretch the MSDF across the quad
+        // and push the visible contour beyond the font metrics.
         let atlas_w = self.width as f32;
         let atlas_h = self.height as f32;
-        let half_texel_u = 0.5 / atlas_w;
-        let half_texel_v = 0.5 / atlas_h;
-        let u_min = x0 as f32 / atlas_w + half_texel_u;
-        let v_min = y0 as f32 / atlas_h + half_texel_v;
-        let u_max = (x0 + bitmap.width) as f32 / atlas_w - half_texel_u;
-        let v_max = (y0 + bitmap.height) as f32 / atlas_h - half_texel_v;
+        let u_min = x0 as f32 / atlas_w;
+        let v_min = y0 as f32 / atlas_h;
+        let u_max = (x0 + bitmap.width) as f32 / atlas_w;
+        let v_max = (y0 + bitmap.height) as f32 / atlas_h;
 
         #[allow(clippy::cast_possible_truncation)]
         let metrics = GlyphMetrics {

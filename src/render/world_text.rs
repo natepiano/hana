@@ -315,6 +315,67 @@ fn shape_world_text(
         let quad_x = metrics.bearing_x.mul_add(style.size(), sg.x) - anchor_x;
         let quad_y = -(metrics.bearing_y.mul_add(-style.size(), sg.baseline - sg.y) - anchor_y);
 
+        // Debug: verify glyph outline position matches font metrics.
+        // Uses the actual font bbox and metrics — no hardcoded values.
+        {
+            let face = ttf_parser::Face::parse(font_data, 0).ok();
+            if let Some(face) = &face {
+                let gid = ttf_parser::GlyphId(sg.glyph_id);
+                if let Some(bbox) = face.glyph_bounding_box(gid) {
+                    #[allow(clippy::cast_precision_loss)]
+                    let upm = face.units_per_em() as f32;
+
+                    // Font metrics from OS/2 table.
+                    let x_height_fu = face.x_height().unwrap_or(0);
+                    let x_height_layout = f32::from(x_height_fu) * style.size() / upm;
+
+                    // Where the glyph outline SHOULD be (from font bbox):
+                    let bbox_top_layout = f32::from(bbox.y_max) * style.size() / upm;
+                    let bbox_bot_layout = f32::from(bbox.y_min) * style.size() / upm;
+
+                    // Where the outline IS (from bearing + padding):
+                    // The quad top is at quad_y. The outline top is pad below that.
+                    // actual_pad_y = (img_h - glyph_h_px) / 2 in bitmap pixels
+                    // In layout units: actual_pad_y * em_scale
+                    #[allow(clippy::cast_precision_loss)]
+                    let glyph_h_px = f64::from(bbox.y_max - bbox.y_min)
+                        * f64::from(atlas.canonical_size())
+                        / f64::from(upm);
+                    #[allow(clippy::cast_precision_loss)]
+                    let actual_pad_y = (f64::from(metrics.pixel_height) - glyph_h_px) / 2.0;
+                    let pad_layout = actual_pad_y as f32 * em_scale;
+
+                    let outline_top_layout = quad_y - pad_layout;
+                    let outline_bot_layout = quad_y - quad_h + pad_layout;
+
+                    // Expected positions from metrics:
+                    let expected_top = sg.baseline - bbox_top_layout - anchor_y;
+                    let expected_bot = sg.baseline - bbox_bot_layout - anchor_y;
+                    let expected_top_world = -expected_top * scale;
+                    let expected_bot_world = -expected_bot * scale;
+
+                    // Metric lines (same computation as overlay):
+                    let baseline_world = -(sg.baseline - anchor_y) * scale;
+                    let x_height_world = -(sg.baseline - x_height_layout - anchor_y) * scale;
+
+                    let top_diff = (outline_top_layout * scale) - expected_top_world;
+                    let bot_diff = (outline_bot_layout * scale) - expected_bot_world;
+
+                    bevy::log::info!(
+                        "VERIFY gid={} bbox=({},{},{},{}) upm={} outline_top_world={:.6} expected_top={:.6} diff={:.6} | outline_bot_world={:.6} expected_bot={:.6} diff={:.6} | baseline={:.6} x_height={:.6} | bbox_top_matches_xheight={} bbox_bot_matches_baseline={}",
+                        sg.glyph_id,
+                        bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max,
+                        upm,
+                        outline_top_layout * scale, expected_top_world, top_diff,
+                        outline_bot_layout * scale, expected_bot_world, bot_diff,
+                        baseline_world, x_height_world,
+                        (bbox_top_layout - x_height_layout).abs() < 0.01,
+                        bbox_bot_layout.abs() < 0.01,
+                    );
+                }
+            }
+        }
+
         quads.push((
             metrics.page_index,
             GlyphQuadData {

@@ -26,7 +26,7 @@ pub const DEFAULT_SDF_RANGE: f64 = 4.0;
 ///
 /// MSDF is resolution-independent, so all glyphs are generated at this
 /// single size. The shader handles scaling.
-pub const DEFAULT_CANONICAL_SIZE: u32 = 64;
+pub const DEFAULT_CANONICAL_SIZE: u32 = 128;
 
 /// Default padding around each glyph in pixels.
 pub const DEFAULT_GLYPH_PADDING: u32 = 2;
@@ -86,16 +86,22 @@ pub fn rasterize_glyph(
         return None;
     }
 
+    // The ceil() may add fractional pixels. Compute the actual padding
+    // used on each side so the glyph outline is centered in the bitmap.
+    // This ensures the bearing accounts for the ceiled bitmap size.
+    let actual_pad_x = (f64::from(img_w) - glyph_w) / 2.0;
+    let actual_pad_y = (f64::from(img_h) - glyph_h) / 2.0;
+
     // Color edges for multi-channel generation.
     let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
     let colored = Shape::edge_coloring_simple(shape, sin_alpha, EDGE_COLORING_SEED);
 
     // Build transform: font units → pixel coordinates.
     // Origin in font space is at (bbox.x_min, bbox.y_min).
-    // In image space, we offset by total_pad.
+    // In image space, we offset by actual_pad (centered).
     // Y axis is flipped (font: Y-up, image: Y-down).
-    let tx = total_pad - f64::from(bbox.x_min) * scale;
-    let ty = total_pad + f64::from(bbox.y_max) * scale;
+    let tx = actual_pad_x - f64::from(bbox.x_min) * scale;
+    let ty = actual_pad_y + f64::from(bbox.y_max) * scale;
 
     let transform = Affine2::from_matrix_unchecked(Matrix3::new(
         scale, 0.0, tx, 0.0, -scale, ty, 0.0, 0.0, 1.0,
@@ -111,10 +117,37 @@ pub fn rasterize_glyph(
     correct_sign_msdf(&mut image, &prepared, FillRule::Nonzero);
 
     // Bearing offsets in em units (fraction of units_per_em).
-    // Include SDF padding so the quad is positioned correctly — the bitmap
-    // extends `total_pad` pixels beyond the glyph bounding box on each side.
-    let bearing_x = f64::from(bbox.x_min) / units_per_em - total_pad / f64::from(px_size);
-    let bearing_y = f64::from(bbox.y_max) / units_per_em + total_pad / f64::from(px_size);
+    // Use `actual_pad` (which accounts for ceil() rounding) so the
+    // glyph outline is centered in the bitmap and positioned correctly.
+    let bearing_x = f64::from(bbox.x_min) / units_per_em - actual_pad_x / f64::from(px_size);
+    let bearing_y = f64::from(bbox.y_max) / units_per_em + actual_pad_y / f64::from(px_size);
+
+    // Debug: dump median values at the outline boundary rows.
+    // The outline top should be at pixel row actual_pad_y (from top).
+    // The outline bottom should be at pixel row (img_h - actual_pad_y).
+    // At those rows, median should transition from <0.5 (outside) to >0.5 (inside).
+    {
+        let raw = image.as_raw();
+        let outline_top_row = actual_pad_y.round() as u32;
+        let outline_bot_row = img_h - actual_pad_y.round() as u32 - 1;
+        // Sample vertical strips at multiple columns
+        for sample_col in [6_u32, img_w / 4, img_w / 2, img_w * 3 / 4, img_w - 7] {
+            let mut col_medians = Vec::with_capacity(img_h as usize);
+            for row in 0..img_h {
+                let idx = ((row * img_w + sample_col) * 3) as usize;
+                let r = raw[idx];
+                let g = raw[idx + 1];
+                let b = raw[idx + 2];
+                let med = r.max(g).min(b).max(r.min(g));
+                col_medians.push(med);
+            }
+
+            bevy::log::info!(
+                "MSDF_DUMP gid={glyph_index} img={}x{} pad_y={actual_pad_y:.1} top_row={outline_top_row} bot_row={outline_bot_row} col={sample_col} medians={col_medians:?}",
+                img_w, img_h,
+            );
+        }
+    }
 
     Some(MsdfBitmap {
         data: image.into_raw(),
