@@ -43,6 +43,7 @@ fn main() {
             DiegeticUiPlugin,
         ))
         .add_systems(Startup, setup)
+        .add_observer(on_world_text_added)
         .run();
 }
 
@@ -68,16 +69,14 @@ fn setup(
     commands.insert_resource(SceneBounds(ground));
 
     // Display word with typography overlay.
-    commands
-        .spawn((
-            WorldText::new("TypogrÂphy"),
-            TextStyle::new()
-                .with_size(DISPLAY_SIZE)
-                .with_color(Color::srgb(0.9, 0.9, 0.9)),
-            TypographyOverlay::default(),
-            Transform::from_xyz(0.0, 0.5, 2.0),
-        ))
-        .observe(on_text_clicked);
+    commands.spawn((
+        WorldText::new("TypogrÂphy - x"),
+        TextStyle::new()
+            .with_size(DISPLAY_SIZE)
+            .with_color(Color::srgb(0.9, 0.9, 0.9)),
+        TypographyOverlay::default(),
+        Transform::from_xyz(0.0, 0.5, 2.0),
+    ));
 
     // Hint text
     commands.spawn((
@@ -115,19 +114,24 @@ fn setup(
     },));
 }
 
-fn on_text_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
+fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
     let camera = click.hit.camera;
     commands.trigger(
-        ZoomToFit::new(camera, click.entity)
+        ZoomToFit::new(camera, scene.0)
             .margin(ZOOM_MARGIN_SCENE)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
 }
 
-fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
+fn on_world_text_added(added: On<Add, WorldText>, mut commands: Commands) {
+    commands.entity(added.entity).observe(on_text_clicked);
+}
+
+fn on_text_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
+    click.propagate(false);
     let camera = click.hit.camera;
     commands.trigger(
-        ZoomToFit::new(camera, scene.0)
+        ZoomToFit::new(camera, click.entity)
             .margin(ZOOM_MARGIN_SCENE)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );

@@ -386,24 +386,15 @@ pub(super) fn update_ink_bounds(
     }
 
     for (entity, world_text, style, text_gtransform, computed, overlay) in &texts {
-        if !overlay.show_shader_bbox {
-            // Despawn any existing overlay meshes.
-            for (overlay_entity, child_of) in &old_overlays {
-                if child_of.parent() == entity {
-                    commands.entity(overlay_entity).despawn();
-                }
-            }
-            continue;
-        }
-        if world_text.0.is_empty() {
-            continue;
-        }
-
         // Despawn previous overlay meshes for this entity.
         for (overlay_entity, child_of) in &old_overlays {
             if child_of.parent() == entity {
                 commands.entity(overlay_entity).despawn();
             }
+        }
+
+        if !overlay.show_shader_bbox || world_text.0.is_empty() {
+            continue;
         }
 
         // Compute `screen_px_range` from camera state.
@@ -423,7 +414,7 @@ pub(super) fn update_ink_bounds(
         };
 
         let world_per_screen_px = frustum_height / viewport_height;
-        #[allow(clippy::cast_precision_loss)]
+        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
         let sdf_range = atlas.sdf_range() as f32;
         #[allow(clippy::cast_precision_loss)]
         let canonical = atlas.canonical_size() as f32;
@@ -495,9 +486,8 @@ pub(super) fn update_ink_bounds(
             mat.extension.uniforms.ink_uv_min = bevy::math::Vec2::new(ink_uv_min[0], ink_uv_min[1]);
             mat.extension.uniforms.ink_uv_max = bevy::math::Vec2::new(ink_uv_max[0], ink_uv_max[1]);
             let linear: LinearRgba = overlay.color.into();
-            mat.extension.uniforms.ink_box_color = bevy::math::Vec4::new(
-                linear.red, linear.green, linear.blue, linear.alpha,
-            );
+            mat.extension.uniforms.ink_box_color =
+                bevy::math::Vec4::new(linear.red, linear.green, linear.blue, linear.alpha);
 
             let material_handle = materials.add(mat);
 

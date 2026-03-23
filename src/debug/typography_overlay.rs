@@ -12,6 +12,7 @@
 use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 
+use crate::layout::GlyphShadowMode;
 use crate::layout::TextAnchor;
 use crate::layout::TextStyle;
 use crate::render::ComputedWorldText;
@@ -159,7 +160,7 @@ pub fn build_typography_overlay(
 
         // Build retained gizmo with all metric lines.
         if overlay.show_font_metrics {
-            let gizmo_asset = build_metric_line_gizmo(
+            let (lines_gizmo, arrows_gizmo) = build_metric_gizmos(
                 &font_metrics,
                 &line_metrics,
                 text_width,
@@ -168,12 +169,27 @@ pub fn build_typography_overlay(
                 anchor_y,
             );
 
+            // Thin horizontal metric lines.
             commands.entity(entity).with_child((
                 OverlayElement,
                 Gizmo {
-                    handle:      gizmo_assets.add(gizmo_asset),
+                    handle:      gizmo_assets.add(lines_gizmo),
                     line_config: GizmoLineConfig {
                         width: overlay.line_width,
+                        ..default()
+                    },
+                    depth_bias:  -0.1,
+                },
+                Transform::IDENTITY,
+            ));
+
+            // Thicker dimension arrows.
+            commands.entity(entity).with_child((
+                OverlayElement,
+                Gizmo {
+                    handle:      gizmo_assets.add(arrows_gizmo),
+                    line_config: GizmoLineConfig {
+                        width: overlay.line_width * 3.0,
                         ..default()
                     },
                     depth_bias:  -0.1,
@@ -186,11 +202,13 @@ pub fn build_typography_overlay(
                 spawn_metric_labels(
                     &mut commands,
                     entity,
+                    &font_metrics,
                     &line_metrics,
                     overlay,
                     anchor_x,
                     anchor_y,
                     font_size,
+                    &mut gizmo_assets,
                 );
             }
         }
@@ -207,20 +225,22 @@ fn layout_to_world_x(layout_x: f32, anchor_x: f32) -> f32 {
     (layout_x - anchor_x) * LAYOUT_TO_WORLD
 }
 
-/// Builds a retained `GizmoAsset` containing all font metric lines.
-fn build_metric_line_gizmo(
+/// Builds two retained `GizmoAsset`s: one for horizontal metric lines
+/// (thin) and one for dimension arrows (thicker).
+fn build_metric_gizmos(
     font_metrics: &crate::text::FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     text_width: f32,
     overlay: &TypographyOverlay,
     anchor_x: f32,
     anchor_y: f32,
-) -> GizmoAsset {
-    let mut gizmo = GizmoAsset::default();
+) -> (GizmoAsset, GizmoAsset) {
+    let mut lines_gizmo = GizmoAsset::default();
+    let mut arrows_gizmo = GizmoAsset::default();
     let extend = overlay.extend;
     let color = overlay.color;
+    let z = 0.001;
 
-    let x_start = -extend;
     let x_end = text_width + extend;
 
     let baseline_y = line_metrics.baseline;
@@ -228,6 +248,11 @@ fn build_metric_line_gizmo(
     let descent_y = baseline_y + line_metrics.descent;
     let top_y = line_metrics.top;
     let bottom_y = line_metrics.bottom;
+
+    // The dimension arrows sit to the left of the text. Labels sit
+    // further left. All metric lines extend past the arrows.
+    let arrow_x = -extend * 1.5;
+    let line_x_start = extend.mul_add(-3.0, arrow_x);
 
     let mut metric_lines: Vec<(&str, f32)> = Vec::with_capacity(7);
     if (top_y - ascent_y).abs() > 0.5 {
@@ -242,102 +267,186 @@ fn build_metric_line_gizmo(
         metric_lines.push(("bottom", bottom_y));
     }
 
+    // Horizontal metric lines — all extend from well left of the arrows
+    // to the right of the text.
     for &(_label, layout_y) in &metric_lines {
         let y = layout_to_world_y(layout_y, anchor_y);
-        let x0 = layout_to_world_x(x_start, anchor_x);
+        let x0 = layout_to_world_x(line_x_start, anchor_x);
         let x1 = layout_to_world_x(x_end, anchor_x);
-
-        gizmo.line(Vec3::new(x0, y, 0.001), Vec3::new(x1, y, 0.001), color);
+        lines_gizmo.line(Vec3::new(x0, y, z), Vec3::new(x1, y, z), color);
     }
 
     // Line height bracket on the right side.
     let bracket_x = layout_to_world_x(extend.mul_add(0.3, x_end), anchor_x);
     let top_world = layout_to_world_y(top_y, anchor_y);
     let bottom_world = layout_to_world_y(bottom_y, anchor_y);
-    gizmo.line(
-        Vec3::new(bracket_x, top_world, 0.001),
-        Vec3::new(bracket_x, bottom_world, 0.001),
+    lines_gizmo.line(
+        Vec3::new(bracket_x, top_world, z),
+        Vec3::new(bracket_x, bottom_world, z),
         color,
     );
 
-    // Ascent dimension bracket on the left side.
-    // Vertical line from baseline to ascent, with horizontal ticks
-    // pointing LEFT (away from the text), like the Apple reference.
-    let tick_len = 0.008;
-    let bracket_layout_x = extend.mul_add(-0.5, x_start);
-    let bx = layout_to_world_x(bracket_layout_x, anchor_x);
+    // Dimension arrows — thicker, drawn in a separate gizmo asset.
+    let arrow_size = 0.005; // Arrowhead size in world units.
+    let arrow_gap = 0.003; // Gap between arrowhead tip and the metric line.
+    let bx = layout_to_world_x(arrow_x, anchor_x);
     let ascent_world = layout_to_world_y(ascent_y, anchor_y);
     let baseline_world = layout_to_world_y(baseline_y, anchor_y);
+    let descent_world = layout_to_world_y(descent_y, anchor_y);
 
-    // Vertical span line.
-    gizmo.line(
-        Vec3::new(bx, ascent_world, 0.001),
-        Vec3::new(bx, baseline_world, 0.001),
-        color,
-    );
-    // Top tick at ascent (pointing left, away from text).
-    gizmo.line(
-        Vec3::new(bx - tick_len, ascent_world, 0.001),
-        Vec3::new(bx, ascent_world, 0.001),
-        color,
-    );
-    // Bottom tick at baseline (pointing left, away from text).
-    gizmo.line(
-        Vec3::new(bx - tick_len, baseline_world, 0.001),
-        Vec3::new(bx, baseline_world, 0.001),
-        color,
+    // Draws a vertical dimension arrow between two horizontal lines.
+    // The arrow tips stop `gap` world units short of the lines.
+    let draw_dimension = |gizmo: &mut GizmoAsset, x: f32, y_top: f32, y_bottom: f32, gap: f32| {
+        let tip_top = y_top - gap;
+        let tip_bottom = y_bottom + gap;
+        // Vertical line between arrow tips.
+        gizmo.line(Vec3::new(x, tip_top, z), Vec3::new(x, tip_bottom, z), color);
+        // Top arrowhead (pointing up toward the line).
+        gizmo.line(
+            Vec3::new(x, tip_top, z),
+            Vec3::new(x - arrow_size, tip_top - arrow_size, z),
+            color,
+        );
+        gizmo.line(
+            Vec3::new(x, tip_top, z),
+            Vec3::new(x + arrow_size, tip_top - arrow_size, z),
+            color,
+        );
+        // Bottom arrowhead (pointing down toward the line).
+        gizmo.line(
+            Vec3::new(x, tip_bottom, z),
+            Vec3::new(x - arrow_size, tip_bottom + arrow_size, z),
+            color,
+        );
+        gizmo.line(
+            Vec3::new(x, tip_bottom, z),
+            Vec3::new(x + arrow_size, tip_bottom + arrow_size, z),
+            color,
+        );
+    };
+
+    // Ascent dimension: ascent line ↕ baseline.
+    draw_dimension(
+        &mut arrows_gizmo,
+        bx,
+        ascent_world,
+        baseline_world,
+        arrow_gap,
     );
 
-    gizmo
+    // Descent dimension: baseline ↕ descent line.
+    draw_dimension(
+        &mut arrows_gizmo,
+        bx,
+        baseline_world,
+        descent_world,
+        arrow_gap,
+    );
+
+    (lines_gizmo, arrows_gizmo)
 }
 
-/// Spawns metric label `WorldText` entities as children of the overlay entity.
-/// Currently spawns only the "Baseline" label as a first step.
+/// Spawns metric label `WorldText` entities and callout lines as children
+/// of the overlay entity.
 #[allow(clippy::too_many_arguments)]
 fn spawn_metric_labels(
     commands: &mut Commands,
     parent: Entity,
+    font_metrics: &crate::text::FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     overlay: &TypographyOverlay,
     anchor_x: f32,
     anchor_y: f32,
     font_size: f32,
+    gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let extend = overlay.extend;
     let label_size = font_size * LABEL_SIZE_RATIO;
     let color = overlay.color;
-
-    // Label X position: to the left of the metric lines.
-    let label_x = layout_to_world_x(-extend, anchor_x);
+    let z = 0.001;
 
     let baseline_y_layout = line_metrics.baseline;
-    let ascent_y_layout = baseline_y_layout - line_metrics.ascent;
+    let x_height_y_layout = baseline_y_layout - font_metrics.x_height;
 
-    // Baseline label — positioned at the left end of the baseline line.
-    let baseline_world_y = layout_to_world_y(baseline_y_layout, anchor_y);
-    commands.entity(parent).with_child((
-        OverlayElement,
-        WorldText::new("Baseline"),
-        TextStyle::new()
-            .with_size(label_size)
-            .with_color(color)
-            .with_anchor(TextAnchor::BottomRight),
-        Transform::from_xyz(label_x - 0.01, baseline_world_y, 0.001),
-    ));
+    // Arrow X position matches the dimension arrows in `build_metric_gizmos`.
+    let arrow_layout_x = -extend * 1.5;
+    let arrow_world_x = layout_to_world_x(arrow_layout_x, anchor_x);
 
-    // Ascent label — positioned at the midpoint of the ascent bracket,
-    // to the left of the bracket's vertical line.
-    let bracket_layout_x = extend.mul_add(-1.5, 0.0);
-    let bracket_world_x = layout_to_world_x(bracket_layout_x, anchor_x);
-    let ascent_mid_layout = f32::midpoint(ascent_y_layout, baseline_y_layout);
-    let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y);
+    // Ascent label — below x-height, to the left of the arrow shaft,
+    // centered between x-height and baseline.
+    let ascent_label_mid = f32::midpoint(x_height_y_layout, baseline_y_layout);
+    let ascent_label_world = layout_to_world_y(ascent_label_mid, anchor_y);
     commands.entity(parent).with_child((
         OverlayElement,
         WorldText::new("Ascent"),
         TextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterRight),
-        Transform::from_xyz(bracket_world_x - 0.01, ascent_mid_world, 0.001),
+            .with_anchor(TextAnchor::CenterRight)
+            .with_shadow_mode(GlyphShadowMode::None),
+        Transform::from_xyz(arrow_world_x - 0.01, ascent_label_world, z),
     ));
+
+    // Descent label — to the left of the arrow shaft, centered vertically.
+    let descent_y_layout = baseline_y_layout + line_metrics.descent;
+    let descent_mid_layout = f32::midpoint(baseline_y_layout, descent_y_layout);
+    let descent_mid_world = layout_to_world_y(descent_mid_layout, anchor_y);
+    commands.entity(parent).with_child((
+        OverlayElement,
+        WorldText::new("Descent"),
+        TextStyle::new()
+            .with_size(label_size)
+            .with_color(color)
+            .with_anchor(TextAnchor::CenterRight)
+            .with_shadow_mode(GlyphShadowMode::None),
+        Transform::from_xyz(arrow_world_x - 0.01, descent_mid_world, z),
+    ));
+
+    // Baseline callout — white label with a red callout line ascending
+    // to the baseline. The line is a child of the label so it moves with it.
+    let baseline_world_y = layout_to_world_y(baseline_y_layout, anchor_y);
+    let callout_x = layout_to_world_x(0.0, anchor_x);
+    // Position the Baseline label at the midpoint between baseline and descent.
+    let callout_y = descent_mid_world;
+    let callout_color = Color::srgb(0.9, 0.2, 0.2);
+
+    // Red callout line in the label's local space. Starts just above
+    // the "B" cap height and goes up to just below the baseline.
+    let label_cap_world = font_metrics.cap_height * (label_size / font_size) * LAYOUT_TO_WORLD;
+    let gap = 0.003;
+    let line_local_x = 0.003;
+    let line_local_bottom = label_cap_world * 0.5 + gap * 2.0;
+    let line_local_top = (baseline_world_y - callout_y) - gap;
+    let mut callout_gizmo = GizmoAsset::default();
+    callout_gizmo.line(
+        Vec3::new(line_local_x, line_local_bottom, z),
+        Vec3::new(line_local_x, line_local_top, z),
+        callout_color,
+    );
+
+    let baseline_label = commands
+        .spawn((
+            OverlayElement,
+            WorldText::new("Baseline"),
+            TextStyle::new()
+                .with_size(label_size)
+                .with_color(color)
+                .with_anchor(TextAnchor::CenterLeft)
+                .with_shadow_mode(GlyphShadowMode::None),
+            Transform::from_xyz(callout_x, callout_y, z),
+        ))
+        .with_child((
+            OverlayElement,
+            Gizmo {
+                handle:      gizmo_assets.add(callout_gizmo),
+                line_config: GizmoLineConfig {
+                    width: overlay.line_width * 3.0,
+                    ..default()
+                },
+                depth_bias:  -0.1,
+            },
+            Transform::IDENTITY,
+        ))
+        .id();
+    commands.entity(parent).add_child(baseline_label);
 }
