@@ -17,6 +17,7 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
+use crate::text::GlyphMetrics;
 use crate::text::MsdfAtlas;
 
 /// Computed layout data for a [`WorldText`] entity, populated by the
@@ -333,8 +334,16 @@ fn shape_world_text(
         ));
 
         #[cfg(feature = "typography_overlay")]
-        if let Some(ink) = compute_ink_rect(font_data, sg, style, anchor_x, anchor_y, scale) {
-            ink_rects.push(ink);
+        {
+            #[allow(clippy::cast_precision_loss)]
+            let canonical = atlas.canonical_size() as f32;
+
+            if let Some(ink) = compute_ink_rect_from_scan(
+                atlas, glyph_key, &metrics, sg, style,
+                anchor_x, anchor_y, scale, canonical,
+            ) {
+                ink_rects.push(ink);
+            }
         }
     }
 
@@ -346,36 +355,63 @@ fn shape_world_text(
     (quads, anchor_x, anchor_y, max_x, ink_rects)
 }
 
-/// Computes a glyph's visible ink rect from its font bounding box.
+/// Computes a glyph's visible ink rect by scanning the MSDF bitmap.
+///
+/// Scans the glyph's region in the atlas for pixels where
+/// `median(r, g, b) >= 128` (the SDF's "inside the glyph" threshold).
+/// This gives the exact visible bounds — no approximation, no expansion.
+///
+/// The pixel bounds are converted to layout units using the glyph's
+/// bearing (which maps bitmap origin to glyph origin) and then
+/// positioned using the same coordinate system as the renderer.
 ///
 /// Returns `[x, y, width, height]` in world units where `(x, y)` is the
-/// top-left corner. Returns `None` if the font face can't be parsed or the
-/// glyph has no bounding box (e.g. space).
+/// top-left corner. Returns `None` if the glyph has no visible pixels.
 #[cfg(feature = "typography_overlay")]
-fn compute_ink_rect(
-    font_data: &[u8],
+#[allow(clippy::cast_precision_loss)]
+fn compute_ink_rect_from_scan(
+    atlas: &MsdfAtlas,
+    glyph_key: GlyphKey,
+    metrics: &crate::text::GlyphMetrics,
     sg: &super::text_renderer::ShapedGlyph,
     style: &TextStyle,
     anchor_x: f32,
     anchor_y: f32,
     scale: f32,
+    canonical_size: f32,
 ) -> Option<[f32; 4]> {
-    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
-    let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(sg.glyph_id))?;
+    let (px_min_x, px_min_y, px_max_x, px_max_y) =
+        atlas.scan_visible_bounds(glyph_key)?;
 
-    let upm = f32::from(face.units_per_em());
-    let font_scale = style.size() / upm;
+    bevy::log::info!(
+        "SCAN gid={} scan=({},{},{},{}) bitmap={}x{} bearing=({:.4},{:.4})",
+        sg.glyph_id,
+        px_min_x, px_min_y, px_max_x, px_max_y,
+        metrics.pixel_width, metrics.pixel_height,
+        metrics.bearing_x, metrics.bearing_y,
+    );
 
-    let ink_width = f32::from(bbox.x_max - bbox.x_min) * font_scale;
-    let ink_height = f32::from(bbox.y_max - bbox.y_min) * font_scale;
-    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, sg.x) - anchor_x;
-    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, sg.baseline - sg.y) - anchor_y;
+    // Convert pixel bounds to layout units relative to the glyph origin.
+    // Each pixel = font_size / canonical_size layout units.
+    // The bearing maps the bitmap's top-left corner to the glyph origin.
+    let px_to_layout = style.size() / canonical_size;
+
+    let ink_left = metrics.bearing_x * style.size() + px_min_x as f32 * px_to_layout;
+    let ink_right = metrics.bearing_x * style.size() + (px_max_x + 1) as f32 * px_to_layout;
+    let ink_top_from_origin = metrics.bearing_y * style.size() - px_min_y as f32 * px_to_layout;
+    let ink_bot_from_origin = metrics.bearing_y * style.size() - (px_max_y + 1) as f32 * px_to_layout;
+
+    // Position in layout coordinates (same as quad positioning).
+    let ink_x = sg.x + ink_left - anchor_x;
+    let ink_top_layout = sg.baseline - sg.y - ink_top_from_origin - anchor_y;
+    let ink_w = ink_right - ink_left;
+    let ink_h = ink_top_from_origin - ink_bot_from_origin;
 
     Some([
         ink_x * scale,
-        -ink_top * scale,
-        ink_width * scale,
-        ink_height * scale,
+        -ink_top_layout * scale,
+        ink_w * scale,
+        ink_h * scale,
     ])
 }
 

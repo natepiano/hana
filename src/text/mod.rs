@@ -24,6 +24,7 @@ mod msdf_rasterizer_tests;
 mod parley_measurer_tests;
 
 pub use atlas::GlyphKey;
+pub use atlas::GlyphMetrics;
 pub use atlas::MsdfAtlas;
 pub use font::Font;
 pub use font::FontMetrics;

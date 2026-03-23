@@ -90,3 +90,6 @@ name = "shadows"
 
 [[example]]
 name = "atlas_pages"
+
+[[example]]
+name = "ink_rect_test"

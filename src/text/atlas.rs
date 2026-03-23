@@ -199,11 +199,82 @@ impl MsdfAtlas {
         self.glyphs.get(&key).copied()
     }
 
-    /// Returns the raw RGBA pixel data for a page. Test-only.
-    #[cfg(test)]
+    /// Returns the raw RGBA pixel data for a page.
     #[must_use]
     pub fn page_pixels(&self, page: usize) -> Option<&[u8]> {
         self.pages.get(page).map(|p| p.pixels.as_slice())
+    }
+
+    /// Scans a glyph's MSDF bitmap to find the tight bounds of visible
+    /// pixels (where `median(r, g, b) >= 128`).
+    ///
+    /// Returns `(local_min_x, local_min_y, local_max_x, local_max_y)` in
+    /// pixels relative to the glyph's bitmap origin. Returns `None` if
+    /// the glyph is not cached or has no visible pixels.
+    #[must_use]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    pub fn scan_visible_bounds(&self, key: GlyphKey) -> Option<(u32, u32, u32, u32)> {
+        let metrics = self.glyphs.get(&key)?;
+        let page = self.pages.get(metrics.page_index as usize)?;
+        let pixels = &page.pixels;
+
+        // Reverse UV coordinates to get the bitmap's pixel position in the
+        // atlas page. UVs were inset by half a texel during insertion, so
+        // we reverse that to find the interior origin.
+        let atlas_w = self.width as f32;
+        let atlas_h = self.height as f32;
+        let half_u = 0.5 / atlas_w;
+        let half_v = 0.5 / atlas_h;
+        let x0 = ((metrics.uv_rect[0] - half_u) * atlas_w).round() as u32;
+        let y0 = ((metrics.uv_rect[1] - half_v) * atlas_h).round() as u32;
+
+        let mut min_x = u32::MAX;
+        let mut min_y = u32::MAX;
+        let mut max_x = 0_u32;
+        let mut max_y = 0_u32;
+
+        for row in 0..metrics.pixel_height {
+            for col in 0..metrics.pixel_width {
+                let px = x0 + col;
+                let py = y0 + row;
+                let idx = ((py * self.width + px) * BYTES_PER_PIXEL) as usize;
+
+                let r = pixels[idx];
+                let g = pixels[idx + 1];
+                let b = pixels[idx + 2];
+                let med = median_u8(r, g, b);
+
+                if med >= 128 {
+                    min_x = min_x.min(col);
+                    min_y = min_y.min(row);
+                    max_x = max_x.max(col);
+                    max_y = max_y.max(row);
+                }
+            }
+        }
+
+        if min_x <= max_x && min_y <= max_y {
+            // Debug: dump a row of median values across the middle
+            let mid_row = metrics.pixel_height / 2;
+            let mut row_vals = Vec::new();
+            for col in 0..metrics.pixel_width {
+                let px = x0 + col;
+                let py = y0 + mid_row;
+                let idx = ((py * self.width + px) * BYTES_PER_PIXEL) as usize;
+                let r = pixels[idx];
+                let g = pixels[idx + 1];
+                let b = pixels[idx + 2];
+                row_vals.push(median_u8(r, g, b));
+            }
+            bevy::log::info!(
+                "SCAN_DEBUG gid mid_row={mid_row} bounds=({min_x},{min_y},{max_x},{max_y}) bitmap={}x{} medians={row_vals:?}",
+                metrics.pixel_width, metrics.pixel_height,
+            );
+
+            Some((min_x, min_y, max_x, max_y))
+        } else {
+            None
+        }
     }
 
     /// Looks up cached metrics for a glyph. Test-only.
@@ -527,4 +598,9 @@ impl MsdfAtlas {
 
 impl Default for MsdfAtlas {
     fn default() -> Self { Self::new() }
+}
+
+/// Returns the median of three `u8` values.
+fn median_u8(a: u8, b: u8, c: u8) -> u8 {
+    a.max(b).min(c).max(a.min(b))
 }
