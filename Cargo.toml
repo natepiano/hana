@@ -90,3 +90,6 @@ name = "shadows"
 
 [[example]]
 name = "atlas_pages"
+
+[[example]]
+name = "font_loading"

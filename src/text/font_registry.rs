@@ -104,6 +104,47 @@ impl FontRegistry {
     #[must_use]
     pub fn family_name(&self, id: FontId) -> Option<&str> { self.font(id).map(Font::name) }
 
+    /// Registers an additional font from raw TTF/OTF bytes.
+    ///
+    /// Returns the [`FontId`] assigned to the new font, or `None` if the
+    /// font data cannot be parsed.
+    ///
+    /// The font is immediately available for use in [`TextConfig`] and
+    /// [`TextStyle`] via `.with_font(id.0)`. Glyphs are rasterized
+    /// on demand into the MSDF atlas when text using this font is first
+    /// rendered.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// const NOTO_SANS: &[u8] = include_bytes!("NotoSans-Regular.ttf");
+    ///
+    /// fn setup(mut registry: ResMut<FontRegistry>) {
+    ///     let id = registry.register_font("Noto Sans", NOTO_SANS)
+    ///         .expect("font should parse");
+    ///     // Use id.0 with TextConfig::new(size).with_font(id.0)
+    /// }
+    /// ```
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn register_font(&mut self, name: &str, data: &[u8]) -> Option<FontId> {
+        let font = Font::from_bytes(name, data)?;
+
+        // Register with parley's font collection.
+        let mut font_cx = self.font_cx.lock().unwrap_or_else(|e| e.into_inner());
+        font_cx.collection.register_fonts(
+            Blob::from(data.to_vec()),
+            Some(FontInfoOverride {
+                family_name: Some(name),
+                ..Default::default()
+            }),
+        );
+        drop(font_cx);
+
+        let id = FontId(self.fonts.len() as u16);
+        self.fonts.push(font);
+        Some(id)
+    }
+
     /// Returns the shared font context for use by the measurement closure.
     #[must_use]
     pub fn font_context(&self) -> Arc<Mutex<FontContext>> { Arc::clone(&self.font_cx) }

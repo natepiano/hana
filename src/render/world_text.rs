@@ -15,6 +15,8 @@ use super::text_renderer::shape_text_cached;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
+use crate::text::Font;
+use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
 use crate::text::MsdfAtlas;
@@ -271,7 +273,9 @@ fn shape_world_text(
 
     let shaped = shape_text_cached(text, &config, font_registry, shaping_cx, cache);
 
-    let font_data = crate::text::EMBEDDED_FONT;
+    let font_data = font_registry
+        .font(FontId(style.font_id()))
+        .map_or(crate::text::EMBEDDED_FONT, Font::data);
     let linear: LinearRgba = style.color().into();
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 

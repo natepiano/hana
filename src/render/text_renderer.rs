@@ -23,6 +23,7 @@ use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
+use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
@@ -609,7 +610,9 @@ fn shape_text_to_quads(
 ) -> Vec<(u32, GlyphQuadData)> {
     let shaped = shape_text_cached(text, config, font_registry, shaping_cx, cache);
 
-    let font_data = crate::text::EMBEDDED_FONT;
+    let font_data = font_registry
+        .font(FontId(config.font_id()))
+        .map_or(crate::text::EMBEDDED_FONT, Font::data);
     let linear: LinearRgba = config.color().into();
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 
