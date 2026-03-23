@@ -62,6 +62,12 @@ pub struct MsdfTextUniform {
     /// Whether this material is a shadow proxy (invisible in main pass,
     /// contributes to the shadow prepass). 0 = visible, 1 = shadow-only.
     pub is_shadow_proxy: u32,
+    /// Ink bounding box in UV space — min corner.
+    /// When `ink_uv_max > ink_uv_min`, the shader draws a 1px yellow
+    /// rectangle at these coordinates.
+    pub ink_uv_min: bevy::math::Vec2,
+    /// Ink bounding box in UV space — max corner.
+    pub ink_uv_max: bevy::math::Vec2,
 }
 
 /// MSDF atlas extension for `StandardMaterial`.
@@ -123,6 +129,8 @@ pub(super) fn msdf_text_material(
                 hue_offset,
                 render_mode,
                 is_shadow_proxy: 0,
+                ink_uv_min: bevy::math::Vec2::ZERO,
+                ink_uv_max: bevy::math::Vec2::ZERO,
             },
             atlas_texture,
         },
@@ -159,6 +167,8 @@ pub(super) fn msdf_shadow_proxy_material(
                 hue_offset,
                 render_mode,
                 is_shadow_proxy: 1,
+                ink_uv_min: bevy::math::Vec2::ZERO,
+                ink_uv_max: bevy::math::Vec2::ZERO,
             },
             atlas_texture,
         },

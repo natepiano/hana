@@ -206,14 +206,19 @@ impl MsdfAtlas {
     }
 
     /// Scans a glyph's MSDF bitmap to find the tight bounds of visible
-    /// pixels (where `median(r, g, b) >= 128`).
+    /// pixels using the same alpha formula as the MSDF shader.
+    ///
+    /// `screen_px_range` controls how the SDF distance is converted to
+    /// alpha — it depends on the zoom level. The shader formula is:
+    /// `alpha = clamp(screen_px_range * (median - 0.5) + 0.5, 0, 1)`.
+    /// A pixel is visible when `alpha >= 0.02` (the discard threshold).
     ///
     /// Returns `(local_min_x, local_min_y, local_max_x, local_max_y)` in
     /// pixels relative to the glyph's bitmap origin. Returns `None` if
     /// the glyph is not cached or has no visible pixels.
     #[must_use]
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    pub fn scan_visible_bounds(&self, key: GlyphKey) -> Option<(u32, u32, u32, u32)> {
+    pub fn scan_visible_bounds(&self, key: GlyphKey, screen_px_range: f32) -> Option<(u32, u32, u32, u32)> {
         let metrics = self.glyphs.get(&key)?;
         let page = self.pages.get(metrics.page_index as usize)?;
         let pixels = &page.pixels;
@@ -244,7 +249,15 @@ impl MsdfAtlas {
                 let b = pixels[idx + 2];
                 let med = median_u8(r, g, b);
 
-                if med >= 128 {
+                // Same formula as the MSDF shader with screen_px_range=1.0
+                // (the shader's minimum). This gives the widest possible
+                // visible bounds — the box contains the glyph at any zoom.
+                // alpha = clamp(median/255, 0, 1) >= 0.02
+                // → median >= 5
+                let sd = med as f32 / 255.0 - 0.5;
+                let alpha = (screen_px_range * sd + 0.5).clamp(0.0, 1.0);
+
+                if alpha >= 0.02 {
                     min_x = min_x.min(col);
                     min_y = min_y.min(row);
                     max_x = max_x.max(col);

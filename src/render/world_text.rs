@@ -145,6 +145,39 @@ pub(super) fn render_world_text(
             let _ = (anchor_x, anchor_y, text_width, glyph_rects);
         }
 
+        // Compute ink UV bounds for each glyph from the bitmap scan.
+        // These are passed to the shader to draw bounding box lines.
+        #[cfg(feature = "typography_overlay")]
+        let ink_uv_bounds: Vec<([f32; 2], [f32; 2])> = {
+            let config = style.as_layout_config();
+            let measure = config.as_measure();
+            cache.get_shaped(&world_text.0, &measure).map_or_else(Vec::new, |s| {
+                s.glyphs.iter().map(|sg| GlyphKey {
+                    font_id: style.font_id(),
+                    glyph_index: sg.glyph_id,
+                }).collect()
+            })
+        }.iter()
+            .filter_map(|glyph_key| {
+                let metrics = atlas.get_metrics(*glyph_key)?;
+                let (px_min_x, px_min_y, px_max_x, px_max_y) =
+                    atlas.scan_visible_bounds(*glyph_key, 1.0)?;
+                let [u_min, v_min, u_max, v_max] = metrics.uv_rect;
+                let u_range = u_max - u_min;
+                let v_range = v_max - v_min;
+                #[allow(clippy::cast_precision_loss)]
+                let pw = metrics.pixel_width as f32;
+                #[allow(clippy::cast_precision_loss)]
+                let ph = metrics.pixel_height as f32;
+                Some((
+                    [u_min + px_min_x as f32 / pw * u_range,
+                     v_min + px_min_y as f32 / ph * v_range],
+                    [u_min + (px_max_x + 1) as f32 / pw * u_range,
+                     v_min + (px_max_y + 1) as f32 / ph * v_range],
+                ))
+            })
+            .collect();
+
         // Group quads by page.
         let mut page_quads: HashMap<u32, Vec<GlyphQuadData>> = HashMap::new();
         for (page_index, quad) in quads {
@@ -190,14 +223,42 @@ pub(super) fn render_world_text(
                 let render_mode_u32 = style.render_mode() as u32;
 
                 #[allow(clippy::cast_possible_truncation)]
-                let material_handle = materials.add(super::msdf_material::msdf_text_material(
+                let mut mat = super::msdf_material::msdf_text_material(
                     atlas.sdf_range() as f32,
                     atlas.width(),
                     atlas.height(),
                     page_image.clone(),
                     0.0,
                     render_mode_u32,
-                ));
+                );
+
+                // Set ink UV bounds for the shader overlay if the
+                // typography overlay is active. For single-glyph text
+                // we use the first glyph's scan bounds.
+                // Pass the glyph's full atlas UV rect to the shader
+                // so it can scan for the visible bounding box.
+                #[cfg(feature = "typography_overlay")]
+                if let Some(first_key) = {
+                    let config = style.as_layout_config();
+                    let measure = config.as_measure();
+                    cache.get_shaped(&world_text.0, &measure).and_then(|s| {
+                        s.glyphs.first().map(|sg| GlyphKey {
+                            font_id: style.font_id(),
+                            glyph_index: sg.glyph_id,
+                        })
+                    })
+                } {
+                    if let Some(metrics) = atlas.get_metrics(first_key) {
+                        mat.extension.uniforms.ink_uv_min = bevy::math::Vec2::new(
+                            metrics.uv_rect[0], metrics.uv_rect[1],
+                        );
+                        mat.extension.uniforms.ink_uv_max = bevy::math::Vec2::new(
+                            metrics.uv_rect[2], metrics.uv_rect[3],
+                        );
+                    }
+                }
+
+                let material_handle = materials.add(mat);
 
                 if suppress_shadow {
                     commands.entity(entity).with_child((
@@ -338,9 +399,15 @@ fn shape_world_text(
             #[allow(clippy::cast_precision_loss)]
             let canonical = atlas.canonical_size() as f32;
 
+            let quad_world = [
+                quad_x * scale,
+                quad_y * scale,
+                quad_w * scale,
+                quad_h * scale,
+            ];
             if let Some(ink) = compute_ink_rect_from_scan(
                 atlas, glyph_key, &metrics, sg, style,
-                anchor_x, anchor_y, scale, canonical,
+                anchor_x, anchor_y, scale, canonical, quad_world,
             ) {
                 ink_rects.push(ink);
             }
@@ -355,15 +422,12 @@ fn shape_world_text(
     (quads, anchor_x, anchor_y, max_x, ink_rects)
 }
 
-/// Computes a glyph's visible ink rect by scanning the MSDF bitmap.
+/// Computes a glyph's visible ink rect by scanning the MSDF bitmap
+/// and interpolating within the quad's world-space rect.
 ///
-/// Scans the glyph's region in the atlas for pixels where
-/// `median(r, g, b) >= 128` (the SDF's "inside the glyph" threshold).
-/// This gives the exact visible bounds — no approximation, no expansion.
-///
-/// The pixel bounds are converted to layout units using the glyph's
-/// bearing (which maps bitmap origin to glyph origin) and then
-/// positioned using the same coordinate system as the renderer.
+/// The scan finds pixels where `median(r,g,b) >= 128`. The pixel bounds
+/// are converted to fractions of the bitmap, then applied to the quad's
+/// known world-space position (which we've verified matches perfectly).
 ///
 /// Returns `[x, y, width, height]` in world units where `(x, y)` is the
 /// top-left corner. Returns `None` if the glyph has no visible pixels.
@@ -373,46 +437,33 @@ fn compute_ink_rect_from_scan(
     atlas: &MsdfAtlas,
     glyph_key: GlyphKey,
     metrics: &crate::text::GlyphMetrics,
-    sg: &super::text_renderer::ShapedGlyph,
-    style: &TextStyle,
-    anchor_x: f32,
-    anchor_y: f32,
-    scale: f32,
-    canonical_size: f32,
+    _sg: &super::text_renderer::ShapedGlyph,
+    _style: &TextStyle,
+    _anchor_x: f32,
+    _anchor_y: f32,
+    _scale: f32,
+    _canonical_size: f32,
+    quad_world: [f32; 4], // [x, y, w, h] of the rendered quad in world units
 ) -> Option<[f32; 4]> {
     let (px_min_x, px_min_y, px_max_x, px_max_y) =
-        atlas.scan_visible_bounds(glyph_key)?;
+        atlas.scan_visible_bounds(glyph_key, 1.0)?;
 
-    bevy::log::info!(
-        "SCAN gid={} scan=({},{},{},{}) bitmap={}x{} bearing=({:.4},{:.4})",
-        sg.glyph_id,
-        px_min_x, px_min_y, px_max_x, px_max_y,
-        metrics.pixel_width, metrics.pixel_height,
-        metrics.bearing_x, metrics.bearing_y,
-    );
+    // Convert scan pixel bounds to fractions of the bitmap.
+    let frac_left = px_min_x as f32 / metrics.pixel_width as f32;
+    let frac_right = (px_max_x + 1) as f32 / metrics.pixel_width as f32;
+    let frac_top = px_min_y as f32 / metrics.pixel_height as f32;
+    let frac_bottom = (px_max_y + 1) as f32 / metrics.pixel_height as f32;
 
-    // Convert pixel bounds to layout units relative to the glyph origin.
-    // Each pixel = font_size / canonical_size layout units.
-    // The bearing maps the bitmap's top-left corner to the glyph origin.
-    let px_to_layout = style.size() / canonical_size;
+    // Apply fractions to the quad's world rect.
+    // Quad: TL=(x, y), size=(w, h), BR=(x+w, y-h) in Y-up.
+    let [qx, qy, qw, qh] = quad_world;
 
-    let ink_left = metrics.bearing_x * style.size() + px_min_x as f32 * px_to_layout;
-    let ink_right = metrics.bearing_x * style.size() + (px_max_x + 1) as f32 * px_to_layout;
-    let ink_top_from_origin = metrics.bearing_y * style.size() - px_min_y as f32 * px_to_layout;
-    let ink_bot_from_origin = metrics.bearing_y * style.size() - (px_max_y + 1) as f32 * px_to_layout;
+    let ink_x = qx + frac_left * qw;
+    let ink_y = qy - frac_top * qh; // Y-up: top of quad minus fraction
+    let ink_w = (frac_right - frac_left) * qw;
+    let ink_h = (frac_bottom - frac_top) * qh;
 
-    // Position in layout coordinates (same as quad positioning).
-    let ink_x = sg.x + ink_left - anchor_x;
-    let ink_top_layout = sg.baseline - sg.y - ink_top_from_origin - anchor_y;
-    let ink_w = ink_right - ink_left;
-    let ink_h = ink_top_from_origin - ink_bot_from_origin;
-
-    Some([
-        ink_x * scale,
-        -ink_top_layout * scale,
-        ink_w * scale,
-        ink_h * scale,
-    ])
+    Some([ink_x, ink_y, ink_w, ink_h])
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.

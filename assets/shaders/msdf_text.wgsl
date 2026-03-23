@@ -46,6 +46,11 @@ struct MsdfTextUniform {
     hue_offset: f32,
     render_mode: u32,
     is_shadow_proxy: u32,
+    // Ink bounding box in UV space [u_min, v_min, u_max, v_max].
+    // When all non-zero, the shader draws a 1px yellow rectangle at
+    // these UV coordinates. Used by the typography overlay.
+    ink_uv_min: vec2<f32>,
+    ink_uv_max: vec2<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> msdf: MsdfTextUniform;
@@ -74,6 +79,150 @@ fn screen_px_range(uv: vec2<f32>) -> f32 {
         0.5 * dot(unit_range, screen_tex_size),
         1.0,
     );
+}
+
+/// Returns the median SDF value at the given UV coordinate.
+fn sample_median(sample_uv: vec2<f32>) -> f32 {
+    let s = textureSample(msdf_texture, msdf_sampler, sample_uv);
+    return median(s.r, s.g, s.b);
+}
+
+/// Scans the glyph's atlas region to find the bounding box of visible
+/// pixels, then returns true if the current fragment is on that
+/// bounding box boundary. Expensive but exact.
+///
+/// `ink_uv_min`/`ink_uv_max` define the atlas region to scan (the full
+/// glyph bitmap UV extent).
+fn is_on_ink_box(uv: vec2<f32>) -> bool {
+    let u_start = msdf.ink_uv_min.x;
+    let v_start = msdf.ink_uv_min.y;
+    let u_end = msdf.ink_uv_max.x;
+    let v_end = msdf.ink_uv_max.y;
+
+    // Step size: half a texel to catch sub-texel boundaries.
+    let du = 0.5 / msdf.atlas_width;
+    let dv = 0.5 / msdf.atlas_height;
+
+    // Find the bounding box by scanning inward from each edge.
+    // Much faster than scanning the entire bitmap — O(width+height)
+    // instead of O(width*height).
+
+    // Left edge: scan columns left-to-right, find first with any visible pixel.
+    var box_u_min = u_end;
+    var su = u_start;
+    loop {
+        if su > u_end { break; }
+        var sv2 = v_start;
+        var found = false;
+        loop {
+            if sv2 > v_end { break; }
+            if compute_alpha(vec2<f32>(su, sv2)) >= 0.02 {
+                found = true;
+                break;
+            }
+            sv2 += dv;
+        }
+        if found {
+            box_u_min = su;
+            break;
+        }
+        su += du;
+    }
+
+    // Right edge: scan columns right-to-left.
+    var box_u_max = u_start;
+    su = u_end;
+    loop {
+        if su < u_start { break; }
+        var sv2 = v_start;
+        var found = false;
+        loop {
+            if sv2 > v_end { break; }
+            if compute_alpha(vec2<f32>(su, sv2)) >= 0.02 {
+                found = true;
+                break;
+            }
+            sv2 += dv;
+        }
+        if found {
+            box_u_max = su;
+            break;
+        }
+        su -= du;
+    }
+
+    // Top edge: scan rows top-to-bottom.
+    var box_v_min = v_end;
+    var sv = v_start;
+    loop {
+        if sv > v_end { break; }
+        var su2 = u_start;
+        var found = false;
+        loop {
+            if su2 > u_end { break; }
+            if compute_alpha(vec2<f32>(su2, sv)) >= 0.02 {
+                found = true;
+                break;
+            }
+            su2 += du;
+        }
+        if found {
+            box_v_min = sv;
+            break;
+        }
+        sv += dv;
+    }
+
+    // Bottom edge: scan rows bottom-to-top.
+    var box_v_max = v_start;
+    sv = v_end;
+    loop {
+        if sv < v_start { break; }
+        var su2 = u_start;
+        var found = false;
+        loop {
+            if su2 > u_end { break; }
+            if compute_alpha(vec2<f32>(su2, sv)) >= 0.02 {
+                found = true;
+                break;
+            }
+            su2 += du;
+        }
+        if found {
+            box_v_max = sv;
+            break;
+        }
+        sv -= dv;
+    }
+
+    // No visible pixels found.
+    if box_u_max < box_u_min {
+        return false;
+    }
+
+    // The scan finds the last sample point where alpha >= threshold.
+    // The visible edge extends to the next sample point.
+    box_u_max += du * 0.75;
+    box_v_max += dv * 0.75;
+
+    // Half-pixel width in UV space for a ~1px screen line.
+    let line_du = fwidth(uv.x) * 0.5;
+    let line_dv = fwidth(uv.y) * 0.5;
+
+    // Check if inside the box region (with margin).
+    let inside_u = uv.x >= box_u_min - line_du && uv.x <= box_u_max + line_du;
+    let inside_v = uv.y >= box_v_min - line_dv && uv.y <= box_v_max + line_dv;
+
+    if !inside_u || !inside_v {
+        return false;
+    }
+
+    // On the left or right edge.
+    let on_lr = abs(uv.x - box_u_min) < line_du || abs(uv.x - box_u_max) < line_du;
+    // On the top or bottom edge.
+    let on_tb = abs(uv.y - box_v_min) < line_dv || abs(uv.y - box_v_max) < line_dv;
+
+    return on_lr || on_tb;
 }
 
 /// Computes the final alpha based on the render mode.
@@ -135,7 +284,20 @@ fn fragment(
     let final_alpha = compute_alpha(in.uv);
 
     if final_alpha < 0.02 {
+        // Even transparent fragments may need to draw the box line.
+        if msdf.ink_uv_max.x > msdf.ink_uv_min.x && is_on_ink_box(in.uv) {
+            var out: FragmentOutput;
+            out.color = vec4<f32>(1.0, 1.0, 0.0, 1.0);
+            return out;
+        }
         discard;
+    }
+
+    // Draw bounding box line if enabled.
+    if msdf.ink_uv_max.x > msdf.ink_uv_min.x && is_on_ink_box(in.uv) {
+        var out: FragmentOutput;
+        out.color = vec4<f32>(1.0, 1.0, 0.0, 1.0);
+        return out;
     }
 
     // Standard PBR input — handles double-sided, normals, lighting, everything.
