@@ -123,13 +123,7 @@ pub fn rasterize_glyph(
     correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
     {
         let ec_config = ErrorCorrectionConfig::default();
-        correct_error_msdf(
-            &mut image_f32,
-            &colored,
-            &prepared,
-            sdf_range,
-            &ec_config,
-        );
+        correct_error_msdf(&mut image_f32, &colored, &prepared, sdf_range, &ec_config);
     }
 
     // Convert f32 [0.0, 1.0] to u8 [0, 255].

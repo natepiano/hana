@@ -55,7 +55,7 @@ fn setup(
     // Ground plane — subtle, light gray.
     let ground = commands
         .spawn((
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 8.0))),
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(5.4, 5.4))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.15, 0.15, 0.15),
                 double_sided: true,

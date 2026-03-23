@@ -28,15 +28,17 @@ use crate::text::MsdfAtlas;
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
     /// Anchor offset X in layout units (matches the renderer's anchor).
-    pub anchor_x:    f32,
+    pub anchor_x:      f32,
     /// Anchor offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y:    f32,
+    pub anchor_y:      f32,
     /// Total text width in layout units (rightmost MSDF quad extent).
-    pub text_width:  f32,
+    pub text_width:    f32,
     /// Per-glyph ink bounding boxes `[x, y, width, height]` in world
     /// units. Derived from the font's glyph bbox, positioned using the
     /// same coordinate system as the renderer.
-    pub glyph_rects: Vec<[f32; 4]>,
+    pub glyph_rects:   Vec<[f32; 4]>,
+    /// Advance width of the first glyph in world units.
+    pub first_advance: f32,
 }
 
 /// Standalone MSDF text rendered in world space.
@@ -121,7 +123,7 @@ pub(super) fn render_world_text(
         }
 
         // Shape text and build quads in entity-local coordinates.
-        let (quads, anchor_x, anchor_y, text_width, glyph_rects) = shape_world_text(
+        let (quads, anchor_x, anchor_y, text_width, glyph_rects, first_advance) = shape_world_text(
             &world_text.0,
             style,
             &font_registry,
@@ -137,10 +139,11 @@ pub(super) fn render_world_text(
             anchor_y,
             text_width,
             glyph_rects,
+            first_advance,
         });
         #[cfg(not(feature = "typography_overlay"))]
         {
-            let _ = (anchor_x, anchor_y, text_width, glyph_rects);
+            let _ = (anchor_x, anchor_y, text_width, glyph_rects, first_advance);
         }
 
         // Group quads by page.
@@ -260,7 +263,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32, Vec<[f32; 4]>) {
+) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32, Vec<[f32; 4]>, f32) {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
@@ -424,7 +427,21 @@ fn shape_world_text(
 
     clip_overlapping_quads(&mut quads);
 
-    (quads, anchor_x, anchor_y, max_x, glyph_rects)
+    // First glyph's advance width in world units.
+    let first_advance = shaped.glyphs.first().map_or(0.0, |sg| {
+        let face = ttf_parser::Face::parse(font_data, 0).ok();
+        face.and_then(|f| {
+            let gid = ttf_parser::GlyphId(sg.glyph_id);
+            f.glyph_hor_advance(gid).map(|adv| {
+                #[allow(clippy::cast_precision_loss)]
+                let upm = f.units_per_em() as f32;
+                f32::from(adv) * style.size() / upm * scale
+            })
+        })
+        .unwrap_or(0.0)
+    });
+
+    (quads, anchor_x, anchor_y, max_x, glyph_rects, first_advance)
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.
