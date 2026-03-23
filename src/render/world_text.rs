@@ -324,31 +324,52 @@ fn shape_world_text(
         // Compute visible ink rect from the UNCLIPPED quad by insetting
         // the SDF padding. Must be done here before clip_overlapping_quads
         // modifies the quad positions.
+        // Compute visible ink rect directly from the font's glyph bbox,
+        // positioned using the renderer's coordinate system. No SDF padding
+        // math — the bbox IS the ink boundary.
         #[cfg(feature = "typography_overlay")]
         {
-            #[allow(clippy::cast_precision_loss)]
-            let pad = (DEFAULT_GLYPH_PADDING as f32 + DEFAULT_SDF_RANGE as f32)
-                * style.size()
-                / DEFAULT_CANONICAL_SIZE as f32;
+            let face = ttf_parser::Face::parse(font_data, 0).ok();
+            if let Some(face) = face {
+                let gid = ttf_parser::GlyphId(sg.glyph_id);
+                if let Some(bbox) = face.glyph_bounding_box(gid) {
+                    #[allow(clippy::cast_precision_loss)]
+                    let upm = face.units_per_em() as f32;
+                    let font_scale = style.size() / upm;
 
-            let ink_x = (quad_x + pad) * scale;
-            let ink_y = (quad_y - pad) * scale;
-            let ink_w = (quad_w - 2.0 * pad) * scale;
-            let ink_h = (quad_h - 2.0 * pad) * scale;
+                    let ink_w_layout = f32::from(bbox.x_max - bbox.x_min) * font_scale;
+                    let ink_h_layout = f32::from(bbox.y_max - bbox.y_min) * font_scale;
+                    let ink_x_layout =
+                        sg.x + f32::from(bbox.x_min) * font_scale - anchor_x;
+                    let ink_top_layout =
+                        sg.baseline - sg.y - f32::from(bbox.y_max) * font_scale - anchor_y;
 
-            bevy::log::info!(
-                "glyph gid={}: quad_world=({:.4},{:.4},{:.4},{:.4}) ink_world=({:.4},{:.4},{:.4},{:.4}) pad_world={:.4} quad_top_world={:.4} quad_bot_world={:.4} ink_top_world={:.4} ink_bot_world={:.4}",
-                sg.glyph_id,
-                quad_x * scale, quad_y * scale, quad_w * scale, quad_h * scale,
-                ink_x, ink_y, ink_w, ink_h,
-                pad * scale,
-                quad_y * scale,
-                quad_y * scale - quad_h * scale,
-                ink_y,
-                ink_y - ink_h,
-            );
+                    let ink_world = [
+                        ink_x_layout * scale,
+                        -ink_top_layout * scale,
+                        ink_w_layout * scale,
+                        ink_h_layout * scale,
+                    ];
 
-            ink_rects.push([ink_x, ink_y, ink_w, ink_h]);
+                    bevy::log::info!(
+                        "INK gid={} '{}' bbox=({},{},{},{}) upm={} font_scale={:.4} sg.x={:.2} sg.baseline={:.2} sg.y={:.2} anchor=({:.2},{:.2}) quad_layout=({:.2},{:.2},{:.2},{:.2}) ink_layout=({:.2},{:.2},{:.2},{:.2}) quad_world=({:.4},{:.4},{:.4},{:.4}) ink_world=({:.4},{:.4},{:.4},{:.4}) bearing=({:.6},{:.6}) em_scale={:.4}",
+                        sg.glyph_id,
+                        char::from_u32(sg.glyph_id as u32).unwrap_or('?'),
+                        bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max,
+                        upm, font_scale,
+                        sg.x, sg.baseline, sg.y,
+                        anchor_x, anchor_y,
+                        quad_x, quad_y, quad_w, quad_h,
+                        ink_x_layout, ink_top_layout, ink_w_layout, ink_h_layout,
+                        quad_x * scale, quad_y * scale, quad_w * scale, quad_h * scale,
+                        ink_world[0], ink_world[1], ink_world[2], ink_world[3],
+                        metrics.bearing_x, metrics.bearing_y,
+                        em_scale,
+                    );
+
+                    ink_rects.push(ink_world);
+                }
+            }
         }
     }
 
