@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use clay_layout::Clay;
+use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
 use clay_layout::fit;
 use clay_layout::fixed;
@@ -462,14 +463,8 @@ fn parity_vertical_center_alignment() {
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
 }
 
-#[test]
-#[allow(clippy::too_many_lines)]
-fn parity_fit_parent_with_grow_children_centering() {
-    // The header vertical-centering bug: Fit-height parent, Grow-height
-    // children containing text, centered vertically in a fixed container.
-    let size = 160.0;
-
-    // Clay
+/// Builds the Clay layout for the fit-parent-with-grow-children centering test.
+fn build_clay_fit_parent_centering(size: f32) -> Vec<Bbox> {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
@@ -503,7 +498,6 @@ fn parity_fit_parent_with_grow_children_centering() {
                             .end()
                             .background_color((22, 28, 34).into()),
                         |clay| {
-                            // Title slot: Grow height.
                             clay.with(
                                 Declaration::new()
                                     .layout()
@@ -519,7 +513,6 @@ fn parity_fit_parent_with_grow_children_centering() {
                                     );
                                 },
                             );
-                            // Spacer.
                             clay.with(
                                 Declaration::new()
                                     .layout()
@@ -528,7 +521,6 @@ fn parity_fit_parent_with_grow_children_centering() {
                                     .end(),
                                 |_| {},
                             );
-                            // Subtitle slot: Grow height.
                             clay.with(
                                 Declaration::new()
                                     .layout()
@@ -550,9 +542,11 @@ fn parity_fit_parent_with_grow_children_centering() {
             );
         },
     );
-    let clay_bboxes = collect_clay_bboxes(layout.end());
+    collect_clay_bboxes(layout.end())
+}
 
-    // Diegetic
+/// Builds the diegetic layout for the fit-parent-with-grow-children centering test.
+fn build_diegetic_fit_parent_centering(size: f32) -> Vec<Bbox> {
     let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
@@ -590,7 +584,17 @@ fn parity_fit_parent_with_grow_children_centering() {
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, size, size);
-    let diegetic_bboxes = collect_diegetic_bboxes(&result);
+    collect_diegetic_bboxes(&result)
+}
+
+#[test]
+fn parity_fit_parent_with_grow_children_centering() {
+    // The header vertical-centering bug: Fit-height parent, Grow-height
+    // children containing text, centered vertically in a fixed container.
+    let size = 160.0;
+
+    let clay_bboxes = build_clay_fit_parent_centering(size);
+    let diegetic_bboxes = build_diegetic_fit_parent_centering(size);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Text);
@@ -973,15 +977,8 @@ fn parity_right_alignment() {
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
 }
 
-#[test]
-#[allow(clippy::too_many_lines)]
-fn parity_status_panel_full_layout() {
-    // The full status panel layout from the actual application.
-    let size = 160.0;
-
-    let labels = [("fps:", "14"), ("frame ms:", "68"), ("radius:", "0.3")];
-
-    // Clay
+/// Builds the Clay status panel layout with header, divider, and key-value body rows.
+fn build_clay_status_panel(size: f32, labels: &[(&str, &str)]) -> Vec<Bbox> {
     let mut clay = new_clay(size);
     let mut layout = clay.begin::<(), ()>();
     layout.with(
@@ -995,74 +992,7 @@ fn parity_status_panel_full_layout() {
             .end()
             .background_color((180, 96, 122).into()),
         |clay| {
-            // Header
-            clay.with(
-                Declaration::new()
-                    .layout()
-                    .width(grow!())
-                    .height(grow!(FONT_SIZE, 20.0))
-                    .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
-                    .child_alignment(Alignment::new(
-                        LayoutAlignmentX::Left,
-                        LayoutAlignmentY::Center,
-                    ))
-                    .end()
-                    .background_color((52, 98, 90).into()),
-                |clay| {
-                    clay.with(
-                        Declaration::new()
-                            .layout()
-                            .width(grow!())
-                            .height(fit!())
-                            .direction(LayoutDirection::LeftToRight)
-                            .end(),
-                        |clay| {
-                            clay.with(
-                                Declaration::new()
-                                    .layout()
-                                    .width(fit!())
-                                    .height(grow!())
-                                    .end(),
-                                |clay| {
-                                    clay.text(
-                                        "STATUS",
-                                        clay_layout::text::TextConfig::new()
-                                            .font_size(CLAY_FONT_SIZE)
-                                            .end(),
-                                    );
-                                },
-                            );
-                            clay.with(
-                                Declaration::new()
-                                    .layout()
-                                    .width(grow!())
-                                    .height(fixed!(1.0))
-                                    .end(),
-                                |_| {},
-                            );
-                            clay.with(
-                                Declaration::new()
-                                    .layout()
-                                    .width(fit!())
-                                    .height(grow!())
-                                    .child_alignment(Alignment::new(
-                                        LayoutAlignmentX::Right,
-                                        LayoutAlignmentY::Top,
-                                    ))
-                                    .end(),
-                                |clay| {
-                                    clay.text(
-                                        "DIEGETIC",
-                                        clay_layout::text::TextConfig::new()
-                                            .font_size(CLAY_FONT_SIZE)
-                                            .end(),
-                                    );
-                                },
-                            );
-                        },
-                    );
-                },
-            );
+            build_clay_status_panel_header(clay);
             // Divider
             clay.with(
                 Declaration::new()
@@ -1073,61 +1003,138 @@ fn parity_status_panel_full_layout() {
                     .background_color((74, 196, 172).into()),
                 |_| {},
             );
-            // Body
+            build_clay_status_panel_body(clay, labels);
+        },
+    );
+    collect_clay_bboxes(layout.end())
+}
+
+/// Builds the Clay header section: title row with "STATUS" / spacer / "DIEGETIC".
+fn build_clay_status_panel_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
+    clay.with(
+        Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(grow!(FONT_SIZE, 20.0))
+            .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
+            .child_alignment(Alignment::new(
+                LayoutAlignmentX::Left,
+                LayoutAlignmentY::Center,
+            ))
+            .end()
+            .background_color((52, 98, 90).into()),
+        |clay| {
             clay.with(
                 Declaration::new()
                     .layout()
                     .width(grow!())
-                    .height(grow!())
-                    .end()
-                    .background_color((22, 28, 34).into()),
+                    .height(fit!())
+                    .direction(LayoutDirection::LeftToRight)
+                    .end(),
                 |clay| {
                     clay.with(
                         Declaration::new()
                             .layout()
-                            .width(grow!())
-                            .padding(clay_layout::layout::Padding::all(5))
-                            .direction(LayoutDirection::TopToBottom)
-                            .child_gap(2)
+                            .width(fit!())
+                            .height(grow!())
                             .end(),
                         |clay| {
-                            for (label, value) in &labels {
-                                clay.with(
-                                    Declaration::new()
-                                        .layout()
-                                        .width(grow!())
-                                        .height(fit!())
-                                        .direction(LayoutDirection::LeftToRight)
-                                        .end(),
-                                    |clay| {
-                                        clay.text(
-                                            label,
-                                            clay_layout::text::TextConfig::new()
-                                                .font_size(CLAY_FONT_SIZE)
-                                                .end(),
-                                        );
-                                        clay.with(
-                                            Declaration::new().layout().width(grow!()).end(),
-                                            |_| {},
-                                        );
-                                        clay.text(
-                                            value,
-                                            clay_layout::text::TextConfig::new()
-                                                .font_size(CLAY_FONT_SIZE)
-                                                .end(),
-                                        );
-                                    },
-                                );
-                            }
+                            clay.text(
+                                "STATUS",
+                                clay_layout::text::TextConfig::new()
+                                    .font_size(CLAY_FONT_SIZE)
+                                    .end(),
+                            );
+                        },
+                    );
+                    clay.with(
+                        Declaration::new()
+                            .layout()
+                            .width(grow!())
+                            .height(fixed!(1.0))
+                            .end(),
+                        |_| {},
+                    );
+                    clay.with(
+                        Declaration::new()
+                            .layout()
+                            .width(fit!())
+                            .height(grow!())
+                            .child_alignment(Alignment::new(
+                                LayoutAlignmentX::Right,
+                                LayoutAlignmentY::Top,
+                            ))
+                            .end(),
+                        |clay| {
+                            clay.text(
+                                "DIEGETIC",
+                                clay_layout::text::TextConfig::new()
+                                    .font_size(CLAY_FONT_SIZE)
+                                    .end(),
+                            );
                         },
                     );
                 },
             );
         },
     );
-    let clay_bboxes = collect_clay_bboxes(layout.end());
+}
 
-    // Diegetic
+/// Builds the Clay body section: key-value rows inside a scrollable container.
+fn build_clay_status_panel_body<'a>(
+    clay: &mut ClayLayoutScope<'a, 'a, (), ()>,
+    labels: &[(&str, &str)],
+) {
+    clay.with(
+        Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(grow!())
+            .end()
+            .background_color((22, 28, 34).into()),
+        |clay| {
+            clay.with(
+                Declaration::new()
+                    .layout()
+                    .width(grow!())
+                    .padding(clay_layout::layout::Padding::all(5))
+                    .direction(LayoutDirection::TopToBottom)
+                    .child_gap(2)
+                    .end(),
+                |clay| {
+                    for (label, value) in labels {
+                        clay.with(
+                            Declaration::new()
+                                .layout()
+                                .width(grow!())
+                                .height(fit!())
+                                .direction(LayoutDirection::LeftToRight)
+                                .end(),
+                            |clay| {
+                                clay.text(
+                                    label,
+                                    clay_layout::text::TextConfig::new()
+                                        .font_size(CLAY_FONT_SIZE)
+                                        .end(),
+                                );
+                                clay.with(Declaration::new().layout().width(grow!()).end(), |_| {});
+                                clay.text(
+                                    value,
+                                    clay_layout::text::TextConfig::new()
+                                        .font_size(CLAY_FONT_SIZE)
+                                        .end(),
+                                );
+                            },
+                        );
+                    }
+                },
+            );
+        },
+    );
+}
+
+/// Builds the diegetic status panel layout with header, divider, and key-value body rows.
+fn build_diegetic_status_panel(size: f32, labels: &[(&str, &str)]) -> Vec<Bbox> {
     let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fixed(size))
@@ -1137,6 +1144,23 @@ fn parity_status_panel_full_layout() {
             .child_gap(5.0)
             .background(bevy::color::Color::srgb_u8(180, 96, 122)),
     );
+    build_diegetic_status_panel_header(&mut b);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(4.0))
+            .background(bevy::color::Color::srgb_u8(74, 196, 172)),
+        |_| {},
+    );
+    build_diegetic_status_panel_body(&mut b, labels);
+    let tree = b.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, size, size);
+    collect_diegetic_bboxes(&result)
+}
+
+/// Builds the diegetic header section: title row with "STATUS" / spacer / "DIEGETIC".
+fn build_diegetic_status_panel_header(b: &mut LayoutBuilder) {
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -1171,13 +1195,10 @@ fn parity_status_panel_full_layout() {
             );
         },
     );
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(4.0))
-            .background(bevy::color::Color::srgb_u8(74, 196, 172)),
-        |_| {},
-    );
+}
+
+/// Builds the diegetic body section: key-value rows inside a scrollable container.
+fn build_diegetic_status_panel_body(b: &mut LayoutBuilder, labels: &[(&str, &str)]) {
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -1191,7 +1212,7 @@ fn parity_status_panel_full_layout() {
                     .direction(Direction::TopToBottom)
                     .child_gap(2.0),
                 |b| {
-                    for (label, value) in &labels {
+                    for (label, value) in labels {
                         b.with(
                             El::new()
                                 .width(Sizing::GROW)
@@ -1211,10 +1232,16 @@ fn parity_status_panel_full_layout() {
             );
         },
     );
-    let tree = b.build();
-    let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
-    let diegetic_bboxes = collect_diegetic_bboxes(&result);
+}
+
+#[test]
+fn parity_status_panel_full_layout() {
+    // The full status panel layout from the actual application.
+    let size = 160.0;
+    let labels = [("fps:", "14"), ("frame ms:", "68"), ("radius:", "0.3")];
+
+    let clay_bboxes = build_clay_status_panel(size, &labels);
+    let diegetic_bboxes = build_diegetic_status_panel(size, &labels);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Text);

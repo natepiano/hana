@@ -55,6 +55,7 @@ use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
 use bevy_window_manager::WindowManagerPlugin;
 use clay_layout::Clay;
+use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
 use clay_layout::fit;
 use clay_layout::fixed;
@@ -550,7 +551,6 @@ fn spawn_clay_text(
 
 /// Builds the diegetic layout tree. Returns a `LayoutTree`.
 /// The plugin handles layout computation and text rendering.
-#[allow(clippy::too_many_lines)]
 fn build_diegetic_tree(rows: &[(String, String)], layout_size: f32) -> LayoutTree {
     let layout_height = layout_size * PANEL_ASPECT;
     let mut builder = LayoutBuilder::with_root(
@@ -573,110 +573,115 @@ fn build_diegetic_tree(rows: &[(String, String)], layout_size: f32) -> LayoutTre
             .border(Border::all(5.0, Color::srgb_u8(255, 255, 255)))
             .background(Color::srgb_u8(56, 16, 24)),
         |b| {
-            // Header container.
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::grow_range(FONT_SIZE, HEADER_HEIGHT))
-                    .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
-                    .child_align_y(AlignY::Center)
-                    .background(Color::srgb_u8(52, 98, 90)),
-                |b| {
-                    // Header text row.
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::FIT)
-                            .direction(Direction::LeftToRight),
-                        |b| {
-                            // Title slot.
-                            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                                b.text("STATUS", TextConfig::new(FONT_SIZE));
-                            });
-                            // Grow spacer.
-                            b.with(
-                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                |_| {},
-                            );
-                            // Subtitle slot.
-                            b.with(
-                                El::new()
-                                    .width(Sizing::FIT)
-                                    .height(Sizing::GROW)
-                                    .child_align_x(AlignX::Right),
-                                |b| {
-                                    b.text("DIEGETIC LAYOUT", TextConfig::new(SUBTITLE_FONT_SIZE));
-                                },
-                            );
-                        },
-                    );
-                },
-            );
-
-            // Accent divider.
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::fixed(DIVIDER_HEIGHT))
-                    .background(Color::srgb_u8(74, 196, 172)),
-                |_| {},
-            );
-
-            // Body.
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .background(Color::srgb_u8(22, 28, 34)),
-                |b| {
-                    // Content.
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .padding(Padding::all(5.0))
-                            .direction(Direction::TopToBottom)
-                            .child_gap(2.0),
-                        |b| {
-                            for (label, value) in rows {
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::FIT)
-                                        .direction(Direction::LeftToRight),
-                                    |b| {
-                                        b.text(label, TextConfig::new(FONT_SIZE));
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::GROW)
-                                                .height(Sizing::fixed(1.0)),
-                                            |_| {},
-                                        );
-                                        b.text(value, TextConfig::new(FONT_SIZE));
-                                    },
-                                );
-                            }
-
-                            // Spacer.
-                            b.with(
-                                El::new().width(Sizing::GROW).height(Sizing::fixed(4.0)),
-                                |_| {},
-                            );
-
-                            // Word-wrap cell.
-                            b.text(WRAP_TEXT, TextConfig::new(FONT_SIZE));
-                        },
-                    );
-                },
-            );
+            build_diegetic_header(b);
+            build_diegetic_divider(b);
+            build_diegetic_body(b, rows);
         },
     );
 
     builder.build()
 }
 
+/// Builds the header container with title and subtitle for the diegetic panel.
+fn build_diegetic_header(b: &mut LayoutBuilder) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::grow_range(FONT_SIZE, HEADER_HEIGHT))
+            .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
+            .child_align_y(AlignY::Center)
+            .background(Color::srgb_u8(52, 98, 90)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight),
+                |b| {
+                    // Title slot.
+                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                        b.text("STATUS", TextConfig::new(FONT_SIZE));
+                    });
+                    // Grow spacer.
+                    b.with(
+                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                        |_| {},
+                    );
+                    // Subtitle slot.
+                    b.with(
+                        El::new()
+                            .width(Sizing::FIT)
+                            .height(Sizing::GROW)
+                            .child_align_x(AlignX::Right),
+                        |b| {
+                            b.text("DIEGETIC LAYOUT", TextConfig::new(SUBTITLE_FONT_SIZE));
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+/// Builds the accent divider bar.
+fn build_diegetic_divider(b: &mut LayoutBuilder) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(DIVIDER_HEIGHT))
+            .background(Color::srgb_u8(74, 196, 172)),
+        |_| {},
+    );
+}
+
+/// Builds the body section containing key-value rows and wrap text.
+fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .background(Color::srgb_u8(22, 28, 34)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .padding(Padding::all(5.0))
+                    .direction(Direction::TopToBottom)
+                    .child_gap(2.0),
+                |b| {
+                    for (label, value) in rows {
+                        b.with(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::FIT)
+                                .direction(Direction::LeftToRight),
+                            |b| {
+                                b.text(label, TextConfig::new(FONT_SIZE));
+                                b.with(
+                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                    |_| {},
+                                );
+                                b.text(value, TextConfig::new(FONT_SIZE));
+                            },
+                        );
+                    }
+
+                    // Spacer.
+                    b.with(
+                        El::new().width(Sizing::GROW).height(Sizing::fixed(4.0)),
+                        |_| {},
+                    );
+
+                    // Word-wrap cell.
+                    b.text(WRAP_TEXT, TextConfig::new(FONT_SIZE));
+                },
+            );
+        },
+    );
+}
+
 // ── Clay layout ──────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_lines)]
 fn compute_clay_layout(
     rows: &[(String, String)],
     measurer: &DiegeticTextMeasurer,
@@ -715,164 +720,84 @@ fn compute_clay_layout(
                     .end()
                     .background_color((56, 16, 24).into()),
                 |clay| {
-                    // Header container.
+                    build_clay_header(clay);
+                    build_clay_divider(clay);
+                    build_clay_body(clay, rows);
+                },
+            );
+        },
+    );
+
+    collect_clay_rects(layout)
+}
+
+/// Builds the clay header container with title and subtitle.
+fn build_clay_header(clay: &mut ClayLayoutScope<'_, '_, (), ()>) {
+    clay.with(
+        &Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(grow!(FONT_SIZE, HEADER_HEIGHT))
+            .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
+            .child_alignment(Alignment::new(
+                LayoutAlignmentX::Left,
+                LayoutAlignmentY::Center,
+            ))
+            .end()
+            .background_color((52, 98, 90).into()),
+        |clay| {
+            clay.with(
+                &Declaration::new()
+                    .layout()
+                    .width(grow!())
+                    .height(fit!())
+                    .direction(LayoutDirection::LeftToRight)
+                    .end(),
+                |clay| {
+                    // Title slot.
                     clay.with(
                         &Declaration::new()
                             .layout()
-                            .width(grow!())
-                            .height(grow!(FONT_SIZE, HEADER_HEIGHT))
-                            .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
-                            .child_alignment(Alignment::new(
-                                LayoutAlignmentX::Left,
-                                LayoutAlignmentY::Center,
-                            ))
-                            .end()
-                            .background_color((52, 98, 90).into()),
+                            .width(fit!())
+                            .height(grow!())
+                            .end(),
                         |clay| {
-                            // Header text row.
-                            clay.with(
-                                &Declaration::new()
-                                    .layout()
-                                    .width(grow!())
-                                    .height(fit!())
-                                    .direction(LayoutDirection::LeftToRight)
+                            clay.text(
+                                "STATUS",
+                                clay_layout::text::TextConfig::new()
+                                    .font_size(CLAY_FONT_SIZE)
+                                    .wrap_mode(TextElementConfigWrapMode::None)
                                     .end(),
-                                |clay| {
-                                    // Title slot.
-                                    clay.with(
-                                        &Declaration::new()
-                                            .layout()
-                                            .width(fit!())
-                                            .height(grow!())
-                                            .end(),
-                                        |clay| {
-                                            clay.text(
-                                                "STATUS",
-                                                clay_layout::text::TextConfig::new()
-                                                    .font_size(CLAY_FONT_SIZE)
-                                                    .wrap_mode(TextElementConfigWrapMode::None)
-                                                    .end(),
-                                            );
-                                        },
-                                    );
-                                    // Grow spacer.
-                                    clay.with(
-                                        &Declaration::new()
-                                            .layout()
-                                            .width(grow!())
-                                            .height(fixed!(1.0))
-                                            .end(),
-                                        |_| {},
-                                    );
-                                    // Subtitle slot.
-                                    clay.with(
-                                        &Declaration::new()
-                                            .layout()
-                                            .width(fit!())
-                                            .height(grow!())
-                                            .child_alignment(Alignment::new(
-                                                LayoutAlignmentX::Right,
-                                                LayoutAlignmentY::Top,
-                                            ))
-                                            .end(),
-                                        |clay| {
-                                            clay.text(
-                                                "CLAY LAYOUT",
-                                                clay_layout::text::TextConfig::new()
-                                                    .font_size(CLAY_SUBTITLE_FONT_SIZE)
-                                                    .wrap_mode(TextElementConfigWrapMode::None)
-                                                    .end(),
-                                            );
-                                        },
-                                    );
-                                },
                             );
                         },
                     );
-
-                    // Accent divider.
+                    // Grow spacer.
                     clay.with(
                         &Declaration::new()
                             .layout()
                             .width(grow!())
-                            .height(fixed!(DIVIDER_HEIGHT))
-                            .end()
-                            .background_color((74, 196, 172).into()),
+                            .height(fixed!(1.0))
+                            .end(),
                         |_| {},
                     );
-
-                    // Body.
+                    // Subtitle slot.
                     clay.with(
                         &Declaration::new()
                             .layout()
-                            .width(grow!())
+                            .width(fit!())
                             .height(grow!())
-                            .end()
-                            .background_color((22, 28, 34).into()),
+                            .child_alignment(Alignment::new(
+                                LayoutAlignmentX::Right,
+                                LayoutAlignmentY::Top,
+                            ))
+                            .end(),
                         |clay| {
-                            // Content.
-                            clay.with(
-                                &Declaration::new()
-                                    .layout()
-                                    .width(grow!())
-                                    .padding(clay_layout::layout::Padding::all(5))
-                                    .direction(LayoutDirection::TopToBottom)
-                                    .child_gap(2)
+                            clay.text(
+                                "CLAY LAYOUT",
+                                clay_layout::text::TextConfig::new()
+                                    .font_size(CLAY_SUBTITLE_FONT_SIZE)
+                                    .wrap_mode(TextElementConfigWrapMode::None)
                                     .end(),
-                                |clay| {
-                                    for (label, value) in rows {
-                                        clay.with(
-                                            &Declaration::new()
-                                                .layout()
-                                                .width(grow!())
-                                                .height(fit!())
-                                                .direction(LayoutDirection::LeftToRight)
-                                                .end(),
-                                            |clay| {
-                                                clay.text(
-                                                    label,
-                                                    clay_layout::text::TextConfig::new()
-                                                        .font_size(CLAY_FONT_SIZE)
-                                                        .wrap_mode(TextElementConfigWrapMode::None)
-                                                        .end(),
-                                                );
-                                                clay.with(
-                                                    &Declaration::new()
-                                                        .layout()
-                                                        .width(grow!())
-                                                        .height(fixed!(1.0))
-                                                        .end(),
-                                                    |_| {},
-                                                );
-                                                clay.text(
-                                                    value,
-                                                    clay_layout::text::TextConfig::new()
-                                                        .font_size(CLAY_FONT_SIZE)
-                                                        .wrap_mode(TextElementConfigWrapMode::None)
-                                                        .end(),
-                                                );
-                                            },
-                                        );
-                                    }
-
-                                    // Spacer.
-                                    clay.with(
-                                        &Declaration::new()
-                                            .layout()
-                                            .width(grow!())
-                                            .height(fixed!(4.0))
-                                            .end(),
-                                        |_| {},
-                                    );
-
-                                    // Word-wrap cell.
-                                    clay.text(
-                                        WRAP_TEXT,
-                                        clay_layout::text::TextConfig::new()
-                                            .font_size(CLAY_FONT_SIZE)
-                                            .end(),
-                                    );
-                                },
                             );
                         },
                     );
@@ -880,7 +805,100 @@ fn compute_clay_layout(
             );
         },
     );
+}
 
+/// Builds the clay accent divider bar.
+fn build_clay_divider(clay: &mut ClayLayoutScope<'_, '_, (), ()>) {
+    clay.with(
+        &Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(fixed!(DIVIDER_HEIGHT))
+            .end()
+            .background_color((74, 196, 172).into()),
+        |_| {},
+    );
+}
+
+/// Builds the clay body section containing key-value rows and wrap text.
+fn build_clay_body(clay: &mut ClayLayoutScope<'_, '_, (), ()>, rows: &[(String, String)]) {
+    clay.with(
+        &Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(grow!())
+            .end()
+            .background_color((22, 28, 34).into()),
+        |clay| {
+            clay.with(
+                &Declaration::new()
+                    .layout()
+                    .width(grow!())
+                    .padding(clay_layout::layout::Padding::all(5))
+                    .direction(LayoutDirection::TopToBottom)
+                    .child_gap(2)
+                    .end(),
+                |clay| {
+                    for (label, value) in rows {
+                        clay.with(
+                            &Declaration::new()
+                                .layout()
+                                .width(grow!())
+                                .height(fit!())
+                                .direction(LayoutDirection::LeftToRight)
+                                .end(),
+                            |clay| {
+                                clay.text(
+                                    label,
+                                    clay_layout::text::TextConfig::new()
+                                        .font_size(CLAY_FONT_SIZE)
+                                        .wrap_mode(TextElementConfigWrapMode::None)
+                                        .end(),
+                                );
+                                clay.with(
+                                    &Declaration::new()
+                                        .layout()
+                                        .width(grow!())
+                                        .height(fixed!(1.0))
+                                        .end(),
+                                    |_| {},
+                                );
+                                clay.text(
+                                    value,
+                                    clay_layout::text::TextConfig::new()
+                                        .font_size(CLAY_FONT_SIZE)
+                                        .wrap_mode(TextElementConfigWrapMode::None)
+                                        .end(),
+                                );
+                            },
+                        );
+                    }
+
+                    // Spacer.
+                    clay.with(
+                        &Declaration::new()
+                            .layout()
+                            .width(grow!())
+                            .height(fixed!(4.0))
+                            .end(),
+                        |_| {},
+                    );
+
+                    // Word-wrap cell.
+                    clay.text(
+                        WRAP_TEXT,
+                        clay_layout::text::TextConfig::new()
+                            .font_size(CLAY_FONT_SIZE)
+                            .end(),
+                    );
+                },
+            );
+        },
+    );
+}
+
+/// Collects render commands from a finished clay layout into `ClayRect` entries.
+fn collect_clay_rects(layout: ClayLayoutScope<'_, '_, (), ()>) -> Vec<ClayRect> {
     let mut rects = Vec::new();
     for cmd in layout.end() {
         let kind = match cmd.config {

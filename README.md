@@ -5,6 +5,8 @@
 
 Diegetic UI layout engine for [Bevy](https://bevyengine.org/), implemented in pure Rust.
 
+> **Status: pre-release (0.0.x)** — This crate is under active development and has not yet reached a stable API. Expect frequent breaking changes between versions. We are not following semver until 0.1.0.
+
 Diegetic UI lives inside the game world — panels on surfaces, status displays on objects, HUDs that exist as physical things characters can see. This crate provides the layout engine and Bevy integration to build those interfaces.
 
 ## Inspiration

@@ -1,7 +1,6 @@
 #![allow(clippy::float_cmp)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::too_many_lines)]
 #![allow(clippy::expect_used)]
 
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout performance on
@@ -155,6 +154,121 @@ fn generate_rows(count: usize) -> Vec<(&'static str, &'static str)> {
 
 // ── Layout builders ─────────────────────────────────────────────────────
 
+fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
+    clay.with(
+        Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(grow!(FONT_SIZE, 20.0))
+            .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
+            .child_alignment(Alignment::new(
+                LayoutAlignmentX::Left,
+                LayoutAlignmentY::Center,
+            ))
+            .end()
+            .background_color((52, 98, 90).into()),
+        |clay| {
+            clay.with(
+                Declaration::new()
+                    .layout()
+                    .width(grow!())
+                    .height(fit!())
+                    .direction(LayoutDirection::LeftToRight)
+                    .end(),
+                |clay| {
+                    clay.with(
+                        Declaration::new()
+                            .layout()
+                            .width(fit!())
+                            .height(grow!())
+                            .end(),
+                        |clay| {
+                            clay.text(
+                                "STATUS",
+                                clay_layout::text::TextConfig::new()
+                                    .font_size(CLAY_FONT_SIZE)
+                                    .end(),
+                            );
+                        },
+                    );
+                    clay.with(
+                        Declaration::new()
+                            .layout()
+                            .width(grow!())
+                            .height(fixed!(1.0))
+                            .end(),
+                        |_| {},
+                    );
+                    clay.with(
+                        Declaration::new()
+                            .layout()
+                            .width(fit!())
+                            .height(grow!())
+                            .end(),
+                        |clay| {
+                            clay.text(
+                                "BENCH",
+                                clay_layout::text::TextConfig::new()
+                                    .font_size(CLAY_FONT_SIZE)
+                                    .end(),
+                            );
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(&str, &str)]) {
+    clay.with(
+        Declaration::new()
+            .layout()
+            .width(grow!())
+            .height(grow!())
+            .end()
+            .background_color((22, 28, 34).into()),
+        |clay| {
+            clay.with(
+                Declaration::new()
+                    .layout()
+                    .width(grow!())
+                    .padding(clay_layout::layout::Padding::all(5))
+                    .direction(LayoutDirection::TopToBottom)
+                    .child_gap(2)
+                    .end(),
+                |clay| {
+                    for (label, value) in rows {
+                        clay.with(
+                            Declaration::new()
+                                .layout()
+                                .width(grow!())
+                                .height(fit!())
+                                .direction(LayoutDirection::LeftToRight)
+                                .end(),
+                            |clay| {
+                                clay.text(
+                                    label,
+                                    clay_layout::text::TextConfig::new()
+                                        .font_size(CLAY_FONT_SIZE)
+                                        .end(),
+                                );
+                                clay.with(Declaration::new().layout().width(grow!()).end(), |_| {});
+                                clay.text(
+                                    value,
+                                    clay_layout::text::TextConfig::new()
+                                        .font_size(CLAY_FONT_SIZE)
+                                        .end(),
+                                );
+                            },
+                        );
+                    }
+                },
+            );
+        },
+    );
+}
+
 fn build_clay_panel<'a>(
     layout: &mut ClayLayoutScope<'a, 'a, (), ()>,
     rows: &[(&str, &str)],
@@ -171,70 +285,7 @@ fn build_clay_panel<'a>(
             .end()
             .background_color((180, 96, 122).into()),
         |clay| {
-            // Header.
-            clay.with(
-                Declaration::new()
-                    .layout()
-                    .width(grow!())
-                    .height(grow!(FONT_SIZE, 20.0))
-                    .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
-                    .child_alignment(Alignment::new(
-                        LayoutAlignmentX::Left,
-                        LayoutAlignmentY::Center,
-                    ))
-                    .end()
-                    .background_color((52, 98, 90).into()),
-                |clay| {
-                    clay.with(
-                        Declaration::new()
-                            .layout()
-                            .width(grow!())
-                            .height(fit!())
-                            .direction(LayoutDirection::LeftToRight)
-                            .end(),
-                        |clay| {
-                            clay.with(
-                                Declaration::new()
-                                    .layout()
-                                    .width(fit!())
-                                    .height(grow!())
-                                    .end(),
-                                |clay| {
-                                    clay.text(
-                                        "STATUS",
-                                        clay_layout::text::TextConfig::new()
-                                            .font_size(CLAY_FONT_SIZE)
-                                            .end(),
-                                    );
-                                },
-                            );
-                            clay.with(
-                                Declaration::new()
-                                    .layout()
-                                    .width(grow!())
-                                    .height(fixed!(1.0))
-                                    .end(),
-                                |_| {},
-                            );
-                            clay.with(
-                                Declaration::new()
-                                    .layout()
-                                    .width(fit!())
-                                    .height(grow!())
-                                    .end(),
-                                |clay| {
-                                    clay.text(
-                                        "BENCH",
-                                        clay_layout::text::TextConfig::new()
-                                            .font_size(CLAY_FONT_SIZE)
-                                            .end(),
-                                    );
-                                },
-                            );
-                        },
-                    );
-                },
-            );
+            build_clay_header(clay);
             // Divider.
             clay.with(
                 Declaration::new()
@@ -245,70 +296,12 @@ fn build_clay_panel<'a>(
                     .background_color((74, 196, 172).into()),
                 |_| {},
             );
-            // Body.
-            clay.with(
-                Declaration::new()
-                    .layout()
-                    .width(grow!())
-                    .height(grow!())
-                    .end()
-                    .background_color((22, 28, 34).into()),
-                |clay| {
-                    clay.with(
-                        Declaration::new()
-                            .layout()
-                            .width(grow!())
-                            .padding(clay_layout::layout::Padding::all(5))
-                            .direction(LayoutDirection::TopToBottom)
-                            .child_gap(2)
-                            .end(),
-                        |clay| {
-                            for (label, value) in rows {
-                                clay.with(
-                                    Declaration::new()
-                                        .layout()
-                                        .width(grow!())
-                                        .height(fit!())
-                                        .direction(LayoutDirection::LeftToRight)
-                                        .end(),
-                                    |clay| {
-                                        clay.text(
-                                            label,
-                                            clay_layout::text::TextConfig::new()
-                                                .font_size(CLAY_FONT_SIZE)
-                                                .end(),
-                                        );
-                                        clay.with(
-                                            Declaration::new().layout().width(grow!()).end(),
-                                            |_| {},
-                                        );
-                                        clay.text(
-                                            value,
-                                            clay_layout::text::TextConfig::new()
-                                                .font_size(CLAY_FONT_SIZE)
-                                                .end(),
-                                        );
-                                    },
-                                );
-                            }
-                        },
-                    );
-                },
-            );
+            build_clay_body(clay, rows);
         },
     );
 }
 
-fn build_diegetic_tree(rows: &[(&str, &str)], size: f32) -> bevy_diegetic::LayoutTree {
-    let mut b = LayoutBuilder::with_root(
-        El::new()
-            .width(Sizing::fixed(size))
-            .height(Sizing::fixed(size))
-            .padding(Padding::all(8.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0)
-            .background(bevy::color::Color::srgb_u8(180, 96, 122)),
-    );
+fn build_diegetic_header(b: &mut LayoutBuilder) {
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -343,13 +336,9 @@ fn build_diegetic_tree(rows: &[(&str, &str)], size: f32) -> bevy_diegetic::Layou
             );
         },
     );
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(4.0))
-            .background(bevy::color::Color::srgb_u8(74, 196, 172)),
-        |_| {},
-    );
+}
+
+fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(&str, &str)]) {
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -383,6 +372,27 @@ fn build_diegetic_tree(rows: &[(&str, &str)], size: f32) -> bevy_diegetic::Layou
             );
         },
     );
+}
+
+fn build_diegetic_tree(rows: &[(&str, &str)], size: f32) -> bevy_diegetic::LayoutTree {
+    let mut b = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fixed(size))
+            .height(Sizing::fixed(size))
+            .padding(Padding::all(8.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(5.0)
+            .background(bevy::color::Color::srgb_u8(180, 96, 122)),
+    );
+    build_diegetic_header(&mut b);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(4.0))
+            .background(bevy::color::Color::srgb_u8(74, 196, 172)),
+        |_| {},
+    );
+    build_diegetic_body(&mut b, rows);
     b.build()
 }
 

@@ -303,94 +303,71 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "manual perf benchmark — run with --ignored"]
-    #[allow(clippy::too_many_lines)]
-    fn perf_tree_build_breakdown() {
-        let rows = 1000;
-        let iters = 100;
+    /// Populates a `LayoutBuilder` with label/value rows inside a vertical container.
+    fn populate_label_rows(builder: &mut LayoutBuilder, labels: &[String]) {
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::FIT)
+                .direction(Direction::TopToBottom)
+                .child_gap(2.0)
+                .padding(Padding::all(4.0))
+                .border(Border::all(1.0, bevy::color::Color::WHITE)),
+            |b| {
+                for label in labels {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(4.0),
+                        |b| {
+                            b.text(label, TextConfig::new(PERF_FONT_SIZE));
+                            b.with(
+                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                |_| {},
+                            );
+                            b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                        },
+                    );
+                }
+            },
+        );
+    }
 
-        // 1. Just the string formatting cost.
+    /// Benchmarks `format!` overhead in isolation.
+    fn bench_string_format(rows: usize, iters: usize) {
         run_timing(&format!("string_format_{rows}_rows"), iters, || {
             for i in 0..rows {
                 std::hint::black_box(format!("item {i}:"));
             }
         });
+    }
 
-        // 2. Tree build with pre-built strings (no format! per row).
-        let labels: Vec<String> = (0..rows).map(|i| format!("item {i}:")).collect();
+    /// Benchmarks tree build + `build()` with pre-built label strings.
+    fn bench_tree_build_prebuilt(labels: &[String], rows: usize, iters: usize) {
         run_timing(
             &format!("tree_build_prebuilt_strings_{rows}_rows"),
             iters,
             || {
                 let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
-                builder.with(
-                    El::new()
-                        .width(Sizing::GROW)
-                        .height(Sizing::FIT)
-                        .direction(Direction::TopToBottom)
-                        .child_gap(2.0)
-                        .padding(Padding::all(4.0))
-                        .border(Border::all(1.0, bevy::color::Color::WHITE)),
-                    |b| {
-                        for label in &labels {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .height(Sizing::FIT)
-                                    .direction(Direction::LeftToRight)
-                                    .child_gap(4.0),
-                                |b| {
-                                    b.text(label, TextConfig::new(PERF_FONT_SIZE));
-                                    b.with(
-                                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                        |_| {},
-                                    );
-                                    b.text("value", TextConfig::new(PERF_FONT_SIZE));
-                                },
-                            );
-                        }
-                    },
-                );
+                populate_label_rows(&mut builder, labels);
                 std::hint::black_box(builder.build());
             },
         );
+    }
 
-        // 3. Builder only — no build() call — isolates hash cost.
+    /// Benchmarks tree construction without the final `build()` call to isolate hash cost.
+    fn bench_tree_build_no_hash(labels: &[String], rows: usize, iters: usize) {
         run_timing(&format!("tree_build_no_hash_{rows}_rows"), iters, || {
             let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
-            builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(2.0)
-                    .padding(Padding::all(4.0))
-                    .border(Border::all(1.0, bevy::color::Color::WHITE)),
-                |b| {
-                    for label in &labels {
-                        b.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .direction(Direction::LeftToRight)
-                                .child_gap(4.0),
-                            |b| {
-                                b.text(label, TextConfig::new(PERF_FONT_SIZE));
-                                b.with(
-                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                    |_| {},
-                                );
-                                b.text("value", TextConfig::new(PERF_FONT_SIZE));
-                            },
-                        );
-                    }
-                },
-            );
+            populate_label_rows(&mut builder, labels);
             std::hint::black_box(builder);
         });
+    }
 
-        // 4. Tree build with pre-allocated capacity.
+    /// Benchmarks tree build + `build()` with pre-allocated builder capacity.
+    fn bench_tree_build_preallocated(labels: &[String], rows: usize, iters: usize) {
         run_timing(
             &format!("tree_build_preallocated_{rows}_rows"),
             iters,
@@ -398,37 +375,23 @@ mod tests {
                 let capacity = rows * 4 + 2;
                 let mut builder =
                     LayoutBuilder::with_capacity(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT, capacity);
-                builder.with(
-                    El::new()
-                        .width(Sizing::GROW)
-                        .height(Sizing::FIT)
-                        .direction(Direction::TopToBottom)
-                        .child_gap(2.0)
-                        .padding(Padding::all(4.0))
-                        .border(Border::all(1.0, bevy::color::Color::WHITE)),
-                    |b| {
-                        for label in &labels {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .height(Sizing::FIT)
-                                    .direction(Direction::LeftToRight)
-                                    .child_gap(4.0),
-                                |b| {
-                                    b.text(label, TextConfig::new(PERF_FONT_SIZE));
-                                    b.with(
-                                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                        |_| {},
-                                    );
-                                    b.text("value", TextConfig::new(PERF_FONT_SIZE));
-                                },
-                            );
-                        }
-                    },
-                );
+                populate_label_rows(&mut builder, labels);
                 std::hint::black_box(builder.build());
             },
         );
+    }
+
+    #[test]
+    #[ignore = "manual perf benchmark — run with --ignored"]
+    fn perf_tree_build_breakdown() {
+        let rows = 1000;
+        let iters = 100;
+        let labels: Vec<String> = (0..rows).map(|i| format!("item {i}:")).collect();
+
+        bench_string_format(rows, iters);
+        bench_tree_build_prebuilt(&labels, rows, iters);
+        bench_tree_build_no_hash(&labels, rows, iters);
+        bench_tree_build_preallocated(&labels, rows, iters);
     }
 
     #[test]

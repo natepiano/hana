@@ -82,7 +82,31 @@ const fn shadow_mode_label(mode: GlyphShadowMode) -> &'static str {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Grid dimensions derived from the mode arrays.
+struct GridLayout {
+    grid_width:    f32,
+    grid_height:   f32,
+    grid_center_y: f32,
+    rows:          usize,
+    cols:          usize,
+}
+
+impl GridLayout {
+    #[allow(clippy::cast_precision_loss)]
+    fn new(num_rows: usize, num_cols: usize) -> Self {
+        let grid_width = (num_cols - 1) as f32 * COL_SPACING;
+        let grid_height = (num_rows - 1) as f32 * ROW_SPACING;
+        let grid_center_y = grid_height * 0.5 + 1.5;
+        Self {
+            grid_width,
+            grid_height,
+            grid_center_y,
+            rows: num_rows,
+            cols: num_cols,
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -101,17 +125,23 @@ fn setup(
         GlyphShadowMode::PunchOut,
     ];
 
-    let cols = shadow_modes.len();
-    let rows = render_modes.len();
+    let grid = GridLayout::new(render_modes.len(), shadow_modes.len());
 
-    #[allow(clippy::cast_precision_loss)]
-    let grid_width = (cols - 1) as f32 * COL_SPACING;
-    #[allow(clippy::cast_precision_loss)]
-    let grid_height = (rows - 1) as f32 * ROW_SPACING;
-    let grid_center_y = grid_height * 0.5 + 1.5;
+    let ground = spawn_ground_and_backdrop(&mut commands, &mut meshes, &mut materials, &grid);
+    spawn_grid_headers(&mut commands, ground, &render_modes, &shadow_modes, &grid);
+    spawn_glyph_grid(&mut commands, ground, &render_modes, &shadow_modes, &grid);
+    spawn_lighting_and_camera(&mut commands, grid.grid_center_y);
+    spawn_hud(&mut commands);
+}
 
-    // Ground plane — root of the scene hierarchy. All UI is parented here
-    // so moving the plane moves everything.
+/// Spawns the ground plane and shadow-receiver backdrop panel.
+/// Returns the ground `Entity` used as parent for the scene hierarchy.
+fn spawn_ground_and_backdrop(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    grid: &GridLayout,
+) -> Entity {
     let ground = commands
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(20.0, 20.0))),
@@ -128,9 +158,8 @@ fn setup(
 
     commands.insert_resource(SceneBounds(ground));
 
-    // Shadow-receiver panel — opaque backdrop behind the text grid.
-    let panel_w = grid_width + 3.0;
-    let panel_h = grid_height + 3.0;
+    let panel_w = grid.grid_width + 3.0;
+    let panel_h = grid.grid_height + 3.0;
     let backdrop = commands
         .spawn((
             Mesh3d(meshes.add(Rectangle::new(panel_w, panel_h))),
@@ -140,39 +169,50 @@ fn setup(
                 cull_mode: None,
                 ..default()
             })),
-            Transform::from_xyz(0.0, grid_center_y, -PANEL_OFFSET),
+            Transform::from_xyz(0.0, grid.grid_center_y, -PANEL_OFFSET),
         ))
         .observe(on_entity_clicked)
         .id();
     commands.entity(ground).add_child(backdrop);
 
+    ground
+}
+
+/// Spawns row headers (render mode) and column headers (shadow mode).
+#[allow(clippy::cast_precision_loss)]
+fn spawn_grid_headers(
+    commands: &mut Commands,
+    ground: Entity,
+    render_modes: &[GlyphRenderMode],
+    shadow_modes: &[GlyphShadowMode],
+    grid: &GridLayout,
+) {
     let label_color = Color::srgb(0.1, 0.15, 0.6);
     let label_shadow_color = Color::WHITE;
     let label_shadow_offset = Vec3::new(0.0015, -0.0015, -0.001);
 
     // Row headers (render mode labels on the left).
-    #[allow(clippy::cast_precision_loss)]
     for (row, &render_mode) in render_modes.iter().enumerate() {
-        let y = ((rows - 1 - row) as f32).mul_add(ROW_SPACING, grid_center_y) - grid_height * 0.5;
+        let y = ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y)
+            - grid.grid_height * 0.5;
         spawn_label(
-            &mut commands,
+            commands,
             ground,
             render_mode_label(render_mode),
             HEADER_SIZE,
             label_color,
             label_shadow_color,
             label_shadow_offset,
-            Vec3::new((-grid_width).mul_add(0.5, -1.5), y, 0.0),
+            Vec3::new((-grid.grid_width).mul_add(0.5, -1.5), y, 0.0),
         );
     }
 
     // Column headers (shadow mode labels on top).
-    #[allow(clippy::cast_precision_loss)]
     for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-        let x = (col as f32).mul_add(COL_SPACING, -(grid_width * 0.5));
-        let y = grid_center_y + grid_height.mul_add(0.5, 0.8);
+        let x = (col as f32).mul_add(COL_SPACING, -(grid.grid_width * 0.5));
+        let y = grid.grid_center_y + grid.grid_height.mul_add(0.5, 0.8);
         spawn_label(
-            &mut commands,
+            commands,
             ground,
             shadow_mode_label(shadow_mode),
             HEADER_SIZE,
@@ -182,14 +222,22 @@ fn setup(
             Vec3::new(x, y, 0.0),
         );
     }
+}
 
-    // Spawn one "A" per (render_mode, shadow_mode) combination.
-    #[allow(clippy::cast_precision_loss)]
+/// Spawns one "A" glyph per `(GlyphRenderMode, GlyphShadowMode)` combination.
+#[allow(clippy::cast_precision_loss)]
+fn spawn_glyph_grid(
+    commands: &mut Commands,
+    ground: Entity,
+    render_modes: &[GlyphRenderMode],
+    shadow_modes: &[GlyphShadowMode],
+    grid: &GridLayout,
+) {
     for (row, &render_mode) in render_modes.iter().enumerate() {
         for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-            let x = (col as f32).mul_add(COL_SPACING, -(grid_width * 0.5));
-            let y =
-                ((rows - 1 - row) as f32).mul_add(ROW_SPACING, grid_center_y) - grid_height * 0.5;
+            let x = (col as f32).mul_add(COL_SPACING, -(grid.grid_width * 0.5));
+            let y = ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y)
+                - grid.grid_height * 0.5;
 
             let glyph = commands
                 .spawn((
@@ -206,8 +254,10 @@ fn setup(
             commands.entity(ground).add_child(glyph);
         }
     }
+}
 
-    // Directional light — shines from the camera side through text toward the panel.
+/// Spawns the directional light, ambient light, and camera.
+fn spawn_lighting_and_camera(commands: &mut Commands, grid_center_y: f32) {
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
@@ -217,7 +267,6 @@ fn setup(
         Transform::from_xyz(0.0, 5.0, 8.0).looking_at(Vec3::new(0.0, grid_center_y, 0.0), Vec3::Y),
     ));
 
-    // Camera + ambient light.
     commands.spawn((
         AmbientLight {
             color:                      Color::WHITE,
@@ -241,8 +290,10 @@ fn setup(
             ..default()
         },
     ));
+}
 
-    // HUD label.
+/// Spawns the HUD label describing the grid axes.
+fn spawn_hud(commands: &mut Commands) {
     commands.spawn((
         Text::new("rows: GlyphRenderMode, columns: GlyphShadowMode"),
         TextFont {

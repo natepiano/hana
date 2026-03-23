@@ -16,6 +16,7 @@ use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
+use crate::layout::LayoutResult;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextConfig;
 use crate::layout::TextMeasure;
@@ -55,21 +56,21 @@ pub struct ShapedGlyph {
 #[derive(Clone, Copy, Debug)]
 pub struct LineMetricsSnapshot {
     /// Typographic ascent for this line.
-    pub ascent:    f32,
+    pub ascent:      f32,
     /// Typographic descent for this line.
-    pub descent:   f32,
+    pub descent:     f32,
     /// Typographic leading for this line.
-    pub leading:   f32,
+    pub leading:     f32,
     /// Absolute line height.
     pub line_height: f32,
     /// Offset to the baseline from the top of the layout.
-    pub baseline:  f32,
+    pub baseline:    f32,
     /// Full advance of the line including trailing whitespace.
-    pub advance:   f32,
+    pub advance:     f32,
     /// Top of the line box (parley `min_coord`).
-    pub top:       f32,
+    pub top:         f32,
     /// Bottom of the line box (parley `max_coord`).
-    pub bottom:    f32,
+    pub bottom:      f32,
 }
 
 /// Cached shaping result for a text string at a specific font configuration.
@@ -253,11 +254,7 @@ fn poll_atlas_glyphs(
 
 /// Extracts `RenderCommandKind::Text` entries from computed panels and
 /// builds glyph mesh entities with [`MsdfTextMaterial`].
-#[allow(
-    clippy::too_many_arguments,
-    clippy::type_complexity,
-    clippy::too_many_lines
-)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn extract_text_meshes(
     changed_panels: Query<
         (
@@ -332,39 +329,19 @@ fn extract_text_meshes(
         let scale_y = panel.world_height / panel.layout_height;
         let half_w = panel.world_width * 0.5;
         let half_h = panel.world_height * 0.5;
-
         let hue = hue_offset.map_or(0.0, |h| h.0);
 
-        // Group quads by (render_mode, shadow_mode) — each unique combo
-        // becomes its own mesh entity with the appropriate material.
-        let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
-        for cmd in &result.commands {
-            let (text, config) = match &cmd.kind {
-                RenderCommandKind::Text { text, config, .. } => (text.as_str(), config.clone()),
-                _ => continue,
-            };
-
-            let key = TextBatchKey {
-                render_mode: config.render_mode(),
-                shadow_mode: config.shadow_mode(),
-            };
-
-            let quads = shape_text_to_quads(
-                text,
-                &config,
-                &cmd.bounds,
-                &font_registry,
-                &mut atlas,
-                &shaping_cx,
-                &mut cache,
-                scale_x,
-                scale_y,
-                half_w,
-                half_h,
-            );
-
-            batches.entry(key).or_default().extend_from_slice(&quads);
-        }
+        let batches = collect_panel_quads(
+            result,
+            &font_registry,
+            &mut atlas,
+            &shaping_cx,
+            &mut cache,
+            scale_x,
+            scale_y,
+            half_w,
+            half_h,
+        );
 
         let total_quads: usize = batches.values().map(Vec::len).sum();
 
@@ -382,98 +359,226 @@ fn extract_text_meshes(
             }
         }
 
-        // Emit one visible mesh (+ optional shadow proxy) per batch.
-        for (key, quads) in &batches {
-            if quads.is_empty() {
-                continue;
-            }
-
-            let mesh = build_glyph_mesh(quads);
-            let mesh_handle = meshes.add(mesh);
-
-            let is_invisible = key.render_mode == GlyphRenderMode::Invisible;
-
-            // Invisible render mode needs a proxy for any non-None shadow
-            // (including SolidQuad) since there's no visible mesh to cast.
-            let needs_proxy = if is_invisible {
-                key.shadow_mode != GlyphShadowMode::None
-            } else {
-                matches!(
-                    key.shadow_mode,
-                    GlyphShadowMode::Text | GlyphShadowMode::PunchOut
-                )
-            };
-            let suppress_shadow =
-                is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None;
-
-            // Spawn visible mesh (skip for Invisible render mode).
-            if !is_invisible {
-                let render_mode_u32 = key.render_mode as u32;
-
-                #[allow(clippy::cast_possible_truncation)]
-                let material_handle =
-                    if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
-                        default_handle.clone()
-                    } else {
-                        materials.add(super::msdf_material::msdf_text_material(
-                            atlas.sdf_range() as f32,
-                            atlas.width(),
-                            atlas.height(),
-                            atlas_image.clone(),
-                            hue,
-                            render_mode_u32,
-                        ))
-                    };
-
-                if suppress_shadow {
-                    commands.entity(panel_entity).with_child((
-                        DiegeticTextMesh,
-                        NotShadowCaster,
-                        Mesh3d(mesh_handle.clone()),
-                        MeshMaterial3d(material_handle),
-                        Transform::IDENTITY,
-                    ));
-                } else {
-                    commands.entity(panel_entity).with_child((
-                        DiegeticTextMesh,
-                        Mesh3d(mesh_handle.clone()),
-                        MeshMaterial3d(material_handle),
-                        Transform::IDENTITY,
-                    ));
-                }
-            }
-
-            // Spawn shadow proxy if needed.
-            if needs_proxy {
-                let shadow_render_mode = match key.shadow_mode {
-                    GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
-                    GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
-                    GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
-                };
-
-                #[allow(clippy::cast_possible_truncation)]
-                let proxy_material =
-                    materials.add(super::msdf_material::msdf_shadow_proxy_material(
-                        atlas.sdf_range() as f32,
-                        atlas.width(),
-                        atlas.height(),
-                        atlas_image.clone(),
-                        hue,
-                        shadow_render_mode,
-                    ));
-
-                commands.entity(panel_entity).with_child((
-                    DiegeticShadowProxy,
-                    Mesh3d(mesh_handle),
-                    MeshMaterial3d(proxy_material),
-                    Transform::IDENTITY,
-                ));
-            }
-        }
+        spawn_batch_meshes(
+            &batches,
+            panel_entity,
+            hue,
+            &default_handle,
+            &atlas_image,
+            &atlas,
+            &mut meshes,
+            &mut materials,
+            &mut commands,
+        );
     }
 
     perf.last_text_extract_ms = start.elapsed().as_secs_f32() * 1000.0;
     perf.last_text_extract_panels = panel_count;
+}
+
+/// Groups text render commands from a single panel's [`LayoutResult`] into
+/// batched glyph quads keyed by (`render_mode`, `shadow_mode`).
+///
+/// Each unique combination of [`GlyphRenderMode`] and [`GlyphShadowMode`]
+/// produces a separate batch that will become its own mesh entity.
+#[allow(clippy::too_many_arguments)]
+fn collect_panel_quads(
+    result: &LayoutResult,
+    font_registry: &FontRegistry,
+    atlas: &mut MsdfAtlas,
+    shaping_cx: &TextShapingContext,
+    cache: &mut ShapedTextCache,
+    scale_x: f32,
+    scale_y: f32,
+    half_w: f32,
+    half_h: f32,
+) -> HashMap<TextBatchKey, Vec<GlyphQuadData>> {
+    let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
+
+    for cmd in &result.commands {
+        let (text, config) = match &cmd.kind {
+            RenderCommandKind::Text { text, config, .. } => (text.as_str(), config.clone()),
+            _ => continue,
+        };
+
+        let key = TextBatchKey {
+            render_mode: config.render_mode(),
+            shadow_mode: config.shadow_mode(),
+        };
+
+        let quads = shape_text_to_quads(
+            text,
+            &config,
+            &cmd.bounds,
+            font_registry,
+            atlas,
+            shaping_cx,
+            cache,
+            scale_x,
+            scale_y,
+            half_w,
+            half_h,
+        );
+
+        batches.entry(key).or_default().extend_from_slice(&quads);
+    }
+
+    batches
+}
+
+/// Spawns visible mesh and optional shadow proxy entities for each batch
+/// of glyph quads under the given `panel_entity`.
+#[allow(clippy::too_many_arguments)]
+fn spawn_batch_meshes(
+    batches: &HashMap<TextBatchKey, Vec<GlyphQuadData>>,
+    panel_entity: Entity,
+    hue: f32,
+    default_handle: &Handle<MsdfTextMaterial>,
+    atlas_image: &Handle<Image>,
+    atlas: &MsdfAtlas,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<MsdfTextMaterial>,
+    commands: &mut Commands,
+) {
+    for (key, quads) in batches {
+        if quads.is_empty() {
+            continue;
+        }
+
+        let mesh = build_glyph_mesh(quads);
+        let mesh_handle = meshes.add(mesh);
+
+        let is_invisible = key.render_mode == GlyphRenderMode::Invisible;
+
+        // `Invisible` render mode needs a proxy for any non-`None` shadow
+        // (including `SolidQuad`) since there's no visible mesh to cast.
+        let needs_proxy = if is_invisible {
+            key.shadow_mode != GlyphShadowMode::None
+        } else {
+            matches!(
+                key.shadow_mode,
+                GlyphShadowMode::Text | GlyphShadowMode::PunchOut
+            )
+        };
+        let suppress_shadow =
+            is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None;
+
+        // Spawn visible mesh (skip for `Invisible` render mode).
+        if !is_invisible {
+            spawn_visible_mesh(
+                key,
+                hue,
+                suppress_shadow,
+                default_handle,
+                atlas_image,
+                atlas,
+                &mesh_handle,
+                panel_entity,
+                materials,
+                commands,
+            );
+        }
+
+        // Spawn shadow proxy if needed.
+        if needs_proxy {
+            spawn_shadow_proxy(
+                key,
+                hue,
+                atlas_image,
+                atlas,
+                &mesh_handle,
+                panel_entity,
+                materials,
+                commands,
+            );
+        }
+    }
+}
+
+/// Spawns a visible text mesh child under `panel_entity` with the
+/// appropriate [`MsdfTextMaterial`].
+#[allow(clippy::too_many_arguments)]
+fn spawn_visible_mesh(
+    key: &TextBatchKey,
+    hue: f32,
+    suppress_shadow: bool,
+    default_handle: &Handle<MsdfTextMaterial>,
+    atlas_image: &Handle<Image>,
+    atlas: &MsdfAtlas,
+    mesh_handle: &Handle<Mesh>,
+    panel_entity: Entity,
+    materials: &mut Assets<MsdfTextMaterial>,
+    commands: &mut Commands,
+) {
+    let render_mode_u32 = key.render_mode as u32;
+
+    #[allow(clippy::cast_possible_truncation)]
+    let material_handle = if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
+        default_handle.clone()
+    } else {
+        materials.add(super::msdf_material::msdf_text_material(
+            atlas.sdf_range() as f32,
+            atlas.width(),
+            atlas.height(),
+            atlas_image.clone(),
+            hue,
+            render_mode_u32,
+        ))
+    };
+
+    if suppress_shadow {
+        commands.entity(panel_entity).with_child((
+            DiegeticTextMesh,
+            NotShadowCaster,
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(material_handle),
+            Transform::IDENTITY,
+        ));
+    } else {
+        commands.entity(panel_entity).with_child((
+            DiegeticTextMesh,
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(material_handle),
+            Transform::IDENTITY,
+        ));
+    }
+}
+
+/// Spawns a shadow proxy mesh child under `panel_entity` with the
+/// shadow-specific [`MsdfTextMaterial`].
+#[allow(clippy::too_many_arguments)]
+fn spawn_shadow_proxy(
+    key: &TextBatchKey,
+    hue: f32,
+    atlas_image: &Handle<Image>,
+    atlas: &MsdfAtlas,
+    mesh_handle: &Handle<Mesh>,
+    panel_entity: Entity,
+    materials: &mut Assets<MsdfTextMaterial>,
+    commands: &mut Commands,
+) {
+    let shadow_render_mode = match key.shadow_mode {
+        GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
+        GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
+        GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
+    };
+
+    #[allow(clippy::cast_possible_truncation)]
+    let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
+        atlas.sdf_range() as f32,
+        atlas.width(),
+        atlas.height(),
+        atlas_image.clone(),
+        hue,
+        shadow_render_mode,
+    ));
+
+    commands.entity(panel_entity).with_child((
+        DiegeticShadowProxy,
+        Mesh3d(mesh_handle.clone()),
+        MeshMaterial3d(proxy_material),
+        Transform::IDENTITY,
+    ));
 }
 
 /// Shapes text via parley, using the cache when possible.
@@ -637,6 +742,8 @@ fn shape_text_to_quads(
             color:    color_arr,
         });
     }
+
+    super::glyph_quad::clip_overlapping_quads(&mut quads);
 
     quads
 }

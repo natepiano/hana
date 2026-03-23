@@ -12,6 +12,7 @@ use std::sync::Arc;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
+use super::render::RectangleSource;
 use super::render::RenderCommand;
 use super::render::RenderCommandKind;
 use super::types::AlignX;
@@ -710,11 +711,228 @@ const fn is_offscreen(x: f32, y: f32, w: f32, h: f32, vp_w: f32, vp_h: f32) -> b
     x > vp_w || y > vp_h || x + w < 0.0 || y + h < 0.0
 }
 
+/// Emits border and scissor-end commands during the up-traversal (second visit)
+/// of the DFS positioning pass.
+fn emit_up_traversal_commands(
+    tree: &LayoutTree,
+    computed: &[ComputedLayout],
+    commands: &mut Vec<RenderCommand>,
+    element: &Element,
+    bounds: BoundingBox,
+    index: usize,
+    offscreen: bool,
+) {
+    if !offscreen && let Some(ref border) = element.border {
+        commands.push(RenderCommand {
+            bounds,
+            kind: RenderCommandKind::Border { border: *border },
+            element_idx: index,
+        });
+
+        // Between-children borders.
+        if border.between_children > 0.0 {
+            emit_between_borders(tree, computed, commands, index, border);
+        }
+    }
+
+    if element.clip {
+        commands.push(RenderCommand {
+            bounds,
+            kind: RenderCommandKind::ScissorEnd,
+            element_idx: index,
+        });
+    }
+}
+
+/// Emits background, scissor-start, and text render commands during the
+/// down-traversal (first visit) of the DFS positioning pass.
+fn emit_down_traversal_commands(
+    commands: &mut Vec<RenderCommand>,
+    element: &Element,
+    wrapped: &Option<WrappedText>,
+    bounds: BoundingBox,
+    index: usize,
+    offscreen: bool,
+) {
+    // Emit rectangle if background is set.
+    if !offscreen && let Some(color) = element.background {
+        commands.push(RenderCommand {
+            bounds,
+            kind: RenderCommandKind::Rectangle {
+                color,
+                source: RectangleSource::Background,
+            },
+            element_idx: index,
+        });
+    }
+
+    // Emit scissor start if clipping (always emit — scissor regions
+    // must be balanced even when the parent is off-screen).
+    if element.clip {
+        commands.push(RenderCommand {
+            bounds,
+            kind: RenderCommandKind::ScissorStart,
+            element_idx: index,
+        });
+    }
+
+    // Emit text render commands.
+    if !offscreen
+        && let ElementContent::Text {
+            ref config,
+            ref text,
+        } = element.content
+    {
+        emit_text_commands(commands, wrapped, config, text, bounds, index);
+    }
+}
+
+/// Emits render commands for text content (both wrapped and unwrapped).
+fn emit_text_commands(
+    commands: &mut Vec<RenderCommand>,
+    wrapped: &Option<WrappedText>,
+    config: &TextConfig,
+    text: &str,
+    bounds: BoundingBox,
+    index: usize,
+) {
+    if let Some(ref wrap_result) = *wrapped {
+        // Wrapped text: emit one command per line.
+        for (line_idx, line) in wrap_result.lines.iter().enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let line_y = wrap_result.line_height.mul_add(line_idx as f32, bounds.y);
+            commands.push(RenderCommand {
+                bounds:      BoundingBox {
+                    x:      bounds.x,
+                    y:      line_y,
+                    width:  line.width,
+                    height: wrap_result.line_height,
+                },
+                kind:        RenderCommandKind::Text {
+                    text:   line.text.clone(),
+                    config: config.clone(),
+                },
+                element_idx: index,
+            });
+        }
+    } else {
+        // Unwrapped text (`TextWrap::None`): single command.
+        commands.push(RenderCommand {
+            bounds,
+            kind: RenderCommandKind::Text {
+                text:   text.to_owned(),
+                config: config.clone(),
+            },
+            element_idx: index,
+        });
+    }
+}
+
+/// Pushes children onto the DFS stack in reverse order with computed positions.
+///
+/// Children are pushed in reverse so the first child is processed first during
+/// iteration. Uses a reverse cursor to compute positions without allocation.
+fn push_children_to_stack(
+    tree: &LayoutTree,
+    computed: &[ComputedLayout],
+    stack: &mut Vec<(usize, f32, f32, bool)>,
+    index: usize,
+    x: f32,
+    y: f32,
+) {
+    let children = tree.children_of(index);
+    if children.is_empty() {
+        return;
+    }
+
+    let parent_el = &tree.elements[index];
+    let parent_w = computed[index].width;
+    let parent_h = computed[index].height;
+    let is_horizontal = parent_el.direction == Direction::LeftToRight;
+
+    let mut children_main_size: f32 = 0.0;
+    for &idx in children {
+        children_main_size += if is_horizontal {
+            computed[idx].width
+        } else {
+            computed[idx].height
+        };
+    }
+
+    let gap_total = if children.len() > 1 {
+        #[allow(clippy::cast_precision_loss)]
+        let g = parent_el.child_gap * (children.len() - 1) as f32;
+        g
+    } else {
+        0.0
+    };
+
+    let main_available = if is_horizontal {
+        parent_w - parent_el.padding.horizontal()
+    } else {
+        parent_h - parent_el.padding.vertical()
+    };
+
+    let extra_main = (main_available - children_main_size - gap_total).max(0.0);
+
+    let main_offset = if is_horizontal {
+        match parent_el.child_align_x {
+            AlignX::Left => 0.0,
+            AlignX::Center => extra_main * 0.5,
+            AlignX::Right => extra_main,
+        }
+    } else {
+        match parent_el.child_align_y {
+            AlignY::Top => 0.0,
+            AlignY::Center => extra_main * 0.5,
+            AlignY::Bottom => extra_main,
+        }
+    };
+
+    // Walk children in reverse, subtracting each child's main size
+    // from the cursor to produce positions in stack-push order.
+    let mut reverse_cursor = main_offset + children_main_size + gap_total;
+    for &child_idx in children.iter().rev() {
+        let child_w = computed[child_idx].width;
+        let child_h = computed[child_idx].height;
+        let child_main = if is_horizontal { child_w } else { child_h };
+
+        reverse_cursor -= child_main;
+
+        let (cx, cy) = if is_horizontal {
+            let cross_available = parent_h - parent_el.padding.vertical();
+            let cross_offset = match parent_el.child_align_y {
+                AlignY::Top => 0.0,
+                AlignY::Center => (cross_available - child_h).max(0.0) * 0.5,
+                AlignY::Bottom => (cross_available - child_h).max(0.0),
+            };
+            (
+                x + parent_el.padding.left + reverse_cursor,
+                y + parent_el.padding.top + cross_offset,
+            )
+        } else {
+            let cross_available = parent_w - parent_el.padding.horizontal();
+            let cross_offset = match parent_el.child_align_x {
+                AlignX::Left => 0.0,
+                AlignX::Center => (cross_available - child_w).max(0.0) * 0.5,
+                AlignX::Right => (cross_available - child_w).max(0.0),
+            };
+            (
+                x + parent_el.padding.left + cross_offset,
+                y + parent_el.padding.top + reverse_cursor,
+            )
+        };
+
+        stack.push((child_idx, cx, cy, false));
+        reverse_cursor -= parent_el.child_gap;
+    }
+}
+
 /// DFS positioning pass. Computes final bounding boxes and emits render commands.
 ///
 /// Elements whose bounding box lies entirely outside the viewport are
 /// omitted from the command list (viewport culling).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn position_and_render(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
@@ -731,224 +949,61 @@ fn position_and_render(
 
     while let Some(&mut (index, x, y, ref mut visited)) = stack.last_mut() {
         let element = &tree.elements[index];
-        let width = computed[index].width;
-        let height = computed[index].height;
+        let bounds = BoundingBox {
+            x,
+            y,
+            width: computed[index].width,
+            height: computed[index].height,
+        };
 
         if *visited {
-            // Second visit (up-traversal): emit borders and scissor end.
-            let offscreen = is_offscreen(x, y, width, height, viewport_width, viewport_height);
-
-            if !offscreen && let Some(ref border) = element.border {
-                commands.push(RenderCommand {
-                    bounds:      BoundingBox {
-                        x,
-                        y,
-                        width,
-                        height,
-                    },
-                    kind:        RenderCommandKind::Border { border: *border },
-                    element_idx: index,
-                });
-
-                // Between-children borders.
-                if border.between_children > 0.0 {
-                    emit_between_borders(tree, computed, &mut commands, index, border);
-                }
-            }
-
-            if element.clip {
-                commands.push(RenderCommand {
-                    bounds:      BoundingBox {
-                        x,
-                        y,
-                        width,
-                        height,
-                    },
-                    kind:        RenderCommandKind::ScissorEnd,
-                    element_idx: index,
-                });
-            }
-
+            let offscreen = is_offscreen(
+                x,
+                y,
+                bounds.width,
+                bounds.height,
+                viewport_width,
+                viewport_height,
+            );
+            emit_up_traversal_commands(
+                tree,
+                computed,
+                &mut commands,
+                element,
+                bounds,
+                index,
+                offscreen,
+            );
             stack.pop();
         } else {
             *visited = true;
 
             // Store the final bounding box (always, even if culled — computed
             // layout is the full picture, only render commands are filtered).
-            computed[index].bounds = BoundingBox {
-                x,
-                y,
-                width,
-                height,
-            };
+            computed[index].bounds = bounds;
 
             // Cull off-screen elements: skip render commands but still recurse
             // into children (a parent can be off-screen while children are on-screen
             // due to overflow).
-            let offscreen = is_offscreen(x, y, width, height, viewport_width, viewport_height);
+            let offscreen = is_offscreen(
+                x,
+                y,
+                bounds.width,
+                bounds.height,
+                viewport_width,
+                viewport_height,
+            );
 
-            // Emit rectangle if background is set.
-            if !offscreen && let Some(color) = element.background {
-                commands.push(RenderCommand {
-                    bounds:      BoundingBox {
-                        x,
-                        y,
-                        width,
-                        height,
-                    },
-                    kind:        RenderCommandKind::Rectangle {
-                        color,
-                        source: super::render::RectangleSource::Background,
-                    },
-                    element_idx: index,
-                });
-            }
+            emit_down_traversal_commands(
+                &mut commands,
+                element,
+                &wrapped[index],
+                bounds,
+                index,
+                offscreen,
+            );
 
-            // Emit scissor start if clipping (always emit — scissor regions
-            // must be balanced even when the parent is off-screen).
-            if element.clip {
-                commands.push(RenderCommand {
-                    bounds:      BoundingBox {
-                        x,
-                        y,
-                        width,
-                        height,
-                    },
-                    kind:        RenderCommandKind::ScissorStart,
-                    element_idx: index,
-                });
-            }
-
-            // Emit text render commands.
-            if !offscreen
-                && let ElementContent::Text {
-                    ref config,
-                    ref text,
-                } = element.content
-            {
-                if let Some(ref wrap_result) = wrapped[index] {
-                    // Wrapped text: emit one command per line.
-                    for (line_idx, line) in wrap_result.lines.iter().enumerate() {
-                        #[allow(clippy::cast_precision_loss)]
-                        let line_y = wrap_result.line_height.mul_add(line_idx as f32, y);
-                        commands.push(RenderCommand {
-                            bounds:      BoundingBox {
-                                x,
-                                y: line_y,
-                                width: line.width,
-                                height: wrap_result.line_height,
-                            },
-                            kind:        RenderCommandKind::Text {
-                                text:   line.text.clone(),
-                                config: config.clone(),
-                            },
-                            element_idx: index,
-                        });
-                    }
-                } else {
-                    // Unwrapped text (TextWrap::None): single command.
-                    commands.push(RenderCommand {
-                        bounds:      BoundingBox {
-                            x,
-                            y,
-                            width,
-                            height,
-                        },
-                        kind:        RenderCommandKind::Text {
-                            text:   text.clone(),
-                            config: config.clone(),
-                        },
-                        element_idx: index,
-                    });
-                }
-            }
-
-            // Push children in reverse order (so first child is processed first).
-            // Uses a reverse cursor to compute positions without allocation.
-            let children = tree.children_of(index);
-            if !children.is_empty() {
-                let parent_el = &tree.elements[index];
-                let parent_w = computed[index].width;
-                let parent_h = computed[index].height;
-                let is_horizontal = parent_el.direction == Direction::LeftToRight;
-
-                let mut children_main_size: f32 = 0.0;
-                for &idx in children {
-                    children_main_size += if is_horizontal {
-                        computed[idx].width
-                    } else {
-                        computed[idx].height
-                    };
-                }
-
-                let gap_total = if children.len() > 1 {
-                    #[allow(clippy::cast_precision_loss)]
-                    let g = parent_el.child_gap * (children.len() - 1) as f32;
-                    g
-                } else {
-                    0.0
-                };
-
-                let main_available = if is_horizontal {
-                    parent_w - parent_el.padding.horizontal()
-                } else {
-                    parent_h - parent_el.padding.vertical()
-                };
-
-                let extra_main = (main_available - children_main_size - gap_total).max(0.0);
-
-                let main_offset = if is_horizontal {
-                    match parent_el.child_align_x {
-                        AlignX::Left => 0.0,
-                        AlignX::Center => extra_main * 0.5,
-                        AlignX::Right => extra_main,
-                    }
-                } else {
-                    match parent_el.child_align_y {
-                        AlignY::Top => 0.0,
-                        AlignY::Center => extra_main * 0.5,
-                        AlignY::Bottom => extra_main,
-                    }
-                };
-
-                // Walk children in reverse, subtracting each child's main size
-                // from the cursor to produce positions in stack-push order.
-                let mut reverse_cursor = main_offset + children_main_size + gap_total;
-                for &child_idx in children.iter().rev() {
-                    let child_w = computed[child_idx].width;
-                    let child_h = computed[child_idx].height;
-                    let child_main = if is_horizontal { child_w } else { child_h };
-
-                    reverse_cursor -= child_main;
-
-                    let (cx, cy) = if is_horizontal {
-                        let cross_available = parent_h - parent_el.padding.vertical();
-                        let cross_offset = match parent_el.child_align_y {
-                            AlignY::Top => 0.0,
-                            AlignY::Center => (cross_available - child_h).max(0.0) * 0.5,
-                            AlignY::Bottom => (cross_available - child_h).max(0.0),
-                        };
-                        (
-                            x + parent_el.padding.left + reverse_cursor,
-                            y + parent_el.padding.top + cross_offset,
-                        )
-                    } else {
-                        let cross_available = parent_w - parent_el.padding.horizontal();
-                        let cross_offset = match parent_el.child_align_x {
-                            AlignX::Left => 0.0,
-                            AlignX::Center => (cross_available - child_w).max(0.0) * 0.5,
-                            AlignX::Right => (cross_available - child_w).max(0.0),
-                        };
-                        (
-                            x + parent_el.padding.left + cross_offset,
-                            y + parent_el.padding.top + reverse_cursor,
-                        )
-                    };
-
-                    stack.push((child_idx, cx, cy, false));
-                    reverse_cursor -= parent_el.child_gap;
-                }
-            }
+            push_children_to_stack(tree, computed, &mut stack, index, x, y);
         }
     }
 
@@ -994,7 +1049,7 @@ fn emit_between_borders(
                 },
                 kind:        RenderCommandKind::Rectangle {
                     color:  border.color,
-                    source: super::render::RectangleSource::BetweenChildrenBorder,
+                    source: RectangleSource::BetweenChildrenBorder,
                 },
                 element_idx: parent_idx,
             });
@@ -1011,7 +1066,7 @@ fn emit_between_borders(
                 },
                 kind:        RenderCommandKind::Rectangle {
                     color:  border.color,
-                    source: super::render::RectangleSource::BetweenChildrenBorder,
+                    source: RectangleSource::BetweenChildrenBorder,
                 },
                 element_idx: parent_idx,
             });

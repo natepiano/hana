@@ -16,6 +16,56 @@ pub(super) struct GlyphQuadData {
     pub color:    [f32; 4],
 }
 
+/// Clips overlapping adjacent glyph quads to eliminate double-compositing
+/// artifacts at quad seams.
+///
+/// MSDF glyph quads include SDF padding that extends beyond the glyph's
+/// advance width, causing adjacent quads to overlap. When rendered with
+/// `AlphaMode::Blend`, the overlapping semi-transparent edge ramps
+/// composite twice, producing visible vertical line artifacts.
+///
+/// This function splits each overlap at its midpoint — the left half goes
+/// to the earlier glyph, the right half to the later glyph — and adjusts
+/// UV coordinates proportionally. O(n) linear pass over sorted quads.
+pub(super) fn clip_overlapping_quads(quads: &mut [GlyphQuadData]) {
+    if quads.len() < 2 {
+        return;
+    }
+
+    for i in 0..quads.len() - 1 {
+        let right_edge_i = quads[i].position[0] + quads[i].size[0];
+        let left_edge_next = quads[i + 1].position[0];
+
+        // Only clip if quads actually overlap in X.
+        if right_edge_i <= left_edge_next {
+            continue;
+        }
+
+        let overlap = right_edge_i - left_edge_next;
+        let half_overlap = overlap * 0.5;
+
+        // Trim the right side of quad i.
+        let old_width_i = quads[i].size[0];
+        let new_width_i = old_width_i - half_overlap;
+        let u_min_i = quads[i].uv_rect[0];
+        let u_max_i = quads[i].uv_rect[2];
+        let new_u_max_i = u_min_i + (u_max_i - u_min_i) * (new_width_i / old_width_i);
+        quads[i].size[0] = new_width_i;
+        quads[i].uv_rect[2] = new_u_max_i;
+
+        // Trim the left side of quad i+1.
+        let old_width_next = quads[i + 1].size[0];
+        let new_width_next = old_width_next - half_overlap;
+        let u_min_next = quads[i + 1].uv_rect[0];
+        let u_max_next = quads[i + 1].uv_rect[2];
+        let new_u_min_next =
+            u_min_next + (u_max_next - u_min_next) * (half_overlap / old_width_next);
+        quads[i + 1].position[0] += half_overlap;
+        quads[i + 1].size[0] = new_width_next;
+        quads[i + 1].uv_rect[0] = new_u_min_next;
+    }
+}
+
 /// Builds a `Mesh` from a list of glyph quads.
 ///
 /// Each glyph produces 4 vertices (quad corners) and 6 indices (two triangles).

@@ -102,11 +102,14 @@ impl Plugin for DiegeticUiPlugin {
         #[cfg(feature = "typography_overlay")]
         {
             app.init_gizmo_group::<crate::debug::TypographyOverlayGizmoGroup>()
-                .add_systems(Update, (
-                    crate::debug::update_typography_gizmo_config,
-                    crate::debug::render_typography_overlay
-                        .after(crate::debug::update_typography_gizmo_config),
-                ));
+                .add_systems(
+                    Update,
+                    (
+                        crate::debug::update_typography_gizmo_config,
+                        crate::debug::render_typography_overlay
+                            .after(crate::debug::update_typography_gizmo_config),
+                    ),
+                );
         }
     }
 }

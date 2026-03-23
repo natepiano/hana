@@ -54,7 +54,7 @@ fn setup(
     // Ground plane — subtle, light gray.
     let ground = commands
         .spawn((
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(12.0, 12.0))),
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 8.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.15, 0.15, 0.15),
                 double_sided: true,
@@ -82,9 +82,18 @@ fn setup(
                 color: Color::from(WHITE),
                 ..default()
             },
-            Transform::from_xyz(0.0, 1.5, 0.0),
+            Transform::from_xyz(0.0, 0.5, 2.0),
         ))
         .observe(on_text_clicked);
+
+    // Hint text
+    commands.spawn((
+        WorldText::new("Click text to zoom in · Click plane to zoom out"),
+        TextStyle::new()
+            .with_size(2.0)
+            .with_color(Color::srgba(0.6, 0.6, 0.6, 0.8)),
+        Transform::from_xyz(0.0, 0.0, 3.45),
+    ));
 
     // Light
     commands.spawn((
@@ -92,27 +101,25 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 1.5, 3.0).looking_at(Vec3::new(0.0, 0.0, -6.0), Vec3::Y),
     ));
 
     // Camera
-    commands.spawn((
-        PanOrbitCamera {
-            focus:  Vec3::new(0.0, 1.5, 0.0),
-            radius: Some(2.93),
-            yaw:    Some(0.0),
-            pitch:  Some(0.05),
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
-            ..default()
+    commands.spawn((PanOrbitCamera {
+        focus: Vec3::new(-0.001, 0.461, 2.002),
+        radius: Some(2.84),
+        yaw: Some(0.0),
+        pitch: Some(0.055),
+        button_orbit: MouseButton::Middle,
+        button_pan: MouseButton::Middle,
+        modifier_pan: Some(KeyCode::ShiftLeft),
+        trackpad_behavior: TrackpadBehavior::BlenderLike {
+            modifier_pan:  Some(KeyCode::ShiftLeft),
+            modifier_zoom: Some(KeyCode::ControlLeft),
         },
-    ));
+        trackpad_pinch_to_zoom_enabled: true,
+        ..default()
+    },));
 }
 
 fn on_text_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
@@ -123,7 +130,6 @@ fn on_text_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
 }
-
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
     let camera = click.hit.camera;

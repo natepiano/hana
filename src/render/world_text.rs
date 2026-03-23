@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use super::glyph_quad::GlyphQuadData;
 use super::glyph_quad::build_glyph_mesh;
+use super::glyph_quad::clip_overlapping_quads;
 use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer::ShapedTextCache;
 use super::text_renderer::TextShapingContext;
@@ -26,11 +27,11 @@ use crate::text::MsdfAtlas;
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
     /// Anchor offset X in layout units (matches the renderer's anchor).
-    pub anchor_x: f32,
+    pub anchor_x:        f32,
     /// Anchor offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y: f32,
+    pub anchor_y:        f32,
     /// Total text width in layout units (rightmost MSDF quad extent).
-    pub text_width: f32,
+    pub text_width:      f32,
     /// Per-glyph layout positions in layout units (before anchor/scale).
     /// Each entry is `(glyph_x, baseline, glyph_id)` from parley shaping.
     pub glyph_positions: Vec<(f32, f32, u16)>,
@@ -55,7 +56,7 @@ pub struct ComputedWorldText {
 ///     Transform::from_xyz(0.0, 2.0, 0.0),
 /// ));
 /// ```
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Reflect)]
 #[require(TextStyle, Transform, Visibility)]
 pub struct WorldText(pub String);
 
@@ -320,6 +321,8 @@ fn shape_world_text(
             color:    color_arr,
         });
     }
+
+    clip_overlapping_quads(&mut quads);
 
     (quads, anchor_x, anchor_y, max_x, glyph_positions)
 }

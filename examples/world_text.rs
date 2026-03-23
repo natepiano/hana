@@ -65,14 +65,27 @@ fn main() {
         .run();
 }
 
-#[allow(clippy::too_many_lines)]
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Ground plane.
-    let ground = commands
+    let ground = spawn_ground(&mut commands, &mut meshes, &mut materials);
+    commands.insert_resource(SceneBounds(ground));
+
+    spawn_labeled_cube(&mut commands, &mut meshes, &mut materials);
+    spawn_anchor_demo(&mut commands, &mut meshes, &mut materials);
+    spawn_ground_text(&mut commands);
+    spawn_lighting_and_camera(&mut commands);
+}
+
+/// Spawns the translucent ground plane.
+fn spawn_ground(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) -> Entity {
+    commands
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 8.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -84,11 +97,15 @@ fn setup(
             })),
         ))
         .observe(on_ground_clicked)
-        .id();
+        .id()
+}
 
-    commands.insert_resource(SceneBounds(ground));
-
-    // Cube.
+/// Spawns a cube with `WorldText` labels on all six faces.
+fn spawn_labeled_cube(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
     commands
         .spawn((
             DemoCube,
@@ -165,10 +182,15 @@ fn setup(
                 ))
                 .observe(on_text_clicked);
         });
+}
 
-    // ── Anchor demo ───────────────────────────────────────────────────────
-    // A plane to the right with 9 anchor points, each showing the anchor
-    // name. The plane is angled slightly toward the default camera.
+/// Spawns the anchor demo panel: title, instructions, nine anchor-point
+/// labels with red dot markers, and the `AnchorDemoText` components.
+fn spawn_anchor_demo(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
     let demo_center = Vec3::new(2.0, 1.5, -0.5);
     let demo_rotation = Quat::from_rotation_y(-15.0_f32.to_radians());
 
@@ -244,8 +266,10 @@ fn setup(
             ))
             .observe(on_text_clicked);
     }
+}
 
-    // Text on the ground plane (lying flat, facing up).
+/// Spawns flat text on the ground plane: "GROUND" label and click instructions.
+fn spawn_ground_text(commands: &mut Commands) {
     commands
         .spawn((
             WorldText::new("GROUND"),
@@ -257,7 +281,6 @@ fn setup(
         ))
         .observe(on_text_clicked);
 
-    // Instructions on the upper-left of the plane surface.
     commands
         .spawn((
             WorldText::new("click the box to zoom in\nclick the text to zoom in\nclick the plane to zoom back out"),
@@ -269,15 +292,16 @@ fn setup(
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         ))
         .observe(on_text_clicked);
+}
 
-    // Ambient light so text is always readable.
+/// Spawns ambient light, directional light, and the orbit camera.
+fn spawn_lighting_and_camera(commands: &mut Commands) {
     commands.insert_resource(GlobalAmbientLight {
         color:                      Color::WHITE,
         brightness:                 1_000.0,
         affects_lightmapped_meshes: true,
     });
 
-    // Directional light for shadows and depth.
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
@@ -286,7 +310,6 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Camera.
     commands.spawn((PanOrbitCamera {
         focus: Vec3::ZERO,
         radius: Some(11.33),

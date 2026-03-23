@@ -714,7 +714,7 @@ impl TextProps<ForLayout> {
             align: TextAlign::Left,
             anchor: TextAnchor::Center,
             render_mode: GlyphRenderMode::Text,
-            shadow_mode: GlyphShadowMode::SolidQuad,
+            shadow_mode: GlyphShadowMode::Text,
             _context: PhantomData,
         }
     }
@@ -761,7 +761,7 @@ impl TextProps<ForStandalone> {
             align:          TextAlign::Left,
             anchor:         TextAnchor::Center,
             render_mode:    GlyphRenderMode::Text,
-            shadow_mode:    GlyphShadowMode::SolidQuad,
+            shadow_mode:    GlyphShadowMode::Text,
             _context:       PhantomData,
         }
     }
