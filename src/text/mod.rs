@@ -23,18 +23,15 @@ mod msdf_rasterizer_tests;
 #[cfg(test)]
 mod parley_measurer_tests;
 
-pub(super) use atlas::GlyphKey;
-pub(super) use atlas::MsdfAtlas;
+pub use atlas::GlyphKey;
+pub use atlas::MsdfAtlas;
 pub use font::Font;
 pub use font::FontMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
-pub(super) use font_registry::EMBEDDED_FONT;
+pub use font_registry::EMBEDDED_FONT;
 pub use font_registry::FontId;
 pub use font_registry::FontRegistry;
-pub(super) use measurer::create_parley_measurer;
-pub(super) use msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
-pub(super) use msdf_rasterizer::DEFAULT_GLYPH_PADDING;
-pub(super) use msdf_rasterizer::DEFAULT_SDF_RANGE;
+pub use measurer::create_parley_measurer;

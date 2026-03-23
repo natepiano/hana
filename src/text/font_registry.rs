@@ -82,6 +82,9 @@ impl FontRegistry {
 
         // Pre-parse the embedded font's metrics. This is infallible for our
         // known-good embedded font, but we handle the Option for robustness.
+        // SAFETY: The embedded JetBrains Mono font is a known-good static asset
+        // compiled into the binary. Parsing failure would indicate a build error.
+        #[allow(clippy::expect_used)]
         let embedded_font = Font::from_bytes(DEFAULT_FAMILY, EMBEDDED_FONT)
             .expect("embedded JetBrains Mono font should parse successfully");
 

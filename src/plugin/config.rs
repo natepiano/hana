@@ -1,0 +1,299 @@
+//! Atlas configuration types for the diegetic UI plugin.
+
+use bevy::prelude::*;
+
+/// Minimum canonical rasterization size in pixels.
+const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
+
+/// Maximum canonical rasterization size in pixels.
+const MAX_CUSTOM_RASTER_SIZE: u32 = 256;
+
+/// Minimum glyphs per atlas page.
+const MIN_GLYPHS_PER_PAGE: u16 = 10;
+
+/// Maximum glyphs per atlas page.
+const MAX_GLYPHS_PER_PAGE: u16 = 2000;
+
+/// Default glyphs per atlas page.
+const DEFAULT_GLYPHS_PER_PAGE: u16 = 100;
+
+/// Controls the pixel resolution of MSDF glyph rasterization.
+///
+/// Higher quality means sharper text at extreme zoom levels but uses more
+/// memory per glyph. MSDF is resolution-independent — the shader handles
+/// scaling — so this controls the *baseline fidelity* from which the
+/// distance field is generated.
+///
+/// # Variants
+///
+/// | Variant    | Pixels | Use case                                     |
+/// |------------|--------|----------------------------------------------|
+/// | `Low`      | 16     | Retro/pixel-art aesthetic, minimal memory    |
+/// | `Medium`   | 32     | Sharp at normal viewing distances             |
+/// | `High`     | 64     | Sharp at extreme zoom (recommended default)  |
+/// | `Extreme`  | 128    | Maximum fidelity, 16x memory vs `Medium`     |
+/// | `Custom`   | 8–256  | Clamped to safe range, warns if out of bounds|
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum RasterQuality {
+    /// 16px — deliberately chunky, retro aesthetic, minimal memory.
+    Low,
+    /// 32px — sharp at normal viewing distances.
+    Medium,
+    /// 64px — sharp even at extreme zoom (default).
+    #[default]
+    High,
+    /// 128px — maximum fidelity, significant memory cost.
+    Extreme,
+    /// Custom pixel size, clamped to 8–256. Values outside this range
+    /// are clamped and a warning is logged.
+    Custom(u32),
+}
+
+impl RasterQuality {
+    /// Returns the canonical pixel size for this quality level.
+    #[must_use]
+    pub const fn pixel_size(self) -> u32 {
+        match self {
+            Self::Low => 16,
+            Self::Medium => 32,
+            Self::High => 64,
+            Self::Extreme => 128,
+            Self::Custom(size) => {
+                if size < MIN_CUSTOM_RASTER_SIZE {
+                    MIN_CUSTOM_RASTER_SIZE
+                } else if size > MAX_CUSTOM_RASTER_SIZE {
+                    MAX_CUSTOM_RASTER_SIZE
+                } else {
+                    size
+                }
+            },
+        }
+    }
+}
+
+/// Configuration for the MSDF glyph atlas.
+///
+/// Controls how glyphs are rasterized and how atlas pages are sized.
+/// Pass to [`DiegeticUiPlugin::with_atlas_config`] to override defaults.
+///
+/// # Memory estimation
+///
+/// Each atlas page is an RGBA texture. The page size is computed
+/// automatically from the raster quality and glyphs-per-page budget.
+/// When you call [`DiegeticUiPlugin::with_atlas_config`], an `info!`
+/// log shows the estimated memory per page so you can tune for your
+/// target platform.
+///
+/// # Defaults
+///
+/// - **Quality**: [`RasterQuality::High`] (64px) — sharp at extreme zoom
+/// - **Glyphs per page**: 100 — fits most Latin text comfortably
+///
+/// # Example
+///
+/// ```ignore
+/// // Retro look with small atlas pages:
+/// App::new().add_plugins(
+///     DiegeticUiPlugin::with_atlas()
+///         .quality(RasterQuality::Low)
+///         .glyphs_per_page(50)
+/// )
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct AtlasConfig {
+    /// Rasterization quality — controls the canonical pixel size used
+    /// for MSDF generation. Higher quality = sharper at zoom but more
+    /// memory per glyph.
+    pub quality: RasterQuality,
+
+    /// Target number of glyphs per atlas page. This is an **estimate** —
+    /// actual capacity depends on the font and character mix (a page of
+    /// narrow characters like `l` and `i` fits more than a page of wide
+    /// characters like `W` and `M`). When a page fills, a new page is
+    /// allocated automatically regardless of the budget. Smaller values
+    /// reduce per-page memory but may increase the number of pages (and
+    /// draw calls) for text-heavy apps. Clamped to 10–2000.
+    pub glyphs_per_page: u16,
+}
+
+impl AtlasConfig {
+    /// Creates a new config with default values.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            quality:         RasterQuality::High,
+            glyphs_per_page: DEFAULT_GLYPHS_PER_PAGE,
+        }
+    }
+}
+
+impl Default for AtlasConfig {
+    fn default() -> Self {
+        Self {
+            quality:         RasterQuality::default(),
+            glyphs_per_page: DEFAULT_GLYPHS_PER_PAGE,
+        }
+    }
+}
+
+impl AtlasConfig {
+    /// Returns the canonical rasterization size in pixels, after clamping.
+    #[must_use]
+    pub const fn canonical_size(&self) -> u32 { self.quality.pixel_size() }
+
+    /// Returns the glyphs-per-page budget, after clamping.
+    #[must_use]
+    pub const fn clamped_glyphs_per_page(&self) -> u16 {
+        if self.glyphs_per_page < MIN_GLYPHS_PER_PAGE {
+            MIN_GLYPHS_PER_PAGE
+        } else if self.glyphs_per_page > MAX_GLYPHS_PER_PAGE {
+            MAX_GLYPHS_PER_PAGE
+        } else {
+            self.glyphs_per_page
+        }
+    }
+
+    /// Computes the atlas page size in pixels for this configuration.
+    ///
+    /// Uses the canonical raster size, SDF range, and padding to estimate
+    /// average glyph bitmap dimensions, then sizes the page to fit
+    /// approximately the requested number of glyphs. The actual capacity
+    /// varies by font — narrow characters pack tighter than wide ones.
+    /// Pages that fill beyond this estimate simply overflow to a new page.
+    #[must_use]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    pub fn page_size(&self) -> u32 {
+        let canonical = self.canonical_size();
+        // Average glyph bitmap dimension — most glyphs use ~75% of the
+        // canonical size plus padding. This is tighter than worst-case
+        // (which would over-allocate) but still safe because `etagere`
+        // overflows to a new page if a glyph doesn't fit.
+        let total_pad = 2 + 4; // DEFAULT_GLYPH_PADDING + DEFAULT_SDF_RANGE
+        let avg_glyph = (canonical as f32 * 0.75) as u32 + 2 * total_pad;
+        let glyphs = f32::from(self.clamped_glyphs_per_page());
+        // Shelf packing is ~80% efficient.
+        let area = glyphs * (avg_glyph as f32) * (avg_glyph as f32) / 0.80;
+        // Round up to next multiple of 4 for GPU texture row alignment.
+        let side = area.sqrt().ceil() as u32;
+        (side + 3) & !3
+    }
+
+    /// Returns the estimated memory per atlas page in bytes (RGBA texture).
+    #[must_use]
+    pub fn estimated_page_bytes(&self) -> usize {
+        let size = self.page_size();
+        (size * size * 4) as usize
+    }
+
+    /// Logs warnings for out-of-range values and an info summary.
+    pub(super) fn log_and_clamp(&self) {
+        if let RasterQuality::Custom(size) = self.quality
+            && !(MIN_CUSTOM_RASTER_SIZE..=MAX_CUSTOM_RASTER_SIZE).contains(&size)
+        {
+            warn!(
+                "AtlasConfig: custom raster size {size} clamped to {}–{} range",
+                MIN_CUSTOM_RASTER_SIZE, MAX_CUSTOM_RASTER_SIZE
+            );
+        }
+        if !(MIN_GLYPHS_PER_PAGE..=MAX_GLYPHS_PER_PAGE).contains(&self.glyphs_per_page) {
+            warn!(
+                "AtlasConfig: glyphs_per_page {} clamped to {}–{} range",
+                self.glyphs_per_page, MIN_GLYPHS_PER_PAGE, MAX_GLYPHS_PER_PAGE
+            );
+        }
+
+        let page_size = self.page_size();
+        let bytes = self.estimated_page_bytes();
+        let kb = bytes / 1024;
+        info!(
+            "Atlas config: {:?}, ~{} glyphs/page (estimate), {page_size}x{page_size}px pages (~{kb}KB each)",
+            self.quality,
+            self.clamped_glyphs_per_page()
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raster_quality_pixel_sizes() {
+        assert_eq!(RasterQuality::Low.pixel_size(), 16);
+        assert_eq!(RasterQuality::Medium.pixel_size(), 32);
+        assert_eq!(RasterQuality::High.pixel_size(), 64);
+        assert_eq!(RasterQuality::Extreme.pixel_size(), 128);
+    }
+
+    #[test]
+    fn raster_quality_custom_clamps() {
+        // Below minimum.
+        assert_eq!(RasterQuality::Custom(1).pixel_size(), 8);
+        assert_eq!(RasterQuality::Custom(7).pixel_size(), 8);
+        // At boundaries.
+        assert_eq!(RasterQuality::Custom(8).pixel_size(), 8);
+        assert_eq!(RasterQuality::Custom(256).pixel_size(), 256);
+        // Above maximum.
+        assert_eq!(RasterQuality::Custom(257).pixel_size(), 256);
+        assert_eq!(RasterQuality::Custom(1000).pixel_size(), 256);
+        // In range.
+        assert_eq!(RasterQuality::Custom(48).pixel_size(), 48);
+    }
+
+    #[test]
+    fn glyphs_per_page_clamps() {
+        let below = AtlasConfig {
+            glyphs_per_page: 1,
+            ..AtlasConfig::default()
+        };
+        assert_eq!(below.clamped_glyphs_per_page(), 10);
+
+        let above = AtlasConfig {
+            glyphs_per_page: 5000,
+            ..AtlasConfig::default()
+        };
+        assert_eq!(above.clamped_glyphs_per_page(), 2000);
+
+        let in_range = AtlasConfig {
+            glyphs_per_page: 75,
+            ..AtlasConfig::default()
+        };
+        assert_eq!(in_range.clamped_glyphs_per_page(), 75);
+    }
+
+    #[test]
+    fn default_config_values() {
+        let config = AtlasConfig::default();
+        assert_eq!(config.quality, RasterQuality::High);
+        assert_eq!(config.glyphs_per_page, 100);
+        assert_eq!(config.canonical_size(), 64);
+    }
+
+    #[test]
+    fn page_size_is_aligned_to_4() {
+        for quality in [
+            RasterQuality::Low,
+            RasterQuality::Medium,
+            RasterQuality::High,
+            RasterQuality::Extreme,
+        ] {
+            for glyphs in [10, 50, 100, 500, 1000] {
+                let config = AtlasConfig {
+                    quality,
+                    glyphs_per_page: glyphs,
+                };
+                let size = config.page_size();
+                assert_eq!(
+                    size % 4,
+                    0,
+                    "page_size {size} not aligned to 4 for {quality:?}/{glyphs}"
+                );
+                assert!(size > 0, "page_size should be non-zero");
+            }
+        }
+    }
+}

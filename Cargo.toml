@@ -36,6 +36,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_asset",
   "bevy_gizmos",
   "bevy_image",
+  "bevy_log",
   "bevy_pbr",
   "bevy_render",
 ] }
@@ -86,3 +87,6 @@ required-features = ["typography_overlay"]
 
 [[example]]
 name = "shadows"
+
+[[example]]
+name = "atlas_pages"

@@ -89,7 +89,6 @@ struct GridLayout {
     grid_height:   f32,
     grid_center_y: f32,
     rows:          usize,
-    cols:          usize,
 }
 
 impl GridLayout {
@@ -103,7 +102,6 @@ impl GridLayout {
             grid_height,
             grid_center_y,
             rows: num_rows,
-            cols: num_cols,
         }
     }
 }
@@ -194,8 +192,10 @@ fn spawn_grid_headers(
 
     // Row headers (render mode labels on the left).
     for (row, &render_mode) in render_modes.iter().enumerate() {
-        let y = ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y)
-            - grid.grid_height * 0.5;
+        let y = grid.grid_height.mul_add(
+            -0.5,
+            ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y),
+        );
         spawn_label(
             commands,
             ground,
@@ -237,8 +237,10 @@ fn spawn_glyph_grid(
     for (row, &render_mode) in render_modes.iter().enumerate() {
         for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
             let x = (col as f32).mul_add(COL_SPACING, -(grid.grid_width * 0.5));
-            let y = ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y)
-                - grid.grid_height * 0.5;
+            let y = grid.grid_height.mul_add(
+                -0.5,
+                ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y),
+            );
 
             let glyph = commands
                 .spawn((

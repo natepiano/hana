@@ -733,7 +733,7 @@ fn compute_clay_layout(
 }
 
 /// Builds the clay header container with title and subtitle.
-fn build_clay_header(clay: &mut ClayLayoutScope<'_, '_, (), ()>) {
+fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
     clay.with(
         &Declaration::new()
             .layout()
@@ -809,7 +809,7 @@ fn build_clay_header(clay: &mut ClayLayoutScope<'_, '_, (), ()>) {
 }
 
 /// Builds the clay accent divider bar.
-fn build_clay_divider(clay: &mut ClayLayoutScope<'_, '_, (), ()>) {
+fn build_clay_divider<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
     clay.with(
         &Declaration::new()
             .layout()
@@ -822,7 +822,7 @@ fn build_clay_divider(clay: &mut ClayLayoutScope<'_, '_, (), ()>) {
 }
 
 /// Builds the clay body section containing key-value rows and wrap text.
-fn build_clay_body(clay: &mut ClayLayoutScope<'_, '_, (), ()>, rows: &[(String, String)]) {
+fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(String, String)]) {
     clay.with(
         &Declaration::new()
             .layout()
@@ -899,7 +899,7 @@ fn build_clay_body(clay: &mut ClayLayoutScope<'_, '_, (), ()>, rows: &[(String, 
 }
 
 /// Collects render commands from a finished clay layout into `ClayRect` entries.
-fn collect_clay_rects(layout: ClayLayoutScope<'_, '_, (), ()>) -> Vec<ClayRect> {
+fn collect_clay_rects<'a>(mut layout: ClayLayoutScope<'a, 'a, (), ()>) -> Vec<ClayRect> {
     let mut rects = Vec::new();
     for cmd in layout.end() {
         let kind = match cmd.config {

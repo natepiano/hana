@@ -374,21 +374,160 @@ fn dump_atlas_png() {
         atlas.get_or_insert_sync(key, FONT_DATA);
     }
 
-    // Write the atlas as a PNG for visual inspection.
-    let path = std::env::temp_dir().join("bevy_diegetic_msdf_atlas.png");
-    let pixels = atlas.pixels();
-    let img = image::RgbaImage::from_raw(atlas.width(), atlas.height(), pixels.to_vec())
-        .unwrap_or_else(|| panic!("failed to create image from atlas pixels"));
-    img.save(&path)
-        .unwrap_or_else(|e| panic!("failed to save atlas PNG: {e}"));
-
-    eprintln!("Atlas PNG written to: {}", path.display());
+    // Write one PNG per atlas page for visual inspection.
+    for page in 0..atlas.page_count() {
+        let path = std::env::temp_dir().join(format!("bevy_diegetic_msdf_atlas_page{page}.png"));
+        let pixels = atlas
+            .page_pixels(page)
+            .unwrap_or_else(|| panic!("page {page} should exist"));
+        let img = image::RgbaImage::from_raw(atlas.width(), atlas.height(), pixels.to_vec())
+            .unwrap_or_else(|| panic!("failed to create image from page {page} pixels"));
+        img.save(&path)
+            .unwrap_or_else(|e| panic!("failed to save page {page} PNG: {e}"));
+        eprintln!("Atlas page {page} PNG written to: {}", path.display());
+    }
     eprintln!(
-        "  {}x{}, {} glyphs",
+        "  {}x{}, {} pages, {} glyphs",
         atlas.width(),
         atlas.height(),
+        atlas.page_count(),
         atlas.glyph_count()
     );
+}
+
+// ── Multi-page atlas tests ───────────────────────────────────────────────────
+
+#[test]
+fn atlas_overflows_to_second_page() {
+    // Small atlas that can't fit all ASCII glyphs on one page.
+    let mut atlas = MsdfAtlas::with_size(128, 128);
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+
+    for c in (33_u8..=126).map(|c| c as char) {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        atlas.get_or_insert_sync(key, FONT_DATA);
+    }
+
+    assert!(
+        atlas.page_count() > 1,
+        "128x128 atlas should overflow to multiple pages, got {} page(s)",
+        atlas.page_count()
+    );
+    assert!(
+        atlas.glyph_count() >= 80,
+        "expected at least 80 ASCII glyphs across pages, got {}",
+        atlas.glyph_count()
+    );
+
+    // Every glyph should have a valid page_index.
+    for c in (33_u8..=126).map(|c| c as char) {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        if let Some(m) = atlas.get(key) {
+            assert!(
+                (m.page_index as usize) < atlas.page_count(),
+                "glyph '{c}' page_index {} >= page_count {}",
+                m.page_index,
+                atlas.page_count()
+            );
+        }
+    }
+
+    println!(
+        "multi-page atlas: {} pages, {} glyphs",
+        atlas.page_count(),
+        atlas.glyph_count()
+    );
+}
+
+#[test]
+fn atlas_single_page_no_overflow() {
+    let mut atlas = MsdfAtlas::new(); // Default 1024x1024
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+
+    // Insert just A-Z — should easily fit on one page.
+    for c in 'A'..='Z' {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        atlas.get_or_insert_sync(key, FONT_DATA);
+    }
+
+    assert_eq!(
+        atlas.page_count(),
+        1,
+        "26 glyphs on 1024x1024 should fit in 1 page"
+    );
+
+    // All glyphs should be on page 0.
+    for c in 'A'..='Z' {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        if let Some(m) = atlas.get(key) {
+            assert_eq!(m.page_index, 0, "glyph '{c}' should be on page 0");
+        }
+    }
+}
+
+#[test]
+fn atlas_multi_page_no_uv_overlap_within_page() {
+    let mut atlas = MsdfAtlas::with_size(128, 128);
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+
+    let mut keys = Vec::new();
+    for c in (33_u8..=126).map(|c| c as char) {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        atlas.get_or_insert_sync(key, FONT_DATA);
+        keys.push(key);
+    }
+
+    // Group metrics by page and check for UV overlap within each page.
+    let mut by_page: std::collections::HashMap<u32, Vec<[f32; 4]>> =
+        std::collections::HashMap::new();
+    for key in &keys {
+        if let Some(m) = atlas.get(*key) {
+            by_page.entry(m.page_index).or_default().push(m.uv_rect);
+        }
+    }
+
+    for (page, rects) in &by_page {
+        for (i, a) in rects.iter().enumerate() {
+            for b in &rects[i + 1..] {
+                let overlap = a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
+                assert!(
+                    !overlap,
+                    "UV overlap on page {page}: [{}, {}, {}, {}] vs [{}, {}, {}, {}]",
+                    a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]
+                );
+            }
+        }
+    }
 }
 
 #[test]

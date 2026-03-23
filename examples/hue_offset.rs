@@ -158,7 +158,7 @@ fn setup(
 
     // Labels.
     commands.spawn((
-        Text::new("Left panel rotates independently — materials are not shared"),
+        Text::new("Left panel rotates independently - materials are not shared"),
         TextFont {
             font_size: 14.0,
             ..default()

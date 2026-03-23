@@ -91,6 +91,7 @@ pub struct OverlayElement;
 ///
 /// Spawns retained gizmo lines and [`WorldText`] labels as children of
 /// the overlay entity.
+#[allow(clippy::type_complexity)]
 pub fn build_typography_overlay(
     query: Query<
         (
@@ -174,9 +175,7 @@ pub fn build_typography_overlay(
                 spawn_metric_labels(
                     &mut commands,
                     entity,
-                    &font_metrics,
                     &line_metrics,
-                    text_width,
                     overlay,
                     anchor_x,
                     anchor_y,
@@ -273,7 +272,7 @@ fn build_metric_line_gizmo(
     // Vertical line from baseline to ascent, with horizontal ticks
     // pointing LEFT (away from the text), like the Apple reference.
     let tick_len = 0.008;
-    let bracket_layout_x = x_start - extend * 0.5;
+    let bracket_layout_x = extend.mul_add(-0.5, x_start);
     let bx = layout_to_world_x(bracket_layout_x, anchor_x);
     let ascent_world = layout_to_world_y(ascent_y, anchor_y);
     let baseline_world = layout_to_world_y(baseline_y, anchor_y);
@@ -302,12 +301,11 @@ fn build_metric_line_gizmo(
 
 /// Spawns metric label `WorldText` entities as children of the overlay entity.
 /// Currently spawns only the "Baseline" label as a first step.
+#[allow(clippy::too_many_arguments)]
 fn spawn_metric_labels(
     commands: &mut Commands,
     parent: Entity,
-    font_metrics: &crate::text::FontMetrics,
     line_metrics: &LineMetricsSnapshot,
-    text_width: f32,
     overlay: &TypographyOverlay,
     anchor_x: f32,
     anchor_y: f32,
@@ -322,23 +320,6 @@ fn spawn_metric_labels(
 
     let baseline_y_layout = line_metrics.baseline;
     let ascent_y_layout = baseline_y_layout - line_metrics.ascent;
-    let descent_y_layout = baseline_y_layout + line_metrics.descent;
-    let top_y_layout = line_metrics.top;
-    let bottom_y_layout = line_metrics.bottom;
-
-    // Build the list of labels to spawn — starting with baseline only.
-    let mut labels: Vec<(&str, f32)> = Vec::with_capacity(7);
-    if (top_y_layout - ascent_y_layout).abs() > 0.5 {
-        labels.push(("Top", top_y_layout));
-    }
-    labels.push(("Ascent", ascent_y_layout));
-    labels.push(("Cap height", baseline_y_layout - font_metrics.cap_height));
-    labels.push(("x-height", baseline_y_layout - font_metrics.x_height));
-    labels.push(("Baseline", baseline_y_layout));
-    labels.push(("Descent", descent_y_layout));
-    if (bottom_y_layout - descent_y_layout).abs() > 0.5 {
-        labels.push(("Bottom", bottom_y_layout));
-    }
 
     // Baseline label — positioned at the left end of the baseline line.
     let baseline_world_y = layout_to_world_y(baseline_y_layout, anchor_y);
@@ -354,9 +335,9 @@ fn spawn_metric_labels(
 
     // Ascent label — positioned at the midpoint of the ascent bracket,
     // to the left of the bracket's vertical line.
-    let bracket_layout_x = -extend - extend * 0.5;
+    let bracket_layout_x = extend.mul_add(-1.5, 0.0);
     let bracket_world_x = layout_to_world_x(bracket_layout_x, anchor_x);
-    let ascent_mid_layout = (ascent_y_layout + baseline_y_layout) / 2.0;
+    let ascent_mid_layout = f32::midpoint(ascent_y_layout, baseline_y_layout);
     let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y);
     commands.entity(parent).with_child((
         OverlayElement,

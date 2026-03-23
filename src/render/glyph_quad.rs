@@ -5,21 +5,18 @@
 //! MSDF text rendering has two distinct seam artifact mechanisms, each
 //! addressed by a different fix that must work together:
 //!
-//! 1. **Quad overlap (geometry)** — SDF padding extends glyph quads beyond
-//!    their advance width, causing adjacent quads to overlap in world space.
-//!    With `AlphaMode::Blend`, overlapping semi-transparent edge ramps
-//!    composite twice, producing visible vertical lines.
-//!    **Fix:** [`clip_overlapping_quads`] trims overlapping quads at their
-//!    midpoint and adjusts UV coordinates. Applied CPU-side after quad
-//!    construction.
+//! 1. **Quad overlap (geometry)** — SDF padding extends glyph quads beyond their advance width,
+//!    causing adjacent quads to overlap in world space. With `AlphaMode::Blend`, overlapping
+//!    semi-transparent edge ramps composite twice, producing visible vertical lines. **Fix:**
+//!    [`clip_overlapping_quads`] trims overlapping quads at their midpoint and adjusts UV
+//!    coordinates. Applied CPU-side after quad construction.
 //!
-//! 2. **Atlas texture bleed (sampling)** — Glyphs packed edge-to-edge in
-//!    the atlas texture cause linear filtering at UV boundaries to sample
-//!    into adjacent glyph regions. The MSDF median-of-three decode
-//!    amplifies even tiny bleed into visible lines.
-//!    **Fix:** [`ATLAS_GUTTER`](crate::text::atlas) adds a 1-texel gutter
-//!    around each glyph with replicated border texels, and UV coordinates
-//!    are inset by half a texel so the sampler hits texel centers.
+//! 2. **Atlas texture bleed (sampling)** — Glyphs packed edge-to-edge in the atlas texture cause
+//!    linear filtering at UV boundaries to sample into adjacent glyph regions. The MSDF
+//!    median-of-three decode amplifies even tiny bleed into visible lines. **Fix:**
+//!    [`ATLAS_GUTTER`](crate::text::atlas) adds a 1-texel gutter around each glyph with replicated
+//!    border texels, and UV coordinates are inset by half a texel so the sampler hits texel
+//!    centers.
 //!
 //! Both fixes are required — overlap clipping alone misses non-overlapping
 //! glyph pairs (like `g`/`r` in a monospace font), and atlas guttering
@@ -52,14 +49,14 @@ pub(super) struct GlyphQuadData {
 /// This function splits each overlap at its midpoint — the left half goes
 /// to the earlier glyph, the right half to the later glyph — and adjusts
 /// UV coordinates proportionally. O(n) linear pass over sorted quads.
-pub(super) fn clip_overlapping_quads(quads: &mut [GlyphQuadData]) {
+pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
     if quads.len() < 2 {
         return;
     }
 
     for i in 0..quads.len() - 1 {
-        let right_edge_i = quads[i].position[0] + quads[i].size[0];
-        let left_edge_next = quads[i + 1].position[0];
+        let right_edge_i = quads[i].1.position[0] + quads[i].1.size[0];
+        let left_edge_next = quads[i + 1].1.position[0];
 
         // Only clip if quads actually overlap in X.
         if right_edge_i <= left_edge_next {
@@ -70,24 +67,24 @@ pub(super) fn clip_overlapping_quads(quads: &mut [GlyphQuadData]) {
         let half_overlap = overlap * 0.5;
 
         // Trim the right side of quad i.
-        let old_width_i = quads[i].size[0];
+        let old_width_i = quads[i].1.size[0];
         let new_width_i = old_width_i - half_overlap;
-        let u_min_i = quads[i].uv_rect[0];
-        let u_max_i = quads[i].uv_rect[2];
-        let new_u_max_i = u_min_i + (u_max_i - u_min_i) * (new_width_i / old_width_i);
-        quads[i].size[0] = new_width_i;
-        quads[i].uv_rect[2] = new_u_max_i;
+        let u_min_i = quads[i].1.uv_rect[0];
+        let u_max_i = quads[i].1.uv_rect[2];
+        let new_u_max_i = (u_max_i - u_min_i).mul_add(new_width_i / old_width_i, u_min_i);
+        quads[i].1.size[0] = new_width_i;
+        quads[i].1.uv_rect[2] = new_u_max_i;
 
         // Trim the left side of quad i+1.
-        let old_width_next = quads[i + 1].size[0];
+        let old_width_next = quads[i + 1].1.size[0];
         let new_width_next = old_width_next - half_overlap;
-        let u_min_next = quads[i + 1].uv_rect[0];
-        let u_max_next = quads[i + 1].uv_rect[2];
+        let u_min_next = quads[i + 1].1.uv_rect[0];
+        let u_max_next = quads[i + 1].1.uv_rect[2];
         let new_u_min_next =
-            u_min_next + (u_max_next - u_min_next) * (half_overlap / old_width_next);
-        quads[i + 1].position[0] += half_overlap;
-        quads[i + 1].size[0] = new_width_next;
-        quads[i + 1].uv_rect[0] = new_u_min_next;
+            (u_max_next - u_min_next).mul_add(half_overlap / old_width_next, u_min_next);
+        quads[i + 1].1.position[0] += half_overlap;
+        quads[i + 1].1.size[0] = new_width_next;
+        quads[i + 1].1.uv_rect[0] = new_u_min_next;
     }
 }
 

@@ -8,9 +8,7 @@ mod text_renderer;
 mod world_text;
 
 pub use text_renderer::LineMetricsSnapshot;
-pub use text_renderer::ShapedGlyph;
 pub use text_renderer::ShapedTextCache;
-pub use text_renderer::ShapedTextRun;
 pub use text_renderer::TextRenderPlugin;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;

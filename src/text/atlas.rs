@@ -1,4 +1,4 @@
-//! MSDF glyph atlas — packs rasterized glyphs into a texture.
+//! MSDF glyph atlas — packs rasterized glyphs into paged textures.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -24,7 +24,7 @@ use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
 use super::msdf_rasterizer::MsdfBitmap;
 use super::msdf_rasterizer::rasterize_glyph;
 
-/// Default atlas texture size in pixels.
+/// Default atlas page texture size in pixels.
 const DEFAULT_ATLAS_SIZE: u32 = 1024;
 
 /// Number of bytes per pixel (RGBA).
@@ -66,6 +66,8 @@ pub struct GlyphMetrics {
     pub pixel_width:  u32,
     /// Glyph bitmap height in pixels.
     pub pixel_height: u32,
+    /// Atlas page this glyph is stored on.
+    pub page_index:   u32,
     /// Atlas allocator ID for potential deallocation.
     _alloc_id:        AllocId,
 }
@@ -76,11 +78,37 @@ struct RasterizedGlyph {
     bitmap: MsdfBitmap,
 }
 
-/// MSDF glyph atlas.
+/// A single page of the MSDF atlas texture.
+struct AtlasPage {
+    /// Raw pixel data (RGBA8, row-major).
+    pixels:       Vec<u8>,
+    /// Rectangle allocator for packing glyphs.
+    allocator:    AtlasAllocator,
+    /// Handle to the GPU image (populated after upload).
+    image_handle: Option<Handle<Image>>,
+    /// Whether the CPU pixel data has changed since last GPU sync.
+    dirty:        bool,
+}
+
+impl AtlasPage {
+    #[allow(clippy::cast_possible_wrap)]
+    fn new(width: u32, height: u32) -> Self {
+        let pixel_count = (width * height * BYTES_PER_PIXEL) as usize;
+        Self {
+            pixels:       vec![0; pixel_count],
+            allocator:    AtlasAllocator::new(size2(width as i32, height as i32)),
+            image_handle: None,
+            dirty:        false,
+        }
+    }
+}
+
+/// MSDF glyph atlas with automatic page overflow.
 ///
-/// Stores an RGBA texture containing MSDF glyph bitmaps and a lookup table
-/// mapping [`GlyphKey`] to [`GlyphMetrics`]. The atlas packs glyphs on demand
-/// using `etagere`'s shelf-packing algorithm.
+/// Stores RGBA textures containing MSDF glyph bitmaps and a lookup table
+/// mapping [`GlyphKey`] to [`GlyphMetrics`]. Glyphs are packed into pages
+/// using `etagere`'s shelf-packing algorithm. When a page fills, a new
+/// page is allocated automatically.
 ///
 /// Glyph rasterization is asynchronous — cache misses spawn tasks on
 /// [`AsyncComputeTaskPool`] and return `None`. Call
@@ -88,68 +116,78 @@ struct RasterizedGlyph {
 /// completed results.
 #[derive(Resource)]
 pub struct MsdfAtlas {
-    /// Raw pixel data (RGBA8, row-major).
-    pixels:       Vec<u8>,
-    /// Rectangle allocator for packing glyphs.
-    allocator:    AtlasAllocator,
+    /// Atlas pages, each with its own pixel buffer and allocator.
+    pages:          Vec<AtlasPage>,
     /// Cached glyph metrics, keyed by `GlyphKey`.
-    glyphs:       HashMap<GlyphKey, GlyphMetrics>,
-    /// Atlas width in pixels.
-    width:        u32,
-    /// Atlas height in pixels.
-    height:       u32,
-    /// Handle to the GPU image (populated after `upload_to_gpu`).
-    image_handle: Option<Handle<Image>>,
-    /// Whether the CPU pixel data has changed since last GPU upload.
-    dirty:        bool,
+    glyphs:         HashMap<GlyphKey, GlyphMetrics>,
+    /// Page width in pixels (all pages share the same dimensions).
+    width:          u32,
+    /// Page height in pixels.
+    height:         u32,
+    /// Canonical pixel size for MSDF rasterization.
+    canonical_size: u32,
     /// Glyph keys currently being rasterized asynchronously.
-    in_flight:    HashSet<GlyphKey>,
+    in_flight:      HashSet<GlyphKey>,
     /// Receiver for completed async rasterizations (Mutex for Sync).
-    rx:           Mutex<mpsc::Receiver<RasterizedGlyph>>,
+    rx:             Mutex<mpsc::Receiver<RasterizedGlyph>>,
     /// Sender cloned into each async task.
-    tx:           mpsc::Sender<RasterizedGlyph>,
+    tx:             mpsc::Sender<RasterizedGlyph>,
 }
 
 impl MsdfAtlas {
-    /// Creates a new empty atlas with the default size.
+    /// Creates a new atlas with the default page size and canonical size.
     #[must_use]
-    pub fn new() -> Self { Self::with_size(DEFAULT_ATLAS_SIZE, DEFAULT_ATLAS_SIZE) }
+    pub fn new() -> Self { Self::with_config(DEFAULT_ATLAS_SIZE, DEFAULT_CANONICAL_SIZE) }
 
-    /// Creates a new empty atlas with a specific size.
+    /// Creates a new atlas with a specific page size (uses default canonical size).
     #[must_use]
-    #[allow(clippy::cast_possible_wrap)]
     pub fn with_size(width: u32, height: u32) -> Self {
-        let pixel_count = (width * height * BYTES_PER_PIXEL) as usize;
         let (tx, rx) = mpsc::channel();
         Self {
-            pixels: vec![0; pixel_count],
-            allocator: AtlasAllocator::new(size2(width as i32, height as i32)),
+            pages: vec![AtlasPage::new(width, height)],
             glyphs: HashMap::new(),
             width,
             height,
-            image_handle: None,
-            dirty: false,
+            canonical_size: DEFAULT_CANONICAL_SIZE,
             in_flight: HashSet::new(),
             rx: Mutex::new(rx),
             tx,
         }
     }
 
-    /// Returns the atlas width in pixels.
+    /// Creates a new atlas with a specific page size and canonical rasterization size.
+    #[must_use]
+    pub fn with_config(page_size: u32, canonical_size: u32) -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            pages: vec![AtlasPage::new(page_size, page_size)],
+            glyphs: HashMap::new(),
+            width: page_size,
+            height: page_size,
+            canonical_size,
+            in_flight: HashSet::new(),
+            rx: Mutex::new(rx),
+            tx,
+        }
+    }
+
+    /// Returns the page width in pixels.
     #[must_use]
     pub const fn width(&self) -> u32 { self.width }
 
-    /// Returns the atlas height in pixels.
+    /// Returns the page height in pixels.
     #[must_use]
     pub const fn height(&self) -> u32 { self.height }
 
-    /// Returns the raw RGBA pixel data. Test-only.
-    #[cfg(test)]
+    /// Returns the canonical rasterization size in pixels.
     #[must_use]
-    pub fn pixels(&self) -> &[u8] { &self.pixels }
+    pub const fn canonical_size(&self) -> u32 { self.canonical_size }
 
-    /// Returns the number of cached glyphs. Test-only.
-    #[cfg(test)]
+    /// Returns the number of atlas pages currently allocated.
+    #[must_use]
+    pub const fn page_count(&self) -> usize { self.pages.len() }
+
+    /// Returns the total number of cached glyphs across all pages.
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.glyphs.len() }
 
@@ -159,6 +197,13 @@ impl MsdfAtlas {
     #[must_use]
     pub fn get_metrics(&self, key: GlyphKey) -> Option<GlyphMetrics> {
         self.glyphs.get(&key).copied()
+    }
+
+    /// Returns the raw RGBA pixel data for a page. Test-only.
+    #[cfg(test)]
+    #[must_use]
+    pub fn page_pixels(&self, page: usize) -> Option<&[u8]> {
+        self.pages.get(page).map(|p| p.pixels.as_slice())
     }
 
     /// Looks up cached metrics for a glyph. Test-only.
@@ -171,48 +216,73 @@ impl MsdfAtlas {
     #[allow(clippy::unused_self)]
     pub const fn sdf_range(&self) -> f64 { DEFAULT_SDF_RANGE }
 
-    /// Returns the GPU image handle.
+    /// Returns the GPU image handle for a specific atlas page.
     ///
-    /// Returns `None` if [`upload_to_gpu`](Self::upload_to_gpu) has not been called.
+    /// Returns `None` if the page doesn't exist or hasn't been uploaded yet.
     #[must_use]
-    pub const fn image_handle(&self) -> Option<&Handle<Image>> { self.image_handle.as_ref() }
+    pub fn image_handle(&self, page: u32) -> Option<&Handle<Image>> {
+        self.pages
+            .get(page as usize)
+            .and_then(|p| p.image_handle.as_ref())
+    }
 
-    /// Creates a Bevy `Image` from the atlas pixel data and stores the handle.
+    /// Creates Bevy `Image` assets for all pages and stores their handles.
     ///
     /// Call once during plugin initialization. Subsequent changes are synced
     /// via [`sync_to_gpu`](Self::sync_to_gpu).
     pub fn upload_to_gpu(&mut self, images: &mut Assets<Image>) {
-        let image = Image::new(
-            Extent3d {
-                width:                 self.width,
-                height:                self.height,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            self.pixels.clone(),
-            TextureFormat::Rgba8Unorm,
-            bevy::asset::RenderAssetUsages::default(),
-        );
-        self.image_handle = Some(images.add(image));
-        self.dirty = false;
+        for page in &mut self.pages {
+            if page.image_handle.is_some() {
+                continue;
+            }
+            let image = Image::new(
+                Extent3d {
+                    width:                 self.width,
+                    height:                self.height,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                page.pixels.clone(),
+                TextureFormat::Rgba8Unorm,
+                bevy::asset::RenderAssetUsages::default(),
+            );
+            page.image_handle = Some(images.add(image));
+            page.dirty = false;
+        }
     }
 
-    /// Syncs changed CPU pixel data to the existing GPU `Image` asset.
+    /// Syncs changed CPU pixel data to the existing GPU `Image` assets.
     ///
-    /// Call after new glyphs are inserted. Only copies data when the atlas
-    /// is dirty. Bevy's asset change detection handles the actual GPU upload.
+    /// Call after new glyphs are inserted. Handles both dirty existing pages
+    /// and newly created pages (allocates GPU Images for them). Bevy's asset
+    /// change detection handles the actual GPU upload.
     pub fn sync_to_gpu(&mut self, images: &mut Assets<Image>) {
-        if !self.dirty {
-            return;
+        for page in &mut self.pages {
+            if !page.dirty {
+                continue;
+            }
+            if let Some(handle) = page.image_handle.as_ref() {
+                // Existing page — update pixel data.
+                if let Some(image) = images.get_mut(handle) {
+                    image.data = Some(page.pixels.clone());
+                }
+            } else {
+                // New page created at runtime — allocate GPU Image.
+                let image = Image::new(
+                    Extent3d {
+                        width:                 self.width,
+                        height:                self.height,
+                        depth_or_array_layers: 1,
+                    },
+                    TextureDimension::D2,
+                    page.pixels.clone(),
+                    TextureFormat::Rgba8Unorm,
+                    bevy::asset::RenderAssetUsages::default(),
+                );
+                page.image_handle = Some(images.add(image));
+            }
+            page.dirty = false;
         }
-        let Some(handle) = self.image_handle.as_ref() else {
-            return;
-        };
-        let Some(image) = images.get_mut(handle) else {
-            return;
-        };
-        image.data = Some(self.pixels.clone());
-        self.dirty = false;
     }
 
     /// Returns cached metrics for a glyph, or `None` if not yet available.
@@ -236,12 +306,13 @@ impl MsdfAtlas {
         let tx = self.tx.clone();
         let glyph_index = key.glyph_index;
         let font_data = font_data.to_vec();
+        let canonical = self.canonical_size;
         AsyncComputeTaskPool::get()
             .spawn(async move {
                 if let Some(bitmap) = rasterize_glyph(
                     &font_data,
                     glyph_index,
-                    DEFAULT_CANONICAL_SIZE,
+                    canonical,
                     DEFAULT_SDF_RANGE,
                     DEFAULT_GLYPH_PADDING,
                 ) {
@@ -285,16 +356,17 @@ impl MsdfAtlas {
         let bitmap = rasterize_glyph(
             font_data,
             key.glyph_index,
-            DEFAULT_CANONICAL_SIZE,
+            self.canonical_size,
             DEFAULT_SDF_RANGE,
             DEFAULT_GLYPH_PADDING,
         )?;
         self.insert_bitmap(key, &bitmap)
     }
 
-    /// Inserts a rasterized bitmap into the atlas with a texel gutter.
+    /// Inserts a rasterized bitmap into the atlas with a texel gutter,
+    /// trying existing pages first and allocating a new page if all are full.
     ///
-    /// Allocates `bitmap + 2 * ATLAS_GUTTER` in the atlas, copies the bitmap
+    /// Allocates `bitmap + 2 * ATLAS_GUTTER` per page, copies the bitmap
     /// into the interior, replicates border texels into the gutter, and
     /// computes UV coordinates inset by half a texel so linear filtering
     /// samples texel centers rather than edges.
@@ -307,20 +379,37 @@ impl MsdfAtlas {
         let g = ATLAS_GUTTER;
         let padded_w = bitmap.width + 2 * g;
         let padded_h = bitmap.height + 2 * g;
+        let alloc_size = size2(padded_w as i32, padded_h as i32);
 
-        let alloc = self
-            .allocator
-            .allocate(size2(padded_w as i32, padded_h as i32))?;
+        // Try each existing page.
+        let mut page_idx = None;
+        for (i, page) in self.pages.iter_mut().enumerate() {
+            if let Some(alloc) = page.allocator.allocate(alloc_size) {
+                page_idx = Some((i, alloc));
+                break;
+            }
+        }
 
+        // All pages full — create a new one.
+        let (page_index, alloc) = if let Some((i, alloc)) = page_idx {
+            (i, alloc)
+        } else {
+            let mut new_page = AtlasPage::new(self.width, self.height);
+            let alloc = new_page.allocator.allocate(alloc_size)?;
+            self.pages.push(new_page);
+            (self.pages.len() - 1, alloc)
+        };
+
+        let page = &mut self.pages[page_index];
         let rect = alloc.rectangle;
         let alloc_x = rect.min.x as u32;
         let alloc_y = rect.min.y as u32;
 
-        // Interior origin (where the actual bitmap goes).
+        // Interior origin (where the actual bitmap goes, inside the gutter).
         let x0 = alloc_x + g;
         let y0 = alloc_y + g;
 
-        // Copy RGB bitmap data into RGBA atlas pixels (interior).
+        // Copy RGB bitmap data into RGBA page pixels (interior).
         for row in 0..bitmap.height {
             for col in 0..bitmap.width {
                 let src_idx = ((row * bitmap.width + col) * 3) as usize;
@@ -328,16 +417,24 @@ impl MsdfAtlas {
                 let dst_y = y0 + row;
                 let dst_idx = ((dst_y * self.width + dst_x) * BYTES_PER_PIXEL) as usize;
 
-                self.pixels[dst_idx] = bitmap.data[src_idx];
-                self.pixels[dst_idx + 1] = bitmap.data[src_idx + 1];
-                self.pixels[dst_idx + 2] = bitmap.data[src_idx + 2];
-                self.pixels[dst_idx + 3] = 255;
+                page.pixels[dst_idx] = bitmap.data[src_idx];
+                page.pixels[dst_idx + 1] = bitmap.data[src_idx + 1];
+                page.pixels[dst_idx + 2] = bitmap.data[src_idx + 2];
+                page.pixels[dst_idx + 3] = 255;
             }
         }
 
         // Replicate border texels into the gutter so linear filtering
         // at the edge samples continuous distance field values.
-        self.replicate_gutter(x0, y0, bitmap.width, bitmap.height, g);
+        Self::replicate_gutter(
+            &mut page.pixels,
+            self.width,
+            x0,
+            y0,
+            bitmap.width,
+            bitmap.height,
+            g,
+        );
 
         // Compute UV coordinates inset by half a texel so the sampler
         // hits texel centers, not the border between texels.
@@ -357,11 +454,12 @@ impl MsdfAtlas {
             bearing_y:    bitmap.bearing_y as f32,
             pixel_width:  bitmap.width,
             pixel_height: bitmap.height,
+            page_index:   page_index as u32,
             _alloc_id:    alloc.id,
         };
 
         self.glyphs.insert(key, metrics);
-        self.dirty = true;
+        page.dirty = true;
         Some(metrics)
     }
 
@@ -370,15 +468,16 @@ impl MsdfAtlas {
     /// values as the edge itself, preventing bleed from adjacent atlas entries.
     #[allow(clippy::cast_sign_loss)]
     fn replicate_gutter(
-        &mut self,
+        pixels: &mut [u8],
+        atlas_width: u32,
         x0: u32,
         y0: u32,
         width: u32,
         height: u32,
         gutter: u32,
     ) {
-        // Helper to copy a texel from (sx, sy) to (dx, dy) in the atlas.
-        let w = self.width;
+        // Helper to copy a texel from (sx, sy) to (dx, dy) in the page.
+        let w = atlas_width;
         let copy_texel = |pixels: &mut [u8], sx: u32, sy: u32, dx: u32, dy: u32| {
             let src = ((sy * w + sx) * BYTES_PER_PIXEL) as usize;
             let dst = ((dy * w + dx) * BYTES_PER_PIXEL) as usize;
@@ -393,54 +492,30 @@ impl MsdfAtlas {
             for col in 0..width {
                 let x = x0 + col;
                 // Top gutter: replicate top row upward.
-                copy_texel(&mut self.pixels, x, y0, x, y0 - g);
+                copy_texel(pixels, x, y0, x, y0 - g);
                 // Bottom gutter: replicate bottom row downward.
-                copy_texel(
-                    &mut self.pixels,
-                    x,
-                    y0 + height - 1,
-                    x,
-                    y0 + height - 1 + g,
-                );
+                copy_texel(pixels, x, y0 + height - 1, x, y0 + height - 1 + g);
             }
 
             // Left and right edges.
             for row in 0..height {
                 let y = y0 + row;
                 // Left gutter: replicate left column leftward.
-                copy_texel(&mut self.pixels, x0, y, x0 - g, y);
+                copy_texel(pixels, x0, y, x0 - g, y);
                 // Right gutter: replicate right column rightward.
-                copy_texel(
-                    &mut self.pixels,
-                    x0 + width - 1,
-                    y,
-                    x0 + width - 1 + g,
-                    y,
-                );
+                copy_texel(pixels, x0 + width - 1, y, x0 + width - 1 + g, y);
             }
 
             // Corners: replicate the corner texel diagonally.
             // Top-left.
-            copy_texel(&mut self.pixels, x0, y0, x0 - g, y0 - g);
+            copy_texel(pixels, x0, y0, x0 - g, y0 - g);
             // Top-right.
-            copy_texel(
-                &mut self.pixels,
-                x0 + width - 1,
-                y0,
-                x0 + width - 1 + g,
-                y0 - g,
-            );
+            copy_texel(pixels, x0 + width - 1, y0, x0 + width - 1 + g, y0 - g);
             // Bottom-left.
-            copy_texel(
-                &mut self.pixels,
-                x0,
-                y0 + height - 1,
-                x0 - g,
-                y0 + height - 1 + g,
-            );
+            copy_texel(pixels, x0, y0 + height - 1, x0 - g, y0 + height - 1 + g);
             // Bottom-right.
             copy_texel(
-                &mut self.pixels,
+                pixels,
                 x0 + width - 1,
                 y0 + height - 1,
                 x0 + width - 1 + g,

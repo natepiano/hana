@@ -749,7 +749,7 @@ fn emit_up_traversal_commands(
 fn emit_down_traversal_commands(
     commands: &mut Vec<RenderCommand>,
     element: &Element,
-    wrapped: &Option<WrappedText>,
+    wrapped: Option<&WrappedText>,
     bounds: BoundingBox,
     index: usize,
     offscreen: bool,
@@ -790,13 +790,13 @@ fn emit_down_traversal_commands(
 /// Emits render commands for text content (both wrapped and unwrapped).
 fn emit_text_commands(
     commands: &mut Vec<RenderCommand>,
-    wrapped: &Option<WrappedText>,
+    wrapped: Option<&WrappedText>,
     config: &TextConfig,
     text: &str,
     bounds: BoundingBox,
     index: usize,
 ) {
-    if let Some(ref wrap_result) = *wrapped {
+    if let Some(wrap_result) = wrapped {
         // Wrapped text: emit one command per line.
         for (line_idx, line) in wrap_result.lines.iter().enumerate() {
             #[allow(clippy::cast_precision_loss)]
@@ -997,7 +997,7 @@ fn position_and_render(
             emit_down_traversal_commands(
                 &mut commands,
                 element,
-                &wrapped[index],
+                wrapped[index].as_ref(),
                 bounds,
                 index,
                 offscreen,
