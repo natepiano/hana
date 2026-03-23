@@ -1,4 +1,29 @@
 //! Per-glyph quad data for mesh construction.
+//!
+//! # MSDF seam artifact prevention
+//!
+//! MSDF text rendering has two distinct seam artifact mechanisms, each
+//! addressed by a different fix that must work together:
+//!
+//! 1. **Quad overlap (geometry)** — SDF padding extends glyph quads beyond
+//!    their advance width, causing adjacent quads to overlap in world space.
+//!    With `AlphaMode::Blend`, overlapping semi-transparent edge ramps
+//!    composite twice, producing visible vertical lines.
+//!    **Fix:** [`clip_overlapping_quads`] trims overlapping quads at their
+//!    midpoint and adjusts UV coordinates. Applied CPU-side after quad
+//!    construction.
+//!
+//! 2. **Atlas texture bleed (sampling)** — Glyphs packed edge-to-edge in
+//!    the atlas texture cause linear filtering at UV boundaries to sample
+//!    into adjacent glyph regions. The MSDF median-of-three decode
+//!    amplifies even tiny bleed into visible lines.
+//!    **Fix:** [`ATLAS_GUTTER`](crate::text::atlas) adds a 1-texel gutter
+//!    around each glyph with replicated border texels, and UV coordinates
+//!    are inset by half a texel so the sampler hits texel centers.
+//!
+//! Both fixes are required — overlap clipping alone misses non-overlapping
+//! glyph pairs (like `g`/`r` in a monospace font), and atlas guttering
+//! alone doesn't prevent double-compositing from overlapping geometry.
 
 /// Per-glyph data used when building batched quad meshes.
 ///

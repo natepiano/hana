@@ -30,6 +30,20 @@ const DEFAULT_ATLAS_SIZE: u32 = 1024;
 /// Number of bytes per pixel (RGBA).
 const BYTES_PER_PIXEL: u32 = 4;
 
+/// Texel gutter around each glyph in the atlas.
+///
+/// Prevents linear filtering from sampling into adjacent glyph regions,
+/// which causes the MSDF median-of-three decode to produce faint vertical
+/// line artifacts at glyph boundaries. Border texels are replicated into
+/// the gutter so the distance field is continuous at the edge, and UV
+/// coordinates are inset by half a texel so the sampler hits texel centers.
+///
+/// This is one of two fixes for MSDF seam artifacts — see the module docs
+/// in [`glyph_quad`](crate::render::glyph_quad) for the full explanation.
+/// The other fix is [`clip_overlapping_quads`](crate::render::glyph_quad::clip_overlapping_quads)
+/// which handles overlapping geometry.
+const ATLAS_GUTTER: u32 = 1;
+
 /// Key for looking up a cached glyph in the atlas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GlyphKey {
@@ -270,22 +284,35 @@ impl MsdfAtlas {
         self.insert_bitmap(key, &bitmap)
     }
 
-    /// Inserts a rasterized bitmap into the atlas, returns metrics.
+    /// Inserts a rasterized bitmap into the atlas with a texel gutter.
+    ///
+    /// Allocates `bitmap + 2 * ATLAS_GUTTER` in the atlas, copies the bitmap
+    /// into the interior, replicates border texels into the gutter, and
+    /// computes UV coordinates inset by half a texel so linear filtering
+    /// samples texel centers rather than edges.
     #[allow(
         clippy::cast_possible_wrap,
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )]
     fn insert_bitmap(&mut self, key: GlyphKey, bitmap: &MsdfBitmap) -> Option<GlyphMetrics> {
+        let g = ATLAS_GUTTER;
+        let padded_w = bitmap.width + 2 * g;
+        let padded_h = bitmap.height + 2 * g;
+
         let alloc = self
             .allocator
-            .allocate(size2(bitmap.width as i32, bitmap.height as i32))?;
+            .allocate(size2(padded_w as i32, padded_h as i32))?;
 
         let rect = alloc.rectangle;
-        let x0 = rect.min.x as u32;
-        let y0 = rect.min.y as u32;
+        let alloc_x = rect.min.x as u32;
+        let alloc_y = rect.min.y as u32;
 
-        // Copy RGB bitmap data into RGBA atlas pixels.
+        // Interior origin (where the actual bitmap goes).
+        let x0 = alloc_x + g;
+        let y0 = alloc_y + g;
+
+        // Copy RGB bitmap data into RGBA atlas pixels (interior).
         for row in 0..bitmap.height {
             for col in 0..bitmap.width {
                 let src_idx = ((row * bitmap.width + col) * 3) as usize;
@@ -296,17 +323,24 @@ impl MsdfAtlas {
                 self.pixels[dst_idx] = bitmap.data[src_idx];
                 self.pixels[dst_idx + 1] = bitmap.data[src_idx + 1];
                 self.pixels[dst_idx + 2] = bitmap.data[src_idx + 2];
-                self.pixels[dst_idx + 3] = 255; // Alpha = 1.0
+                self.pixels[dst_idx + 3] = 255;
             }
         }
 
-        // Compute UV coordinates (normalized 0..1).
+        // Replicate border texels into the gutter so linear filtering
+        // at the edge samples continuous distance field values.
+        self.replicate_gutter(x0, y0, bitmap.width, bitmap.height, g);
+
+        // Compute UV coordinates inset by half a texel so the sampler
+        // hits texel centers, not the border between texels.
         let atlas_w = self.width as f32;
         let atlas_h = self.height as f32;
-        let u_min = x0 as f32 / atlas_w;
-        let v_min = y0 as f32 / atlas_h;
-        let u_max = (x0 + bitmap.width) as f32 / atlas_w;
-        let v_max = (y0 + bitmap.height) as f32 / atlas_h;
+        let half_texel_u = 0.5 / atlas_w;
+        let half_texel_v = 0.5 / atlas_h;
+        let u_min = x0 as f32 / atlas_w + half_texel_u;
+        let v_min = y0 as f32 / atlas_h + half_texel_v;
+        let u_max = (x0 + bitmap.width) as f32 / atlas_w - half_texel_u;
+        let v_max = (y0 + bitmap.height) as f32 / atlas_h - half_texel_v;
 
         #[allow(clippy::cast_possible_truncation)]
         let metrics = GlyphMetrics {
@@ -321,6 +355,90 @@ impl MsdfAtlas {
         self.glyphs.insert(key, metrics);
         self.dirty = true;
         Some(metrics)
+    }
+
+    /// Replicates the border texels of a bitmap region into the surrounding
+    /// gutter. This ensures linear filtering at the edge samples the same
+    /// values as the edge itself, preventing bleed from adjacent atlas entries.
+    #[allow(clippy::cast_sign_loss)]
+    fn replicate_gutter(
+        &mut self,
+        x0: u32,
+        y0: u32,
+        width: u32,
+        height: u32,
+        gutter: u32,
+    ) {
+        // Helper to copy a texel from (sx, sy) to (dx, dy) in the atlas.
+        let w = self.width;
+        let copy_texel = |pixels: &mut [u8], sx: u32, sy: u32, dx: u32, dy: u32| {
+            let src = ((sy * w + sx) * BYTES_PER_PIXEL) as usize;
+            let dst = ((dy * w + dx) * BYTES_PER_PIXEL) as usize;
+            pixels[dst] = pixels[src];
+            pixels[dst + 1] = pixels[src + 1];
+            pixels[dst + 2] = pixels[src + 2];
+            pixels[dst + 3] = pixels[src + 3];
+        };
+
+        for g in 1..=gutter {
+            // Top and bottom edges.
+            for col in 0..width {
+                let x = x0 + col;
+                // Top gutter: replicate top row upward.
+                copy_texel(&mut self.pixels, x, y0, x, y0 - g);
+                // Bottom gutter: replicate bottom row downward.
+                copy_texel(
+                    &mut self.pixels,
+                    x,
+                    y0 + height - 1,
+                    x,
+                    y0 + height - 1 + g,
+                );
+            }
+
+            // Left and right edges.
+            for row in 0..height {
+                let y = y0 + row;
+                // Left gutter: replicate left column leftward.
+                copy_texel(&mut self.pixels, x0, y, x0 - g, y);
+                // Right gutter: replicate right column rightward.
+                copy_texel(
+                    &mut self.pixels,
+                    x0 + width - 1,
+                    y,
+                    x0 + width - 1 + g,
+                    y,
+                );
+            }
+
+            // Corners: replicate the corner texel diagonally.
+            // Top-left.
+            copy_texel(&mut self.pixels, x0, y0, x0 - g, y0 - g);
+            // Top-right.
+            copy_texel(
+                &mut self.pixels,
+                x0 + width - 1,
+                y0,
+                x0 + width - 1 + g,
+                y0 - g,
+            );
+            // Bottom-left.
+            copy_texel(
+                &mut self.pixels,
+                x0,
+                y0 + height - 1,
+                x0 - g,
+                y0 + height - 1 + g,
+            );
+            // Bottom-right.
+            copy_texel(
+                &mut self.pixels,
+                x0 + width - 1,
+                y0 + height - 1,
+                x0 + width - 1 + g,
+                y0 + height - 1 + g,
+            );
+        }
     }
 }
 
