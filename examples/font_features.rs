@@ -9,6 +9,8 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::AlignX;
+use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -40,22 +42,28 @@ const PANEL_WORLD_HEIGHT: f32 = 3.1;
 /// Space between the panel's bottom edge and the ground plane.
 const PANEL_GROUND_CLEARANCE: f32 = 0.45;
 
-/// Move the panel slightly toward the camera so the plane reads behind it.
-const PANEL_FORWARD_OFFSET: f32 = 0.7;
+/// Base offset used to place the ground plane in front of the origin.
+const PANEL_FORWARD_OFFSET: f32 = 1.35;
+
+/// Panel sits this far back from the plane's front edge.
+const PANEL_FRONT_DEPTH_FRACTION: f32 = 0.10;
 
 /// Extra plane coverage around the panel.
 const GROUND_SIDE_MARGIN: f32 = 1.4;
-const GROUND_FRONT_MARGIN: f32 = 0.9;
+const GROUND_FRONT_MARGIN: f32 = 0.65;
 const GROUND_BACK_MARGIN: f32 = 2.0;
 
 /// Font size for feature samples.
-const SAMPLE_SIZE: f32 = 36.0;
+const SAMPLE_SIZE: f32 = 55.2;
 
 /// Font size for labels and headers.
 const LABEL_SIZE: f32 = 11.0;
 
 /// Font size for section headers.
 const SECTION_SIZE: f32 = 13.0;
+
+/// Font size for the typeface label shown at the top-right of each cell.
+const FONT_NAME_SIZE: f32 = 15.0;
 
 /// Marker for the showcase panel.
 #[derive(Component)]
@@ -115,9 +123,7 @@ fn setup(
         GroundPlane,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(ground_w, ground_d))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(0.32, 0.34, 0.37, 0.82),
-            alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.92,
+            base_color: Color::srgb(0.15, 0.15, 0.15),
             double_sided: true,
             cull_mode: None,
             ..default()
@@ -141,23 +147,17 @@ fn setup(
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
-            illuminance: 10_000.0,
             ..default()
         },
-        Transform::from_xyz(3.5, 7.0, 5.5).looking_at(Vec3::new(0.0, 0.8, -0.5), Vec3::Y),
+        Transform::from_xyz(1.5, 7.5, 6.0).looking_at(Vec3::new(0.0, 0.2, -0.5), Vec3::Y),
     ));
 
     commands.spawn((
-        AmbientLight {
-            color:                      Color::WHITE,
-            brightness:                 180.0,
-            affects_lightmapped_meshes: false,
-        },
         PanOrbitCamera {
-            focus: Vec3::new(0.0, 1.2, -0.1),
-            radius: Some(5.3),
-            yaw: Some(0.0),
-            pitch: Some(0.24),
+            focus: Vec3::new(0.06764774, 1.9130665, 2.4002967),
+            radius: Some(4.3855944),
+            yaw: Some(-0.004848164),
+            pitch: Some(0.0261289),
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
@@ -198,11 +198,16 @@ fn ground_center_z() -> f32 {
     PANEL_FORWARD_OFFSET + (GROUND_FRONT_MARGIN - GROUND_BACK_MARGIN) * 0.5
 }
 
+fn panel_z() -> f32 {
+    let (_, ground_d) = ground_dimensions(0.0);
+    ground_center_z() + ground_d * (0.5 - PANEL_FRONT_DEPTH_FRACTION)
+}
+
 fn panel_transform(world_h: f32) -> Transform {
     Transform::from_xyz(
         0.0,
         world_h * 0.5 + PANEL_GROUND_CLEARANCE,
-        PANEL_FORWARD_OFFSET,
+        panel_z(),
     )
 }
 
@@ -465,6 +470,10 @@ fn build_feature_column(
     let label_config = TextConfig::new(LABEL_SIZE)
         .with_color(label_color)
         .with_loading_policy(loading_policy);
+    let font_name_config = TextConfig::new(FONT_NAME_SIZE)
+        .with_font(font_id)
+        .with_color(label_color)
+        .with_loading_policy(loading_policy);
 
     b.with(
         El::new()
@@ -475,51 +484,101 @@ fn build_feature_column(
             .child_gap(4.0)
             .border(Border::all(1.0, column_border_color)),
         |b| {
-            // Section header.
-            b.text(
-                title,
-                TextConfig::new(SECTION_SIZE)
-                    .with_color(section_color)
-                    .with_loading_policy(loading_policy),
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(8.0)
+                    .child_align_y(AlignY::Top),
+                |b| {
+                    b.text(
+                        title,
+                        TextConfig::new(SECTION_SIZE)
+                            .with_color(section_color)
+                            .with_loading_policy(loading_policy),
+                    );
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .child_align_x(AlignX::Right),
+                        |b| {
+                            b.text(font_name, font_name_config.clone());
+                        },
+                    );
+                },
             );
-            b.text(font_name, label_config.clone());
 
-            for &sample in samples {
-                // Row: on | off side by side.
-                b.with(
-                    El::new()
-                        .width(Sizing::GROW)
-                        .height(Sizing::FIT)
-                        .direction(Direction::LeftToRight)
-                        .child_gap(8.0),
-                    |b| {
-                        // "On" side.
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(0.0),
+                |b| {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::percent(0.11))
+                            .padding(Padding::new(6.0, 4.0, 0.0, 4.0))
+                            .direction(Direction::LeftToRight)
+                            .child_gap(12.0)
+                            .child_align_y(AlignY::Bottom),
+                        |b| {
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::FIT)
+                                    .child_alignment(AlignX::Center, AlignY::Top),
+                                |b| {
+                                    b.text("On", label_config.clone());
+                                },
+                            );
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::FIT)
+                                    .child_alignment(AlignX::Center, AlignY::Top),
+                                |b| {
+                                    b.text("Off", label_config.clone());
+                                },
+                            );
+                        },
+                    );
+
+                    for &sample in samples {
                         b.with(
                             El::new()
                                 .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .direction(Direction::TopToBottom)
-                                .child_gap(1.0),
+                                .height(Sizing::GROW)
+                                .padding(Padding::new(0.0, 4.0, 0.0, 4.0))
+                                .direction(Direction::LeftToRight)
+                                .child_gap(10.0),
                             |b| {
-                                b.text(sample, on_config.clone());
-                                b.text("on", label_config.clone());
+                                b.with(
+                                    El::new()
+                                        .width(Sizing::GROW)
+                                        .height(Sizing::GROW)
+                                        .child_alignment(AlignX::Center, AlignY::Center),
+                                    |b| {
+                                        b.text(sample, on_config.clone());
+                                    },
+                                );
+                                b.with(
+                                    El::new()
+                                        .width(Sizing::GROW)
+                                        .height(Sizing::GROW)
+                                        .child_alignment(AlignX::Center, AlignY::Center),
+                                    |b| {
+                                        b.text(sample, off_config.clone());
+                                    },
+                                );
                             },
                         );
-                        // "Off" side.
-                        b.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .direction(Direction::TopToBottom)
-                                .child_gap(1.0),
-                            |b| {
-                                b.text(sample, off_config.clone());
-                                b.text("off", label_config.clone());
-                            },
-                        );
-                    },
-                );
-            }
+                    }
+                },
+            );
         },
     );
 }
