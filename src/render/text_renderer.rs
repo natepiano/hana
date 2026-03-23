@@ -79,15 +79,16 @@ pub struct ShapedTextRun {
 /// Cache key: hash of the text string + the full `TextMeasure` identity.
 #[derive(Clone, Eq, PartialEq, Hash)]
 struct ShapedCacheKey {
-    text_hash: u64,
-    font_id:   u16,
+    text_hash:     u64,
+    font_id:       u16,
     /// Size quantized to avoid floating-point hash issues (size * 100 as u32).
-    size_q:    u32,
-    weight_q:  u32,
-    slant:     u8,
-    lh_q:      u32,
-    ls_q:      i32,
-    ws_q:      i32,
+    size_q:        u32,
+    weight_q:      u32,
+    slant:         u8,
+    lh_q:          u32,
+    ls_q:          i32,
+    ws_q:          i32,
+    font_features: crate::layout::FontFeatures,
 }
 
 impl ShapedCacheKey {
@@ -96,18 +97,19 @@ impl ShapedCacheKey {
         let mut hasher = DefaultHasher::new();
         text.hash(&mut hasher);
         Self {
-            text_hash: hasher.finish(),
-            font_id:   m.font_id,
-            size_q:    (m.size * 100.0) as u32,
-            weight_q:  (m.weight.0 * 10.0) as u32,
-            slant:     match m.slant {
+            text_hash:     hasher.finish(),
+            font_id:       m.font_id,
+            size_q:        (m.size * 100.0) as u32,
+            weight_q:      (m.weight.0 * 10.0) as u32,
+            slant:         match m.slant {
                 crate::layout::FontSlant::Normal => 0,
                 crate::layout::FontSlant::Italic => 1,
                 crate::layout::FontSlant::Oblique => 2,
             },
-            lh_q:      (m.line_height * 100.0) as u32,
-            ls_q:      (m.letter_spacing * 100.0) as i32,
-            ws_q:      (m.word_spacing * 100.0) as i32,
+            lh_q:          (m.line_height * 100.0) as u32,
+            ls_q:          (m.letter_spacing * 100.0) as i32,
+            ws_q:          (m.word_spacing * 100.0) as i32,
+            font_features: m.font_features,
         }
     }
 }
@@ -144,6 +146,17 @@ impl ShapedTextCache {
     pub fn get_shaped(&self, text: &str, measure: &TextMeasure) -> Option<&ShapedTextRun> {
         let key = ShapedCacheKey::new(text, measure);
         self.entries.get(&key)
+    }
+
+    /// Inserts a measurement result into the cache.
+    pub fn insert_measurement(
+        &mut self,
+        text: &str,
+        measure: &TextMeasure,
+        dims: crate::layout::TextDimensions,
+    ) {
+        let key = ShapedCacheKey::new(text, measure);
+        self.measurements.insert(key, dims);
     }
 }
 
@@ -378,7 +391,11 @@ fn extract_text_meshes(
         );
     }
 
-    perf.last_text_extract_ms = start.elapsed().as_secs_f32() * 1000.0;
+    let extract_ms = start.elapsed().as_secs_f32() * 1000.0;
+    if extract_ms > 10.0 {
+        bevy::log::warn!("extract_text_meshes: {extract_ms:.1}ms for {panel_count} panels");
+    }
+    perf.last_text_extract_ms = extract_ms;
     perf.last_text_extract_panels = panel_count;
 }
 
@@ -538,6 +555,23 @@ pub(super) fn shape_text_cached(
     builder.push_default(parley::style::StyleProperty::LineHeight(
         parley::style::LineHeight::Absolute(line_height),
     ));
+
+    // Push OpenType feature overrides (liga, calt, dlig, kern).
+    let font_features = config.font_features();
+    if !font_features.is_default() {
+        let parley_features: Vec<parley::style::FontFeature> = font_features
+            .to_parley_settings()
+            .into_iter()
+            .map(|(tag, value)| parley::swash::Setting {
+                tag: parley::swash::tag_from_bytes(&tag),
+                value,
+            })
+            .collect();
+        builder.push_default(parley::style::StyleProperty::FontFeatures(
+            parley::style::FontSettings::List(std::borrow::Cow::Owned(parley_features)),
+        ));
+    }
+
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
 

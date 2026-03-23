@@ -258,6 +258,7 @@ fn clay_measure_with_parley(
         line_height:    f32::from(config.line_height),
         letter_spacing: 0.0,
         word_spacing:   0.0,
+        font_features:  bevy_diegetic::FontFeatures::default(),
     };
     let dims = measurer(text, &measure);
     Dimensions {

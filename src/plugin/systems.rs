@@ -46,17 +46,34 @@ pub struct DiegeticPerfStats {
 /// returned from the cache without calling parley. On cache miss, falls back
 /// to the parley-backed [`DiegeticTextMeasurer`].
 pub(super) fn compute_panel_layouts(
-    mut panels: Query<(&DiegeticPanel, &mut ComputedDiegeticPanel), Changed<DiegeticPanel>>,
+    panels: Query<(Entity, Ref<DiegeticPanel>)>,
+    mut computed_panels: Query<&mut ComputedDiegeticPanel>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
-    if panels.is_empty() {
+    // Only process panels where DiegeticPanel actually changed.
+    let changed_entities: Vec<Entity> = panels
+        .iter()
+        .filter(|(_, panel_ref)| panel_ref.is_changed())
+        .map(|(entity, _)| entity)
+        .collect();
+
+    if changed_entities.is_empty() {
         perf.last_compute_ms = 0.0;
         perf.last_compute_panels = 0;
         return;
     }
 
+    bevy::log::warn!(
+        "compute_panel_layouts: {} panels changed (is_added: {:?})",
+        changed_entities.len(),
+        panels
+            .iter()
+            .filter(|(_, r)| r.is_changed())
+            .map(|(_, r)| r.is_added())
+            .collect::<Vec<_>>()
+    );
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
@@ -64,34 +81,59 @@ pub(super) fn compute_panel_layouts(
     let cache_ref = Arc::new(Mutex::new(cache.clone()));
     let parley_fn = Arc::clone(&measurer.measure_fn);
 
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let misses = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hits_clone = Arc::clone(&hits);
+    let misses_clone = Arc::clone(&misses);
+
     let cached_measure: crate::layout::MeasureTextFn =
         Arc::new(move |text: &str, measure: &crate::layout::TextMeasure| {
             // Check cache first.
-            let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(dims) = cache_guard.get_measurement(text, measure) {
-                return dims;
+            {
+                let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(dims) = cache_guard.get_measurement(text, measure) {
+                    hits_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    return dims;
+                }
             }
-            drop(cache_guard);
-            // Cache miss — fall back to parley.
-            parley_fn(text, measure)
+            // Cache miss — measure via parley and write back to cache.
+            misses_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dims = parley_fn(text, measure);
+            {
+                let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+                cache_guard.insert_measurement(text, measure, dims);
+            }
+            dims
         });
 
-    for (panel, mut computed) in &mut panels {
+    for entity in &changed_entities {
+        let Ok((_, panel_ref)) = panels.get(*entity) else {
+            continue;
+        };
+        let Ok(mut computed) = computed_panels.get_mut(*entity) else {
+            continue;
+        };
         panel_count += 1;
 
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
-        let result = engine.compute(&panel.tree, panel.layout_width, panel.layout_height);
+        let result = engine.compute(&panel_ref.tree, panel_ref.layout_width, panel_ref.layout_height);
 
         if let Some(bounds) = result.content_bounds() {
-            let scale_x = panel.world_width / panel.layout_width;
-            let scale_y = panel.world_height / panel.layout_height;
+            let scale_x = panel_ref.world_width / panel_ref.layout_width;
+            let scale_y = panel_ref.world_height / panel_ref.layout_height;
             computed.set_content_size(bounds.width * scale_x, bounds.height * scale_y);
         }
 
         computed.set_result(result);
     }
 
-    perf.last_compute_ms = start.elapsed().as_secs_f32() * 1000.0;
+    let compute_ms = start.elapsed().as_secs_f32() * 1000.0;
+    let h = hits.load(std::sync::atomic::Ordering::Relaxed);
+    let m = misses.load(std::sync::atomic::Ordering::Relaxed);
+    bevy::log::warn!(
+        "compute_panel_layouts: {compute_ms:.1}ms, {panel_count} panels, {h} cache hits, {m} cache misses"
+    );
+    perf.last_compute_ms = compute_ms;
     perf.last_compute_panels = panel_count;
 }
 

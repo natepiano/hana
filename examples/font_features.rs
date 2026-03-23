@@ -1,0 +1,525 @@
+//! @generated `bevy_example_template`
+//! OpenType font feature showcase.
+//!
+//! Demonstrates `FontFeatures` by showing text with each OpenType feature
+//! enabled (shaper default) vs explicitly disabled. Loads Noto Sans for
+//! `liga` samples and uses the built-in JetBrains Mono for `calt`/`kern`.
+//! Rendered as a [`DiegeticPanel`] hovering above a visible ground plane.
+
+use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::Border;
+use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticUiPlugin;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::Font;
+use bevy_diegetic::FontFeatureFlags;
+use bevy_diegetic::FontFeatures;
+use bevy_diegetic::FontRegistered;
+use bevy_diegetic::GlyphLoadingPolicy;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Sizing;
+use bevy_diegetic::TextConfig;
+use bevy_panorbit_camera::PanOrbitCamera;
+use bevy_panorbit_camera::PanOrbitCameraPlugin;
+use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
+use bevy_window_manager::WindowManagerPlugin;
+
+/// Fraction of screen width used as inset on each side.
+const SIDE_INSET_FRACTION: f32 = 0.05;
+const TOP_INSET_FRACTION: f32 = 0.06;
+const BOTTOM_INSET_FRACTION: f32 = 0.18;
+
+/// World-space panel height. Width follows the window aspect ratio.
+const PANEL_WORLD_HEIGHT: f32 = 3.1;
+
+/// Space between the panel's bottom edge and the ground plane.
+const PANEL_GROUND_CLEARANCE: f32 = 0.45;
+
+/// Move the panel slightly toward the camera so the plane reads behind it.
+const PANEL_FORWARD_OFFSET: f32 = 0.7;
+
+/// Extra plane coverage around the panel.
+const GROUND_SIDE_MARGIN: f32 = 1.4;
+const GROUND_FRONT_MARGIN: f32 = 0.9;
+const GROUND_BACK_MARGIN: f32 = 2.0;
+
+/// Font size for feature samples.
+const SAMPLE_SIZE: f32 = 36.0;
+
+/// Font size for labels and headers.
+const LABEL_SIZE: f32 = 11.0;
+
+/// Font size for section headers.
+const SECTION_SIZE: f32 = 13.0;
+
+/// Marker for the showcase panel.
+#[derive(Component)]
+struct ShowcasePanel;
+
+#[derive(Component)]
+struct GroundPlane;
+
+/// Keeps font handles alive so Bevy doesn't unload the assets.
+#[derive(Resource, Default)]
+struct FontHandles(Vec<Handle<Font>>);
+
+/// Tracks the EB Garamond font ID once registered.
+#[derive(Resource, Default)]
+struct SerifFontId(Option<u16>);
+
+fn main() {
+    App::new()
+        .add_plugins((
+            DefaultPlugins,
+            DiegeticUiPlugin,
+            PanOrbitCameraPlugin,
+            PanOrbitCameraExtPlugin,
+            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
+            WindowManagerPlugin,
+        ))
+        .init_resource::<FontHandles>()
+        .init_resource::<SerifFontId>()
+        .add_observer(on_font_registered)
+        .add_systems(Startup, setup)
+        .add_systems(Update, resize_panel)
+        .run();
+}
+
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut font_handles: ResMut<FontHandles>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    windows: Query<&Window>,
+    noto_id: Res<SerifFontId>,
+) {
+    font_handles
+        .0
+        .push(asset_server.load("fonts/EBGaramond-Regular.ttf"));
+
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let (layout_w, layout_h) = layout_dimensions(window);
+    let (world_w, world_h) = world_dimensions(window);
+    let (ground_w, ground_d) = ground_dimensions(world_w);
+    let ground_z = ground_center_z();
+
+    commands.spawn((
+        GroundPlane,
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(ground_w, ground_d))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgba(0.32, 0.34, 0.37, 0.82),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.92,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.0, ground_z),
+    ));
+
+    warn!("MUTATE: setup spawning DiegeticPanel");
+    commands.spawn((
+        ShowcasePanel,
+        DiegeticPanel {
+            tree:          build_panel(layout_w, layout_h, noto_id.0),
+            layout_width:  layout_w,
+            layout_height: layout_h,
+            world_width:   world_w,
+            world_height:  world_h,
+        },
+        panel_transform(world_h),
+    ));
+
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            illuminance: 10_000.0,
+            ..default()
+        },
+        Transform::from_xyz(3.5, 7.0, 5.5).looking_at(Vec3::new(0.0, 0.8, -0.5), Vec3::Y),
+    ));
+
+    commands.spawn((
+        AmbientLight {
+            color:                      Color::WHITE,
+            brightness:                 180.0,
+            affects_lightmapped_meshes: false,
+        },
+        PanOrbitCamera {
+            focus: Vec3::new(0.0, 1.2, -0.1),
+            radius: Some(5.3),
+            yaw: Some(0.0),
+            pitch: Some(0.24),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
+    ));
+}
+
+fn layout_dimensions(window: &Window) -> (f32, f32) {
+    let side_inset = window.width() * SIDE_INSET_FRACTION;
+    let top_inset = window.height() * TOP_INSET_FRACTION;
+    let bottom_inset = window.height() * BOTTOM_INSET_FRACTION;
+    (
+        window.width() - side_inset * 2.0,
+        window.height() - top_inset - bottom_inset,
+    )
+}
+
+fn world_dimensions(window: &Window) -> (f32, f32) {
+    let aspect = window.width() / window.height();
+    let world_h = PANEL_WORLD_HEIGHT;
+    (world_h * aspect, world_h)
+}
+
+fn ground_dimensions(world_w: f32) -> (f32, f32) {
+    (
+        world_w + GROUND_SIDE_MARGIN * 2.0,
+        GROUND_FRONT_MARGIN + GROUND_BACK_MARGIN + 2.0,
+    )
+}
+
+fn ground_center_z() -> f32 {
+    PANEL_FORWARD_OFFSET + (GROUND_FRONT_MARGIN - GROUND_BACK_MARGIN) * 0.5
+}
+
+fn panel_transform(world_h: f32) -> Transform {
+    Transform::from_xyz(
+        0.0,
+        world_h * 0.5 + PANEL_GROUND_CLEARANCE,
+        PANEL_FORWARD_OFFSET,
+    )
+}
+
+fn resize_panel(
+    windows: Query<&Window, Changed<Window>>,
+    mut panels: Query<
+        (&mut DiegeticPanel, &mut Transform),
+        (With<ShowcasePanel>, Without<GroundPlane>),
+    >,
+    mut ground: Query<
+        (&mut Mesh3d, &mut Transform),
+        (With<GroundPlane>, Without<ShowcasePanel>),
+    >,
+    mut meshes: ResMut<Assets<Mesh>>,
+    noto_id: Res<SerifFontId>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let (layout_w, layout_h) = layout_dimensions(window);
+    let (world_w, world_h) = world_dimensions(window);
+    let (ground_w, ground_d) = ground_dimensions(world_w);
+    let ground_z = ground_center_z();
+
+    for (mut panel, mut transform) in &mut panels {
+        if panel.layout_width == layout_w
+            && panel.layout_height == layout_h
+            && panel.world_width == world_w
+            && panel.world_height == world_h
+        {
+            continue;
+        }
+        panel.layout_width = layout_w;
+        panel.layout_height = layout_h;
+        panel.world_width = world_w;
+        panel.world_height = world_h;
+        panel.tree = build_panel(layout_w, layout_h, noto_id.0);
+        *transform = panel_transform(world_h);
+    }
+
+    for (mut mesh3d, mut transform) in &mut ground {
+        mesh3d.0 = meshes.add(Plane3d::default().mesh().size(ground_w, ground_d));
+        transform.translation.z = ground_z;
+    }
+}
+
+fn on_font_registered(
+    trigger: On<FontRegistered>,
+    mut noto_id: ResMut<SerifFontId>,
+    mut panels: Query<&mut DiegeticPanel, With<ShowcasePanel>>,
+    windows: Query<&Window>,
+) {
+    info!(
+        "FontRegistered: {} (id: {}, {})",
+        trigger.name, trigger.id.0, trigger.source
+    );
+    noto_id.0 = Some(trigger.id.0);
+
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let (layout_w, layout_h) = layout_dimensions(window);
+    for mut panel in &mut panels {
+        warn!("MUTATE: on_font_registered rebuilding tree for {}", trigger.name);
+        panel.tree = build_panel(layout_w, layout_h, noto_id.0);
+    }
+}
+
+// ── Panel layout ────────────────────────────────────────────────────────────
+
+fn build_panel(
+    layout_w: f32,
+    layout_h: f32,
+    serif_font_id: Option<u16>,
+) -> bevy_diegetic::LayoutTree {
+    let mut builder = LayoutBuilder::new(layout_w, layout_h);
+
+    let bg = Color::srgb_u8(40, 40, 45);
+    let border_color = Color::srgb_u8(70, 75, 85);
+    let column_border_color = Color::srgba(0.75, 0.8, 0.9, 0.3);
+    let section_color = Color::srgb(0.55, 0.75, 1.0);
+    let label_color = Color::srgba(1.0, 1.0, 1.0, 0.45);
+    let on_color = Color::WHITE;
+    let off_color = Color::srgb(0.7, 0.7, 0.7);
+
+    let progressive = GlyphLoadingPolicy::Progressive;
+
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(10.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(6.0)
+            .background(bg)
+            .border(Border::all(2.0, border_color)),
+        |b| {
+            // Title.
+            b.text(
+                "Font Features",
+                TextConfig::new(SECTION_SIZE + 2.0)
+                    .with_color(section_color)
+                    .with_loading_policy(progressive),
+            );
+
+            let serif_font = serif_font_id.unwrap_or(0);
+            let serif_name = if serif_font_id.is_some() {
+                "EB Garamond"
+            } else {
+                "(loading...)"
+            };
+
+            // 2x2 grid:
+            // LIGA | CALT
+            // DLIG | KERN
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(12.0),
+                |b| {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(12.0),
+                        |b| {
+                            // LIGA — uses EB Garamond (has fi/fl/ffi/ffl ligatures).
+                            build_feature_column(
+                                b,
+                                "LIGA — Standard Ligatures",
+                                serif_name,
+                                serif_font,
+                                FontFeatureFlags::LIGA,
+                                true,
+                                &["fi", "fl", "ffi", "ffl"],
+                                section_color,
+                                label_color,
+                                on_color,
+                                off_color,
+                                column_border_color,
+                                progressive,
+                            );
+
+                            // CALT — uses JetBrains Mono.
+                            build_feature_column(
+                                b,
+                                "CALT — Contextual Alternates",
+                                "JetBrains Mono",
+                                0,
+                                FontFeatureFlags::CALT,
+                                true,
+                                &["::", "->", "=>", "!="],
+                                section_color,
+                                label_color,
+                                on_color,
+                                off_color,
+                                column_border_color,
+                                progressive,
+                            );
+                        },
+                    );
+
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(12.0),
+                        |b| {
+                            // DLIG — uses EB Garamond (has ct/st discretionary ligatures).
+                            build_feature_column(
+                                b,
+                                "DLIG — Discretionary",
+                                serif_name,
+                                serif_font,
+                                FontFeatureFlags::DLIG,
+                                false,
+                                &["Th", "st", "ct"],
+                                section_color,
+                                label_color,
+                                on_color,
+                                off_color,
+                                column_border_color,
+                                progressive,
+                            );
+
+                            // KERN — uses EB Garamond (proportional, has kerning pairs).
+                            build_feature_column(
+                                b,
+                                "KERN — Kerning",
+                                serif_name,
+                                serif_font,
+                                FontFeatureFlags::KERN,
+                                true,
+                                &["AVAV", "Type", "Wolf"],
+                                section_color,
+                                label_color,
+                                on_color,
+                                off_color,
+                                column_border_color,
+                                progressive,
+                            );
+                        },
+                    );
+                },
+            );
+        },
+    );
+
+    builder.build()
+}
+
+/// Builds a single feature column: header, font name, then pairs of
+/// on/off samples for each test string.
+#[allow(clippy::too_many_arguments)]
+fn build_feature_column(
+    b: &mut LayoutBuilder,
+    title: &str,
+    font_name: &str,
+    font_id: u16,
+    feature: FontFeatureFlags,
+    default_on: bool,
+    samples: &[&str],
+    section_color: Color,
+    label_color: Color,
+    on_color: Color,
+    off_color: Color,
+    column_border_color: Color,
+    loading_policy: GlyphLoadingPolicy,
+) {
+    // "on" explicitly enables the feature, "off" explicitly disables it.
+    // For features on by default (liga, calt, kern), "on" = default, "off" = disabled.
+    // For features off by default (dlig), "on" = enabled, "off" = default.
+    let on_features = if default_on {
+        FontFeatures::new()
+    } else {
+        FontFeatures::new().with(feature)
+    };
+    let off_features = if default_on {
+        FontFeatures::new().without(feature)
+    } else {
+        FontFeatures::new()
+    };
+
+    let on_config = TextConfig::new(SAMPLE_SIZE)
+        .with_font(font_id)
+        .with_color(on_color)
+        .with_font_features(on_features)
+        .with_loading_policy(loading_policy);
+
+    let off_config = TextConfig::new(SAMPLE_SIZE)
+        .with_font(font_id)
+        .with_color(off_color)
+        .with_font_features(off_features)
+        .with_loading_policy(loading_policy);
+
+    let label_config = TextConfig::new(LABEL_SIZE)
+        .with_color(label_color)
+        .with_loading_policy(loading_policy);
+
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(6.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(4.0)
+            .border(Border::all(1.0, column_border_color)),
+        |b| {
+            // Section header.
+            b.text(
+                title,
+                TextConfig::new(SECTION_SIZE)
+                    .with_color(section_color)
+                    .with_loading_policy(loading_policy),
+            );
+            b.text(font_name, label_config.clone());
+
+            for &sample in samples {
+                // Row: on | off side by side.
+                b.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::FIT)
+                        .direction(Direction::LeftToRight)
+                        .child_gap(8.0),
+                    |b| {
+                        // "On" side.
+                        b.with(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::FIT)
+                                .direction(Direction::TopToBottom)
+                                .child_gap(1.0),
+                            |b| {
+                                b.text(sample, on_config.clone());
+                                b.text("on", label_config.clone());
+                            },
+                        );
+                        // "Off" side.
+                        b.with(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::FIT)
+                                .direction(Direction::TopToBottom)
+                                .child_gap(1.0),
+                            |b| {
+                                b.text(sample, off_config.clone());
+                                b.text("off", label_config.clone());
+                            },
+                        );
+                    },
+                );
+            }
+        },
+    );
+}

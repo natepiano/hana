@@ -45,6 +45,8 @@ pub use layout::BoundingBox;
 pub use layout::Direction;
 // Layout tree.
 pub use layout::El;
+pub use layout::FontFeatureFlags;
+pub use layout::FontFeatures;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;

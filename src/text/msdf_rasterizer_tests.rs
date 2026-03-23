@@ -357,6 +357,151 @@ fn parley_colon_glyph_ids_match_cmap() {
     }
 }
 
+const EB_GARAMOND: &[u8] = include_bytes!("../../assets/fonts/EBGaramond-Regular.ttf");
+
+#[test]
+fn eb_garamond_rasterize_basic_glyphs() {
+    let face = ttf_parser::Face::parse(EB_GARAMOND, 0).unwrap();
+    println!(
+        "EB Garamond: {} glyphs, {} upem",
+        face.number_of_glyphs(),
+        face.units_per_em()
+    );
+
+    for ch in ['f', 'i', 'A', 'V', 'T'] {
+        let gid = face.glyph_index(ch).unwrap();
+        let start = std::time::Instant::now();
+        println!("Rasterizing '{ch}' (glyph {})...", gid.0);
+        let result = rasterize_glyph(EB_GARAMOND, gid.0, 32, 4.0, 2);
+        let elapsed = start.elapsed();
+        println!(
+            "  result={}, took {:?}",
+            result.is_some(),
+            elapsed
+        );
+        if let Some(bm) = &result {
+            println!("  bitmap {}x{}", bm.width, bm.height);
+        }
+        assert!(
+            elapsed.as_secs() < 5,
+            "glyph '{ch}' took too long: {elapsed:?}"
+        );
+    }
+}
+
+#[test]
+fn eb_garamond_shape_and_rasterize() {
+    use std::sync::PoisonError;
+
+    let mut font_cx = parley::FontContext::default();
+    font_cx
+        .collection
+        .register_fonts(EB_GARAMOND.to_vec().into(), None);
+    let font_cx = std::sync::Mutex::new(font_cx);
+    let layout_cx = std::sync::Mutex::new(parley::LayoutContext::<()>::default());
+    let mut layout = parley::Layout::<()>::new();
+
+    let texts = ["fi", "fl", "ffi", "ffl", "Th", "st", "ct", "AVAV", "Type", "Wolf"];
+
+    for text in texts {
+        let mut fcx = font_cx.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut lcx = layout_cx.lock().unwrap_or_else(PoisonError::into_inner);
+
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, true);
+        builder.push_default(parley::style::StyleProperty::FontSize(36.0));
+        builder.push_default(parley::style::StyleProperty::FontStack(
+            parley::style::FontStack::Single(parley::style::FontFamily::Named(
+                "EB Garamond".into(),
+            )),
+        ));
+        builder.build_into(&mut layout, text);
+        layout.break_all_lines(None);
+        drop(fcx);
+        drop(lcx);
+
+        println!("\nShaped \"{text}\":");
+        for line in layout.lines() {
+            for item in line.items() {
+                let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
+                    continue;
+                };
+                let glyph_run = run.run();
+                for cluster in glyph_run.clusters() {
+                    for glyph in cluster.glyphs() {
+                        let gid = glyph.id as u16;
+                        print!("  glyph {gid}: ");
+                        let start = std::time::Instant::now();
+                        let result = rasterize_glyph(EB_GARAMOND, gid, 32, 4.0, 2);
+                        let elapsed = start.elapsed();
+                        println!(
+                            "rasterize={}, {:?}",
+                            result.is_some(),
+                            elapsed,
+                        );
+                        assert!(
+                            elapsed.as_secs() < 10,
+                            "glyph {gid} in \"{text}\" took too long: {elapsed:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Times parley measurement (no rasterization) for EB Garamond — the same
+/// codepath `DiegeticPanel` uses via `create_parley_measurer`.
+#[test]
+fn eb_garamond_measure_timing() {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::PoisonError;
+
+    let mut font_cx = parley::FontContext::default();
+    font_cx
+        .collection
+        .register_fonts(EB_GARAMOND.to_vec().into(), None);
+    let font_cx = Arc::new(Mutex::new(font_cx));
+
+    let measurer = crate::text::measurer::create_parley_measurer(
+        Arc::clone(&font_cx),
+        vec!["EB Garamond".to_string()],
+    );
+
+    // Simulate the font_features example: ~72 text measurements
+    let texts = [
+        "fi", "fl", "ffi", "ffl", "on", "off",
+        "LIGA — Standard Ligatures", "EB Garamond",
+        "::", "->", "=>", "!=",
+        "CALT — Contextual Alternates", "JetBrains Mono",
+        "Th", "st", "ct",
+        "DLIG — Discretionary",
+        "AVAV", "Type", "Wolf",
+        "KERN — Kerning",
+        "Font Features",
+    ];
+
+    let measure = crate::layout::TextMeasure {
+        font_id:        0,
+        size:           36.0,
+        weight:         crate::layout::FontWeight::NORMAL,
+        slant:          crate::layout::FontSlant::Normal,
+        line_height:    0.0,
+        letter_spacing: 0.0,
+        word_spacing:   0.0,
+        font_features:  crate::layout::FontFeatures::default(),
+    };
+
+    let total_start = std::time::Instant::now();
+    for text in &texts {
+        let start = std::time::Instant::now();
+        let dims = measurer(text, &measure);
+        let elapsed = start.elapsed();
+        println!("{text:>35}: {:.1}x{:.1}  {:?}", dims.width, dims.height, elapsed);
+    }
+    println!("\nTotal for {} measurements: {:?}", texts.len(), total_start.elapsed());
+}
+
 // ── PNG dump (visual inspection) ─────────────────────────────────────────────
 
 #[test]
