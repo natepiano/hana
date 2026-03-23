@@ -48,7 +48,7 @@ const LABEL_SIZE_RATIO: f32 = 0.08;
 ///     Transform::from_xyz(0.0, 2.0, 0.0),
 /// ));
 /// ```
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, bevy::prelude::Reflect)]
 pub struct TypographyOverlay {
     /// Show font-level metric lines (ascent, descent, cap height, x-height,
     /// baseline, top, bottom).
@@ -65,6 +65,11 @@ pub struct TypographyOverlay {
     pub label_size:         f32,
     /// How far annotation lines extend beyond text bounds (in layout units).
     pub extend:             f32,
+    /// Anti-aliasing expansion factor for glyph bounding boxes. Controls
+    /// how far the bounding box extends beyond the mathematical outline
+    /// to account for the MSDF shader's anti-aliased edge. Higher values
+    /// produce larger boxes.
+    pub aa_factor:          f32,
 }
 
 impl Default for TypographyOverlay {
@@ -77,6 +82,7 @@ impl Default for TypographyOverlay {
             line_width:         DEFAULT_LINE_WIDTH,
             label_size:         6.0,
             extend:             8.0,
+            aa_factor:          1.2,
         }
     }
 }
@@ -100,21 +106,39 @@ pub fn build_typography_overlay(
             &TextStyle,
             &TypographyOverlay,
             &ComputedWorldText,
+            &GlobalTransform,
         ),
-        Or<(
-            Added<TypographyOverlay>,
-            Changed<WorldText>,
-            Changed<TextStyle>,
-            Changed<ComputedWorldText>,
-        )>,
+    >,
+    text_changed: Query<
+        Entity,
+        (
+            With<TypographyOverlay>,
+            Or<(
+                Added<TypographyOverlay>,
+                Changed<TypographyOverlay>,
+                Changed<WorldText>,
+                Changed<TextStyle>,
+                Changed<ComputedWorldText>,
+            )>,
+        ),
     >,
     old_elements: Query<(Entity, &ChildOf), With<OverlayElement>>,
+    cameras: Query<(&GlobalTransform, &Projection, &Camera), Changed<GlobalTransform>>,
+    all_cameras: Query<(&GlobalTransform, &Projection, &Camera)>,
+    atlas: Res<crate::text::MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     cache: Res<ShapedTextCache>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut commands: Commands,
 ) {
-    for (entity, world_text, style, overlay, computed) in &query {
+    let camera_changed = !cameras.is_empty();
+    let changed_entities: Vec<Entity> = text_changed.iter().collect();
+
+    for (entity, world_text, style, overlay, computed, text_gtransform) in &query {
+        // Only rebuild if the text changed or the camera moved.
+        if !camera_changed && !changed_entities.contains(&entity) {
+            continue;
+        }
         if world_text.0.is_empty() {
             continue;
         }
@@ -187,7 +211,48 @@ pub fn build_typography_overlay(
         // Build per-glyph bounding box gizmo from the renderer's actual
         // quad rects — guaranteed to match what's drawn on screen.
         if overlay.show_glyph_metrics {
-            let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects);
+            // Compute AA expansion using the MSDF shader's formula.
+            //
+            // The shader's visible edge extends beyond the outline by:
+            //   extension_bp = 0.48 / screen_px_range * sdf_range
+            // where screen_px_range = max(0.5 * sdf_range * screen_px_per_bp, 1.0)
+            // and screen_px_per_bp = world_per_bp / world_per_screen_pixel.
+            #[allow(clippy::cast_precision_loss)]
+            let aa_expansion = all_cameras.iter().next().map_or(0.0, |(cam_gt, proj, cam)| {
+                let viewport_height = cam
+                    .physical_viewport_size()
+                    .map_or(1080.0, |size| size.y as f32);
+                let dist = cam_gt.translation().distance(text_gtransform.translation());
+                let frustum_height = match proj {
+                    Projection::Perspective(persp) => 2.0 * dist * (persp.fov / 2.0).tan(),
+                    Projection::Orthographic(ortho) => ortho.area.height(),
+                    _ => return 0.0,
+                };
+
+                let world_per_screen_px = frustum_height / viewport_height;
+                let sdf_range = atlas.sdf_range() as f32;
+                let canonical = atlas.canonical_size() as f32;
+
+                // World units per bitmap pixel.
+                let world_per_bp = font_size / canonical * LAYOUT_TO_WORLD;
+
+                // Screen pixels per bitmap pixel.
+                let screen_px_per_bp = world_per_bp / world_per_screen_px;
+
+                // screen_px_range (same formula as the shader).
+                let spr = (0.5 * sdf_range * screen_px_per_bp).max(1.0);
+
+                // Extension beyond the outline in bitmap pixels.
+                let ext_bp = overlay.aa_factor / spr * sdf_range;
+
+                let result = ext_bp * world_per_bp;
+                bevy::log::info!(
+                    "AA: dist={dist:.3} frustum_h={frustum_height:.3} vp_h={viewport_height:.0} world/px={world_per_screen_px:.6} world/bp={world_per_bp:.6} px/bp={screen_px_per_bp:.2} spr={spr:.2} ext_bp={ext_bp:.3} ext_world={result:.6}"
+                );
+                result
+            });
+
+            let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects, aa_expansion);
 
             commands.entity(entity).with_child((
                 OverlayElement,
@@ -354,19 +419,17 @@ fn spawn_metric_labels(
 ///
 /// Uses the renderer's actual quad rects (world-space, after clipping) so
 /// the boxes match exactly what's drawn on screen.
-fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]]) -> GizmoAsset {
+fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]], aa_expansion: f32) -> GizmoAsset {
     let mut gizmo = GizmoAsset::default();
     let color = Color::srgb(1.0, 1.0, 0.0);
 
-    bevy::log::info!("build_glyph_box_gizmo: {} rects", glyph_rects.len());
-    for (i, &[x, y, w, h]) in glyph_rects.iter().enumerate() {
-        bevy::log::info!("  rect[{i}]: x={x:.4} y={y:.4} w={w:.4} h={h:.4}");
-        // Quad is TL=(x,y), TR=(x+w,y), BR=(x+w,y-h), BL=(x,y-h)
-        // in world-space Y-up coordinates.
-        let tl = Vec3::new(x, y, 0.002);
-        let tr = Vec3::new(x + w, y, 0.002);
-        let br = Vec3::new(x + w, y - h, 0.002);
-        let bl = Vec3::new(x, y - h, 0.002);
+    for &[x, y, w, h] in glyph_rects {
+        // Expand the outline bbox by the AA width to match the visible edge.
+        let ex = aa_expansion;
+        let tl = Vec3::new(x - ex, y + ex, 0.002);
+        let tr = Vec3::new(x + w + ex, y + ex, 0.002);
+        let br = Vec3::new(x + w + ex, y - h - ex, 0.002);
+        let bl = Vec3::new(x - ex, y - h - ex, 0.002);
 
         gizmo.line(tl, tr, color);
         gizmo.line(tr, br, color);

@@ -161,7 +161,7 @@ pub(super) fn render_world_text(
             .filter_map(|glyph_key| {
                 let metrics = atlas.get_metrics(*glyph_key)?;
                 let (px_min_x, px_min_y, px_max_x, px_max_y) =
-                    atlas.scan_visible_bounds(*glyph_key, 1.0)?;
+                    atlas.scan_visible_bounds(*glyph_key, 20.0)?;
                 let [u_min, v_min, u_max, v_max] = metrics.uv_rect;
                 let u_range = u_max - u_min;
                 let v_range = v_max - v_min;
@@ -232,31 +232,8 @@ pub(super) fn render_world_text(
                     render_mode_u32,
                 );
 
-                // Set ink UV bounds for the shader overlay if the
-                // typography overlay is active. For single-glyph text
-                // we use the first glyph's scan bounds.
-                // Pass the glyph's full atlas UV rect to the shader
-                // so it can scan for the visible bounding box.
-                #[cfg(feature = "typography_overlay")]
-                if let Some(first_key) = {
-                    let config = style.as_layout_config();
-                    let measure = config.as_measure();
-                    cache.get_shaped(&world_text.0, &measure).and_then(|s| {
-                        s.glyphs.first().map(|sg| GlyphKey {
-                            font_id: style.font_id(),
-                            glyph_index: sg.glyph_id,
-                        })
-                    })
-                } {
-                    if let Some(metrics) = atlas.get_metrics(first_key) {
-                        mat.extension.uniforms.ink_uv_min = bevy::math::Vec2::new(
-                            metrics.uv_rect[0], metrics.uv_rect[1],
-                        );
-                        mat.extension.uniforms.ink_uv_max = bevy::math::Vec2::new(
-                            metrics.uv_rect[2], metrics.uv_rect[3],
-                        );
-                    }
-                }
+                // Shader bounding box is disabled — using gizmo overlay
+                // with camera-dependent AA expansion instead.
 
                 let material_handle = materials.add(mat);
 
@@ -422,48 +399,47 @@ fn shape_world_text(
     (quads, anchor_x, anchor_y, max_x, ink_rects)
 }
 
-/// Computes a glyph's visible ink rect by scanning the MSDF bitmap
-/// and interpolating within the quad's world-space rect.
+/// Computes a glyph's outline bounding box from the font's glyph bbox.
 ///
-/// The scan finds pixels where `median(r,g,b) >= 128`. The pixel bounds
-/// are converted to fractions of the bitmap, then applied to the quad's
-/// known world-space position (which we've verified matches perfectly).
+/// Returns the mathematical outline boundary in world units. The MSDF
+/// shader renders visible pixels ~0.5 screen pixels beyond this boundary
+/// due to anti-aliasing — the caller should expand accordingly.
 ///
 /// Returns `[x, y, width, height]` in world units where `(x, y)` is the
-/// top-left corner. Returns `None` if the glyph has no visible pixels.
+/// top-left corner. Returns `None` if the font face can't be parsed or the
+/// glyph has no bounding box (e.g. space).
 #[cfg(feature = "typography_overlay")]
-#[allow(clippy::cast_precision_loss)]
 fn compute_ink_rect_from_scan(
-    atlas: &MsdfAtlas,
-    glyph_key: GlyphKey,
-    metrics: &crate::text::GlyphMetrics,
-    _sg: &super::text_renderer::ShapedGlyph,
-    _style: &TextStyle,
-    _anchor_x: f32,
-    _anchor_y: f32,
-    _scale: f32,
+    _atlas: &MsdfAtlas,
+    _glyph_key: GlyphKey,
+    _metrics: &crate::text::GlyphMetrics,
+    sg: &super::text_renderer::ShapedGlyph,
+    style: &TextStyle,
+    anchor_x: f32,
+    anchor_y: f32,
+    scale: f32,
     _canonical_size: f32,
-    quad_world: [f32; 4], // [x, y, w, h] of the rendered quad in world units
+    _quad_world: [f32; 4],
 ) -> Option<[f32; 4]> {
-    let (px_min_x, px_min_y, px_max_x, px_max_y) =
-        atlas.scan_visible_bounds(glyph_key, 1.0)?;
+    let font_data = crate::text::EMBEDDED_FONT;
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(sg.glyph_id))?;
 
-    // Convert scan pixel bounds to fractions of the bitmap.
-    let frac_left = px_min_x as f32 / metrics.pixel_width as f32;
-    let frac_right = (px_max_x + 1) as f32 / metrics.pixel_width as f32;
-    let frac_top = px_min_y as f32 / metrics.pixel_height as f32;
-    let frac_bottom = (px_max_y + 1) as f32 / metrics.pixel_height as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let upm = face.units_per_em() as f32;
+    let font_scale = style.size() / upm;
 
-    // Apply fractions to the quad's world rect.
-    // Quad: TL=(x, y), size=(w, h), BR=(x+w, y-h) in Y-up.
-    let [qx, qy, qw, qh] = quad_world;
+    let ink_width = f32::from(bbox.x_max - bbox.x_min) * font_scale;
+    let ink_height = f32::from(bbox.y_max - bbox.y_min) * font_scale;
+    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, sg.x) - anchor_x;
+    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, sg.baseline - sg.y) - anchor_y;
 
-    let ink_x = qx + frac_left * qw;
-    let ink_y = qy - frac_top * qh; // Y-up: top of quad minus fraction
-    let ink_w = (frac_right - frac_left) * qw;
-    let ink_h = (frac_bottom - frac_top) * qh;
-
-    Some([ink_x, ink_y, ink_w, ink_h])
+    Some([
+        ink_x * scale,
+        -ink_top * scale,
+        ink_width * scale,
+        ink_height * scale,
+    ])
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.

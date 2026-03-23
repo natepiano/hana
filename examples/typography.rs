@@ -18,6 +18,10 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::WorldText;
+use bevy_inspector_egui::bevy_egui::EguiPlugin;
+use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
+use bevy_inspector_egui::prelude::*;
+use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -42,8 +46,12 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
             DiegeticUiPlugin,
+            EguiPlugin::default(),
+            ResourceInspectorPlugin::<AaSettings>::default(),
         ))
+        .init_resource::<AaSettings>()
         .add_systems(Startup, setup)
+        .add_systems(Update, sync_aa_factor)
         .run();
 }
 
@@ -138,4 +146,23 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
             .margin(ZOOM_MARGIN_SCENE)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
+}
+
+#[derive(Resource, Reflect, InspectorOptions)]
+#[reflect(Resource, InspectorOptions)]
+struct AaSettings {
+    #[inspector(min = 0.0, max = 15.0, display = NumberDisplay::Slider)]
+    aa_factor: f32,
+}
+
+impl Default for AaSettings {
+    fn default() -> Self { Self { aa_factor: 1.2 } }
+}
+
+fn sync_aa_factor(settings: Res<AaSettings>, mut overlays: Query<&mut TypographyOverlay>) {
+    if settings.is_changed() {
+        for mut overlay in &mut overlays {
+            overlay.aa_factor = settings.aa_factor;
+        }
+    }
 }

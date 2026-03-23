@@ -39,7 +39,7 @@ fn setup(mut commands: Commands) {
             .with_color(Color::srgb(0.9, 0.9, 0.9)),
         bevy_diegetic::TypographyOverlay {
             show_font_metrics: false,
-            show_glyph_metrics: false,
+            show_glyph_metrics: true,
             show_labels: false,
             color: Color::srgb(1.0, 1.0, 0.0),
             line_width: 2.0,
