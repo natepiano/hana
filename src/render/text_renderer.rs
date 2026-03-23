@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use super::glyph_quad::GlyphQuadData;
 use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
+use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::RenderCommandKind;
@@ -613,6 +614,25 @@ fn shape_text_to_quads(
     let font_data = font_registry
         .font(FontId(config.font_id()))
         .map_or(crate::text::EMBEDDED_FONT, Font::data);
+
+    // Under `WhenReady`, trigger async rasterization for every glyph but
+    // emit nothing until the entire string is cached in the atlas.
+    if config.loading_policy() == GlyphLoadingPolicy::WhenReady {
+        let mut all_ready = true;
+        for sg in &shaped.glyphs {
+            let glyph_key = GlyphKey {
+                font_id:     config.font_id(),
+                glyph_index: sg.glyph_id,
+            };
+            if atlas.get_or_insert(glyph_key, font_data).is_none() {
+                all_ready = false;
+            }
+        }
+        if !all_ready {
+            return Vec::new();
+        }
+    }
+
     let linear: LinearRgba = config.color().into();
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 

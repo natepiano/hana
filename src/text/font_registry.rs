@@ -3,7 +3,65 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use bevy::prelude::Event;
 use bevy::prelude::Resource;
+
+/// How a font was loaded into the registry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FontSource {
+    /// Embedded in the library binary (e.g., `JetBrains Mono`).
+    Embedded,
+    /// Loaded at runtime via `AssetServer` or `Assets<Font>::add()`.
+    Loaded,
+}
+
+impl std::fmt::Display for FontSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Embedded => write!(f, "embedded"),
+            Self::Loaded => write!(f, "loaded"),
+        }
+    }
+}
+
+/// Fired when a font is successfully registered and ready for use.
+///
+/// Observe this event to react when fonts become available — works for
+/// both the embedded default font and fonts loaded via `AssetServer`.
+///
+/// ```ignore
+/// app.add_observer(|trigger: On<FontRegistered>| {
+///     info!("{} font ready: {} (id: {:?})", trigger.source, trigger.name, trigger.id);
+/// });
+/// ```
+#[derive(Event, Clone, Debug)]
+pub struct FontRegistered {
+    /// The [`FontId`] assigned to this font.
+    pub id:     FontId,
+    /// The font family name.
+    pub name:   String,
+    /// Whether this font was embedded or loaded at runtime.
+    pub source: FontSource,
+}
+
+/// Fired when a font file fails to load or parse.
+///
+/// Covers both I/O errors (file not found) and parse errors (corrupt
+/// font data). Observe this event to show error UI or fall back to
+/// a default font.
+///
+/// ```ignore
+/// app.add_observer(|trigger: On<FontLoadFailed>| {
+///     warn!("Font failed: {} — {}", trigger.path, trigger.error);
+/// });
+/// ```
+#[derive(Event, Clone, Debug)]
+pub struct FontLoadFailed {
+    /// The asset path that failed to load.
+    pub path:  String,
+    /// Human-readable error description.
+    pub error: String,
+}
 use parley::FontContext;
 use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;
@@ -130,7 +188,10 @@ impl FontRegistry {
         let font = Font::from_bytes(name, data)?;
 
         // Register with parley's font collection.
-        let mut font_cx = self.font_cx.lock().unwrap_or_else(|e| e.into_inner());
+        let mut font_cx = self
+            .font_cx
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         font_cx.collection.register_fonts(
             Blob::from(data.to_vec()),
             Some(FontInfoOverride {
@@ -143,6 +204,18 @@ impl FontRegistry {
         let id = FontId(self.fonts.len() as u16);
         self.fonts.push(font);
         Some(id)
+    }
+
+    /// Returns the [`FontId`] for a font with the given family name.
+    ///
+    /// Returns `None` if no font with that name has been registered.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn font_id_by_name(&self, name: &str) -> Option<FontId> {
+        self.fonts
+            .iter()
+            .position(|f| f.name() == name)
+            .map(|i| FontId(i as u16))
     }
 
     /// Returns the shared font context for use by the measurement closure.

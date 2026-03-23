@@ -93,3 +93,6 @@ name = "atlas_pages"
 
 [[example]]
 name = "font_loading"
+
+[[example]]
+name = "preload_text"

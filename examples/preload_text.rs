@@ -1,11 +1,33 @@
 //! @generated `bevy_example_template`
-//! Font loading validation.
+//! Preloaded vs progressive glyph loading.
 //!
-//! Demonstrates loading fonts via `AssetServer` and observing
-//! `FontRegistered` / `FontLoadFailed` events. The embedded `JetBrains
-//! Mono` font is available at startup; `Noto Sans` loads asynchronously
-//! from the assets directory. A HUD shows registered fonts as they
-//! arrive, and `WorldText` labels render each font name in its own font.
+//! MSDF glyph rasterization is asynchronous — the first time a character
+//! is rendered, it must be rasterized in the background before it can
+//! appear on screen. This example demonstrates two strategies for
+//! handling that delay:
+//!
+//! # `GlyphLoadingPolicy::WhenReady` (default)
+//!
+//! Text stays invisible until **every** glyph has been rasterized, then
+//! appears all at once. Combined with [`MsdfAtlas::preload`], you can
+//! warm the atlas for a known character set in a [`FontRegistered`]
+//! observer so the text is ready before it's ever spawned. This is the
+//! recommended approach for UI text, labels, and anything where partial
+//! rendering would look broken.
+//!
+//! # `GlyphLoadingPolicy::Progressive`
+//!
+//! Glyphs render as soon as they're available. Missing glyphs are
+//! skipped, so text may appear with visible holes that fill in over
+//! a few frames. Useful for debug overlays or situations where showing
+//! *something* immediately is more important than visual polish.
+//!
+//! # What this example shows
+//!
+//! - **Green text** (top): embedded `JetBrains Mono`, preloaded via `atlas.preload()` in the
+//!   observer — appears instantly.
+//! - **Red text** (bottom): `Noto Sans` loaded async via `AssetServer`, no preload, progressive
+//!   policy — glyphs pop in as they rasterize.
 
 use std::time::Duration;
 
@@ -15,9 +37,12 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Font;
-use bevy_diegetic::FontLoadFailed;
 use bevy_diegetic::FontRegistered;
+use bevy_diegetic::FontRegistry;
+use bevy_diegetic::FontSource;
+use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::MsdfAtlas;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -32,22 +57,17 @@ const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 /// Font size for the sample text.
-const SAMPLE_SIZE: f32 = 28.0;
+const SAMPLE_SIZE: f32 = 24.0;
 
-/// Vertical spacing between font samples.
-const LINE_SPACING: f32 = 0.5;
+/// Font size for headers.
+const HEADER_SIZE: f32 = 14.0;
 
-/// Tracks how many fonts have been registered (for vertical positioning).
-#[derive(Resource, Default)]
-struct FontCount(usize);
+/// The text to display.
+const SAMPLE_TEXT: &str = "The quick brown fox jumps over the lazy dog. 0123456789!?";
 
-/// Keeps font handles alive so Bevy doesn't unload the assets.
+/// Keeps the Noto Sans handle alive so Bevy doesn't unload it.
 #[derive(Resource, Default)]
 struct FontHandles(Vec<Handle<Font>>);
-
-/// Marker for the HUD text.
-#[derive(Component)]
-struct HudText;
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -63,10 +83,8 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .init_resource::<FontCount>()
         .init_resource::<FontHandles>()
         .add_observer(on_font_registered)
-        .add_observer(on_font_load_failed)
         .add_systems(Startup, setup)
         .run();
 }
@@ -78,6 +96,11 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut font_handles: ResMut<FontHandles>,
 ) {
+    // Load Noto Sans asynchronously.
+    font_handles
+        .0
+        .push(asset_server.load("fonts/NotoSans-Regular.ttf"));
+
     // Ground plane.
     let ground = commands
         .spawn((
@@ -94,16 +117,6 @@ fn setup(
         .id();
 
     commands.insert_resource(SceneBounds(ground));
-
-    // Load Noto Sans asynchronously from assets directory.
-    font_handles
-        .0
-        .push(asset_server.load("fonts/NotoSans-Regular.ttf"));
-
-    // Try loading a font that doesn't exist to test FontLoadFailed.
-    font_handles
-        .0
-        .push(asset_server.load("fonts/DoesNotExist.ttf"));
 
     // Light.
     commands.spawn((
@@ -124,7 +137,7 @@ fn setup(
         },
         PanOrbitCamera {
             focus: Vec3::new(0.0, 2.0, 0.0),
-            radius: Some(5.0),
+            radius: Some(8.0),
             yaw: Some(0.0),
             pitch: Some(-0.1),
             button_orbit: MouseButton::Middle,
@@ -138,73 +151,85 @@ fn setup(
             ..default()
         },
     ));
-
-    // HUD.
-    commands.spawn((
-        HudText,
-        Text::new("Fonts: loading..."),
-        TextFont {
-            font_size: 16.0,
-            ..default()
-        },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
-    ));
 }
 
-/// Observer: fires when a font is successfully registered.
-#[allow(clippy::cast_precision_loss)]
+/// Embedded font → preloaded + `WhenReady`.
+/// Loaded font → no preload + `Progressive`.
 fn on_font_registered(
     trigger: On<FontRegistered>,
-    mut font_count: ResMut<FontCount>,
-    mut hud: Query<&mut Text, With<HudText>>,
+    mut atlas: ResMut<MsdfAtlas>,
+    registry: Res<FontRegistry>,
     mut commands: Commands,
 ) {
-    let idx = font_count.0;
-    font_count.0 += 1;
+    let font_id = trigger.id;
+    let is_embedded = trigger.source == FontSource::Embedded;
 
-    let y = (idx as f32).mul_add(LINE_SPACING, 1.5);
+    let (label, color, y, policy) = if is_embedded {
+        // Preload the embedded font's glyphs.
+        atlas.preload(SAMPLE_TEXT, font_id, &registry);
+        (
+            format!("preloaded ({}): {SAMPLE_TEXT}", trigger.name),
+            Color::srgb(0.2, 0.8, 0.3),
+            2.0,
+            GlyphLoadingPolicy::WhenReady,
+        )
+    } else {
+        // Loaded font — no preload, progressive rendering.
+        (
+            format!("progressive ({}): {SAMPLE_TEXT}", trigger.name),
+            Color::srgb(0.8, 0.3, 0.2),
+            1.0,
+            GlyphLoadingPolicy::Progressive,
+        )
+    };
 
-    // Spawn a WorldText label in this font.
-    let label = format!(
-        "[FontId {}] {} ({})",
-        trigger.id.0, trigger.name, trigger.source
-    );
+    // Header.
+    commands
+        .spawn((
+            WorldText::new(format!(
+                "{} — {} (FontId {})",
+                if is_embedded {
+                    "preloaded"
+                } else {
+                    "progressive"
+                },
+                trigger.name,
+                font_id.0
+            )),
+            TextStyle::new()
+                .with_size(HEADER_SIZE)
+                .with_font(font_id.0)
+                .with_color(Color::srgb(0.6, 0.6, 0.6))
+                .with_shadow_mode(GlyphShadowMode::None)
+                .with_loading_policy(policy),
+            Transform::from_xyz(0.0, y + 0.4, 0.0),
+        ))
+        .observe(on_text_clicked);
+
+    // Sample text.
     commands
         .spawn((
             WorldText::new(label),
             TextStyle::new()
                 .with_size(SAMPLE_SIZE)
-                .with_font(trigger.id.0)
-                .with_color(Color::srgb(0.2, 0.3, 0.9))
-                .with_shadow_mode(GlyphShadowMode::None),
+                .with_font(font_id.0)
+                .with_color(color)
+                .with_shadow_mode(GlyphShadowMode::None)
+                .with_loading_policy(policy),
             Transform::from_xyz(0.0, y, 0.0),
         ))
         .observe(on_text_clicked);
 
-    // Update HUD.
-    for mut text in &mut hud {
-        **text = format!("Fonts registered: {}", font_count.0);
-    }
-
     info!(
-        "FontRegistered: {} (id: {}, {})",
-        trigger.name, trigger.id.0, trigger.source
+        "FontRegistered: {} ({}) — {}",
+        trigger.name,
+        trigger.source,
+        if is_embedded {
+            "preloaded"
+        } else {
+            "progressive"
+        }
     );
-}
-
-/// Observer: fires when a font fails to load.
-fn on_font_load_failed(trigger: On<FontLoadFailed>, mut hud: Query<&mut Text, With<HudText>>) {
-    warn!("FontLoadFailed: {} — {}", trigger.path, trigger.error);
-
-    for mut text in &mut hud {
-        **text = format!("{}\nFAILED: {}", **text, trigger.path);
-    }
 }
 
 fn on_text_clicked(

@@ -14,10 +14,12 @@ use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::render::render_resource::TextureFormat;
 use bevy::tasks::AsyncComputeTaskPool;
-use etagere::AllocId;
 use etagere::AtlasAllocator;
 use etagere::size2;
 
+use super::font::Font;
+use super::font_registry::FontId;
+use super::font_registry::FontRegistry;
 use super::msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
 use super::msdf_rasterizer::DEFAULT_GLYPH_PADDING;
 use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
@@ -68,14 +70,27 @@ pub struct GlyphMetrics {
     pub pixel_height: u32,
     /// Atlas page this glyph is stored on.
     pub page_index:   u32,
-    /// Atlas allocator ID for potential deallocation.
-    _alloc_id:        AllocId,
+}
+
+impl GlyphMetrics {
+    /// Sentinel for glyphs with no visual representation (e.g. space).
+    /// Zero-sized so no quad is generated, but present in the cache so
+    /// the glyph isn't re-queued for async rasterization.
+    const INVISIBLE: Self = Self {
+        uv_rect:      [0.0; 4],
+        bearing_x:    0.0,
+        bearing_y:    0.0,
+        pixel_width:  0,
+        pixel_height: 0,
+        page_index:   0,
+    };
 }
 
 /// Completed async rasterization result.
 struct RasterizedGlyph {
     key:    GlyphKey,
-    bitmap: MsdfBitmap,
+    /// `None` for glyphs with no visual representation (e.g. space).
+    bitmap: Option<MsdfBitmap>,
 }
 
 /// A single page of the MSDF atlas texture.
@@ -309,19 +324,54 @@ impl MsdfAtlas {
         let canonical = self.canonical_size;
         AsyncComputeTaskPool::get()
             .spawn(async move {
-                if let Some(bitmap) = rasterize_glyph(
+                let bitmap = rasterize_glyph(
                     &font_data,
                     glyph_index,
                     canonical,
                     DEFAULT_SDF_RANGE,
                     DEFAULT_GLYPH_PADDING,
-                ) {
-                    let _ = tx.send(RasterizedGlyph { key, bitmap });
-                }
+                );
+                let _ = tx.send(RasterizedGlyph { key, bitmap });
             })
             .detach();
 
         None
+    }
+
+    /// Kicks off async rasterization for every glyph in `text`.
+    ///
+    /// This does **not** block — glyphs are queued on
+    /// [`AsyncComputeTaskPool`] and inserted into the atlas when
+    /// [`poll_async_glyphs`](Self::poll_async_glyphs) runs. Preloading
+    /// front-loads the async work so glyphs are more likely to be cached
+    /// by the time the text is rendered.
+    ///
+    /// Call this in a [`FontRegistered`](crate::FontRegistered) observer
+    /// to warm the atlas for a known character set:
+    ///
+    /// ```ignore
+    /// app.add_observer(|trigger: On<FontRegistered>,
+    ///                    mut atlas: ResMut<MsdfAtlas>,
+    ///                    registry: Res<FontRegistry>| {
+    ///     atlas.preload("ABCDEF...", trigger.id, &registry);
+    /// });
+    /// ```
+    pub fn preload(&mut self, text: &str, font_id: FontId, registry: &FontRegistry) {
+        let Some(font_data) = registry.font(font_id).map(Font::data) else {
+            return;
+        };
+        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+            return;
+        };
+        for ch in text.chars() {
+            if let Some(glyph_id) = face.glyph_index(ch) {
+                let key = GlyphKey {
+                    font_id:     font_id.0,
+                    glyph_index: glyph_id.0,
+                };
+                self.get_or_insert(key, font_data);
+            }
+        }
     }
 
     /// Drains completed async rasterizations and inserts them into the atlas.
@@ -339,7 +389,15 @@ impl MsdfAtlas {
             if self.glyphs.contains_key(&result.key) {
                 continue;
             }
-            if self.insert_bitmap(result.key, &result.bitmap).is_some() {
+            let Some(bitmap) = result.bitmap else {
+                // Glyph has no visual representation (e.g. space).
+                // Insert zero-sized metrics so future lookups hit the
+                // cache instead of re-queuing async rasterization.
+                self.glyphs.insert(result.key, GlyphMetrics::INVISIBLE);
+                any_inserted = true;
+                continue;
+            };
+            if self.insert_bitmap(result.key, &bitmap).is_some() {
                 any_inserted = true;
             }
         }
@@ -455,7 +513,6 @@ impl MsdfAtlas {
             pixel_width:  bitmap.width,
             pixel_height: bitmap.height,
             page_index:   page_index as u32,
-            _alloc_id:    alloc.id,
         };
 
         self.glyphs.insert(key, metrics);

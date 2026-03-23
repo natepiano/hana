@@ -12,6 +12,7 @@ use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer::ShapedTextCache;
 use super::text_renderer::TextShapingContext;
 use super::text_renderer::shape_text_cached;
+use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
@@ -276,6 +277,25 @@ fn shape_world_text(
     let font_data = font_registry
         .font(FontId(style.font_id()))
         .map_or(crate::text::EMBEDDED_FONT, Font::data);
+
+    // Under `WhenReady`, trigger async rasterization for every glyph but
+    // emit nothing until the entire string is cached in the atlas.
+    if style.loading_policy() == GlyphLoadingPolicy::WhenReady {
+        let mut all_ready = true;
+        for sg in &shaped.glyphs {
+            let glyph_key = GlyphKey {
+                font_id:     style.font_id(),
+                glyph_index: sg.glyph_id,
+            };
+            if atlas.get_or_insert(glyph_key, font_data).is_none() {
+                all_ready = false;
+            }
+        }
+        if !all_ready {
+            return (Vec::new(), 0.0, 0.0, 0.0, Vec::new());
+        }
+    }
+
     let linear: LinearRgba = style.color().into();
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 

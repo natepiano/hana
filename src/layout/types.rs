@@ -416,6 +416,23 @@ pub enum GlyphShadowMode {
     PunchOut,
 }
 
+/// Controls when text becomes visible during async glyph rasterization.
+///
+/// When glyphs are rasterized asynchronously, there is a brief window
+/// where some glyphs are ready but others are still in flight. This
+/// policy controls whether partially-rasterized text is shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+pub enum GlyphLoadingPolicy {
+    /// Text is invisible until every glyph has been rasterized (default).
+    /// Async tasks are still triggered for missing glyphs — the text
+    /// simply appears all at once when the last glyph completes.
+    #[default]
+    WhenReady,
+    /// Show glyphs as they become available. Missing glyphs are skipped,
+    /// so text may appear with visible holes until rasterization finishes.
+    Progressive,
+}
+
 // ── Typestate markers ────────────────────────────────────────────────────────
 
 /// Context marker: text properties for the layout engine.
@@ -475,6 +492,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     anchor:         TextAnchor,
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
+    loading_policy: GlyphLoadingPolicy,
     #[reflect(ignore)]
     _context:       PhantomData<C>,
 }
@@ -494,6 +512,7 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.anchor == other.anchor
             && self.render_mode == other.render_mode
             && self.shadow_mode == other.shadow_mode
+            && self.loading_policy == other.loading_policy
     }
 }
 
@@ -637,6 +656,17 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns the glyph loading policy.
+    #[must_use]
+    pub const fn loading_policy(&self) -> GlyphLoadingPolicy { self.loading_policy }
+
+    /// Sets the glyph loading policy.
+    #[must_use]
+    pub const fn with_loading_policy(mut self, policy: GlyphLoadingPolicy) -> Self {
+        self.loading_policy = policy;
+        self
+    }
+
     /// Hashes all layout-affecting fields into `hasher`, excluding color.
     ///
     /// Uses exhaustive destructuring so that adding a new field to
@@ -660,6 +690,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             color: _,
             render_mode: _,
             shadow_mode: _,
+            loading_policy: _,
             _context: _,
         } = self;
 
@@ -715,6 +746,7 @@ impl TextProps<ForLayout> {
             anchor: TextAnchor::Center,
             render_mode: GlyphRenderMode::Text,
             shadow_mode: GlyphShadowMode::Text,
+            loading_policy: GlyphLoadingPolicy::WhenReady,
             _context: PhantomData,
         }
     }
@@ -762,6 +794,7 @@ impl TextProps<ForStandalone> {
             anchor:         TextAnchor::Center,
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
+            loading_policy: GlyphLoadingPolicy::WhenReady,
             _context:       PhantomData,
         }
     }
@@ -811,6 +844,7 @@ impl TextProps<ForStandalone> {
             .with_color(self.color)
             .with_render_mode(self.render_mode)
             .with_shadow_mode(self.shadow_mode)
+            .with_loading_policy(self.loading_policy)
             .no_wrap()
     }
 }

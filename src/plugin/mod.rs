@@ -7,6 +7,7 @@ mod components;
 mod config;
 mod systems;
 
+use bevy::asset::AssetLoadFailedEvent;
 use bevy::prelude::*;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
@@ -24,17 +25,71 @@ use crate::layout::ForStandalone;
 use crate::layout::TextProps;
 use crate::render::ShapedTextCache;
 use crate::render::TextRenderPlugin;
+use crate::text::Font;
+use crate::text::FontId;
+use crate::text::FontLoadFailed;
+use crate::text::FontLoader;
+use crate::text::FontRegistered;
 use crate::text::FontRegistry;
+use crate::text::FontSource;
 use crate::text::MsdfAtlas;
 use crate::text::create_parley_measurer;
 
-/// Creates the empty GPU `Image` for the MSDF atlas at startup.
-///
-/// The atlas starts with no glyphs — they are rasterized on demand. But
-/// the `Image` handle must exist before any text extraction system runs
-/// so that materials can reference it.
-fn init_atlas_image(mut atlas: ResMut<MsdfAtlas>, mut images: ResMut<Assets<Image>>) {
+/// Creates the empty GPU `Image` for the MSDF atlas at startup and
+/// fires [`FontRegistered`] for the embedded default font.
+fn init_atlas_and_embedded_font(
+    mut atlas: ResMut<MsdfAtlas>,
+    mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
+) {
     atlas.upload_to_gpu(&mut images);
+    // Fire FontRegistered for the embedded font so observers see it.
+    commands.trigger(FontRegistered {
+        id:     FontId::MONOSPACE,
+        name:   "JetBrains Mono".to_string(),
+        source: FontSource::Embedded,
+    });
+}
+
+/// Watches for newly loaded [`Font`] assets and registers them with
+/// [`FontRegistry`]. Fires [`FontRegistered`] for each successful
+/// registration.
+fn consume_loaded_fonts(
+    mut events: MessageReader<AssetEvent<Font>>,
+    font_assets: Res<Assets<Font>>,
+    mut registry: ResMut<FontRegistry>,
+    mut commands: Commands,
+) {
+    for event in events.read() {
+        if let AssetEvent::Added { id } = event
+            && let Some(font) = font_assets.get(*id)
+        {
+            // Skip if already registered (e.g., embedded font).
+            if registry.font_id_by_name(font.name()).is_some() {
+                continue;
+            }
+            if let Some(font_id) = registry.register_font(font.name(), font.data()) {
+                commands.trigger(FontRegistered {
+                    id:     font_id,
+                    name:   (*font.name()).to_string(),
+                    source: FontSource::Loaded,
+                });
+            }
+        }
+    }
+}
+
+/// Watches for failed [`Font`] asset loads and fires [`FontLoadFailed`].
+fn watch_font_failures(
+    mut failures: MessageReader<AssetLoadFailedEvent<Font>>,
+    mut commands: Commands,
+) {
+    for event in failures.read() {
+        commands.trigger(FontLoadFailed {
+            path:  event.path.to_string(),
+            error: event.error.to_string(),
+        });
+    }
 }
 
 /// Gizmo group for diegetic panel debug wireframes.
@@ -207,13 +262,16 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
 
     app.insert_resource(registry)
         .insert_resource(measurer)
+        .init_asset::<Font>()
+        .init_asset_loader::<FontLoader>()
         .add_plugins(LayoutPlugin)
         .init_resource::<ShowTextGizmos>()
         .register_type::<TextProps<ForLayout>>()
         .register_type::<TextProps<ForStandalone>>()
         .add_plugins(TextRenderPlugin)
         .init_gizmo_group::<DiegeticPanelGizmoGroup>()
-        .add_systems(Startup, init_atlas_image)
+        .add_systems(Startup, init_atlas_and_embedded_font)
+        .add_systems(PostUpdate, (consume_loaded_fonts, watch_font_failures))
         .add_systems(Update, render_panel_gizmos.after(compute_panel_layouts));
 
     #[cfg(feature = "typography_overlay")]

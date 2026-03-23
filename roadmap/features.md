@@ -78,15 +78,26 @@
 | 25 | Rich text / inline markup | `Text3d::rich("{red:WARNING} -- {green:all clear}")`            |
 | 26 | Dynamic text segments  | Live-updating text from ECS entities.                             |
 | 27 | Per-glyph effects      | Wave, shake, typewriter, fade — indexed arrays + per-glyph entities. |
-| 28 | Text truncation / ellipsis | Detect overflow, replace tail with "...".                      |
-| 29 | Auto-fit text sizing   | Shrink font to fit container. `clamp(min, max)`, best-fit binary search. |
+| 28 | Text outline           | Render text as outline strokes instead of filled glyphs. Configurable stroke width and color via `TextConfig`. Requires MSDF edge extraction or secondary SDF pass. |
+| 29 | Text truncation / ellipsis | Detect overflow, replace tail with "...".                      |
+| 30 | Auto-fit text sizing   | Shrink font to fit container. `clamp(min, max)`, best-fit binary search. |
 
-## Phase 9 — Polish
+## Phase 9 — 3D text geometry
+
+| # | Feature                  | Notes                                                              |
+|---|--------------------------|----------------------------------------------------------------------|
+| 31 | Glyph outline extraction | Implement `ttf_parser::OutlineBuilder` to extract bezier curves from glyph outlines. Flatten to polylines with adaptive subdivision. |
+| 32 | 2D glyph tessellation    | Tessellate flattened glyph outlines into triangle meshes using `lyon_tessellation`. Handle holes (counter-wound inner contours) via EvenOdd fill. Using lyon directly rather than `fontmesh` — `fontmesh` is just a thin wrapper around lyon + `OutlineBuilder` anyway, and the delta (adapter + extrusion fn) is straightforward to own. `lyon_tessellation` is the de facto standard (4M+ downloads, actively maintained). |
+| 33 | 3D text extrusion        | Extrude tessellated 2D glyph faces into 3D meshes — front face, back face, side walls with edge-perpendicular normals. Configurable depth. Spawn as Bevy `Mesh3d` with standard material for lighting/shadows. |
+| 34 | Text string layout       | Position extruded glyphs using advance widths and kerning from `ttf-parser`. Horizontal layout with proper spacing. Reuse parley shaping where possible. |
+| 35 | Glyph mesh caching       | Cache tessellated/extruded meshes per (glyph, font, depth) to avoid re-tessellation. |
+
+## Phase 10 — Polish
 
 | # | Feature                | Notes                                                              |
 |---|------------------------|--------------------------------------------------------------------|
-| 30 | Custom element data   | Arbitrary data on render commands.                                 |
-| 31 | Per-side border colors | Currently uniform color only.                                     |
-| 32 | Baseline offset        | MSDF quads have extra space below baseline — investigate when visually noticeable. |
-| 33 | Debug gizmos → overlay | Replace `ShowTextGizmos` with panel-rendered debug overlay.       |
-| 34 | Performance observability | Stabilize `DiegeticPerfStats`, decouple from internal system names, integrate with Bevy `DiagnosticsStore`. |
+| 36 | Custom element data   | Arbitrary data on render commands.                                 |
+| 37 | Per-side border colors | Currently uniform color only.                                     |
+| 38 | Baseline offset        | MSDF quads have extra space below baseline — investigate when visually noticeable. |
+| 39 | Debug gizmos → overlay | Replace `ShowTextGizmos` with panel-rendered debug overlay.       |
+| 40 | Performance observability | Stabilize `DiegeticPerfStats`, decouple from internal system names, integrate with Bevy `DiagnosticsStore`. |

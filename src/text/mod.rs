@@ -13,6 +13,7 @@
 
 mod atlas;
 mod font;
+mod font_loader;
 mod font_registry;
 mod measurer;
 #[cfg(test)]
@@ -31,7 +32,11 @@ pub use font::FontMetrics;
 pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
+pub use font_loader::FontLoader;
 pub use font_registry::EMBEDDED_FONT;
 pub use font_registry::FontId;
+pub use font_registry::FontLoadFailed;
+pub use font_registry::FontRegistered;
 pub use font_registry::FontRegistry;
+pub use font_registry::FontSource;
 pub use measurer::create_parley_measurer;

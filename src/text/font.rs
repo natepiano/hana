@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use bevy::asset::Asset;
+use bevy::reflect::TypePath;
 use ttf_parser::Face;
 
 /// Pre-parsed font with design-unit metrics.
@@ -13,6 +15,17 @@ use ttf_parser::Face;
 /// Created via [`Font::from_bytes`]. All raw values are in the font's
 /// design units (`units_per_em`). Call [`Font::metrics`] to get values
 /// scaled to a specific font size.
+///
+/// Also a Bevy [`Asset`] — load `.ttf`/`.otf` files via `AssetServer`:
+///
+/// ```ignore
+/// let handle: Handle<Font> = asset_server.load("fonts/MyFont.ttf");
+/// ```
+///
+/// When the asset loads, the plugin automatically registers it with
+/// [`FontRegistry`](crate::FontRegistry) and fires a
+/// [`FontRegistered`](crate::FontRegistered) event.
+#[derive(Asset, TypePath)]
 pub struct Font {
     name:                    String,
     units_per_em:            u16,

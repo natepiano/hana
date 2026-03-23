@@ -49,6 +49,7 @@ pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;
 pub use layout::ForStandalone;
+pub use layout::GlyphLoadingPolicy;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
 pub use layout::LayoutBuilder;
@@ -91,8 +92,11 @@ pub use render::WorldText;
 // Text.
 pub use text::Font;
 pub use text::FontId;
+pub use text::FontLoadFailed;
 pub use text::FontMetrics;
+pub use text::FontRegistered;
 pub use text::FontRegistry;
+pub use text::FontSource;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
