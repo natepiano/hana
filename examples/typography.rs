@@ -85,7 +85,7 @@ fn setup(
                 .with_color(Color::srgb(0.9, 0.9, 0.9)),
             TypographyOverlay {
                 show_font_metrics: false,
-                show_glyph_metrics: true,
+                show_glyph_metrics: false,
                 show_labels: false,
                 color: Color::from(WHITE),
                 ..default()

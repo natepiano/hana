@@ -53,8 +53,11 @@ pub struct TypographyOverlay {
     /// Show font-level metric lines (ascent, descent, cap height, x-height,
     /// baseline, top, bottom).
     pub show_font_metrics:  bool,
-    /// Show per-glyph bounding boxes and advance widths.
+    /// Show per-glyph bounding boxes and advance widths (gizmo lines).
     pub show_glyph_metrics: bool,
+    /// Show per-glyph bounding boxes drawn by the shader (uses CPU
+    /// bilinear scan to compute UV bounds, shader draws the lines).
+    pub show_shader_bbox:   bool,
     /// Show text labels on the metric lines.
     pub show_labels:        bool,
     /// Color for overlay lines and labels (includes alpha).
@@ -77,6 +80,7 @@ impl Default for TypographyOverlay {
         Self {
             show_font_metrics:  true,
             show_glyph_metrics: false,
+            show_shader_bbox:   true,
             show_labels:        true,
             color:              Color::from(WHITE),
             line_width:         DEFAULT_LINE_WIDTH,
@@ -99,16 +103,14 @@ pub struct OverlayElement;
 /// the overlay entity.
 #[allow(clippy::type_complexity)]
 pub fn build_typography_overlay(
-    query: Query<
-        (
-            Entity,
-            &WorldText,
-            &TextStyle,
-            &TypographyOverlay,
-            &ComputedWorldText,
-            &GlobalTransform,
-        ),
-    >,
+    query: Query<(
+        Entity,
+        &WorldText,
+        &TextStyle,
+        &TypographyOverlay,
+        &ComputedWorldText,
+        &GlobalTransform,
+    )>,
     text_changed: Query<
         Entity,
         (
@@ -218,35 +220,38 @@ pub fn build_typography_overlay(
             // where screen_px_range = max(0.5 * sdf_range * screen_px_per_bp, 1.0)
             // and screen_px_per_bp = world_per_bp / world_per_screen_pixel.
             #[allow(clippy::cast_precision_loss)]
-            let aa_expansion = all_cameras.iter().next().map_or(0.0, |(cam_gt, proj, cam)| {
-                let viewport_height = cam
-                    .physical_viewport_size()
-                    .map_or(1080.0, |size| size.y as f32);
-                let dist = cam_gt.translation().distance(text_gtransform.translation());
-                let frustum_height = match proj {
-                    Projection::Perspective(persp) => 2.0 * dist * (persp.fov / 2.0).tan(),
-                    Projection::Orthographic(ortho) => ortho.area.height(),
-                    _ => return 0.0,
-                };
+            let aa_expansion = all_cameras
+                .iter()
+                .next()
+                .map_or(0.0, |(cam_gt, proj, cam)| {
+                    let viewport_height = cam
+                        .physical_viewport_size()
+                        .map_or(1080.0, |size| size.y as f32);
+                    let dist = cam_gt.translation().distance(text_gtransform.translation());
+                    let frustum_height = match proj {
+                        Projection::Perspective(persp) => 2.0 * dist * (persp.fov / 2.0).tan(),
+                        Projection::Orthographic(ortho) => ortho.area.height(),
+                        _ => return 0.0,
+                    };
 
-                let world_per_screen_px = frustum_height / viewport_height;
-                let sdf_range = atlas.sdf_range() as f32;
-                let canonical = atlas.canonical_size() as f32;
+                    let world_per_screen_px = frustum_height / viewport_height;
+                    let sdf_range = atlas.sdf_range() as f32;
+                    let canonical = atlas.canonical_size() as f32;
 
-                // World units per bitmap pixel.
-                let world_per_bp = font_size / canonical * LAYOUT_TO_WORLD;
+                    // World units per bitmap pixel.
+                    let world_per_bp = font_size / canonical * LAYOUT_TO_WORLD;
 
-                // Screen pixels per bitmap pixel.
-                let screen_px_per_bp = world_per_bp / world_per_screen_px;
+                    // Screen pixels per bitmap pixel.
+                    let screen_px_per_bp = world_per_bp / world_per_screen_px;
 
-                // screen_px_range (same formula as the shader).
-                let spr = (0.5 * sdf_range * screen_px_per_bp).max(1.0);
+                    // screen_px_range (same formula as the shader).
+                    let spr = (0.5 * sdf_range * screen_px_per_bp).max(1.0);
 
-                // Extension beyond the outline in bitmap pixels.
-                let ext_bp = overlay.aa_factor / spr * sdf_range;
+                    // Extension beyond the outline in bitmap pixels.
+                    let ext_bp = overlay.aa_factor / spr * sdf_range;
 
-                ext_bp * world_per_bp
-            });
+                    ext_bp * world_per_bp
+                });
 
             let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects, aa_expansion);
 

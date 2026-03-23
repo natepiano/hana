@@ -62,12 +62,13 @@ pub struct MsdfTextUniform {
     /// Whether this material is a shadow proxy (invisible in main pass,
     /// contributes to the shadow prepass). 0 = visible, 1 = shadow-only.
     pub is_shadow_proxy: u32,
-    /// Ink bounding box in UV space — min corner.
+    /// Pre-computed tight ink bounding box — min UV corner.
+    /// Computed on the CPU with bilinear filtering that matches the GPU.
     /// When `ink_uv_max > ink_uv_min`, the shader draws a 1px yellow
     /// rectangle at these coordinates.
-    pub ink_uv_min: bevy::math::Vec2,
-    /// Ink bounding box in UV space — max corner.
-    pub ink_uv_max: bevy::math::Vec2,
+    pub ink_uv_min:      bevy::math::Vec2,
+    /// Pre-computed tight ink bounding box — max UV corner.
+    pub ink_uv_max:      bevy::math::Vec2,
 }
 
 /// MSDF atlas extension for `StandardMaterial`.

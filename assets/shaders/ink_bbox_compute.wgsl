@@ -1,8 +1,13 @@
-// Compute shader that scans a glyph's MSDF atlas region to find the
-// tight bounding box of visible pixels (where compute_alpha >= 0.02).
+// Compute shader reference implementation for scanning a glyph's MSDF
+// atlas region to find the tight bounding box of visible pixels
+// (where compute_alpha >= 0.02).
 //
-// Dispatched once per glyph. Writes the result to a storage buffer
-// that the fragment shader reads to draw bounding box lines.
+// NOTE: The actual ink bounds computation is performed CPU-side in
+// `MsdfAtlas::scan_ink_bounds_uv()` using bilinear-filtered sampling
+// that matches `textureSampleLevel`. The results are written to the
+// `MsdfTextUniform` uniform and the fragment shader reads them as
+// pre-computed bounds. This file is kept as a GPU reference for the
+// algorithm — it is not currently dispatched.
 
 // Input: glyph parameters
 struct GlyphParams {

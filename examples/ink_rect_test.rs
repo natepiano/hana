@@ -39,7 +39,7 @@ fn setup(mut commands: Commands) {
             .with_color(Color::srgb(0.9, 0.9, 0.9)),
         bevy_diegetic::TypographyOverlay {
             show_font_metrics: false,
-            show_glyph_metrics: true,
+            show_glyph_metrics: false,
             show_labels: false,
             color: Color::srgb(1.0, 1.0, 0.0),
             line_width: 2.0,
@@ -58,21 +58,19 @@ fn setup(mut commands: Commands) {
     ));
 
     // Camera — close up, looking straight at the glyph
-    commands.spawn((
-        PanOrbitCamera {
-            focus: Vec3::new(0.0, 0.5, 0.0),
-            radius: Some(0.5),
-            yaw: Some(0.0),
-            pitch: Some(0.0),
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan: Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
-            ..default()
+    commands.spawn((PanOrbitCamera {
+        focus: Vec3::new(0.0, 0.5, 0.0),
+        radius: Some(0.5),
+        yaw: Some(0.0),
+        pitch: Some(0.0),
+        button_orbit: MouseButton::Middle,
+        button_pan: MouseButton::Middle,
+        modifier_pan: Some(KeyCode::ShiftLeft),
+        trackpad_behavior: TrackpadBehavior::BlenderLike {
+            modifier_pan:  Some(KeyCode::ShiftLeft),
+            modifier_zoom: Some(KeyCode::ControlLeft),
         },
-    ));
+        trackpad_pinch_to_zoom_enabled: true,
+        ..default()
+    },));
 }
