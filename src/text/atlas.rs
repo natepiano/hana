@@ -153,6 +153,14 @@ impl MsdfAtlas {
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.glyphs.len() }
 
+    /// Looks up cached metrics for a glyph without triggering rasterization.
+    ///
+    /// Returns `None` if the glyph hasn't been rasterized yet.
+    #[must_use]
+    pub fn get_metrics(&self, key: GlyphKey) -> Option<GlyphMetrics> {
+        self.glyphs.get(&key).copied()
+    }
+
     /// Looks up cached metrics for a glyph. Test-only.
     #[cfg(test)]
     #[must_use]

@@ -100,16 +100,6 @@ impl Plugin for DiegeticUiPlugin {
             .add_systems(Update, render_panel_gizmos.after(compute_panel_layouts));
 
         #[cfg(feature = "typography_overlay")]
-        {
-            app.init_gizmo_group::<crate::debug::TypographyOverlayGizmoGroup>()
-                .add_systems(
-                    Update,
-                    (
-                        crate::debug::update_typography_gizmo_config,
-                        crate::debug::render_typography_overlay
-                            .after(crate::debug::update_typography_gizmo_config),
-                    ),
-                );
-        }
+        app.add_systems(Update, crate::debug::build_typography_overlay);
     }
 }

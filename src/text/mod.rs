@@ -36,3 +36,5 @@ pub use font_registry::FontId;
 pub use font_registry::FontRegistry;
 pub(super) use measurer::create_parley_measurer;
 pub(super) use msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
+pub(super) use msdf_rasterizer::DEFAULT_GLYPH_PADDING;
+pub(super) use msdf_rasterizer::DEFAULT_SDF_RANGE;

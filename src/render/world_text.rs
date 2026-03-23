@@ -14,6 +14,8 @@ use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
 use crate::text::DEFAULT_CANONICAL_SIZE;
+use crate::text::DEFAULT_GLYPH_PADDING;
+use crate::text::DEFAULT_SDF_RANGE;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
 use crate::text::MsdfAtlas;
@@ -27,14 +29,16 @@ use crate::text::MsdfAtlas;
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
     /// Anchor offset X in layout units (matches the renderer's anchor).
-    pub anchor_x:        f32,
+    pub anchor_x:   f32,
     /// Anchor offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y:        f32,
+    pub anchor_y:   f32,
     /// Total text width in layout units (rightmost MSDF quad extent).
-    pub text_width:      f32,
-    /// Per-glyph layout positions in layout units (before anchor/scale).
-    /// Each entry is `(glyph_x, baseline, glyph_id)` from parley shaping.
-    pub glyph_positions: Vec<(f32, f32, u16)>,
+    pub text_width: f32,
+    /// Per-glyph rendered quad rects in world units (after anchor, scale,
+    /// and overlap clipping). Each `[f32; 4]` is `[x, y, width, height]`
+    /// where `(x, y)` is the top-left corner. These are the exact rects
+    /// that the MSDF renderer draws — the overlay uses them directly.
+    pub glyph_rects: Vec<[f32; 4]>,
 }
 
 /// Standalone MSDF text rendered in world space.
@@ -115,7 +119,7 @@ pub(super) fn render_world_text(
         }
 
         // Shape text and build quads in entity-local coordinates.
-        let (quads, _anchor_x, _anchor_y, _text_width, _glyph_positions) = shape_world_text(
+        let (quads, _anchor_x, _anchor_y, _text_width, _glyph_rects) = shape_world_text(
             &world_text.0,
             style,
             &font_registry,
@@ -127,10 +131,10 @@ pub(super) fn render_world_text(
         // Store computed layout data for the typography overlay.
         #[cfg(feature = "typography_overlay")]
         commands.entity(entity).insert(ComputedWorldText {
-            anchor_x:        _anchor_x,
-            anchor_y:        _anchor_y,
-            text_width:      _text_width,
-            glyph_positions: _glyph_positions,
+            anchor_x:   _anchor_x,
+            anchor_y:   _anchor_y,
+            text_width: _text_width,
+            glyph_rects: _glyph_rects,
         });
 
         // Only replace old meshes if we have content.
@@ -233,11 +237,12 @@ pub(super) fn render_world_text(
 /// Unlike panel text, standalone text has no layout bounds or panel scale.
 /// Glyphs are positioned relative to the origin, offset by the anchor point,
 /// with a fixed scale (1 layout unit = 0.01 world units by default).
-/// Returns `(quads, anchor_x, anchor_y, text_width, glyph_positions)`.
+/// Returns `(quads, anchor_x, anchor_y, text_width, glyph_rects)`.
 ///
-/// `glyph_positions` contains `(sg.x, sg.baseline, sg.glyph_id)` for each
-/// shaped glyph — used by the typography overlay to position bounding boxes
-/// using the same coordinate system as the renderer.
+/// `glyph_rects` contains `[x, y, width, height]` for each rendered glyph
+/// quad in world units (after anchor offset, scale, and overlap clipping).
+/// Used by the typography overlay to draw bounding boxes that exactly match
+/// the rendered MSDF quads.
 fn shape_world_text(
     text: &str,
     style: &TextStyle,
@@ -245,7 +250,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Vec<GlyphQuadData>, f32, f32, f32, Vec<(f32, f32, u16)>) {
+) -> (Vec<GlyphQuadData>, f32, f32, f32, Vec<[f32; 4]>) {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
@@ -288,14 +293,9 @@ fn shape_world_text(
     // Anchor offset in layout units.
     let (anchor_x, anchor_y) = anchor_offset(style.anchor(), max_x, max_y);
 
-    // Capture glyph positions for the overlay.
-    let glyph_positions: Vec<(f32, f32, u16)> = shaped
-        .glyphs
-        .iter()
-        .map(|sg| (sg.x, sg.baseline, sg.glyph_id))
-        .collect();
-
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
+    #[cfg(feature = "typography_overlay")]
+    let mut ink_rects: Vec<[f32; 4]> = Vec::with_capacity(shaped.glyphs.len());
     for sg in &shaped.glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
@@ -320,11 +320,44 @@ fn shape_world_text(
             uv_rect:  metrics.uv_rect,
             color:    color_arr,
         });
+
+        // Compute visible ink rect from the UNCLIPPED quad by insetting
+        // the SDF padding. Must be done here before clip_overlapping_quads
+        // modifies the quad positions.
+        #[cfg(feature = "typography_overlay")]
+        {
+            #[allow(clippy::cast_precision_loss)]
+            let pad = (DEFAULT_GLYPH_PADDING as f32 + DEFAULT_SDF_RANGE as f32)
+                * style.size()
+                / DEFAULT_CANONICAL_SIZE as f32;
+
+            let ink_x = (quad_x + pad) * scale;
+            let ink_y = (quad_y - pad) * scale;
+            let ink_w = (quad_w - 2.0 * pad) * scale;
+            let ink_h = (quad_h - 2.0 * pad) * scale;
+
+            bevy::log::info!(
+                "glyph gid={}: quad_world=({:.4},{:.4},{:.4},{:.4}) ink_world=({:.4},{:.4},{:.4},{:.4}) pad_world={:.4} quad_top_world={:.4} quad_bot_world={:.4} ink_top_world={:.4} ink_bot_world={:.4}",
+                sg.glyph_id,
+                quad_x * scale, quad_y * scale, quad_w * scale, quad_h * scale,
+                ink_x, ink_y, ink_w, ink_h,
+                pad * scale,
+                quad_y * scale,
+                quad_y * scale - quad_h * scale,
+                ink_y,
+                ink_y - ink_h,
+            );
+
+            ink_rects.push([ink_x, ink_y, ink_w, ink_h]);
+        }
     }
 
     clip_overlapping_quads(&mut quads);
 
-    (quads, anchor_x, anchor_y, max_x, glyph_positions)
+    #[cfg(not(feature = "typography_overlay"))]
+    let ink_rects = Vec::new();
+
+    (quads, anchor_x, anchor_y, max_x, ink_rects)
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.

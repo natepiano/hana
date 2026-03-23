@@ -13,6 +13,7 @@ use bevy::color::palettes::css::WHITE;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
@@ -37,7 +38,7 @@ fn main() {
             DefaultPlugins,
             PanOrbitCameraPlugin,
             PanOrbitCameraExtPlugin,
-            BrpExtrasPlugin::default(),
+            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
             DiegeticUiPlugin,
@@ -70,14 +71,13 @@ fn setup(
     // Display word with typography overlay.
     commands
         .spawn((
-            WorldText::new("Typography"),
+            WorldText::new("TypogrÂphy"),
             TextStyle::new()
                 .with_size(DISPLAY_SIZE)
                 .with_color(Color::srgb(0.9, 0.9, 0.9)),
-            // Overlay temporarily disabled to isolate MSDF artifacts.
             TypographyOverlay {
                 show_font_metrics: false,
-                show_glyph_metrics: false,
+                show_glyph_metrics: true,
                 show_labels: false,
                 color: Color::from(WHITE),
                 ..default()

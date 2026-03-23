@@ -5,6 +5,4 @@
 mod typography_overlay;
 
 pub use typography_overlay::TypographyOverlay;
-pub use typography_overlay::TypographyOverlayGizmoGroup;
-pub use typography_overlay::render_typography_overlay;
-pub use typography_overlay::update_typography_gizmo_config;
+pub use typography_overlay::build_typography_overlay;

@@ -1,13 +1,19 @@
 //! Typography overlay — renders font-level metric lines and per-glyph
-//! bounding boxes as gizmos on any [`WorldText`] entity.
+//! bounding boxes as retained gizmos on any [`WorldText`] entity.
 //!
 //! Uses [`ComputedWorldText`] data populated by the renderer to ensure
 //! exact alignment with the rendered MSDF quads — no independent layout
 //! computation.
+//!
+//! Metric lines are drawn using Bevy's retained [`GizmoAsset`] (spawned
+//! once, not redrawn every frame). Labels are spawned as [`WorldText`]
+//! children.
 
 use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 
+use crate::layout::TextAnchor;
+use crate::layout::TextStyle;
 use crate::render::ComputedWorldText;
 use crate::render::LineMetricsSnapshot;
 use crate::render::ShapedTextCache;
@@ -21,19 +27,16 @@ const LAYOUT_TO_WORLD: f32 = 0.01;
 /// Default line width for overlay gizmos (in pixels).
 const DEFAULT_LINE_WIDTH: f32 = 0.5;
 
-/// Gizmo group for typography overlay lines.
-///
-/// Registered with a thin default line width so overlay lines are visually
-/// distinct from other debug gizmos.
-#[derive(Default, Reflect, GizmoConfigGroup)]
-pub struct TypographyOverlayGizmoGroup;
+/// Font size for metric labels relative to the text's font size.
+/// Apple's reference diagram uses labels roughly 1/10th the display size.
+const LABEL_SIZE_RATIO: f32 = 0.08;
 
-/// Attach to a [`WorldText`] entity to render typography metric annotations
-/// as gizmos. Built into the library as a debug tool — only available when
-/// the `typography_overlay` feature is enabled.
+/// Attach to a [`WorldText`] entity to render typography metric annotations.
+/// Built into the library as a debug tool — only available when the
+/// `typography_overlay` feature is enabled.
 ///
-/// The overlay uses the renderer's own computed layout data
-/// ([`ComputedWorldText`]) to guarantee alignment with the rendered text.
+/// Metric lines are rendered as retained gizmos (spawned once, not
+/// redrawn every frame). Labels are spawned as [`WorldText`] children.
 ///
 /// # Example
 ///
@@ -78,36 +81,48 @@ impl Default for TypographyOverlay {
     }
 }
 
-/// System that updates the gizmo line width from the overlay config.
-pub fn update_typography_gizmo_config(
-    query: Query<&TypographyOverlay>,
-    mut config_store: ResMut<GizmoConfigStore>,
-) {
-    if let Some(overlay) = query.iter().next() {
-        let (config, _) = config_store.config_mut::<TypographyOverlayGizmoGroup>();
-        config.line.width = overlay.line_width;
-    }
-}
+/// Marker for child entities spawned by the typography overlay.
+/// Used to despawn/rebuild overlay elements when the text changes.
+#[derive(Component)]
+pub struct OverlayElement;
 
-/// System that draws typography overlay gizmos.
+/// System that builds the typography overlay when a [`TypographyOverlay`]
+/// is first added or when the text/style changes.
 ///
-/// Reads [`ComputedWorldText`] (populated by the renderer) for anchor and
-/// glyph positions, ensuring exact alignment with the rendered MSDF quads.
-pub fn render_typography_overlay(
-    query: Query<(
-        &WorldText,
-        &crate::layout::TextStyle,
-        &GlobalTransform,
-        &TypographyOverlay,
-        &ComputedWorldText,
-    )>,
+/// Spawns retained gizmo lines and [`WorldText`] labels as children of
+/// the overlay entity.
+pub fn build_typography_overlay(
+    query: Query<
+        (
+            Entity,
+            &WorldText,
+            &TextStyle,
+            &TypographyOverlay,
+            &ComputedWorldText,
+        ),
+        Or<(
+            Added<TypographyOverlay>,
+            Changed<WorldText>,
+            Changed<TextStyle>,
+            Changed<ComputedWorldText>,
+        )>,
+    >,
+    old_elements: Query<(Entity, &ChildOf), With<OverlayElement>>,
     font_registry: Res<FontRegistry>,
     cache: Res<ShapedTextCache>,
-    mut gizmos: Gizmos<TypographyOverlayGizmoGroup>,
+    mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
+    mut commands: Commands,
 ) {
-    for (world_text, style, global_transform, overlay, computed) in &query {
+    for (entity, world_text, style, overlay, computed) in &query {
         if world_text.0.is_empty() {
             continue;
+        }
+
+        // Despawn previous overlay elements.
+        for (elem_entity, child_of) in &old_elements {
+            if child_of.parent() == entity {
+                commands.entity(elem_entity).despawn();
+            }
         }
 
         let font_id = FontId(style.font_id());
@@ -117,45 +132,76 @@ pub fn render_typography_overlay(
 
         let font_size = style.size();
         let font_metrics = font.metrics(font_size);
-        let transform = global_transform.compute_transform();
 
-        // Use the renderer's exact anchor and text width.
         let anchor_x = computed.anchor_x;
         let anchor_y = computed.anchor_y;
         let text_width = computed.text_width;
 
-        // Get parley's line metrics for baseline and top/bottom.
         let measure = style.as_layout_config().as_measure();
-        let line_metrics = cache
+        let Some(line_metrics) = cache
             .get_shaped(&world_text.0, &measure)
-            .and_then(|s| s.line_metrics.first().copied());
+            .and_then(|s| s.line_metrics.first().copied())
+        else {
+            continue;
+        };
 
+        // Build retained gizmo with all metric lines.
         if overlay.show_font_metrics {
-            if let Some(lm) = &line_metrics {
-                draw_font_metric_lines(
-                    &mut gizmos,
+            let gizmo_asset = build_metric_line_gizmo(
+                &font_metrics,
+                &line_metrics,
+                text_width,
+                overlay,
+                anchor_x,
+                anchor_y,
+            );
+
+            commands.entity(entity).with_child((
+                OverlayElement,
+                Gizmo {
+                    handle:      gizmo_assets.add(gizmo_asset),
+                    line_config: GizmoLineConfig {
+                        width: overlay.line_width,
+                        ..default()
+                    },
+                    depth_bias:  -0.1,
+                },
+                Transform::IDENTITY,
+            ));
+
+            // Spawn labels as WorldText children.
+            if overlay.show_labels {
+                spawn_metric_labels(
+                    &mut commands,
+                    entity,
                     &font_metrics,
-                    lm,
+                    &line_metrics,
                     text_width,
                     overlay,
-                    &transform,
                     anchor_x,
                     anchor_y,
+                    font_size,
                 );
             }
         }
 
+        // Build per-glyph bounding box gizmo from the renderer's actual
+        // quad rects — guaranteed to match what's drawn on screen.
         if overlay.show_glyph_metrics {
-            draw_glyph_metrics(
-                &mut gizmos,
-                &computed.glyph_positions,
-                font,
-                font_size,
-                overlay,
-                &transform,
-                anchor_x,
-                anchor_y,
-            );
+            let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects);
+
+            commands.entity(entity).with_child((
+                OverlayElement,
+                Gizmo {
+                    handle:      gizmo_assets.add(glyph_gizmo),
+                    line_config: GizmoLineConfig {
+                        width: 2.0,
+                        ..default()
+                    },
+                    depth_bias:  -0.1,
+                },
+                Transform::IDENTITY,
+            ));
         }
     }
 }
@@ -170,17 +216,16 @@ fn layout_to_world_x(layout_x: f32, anchor_x: f32) -> f32 {
     (layout_x - anchor_x) * LAYOUT_TO_WORLD
 }
 
-/// Draws horizontal metric lines for font-level metrics.
-fn draw_font_metric_lines(
-    gizmos: &mut Gizmos<TypographyOverlayGizmoGroup>,
+/// Builds a retained `GizmoAsset` containing all font metric lines.
+fn build_metric_line_gizmo(
     font_metrics: &crate::text::FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     text_width: f32,
     overlay: &TypographyOverlay,
-    transform: &Transform,
     anchor_x: f32,
     anchor_y: f32,
-) {
+) -> GizmoAsset {
+    let mut gizmo = GizmoAsset::default();
     let extend = overlay.extend;
     let color = overlay.color;
 
@@ -193,8 +238,6 @@ fn draw_font_metric_lines(
     let top_y = line_metrics.top;
     let bottom_y = line_metrics.bottom;
 
-    // Build metric lines, skipping top/bottom when they coincide with
-    // ascent/descent (no half-leading).
     let mut metric_lines: Vec<(&str, f32)> = Vec::with_capacity(7);
     if (top_y - ascent_y).abs() > 0.5 {
         metric_lines.push(("top", top_y));
@@ -208,90 +251,151 @@ fn draw_font_metric_lines(
         metric_lines.push(("bottom", bottom_y));
     }
 
-    for &(label, layout_y) in &metric_lines {
+    for &(_label, layout_y) in &metric_lines {
         let y = layout_to_world_y(layout_y, anchor_y);
         let x0 = layout_to_world_x(x_start, anchor_x);
         let x1 = layout_to_world_x(x_end, anchor_x);
 
-        let start = transform.transform_point(Vec3::new(x0, y, 0.001));
-        let end = transform.transform_point(Vec3::new(x1, y, 0.001));
-        gizmos.line(start, end, color);
-
-        let _ = (overlay.show_labels, label);
+        gizmo.line(Vec3::new(x0, y, 0.001), Vec3::new(x1, y, 0.001), color);
     }
 
     // Line height bracket on the right side.
     let bracket_x = layout_to_world_x(extend.mul_add(0.3, x_end), anchor_x);
     let top_world = layout_to_world_y(top_y, anchor_y);
     let bottom_world = layout_to_world_y(bottom_y, anchor_y);
-    let bracket_top = transform.transform_point(Vec3::new(bracket_x, top_world, 0.001));
-    let bracket_bottom = transform.transform_point(Vec3::new(bracket_x, bottom_world, 0.001));
-    gizmos.line(bracket_top, bracket_bottom, color);
+    gizmo.line(
+        Vec3::new(bracket_x, top_world, 0.001),
+        Vec3::new(bracket_x, bottom_world, 0.001),
+        color,
+    );
+
+    // Ascent dimension bracket on the left side.
+    // Vertical line from baseline to ascent, with horizontal ticks
+    // pointing LEFT (away from the text), like the Apple reference.
+    let tick_len = 0.008;
+    let bracket_layout_x = x_start - extend * 0.5;
+    let bx = layout_to_world_x(bracket_layout_x, anchor_x);
+    let ascent_world = layout_to_world_y(ascent_y, anchor_y);
+    let baseline_world = layout_to_world_y(baseline_y, anchor_y);
+
+    // Vertical span line.
+    gizmo.line(
+        Vec3::new(bx, ascent_world, 0.001),
+        Vec3::new(bx, baseline_world, 0.001),
+        color,
+    );
+    // Top tick at ascent (pointing left, away from text).
+    gizmo.line(
+        Vec3::new(bx - tick_len, ascent_world, 0.001),
+        Vec3::new(bx, ascent_world, 0.001),
+        color,
+    );
+    // Bottom tick at baseline (pointing left, away from text).
+    gizmo.line(
+        Vec3::new(bx - tick_len, baseline_world, 0.001),
+        Vec3::new(bx, baseline_world, 0.001),
+        color,
+    );
+
+    gizmo
 }
 
-/// Draws per-glyph bounding boxes using the renderer's glyph positions.
-fn draw_glyph_metrics(
-    gizmos: &mut Gizmos<TypographyOverlayGizmoGroup>,
-    glyph_positions: &[(f32, f32, u16)],
-    font: &crate::text::Font,
-    font_size: f32,
+/// Spawns metric label `WorldText` entities as children of the overlay entity.
+/// Currently spawns only the "Baseline" label as a first step.
+fn spawn_metric_labels(
+    commands: &mut Commands,
+    parent: Entity,
+    font_metrics: &crate::text::FontMetrics,
+    line_metrics: &LineMetricsSnapshot,
+    text_width: f32,
     overlay: &TypographyOverlay,
-    transform: &Transform,
     anchor_x: f32,
     anchor_y: f32,
+    font_size: f32,
 ) {
+    let extend = overlay.extend;
+    let label_size = font_size * LABEL_SIZE_RATIO;
     let color = overlay.color;
 
-    for &(glyph_x, baseline, glyph_id) in glyph_positions {
-        let Some(gm) = font.glyph_metrics_by_id(glyph_id, font_size) else {
-            continue;
-        };
+    // Label X position: to the left of the metric lines.
+    let label_x = layout_to_world_x(-extend, anchor_x);
 
-        // True glyph outline bounds in layout coords.
-        // gm.bounds are in font coords (Y-up from baseline).
-        // Convert to layout Y-down: layout_y = baseline - font_y.
-        let left = glyph_x + gm.bounds.min_x;
-        let right = glyph_x + gm.bounds.max_x;
-        let top_layout = baseline - gm.bounds.max_y;
-        let bottom_layout = baseline - gm.bounds.min_y;
+    let baseline_y_layout = line_metrics.baseline;
+    let ascent_y_layout = baseline_y_layout - line_metrics.ascent;
+    let descent_y_layout = baseline_y_layout + line_metrics.descent;
+    let top_y_layout = line_metrics.top;
+    let bottom_y_layout = line_metrics.bottom;
 
-        let corners = [
-            Vec3::new(
-                layout_to_world_x(left, anchor_x),
-                layout_to_world_y(bottom_layout, anchor_y),
-                0.002,
-            ),
-            Vec3::new(
-                layout_to_world_x(right, anchor_x),
-                layout_to_world_y(bottom_layout, anchor_y),
-                0.002,
-            ),
-            Vec3::new(
-                layout_to_world_x(right, anchor_x),
-                layout_to_world_y(top_layout, anchor_y),
-                0.002,
-            ),
-            Vec3::new(
-                layout_to_world_x(left, anchor_x),
-                layout_to_world_y(top_layout, anchor_y),
-                0.002,
-            ),
-        ];
-
-        for i in 0..4 {
-            let a = transform.transform_point(corners[i]);
-            let b = transform.transform_point(corners[(i + 1) % 4]);
-            gizmos.line(a, b, color);
-        }
-
-        // Advance marker — vertical tick at the glyph's advance position.
-        let advance_x = glyph_x + gm.advance_width;
-        let tick_x = layout_to_world_x(advance_x, anchor_x);
-        let tick_top = layout_to_world_y(top_layout, anchor_y);
-        let tick_bottom = layout_to_world_y(bottom_layout, anchor_y);
-
-        let a = transform.transform_point(Vec3::new(tick_x, tick_top, 0.002));
-        let b = transform.transform_point(Vec3::new(tick_x, tick_bottom, 0.002));
-        gizmos.line(a, b, color);
+    // Build the list of labels to spawn — starting with baseline only.
+    let mut labels: Vec<(&str, f32)> = Vec::with_capacity(7);
+    if (top_y_layout - ascent_y_layout).abs() > 0.5 {
+        labels.push(("Top", top_y_layout));
     }
+    labels.push(("Ascent", ascent_y_layout));
+    labels.push(("Cap height", baseline_y_layout - font_metrics.cap_height));
+    labels.push(("x-height", baseline_y_layout - font_metrics.x_height));
+    labels.push(("Baseline", baseline_y_layout));
+    labels.push(("Descent", descent_y_layout));
+    if (bottom_y_layout - descent_y_layout).abs() > 0.5 {
+        labels.push(("Bottom", bottom_y_layout));
+    }
+
+    // Baseline label — positioned at the left end of the baseline line.
+    let baseline_world_y = layout_to_world_y(baseline_y_layout, anchor_y);
+    commands.entity(parent).with_child((
+        OverlayElement,
+        WorldText::new("Baseline"),
+        TextStyle::new()
+            .with_size(label_size)
+            .with_color(color)
+            .with_anchor(TextAnchor::BottomRight),
+        Transform::from_xyz(label_x - 0.01, baseline_world_y, 0.001),
+    ));
+
+    // Ascent label — positioned at the midpoint of the ascent bracket,
+    // to the left of the bracket's vertical line.
+    let bracket_layout_x = -extend - extend * 0.5;
+    let bracket_world_x = layout_to_world_x(bracket_layout_x, anchor_x);
+    let ascent_mid_layout = (ascent_y_layout + baseline_y_layout) / 2.0;
+    let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y);
+    commands.entity(parent).with_child((
+        OverlayElement,
+        WorldText::new("Ascent"),
+        TextStyle::new()
+            .with_size(label_size)
+            .with_color(color)
+            .with_anchor(TextAnchor::CenterRight),
+        Transform::from_xyz(bracket_world_x - 0.01, ascent_mid_world, 0.001),
+    ));
+}
+
+/// Builds a retained `GizmoAsset` containing per-glyph bounding boxes.
+///
+/// Uses the renderer's actual quad rects (world-space, after clipping) so
+/// the boxes match exactly what's drawn on screen.
+fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]]) -> GizmoAsset {
+    let mut gizmo = GizmoAsset::default();
+    let color = Color::srgb(1.0, 1.0, 0.0);
+
+    bevy::log::info!("build_glyph_box_gizmo: {} rects", glyph_rects.len());
+    for (i, &[x, y, w, h]) in glyph_rects.iter().enumerate() {
+        bevy::log::info!("  rect[{i}]: x={x:.4} y={y:.4} w={w:.4} h={h:.4}");
+        // Quad is TL=(x,y), TR=(x+w,y), BR=(x+w,y-h), BL=(x,y-h)
+        // in world-space Y-up coordinates.
+        let tl = Vec3::new(x, y, 0.002);
+        let tr = Vec3::new(x + w, y, 0.002);
+        let br = Vec3::new(x + w, y - h, 0.002);
+        let bl = Vec3::new(x, y - h, 0.002);
+
+        gizmo.line(tl, tr, color);
+        gizmo.line(tr, br, color);
+        gizmo.line(br, bl, color);
+        gizmo.line(bl, tl, color);
+    }
+
+    // TODO: advance markers — needs a different visual treatment
+    // (e.g. arrow below baseline like the Apple diagram's "Advancement")
+    // rather than a vertical line that looks like a bounding box edge.
+
+    gizmo
 }
