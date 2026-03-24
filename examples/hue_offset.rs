@@ -218,6 +218,9 @@ fn rotate_hue(panels: Query<Entity, With<RotatingPanel>>, mut commands: Commands
 }
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, scene.0)

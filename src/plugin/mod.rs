@@ -5,6 +5,7 @@
 
 mod components;
 mod config;
+mod diagnostics;
 mod systems;
 
 use bevy::asset::AssetLoadFailedEvent;
@@ -18,6 +19,7 @@ pub use config::GlyphWorkerThreads;
 pub use config::RasterQuality;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
+use diagnostics::install as install_perf_diagnostics;
 use systems::compute_panel_layouts;
 use systems::render_panel_gizmos;
 
@@ -115,6 +117,7 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<Self>() {
+            install_perf_diagnostics(app);
             app.init_resource::<ShapedTextCache>()
                 .init_resource::<DiegeticPerfStats>()
                 .add_systems(Update, compute_panel_layouts);
@@ -261,6 +264,7 @@ impl Plugin for DiegeticUiPluginConfigured {
 /// Shared plugin build logic for both [`DiegeticUiPlugin`] and
 /// [`DiegeticUiPluginConfigured`].
 fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
+    install_perf_diagnostics(app);
     // Initialize font registry and wire up parley-backed text measurement.
     let registry = FontRegistry::new();
     let measurer = DiegeticTextMeasurer {

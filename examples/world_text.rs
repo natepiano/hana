@@ -329,6 +329,9 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
 }
 
 fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, click.entity)
@@ -338,6 +341,9 @@ fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
 }
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, scene.0)
@@ -356,6 +362,9 @@ fn on_text_clicked(
     meshes: Query<(), With<Mesh3d>>,
     mut commands: Commands,
 ) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     click.propagate(false);
     let camera = click.hit.camera;
     let target = children

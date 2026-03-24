@@ -263,6 +263,9 @@ fn on_char_clicked(
     meshes_q: Query<(), With<Mesh3d>>,
     mut commands: Commands,
 ) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     click.propagate(false);
     let camera = click.hit.camera;
     let target = children
@@ -278,6 +281,9 @@ fn on_char_clicked(
 }
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, scene.0)
