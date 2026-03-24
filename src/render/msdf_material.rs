@@ -22,11 +22,11 @@ use bevy::shader::ShaderRef;
 /// Use `MsdfTextMaterial::new(...)` to create instances. The `base` field
 /// exposes all `StandardMaterial` properties (metallic, roughness, emissive,
 /// `double_sided`, etc.) for full PBR control.
-pub type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
+pub(super) type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
 
 /// Uniform data for the MSDF extension shader.
 #[derive(Clone, Debug, ShaderType)]
-pub struct MsdfTextUniform {
+pub(super) struct MsdfTextUniform {
     /// SDF range in atlas pixels.
     pub sdf_range:       f32,
     /// Atlas texture width in pixels.
@@ -71,7 +71,7 @@ pub struct MsdfTextUniform {
 /// signed distance field, and modifies the PBR input's base color before
 /// lighting is applied.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-pub struct MsdfExtension {
+pub(super) struct MsdfExtension {
     /// MSDF shader uniforms.
     #[uniform(100)]
     pub uniforms:      MsdfTextUniform,

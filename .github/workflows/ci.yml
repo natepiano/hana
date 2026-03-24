@@ -5,7 +5,7 @@ on:
     branches: [main]
   push:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 env:
@@ -166,7 +166,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Criterion benchmark smoke
-        run: cargo bench --bench layout_perf
+        run: cargo bench --benches
         env:
           WGPU_BACKEND: gl
           WINIT_UNIX_BACKEND: x11

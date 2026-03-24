@@ -4,9 +4,10 @@
 //! [`Font::metrics`] to get scaled [`FontMetrics`] at any font size —
 //! pure arithmetic, no re-parsing.
 
-#[cfg(feature = "typography_overlay")]
 use std::sync::Arc;
 
+use bevy::asset::Asset;
+use bevy::reflect::TypePath;
 use ttf_parser::Face;
 
 /// Pre-parsed font with design-unit metrics.
@@ -14,6 +15,17 @@ use ttf_parser::Face;
 /// Created via [`Font::from_bytes`]. All raw values are in the font's
 /// design units (`units_per_em`). Call [`Font::metrics`] to get values
 /// scaled to a specific font size.
+///
+/// Also a Bevy [`Asset`] — load `.ttf`/`.otf` files via `AssetServer`:
+///
+/// ```ignore
+/// let handle: Handle<Font> = asset_server.load("fonts/MyFont.ttf");
+/// ```
+///
+/// When the asset loads, the plugin automatically registers it with
+/// [`FontRegistry`](crate::FontRegistry) and fires a
+/// [`FontRegistered`](crate::FontRegistered) event.
+#[derive(Asset, TypePath)]
 pub struct Font {
     name:                    String,
     units_per_em:            u16,
@@ -27,9 +39,7 @@ pub struct Font {
     raw_underline_thickness: Option<i16>,
     raw_strikeout_position:  Option<i16>,
     raw_strikeout_thickness: Option<i16>,
-    /// Retained for per-glyph queries when the `typography_overlay` feature
-    /// is enabled. Zero cost when the feature is disabled.
-    #[cfg(feature = "typography_overlay")]
+    /// Raw font bytes, retained for MSDF rasterization and per-glyph queries.
     data:                    Arc<[u8]>,
 }
 
@@ -172,7 +182,6 @@ impl Font {
             raw_underline_thickness,
             raw_strikeout_position,
             raw_strikeout_thickness,
-            #[cfg(feature = "typography_overlay")]
             data: Arc::from(data),
         })
     }
@@ -180,6 +189,10 @@ impl Font {
     /// Returns the font family name.
     #[must_use]
     pub fn name(&self) -> &str { &self.name }
+
+    /// Returns the raw TTF/OTF font bytes.
+    #[must_use]
+    pub fn data(&self) -> &[u8] { &self.data }
 
     /// Returns font-level metrics scaled to `size` layout units.
     ///

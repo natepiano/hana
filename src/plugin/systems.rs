@@ -45,7 +45,7 @@ pub struct DiegeticPerfStats {
 /// been shaped (by a previous layout or render pass), its dimensions are
 /// returned from the cache without calling parley. On cache miss, falls back
 /// to the parley-backed [`DiegeticTextMeasurer`].
-pub fn compute_panel_layouts(
+pub(super) fn compute_panel_layouts(
     mut panels: Query<(&DiegeticPanel, &mut ComputedDiegeticPanel), Changed<DiegeticPanel>>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
