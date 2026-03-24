@@ -254,20 +254,18 @@ fn spawn_font_metric_gizmos(
     font_size: f32,
     gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
-    let first_glyph_left = computed.glyph_rects.first().map_or(0.0, |r| r[0]);
-    let last_glyph_right = computed.glyph_rects.last().map_or(0.0, |r| r[0] + r[2]);
-
-    // Uniform spacing between arrow columns, derived from the font.
-    let arrow_spacing = arrow_spacing(computed.first_advance);
+    let extents = GlyphExtents {
+        first_left:    computed.glyph_rects.first().map_or(0.0, |r| r[0]),
+        last_right:    computed.glyph_rects.last().map_or(0.0, |r| r[0] + r[2]),
+        arrow_spacing: arrow_spacing(computed.first_advance),
+    };
 
     let (lines_gizmo, arrows_gizmo, metric_lines) = build_metric_gizmos(
         font_metrics,
         line_metrics,
         overlay,
         anchor_y,
-        first_glyph_left,
-        last_glyph_right,
-        arrow_spacing,
+        &extents,
         font_size,
     );
 
@@ -308,9 +306,7 @@ fn spawn_font_metric_gizmos(
             overlay,
             anchor_y,
             font_size,
-            first_glyph_left,
-            last_glyph_right,
-            arrow_spacing,
+            &extents,
         );
     }
 }
@@ -395,7 +391,9 @@ fn spawn_bounding_box_callout(
     let label_size = font_size * LABEL_SIZE_RATIO;
     let z = 0.002;
 
-    let last = computed.glyph_rects.last().unwrap();
+    let Some(last) = computed.glyph_rects.last() else {
+        return;
+    };
     let last_x = last[0];
     let last_y = last[1];
     let last_w = last[2];
@@ -641,7 +639,7 @@ fn spawn_advancement_arrow(
 
     // "Advancement" label centered below the arrow.
     let adv_mid_x = f32::midpoint(origin_x, advance_end_x);
-    let adv_label_y = arrow_y - spacing * 0.5;
+    let adv_label_y = spacing.mul_add(-0.5, arrow_y);
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ADVANCEMENT),
         TextStyle::new()
@@ -701,6 +699,13 @@ const fn arrow_gap(font_size: f32) -> f32 { ARROW_GAP_RATIO * font_scale(font_si
 /// Label gap in world units, scaled to the font size.
 const fn label_gap(font_size: f32) -> f32 { LABEL_GAP_RATIO * font_scale(font_size) }
 
+/// Horizontal extents of the glyph run and the uniform arrow column spacing.
+struct GlyphExtents {
+    first_left:    f32,
+    last_right:    f32,
+    arrow_spacing: f32,
+}
+
 /// Builds gizmos for horizontal metric lines and dimension arrows.
 /// Returns the lines gizmo, arrows gizmo, and the list of
 /// `(label, layout_y)` pairs for label spawning.
@@ -709,9 +714,7 @@ fn build_metric_gizmos(
     line_metrics: &LineMetricsSnapshot,
     overlay: &TypographyOverlay,
     anchor_y: f32,
-    first_glyph_left: f32,
-    last_glyph_right: f32,
-    arrow_spacing: f32,
+    extents: &GlyphExtents,
     font_size: f32,
 ) -> (GizmoAsset, GizmoAsset, Vec<(&'static str, f32)>) {
     let mut lines_gizmo = GizmoAsset::default();
@@ -745,8 +748,8 @@ fn build_metric_gizmos(
     // A full advance width separates Ascent/Descent from Line Height
     // so the Line Height shaft doesn't pass through their labels.
     // Metric lines extend one spacing past the outermost arrows.
-    let left_outermost = 3.0_f32.mul_add(-arrow_spacing, first_glyph_left);
-    let right_outermost = 2.0_f32.mul_add(arrow_spacing, last_glyph_right);
+    let left_outermost = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let right_outermost = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
     let line_x0 = left_outermost;
     let line_x1 = right_outermost;
 
@@ -773,8 +776,8 @@ fn build_metric_gizmos(
     // Ascent and Descent share the same column (they don't overlap vertically).
     // Line Height is a full advance width further left so its shaft
     // passes between the Ascent and Descent labels.
-    let left_1 = first_glyph_left - arrow_spacing; // Ascent + Descent
-    let left_2 = 3.0_f32.mul_add(-arrow_spacing, first_glyph_left); // Line Height
+    let left_1 = extents.first_left - extents.arrow_spacing; // Ascent + Descent
+    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left); // Line Height
 
     let g = &mut arrows_gizmo;
     draw_dimension_arrow(
@@ -806,8 +809,8 @@ fn build_metric_gizmos(
     let x_height_world = layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y);
     let cap_height_world = layout_to_world_y(baseline_y - font_metrics.cap_height, anchor_y);
 
-    let right_1 = last_glyph_right + arrow_spacing; // x-Height
-    let right_2 = 2.0_f32.mul_add(arrow_spacing, last_glyph_right); // Cap Height
+    let right_1 = extents.last_right + extents.arrow_spacing; // x-Height
+    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right); // Cap Height
 
     draw_dimension_arrow(
         g,
@@ -844,9 +847,7 @@ fn spawn_metric_labels(
     overlay: &TypographyOverlay,
     anchor_y: f32,
     font_size: f32,
-    first_glyph_left: f32,
-    last_glyph_right: f32,
-    arrow_spacing: f32,
+    extents: &GlyphExtents,
 ) {
     let label_size = font_size * LABEL_SIZE_RATIO;
     let color = overlay.color;
@@ -860,15 +861,15 @@ fn spawn_metric_labels(
     let descent_y = baseline_y + line_metrics.descent;
 
     // Left-side arrow positions (match `build_metric_gizmos`).
-    let left_1 = first_glyph_left - arrow_spacing; // Ascent + Descent
-    let left_2 = 3.0_f32.mul_add(-arrow_spacing, first_glyph_left); // Line Height
+    let left_1 = extents.first_left - extents.arrow_spacing; // Ascent + Descent
+    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left); // Line Height
 
     // Right-side arrow positions.
-    let right_1 = last_glyph_right + arrow_spacing; // x-Height
-    let right_2 = 2.0_f32.mul_add(arrow_spacing, last_glyph_right); // Cap Height
+    let right_1 = extents.last_right + extents.arrow_spacing; // x-Height
+    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right); // Cap Height
 
     // Metric line left edge — for non-arrow labels on their lines.
-    let line_x0 = left_2 - arrow_spacing;
+    let line_x0 = left_2 - extents.arrow_spacing;
 
     spawn_line_edge_labels(
         commands,

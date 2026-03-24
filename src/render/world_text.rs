@@ -351,48 +351,72 @@ fn shape_world_text(
             },
         ));
 
-        // Compute ink rect from the font's glyph bounding box.
-        {
-            let face = ttf_parser::Face::parse(font_data, 0).ok();
-            if let Some(face) = &face {
-                let gid = ttf_parser::GlyphId(sg.glyph_id);
-                if let Some(bbox) = face.glyph_bounding_box(gid) {
-                    let upm = f32::from(face.units_per_em());
-                    let font_scale = style.size() / upm;
-
-                    let ink_w = f32::from(bbox.x_max - bbox.x_min) * font_scale;
-                    let ink_h = f32::from(bbox.y_max - bbox.y_min) * font_scale;
-                    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, sg.x) - anchor_x;
-                    let ink_top =
-                        f32::from(bbox.y_max).mul_add(-font_scale, sg.baseline - sg.y) - anchor_y;
-
-                    glyph_rects.push([
-                        ink_x * scale,
-                        -ink_top * scale,
-                        ink_w * scale,
-                        ink_h * scale,
-                    ]);
-                }
-            }
+        if let Some(rect) = ink_rect(
+            font_data,
+            sg.glyph_id,
+            style.size(),
+            sg.x,
+            sg.baseline - sg.y,
+            anchor_x,
+            anchor_y,
+            scale,
+        ) {
+            glyph_rects.push(rect);
         }
     }
 
     clip_overlapping_quads(&mut quads);
 
-    // First glyph's advance width in world units.
     let first_advance = shaped.glyphs.first().map_or(0.0, |sg| {
-        let face = ttf_parser::Face::parse(font_data, 0).ok();
-        face.and_then(|f| {
-            let gid = ttf_parser::GlyphId(sg.glyph_id);
-            f.glyph_hor_advance(gid).map(|adv| {
-                let upm = f32::from(f.units_per_em());
-                f32::from(adv) * style.size() / upm * scale
-            })
-        })
-        .unwrap_or(0.0)
+        glyph_advance(font_data, sg.glyph_id, style.size(), scale)
     });
 
     (quads, anchor_x, anchor_y, glyph_rects, first_advance)
+}
+
+/// Computes the ink bounding box for a single glyph, returned as `[x, y, w, h]`
+/// in world units, or `None` if the font face or glyph bbox is unavailable.
+#[allow(clippy::too_many_arguments)]
+fn ink_rect(
+    font_data: &[u8],
+    glyph_id: u16,
+    font_size: f32,
+    glyph_x: f32,
+    baseline_offset: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    scale: f32,
+) -> Option<[f32; 4]> {
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(glyph_id))?;
+    let upm = f32::from(face.units_per_em());
+    let font_scale = font_size / upm;
+
+    let ink_w = f32::from(bbox.x_max - bbox.x_min) * font_scale;
+    let ink_h = f32::from(bbox.y_max - bbox.y_min) * font_scale;
+    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, glyph_x) - anchor_x;
+    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, baseline_offset) - anchor_y;
+
+    Some([
+        ink_x * scale,
+        -ink_top * scale,
+        ink_w * scale,
+        ink_h * scale,
+    ])
+}
+
+/// Returns a single glyph's horizontal advance in world units.
+fn glyph_advance(font_data: &[u8], glyph_id: u16, font_size: f32, scale: f32) -> f32 {
+    ttf_parser::Face::parse(font_data, 0)
+        .ok()
+        .and_then(|f| {
+            let gid = ttf_parser::GlyphId(glyph_id);
+            f.glyph_hor_advance(gid).map(|adv| {
+                let upm = f32::from(f.units_per_em());
+                f32::from(adv) * font_size / upm * scale
+            })
+        })
+        .unwrap_or(0.0)
 }
 
 /// Returns the anchor offset in layout units for centering/alignment.

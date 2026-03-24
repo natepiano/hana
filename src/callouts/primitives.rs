@@ -67,10 +67,12 @@ pub fn draw_dashed_line(
     }
     let dir = delta / total_len;
     let stride = dash_len + gap_len;
-    let mut t = 0.0;
-    while t < total_len {
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let count = (total_len / stride).ceil() as usize;
+    for i in 0..count {
+        #[allow(clippy::cast_precision_loss)]
+        let t = i as f32 * stride;
         let dash_end = (t + dash_len).min(total_len);
         gizmo.line(start + dir * t, start + dir * dash_end, color);
-        t += stride;
     }
 }
