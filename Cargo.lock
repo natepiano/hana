@@ -875,6 +875,7 @@ dependencies = [
  "bevy_panorbit_camera",
  "bevy_panorbit_camera_ext",
  "bevy_window_manager",
+ "bitflags 2.11.0",
  "clay-layout",
  "criterion",
  "etagere",

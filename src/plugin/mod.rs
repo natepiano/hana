@@ -5,6 +5,7 @@
 
 mod components;
 mod config;
+mod diagnostics;
 mod systems;
 
 use bevy::asset::AssetLoadFailedEvent;
@@ -14,7 +15,9 @@ pub use components::DiegeticPanel;
 pub use components::DiegeticTextMeasurer;
 pub use components::HueOffset;
 pub use config::AtlasConfig;
+pub use config::GlyphWorkerThreads;
 pub use config::RasterQuality;
+use diagnostics::install as install_perf_diagnostics;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 use systems::compute_panel_layouts;
@@ -114,6 +117,7 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<Self>() {
+            install_perf_diagnostics(app);
             app.init_resource::<ShapedTextCache>()
                 .init_resource::<DiegeticPerfStats>()
                 .add_systems(Update, compute_panel_layouts);
@@ -132,22 +136,24 @@ impl Plugin for LayoutPlugin {
 /// App::new().add_plugins(DiegeticUiPlugin)
 /// ```
 ///
-/// Uses [`RasterQuality::High`] (64px) with 100 glyphs per page.
+/// Uses [`RasterQuality::High`] (64px) with 100 glyphs per page and
+/// [`GlyphWorkerThreads::Auto`] glyph raster workers.
 ///
 /// # Custom atlas configuration
 ///
-/// Use [`with_atlas`](Self::with_atlas) to tune rasterization quality
-/// and per-page glyph budget. This returns a builder that implements
-/// [`Plugin`], so you can chain configuration and pass it directly to
-/// `add_plugins`:
+/// Use [`with_atlas`](Self::with_atlas) to tune rasterization quality,
+/// per-page glyph budget, and glyph raster worker count. This returns a
+/// builder that implements [`Plugin`], so you can chain configuration and
+/// pass it directly to `add_plugins`:
 ///
 /// ```ignore
-/// use bevy_diegetic::{DiegeticUiPlugin, RasterQuality};
+/// use bevy_diegetic::{DiegeticUiPlugin, GlyphWorkerThreads, RasterQuality};
 ///
 /// App::new().add_plugins(
 ///     DiegeticUiPlugin::with_atlas()
 ///         .quality(RasterQuality::Low)
 ///         .glyphs_per_page(50)
+///         .glyph_worker_threads(GlyphWorkerThreads::Fixed(4))
 /// )
 /// ```
 ///
@@ -159,10 +165,12 @@ pub struct DiegeticUiPlugin;
 impl DiegeticUiPlugin {
     /// Returns an atlas configuration builder that implements [`Plugin`].
     ///
-    /// Call `.quality()` and/or `.glyphs_per_page()` to override
-    /// defaults, then pass the result to `add_plugins`. Only the
-    /// settings you override are changed — the rest use sensible
-    /// defaults ([`RasterQuality::High`], 100 glyphs per page).
+    /// Call `.quality()`, `.glyphs_per_page()`, and/or
+    /// `.glyph_worker_threads()` to override defaults, then pass the
+    /// result to `add_plugins`. Only the settings you override are
+    /// changed — the rest use sensible defaults
+    /// ([`RasterQuality::High`], 100 glyphs per page,
+    /// [`GlyphWorkerThreads::Auto`]).
     ///
     /// The builder logs an `info!` summary of the computed atlas page
     /// size and estimated memory at startup. Out-of-range values are
@@ -176,6 +184,7 @@ impl DiegeticUiPlugin {
     ///     DiegeticUiPlugin::with_atlas()
     ///         .quality(RasterQuality::High)
     ///         .glyphs_per_page(50)
+    ///         .glyph_worker_threads(GlyphWorkerThreads::Fixed(6))
     /// )
     /// ```
     #[must_use]
@@ -230,6 +239,22 @@ impl DiegeticUiPluginConfigured {
         self.config.glyphs_per_page = count;
         self
     }
+
+    /// Sets the async glyph raster worker policy.
+    ///
+    /// This applies to the shared MSDF text pipeline used by both
+    /// diegetic panels and [`WorldText`](crate::WorldText).
+    ///
+    /// [`GlyphWorkerThreads::Auto`] uses the crate's default heuristic,
+    /// currently up to 6 worker threads, clamped to the machine's
+    /// available parallelism. [`GlyphWorkerThreads::Fixed`] requests an
+    /// explicit worker count, which is clamped to
+    /// `1..=available_parallelism()` with a warning.
+    #[must_use]
+    pub const fn glyph_worker_threads(mut self, workers: GlyphWorkerThreads) -> Self {
+        self.config.glyph_worker_threads = workers;
+        self
+    }
 }
 
 impl Plugin for DiegeticUiPluginConfigured {
@@ -239,6 +264,7 @@ impl Plugin for DiegeticUiPluginConfigured {
 /// Shared plugin build logic for both [`DiegeticUiPlugin`] and
 /// [`DiegeticUiPluginConfigured`].
 fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
+    install_perf_diagnostics(app);
     // Initialize font registry and wire up parley-backed text measurement.
     let registry = FontRegistry::new();
     let measurer = DiegeticTextMeasurer {
@@ -257,7 +283,12 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
 
         let page_size = cfg.page_size();
         let canonical_size = cfg.canonical_size();
-        app.insert_resource(MsdfAtlas::with_config(page_size, canonical_size));
+        let glyph_worker_threads = cfg.clamped_glyph_worker_threads();
+        app.insert_resource(MsdfAtlas::with_config(
+            page_size,
+            canonical_size,
+            glyph_worker_threads,
+        ));
     }
 
     app.insert_resource(registry)

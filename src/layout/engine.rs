@@ -39,6 +39,13 @@ use super::types::TextWrap;
 /// (e.g. stored in a Bevy `Resource` and cloned to create `LayoutEngine` instances).
 pub type MeasureTextFn = Arc<dyn Fn(&str, &TextMeasure) -> TextDimensions + Send + Sync>;
 
+/// Clay-style tolerance for layout convergence and float grouping.
+///
+/// Layout operates in pixel-like units, so differences below one hundredth
+/// of a unit are not visually meaningful but can cause iterative sizing loops
+/// to spin forever if treated as significant.
+const LAYOUT_EPSILON: f32 = 0.01;
+
 /// Computed layout data for a single element.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ComputedLayout {
@@ -947,7 +954,10 @@ fn position_and_render(
     let mut stack: Vec<(usize, f32, f32, bool)> = Vec::with_capacity(tree.len());
     stack.push((root, 0.0, 0.0, false));
 
-    while let Some(&mut (index, x, y, ref mut visited)) = stack.last_mut() {
+    loop {
+        let Some(&mut (index, x, y, ref mut visited)) = stack.last_mut() else {
+            break;
+        };
         let element = &tree.elements[index];
         let bounds = BoundingBox {
             x,
@@ -1006,7 +1016,6 @@ fn position_and_render(
             push_children_to_stack(tree, computed, &mut stack, index, x, y);
         }
     }
-
     commands
 }
 
@@ -1087,7 +1096,7 @@ fn compress_children(
     to_distribute: &mut f32,
 ) {
     loop {
-        if *to_distribute >= -f32::EPSILON {
+        if *to_distribute >= -LAYOUT_EPSILON {
             break;
         }
 
@@ -1103,21 +1112,21 @@ fn compress_children(
             }
             let size = get_size(computed[idx], x_axis);
             let min = get_min_size(computed[idx], x_axis);
-            if size <= min + f32::EPSILON {
+            if size <= min + LAYOUT_EPSILON {
                 continue;
             }
-            if size > largest + f32::EPSILON {
+            if size > largest + LAYOUT_EPSILON {
                 second_largest = largest;
                 largest = size;
                 at_largest_count = 1;
-            } else if (size - largest).abs() <= f32::EPSILON {
+            } else if (size - largest).abs() <= LAYOUT_EPSILON {
                 at_largest_count += 1;
             } else if size > second_largest {
                 second_largest = size;
             }
         }
 
-        if at_largest_count == 0 || largest <= f32::EPSILON {
+        if at_largest_count == 0 || largest <= LAYOUT_EPSILON {
             break;
         }
 
@@ -1133,17 +1142,18 @@ fn compress_children(
             delta_even
         };
 
-        if shrink_per_child <= f32::EPSILON {
+        if shrink_per_child <= LAYOUT_EPSILON {
             break;
         }
 
         // Apply shrink to resizable children at the largest size.
+        let mut total_shrink = 0.0_f32;
         for &idx in children {
             if !get_sizing(&tree.elements[idx], x_axis).is_resizable() {
                 continue;
             }
             let current = get_size(computed[idx], x_axis);
-            if (current - largest).abs() >= f32::EPSILON {
+            if (current - largest).abs() > LAYOUT_EPSILON {
                 continue;
             }
             let min = get_min_size(computed[idx], x_axis);
@@ -1151,6 +1161,11 @@ fn compress_children(
             let actual_shrink = current - new_size;
             set_size(&mut computed[idx], x_axis, new_size);
             *to_distribute += actual_shrink;
+            total_shrink += actual_shrink;
+        }
+
+        if total_shrink <= LAYOUT_EPSILON {
+            break;
         }
     }
 }
@@ -1166,7 +1181,7 @@ fn expand_children(
     to_distribute: &mut f32,
 ) {
     loop {
-        if *to_distribute <= f32::EPSILON {
+        if *to_distribute <= LAYOUT_EPSILON {
             break;
         }
 
@@ -1182,14 +1197,14 @@ fn expand_children(
             }
             let size = get_size(computed[idx], x_axis);
             let max = get_sizing(&tree.elements[idx], x_axis).max_size();
-            if size >= max - f32::EPSILON {
+            if size >= max - LAYOUT_EPSILON {
                 continue;
             }
-            if size < smallest - f32::EPSILON {
+            if size < smallest - LAYOUT_EPSILON {
                 second_smallest = smallest;
                 smallest = size;
                 at_smallest_count = 1;
-            } else if (size - smallest).abs() <= f32::EPSILON {
+            } else if (size - smallest).abs() <= LAYOUT_EPSILON {
                 at_smallest_count += 1;
             } else if size < second_smallest {
                 second_smallest = size;
@@ -1212,17 +1227,18 @@ fn expand_children(
             delta_even
         };
 
-        if grow_per_child <= f32::EPSILON {
+        if grow_per_child <= LAYOUT_EPSILON {
             break;
         }
 
         // Apply growth to growable children at the smallest size.
+        let mut total_grow = 0.0_f32;
         for &idx in children {
             if !get_sizing(&tree.elements[idx], x_axis).is_grow() {
                 continue;
             }
             let current = get_size(computed[idx], x_axis);
-            if (current - smallest).abs() >= f32::EPSILON {
+            if (current - smallest).abs() > LAYOUT_EPSILON {
                 continue;
             }
             let max = get_sizing(&tree.elements[idx], x_axis).max_size();
@@ -1230,6 +1246,11 @@ fn expand_children(
             let actual_grow = new_size - current;
             set_size(&mut computed[idx], x_axis, new_size);
             *to_distribute -= actual_grow;
+            total_grow += actual_grow;
+        }
+
+        if total_grow <= LAYOUT_EPSILON {
+            break;
         }
     }
 }

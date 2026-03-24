@@ -67,6 +67,22 @@ pub fn create_parley_measurer(
         let line_height = measure.effective_line_height();
         builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line_height)));
 
+        // Push OpenType feature overrides (liga, calt, dlig, kern).
+        let font_features = measure.font_features;
+        if !font_features.is_default() {
+            let parley_features: Vec<parley::style::FontFeature> = font_features
+                .to_parley_settings()
+                .into_iter()
+                .map(|(tag, value)| parley::swash::Setting {
+                    tag: parley::swash::tag_from_bytes(&tag),
+                    value,
+                })
+                .collect();
+            builder.push_default(StyleProperty::FontFeatures(
+                parley::style::FontSettings::List(std::borrow::Cow::Owned(parley_features)),
+            ));
+        }
+
         builder.build_into(&mut layout, text);
         layout.break_all_lines(None);
 

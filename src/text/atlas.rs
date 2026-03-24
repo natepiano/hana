@@ -2,9 +2,13 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+use std::time::Instant;
 
 use bevy::image::Image;
 use bevy::prelude::Assets;
@@ -13,7 +17,8 @@ use bevy::prelude::Resource;
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::render::render_resource::TextureFormat;
-use bevy::tasks::AsyncComputeTaskPool;
+use bevy::tasks::TaskPool;
+use bevy::tasks::TaskPoolBuilder;
 use etagere::AtlasAllocator;
 use etagere::size2;
 
@@ -28,6 +33,9 @@ use super::msdf_rasterizer::rasterize_glyph;
 
 /// Default atlas page texture size in pixels.
 const DEFAULT_ATLAS_SIZE: u32 = 1024;
+
+/// Default number of worker threads used by the atlas when no override is provided.
+const DEFAULT_GLYPH_WORKER_THREADS: usize = 6;
 
 /// Number of bytes per pixel (RGBA).
 const BYTES_PER_PIXEL: u32 = 4;
@@ -88,9 +96,47 @@ impl GlyphMetrics {
 
 /// Completed async rasterization result.
 struct RasterizedGlyph {
-    key:    GlyphKey,
+    key:               GlyphKey,
     /// `None` for glyphs with no visual representation (e.g. space).
-    bitmap: Option<MsdfBitmap>,
+    bitmap:            Option<MsdfBitmap>,
+    /// End-to-end raster time on the worker.
+    elapsed_ms:        f32,
+    /// Worker thread id that completed the raster.
+    worker:            String,
+    /// Number of raster jobs concurrently active when this job started.
+    start_active_jobs: usize,
+}
+
+/// Result of a glyph atlas lookup with async queueing semantics.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum GlyphLookup {
+    /// Glyph metrics are already available in the atlas.
+    Ready(GlyphMetrics),
+    /// Glyph was already queued and is still being rasterized.
+    Pending,
+    /// Glyph was queued by this lookup and will be available later.
+    Queued,
+}
+
+/// Diagnostics from draining completed async glyph rasterizations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AsyncGlyphPollStats {
+    /// Number of completed async jobs drained from the channel.
+    pub completed:       usize,
+    /// Number of visible glyphs inserted into atlas pages.
+    pub inserted:        usize,
+    /// Number of invisible glyph entries cached (e.g. space).
+    pub invisible:       usize,
+    /// Number of atlas pages added while inserting completed glyphs.
+    pub pages_added:     usize,
+    /// Average worker-side raster duration for drained jobs.
+    pub avg_raster_ms:   f32,
+    /// Maximum worker-side raster duration for drained jobs.
+    pub max_raster_ms:   f32,
+    /// Maximum concurrent active raster jobs reported by drained jobs.
+    pub max_active_jobs: usize,
+    /// Number of distinct worker threads seen in drained jobs.
+    pub worker_threads:  usize,
 }
 
 /// A single page of the MSDF atlas texture.
@@ -132,57 +178,82 @@ impl AtlasPage {
 #[derive(Resource)]
 pub struct MsdfAtlas {
     /// Atlas pages, each with its own pixel buffer and allocator.
-    pages:          Vec<AtlasPage>,
+    pages:             Vec<AtlasPage>,
     /// Cached glyph metrics, keyed by `GlyphKey`.
-    glyphs:         HashMap<GlyphKey, GlyphMetrics>,
+    glyphs:            HashMap<GlyphKey, GlyphMetrics>,
     /// Page width in pixels (all pages share the same dimensions).
-    width:          u32,
+    width:             u32,
     /// Page height in pixels.
-    height:         u32,
+    height:            u32,
     /// Canonical pixel size for MSDF rasterization.
-    canonical_size: u32,
+    canonical_size:    u32,
     /// Glyph keys currently being rasterized asynchronously.
-    in_flight:      HashSet<GlyphKey>,
+    in_flight:         HashSet<GlyphKey>,
     /// Receiver for completed async rasterizations (Mutex for Sync).
-    rx:             Mutex<mpsc::Receiver<RasterizedGlyph>>,
+    rx:                Mutex<mpsc::Receiver<RasterizedGlyph>>,
     /// Sender cloned into each async task.
-    tx:             mpsc::Sender<RasterizedGlyph>,
+    tx:                mpsc::Sender<RasterizedGlyph>,
+    /// Number of raster jobs currently executing on worker threads.
+    active_jobs:       Arc<AtomicUsize>,
+    /// Peak concurrently executing raster jobs observed so far.
+    peak_active_jobs:  Arc<AtomicUsize>,
+    /// Dedicated worker pool for async glyph rasterization.
+    glyph_worker_pool: Arc<TaskPool>,
 }
 
 impl MsdfAtlas {
     /// Creates a new atlas with the default page size and canonical size.
     #[must_use]
-    pub fn new() -> Self { Self::with_config(DEFAULT_ATLAS_SIZE, DEFAULT_CANONICAL_SIZE) }
+    pub fn new() -> Self {
+        Self::new_with_dimensions(
+            DEFAULT_ATLAS_SIZE,
+            DEFAULT_ATLAS_SIZE,
+            DEFAULT_CANONICAL_SIZE,
+            DEFAULT_GLYPH_WORKER_THREADS,
+        )
+    }
 
     /// Creates a new atlas with a specific page size (uses default canonical size).
     #[must_use]
     pub fn with_size(width: u32, height: u32) -> Self {
+        Self::new_with_dimensions(
+            width,
+            height,
+            DEFAULT_CANONICAL_SIZE,
+            DEFAULT_GLYPH_WORKER_THREADS,
+        )
+    }
+
+    /// Creates a new atlas with a specific page size and canonical rasterization size.
+    #[must_use]
+    pub fn with_config(page_size: u32, canonical_size: u32, glyph_worker_threads: usize) -> Self {
+        Self::new_with_dimensions(page_size, page_size, canonical_size, glyph_worker_threads)
+    }
+
+    fn new_with_dimensions(
+        width: u32,
+        height: u32,
+        canonical_size: u32,
+        glyph_worker_threads: usize,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             pages: vec![AtlasPage::new(width, height)],
             glyphs: HashMap::new(),
             width,
             height,
-            canonical_size: DEFAULT_CANONICAL_SIZE,
-            in_flight: HashSet::new(),
-            rx: Mutex::new(rx),
-            tx,
-        }
-    }
-
-    /// Creates a new atlas with a specific page size and canonical rasterization size.
-    #[must_use]
-    pub fn with_config(page_size: u32, canonical_size: u32) -> Self {
-        let (tx, rx) = mpsc::channel();
-        Self {
-            pages: vec![AtlasPage::new(page_size, page_size)],
-            glyphs: HashMap::new(),
-            width: page_size,
-            height: page_size,
             canonical_size,
             in_flight: HashSet::new(),
             rx: Mutex::new(rx),
             tx,
+            active_jobs: Arc::new(AtomicUsize::new(0)),
+            peak_active_jobs: Arc::new(AtomicUsize::new(0)),
+            glyph_worker_pool: Arc::new(
+                TaskPoolBuilder::new()
+                    .num_threads(glyph_worker_threads)
+                    .thread_name("Diegetic Glyph Raster".to_string())
+                    .build(),
+            ),
         }
     }
 
@@ -205,6 +276,22 @@ impl MsdfAtlas {
     /// Returns the total number of cached glyphs across all pages.
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.glyphs.len() }
+
+    /// Returns the number of glyphs currently being rasterized asynchronously.
+    #[must_use]
+    pub fn in_flight_count(&self) -> usize { self.in_flight.len() }
+
+    /// Returns the number of raster jobs currently executing on worker threads.
+    #[must_use]
+    pub fn active_job_count(&self) -> usize { self.active_jobs.load(Ordering::Relaxed) }
+
+    /// Returns the peak worker-side raster concurrency observed so far.
+    #[must_use]
+    pub fn peak_active_job_count(&self) -> usize { self.peak_active_jobs.load(Ordering::Relaxed) }
+
+    /// Returns the number of atlas pages with unsynced CPU-side changes.
+    #[must_use]
+    pub fn dirty_page_count(&self) -> usize { self.pages.iter().filter(|p| p.dirty).count() }
 
     /// Looks up cached metrics for a glyph without triggering rasterization.
     ///
@@ -306,23 +393,37 @@ impl MsdfAtlas {
     /// [`poll_async_glyphs`](Self::poll_async_glyphs) picks up the
     /// completed result.
     pub fn get_or_insert(&mut self, key: GlyphKey, font_data: &[u8]) -> Option<GlyphMetrics> {
+        match self.lookup_or_queue(key, font_data) {
+            GlyphLookup::Ready(metrics) => Some(metrics),
+            GlyphLookup::Pending | GlyphLookup::Queued => None,
+        }
+    }
+
+    /// Looks up a glyph and reports whether it was ready, already pending,
+    /// or newly queued for async rasterization.
+    pub(crate) fn lookup_or_queue(&mut self, key: GlyphKey, font_data: &[u8]) -> GlyphLookup {
         if let Some(metrics) = self.glyphs.get(&key) {
-            return Some(*metrics);
+            return GlyphLookup::Ready(*metrics);
         }
 
         // Already queued — don't spawn a duplicate task.
         if self.in_flight.contains(&key) {
-            return None;
+            return GlyphLookup::Pending;
         }
 
         // Queue async rasterization.
         self.in_flight.insert(key);
         let tx = self.tx.clone();
+        let active_jobs = Arc::clone(&self.active_jobs);
+        let peak_active_jobs = Arc::clone(&self.peak_active_jobs);
         let glyph_index = key.glyph_index;
         let font_data = font_data.to_vec();
         let canonical = self.canonical_size;
-        AsyncComputeTaskPool::get()
+        self.glyph_worker_pool
             .spawn(async move {
+                let active_now = active_jobs.fetch_add(1, Ordering::Relaxed) + 1;
+                peak_active_jobs.fetch_max(active_now, Ordering::Relaxed);
+                let start = Instant::now();
                 let bitmap = rasterize_glyph(
                     &font_data,
                     glyph_index,
@@ -330,11 +431,20 @@ impl MsdfAtlas {
                     DEFAULT_SDF_RANGE,
                     DEFAULT_GLYPH_PADDING,
                 );
-                let _ = tx.send(RasterizedGlyph { key, bitmap });
+                let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+                let worker = format!("{:?}", std::thread::current().id());
+                let _ = tx.send(RasterizedGlyph {
+                    key,
+                    bitmap,
+                    elapsed_ms,
+                    worker,
+                    start_active_jobs: active_now,
+                });
+                active_jobs.fetch_sub(1, Ordering::Relaxed);
             })
             .detach();
 
-        None
+        GlyphLookup::Queued
     }
 
     /// Kicks off async rasterization for every glyph in `text`.
@@ -378,12 +488,28 @@ impl MsdfAtlas {
     /// Returns `true` if any new glyphs were inserted (callers should
     /// trigger text mesh rebuilds).
     pub fn poll_async_glyphs(&mut self) -> bool {
+        let stats = self.poll_async_glyphs_stats();
+        stats.inserted > 0 || stats.invisible > 0
+    }
+
+    /// Drains completed async rasterizations and returns detailed diagnostics.
+    pub fn poll_async_glyphs_stats(&mut self) -> AsyncGlyphPollStats {
         let completed: Vec<_> = {
             let rx = self.rx.lock().unwrap_or_else(PoisonError::into_inner);
             rx.try_iter().collect()
         };
-        let mut any_inserted = false;
+        let pages_before = self.pages.len();
+        let mut stats = AsyncGlyphPollStats {
+            completed: completed.len(),
+            ..Default::default()
+        };
+        let mut total_raster_ms = 0.0_f32;
+        let mut workers = HashSet::new();
         for result in completed {
+            total_raster_ms += result.elapsed_ms;
+            stats.max_raster_ms = stats.max_raster_ms.max(result.elapsed_ms);
+            stats.max_active_jobs = stats.max_active_jobs.max(result.start_active_jobs);
+            workers.insert(result.worker);
             self.in_flight.remove(&result.key);
             if self.glyphs.contains_key(&result.key) {
                 continue;
@@ -393,14 +519,19 @@ impl MsdfAtlas {
                 // Insert zero-sized metrics so future lookups hit the
                 // cache instead of re-queuing async rasterization.
                 self.glyphs.insert(result.key, GlyphMetrics::INVISIBLE);
-                any_inserted = true;
+                stats.invisible += 1;
                 continue;
             };
             if self.insert_bitmap(result.key, &bitmap).is_some() {
-                any_inserted = true;
+                stats.inserted += 1;
             }
         }
-        any_inserted
+        stats.pages_added = self.pages.len().saturating_sub(pages_before);
+        if stats.completed > 0 {
+            stats.avg_raster_ms = total_raster_ms / stats.completed as f32;
+        }
+        stats.worker_threads = workers.len();
+        stats
     }
 
     /// Synchronously rasterizes and inserts a glyph. Used in tests and

@@ -48,6 +48,8 @@ pub use layout::BoundingBox;
 pub use layout::Direction;
 // Layout tree.
 pub use layout::El;
+pub use layout::FontFeatureFlags;
+pub use layout::FontFeatures;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;
@@ -86,6 +88,7 @@ pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
 pub use plugin::DiegeticUiPluginConfigured;
+pub use plugin::GlyphWorkerThreads;
 pub use plugin::HueOffset;
 pub use plugin::LayoutPlugin;
 pub use plugin::RasterQuality;

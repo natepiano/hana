@@ -13,6 +13,120 @@ use std::marker::PhantomData;
 use bevy::color::Color;
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
+use bitflags::bitflags;
+
+// ── OpenType feature control ────────────────────────────────────────────────
+
+bitflags! {
+    /// Named flags for common OpenType features.
+    ///
+    /// Used inside [`FontFeatures`] to specify which features are
+    /// explicitly enabled or disabled during text shaping.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct FontFeatureFlags: u16 {
+        /// Standard ligatures (`liga`): fi, fl, ffi, ffl.
+        const LIGA = 1 << 0;
+        /// Contextual alternates (`calt`): ->, =>, ::, !=.
+        const CALT = 1 << 1;
+        /// Discretionary ligatures (`dlig`): decorative alternates.
+        const DLIG = 1 << 2;
+        /// Kerning (`kern`): inter-character spacing adjustments.
+        const KERN = 1 << 3;
+    }
+}
+
+/// OpenType feature overrides for text shaping.
+///
+/// Controls which OpenType features are explicitly enabled or disabled
+/// during text shaping. Features not overridden use the shaper's defaults
+/// (HarfBuzz enables `liga`, `calt`, `kern` by default; `dlig` is off).
+///
+/// ```ignore
+/// // Disable contextual alternates (coding ligatures):
+/// let features = FontFeatures::new()
+///     .without(FontFeatureFlags::CALT);
+///
+/// // Enable discretionary ligatures:
+/// let features = FontFeatures::new()
+///     .with(FontFeatureFlags::DLIG);
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+pub struct FontFeatures {
+    /// Features explicitly forced on.
+    #[reflect(ignore)]
+    enabled:  FontFeatureFlags,
+    /// Features explicitly forced off.
+    #[reflect(ignore)]
+    disabled: FontFeatureFlags,
+}
+
+/// OpenType tag for standard ligatures.
+const LIGA_TAG: [u8; 4] = *b"liga";
+/// OpenType tag for contextual alternates.
+const CALT_TAG: [u8; 4] = *b"calt";
+/// OpenType tag for discretionary ligatures.
+const DLIG_TAG: [u8; 4] = *b"dlig";
+/// OpenType tag for kerning.
+const KERN_TAG: [u8; 4] = *b"kern";
+
+impl FontFeatures {
+    /// No overrides — all features use shaper defaults.
+    pub const NONE: Self = Self {
+        enabled:  FontFeatureFlags::empty(),
+        disabled: FontFeatureFlags::empty(),
+    };
+
+    /// Creates a new `FontFeatures` with no overrides.
+    #[must_use]
+    pub const fn new() -> Self { Self::NONE }
+
+    /// Returns `true` if no features are overridden.
+    #[must_use]
+    pub const fn is_default(&self) -> bool { self.enabled.is_empty() && self.disabled.is_empty() }
+
+    /// Explicitly enables the given feature(s).
+    #[must_use]
+    pub const fn with(mut self, flags: FontFeatureFlags) -> Self {
+        self.enabled = self.enabled.union(flags);
+        self.disabled = self.disabled.difference(flags);
+        self
+    }
+
+    /// Explicitly disables the given feature(s).
+    #[must_use]
+    pub const fn without(mut self, flags: FontFeatureFlags) -> Self {
+        self.disabled = self.disabled.union(flags);
+        self.enabled = self.enabled.difference(flags);
+        self
+    }
+
+    /// Converts to parley font feature settings.
+    ///
+    /// Returns a `Vec` of `(tag_bytes, value)` pairs. Only features
+    /// with explicit overrides are included — the shaper's defaults
+    /// handle everything else.
+    #[must_use]
+    pub fn to_parley_settings(&self) -> Vec<([u8; 4], u16)> {
+        let mut settings = Vec::new();
+
+        let all_flags = [
+            (FontFeatureFlags::LIGA, LIGA_TAG),
+            (FontFeatureFlags::CALT, CALT_TAG),
+            (FontFeatureFlags::DLIG, DLIG_TAG),
+            (FontFeatureFlags::KERN, KERN_TAG),
+        ];
+
+        for (flag, tag) in all_flags {
+            if self.enabled.contains(flag) {
+                settings.push((tag, 1));
+            } else if self.disabled.contains(flag) {
+                settings.push((tag, 0));
+            }
+        }
+
+        settings
+    }
+}
 
 /// Sizing behavior for a layout element along one axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -493,6 +607,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
     loading_policy: GlyphLoadingPolicy,
+    font_features:  FontFeatures,
     #[reflect(ignore)]
     _context:       PhantomData<C>,
 }
@@ -513,6 +628,7 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.render_mode == other.render_mode
             && self.shadow_mode == other.shadow_mode
             && self.loading_policy == other.loading_policy
+            && self.font_features == other.font_features
     }
 }
 
@@ -667,6 +783,31 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns the font feature overrides.
+    #[must_use]
+    pub const fn font_features(&self) -> FontFeatures { self.font_features }
+
+    /// Sets font feature overrides.
+    #[must_use]
+    pub const fn with_font_features(mut self, features: FontFeatures) -> Self {
+        self.font_features = features;
+        self
+    }
+
+    /// Disables contextual alternates (`calt`).
+    #[must_use]
+    pub const fn without_contextual_alternates(mut self) -> Self {
+        self.font_features = self.font_features.without(FontFeatureFlags::CALT);
+        self
+    }
+
+    /// Disables standard ligatures (`liga`).
+    #[must_use]
+    pub const fn without_ligatures(mut self) -> Self {
+        self.font_features = self.font_features.without(FontFeatureFlags::LIGA);
+        self
+    }
+
     /// Hashes all layout-affecting fields into `hasher`, excluding color.
     ///
     /// Uses exhaustive destructuring so that adding a new field to
@@ -686,6 +827,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             wrap,
             align,
             anchor,
+            font_features,
             // Render-only — explicitly skipped.
             color: _,
             render_mode: _,
@@ -704,6 +846,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         (*wrap as u8).hash(hasher);
         (*align as u8).hash(hasher);
         (*anchor as u8).hash(hasher);
+        font_features.hash(hasher);
     }
 
     /// Extracts measurement-relevant fields as a [`TextMeasure`].
@@ -720,6 +863,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             line_height:    self.line_height,
             letter_spacing: self.letter_spacing,
             word_spacing:   self.word_spacing,
+            font_features:  self.font_features,
         }
     }
 }
@@ -747,6 +891,7 @@ impl TextProps<ForLayout> {
             render_mode: GlyphRenderMode::Text,
             shadow_mode: GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
+            font_features: FontFeatures::NONE,
             _context: PhantomData,
         }
     }
@@ -795,6 +940,7 @@ impl TextProps<ForStandalone> {
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
+            font_features:  FontFeatures::NONE,
             _context:       PhantomData,
         }
     }
@@ -845,6 +991,7 @@ impl TextProps<ForStandalone> {
             .with_render_mode(self.render_mode)
             .with_shadow_mode(self.shadow_mode)
             .with_loading_policy(self.loading_policy)
+            .with_font_features(self.font_features)
             .no_wrap()
     }
 }
@@ -872,6 +1019,8 @@ pub struct TextMeasure {
     pub letter_spacing: f32,
     /// Word spacing in layout units.
     pub word_spacing:   f32,
+    /// OpenType feature overrides.
+    pub font_features:  FontFeatures,
 }
 
 impl TextMeasure {

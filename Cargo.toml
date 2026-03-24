@@ -40,6 +40,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_pbr",
   "bevy_render",
 ] }
+bitflags = "2"
 etagere = "0.3.0"
 fdsm = "0.8"
 fdsm-ttf-parser = "0.2"
@@ -96,3 +97,9 @@ name = "font_loading"
 
 [[example]]
 name = "preload_text"
+
+[[example]]
+name = "font_features"
+
+[[example]]
+name = "minimal_eb"
