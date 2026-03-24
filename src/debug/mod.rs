@@ -2,6 +2,7 @@
 //!
 //! This module is only compiled when the `typography_overlay` feature is enabled.
 
+mod constants;
 mod typography_overlay;
 
 pub use typography_overlay::TypographyOverlay;

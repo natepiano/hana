@@ -127,6 +127,7 @@ pub fn rasterize_glyph(
     }
 
     // Convert f32 [0.0, 1.0] to u8 [0, 255].
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let image = RgbImage::from_fn(img_w, img_h, |x, y| {
         let p = image_f32.get_pixel(x, y);
         image::Rgb([
@@ -141,34 +142,6 @@ pub fn rasterize_glyph(
     // glyph outline is centered in the bitmap and positioned correctly.
     let bearing_x = f64::from(bbox.x_min) / units_per_em - actual_pad_x / f64::from(px_size);
     let bearing_y = f64::from(bbox.y_max) / units_per_em + actual_pad_y / f64::from(px_size);
-
-    // Debug: dump median values at the outline boundary rows.
-    // The outline top should be at pixel row actual_pad_y (from top).
-    // The outline bottom should be at pixel row (img_h - actual_pad_y).
-    // At those rows, median should transition from <0.5 (outside) to >0.5 (inside).
-    {
-        let raw = image.as_raw();
-        let outline_top_row = actual_pad_y.round() as u32;
-        let outline_bot_row = img_h - actual_pad_y.round() as u32 - 1;
-        // Sample vertical strips at multiple columns
-        for sample_col in [6_u32, img_w / 4, img_w / 2, img_w * 3 / 4, img_w - 7] {
-            let mut col_medians = Vec::with_capacity(img_h as usize);
-            for row in 0..img_h {
-                let idx = ((row * img_w + sample_col) * 3) as usize;
-                let r = raw[idx];
-                let g = raw[idx + 1];
-                let b = raw[idx + 2];
-                let med = r.max(g).min(b).max(r.min(g));
-                col_medians.push(med);
-            }
-
-            bevy::log::info!(
-                "MSDF_DUMP gid={glyph_index} img={}x{} pad_y={actual_pad_y:.1} top_row={outline_top_row} bot_row={outline_bot_row} col={sample_col} medians={col_medians:?}",
-                img_w,
-                img_h,
-            );
-        }
-    }
 
     Some(MsdfBitmap {
         data: image.into_raw(),
