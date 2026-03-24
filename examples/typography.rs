@@ -23,6 +23,7 @@ use bevy_diegetic::El;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontId;
 use bevy_diegetic::FontRegistered;
+use bevy_diegetic::FontRegistry;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
@@ -30,7 +31,6 @@ use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::ZOOM_TO_FIT_MARGIN;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -41,6 +41,7 @@ use bevy_panorbit_camera_ext::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const DISPLAY_SIZE: f32 = 48.0;
+const ZOOM_TO_FIT_MARGIN: f32 = 0.05;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 const HOME_FOCUS: Vec3 = Vec3::new(-0.001, 0.461, 2.002);
@@ -57,6 +58,17 @@ const CONTROLS_TITLE_SIZE: f32 = 10.5;
 const CONTROLS_ARROW_SIZE: f32 = CONTROLS_FONT_SIZE * 0.5;
 const CONTROLS_ROW_HEIGHT: f32 = CONTROLS_FONT_SIZE * 1.4;
 const CONTROLS_TITLE_COLOR: Color = Color::srgb(0.42, 0.5, 0.72);
+
+/// Font key bindings: (digit key label, font family name, KeyCode).
+/// JetBrains Mono is always available; the rest are loaded at runtime.
+const FONT_KEYS: &[(&str, &str, KeyCode)] = &[
+    ("1", "JetBrains Mono", KeyCode::Digit1),
+    ("2", "Noto Sans", KeyCode::Digit2),
+    ("3", "EB Garamond", KeyCode::Digit3),
+    ("4", "Crimson Text", KeyCode::Digit4),
+    ("5", "Liberation Sans", KeyCode::Digit5),
+    ("6", "Liberation Serif", KeyCode::Digit6),
+];
 
 const DISPLAY_WORDS: &[&str] = &[
     "Typography", // accented cap above ascent
@@ -142,10 +154,23 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut font_handles: ResMut<FontHandles>,
+    registry: Res<FontRegistry>,
 ) {
     font_handles
         .0
         .push(asset_server.load("fonts/NotoSans-Regular.ttf"));
+    font_handles
+        .0
+        .push(asset_server.load("fonts/EBGaramond-Regular.ttf"));
+    font_handles
+        .0
+        .push(asset_server.load("fonts/CrimsonText-Regular.ttf"));
+    font_handles
+        .0
+        .push(asset_server.load("fonts/LiberationSans-Regular.ttf"));
+    font_handles
+        .0
+        .push(asset_server.load("fonts/LiberationSerif-Regular.ttf"));
     // Ground plane — subtle, light gray.
     let ground = commands
         .spawn((
@@ -165,7 +190,7 @@ fn setup(
     // Display word with typography overlay.
     commands.spawn((
         DisplayText,
-        WorldText::new("TypogrÂphy"),
+        WorldText::new(DISPLAY_WORDS[0]),
         TextStyle::new()
             .with_size(DISPLAY_SIZE)
             .with_color(Color::srgb(0.9, 0.9, 0.9)),
@@ -211,7 +236,7 @@ fn setup(
         .spawn((
             FontsPanel,
             DiegeticPanel {
-                tree:          build_fonts_panel(),
+                tree:          build_fonts_panel(&registry),
                 layout_width:  CONTROLS_LAYOUT_W,
                 layout_height: CONTROLS_LAYOUT_H,
                 world_width:   CONTROLS_WORLD_W,
@@ -359,12 +384,31 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
     builder.build()
 }
 
-fn build_fonts_panel() -> bevy_diegetic::LayoutTree {
+fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
     let row_h = Sizing::fixed(CONTROLS_ROW_HEIGHT);
     let cfg = TextConfig::new(CONTROLS_FONT_SIZE);
     let arrow_cfg = TextConfig::new(CONTROLS_ARROW_SIZE);
+
+    let key_cells: Vec<ColumnCell> = FONT_KEYS
+        .iter()
+        .map(|(label, _, _)| ColumnCell::Text(label, cfg.clone()))
+        .collect();
+    let arrow_cells: Vec<ColumnCell> = FONT_KEYS
+        .iter()
+        .map(|_| ColumnCell::Text("  ->  ", arrow_cfg.clone()))
+        .collect();
+    let name_cells: Vec<ColumnCell> = FONT_KEYS
+        .iter()
+        .map(|(_, name, _)| {
+            let font_id = registry
+                .font_id_by_name(name)
+                .unwrap_or(FontId::MONOSPACE)
+                .0;
+            ColumnCell::Text(name, cfg.clone().with_font(font_id))
+        })
+        .collect();
 
     let mut builder = LayoutBuilder::new(CONTROLS_LAYOUT_W, CONTROLS_LAYOUT_H);
     builder.with(
@@ -388,7 +432,6 @@ fn build_fonts_panel() -> bevy_diegetic::LayoutTree {
                     .background(divider_color),
                 |_| {},
             );
-            // Three columns with fixed row heights.
             b.with(
                 El::new()
                     .width(Sizing::FIT)
@@ -396,36 +439,9 @@ fn build_fonts_panel() -> bevy_diegetic::LayoutTree {
                     .direction(Direction::LeftToRight)
                     .child_gap(2.0),
                 |b| {
-                    column(
-                        b,
-                        AlignX::Center,
-                        row_h,
-                        &[
-                            ColumnCell::Text("1", cfg.clone()),
-                            ColumnCell::Text("2", cfg.clone()),
-                        ],
-                    );
-                    column(
-                        b,
-                        AlignX::Center,
-                        row_h,
-                        &[
-                            ColumnCell::Text("  ->  ", arrow_cfg.clone()),
-                            ColumnCell::Text("  ->  ", arrow_cfg.clone()),
-                        ],
-                    );
-                    column(
-                        b,
-                        AlignX::Left,
-                        row_h,
-                        &[
-                            ColumnCell::Text(
-                                "JetBrains Mono",
-                                cfg.clone().with_font(FontId::MONOSPACE.0),
-                            ),
-                            ColumnCell::Text("Noto Sans", cfg.clone().with_font(1)),
-                        ],
-                    );
+                    column(b, AlignX::Center, row_h, &key_cells);
+                    column(b, AlignX::Center, row_h, &arrow_cells);
+                    column(b, AlignX::Left, row_h, &name_cells);
                 },
             );
         },
@@ -466,6 +482,7 @@ fn column(b: &mut LayoutBuilder, align: AlignX, row_height: Sizing, cells: &[Col
 fn on_font_registered(
     trigger: On<FontRegistered>,
     mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
+    registry: Res<FontRegistry>,
 ) {
     info!(
         "FontRegistered: {} (id: {}, {:?})",
@@ -473,7 +490,7 @@ fn on_font_registered(
     );
     for mut panel in &mut panels {
         info!("Rebuilding fonts panel");
-        panel.tree = build_fonts_panel();
+        panel.tree = build_fonts_panel(&registry);
     }
 }
 
@@ -555,21 +572,23 @@ fn cycle_word(
 
 fn switch_font(
     keyboard: Res<ButtonInput<KeyCode>>,
+    registry: Res<FontRegistry>,
     mut texts: Query<&mut TextStyle, With<DisplayText>>,
 ) {
-    let font_id = if keyboard.just_pressed(KeyCode::Digit1) {
-        Some(FontId::MONOSPACE.0)
-    } else if keyboard.just_pressed(KeyCode::Digit2) {
-        Some(1)
-    } else {
-        None
+    let pressed = FONT_KEYS
+        .iter()
+        .find(|(_, _, key)| keyboard.just_pressed(*key));
+    let Some((_, name, _)) = pressed else {
+        return;
     };
-    if let Some(id) = font_id {
-        for mut style in &mut texts {
-            *style = TextStyle::new()
-                .with_font(id)
-                .with_size(DISPLAY_SIZE)
-                .with_color(Color::srgb(0.9, 0.9, 0.9));
-        }
+    let font_id = registry
+        .font_id_by_name(name)
+        .unwrap_or(FontId::MONOSPACE)
+        .0;
+    for mut style in &mut texts {
+        *style = TextStyle::new()
+            .with_font(font_id)
+            .with_size(DISPLAY_SIZE)
+            .with_color(Color::srgb(0.9, 0.9, 0.9));
     }
 }

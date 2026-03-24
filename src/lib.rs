@@ -39,8 +39,6 @@ mod text;
 // Debug overlay.
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
-#[cfg(feature = "typography_overlay")]
-pub use debug::ZOOM_TO_FIT_MARGIN;
 pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Border;

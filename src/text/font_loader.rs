@@ -37,13 +37,14 @@ impl AssetLoader for FontLoader {
             .and_then(|face| {
                 face.names()
                     .into_iter()
-                    .find(|n| n.name_id == ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
+                    .filter(|n| n.name_id == ttf_parser::name_id::TYPOGRAPHIC_FAMILY)
+                    .find_map(|n| n.to_string())
                     .or_else(|| {
                         face.names()
                             .into_iter()
-                            .find(|n| n.name_id == ttf_parser::name_id::FAMILY)
+                            .filter(|n| n.name_id == ttf_parser::name_id::FAMILY)
+                            .find_map(|n| n.to_string())
                     })
-                    .and_then(|n| n.to_string())
             })
             .unwrap_or(path_str);
 

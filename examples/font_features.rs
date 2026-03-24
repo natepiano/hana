@@ -526,7 +526,7 @@ fn build_feature_column(
                                     .height(Sizing::FIT)
                                     .child_alignment(AlignX::Center, AlignY::Top),
                                 |b| {
-                                    b.text("On", label_config.clone());
+                                    b.text("Off", label_config.clone());
                                 },
                             );
                             b.with(
@@ -535,7 +535,7 @@ fn build_feature_column(
                                     .height(Sizing::FIT)
                                     .child_alignment(AlignX::Center, AlignY::Top),
                                 |b| {
-                                    b.text("Off", label_config.clone());
+                                    b.text("On", label_config.clone());
                                 },
                             );
                         },
@@ -556,7 +556,7 @@ fn build_feature_column(
                                         .height(Sizing::GROW)
                                         .child_alignment(AlignX::Center, AlignY::Center),
                                     |b| {
-                                        b.text(sample, on_config.clone());
+                                        b.text(sample, off_config.clone());
                                     },
                                 );
                                 b.with(
@@ -565,7 +565,7 @@ fn build_feature_column(
                                         .height(Sizing::GROW)
                                         .child_alignment(AlignX::Center, AlignY::Center),
                                     |b| {
-                                        b.text(sample, off_config.clone());
+                                        b.text(sample, on_config.clone());
                                     },
                                 );
                             },
