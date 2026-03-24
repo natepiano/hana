@@ -3,7 +3,7 @@
 //!
 //! Demonstrates `FontFeatures` by showing text with each OpenType feature
 //! enabled (shaper default) vs explicitly disabled. Loads Noto Sans for
-//! `liga` samples and uses the built-in JetBrains Mono for `calt`/`kern`.
+//! `liga` samples and uses the built-in `JetBrains` Mono for `calt`/`kern`.
 //! Rendered as a [`DiegeticPanel`] hovering above a visible ground plane.
 
 use bevy::prelude::*;
@@ -153,10 +153,10 @@ fn setup(
     ));
 
     commands.spawn((PanOrbitCamera {
-        focus: Vec3::new(0.06764774, 1.9130665, 2.4002967),
-        radius: Some(4.3855944),
-        yaw: Some(-0.004848164),
-        pitch: Some(0.0261289),
+        focus: Vec3::new(0.067_647_74, 1.913_066_5, 2.400_296_7),
+        radius: Some(4.385_594_4),
+        yaw: Some(-0.004_848_164),
+        pitch: Some(0.026_128_9),
         button_orbit: MouseButton::Middle,
         button_pan: MouseButton::Middle,
         modifier_pan: Some(KeyCode::ShiftLeft),
@@ -174,7 +174,7 @@ fn layout_dimensions(window: &Window) -> (f32, f32) {
     let top_inset = window.height() * TOP_INSET_FRACTION;
     let bottom_inset = window.height() * BOTTOM_INSET_FRACTION;
     (
-        window.width() - side_inset * 2.0,
+        side_inset.mul_add(-2.0, window.width()),
         window.height() - top_inset - bottom_inset,
     )
 }
@@ -187,24 +187,25 @@ fn world_dimensions(window: &Window) -> (f32, f32) {
 
 fn ground_dimensions(world_w: f32) -> (f32, f32) {
     (
-        world_w + GROUND_SIDE_MARGIN * 2.0,
+        GROUND_SIDE_MARGIN.mul_add(2.0, world_w),
         GROUND_FRONT_MARGIN + GROUND_BACK_MARGIN + 2.0,
     )
 }
 
 fn ground_center_z() -> f32 {
-    PANEL_FORWARD_OFFSET + (GROUND_FRONT_MARGIN - GROUND_BACK_MARGIN) * 0.5
+    (GROUND_FRONT_MARGIN - GROUND_BACK_MARGIN).mul_add(0.5, PANEL_FORWARD_OFFSET)
 }
 
 fn panel_z() -> f32 {
     let (_, ground_d) = ground_dimensions(0.0);
-    ground_center_z() + ground_d * (0.5 - PANEL_FRONT_DEPTH_FRACTION)
+    ground_d.mul_add(0.5 - PANEL_FRONT_DEPTH_FRACTION, ground_center_z())
 }
 
 fn panel_transform(world_h: f32) -> Transform {
-    Transform::from_xyz(0.0, world_h * 0.5 + PANEL_GROUND_CLEARANCE, panel_z())
+    Transform::from_xyz(0.0, world_h.mul_add(0.5, PANEL_GROUND_CLEARANCE), panel_z())
 }
 
+#[allow(clippy::type_complexity)]
 fn resize_panel(
     windows: Query<&Window, Changed<Window>>,
     mut panels: Query<
@@ -224,6 +225,7 @@ fn resize_panel(
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
+        #[allow(clippy::float_cmp)]
         if panel.layout_width == layout_w
             && panel.layout_height == layout_h
             && panel.world_width == world_w
@@ -317,104 +319,123 @@ fn build_panel(
             // 2x2 grid:
             // LIGA | CALT
             // DLIG | KERN
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(12.0),
-                |b| {
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(12.0),
-                        |b| {
-                            // LIGA — uses EB Garamond (has fi/fl/ffi/ffl ligatures).
-                            build_feature_column(
-                                b,
-                                "LIGA — Standard Ligatures",
-                                serif_name,
-                                serif_font,
-                                FontFeatureFlags::LIGA,
-                                true,
-                                &["fi", "fl", "ffi", "ffl"],
-                                section_color,
-                                label_color,
-                                on_color,
-                                off_color,
-                                column_border_color,
-                                progressive,
-                            );
-
-                            // CALT — uses JetBrains Mono.
-                            build_feature_column(
-                                b,
-                                "CALT — Contextual Alternates",
-                                "JetBrains Mono",
-                                0,
-                                FontFeatureFlags::CALT,
-                                true,
-                                &["::", "->", "=>", "!="],
-                                section_color,
-                                label_color,
-                                on_color,
-                                off_color,
-                                column_border_color,
-                                progressive,
-                            );
-                        },
-                    );
-
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(12.0),
-                        |b| {
-                            // DLIG — uses EB Garamond (has ct/st discretionary ligatures).
-                            build_feature_column(
-                                b,
-                                "DLIG — Discretionary",
-                                serif_name,
-                                serif_font,
-                                FontFeatureFlags::DLIG,
-                                false,
-                                &["Th", "st", "ct"],
-                                section_color,
-                                label_color,
-                                on_color,
-                                off_color,
-                                column_border_color,
-                                progressive,
-                            );
-
-                            // KERN — uses EB Garamond (proportional, has kerning pairs).
-                            build_feature_column(
-                                b,
-                                "KERN — Kerning",
-                                serif_name,
-                                serif_font,
-                                FontFeatureFlags::KERN,
-                                true,
-                                &["AVAV", "Type", "Wolf"],
-                                section_color,
-                                label_color,
-                                on_color,
-                                off_color,
-                                column_border_color,
-                                progressive,
-                            );
-                        },
-                    );
-                },
+            build_feature_grid(
+                b,
+                serif_name,
+                serif_font,
+                section_color,
+                label_color,
+                on_color,
+                off_color,
+                column_border_color,
+                progressive,
             );
         },
     );
 
     builder.build()
+}
+
+/// Builds the 2x2 feature grid (LIGA|CALT over DLIG|KERN).
+#[allow(clippy::too_many_arguments)]
+fn build_feature_grid(
+    b: &mut LayoutBuilder,
+    serif_name: &str,
+    serif_font: u16,
+    section_color: Color,
+    label_color: Color,
+    on_color: Color,
+    off_color: Color,
+    column_border_color: Color,
+    loading_policy: GlyphLoadingPolicy,
+) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom)
+            .child_gap(12.0),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(12.0),
+                |b| {
+                    build_feature_column(
+                        b,
+                        "LIGA — Standard Ligatures",
+                        serif_name,
+                        serif_font,
+                        FontFeatureFlags::LIGA,
+                        true,
+                        &["fi", "fl", "ffi", "ffl"],
+                        section_color,
+                        label_color,
+                        on_color,
+                        off_color,
+                        column_border_color,
+                        loading_policy,
+                    );
+                    build_feature_column(
+                        b,
+                        "CALT — Contextual Alternates",
+                        "JetBrains Mono",
+                        0,
+                        FontFeatureFlags::CALT,
+                        true,
+                        &["::", "->", "=>", "!="],
+                        section_color,
+                        label_color,
+                        on_color,
+                        off_color,
+                        column_border_color,
+                        loading_policy,
+                    );
+                },
+            );
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(12.0),
+                |b| {
+                    build_feature_column(
+                        b,
+                        "DLIG — Discretionary",
+                        serif_name,
+                        serif_font,
+                        FontFeatureFlags::DLIG,
+                        false,
+                        &["Th", "st", "ct"],
+                        section_color,
+                        label_color,
+                        on_color,
+                        off_color,
+                        column_border_color,
+                        loading_policy,
+                    );
+                    build_feature_column(
+                        b,
+                        "KERN — Kerning",
+                        serif_name,
+                        serif_font,
+                        FontFeatureFlags::KERN,
+                        true,
+                        &["AVAV", "Type", "Wolf"],
+                        section_color,
+                        label_color,
+                        on_color,
+                        off_color,
+                        column_border_color,
+                        loading_policy,
+                    );
+                },
+            );
+        },
+    );
 }
 
 /// Builds a single feature column: header, font name, then pairs of
@@ -504,75 +525,86 @@ fn build_feature_column(
                 },
             );
 
+            build_sample_rows(b, samples, &label_config, &on_config, &off_config);
+        },
+    );
+}
+
+/// Builds the Off/On header row and per-sample comparison rows.
+fn build_sample_rows(
+    b: &mut LayoutBuilder,
+    samples: &[&str],
+    label_config: &TextConfig,
+    on_config: &TextConfig,
+    off_config: &TextConfig,
+) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom)
+            .child_gap(0.0),
+        |b| {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(0.0),
+                    .height(Sizing::percent(0.11))
+                    .padding(Padding::new(6.0, 4.0, 0.0, 4.0))
+                    .direction(Direction::LeftToRight)
+                    .child_gap(12.0)
+                    .child_align_y(AlignY::Bottom),
                 |b| {
                     b.with(
                         El::new()
                             .width(Sizing::GROW)
-                            .height(Sizing::percent(0.11))
-                            .padding(Padding::new(6.0, 4.0, 0.0, 4.0))
-                            .direction(Direction::LeftToRight)
-                            .child_gap(12.0)
-                            .child_align_y(AlignY::Bottom),
+                            .height(Sizing::FIT)
+                            .child_alignment(AlignX::Center, AlignY::Top),
                         |b| {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .height(Sizing::FIT)
-                                    .child_alignment(AlignX::Center, AlignY::Top),
-                                |b| {
-                                    b.text("Off", label_config.clone());
-                                },
-                            );
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .height(Sizing::FIT)
-                                    .child_alignment(AlignX::Center, AlignY::Top),
-                                |b| {
-                                    b.text("On", label_config.clone());
-                                },
-                            );
+                            b.text("Off", label_config.clone());
                         },
                     );
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .child_alignment(AlignX::Center, AlignY::Top),
+                        |b| {
+                            b.text("On", label_config.clone());
+                        },
+                    );
+                },
+            );
 
-                    for &sample in samples {
+            for &sample in samples {
+                b.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .padding(Padding::new(0.0, 4.0, 0.0, 4.0))
+                        .direction(Direction::LeftToRight)
+                        .child_gap(10.0),
+                    |b| {
                         b.with(
                             El::new()
                                 .width(Sizing::GROW)
                                 .height(Sizing::GROW)
-                                .padding(Padding::new(0.0, 4.0, 0.0, 4.0))
-                                .direction(Direction::LeftToRight)
-                                .child_gap(10.0),
+                                .child_alignment(AlignX::Center, AlignY::Center),
                             |b| {
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::GROW)
-                                        .child_alignment(AlignX::Center, AlignY::Center),
-                                    |b| {
-                                        b.text(sample, off_config.clone());
-                                    },
-                                );
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::GROW)
-                                        .child_alignment(AlignX::Center, AlignY::Center),
-                                    |b| {
-                                        b.text(sample, on_config.clone());
-                                    },
-                                );
+                                b.text(sample, off_config.clone());
                             },
                         );
-                    }
-                },
-            );
+                        b.with(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::GROW)
+                                .child_alignment(AlignX::Center, AlignY::Center),
+                            |b| {
+                                b.text(sample, on_config.clone());
+                            },
+                        );
+                    },
+                );
+            }
         },
     );
 }

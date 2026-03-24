@@ -473,7 +473,28 @@ fn extract_text_meshes(
     }
 
     let extract_ms = start.elapsed().as_secs_f32() * 1000.0;
-    if extract_ms > 5.0 || ready.0 || text_stats.queued_glyphs > 0 || text_stats.pending_glyphs > 0
+    record_extract_perf(
+        &mut perf,
+        extract_ms,
+        panel_count,
+        spawn_ms_total,
+        &text_stats,
+        rebuild_all,
+    );
+}
+
+fn record_extract_perf(
+    perf: &mut DiegeticPerfStats,
+    extract_ms: f32,
+    panel_count: usize,
+    spawn_ms_total: f32,
+    text_stats: &TextBuildStats,
+    rebuild_all: bool,
+) {
+    if extract_ms > 5.0
+        || rebuild_all
+        || text_stats.queued_glyphs > 0
+        || text_stats.pending_glyphs > 0
     {
         bevy::log::info!(
             "extract_text_meshes: total={extract_ms:.1}ms panels={} texts={} shape={:.1}ms atlas={:.1}ms spawn={spawn_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={} rebuild_all={}",
@@ -717,7 +738,7 @@ pub(super) fn shape_text_cached(
         line_height: layout
             .lines()
             .next()
-            .map_or(config.size(), |l| l.metrics().line_height),
+            .map_or_else(|| config.size(), |l| l.metrics().line_height),
     };
     drop(layout);
     let run = ShapedTextRun {

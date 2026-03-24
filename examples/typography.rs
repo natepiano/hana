@@ -59,8 +59,8 @@ const CONTROLS_ARROW_SIZE: f32 = CONTROLS_FONT_SIZE * 0.5;
 const CONTROLS_ROW_HEIGHT: f32 = CONTROLS_FONT_SIZE * 1.4;
 const CONTROLS_TITLE_COLOR: Color = Color::srgb(0.42, 0.5, 0.72);
 
-/// Font key bindings: (digit key label, font family name, KeyCode).
-/// JetBrains Mono is always available; the rest are loaded at runtime.
+/// Font key bindings: (digit key label, font family name, `KeyCode`).
+/// `JetBrains` Mono is always available; the rest are loaded at runtime.
 const FONT_KEYS: &[(&str, &str, KeyCode)] = &[
     ("1", "JetBrains Mono", KeyCode::Digit1),
     ("2", "Noto Sans", KeyCode::Digit2),

@@ -78,6 +78,7 @@ Replace every `map_or(EMBEDDED_FONT, ...)` and `unwrap_or("JetBrains Mono")` wit
 | `src/render/text_renderer.rs` | `shape_text_cached` ~644 | `family_name(...).unwrap_or("JetBrains Mono")` | `resolved.name()` from `resolve_or_embedded()` |
 | `src/render/text_renderer.rs` | `shape_text_to_quads` ~754 | `font(...).map_or(EMBEDDED_FONT, Font::data)` | `resolved.data()` from `resolve_or_embedded()` |
 | `src/render/world_text.rs` | `shape_world_text` ~318 | `font(...).map_or(EMBEDDED_FONT, Font::data)` | `resolved.data()` from `resolve_or_embedded()` |
+| `src/render/world_text.rs` | line height calc ~377 | `font_registry.font(FontId(style.font_id())).map_or(style.size(), \|f\| f.metrics(...).line_height)` | `resolved.font().metrics(style.size()).line_height` |
 | `src/text/atlas.rs` | `preload` ~469 | silent early return | Change signature to take `&ResolvedFont` |
 
 **Critical change in shaping:** The `ShapedCacheKey` must use the *resolved* font_id (possibly 0 if falling back), not the *requested* font_id. This means `shape_text_cached` receives the `ResolvedFont` and uses `resolved.id()` for the cache key. When the real font loads, the cache key changes → cache miss → re-shapes with the correct font.

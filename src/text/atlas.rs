@@ -109,7 +109,7 @@ struct RasterizedGlyph {
 
 /// Result of a glyph atlas lookup with async queueing semantics.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum GlyphLookup {
+pub enum GlyphLookup {
     /// Glyph metrics are already available in the atlas.
     Ready(GlyphMetrics),
     /// Glyph was already queued and is still being rasterized.
@@ -401,7 +401,7 @@ impl MsdfAtlas {
 
     /// Looks up a glyph and reports whether it was ready, already pending,
     /// or newly queued for async rasterization.
-    pub(crate) fn lookup_or_queue(&mut self, key: GlyphKey, font_data: &[u8]) -> GlyphLookup {
+    pub fn lookup_or_queue(&mut self, key: GlyphKey, font_data: &[u8]) -> GlyphLookup {
         if let Some(metrics) = self.glyphs.get(&key) {
             return GlyphLookup::Ready(*metrics);
         }
@@ -528,7 +528,10 @@ impl MsdfAtlas {
         }
         stats.pages_added = self.pages.len().saturating_sub(pages_before);
         if stats.completed > 0 {
-            stats.avg_raster_ms = total_raster_ms / stats.completed as f32;
+            #[allow(clippy::cast_precision_loss)]
+            {
+                stats.avg_raster_ms = total_raster_ms / stats.completed as f32;
+            }
         }
         stats.worker_threads = workers.len();
         stats

@@ -101,6 +101,7 @@ pub(super) fn install(app: &mut App) {
     app.add_systems(Last, publish_perf_diagnostics);
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagnostics) {
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_MS, || f64::from(perf.last_compute_ms));
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_PANELS, || {

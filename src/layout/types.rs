@@ -39,7 +39,7 @@ bitflags! {
 ///
 /// Controls which OpenType features are explicitly enabled or disabled
 /// during text shaping. Features not overridden use the shaper's defaults
-/// (HarfBuzz enables `liga`, `calt`, `kern` by default; `dlig` is off).
+/// (`HarfBuzz` enables `liga`, `calt`, `kern` by default; `dlig` is off).
 ///
 /// ```ignore
 /// // Disable contextual alternates (coding ligatures):
