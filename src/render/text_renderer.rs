@@ -14,16 +14,22 @@ use bevy::prelude::*;
 use super::glyph_quad::GlyphQuadData;
 use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
+use super::world_text::PanelTextChild;
+use super::world_text::PendingGlyphs;
+use super::world_text::WorldText;
+use super::world_text::WorldTextReady;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextConfig;
 use crate::layout::TextMeasure;
+use crate::layout::TextStyle;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
+use crate::plugin::TextScaleOverride;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -188,18 +194,6 @@ struct DiegeticTextMesh;
 #[derive(Component)]
 struct DiegeticShadowProxy;
 
-/// Set by [`poll_atlas_glyphs`] when new glyphs are inserted into the
-/// atlas. Text systems check this flag and rebuild all meshes when true.
-///
-/// **Optimization opportunity:** when this flag is set, ALL panels and
-/// `WorldText` entities are rebuilt — even those whose glyphs were
-/// already complete. A `HashSet<Entity>` tracking only panels/texts
-/// with missing glyphs (where `get_or_insert` returned `None`) would
-/// limit rebuilds to just the entities that need them. In practice the
-/// flag only fires 1–3 times during startup so the cost is low.
-#[derive(Resource, Default)]
-pub(super) struct GlyphsReady(pub(super) bool);
-
 /// Key for grouping text quads that share the same material configuration.
 /// Quads with different page indices produce separate meshes because each
 /// page has its own atlas texture.
@@ -256,14 +250,17 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterials>();
-        app.init_resource::<GlyphsReady>();
         app.init_resource::<DiegeticPerfStats>();
         app.add_systems(
             PostUpdate,
             (
-                poll_atlas_glyphs.before(extract_text_meshes),
-                extract_text_meshes,
-                sync_panel_hue_offset.after(extract_text_meshes),
+                poll_atlas_glyphs,
+                reconcile_panel_text_children.after(poll_atlas_glyphs),
+                shape_panel_text_children
+                    .after(reconcile_panel_text_children)
+                    .after(poll_atlas_glyphs),
+                build_panel_batched_meshes.after(shape_panel_text_children),
+                sync_panel_hue_offset.after(build_panel_batched_meshes),
                 super::world_text::render_world_text.after(poll_atlas_glyphs),
             ),
         );
@@ -271,17 +268,14 @@ impl Plugin for TextRenderPlugin {
 }
 
 /// Polls completed async glyph rasterizations, inserts them into the
-/// atlas, syncs to GPU, and marks all panels/text as changed so the
-/// existing text systems re-extract meshes.
+/// atlas, and syncs to GPU. Entities with [`PendingGlyphs`] will be
+/// re-checked by `shape_panel_text_children` and `render_world_text`.
 fn poll_atlas_glyphs(
     mut atlas: ResMut<MsdfAtlas>,
     mut images: ResMut<Assets<Image>>,
-    mut ready: ResMut<GlyphsReady>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
-    // Clear last frame's flag before polling new results.
-    ready.0 = false;
     let poll_start = Instant::now();
     let poll_stats = atlas.poll_async_glyphs_stats();
     let poll_ms = poll_start.elapsed().as_secs_f32() * 1000.0;
@@ -292,9 +286,8 @@ fn poll_atlas_glyphs(
         let sync_start = Instant::now();
         atlas.sync_to_gpu(&mut images);
         sync_ms = sync_start.elapsed().as_secs_f32() * 1000.0;
-        ready.0 = true;
         // Invalidate all shared materials so they get recreated with
-        // updated atlas textures on the next extract_text_meshes run.
+        // updated atlas textures on the next `build_panel_batched_meshes` run.
         shared_mats.handles.clear();
     }
 
@@ -315,7 +308,7 @@ fn poll_atlas_glyphs(
     perf.last_atlas_total_glyphs = atlas.glyph_count();
 
     if poll_stats.completed > 0 || sync_ms > 0.0 {
-        bevy::log::info!(
+        bevy::log::debug!(
             "poll_atlas_glyphs: poll={poll_ms:.2}ms sync={sync_ms:.2}ms completed={} inserted={} invisible={} pages_added={} dirty_pages={} in_flight={} active_jobs={} peak_active={} workers={} avg_raster={:.2}ms max_raster={:.2}ms batch_max_active={} total_glyphs={}",
             poll_stats.completed,
             poll_stats.inserted,
@@ -334,131 +327,266 @@ fn poll_atlas_glyphs(
     }
 }
 
-/// Extracts `RenderCommandKind::Text` entries from computed panels and
-/// builds glyph mesh entities with [`MsdfTextMaterial`].
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn extract_text_meshes(
+// ── Panel text quad storage ──────────────────────────────────────────────────
+
+/// Stores shaped glyph quads for a panel [`WorldText`] child, along with its
+/// render and shadow modes for batching into combined meshes.
+#[derive(Component)]
+pub struct PanelTextQuads {
+    /// Per-glyph quads keyed by atlas page index.
+    pub quads:       Vec<(u32, GlyphQuadData)>,
+    /// The glyph render mode for this text element.
+    pub render_mode: GlyphRenderMode,
+    /// The glyph shadow mode for this text element.
+    pub shadow_mode: GlyphShadowMode,
+}
+
+// ── System 1: reconcile_panel_text_children ─────────────────────────────────
+
+/// Reconciles [`WorldText`] children for each changed [`ComputedDiegeticPanel`].
+///
+/// For each panel whose layout changed:
+/// 1. Collects all `RenderCommandKind::Text` commands.
+/// 2. Diffs against existing [`PanelTextChild`] children by `element_idx`.
+/// 3. Updates, spawns, or despawns children as needed.
+#[allow(clippy::too_many_arguments)]
+fn reconcile_panel_text_children(
     changed_panels: Query<
         (
             Entity,
             &DiegeticPanel,
             &ComputedDiegeticPanel,
-            Option<&HueOffset>,
+            Option<&TextScaleOverride>,
         ),
         Changed<ComputedDiegeticPanel>,
     >,
-    all_panels: Query<(
-        Entity,
-        &DiegeticPanel,
-        &ComputedDiegeticPanel,
-        Option<&HueOffset>,
-    )>,
-    old_text: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
-    mut atlas: ResMut<MsdfAtlas>,
-    font_registry: Res<FontRegistry>,
-    shaping_cx: Res<TextShapingContext>,
-    mut cache: ResMut<ShapedTextCache>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<MsdfTextMaterial>>,
-    mut shared_mats: ResMut<SharedMsdfMaterials>,
+    existing_children: Query<(Entity, &PanelTextChild, &ChildOf)>,
     mut commands: Commands,
-    mut perf: ResMut<DiegeticPerfStats>,
-    ready: Res<GlyphsReady>,
 ) {
-    let rebuild_all = ready.0;
-
-    if !rebuild_all && changed_panels.is_empty() {
-        perf.last_text_extract_ms = 0.0;
-        perf.last_text_extract_panels = 0;
-        perf.last_text_shape_ms = 0.0;
-        perf.last_text_atlas_ms = 0.0;
-        perf.last_text_spawn_ms = 0.0;
-        perf.last_text_queued_glyphs = 0;
-        perf.last_text_pending_glyphs = 0;
-        return;
-    }
-
-    let start = Instant::now();
-    let mut panel_count = 0_usize;
-    let mut spawn_ms_total = 0.0_f32;
-    let mut text_stats = TextBuildStats::default();
-
-    // Ensure at least page 0 has a GPU image.
-    if atlas.image_handle(0).is_none() {
-        return;
-    }
-
-    let panels_iter: Vec<_> = if rebuild_all {
-        all_panels.iter().collect()
-    } else {
-        changed_panels.iter().collect()
-    };
-
-    for (panel_entity, panel, computed, hue_offset) in panels_iter {
-        panel_count += 1;
-
+    for (panel_entity, panel, computed, scale_override) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
 
-        let scale_x = panel.world_width / panel.layout_width;
-        let scale_y = panel.world_height / panel.layout_height;
-        let half_w = panel.world_width * 0.5;
-        let half_h = panel.world_height * 0.5;
-        let hue = hue_offset.map_or(0.0, |h| h.0);
+        let override_mult = scale_override.map_or(1.0, |o| o.0);
+        let scale_x = panel.world_width / panel.layout_width * override_mult;
+        let scale_y = panel.world_height / panel.layout_height * override_mult;
+        let half_w = panel.world_width * 0.5 * override_mult;
+        let half_h = panel.world_height * 0.5 * override_mult;
 
-        // Group quads by (render_mode, shadow_mode, page_index) — each
-        // unique combo becomes its own mesh entity with the appropriate
-        // material bound to that atlas page's texture.
-        let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
-        for cmd in &result.commands {
-            let (text, config) = match &cmd.kind {
-                RenderCommandKind::Text { text, config, .. } => (text.as_str(), config.clone()),
-                _ => continue,
-            };
+        // Collect text commands from layout result.
+        let text_commands: Vec<_> = result
+            .commands
+            .iter()
+            .filter_map(|cmd| match &cmd.kind {
+                RenderCommandKind::Text { text, config } => {
+                    Some((cmd.element_idx, text.clone(), config.clone(), cmd.bounds))
+                },
+                _ => None,
+            })
+            .collect();
 
-            let (tagged_quads, build_stats) = shape_text_to_quads(
-                text,
-                &config,
-                &cmd.bounds,
-                &font_registry,
-                &mut atlas,
-                &shaping_cx,
-                &mut cache,
+        // Build a map of existing children by `element_idx`.
+        let mut existing_by_idx: HashMap<usize, Entity> = HashMap::new();
+        for (entity, ptc, child_of) in &existing_children {
+            if child_of.parent() == panel_entity {
+                existing_by_idx.insert(ptc.element_idx, entity);
+            }
+        }
+
+        // Track which existing indices we visited so we can despawn extras.
+        let mut visited_indices: Vec<usize> = Vec::new();
+
+        for (element_idx, text, config, bounds) in &text_commands {
+            let style = config.as_standalone();
+            let ptc = PanelTextChild {
+                element_idx: *element_idx,
+                bounds: *bounds,
                 scale_x,
                 scale_y,
                 half_w,
                 half_h,
-            );
-            text_stats.accumulate(&build_stats);
+            };
 
-            for (page_index, quad) in tagged_quads {
+            visited_indices.push(*element_idx);
+
+            if let Some(&child_entity) = existing_by_idx.get(element_idx) {
+                // Update existing child.
+                commands
+                    .entity(child_entity)
+                    .insert((WorldText(text.clone()), style, ptc));
+            } else {
+                // Spawn new child.
+                commands
+                    .entity(panel_entity)
+                    .with_child((WorldText(text.clone()), style, ptc));
+            }
+        }
+
+        // Despawn children whose `element_idx` is no longer present.
+        for (entity, ptc, child_of) in &existing_children {
+            if child_of.parent() == panel_entity && !visited_indices.contains(&ptc.element_idx) {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+// ── System 2: shape_panel_text_children ─────────────────────────────────────
+
+/// Shapes text for panel [`WorldText`] children that are changed or pending.
+///
+/// For each eligible entity:
+/// 1. Calls [`shape_text_to_quads`] using the [`PanelTextChild`] scale data.
+/// 2. If all glyphs are ready, stores results in [`PanelTextQuads`] and removes [`PendingGlyphs`].
+/// 3. If glyphs are still pending, inserts [`PendingGlyphs`].
+#[allow(clippy::too_many_arguments)]
+fn shape_panel_text_children(
+    changed_texts: Query<
+        Entity,
+        (
+            With<PanelTextChild>,
+            With<WorldText>,
+            Or<(
+                Changed<WorldText>,
+                Changed<TextStyle>,
+                Changed<PanelTextChild>,
+            )>,
+        ),
+    >,
+    pending_texts: Query<Entity, (With<PanelTextChild>, With<WorldText>, With<PendingGlyphs>)>,
+    texts: Query<(&WorldText, &TextStyle, &PanelTextChild)>,
+    mut atlas: ResMut<MsdfAtlas>,
+    font_registry: Res<FontRegistry>,
+    shaping_cx: Res<TextShapingContext>,
+    mut cache: ResMut<ShapedTextCache>,
+    mut commands: Commands,
+) {
+    let mut to_process = Vec::new();
+    for entity in &changed_texts {
+        to_process.push(entity);
+    }
+    for entity in &pending_texts {
+        if !to_process.contains(&entity) {
+            to_process.push(entity);
+        }
+    }
+
+    if to_process.is_empty() {
+        return;
+    }
+
+    for entity in to_process {
+        let Ok((world_text, style, ptc)) = texts.get(entity) else {
+            continue;
+        };
+
+        if world_text.0.is_empty() {
+            commands
+                .entity(entity)
+                .remove::<PendingGlyphs>()
+                .remove::<PanelTextQuads>();
+            continue;
+        }
+
+        let config = style.as_layout_config();
+
+        let (quads, stats) = shape_text_to_quads(
+            &world_text.0,
+            &config,
+            &ptc.bounds,
+            &font_registry,
+            &mut atlas,
+            &shaping_cx,
+            &mut cache,
+            ptc.scale_x,
+            ptc.scale_y,
+            ptc.half_w,
+            ptc.half_h,
+        );
+
+        let all_ready = stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs;
+        let has_pending = stats.pending_glyphs > 0 || stats.queued_glyphs > 0;
+
+        if all_ready {
+            commands.entity(entity).insert(PanelTextQuads {
+                quads,
+                render_mode: config.render_mode(),
+                shadow_mode: config.shadow_mode(),
+            });
+            commands.entity(entity).remove::<PendingGlyphs>();
+            commands
+                .entity(entity)
+                .trigger(|e| WorldTextReady { entity: e });
+        } else if has_pending {
+            commands.entity(entity).insert_if_new(PendingGlyphs);
+        }
+    }
+}
+
+// ── System 3: build_panel_batched_meshes ────────────────────────────────────
+
+/// Builds batched meshes for panels whose [`WorldText`] children have changed
+/// [`PanelTextQuads`].
+///
+/// For each affected panel:
+/// 1. Collects all [`PanelTextQuads`] from children.
+/// 2. Groups quads by [`TextBatchKey`] (render mode, shadow mode, page index).
+/// 3. Despawns old [`DiegeticTextMesh`] / [`DiegeticShadowProxy`] children.
+/// 4. Spawns new batched mesh entities via [`spawn_batch_meshes`].
+#[allow(clippy::too_many_arguments)]
+fn build_panel_batched_meshes(
+    changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
+    panel_children: Query<(&PanelTextQuads, &ChildOf), With<PanelTextChild>>,
+    old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
+    panels: Query<Option<&HueOffset>, With<DiegeticPanel>>,
+    atlas: Res<MsdfAtlas>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<MsdfTextMaterial>>,
+    mut shared_mats: ResMut<SharedMsdfMaterials>,
+    mut commands: Commands,
+) {
+    // Collect the set of panel entities that have at least one child with
+    // changed `PanelTextQuads`.
+    let mut dirty_panels: Vec<Entity> = Vec::new();
+    for child_of in &changed_quads {
+        let panel_entity = child_of.parent();
+        if !dirty_panels.contains(&panel_entity) {
+            dirty_panels.push(panel_entity);
+        }
+    }
+
+    for panel_entity in dirty_panels {
+        let hue = panels.get(panel_entity).ok().flatten().map_or(0.0, |h| h.0);
+
+        // Collect all quads from this panel's `PanelTextChild` children.
+        let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
+        for (ptq, child_of) in &panel_children {
+            if child_of.parent() != panel_entity {
+                continue;
+            }
+            for (page_index, quad) in &ptq.quads {
                 let key = TextBatchKey {
-                    render_mode: config.render_mode(),
-                    shadow_mode: config.shadow_mode(),
-                    page_index,
+                    render_mode: ptq.render_mode,
+                    shadow_mode: ptq.shadow_mode,
+                    page_index:  *page_index,
                 };
-                batches.entry(key).or_default().push(quad);
+                batches.entry(key).or_default().push(*quad);
             }
         }
 
         let total_quads: usize = batches.values().map(Vec::len).sum();
-
-        // Only replace old meshes if we have content. Keeps partial
-        // text visible until a more complete replacement is ready.
         if total_quads == 0 {
             continue;
         }
 
-        // Despawn previous text mesh children — safe because we have a
-        // non-empty replacement ready.
-        for (entity, child_of) in &old_text {
+        // Despawn previous mesh children.
+        for (mesh_entity, child_of) in &old_meshes {
             if child_of.parent() == panel_entity {
-                commands.entity(entity).despawn();
+                commands.entity(mesh_entity).despawn();
             }
         }
 
-        let spawn_start = Instant::now();
         spawn_batch_meshes(
             &batches,
             panel_entity,
@@ -469,54 +597,7 @@ fn extract_text_meshes(
             &mut shared_mats,
             &mut commands,
         );
-        spawn_ms_total += spawn_start.elapsed().as_secs_f32() * 1000.0;
     }
-
-    let extract_ms = start.elapsed().as_secs_f32() * 1000.0;
-    record_extract_perf(
-        &mut perf,
-        extract_ms,
-        panel_count,
-        spawn_ms_total,
-        &text_stats,
-        rebuild_all,
-    );
-}
-
-fn record_extract_perf(
-    perf: &mut DiegeticPerfStats,
-    extract_ms: f32,
-    panel_count: usize,
-    spawn_ms_total: f32,
-    text_stats: &TextBuildStats,
-    rebuild_all: bool,
-) {
-    if extract_ms > 5.0
-        || rebuild_all
-        || text_stats.queued_glyphs > 0
-        || text_stats.pending_glyphs > 0
-    {
-        bevy::log::info!(
-            "extract_text_meshes: total={extract_ms:.1}ms panels={} texts={} shape={:.1}ms atlas={:.1}ms spawn={spawn_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={} rebuild_all={}",
-            panel_count,
-            text_stats.texts,
-            text_stats.shape_ms,
-            text_stats.atlas_ms,
-            text_stats.glyphs,
-            text_stats.ready_glyphs,
-            text_stats.queued_glyphs,
-            text_stats.pending_glyphs,
-            text_stats.emitted_quads,
-            rebuild_all,
-        );
-    }
-    perf.last_text_extract_ms = extract_ms;
-    perf.last_text_extract_panels = panel_count;
-    perf.last_text_shape_ms = text_stats.shape_ms;
-    perf.last_text_atlas_ms = text_stats.atlas_ms;
-    perf.last_text_spawn_ms = spawn_ms_total;
-    perf.last_text_queued_glyphs = text_stats.queued_glyphs;
-    perf.last_text_pending_glyphs = text_stats.pending_glyphs;
 }
 
 /// Spawns visible mesh and optional shadow proxy entities for each batch

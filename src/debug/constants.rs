@@ -60,9 +60,6 @@ pub(super) const LABEL_TOP: &str = "top";
 /// Label for the x-height metric line and dimension arrow.
 pub(super) const LABEL_X_HEIGHT: &str = "x-height";
 
-/// Layout-units-to-world-units conversion factor.
-pub(super) const LAYOUT_TO_WORLD: f32 = 0.01;
-
 /// Line width for arrows, callout lines, and arrow points.
 pub(super) const THICK_LINE_WIDTH: f32 = 2.5;
 

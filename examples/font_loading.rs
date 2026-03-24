@@ -18,6 +18,7 @@ use bevy_diegetic::Font;
 use bevy_diegetic::FontLoadFailed;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::TextScale;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -63,6 +64,7 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
+        .insert_resource(TextScale(0.01))
         .init_resource::<FontCount>()
         .init_resource::<FontHandles>()
         .add_observer(on_font_registered)

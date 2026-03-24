@@ -903,6 +903,28 @@ impl TextProps<ForLayout> {
         self.wrap = TextWrap::None;
         self
     }
+
+    /// Converts to a [`TextStyle`] for use with standalone [`WorldText`] entities.
+    ///
+    /// Copies all shared fields. The standalone-specific `anchor` defaults to
+    /// [`TextAnchor::TopLeft`] since panel text is positioned by the layout
+    /// engine rather than by an anchor offset.
+    #[must_use]
+    pub const fn as_standalone(&self) -> TextProps<ForStandalone> {
+        TextProps::<ForStandalone>::new()
+            .with_font(self.font_id)
+            .with_size(self.size)
+            .with_weight(self.weight)
+            .with_slant(self.slant)
+            .with_line_height(self.line_height)
+            .with_letter_spacing(self.letter_spacing)
+            .with_word_spacing(self.word_spacing)
+            .with_color(self.color)
+            .with_render_mode(self.render_mode)
+            .with_shadow_mode(self.shadow_mode)
+            .with_loading_policy(self.loading_policy)
+            .with_font_features(self.font_features)
+    }
 }
 
 impl Default for TextProps<ForLayout> {

@@ -271,6 +271,29 @@ impl AtlasConfig {
     }
 }
 
+/// Global scale factor for [`WorldText`](crate::WorldText) entities.
+///
+/// Converts layout units (points) to world units (meters). The default
+/// is physically accurate: [`METERS_PER_POINT`](crate::METERS_PER_POINT)
+/// ≈ 0.000353, so 72pt text produces a 1-inch (0.0254m) em-square.
+///
+/// Does **not** affect [`DiegeticPanel`](crate::DiegeticPanel) text — panels
+/// derive scale from `world_width / layout_width`.
+///
+/// ```ignore
+/// // Physically accurate (default):
+/// app.insert_resource(TextScale::default());
+///
+/// // Restore legacy 0.01 scale:
+/// app.insert_resource(TextScale(0.01));
+/// ```
+#[derive(Resource, Clone, Copy, Debug, Reflect)]
+pub struct TextScale(pub f32);
+
+impl Default for TextScale {
+    fn default() -> Self { Self(crate::render::METERS_PER_POINT) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

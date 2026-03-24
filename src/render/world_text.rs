@@ -10,7 +10,6 @@ use super::glyph_quad::GlyphQuadData;
 use super::glyph_quad::build_glyph_mesh;
 use super::glyph_quad::clip_overlapping_quads;
 use super::msdf_material::MsdfTextMaterial;
-use super::text_renderer::GlyphsReady;
 use super::text_renderer::ShapedGlyph;
 use super::text_renderer::ShapedTextCache;
 use super::text_renderer::TextBuildStats;
@@ -20,6 +19,8 @@ use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
+use crate::plugin::TextScale;
+use crate::plugin::TextScaleOverride;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -84,17 +85,79 @@ pub(super) struct WorldTextMesh;
 #[derive(Component)]
 pub(super) struct WorldTextShadowProxy;
 
+/// Marker on a [`WorldText`] entity whose glyphs are not yet fully
+/// rasterized in the atlas. Removed automatically when all glyphs
+/// become ready.
+#[derive(Component)]
+pub struct PendingGlyphs;
+
+/// Marker on a [`WorldText`] entity that was spawned as a child of a
+/// [`DiegeticPanel`](crate::DiegeticPanel). Stores the layout-computed
+/// bounding box and panel scale factors needed to build panel-local quads.
+#[derive(Component, Clone, Debug)]
+pub struct PanelTextChild {
+    /// Index of the source element in the layout tree.
+    pub element_idx: usize,
+    /// Layout-computed position and size in layout coordinates.
+    pub bounds:      crate::layout::BoundingBox,
+    /// X scale: `world_width / layout_width * override`.
+    pub scale_x:     f32,
+    /// Y scale: `world_height / layout_height * override`.
+    pub scale_y:     f32,
+    /// Half panel width in world units.
+    pub half_w:      f32,
+    /// Half panel height in world units.
+    pub half_h:      f32,
+}
+
+/// Fired on a [`WorldText`] entity when all its glyphs are rasterized
+/// and the text is fully rendered for the first time (or after a
+/// text/style change).
+///
+/// Observe per-entity:
+/// ```ignore
+/// commands.spawn((WorldText::new("Hello"), ...))
+///     .observe(|trigger: On<WorldTextReady>| {
+///         info!("Text ready on {:?}", trigger.entity());
+///     });
+/// ```
+#[derive(EntityEvent)]
+pub struct WorldTextReady {
+    /// The [`WorldText`] entity that is now fully rendered.
+    pub entity: Entity,
+}
+
 /// Renders [`WorldText`] entities as MSDF glyph meshes.
 ///
-/// Rebuilds the text mesh whenever the [`WorldText`] or [`TextStyle`]
-/// component changes.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// Processes entities in two cases:
+/// - **Changed**: `WorldText` or `TextStyle` was modified — re-shape and check glyphs.
+/// - **Pending**: entity has [`PendingGlyphs`] — re-check atlas each frame.
+///
+/// When all glyphs are ready, builds meshes and fires [`WorldTextReady`].
+/// When glyphs are still missing, adds/keeps [`PendingGlyphs`].
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_world_text(
     changed_texts: Query<
-        (Entity, &WorldText, &TextStyle),
-        Or<(Changed<WorldText>, Changed<TextStyle>)>,
+        Entity,
+        (
+            With<WorldText>,
+            Without<PanelTextChild>,
+            Or<(
+                Changed<WorldText>,
+                Changed<TextStyle>,
+                Changed<TextScaleOverride>,
+            )>,
+        ),
     >,
-    all_texts: Query<(Entity, &WorldText, &TextStyle)>,
+    pending_texts: Query<
+        Entity,
+        (
+            With<WorldText>,
+            With<PendingGlyphs>,
+            Without<PanelTextChild>,
+        ),
+    >,
+    texts: Query<(&WorldText, &TextStyle, Option<&TextScaleOverride>), Without<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -103,31 +166,45 @@ pub(super) fn render_world_text(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut commands: Commands,
-    ready: Res<GlyphsReady>,
+    text_scale: Res<TextScale>,
 ) {
-    let rebuild_all = ready.0;
+    // Collect entities that need processing: changed texts + pending texts.
+    let mut to_process = Vec::new();
+    for entity in &changed_texts {
+        to_process.push(entity);
+    }
+    for entity in &pending_texts {
+        if !to_process.contains(&entity) {
+            to_process.push(entity);
+        }
+    }
 
-    let texts_iter: Vec<_> = if rebuild_all {
-        all_texts.iter().collect()
-    } else {
-        changed_texts.iter().collect()
-    };
+    if to_process.is_empty() {
+        return;
+    }
+
     let total_start = Instant::now();
     let mut text_count = 0_usize;
     let mut text_stats = TextBuildStats::default();
     let mut mesh_ms_total = 0.0_f32;
 
-    for (entity, world_text, style) in texts_iter {
+    for entity in to_process {
+        let Ok((world_text, style, scale_override)) = texts.get(entity) else {
+            continue;
+        };
         text_count += 1;
+
         if world_text.0.is_empty() {
-            // Despawn old meshes for empty text.
             for (mesh_entity, child_of) in &old_meshes {
                 if child_of.parent() == entity {
                     commands.entity(mesh_entity).despawn();
                 }
             }
+            commands.entity(entity).remove::<PendingGlyphs>();
             continue;
         }
+
+        let scale = text_scale.0 * scale_override.map_or(1.0, |o| o.0);
 
         // Shape text and build quads in entity-local coordinates.
         let shaped = shape_world_text(
@@ -137,17 +214,23 @@ pub(super) fn render_world_text(
             &mut atlas,
             &shaping_cx,
             &mut cache,
+            scale,
         );
         text_stats.accumulate(&shaped.stats);
 
+        let all_ready = shaped.stats.glyphs > 0 && shaped.stats.ready_glyphs == shaped.stats.glyphs;
+        let has_pending = shaped.stats.pending_glyphs > 0 || shaped.stats.queued_glyphs > 0;
+
         // Store computed layout data for the typography overlay.
         #[cfg(feature = "typography_overlay")]
-        commands.entity(entity).insert(ComputedWorldText {
-            anchor_x:      shaped.anchor_x,
-            anchor_y:      shaped.anchor_y,
-            glyph_rects:   shaped.glyph_rects,
-            first_advance: shaped.first_advance,
-        });
+        if all_ready {
+            commands.entity(entity).insert(ComputedWorldText {
+                anchor_x:      shaped.anchor_x,
+                anchor_y:      shaped.anchor_y,
+                glyph_rects:   shaped.glyph_rects,
+                first_advance: shaped.first_advance,
+            });
+        }
 
         // Group quads by page.
         let mut page_quads: HashMap<u32, Vec<GlyphQuadData>> = HashMap::new();
@@ -157,38 +240,40 @@ pub(super) fn render_world_text(
 
         let total_quads: usize = page_quads.values().map(Vec::len).sum();
 
-        // Only replace old meshes if we have content.
-        if total_quads == 0 {
-            continue;
-        }
-
-        // Despawn previous mesh children — safe because we have content.
-        for (mesh_entity, child_of) in &old_meshes {
-            if child_of.parent() == entity {
-                commands.entity(mesh_entity).despawn();
+        if total_quads > 0 {
+            // Despawn previous mesh children and rebuild.
+            for (mesh_entity, child_of) in &old_meshes {
+                if child_of.parent() == entity {
+                    commands.entity(mesh_entity).despawn();
+                }
             }
+
+            mesh_ms_total += spawn_world_text_meshes(
+                &page_quads,
+                entity,
+                style,
+                &atlas,
+                &mut meshes,
+                &mut materials,
+                &mut commands,
+            );
         }
 
-        mesh_ms_total += spawn_world_text_meshes(
-            &page_quads,
-            entity,
-            style,
-            &atlas,
-            &mut meshes,
-            &mut materials,
-            &mut commands,
-        );
+        // Track per-entity glyph readiness.
+        if has_pending {
+            commands.entity(entity).insert_if_new(PendingGlyphs);
+        } else if all_ready {
+            commands.entity(entity).remove::<PendingGlyphs>();
+            commands
+                .entity(entity)
+                .trigger(|e| WorldTextReady { entity: e });
+        }
     }
 
     let total_ms = total_start.elapsed().as_secs_f32() * 1000.0;
-    if total_ms > 5.0
-        || rebuild_all
-        || text_stats.queued_glyphs > 0
-        || text_stats.pending_glyphs > 0
-    {
-        bevy::log::info!(
-            "render_world_text: total={total_ms:.1}ms texts={} shape={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={} rebuild_all={}",
-            text_count,
+    if total_ms > 5.0 || text_stats.queued_glyphs > 0 || text_stats.pending_glyphs > 0 {
+        bevy::log::debug!(
+            "render_world_text: total={total_ms:.1}ms texts={text_count} shape={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={}",
             text_stats.shape_ms,
             text_stats.atlas_ms,
             text_stats.glyphs,
@@ -196,7 +281,6 @@ pub(super) fn render_world_text(
             text_stats.queued_glyphs,
             text_stats.pending_glyphs,
             text_stats.emitted_quads,
-            rebuild_all,
         );
     }
 }
@@ -332,8 +416,8 @@ impl ShapedWorldText {
 /// Shapes text and produces glyph quads in entity-local coordinates.
 ///
 /// Unlike panel text, standalone text has no layout bounds or panel scale.
-/// Glyphs are positioned relative to the origin, offset by the anchor point,
-/// with a fixed scale (1 layout unit = 0.01 world units by default).
+/// Glyphs are positioned relative to the origin, offset by the anchor point.
+/// The `scale` parameter converts layout units to world units.
 fn shape_world_text(
     text: &str,
     style: &TextStyle,
@@ -341,6 +425,7 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
+    scale: f32,
 ) -> ShapedWorldText {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
@@ -374,7 +459,6 @@ fn shape_world_text(
     #[allow(clippy::cast_precision_loss)]
     let em_scale = style.size() / atlas.canonical_size() as f32;
 
-    let scale = 0.01_f32;
     let (anchor_x, anchor_y) = measure_anchor_offset(
         &shaped.glyphs,
         style,

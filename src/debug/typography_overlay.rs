@@ -30,7 +30,6 @@ use super::constants::LABEL_ORIGIN;
 use super::constants::LABEL_SIZE_RATIO;
 use super::constants::LABEL_TOP;
 use super::constants::LABEL_X_HEIGHT;
-use super::constants::LAYOUT_TO_WORLD;
 use super::constants::THICK_LINE_WIDTH;
 use super::constants::THIN_LINE_WIDTH;
 use crate::callouts::draw_dashed_line;
@@ -38,6 +37,8 @@ use crate::callouts::draw_dimension_arrow;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextAnchor;
 use crate::layout::TextStyle;
+use crate::plugin::TextScale;
+use crate::plugin::TextScaleOverride;
 use crate::render::ComputedWorldText;
 use crate::render::LineMetricsSnapshot;
 use crate::render::ShapedTextCache;
@@ -138,6 +139,7 @@ pub fn build_typography_overlay(
         &TextStyle,
         &TypographyOverlay,
         &ComputedWorldText,
+        Option<&TextScaleOverride>,
     )>,
     text_changed: Query<
         Entity,
@@ -155,6 +157,7 @@ pub fn build_typography_overlay(
     containers: Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
     font_registry: Res<FontRegistry>,
     cache: Res<ShapedTextCache>,
+    text_scale: Res<TextScale>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
@@ -162,7 +165,7 @@ pub fn build_typography_overlay(
 ) {
     let changed_entities: Vec<Entity> = text_changed.iter().collect();
 
-    for (entity, world_text, style, overlay, computed) in &query {
+    for (entity, world_text, style, overlay, computed, scale_override) in &query {
         if !changed_entities.contains(&entity) {
             continue;
         }
@@ -197,6 +200,7 @@ pub fn build_typography_overlay(
 
         let anchor_x = computed.anchor_x;
         let anchor_y = computed.anchor_y;
+        let scale = text_scale.0 * scale_override.map_or(1.0, |o| o.0);
 
         let measure = style.as_layout_config().as_measure();
         let Some(line_metrics) = cache
@@ -217,6 +221,7 @@ pub fn build_typography_overlay(
                 computed,
                 anchor_y,
                 font_size,
+                scale,
                 &mut gizmo_assets,
             );
         }
@@ -232,6 +237,7 @@ pub fn build_typography_overlay(
                 anchor_x,
                 anchor_y,
                 font_size,
+                scale,
                 &mut gizmo_assets,
                 &mut meshes,
                 &mut dot_materials,
@@ -252,6 +258,7 @@ fn spawn_font_metric_gizmos(
     computed: &ComputedWorldText,
     anchor_y: f32,
     font_size: f32,
+    scale: f32,
     gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let extents = GlyphExtents {
@@ -267,6 +274,7 @@ fn spawn_font_metric_gizmos(
         anchor_y,
         &extents,
         font_size,
+        scale,
     );
 
     // Horizontal metric lines.
@@ -306,6 +314,7 @@ fn spawn_font_metric_gizmos(
             overlay,
             anchor_y,
             font_size,
+            scale,
             &extents,
         );
     }
@@ -323,6 +332,7 @@ fn spawn_glyph_metric_gizmos(
     anchor_x: f32,
     anchor_y: f32,
     font_size: f32,
+    scale: f32,
     gizmo_assets: &mut Assets<GizmoAsset>,
     meshes: &mut Assets<Mesh>,
     dot_materials: &mut Assets<StandardMaterial>,
@@ -352,6 +362,7 @@ fn spawn_glyph_metric_gizmos(
             computed,
             anchor_y,
             font_size,
+            scale,
             bbox_color,
             gizmo_assets,
         );
@@ -368,6 +379,7 @@ fn spawn_glyph_metric_gizmos(
             anchor_x,
             anchor_y,
             font_size,
+            scale,
             gizmo_assets,
             meshes,
             dot_materials,
@@ -385,6 +397,7 @@ fn spawn_bounding_box_callout(
     computed: &ComputedWorldText,
     anchor_y: f32,
     font_size: f32,
+    scale: f32,
     bbox_color: Color,
     gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
@@ -414,7 +427,7 @@ fn spawn_bounding_box_callout(
     let ascent_y_layout = baseline_y_layout - line_metrics.ascent;
     let cap_height_y_layout = baseline_y_layout - font_metrics.cap_height;
     let callout_top_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
-    let callout_top_world = layout_to_world_y(callout_top_layout, anchor_y);
+    let callout_top_world = layout_to_world_y(callout_top_layout, anchor_y, scale);
 
     let mut callout_gizmo = GizmoAsset::default();
     // Horizontal shelf.
@@ -444,7 +457,7 @@ fn spawn_bounding_box_callout(
 
     // Label at the top of the riser, to the left (CenterRight anchor).
     let ascent_mid_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
-    let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y);
+    let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y, scale);
     commands.entity(entity).with_child((
         WorldText::new(LABEL_BOUNDING_BOX),
         TextStyle::new()
@@ -452,7 +465,11 @@ fn spawn_bounding_box_callout(
             .with_color(bbox_color)
             .with_anchor(TextAnchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
-        Transform::from_xyz(shelf_end_x - label_gap(font_size), ascent_mid_world, z),
+        Transform::from_xyz(
+            shelf_end_x - label_gap(font_size, scale),
+            ascent_mid_world,
+            z,
+        ),
     ));
 }
 
@@ -467,6 +484,7 @@ fn spawn_origin_and_advancement(
     anchor_x: f32,
     anchor_y: f32,
     font_size: f32,
+    scale: f32,
     gizmo_assets: &mut Assets<GizmoAsset>,
     meshes: &mut Assets<Mesh>,
     dot_materials: &mut Assets<StandardMaterial>,
@@ -474,15 +492,19 @@ fn spawn_origin_and_advancement(
     let callout_color = Color::srgb(0.9, 0.2, 0.2);
     let label_size = font_size * LABEL_SIZE_RATIO;
     let z = 0.002;
-    let dot_radius = dot_radius(font_size);
+    let dot_radius = dot_radius(font_size, scale);
 
     let first = &computed.glyph_rects[0];
     let first_mid_x = first[0] + first[2] / 2.0;
 
-    let baseline_world = layout_to_world_y(line_metrics.baseline, anchor_y);
-    let descent_world = layout_to_world_y(line_metrics.baseline + line_metrics.descent, anchor_y);
+    let baseline_world = layout_to_world_y(line_metrics.baseline, anchor_y, scale);
+    let descent_world = layout_to_world_y(
+        line_metrics.baseline + line_metrics.descent,
+        anchor_y,
+        scale,
+    );
 
-    let origin_x = layout_to_world_x(0.0, anchor_x);
+    let origin_x = layout_to_world_x(0.0, anchor_x, scale);
     let origin_y = baseline_world;
 
     // Origin dot — small filled circle at (origin, baseline).
@@ -504,7 +526,7 @@ fn spawn_origin_and_advancement(
     // Callout line from just above the label toward the origin
     // dot, touching the circle edge. The label's cap height in
     // world units gives the visual top of the text.
-    let label_ascent_world = line_metrics.ascent * LABEL_SIZE_RATIO * LAYOUT_TO_WORLD;
+    let label_ascent_world = line_metrics.ascent * LABEL_SIZE_RATIO * scale;
     let label_top_y = origin_label_y + label_ascent_world;
     let dx = origin_x - first_mid_x;
     let dy = origin_y - label_top_y;
@@ -564,6 +586,7 @@ fn spawn_origin_and_advancement(
         label_size,
         spacing,
         font_size,
+        scale,
         z,
         gizmo_assets,
     );
@@ -583,12 +606,13 @@ fn spawn_advancement_arrow(
     label_size: f32,
     spacing: f32,
     font_size: f32,
+    scale: f32,
     z: f32,
     gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let arrow_y = descent_world - spacing;
-    let head = arrowhead_size(font_size);
-    let gap = arrow_gap(font_size);
+    let head = arrowhead_size(font_size, scale);
+    let gap = arrow_gap(font_size, scale);
 
     let mut adv_gizmo = GizmoAsset::default();
 
@@ -671,13 +695,13 @@ fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]], color: Color) -> GizmoAsset {
 }
 
 /// Convert layout Y-down to world Y-up, with anchor offset.
-fn layout_to_world_y(layout_y: f32, anchor_y: f32) -> f32 {
-    -(layout_y - anchor_y) * LAYOUT_TO_WORLD
+fn layout_to_world_y(layout_y: f32, anchor_y: f32, scale: f32) -> f32 {
+    -(layout_y - anchor_y) * scale
 }
 
 /// Convert layout X to world X, with anchor offset.
-fn layout_to_world_x(layout_x: f32, anchor_x: f32) -> f32 {
-    (layout_x - anchor_x) * LAYOUT_TO_WORLD
+fn layout_to_world_x(layout_x: f32, anchor_x: f32, scale: f32) -> f32 {
+    (layout_x - anchor_x) * scale
 }
 
 /// Computes the uniform spacing between arrow columns from the first
@@ -685,19 +709,21 @@ fn layout_to_world_x(layout_x: f32, anchor_x: f32) -> f32 {
 const fn arrow_spacing(first_advance: f32) -> f32 { first_advance * ARROW_SPACING_RATIO }
 
 /// Scale factor for converting font-size-relative ratios to world units.
-const fn font_scale(font_size: f32) -> f32 { font_size * LAYOUT_TO_WORLD }
+fn font_scale(font_size: f32, scale: f32) -> f32 { font_size * scale }
 
 /// Dot radius in world units, scaled to the font size.
-const fn dot_radius(font_size: f32) -> f32 { DOT_RADIUS_RATIO * font_scale(font_size) }
+fn dot_radius(font_size: f32, scale: f32) -> f32 { DOT_RADIUS_RATIO * font_scale(font_size, scale) }
 
 /// Arrowhead line length in world units, scaled to the font size.
-const fn arrowhead_size(font_size: f32) -> f32 { ARROWHEAD_RATIO * font_scale(font_size) }
+fn arrowhead_size(font_size: f32, scale: f32) -> f32 {
+    ARROWHEAD_RATIO * font_scale(font_size, scale)
+}
 
 /// Arrow gap in world units, scaled to the font size.
-const fn arrow_gap(font_size: f32) -> f32 { ARROW_GAP_RATIO * font_scale(font_size) }
+fn arrow_gap(font_size: f32, scale: f32) -> f32 { ARROW_GAP_RATIO * font_scale(font_size, scale) }
 
 /// Label gap in world units, scaled to the font size.
-const fn label_gap(font_size: f32) -> f32 { LABEL_GAP_RATIO * font_scale(font_size) }
+fn label_gap(font_size: f32, scale: f32) -> f32 { LABEL_GAP_RATIO * font_scale(font_size, scale) }
 
 /// Horizontal extents of the glyph run and the uniform arrow column spacing.
 struct GlyphExtents {
@@ -716,13 +742,14 @@ fn build_metric_gizmos(
     anchor_y: f32,
     extents: &GlyphExtents,
     font_size: f32,
+    scale: f32,
 ) -> (GizmoAsset, GizmoAsset, Vec<(&'static str, f32)>) {
     let mut lines_gizmo = GizmoAsset::default();
     let mut arrows_gizmo = GizmoAsset::default();
     let color = overlay.color;
     let z = 0.001;
-    let head = arrowhead_size(font_size);
-    let gap = arrow_gap(font_size);
+    let head = arrowhead_size(font_size, scale);
+    let gap = arrow_gap(font_size, scale);
 
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
@@ -755,7 +782,7 @@ fn build_metric_gizmos(
 
     let baseline_color = Color::srgb(0.9, 0.2, 0.2);
     for &(label, layout_y) in &metric_lines {
-        let y = layout_to_world_y(layout_y, anchor_y);
+        let y = layout_to_world_y(layout_y, anchor_y, scale);
         let line_color = if label == LABEL_BASELINE {
             baseline_color
         } else {
@@ -768,9 +795,9 @@ fn build_metric_gizmos(
         );
     }
 
-    let ascent_world = layout_to_world_y(ascent_y, anchor_y);
-    let baseline_world = layout_to_world_y(baseline_y, anchor_y);
-    let descent_world = layout_to_world_y(descent_y, anchor_y);
+    let ascent_world = layout_to_world_y(ascent_y, anchor_y, scale);
+    let baseline_world = layout_to_world_y(baseline_y, anchor_y, scale);
+    let descent_world = layout_to_world_y(descent_y, anchor_y, scale);
 
     // Left side: arrows grow outward from first glyph.
     // Ascent and Descent share the same column (they don't overlap vertically).
@@ -806,8 +833,8 @@ fn build_metric_gizmos(
     );
 
     // Right side: arrows grow outward from last glyph.
-    let x_height_world = layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y);
-    let cap_height_world = layout_to_world_y(baseline_y - font_metrics.cap_height, anchor_y);
+    let x_height_world = layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y, scale);
+    let cap_height_world = layout_to_world_y(baseline_y - font_metrics.cap_height, anchor_y, scale);
 
     let right_1 = extents.last_right + extents.arrow_spacing; // x-Height
     let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right); // Cap Height
@@ -847,12 +874,13 @@ fn spawn_metric_labels(
     overlay: &TypographyOverlay,
     anchor_y: f32,
     font_size: f32,
+    scale: f32,
     extents: &GlyphExtents,
 ) {
     let label_size = font_size * LABEL_SIZE_RATIO;
     let color = overlay.color;
     let z = 0.001;
-    let gap = label_gap(font_size);
+    let gap = label_gap(font_size, scale);
 
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
@@ -878,6 +906,7 @@ fn spawn_metric_labels(
         z,
         left_2,
         gap,
+        scale,
     );
     spawn_left_arrow_labels(
         commands,
@@ -895,6 +924,7 @@ fn spawn_metric_labels(
         descent_y,
         left_1,
         left_2,
+        scale,
     );
     spawn_right_arrow_labels(
         commands,
@@ -909,6 +939,7 @@ fn spawn_metric_labels(
         x_height_y,
         right_1,
         right_2,
+        scale,
     );
 }
 
@@ -924,12 +955,13 @@ fn spawn_line_edge_labels(
     z: f32,
     label_x: f32,
     label_gap: f32,
+    scale: f32,
 ) {
     for &(label, layout_y) in metric_lines {
         if label != LABEL_TOP && label != LABEL_BOTTOM {
             continue;
         }
-        let line_world_y = layout_to_world_y(layout_y, anchor_y);
+        let line_world_y = layout_to_world_y(layout_y, anchor_y, scale);
         commands.entity(parent).with_child((
             WorldText::new(label),
             TextStyle::new()
@@ -960,10 +992,11 @@ fn spawn_left_arrow_labels(
     descent_y: f32,
     left_1: f32,
     left_2: f32,
+    scale: f32,
 ) {
     // Ascent label: halfway between Baseline and x-Height.
     let label_y_mid = f32::midpoint(baseline_y, x_height_y);
-    let label_y_mid_world = layout_to_world_y(label_y_mid, anchor_y);
+    let label_y_mid_world = layout_to_world_y(label_y_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_ASCENT),
         TextStyle::new()
@@ -976,7 +1009,7 @@ fn spawn_left_arrow_labels(
 
     // Descent label: halfway between Baseline and Descent.
     let descent_mid = f32::midpoint(baseline_y, descent_y);
-    let descent_mid_world = layout_to_world_y(descent_mid, anchor_y);
+    let descent_mid_world = layout_to_world_y(descent_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_DESCENT),
         TextStyle::new()
@@ -1001,8 +1034,9 @@ fn spawn_left_arrow_labels(
     // Baseline label: on the baseline, underneath Line Height.
     // Offset down by half the label's descent so the visual center
     // of the text (not the bounding box center) sits on the red line.
-    let label_descent_offset = line_metrics.descent * LABEL_SIZE_RATIO * LAYOUT_TO_WORLD / 2.0;
-    let baseline_label_world = layout_to_world_y(baseline_y, anchor_y) - label_descent_offset;
+    let label_descent_offset = line_metrics.descent * LABEL_SIZE_RATIO * scale / 2.0;
+    let baseline_label_world =
+        layout_to_world_y(baseline_y, anchor_y, scale) - label_descent_offset;
     commands.entity(parent).with_child((
         WorldText::new(LABEL_BASELINE),
         TextStyle::new()
@@ -1017,7 +1051,7 @@ fn spawn_left_arrow_labels(
     let has_line_gap =
         (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5;
     if !has_line_gap {
-        let ascent_world = layout_to_world_y(ascent_y, anchor_y);
+        let ascent_world = layout_to_world_y(ascent_y, anchor_y, scale);
         let no_gap_label = format!("no line gap for {font_name}");
         commands.entity(parent).with_child((
             WorldText::new(no_gap_label),
@@ -1046,10 +1080,11 @@ fn spawn_right_arrow_labels(
     x_height_y: f32,
     right_1: f32,
     right_2: f32,
+    scale: f32,
 ) {
     // x-Height label: halfway between x-Height and Baseline.
     let x_height_mid = f32::midpoint(x_height_y, baseline_y);
-    let x_height_mid_world = layout_to_world_y(x_height_mid, anchor_y);
+    let x_height_mid_world = layout_to_world_y(x_height_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_X_HEIGHT),
         TextStyle::new()
@@ -1062,7 +1097,7 @@ fn spawn_right_arrow_labels(
 
     // Cap Height label: halfway between Cap Height and x-Height.
     let cap_mid = f32::midpoint(cap_height_y, x_height_y);
-    let cap_mid_world = layout_to_world_y(cap_mid, anchor_y);
+    let cap_mid_world = layout_to_world_y(cap_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_CAP_HEIGHT),
         TextStyle::new()

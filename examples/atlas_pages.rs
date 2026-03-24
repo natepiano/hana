@@ -17,6 +17,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::RasterQuality;
+use bevy_diegetic::TextScale;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -89,6 +90,7 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
+        .insert_resource(TextScale(0.01))
         .insert_resource(NextBlock(0))
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_input, update_diagnostics))

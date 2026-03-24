@@ -51,6 +51,17 @@ pub struct DiegeticPanel {
 #[derive(Component, Default, Clone, Copy, Debug, Reflect)]
 pub struct HueOffset(pub f32);
 
+/// Per-entity scale multiplier applied on top of the effective text scale.
+///
+/// For [`WorldText`](crate::WorldText): multiplied with the global
+/// [`TextScale`](crate::TextScale) resource.
+/// For [`DiegeticPanel`](crate::DiegeticPanel): multiplied with the
+/// panel's `world_width / layout_width` scale.
+///
+/// Entities without this component behave as if it were `1.0`.
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+pub struct TextScaleOverride(pub f32);
+
 /// Computed layout result for a [`DiegeticPanel`].
 ///
 /// Automatically added via required components when a [`DiegeticPanel`] is inserted.

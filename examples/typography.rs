@@ -26,11 +26,14 @@ use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PendingGlyphs;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
+use bevy_diegetic::TextScale;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextReady;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -118,6 +121,11 @@ struct WordCycle {
     timer: Timer,
 }
 
+/// Zoom-to-fit marker: added at spawn, consumed once the entity and all
+/// descendants (overlay labels) are fully rendered with no pending glyphs.
+#[derive(Component)]
+struct ZoomWhenReady;
+
 /// Keeps loaded font handles alive so they don't get unloaded.
 #[derive(Resource, Default)]
 struct FontHandles(Vec<Handle<Font>>);
@@ -133,6 +141,7 @@ fn main() {
             MeshPickingPlugin,
             DiegeticUiPlugin,
         ))
+        .insert_resource(TextScale(0.01))
         .insert_resource(WordCycle {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
@@ -141,7 +150,13 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (toggle_overlay, home_camera, switch_font, cycle_word),
+            (
+                toggle_overlay,
+                home_camera,
+                switch_font,
+                cycle_word,
+                deferred_zoom_to_fit,
+            ),
         )
         .add_observer(on_world_text_added)
         .add_observer(on_font_registered)
@@ -190,6 +205,7 @@ fn setup(
     // Display word with typography overlay.
     commands.spawn((
         DisplayText,
+        ZoomWhenReady,
         WorldText::new(DISPLAY_WORDS[0]),
         TextStyle::new()
             .with_size(DISPLAY_SIZE)
@@ -590,5 +606,39 @@ fn switch_font(
             .with_font(font_id)
             .with_size(DISPLAY_SIZE)
             .with_color(Color::srgb(0.9, 0.9, 0.9));
+    }
+}
+
+fn deferred_zoom_to_fit(
+    targets: Query<Entity, With<ZoomWhenReady>>,
+    pending: Query<(), With<PendingGlyphs>>,
+    children_query: Query<&Children>,
+    cameras: Query<Entity, With<PanOrbitCamera>>,
+    mut commands: Commands,
+) {
+    for entity in &targets {
+        // Wait until descendants exist (overlay has been built).
+        let has_descendants = children_query.iter_descendants(entity).next().is_some();
+        if !has_descendants {
+            continue;
+        }
+
+        // Wait until this entity and all descendants have no `PendingGlyphs`.
+        let any_pending = pending.get(entity).is_ok()
+            || children_query
+                .iter_descendants(entity)
+                .any(|d| pending.get(d).is_ok());
+        if any_pending {
+            continue;
+        }
+
+        commands.entity(entity).remove::<ZoomWhenReady>();
+        for camera in &cameras {
+            commands.trigger(
+                ZoomToFit::new(camera, entity)
+                    .margin(ZOOM_TO_FIT_MARGIN)
+                    .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+            );
+        }
     }
 }

@@ -91,8 +91,14 @@ pub use plugin::HueOffset;
 pub use plugin::LayoutPlugin;
 pub use plugin::RasterQuality;
 pub use plugin::ShowTextGizmos;
+pub use plugin::TextScale;
+pub use plugin::TextScaleOverride;
 // Render.
+pub use render::METERS_PER_POINT;
+pub use render::PanelTextChild;
+pub use render::PendingGlyphs;
 pub use render::WorldText;
+pub use render::WorldTextReady;
 // Text.
 pub use text::Font;
 pub use text::FontId;

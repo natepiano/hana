@@ -14,9 +14,11 @@ pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
 pub use components::DiegeticTextMeasurer;
 pub use components::HueOffset;
+pub use components::TextScaleOverride;
 pub use config::AtlasConfig;
 pub use config::GlyphWorkerThreads;
 pub use config::RasterQuality;
+pub use config::TextScale;
 use diagnostics::install as install_perf_diagnostics;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
@@ -190,13 +192,14 @@ impl DiegeticUiPlugin {
     #[must_use]
     pub const fn with_atlas() -> DiegeticUiPluginConfigured {
         DiegeticUiPluginConfigured {
-            config: AtlasConfig::new(),
+            config:     AtlasConfig::new(),
+            text_scale: None,
         }
     }
 }
 
 impl Plugin for DiegeticUiPlugin {
-    fn build(&self, app: &mut App) { build_plugin(app, None); }
+    fn build(&self, app: &mut App) { build_plugin(app, None, None); }
 }
 
 /// Configured variant of [`DiegeticUiPlugin`] with custom atlas settings.
@@ -204,7 +207,8 @@ impl Plugin for DiegeticUiPlugin {
 /// Created by [`DiegeticUiPlugin::with_atlas`]. Implements [`Plugin`]
 /// so it can be passed directly to `add_plugins`.
 pub struct DiegeticUiPluginConfigured {
-    config: AtlasConfig,
+    config:     AtlasConfig,
+    text_scale: Option<TextScale>,
 }
 
 impl DiegeticUiPluginConfigured {
@@ -255,15 +259,25 @@ impl DiegeticUiPluginConfigured {
         self.config.glyph_worker_threads = workers;
         self
     }
+
+    /// Sets the global [`TextScale`] for [`WorldText`](crate::WorldText) entities.
+    ///
+    /// Default is physically accurate ([`METERS_PER_POINT`](crate::METERS_PER_POINT)).
+    /// Use `TextScale(0.01)` to restore legacy behavior.
+    #[must_use]
+    pub const fn text_scale(mut self, scale: TextScale) -> Self {
+        self.text_scale = Some(scale);
+        self
+    }
 }
 
 impl Plugin for DiegeticUiPluginConfigured {
-    fn build(&self, app: &mut App) { build_plugin(app, Some(&self.config)); }
+    fn build(&self, app: &mut App) { build_plugin(app, Some(&self.config), self.text_scale); }
 }
 
 /// Shared plugin build logic for both [`DiegeticUiPlugin`] and
 /// [`DiegeticUiPluginConfigured`].
-fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
+fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, text_scale: Option<TextScale>) {
     install_perf_diagnostics(app);
     // Initialize font registry and wire up parley-backed text measurement.
     let registry = FontRegistry::new();
@@ -291,7 +305,8 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
         ));
     }
 
-    app.insert_resource(registry)
+    app.insert_resource(text_scale.unwrap_or_default())
+        .insert_resource(registry)
         .insert_resource(measurer)
         .init_asset::<Font>()
         .init_asset_loader::<FontLoader>()

@@ -49,6 +49,7 @@ use bevy_diegetic::ShowTextGizmos;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
+use bevy_diegetic::TextScale;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -216,6 +217,7 @@ fn main() {
         .add_plugins(DiegeticUiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(WindowManagerPlugin)
+        .insert_resource(TextScale(0.01))
         .init_gizmo_group::<ClayGizmoGroup>()
         .insert_resource(ShowTextGizmos(true))
         .init_resource::<ClayLayoutResult>()
