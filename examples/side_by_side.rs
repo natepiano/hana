@@ -322,6 +322,7 @@ fn setup(
         PanOrbitCamera {
             focus: midpoint,
             trackpad_behavior: TrackpadBehavior::blender_default(),
+            trackpad_sensitivity: 0.5,
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },

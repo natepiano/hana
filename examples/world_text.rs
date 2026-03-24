@@ -323,6 +323,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
             modifier_pan:  Some(KeyCode::ShiftLeft),
             modifier_zoom: Some(KeyCode::ControlLeft),
         },
+        trackpad_sensitivity: 0.5,
         trackpad_pinch_to_zoom_enabled: true,
         ..default()
     },));
