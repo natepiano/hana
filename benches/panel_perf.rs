@@ -43,7 +43,6 @@ const LAYOUT_SIZE: f32 = 160.0;
 fn monospace_measurer() -> DiegeticTextMeasurer {
     DiegeticTextMeasurer {
         measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
-            let line_height = measure.effective_line_height();
             let char_width = measure.size * 0.6;
             let mut max_line_width: f32 = 0.0;
             let mut line_count = 0_u32;
@@ -56,8 +55,9 @@ fn monospace_measurer() -> DiegeticTextMeasurer {
                 line_count = 1;
             }
             TextDimensions {
-                width:  max_line_width,
-                height: line_height * line_count as f32,
+                width:       max_line_width,
+                height:      measure.size * line_count as f32,
+                line_height: measure.size,
             }
         }),
     }

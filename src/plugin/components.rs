@@ -140,8 +140,11 @@ impl Default for DiegeticTextMeasurer {
                 let char_width = measure.size * 0.6;
                 #[allow(clippy::cast_precision_loss)]
                 let width = char_width * text.len() as f32;
-                let height = measure.effective_line_height();
-                TextDimensions { width, height }
+                TextDimensions {
+                    width,
+                    height: measure.size,
+                    line_height: measure.size,
+                }
             }),
         }
     }

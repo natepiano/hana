@@ -371,7 +371,14 @@ fn shape_world_text(
     baselines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
     let line_count = baselines.len().max(1);
     #[allow(clippy::cast_precision_loss)]
-    let max_y = style.effective_line_height() * line_count as f32;
+    let natural_line_height = if style.line_height_raw() > 0.0 {
+        style.line_height_raw()
+    } else {
+        font_registry
+            .font(FontId(style.font_id()))
+            .map_or(style.size(), |f| f.metrics(style.size()).line_height)
+    };
+    let max_y = natural_line_height * line_count as f32;
 
     let scale = 0.01_f32;
     let (anchor_x, anchor_y) = anchor_offset(style.anchor(), max_x, max_y);

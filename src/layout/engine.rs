@@ -228,8 +228,9 @@ fn wrap_text_words(
     measure: &MeasureTextFn,
 ) -> WrappedText {
     let text_measure = config.as_measure();
-    let line_height = config.effective_line_height();
-    let space_width = measure(" ", &text_measure).width;
+    let space_dims = measure(" ", &text_measure);
+    let line_height = space_dims.line_height;
+    let space_width = space_dims.width;
     let mut all_lines = Vec::new();
 
     for paragraph in text.split('\n') {
@@ -301,15 +302,16 @@ fn wrap_text_words(
 
 /// Splits text at explicit `\n` characters and measures each line as a single run.
 fn wrap_text_newlines(text: &str, config: &TextConfig, measure: &MeasureTextFn) -> WrappedText {
-    let line_height = config.effective_line_height();
     let text_measure = config.as_measure();
     let mut lines = Vec::new();
+    let mut line_height = 0.0_f32;
 
     for line in text.split('\n') {
-        let width = measure(line, &text_measure).width;
+        let dims = measure(line, &text_measure);
+        line_height = dims.line_height;
         lines.push(WrappedLine {
-            text: line.to_string(),
-            width,
+            text:  line.to_string(),
+            width: dims.width,
         });
     }
 

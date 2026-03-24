@@ -663,16 +663,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn word_spacing(&self) -> f32 { self.word_spacing }
 
-    /// Returns the effective line height (falls back to `size` if 0.0).
-    #[must_use]
-    pub const fn effective_line_height(&self) -> f32 {
-        if self.line_height == 0.0 {
-            self.size
-        } else {
-            self.line_height
-        }
-    }
-
     /// Sets the font identifier.
     #[must_use]
     pub const fn with_font(mut self, font_id: u16) -> Self {
@@ -1023,25 +1013,16 @@ pub struct TextMeasure {
     pub font_features:  FontFeatures,
 }
 
-impl TextMeasure {
-    /// Returns the effective line height (falls back to `size` if 0.0).
-    #[must_use]
-    pub const fn effective_line_height(&self) -> f32 {
-        if self.line_height == 0.0 {
-            self.size
-        } else {
-            self.line_height
-        }
-    }
-}
-
 /// Measured dimensions of a text string.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextDimensions {
     /// Width in layout units.
-    pub width:  f32,
+    pub width:       f32,
     /// Height in layout units.
-    pub height: f32,
+    pub height:      f32,
+    /// Per-line height from parley (includes font's natural line gap
+    /// when no explicit override is set).
+    pub line_height: f32,
 }
 
 /// Border widths for an element.

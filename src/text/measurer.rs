@@ -64,8 +64,11 @@ pub fn create_parley_measurer(
             builder.push_default(StyleProperty::WordSpacing(measure.word_spacing));
         }
 
-        let line_height = measure.effective_line_height();
-        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(line_height)));
+        if measure.line_height > 0.0 {
+            builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+                measure.line_height,
+            )));
+        }
 
         // Push OpenType feature overrides (liga, calt, dlig, kern).
         let font_features = measure.font_features;
@@ -90,9 +93,15 @@ pub fn create_parley_measurer(
         drop(font_cx);
         drop(layout_cx);
 
+        let line_height = layout
+            .lines()
+            .next()
+            .map_or(measure.size, |l| l.metrics().line_height);
+
         TextDimensions {
-            width:  layout.full_width(),
+            width: layout.full_width(),
             height: layout.height(),
+            line_height,
         }
     })
 }

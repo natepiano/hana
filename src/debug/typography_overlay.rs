@@ -868,9 +868,6 @@ fn spawn_metric_labels(
     let right_1 = extents.last_right + extents.arrow_spacing; // x-Height
     let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right); // Cap Height
 
-    // Metric line left edge — for non-arrow labels on their lines.
-    let line_x0 = left_2 - extents.arrow_spacing;
-
     spawn_line_edge_labels(
         commands,
         parent,
@@ -879,7 +876,7 @@ fn spawn_metric_labels(
         label_size,
         color,
         z,
-        line_x0,
+        left_2,
         gap,
     );
     spawn_left_arrow_labels(
@@ -925,7 +922,7 @@ fn spawn_line_edge_labels(
     label_size: f32,
     color: Color,
     z: f32,
-    line_x0: f32,
+    label_x: f32,
     label_gap: f32,
 ) {
     for &(label, layout_y) in metric_lines {
@@ -940,7 +937,7 @@ fn spawn_line_edge_labels(
                 .with_color(color)
                 .with_anchor(TextAnchor::CenterRight)
                 .with_shadow_mode(GlyphShadowMode::None),
-            Transform::from_xyz(line_x0 - label_gap, line_world_y, z),
+            Transform::from_xyz(label_x - label_gap, line_world_y, z),
         ));
     }
 }

@@ -298,14 +298,14 @@ mod tests {
 
     fn monospace_measure() -> crate::layout::MeasureTextFn {
         Arc::new(|text: &str, measure: &TextMeasure| {
-            let line_height = measure.effective_line_height();
             #[allow(clippy::cast_precision_loss)]
             let char_width = measure.size * 0.6;
             #[allow(clippy::cast_precision_loss)]
             let width = char_width * text.len() as f32;
             TextDimensions {
                 width,
-                height: line_height,
+                height: measure.size,
+                line_height: measure.size,
             }
         })
     }

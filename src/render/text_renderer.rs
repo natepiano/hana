@@ -650,10 +650,11 @@ pub(super) fn shape_text_cached(
     builder.push_default(parley::style::StyleProperty::FontStack(
         parley::style::FontStack::Single(parley::style::FontFamily::Named(family_name.into())),
     ));
-    let line_height = config.effective_line_height();
-    builder.push_default(parley::style::StyleProperty::LineHeight(
-        parley::style::LineHeight::Absolute(line_height),
-    ));
+    if config.line_height_raw() > 0.0 {
+        builder.push_default(parley::style::StyleProperty::LineHeight(
+            parley::style::LineHeight::Absolute(config.line_height_raw()),
+        ));
+    }
 
     // Push OpenType feature overrides (liga, calt, dlig, kern).
     let font_features = config.font_features();
@@ -711,8 +712,12 @@ pub(super) fn shape_text_cached(
 
     // Store measurement alongside the shaped run.
     let dims = crate::layout::TextDimensions {
-        width:  layout.full_width(),
-        height: layout.height(),
+        width:       layout.full_width(),
+        height:      layout.height(),
+        line_height: layout
+            .lines()
+            .next()
+            .map_or(config.size(), |l| l.metrics().line_height),
     };
     drop(layout);
     let run = ShapedTextRun {
