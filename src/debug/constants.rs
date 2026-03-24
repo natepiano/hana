@@ -2,7 +2,7 @@
 
 /// Fraction of the first glyph's advance width used as the spacing
 /// unit between arrow columns.
-pub const ARROW_SPACING_RATIO: f32 = 0.25;
+pub const ARROW_SPACING_RATIO: f32 = 0.28;
 
 /// Gap between labels and the elements they annotate, relative to font size.
 /// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
@@ -68,3 +68,6 @@ pub const THICK_LINE_WIDTH: f32 = 2.5;
 
 /// Line width for metric lines, bounding boxes, and callout backgrounds.
 pub const THIN_LINE_WIDTH: f32 = 1.0;
+
+/// Margin for `ZoomToFit` when framing a scene or entity.
+pub const ZOOM_TO_FIT_MARGIN: f32 = 0.05;

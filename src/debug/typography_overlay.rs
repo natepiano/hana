@@ -395,24 +395,21 @@ fn spawn_bounding_box_callout(
     let label_size = font_size * LABEL_SIZE_RATIO;
     let z = 0.002;
 
-    let first = &computed.glyph_rects[0];
-    let first_x = first[0];
-    let first_y = first[1];
-    let first_w = first[2];
-    let first_h = first[3];
+    let last = computed.glyph_rects.last().unwrap();
+    let last_x = last[0];
+    let last_y = last[1];
+    let last_w = last[2];
+    let last_h = last[3];
 
-    // Shelf starts at right edge of first bbox, at vertical midpoint.
-    let shelf_left_x = first_x + first_w;
-    let shelf_y = first_y - first_h / 2.0;
+    // Shelf starts at right edge of last bbox, at vertical midpoint.
+    let shelf_right_x = last_x + last_w;
+    let shelf_y = last_y - last_h / 2.0;
 
-    // Shelf extends rightward by half the gap to the second glyph.
-    let shelf_len = if computed.glyph_rects.len() >= 2 {
-        let second_x = computed.glyph_rects[1][0];
-        (second_x - shelf_left_x) / 2.0
-    } else {
-        label_gap(font_size)
-    };
-    let shelf_right_x = shelf_left_x + shelf_len;
+    // Shelf extends rightward, then riser goes up. Label sits to the
+    // left of the riser (CenterRight anchor) so it's always clear of
+    // adjacent glyphs even when bounding boxes overlap.
+    let shelf_len = arrow_spacing(computed.first_advance) / 2.0;
+    let shelf_end_x = shelf_right_x + shelf_len;
 
     // Vertical line goes up to halfway between Cap Height and Ascent.
     let baseline_y_layout = line_metrics.baseline;
@@ -424,14 +421,14 @@ fn spawn_bounding_box_callout(
     let mut callout_gizmo = GizmoAsset::default();
     // Horizontal shelf.
     callout_gizmo.line(
-        Vec3::new(shelf_left_x, shelf_y, z),
         Vec3::new(shelf_right_x, shelf_y, z),
+        Vec3::new(shelf_end_x, shelf_y, z),
         bbox_color,
     );
     // Vertical riser.
     callout_gizmo.line(
-        Vec3::new(shelf_right_x, shelf_y, z),
-        Vec3::new(shelf_right_x, callout_top_world, z),
+        Vec3::new(shelf_end_x, shelf_y, z),
+        Vec3::new(shelf_end_x, callout_top_world, z),
         bbox_color,
     );
 
@@ -447,7 +444,7 @@ fn spawn_bounding_box_callout(
         Transform::IDENTITY,
     ));
 
-    // Label at the top of the riser, same height as Ascent label.
+    // Label at the top of the riser, to the left (CenterRight anchor).
     let ascent_mid_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y);
     commands.entity(entity).with_child((
@@ -455,9 +452,9 @@ fn spawn_bounding_box_callout(
         TextStyle::new()
             .with_size(label_size)
             .with_color(bbox_color)
-            .with_anchor(TextAnchor::CenterLeft)
+            .with_anchor(TextAnchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
-        Transform::from_xyz(shelf_right_x + label_gap(font_size), ascent_mid_world, z),
+        Transform::from_xyz(shelf_end_x - label_gap(font_size), ascent_mid_world, z),
     ));
 }
 

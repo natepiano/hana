@@ -5,6 +5,7 @@
 mod constants;
 mod typography_overlay;
 
+pub use constants::ZOOM_TO_FIT_MARGIN;
 pub use typography_overlay::TypographyOverlay;
 pub use typography_overlay::build_typography_overlay;
 pub use typography_overlay::on_overlay_added;

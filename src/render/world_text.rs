@@ -288,7 +288,7 @@ fn shape_world_text(
             }
         }
         if !all_ready {
-            return (Vec::new(), 0.0, 0.0, 0.0, Vec::new());
+            return (Vec::new(), 0.0, 0.0, Vec::new(), 0.0);
         }
     }
 
