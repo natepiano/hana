@@ -1,6 +1,7 @@
 //! Standalone world-space text component and rendering system.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
@@ -10,6 +11,7 @@ use super::glyph_quad::build_glyph_mesh;
 use super::glyph_quad::clip_overlapping_quads;
 use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer::ShapedTextCache;
+use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
 use super::text_renderer::shape_text_cached;
 use crate::layout::GlyphLoadingPolicy;
@@ -20,6 +22,7 @@ use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
+use crate::text::GlyphLookup;
 use crate::text::MsdfAtlas;
 
 /// Computed layout data for a [`WorldText`] entity, populated by the
@@ -112,8 +115,13 @@ pub(super) fn render_world_text(
     } else {
         changed_texts.iter().collect()
     };
+    let total_start = Instant::now();
+    let mut text_count = 0_usize;
+    let mut text_stats = TextBuildStats::default();
+    let mut mesh_ms_total = 0.0_f32;
 
     for (entity, world_text, style) in texts_iter {
+        text_count += 1;
         if world_text.0.is_empty() {
             // Despawn old meshes for empty text.
             for (mesh_entity, child_of) in &old_meshes {
@@ -125,7 +133,7 @@ pub(super) fn render_world_text(
         }
 
         // Shape text and build quads in entity-local coordinates.
-        let (quads, anchor_x, anchor_y, text_width, glyph_rects) = shape_world_text(
+        let (quads, anchor_x, anchor_y, text_width, glyph_rects, build_stats) = shape_world_text(
             &world_text.0,
             style,
             &font_registry,
@@ -133,6 +141,7 @@ pub(super) fn render_world_text(
             &shaping_cx,
             &mut cache,
         );
+        text_stats.accumulate(&build_stats);
 
         // Store computed layout data for the typography overlay.
         #[cfg(feature = "typography_overlay")]
@@ -184,6 +193,7 @@ pub(super) fn render_world_text(
                 continue;
             };
 
+            let mesh_start = Instant::now();
             let mesh = build_glyph_mesh(pq);
             let mesh_handle = meshes.add(mesh);
 
@@ -245,7 +255,28 @@ pub(super) fn render_world_text(
                     Transform::IDENTITY,
                 ));
             }
+            mesh_ms_total += mesh_start.elapsed().as_secs_f32() * 1000.0;
         }
+    }
+
+    let total_ms = total_start.elapsed().as_secs_f32() * 1000.0;
+    if total_ms > 5.0
+        || rebuild_all
+        || text_stats.queued_glyphs > 0
+        || text_stats.pending_glyphs > 0
+    {
+        bevy::log::info!(
+            "render_world_text: total={total_ms:.1}ms texts={} shape={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={} rebuild_all={}",
+            text_count,
+            text_stats.shape_ms,
+            text_stats.atlas_ms,
+            text_stats.glyphs,
+            text_stats.ready_glyphs,
+            text_stats.queued_glyphs,
+            text_stats.pending_glyphs,
+            text_stats.emitted_quads,
+            rebuild_all,
+        );
     }
 }
 
@@ -268,16 +299,31 @@ fn shape_world_text(
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Vec<(u32, GlyphQuadData)>, f32, f32, f32, Vec<[f32; 4]>) {
+) -> (
+    Vec<(u32, GlyphQuadData)>,
+    f32,
+    f32,
+    f32,
+    Vec<[f32; 4]>,
+    TextBuildStats,
+) {
     // Convert TextStyle to TextConfig for shaping (same underlying fields).
     let config = style.as_layout_config();
 
+    let mut stats = TextBuildStats {
+        texts: 1,
+        ..Default::default()
+    };
+    let shape_start = Instant::now();
     let shaped = shape_text_cached(text, &config, font_registry, shaping_cx, cache);
+    stats.shape_ms = shape_start.elapsed().as_secs_f32() * 1000.0;
+    stats.glyphs = shaped.glyphs.len();
 
     let font_data = font_registry
         .font(FontId(style.font_id()))
         .map_or(crate::text::EMBEDDED_FONT, Font::data);
 
+    let atlas_start = Instant::now();
     // Under `WhenReady`, trigger async rasterization for every glyph but
     // emit nothing until the entire string is cached in the atlas.
     if style.loading_policy() == GlyphLoadingPolicy::WhenReady {
@@ -287,12 +333,21 @@ fn shape_world_text(
                 font_id:     style.font_id(),
                 glyph_index: sg.glyph_id,
             };
-            if atlas.get_or_insert(glyph_key, font_data).is_none() {
-                all_ready = false;
+            match atlas.lookup_or_queue(glyph_key, font_data) {
+                GlyphLookup::Ready(_) => {}
+                GlyphLookup::Pending => {
+                    stats.pending_glyphs += 1;
+                    all_ready = false;
+                },
+                GlyphLookup::Queued => {
+                    stats.queued_glyphs += 1;
+                    all_ready = false;
+                },
             }
         }
         if !all_ready {
-            return (Vec::new(), 0.0, 0.0, 0.0, Vec::new());
+            stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+            return (Vec::new(), 0.0, 0.0, 0.0, Vec::new(), stats);
         }
     }
 
@@ -334,8 +389,19 @@ fn shape_world_text(
             glyph_index: sg.glyph_id,
         };
 
-        let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) else {
-            continue;
+        let metrics = match atlas.lookup_or_queue(glyph_key, font_data) {
+            GlyphLookup::Ready(metrics) => {
+                stats.ready_glyphs += 1;
+                metrics
+            },
+            GlyphLookup::Pending => {
+                stats.pending_glyphs += 1;
+                continue;
+            },
+            GlyphLookup::Queued => {
+                stats.queued_glyphs += 1;
+                continue;
+            },
         };
 
         #[allow(clippy::cast_precision_loss)]
@@ -367,7 +433,10 @@ fn shape_world_text(
     #[cfg(not(feature = "typography_overlay"))]
     let ink_rects = Vec::new();
 
-    (quads, anchor_x, anchor_y, max_x, ink_rects)
+    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+    stats.emitted_quads = quads.len();
+
+    (quads, anchor_x, anchor_y, max_x, ink_rects, stats)
 }
 
 /// Computes a glyph's visible ink rect from its font bounding box.

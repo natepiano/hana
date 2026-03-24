@@ -37,6 +37,46 @@ pub struct DiegeticPerfStats {
     pub last_text_extract_ms:     f32,
     /// Number of panels processed by the most recent text extraction run.
     pub last_text_extract_panels: usize,
+    /// Time spent shaping text during the most recent panel text extraction.
+    pub last_text_shape_ms:       f32,
+    /// Time spent in atlas lookups/queueing during the most recent panel text extraction.
+    pub last_text_atlas_ms:       f32,
+    /// Time spent spawning mesh/material batches during the most recent panel text extraction.
+    pub last_text_spawn_ms:       f32,
+    /// Number of glyphs newly queued for rasterization during the most recent panel text extraction.
+    pub last_text_queued_glyphs:  usize,
+    /// Number of glyphs still pending rasterization during the most recent panel text extraction.
+    pub last_text_pending_glyphs: usize,
+    /// Time spent draining async atlas results in the most recent atlas poll.
+    pub last_atlas_poll_ms:       f32,
+    /// Time spent syncing dirty atlas pages to GPU images in the most recent atlas poll.
+    pub last_atlas_sync_ms:       f32,
+    /// Number of completed async glyph jobs drained by the most recent atlas poll.
+    pub last_atlas_completed_glyphs: usize,
+    /// Number of visible glyphs inserted into atlas pages by the most recent atlas poll.
+    pub last_atlas_inserted_glyphs: usize,
+    /// Number of invisible glyph entries cached by the most recent atlas poll.
+    pub last_atlas_invisible_glyphs: usize,
+    /// Number of atlas pages added by the most recent atlas poll.
+    pub last_atlas_pages_added: usize,
+    /// Number of dirty atlas pages observed before the most recent GPU sync.
+    pub last_atlas_dirty_pages: usize,
+    /// Number of glyph raster jobs still in flight after the most recent atlas poll.
+    pub last_atlas_in_flight_glyphs: usize,
+    /// Number of glyph raster jobs actively executing at the end of the most recent atlas poll.
+    pub last_atlas_active_jobs: usize,
+    /// Peak concurrently executing glyph raster jobs observed so far.
+    pub last_atlas_peak_active_jobs: usize,
+    /// Number of distinct worker threads that completed jobs in the most recent atlas poll.
+    pub last_atlas_worker_threads: usize,
+    /// Average worker-side glyph raster duration for the most recent drained batch.
+    pub last_atlas_avg_raster_ms: f32,
+    /// Maximum worker-side glyph raster duration for the most recent drained batch.
+    pub last_atlas_max_raster_ms: f32,
+    /// Highest active-job count reported by any job in the most recent drained batch.
+    pub last_atlas_batch_max_active_jobs: usize,
+    /// Total number of glyphs currently cached in the atlas.
+    pub last_atlas_total_glyphs: usize,
 }
 
 /// Recomputes layout for panels whose [`DiegeticPanel`] component has changed.

@@ -1,6 +1,7 @@
 //! Atlas configuration types for the diegetic UI plugin.
 
 use bevy::prelude::*;
+use bevy::tasks::available_parallelism;
 
 /// Minimum canonical rasterization size in pixels.
 const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
@@ -16,6 +17,9 @@ const MAX_GLYPHS_PER_PAGE: u16 = 2000;
 
 /// Default glyphs per atlas page.
 const DEFAULT_GLYPHS_PER_PAGE: u16 = 100;
+
+/// Default auto-selected glyph raster worker count on sufficiently parallel machines.
+const DEFAULT_AUTO_GLYPH_WORKER_THREADS: usize = 6;
 
 /// Controls the pixel resolution of MSDF glyph rasterization.
 ///
@@ -71,16 +75,44 @@ impl RasterQuality {
     }
 }
 
+/// Controls how many worker threads are used for async glyph rasterization.
+///
+/// This setting applies to the shared MSDF text pipeline used by both
+/// diegetic panels and standalone [`WorldText`](crate::WorldText).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum GlyphWorkerThreads {
+    /// Use the crate's default heuristic: currently up to 6 worker threads,
+    /// clamped to the machine's available parallelism.
+    #[default]
+    Auto,
+    /// Request an explicit worker count. Values are clamped to the safe
+    /// range `1..=available_parallelism()`, with a warning.
+    Fixed(usize),
+}
+
+impl GlyphWorkerThreads {
+    /// Resolves this policy to a concrete worker count for the current machine.
+    #[must_use]
+    pub fn resolve(self) -> usize {
+        let available = available_parallelism().max(1);
+        match self {
+            Self::Auto => DEFAULT_AUTO_GLYPH_WORKER_THREADS.min(available),
+            Self::Fixed(count) => count.clamp(1, available),
+        }
+    }
+}
+
 /// Configuration for the MSDF glyph atlas.
 ///
 /// Controls how glyphs are rasterized and how atlas pages are sized.
-/// Pass to [`DiegeticUiPlugin::with_atlas_config`] to override defaults.
+/// Pass to [`DiegeticUiPlugin::with_atlas`](crate::DiegeticUiPlugin::with_atlas)
+/// to override defaults.
 ///
 /// # Memory estimation
 ///
 /// Each atlas page is an RGBA texture. The page size is computed
 /// automatically from the raster quality and glyphs-per-page budget.
-/// When you call [`DiegeticUiPlugin::with_atlas_config`], an `info!`
+/// When you call [`DiegeticUiPlugin::with_atlas`](crate::DiegeticUiPlugin::with_atlas), an `info!`
 /// log shows the estimated memory per page so you can tune for your
 /// target platform.
 ///
@@ -88,6 +120,8 @@ impl RasterQuality {
 ///
 /// - **Quality**: [`RasterQuality::High`] (64px) — sharp at extreme zoom
 /// - **Glyphs per page**: 100 — fits most Latin text comfortably
+/// - **Glyph worker threads**: [`GlyphWorkerThreads::Auto`] — currently up to
+///   6 worker threads, clamped to the machine's available parallelism
 ///
 /// # Example
 ///
@@ -114,6 +148,10 @@ pub struct AtlasConfig {
     /// reduce per-page memory but may increase the number of pages (and
     /// draw calls) for text-heavy apps. Clamped to 10–2000.
     pub glyphs_per_page: u16,
+
+    /// Async worker policy for MSDF glyph rasterization. Applies to both
+    /// panel text and [`WorldText`](crate::WorldText).
+    pub glyph_worker_threads: GlyphWorkerThreads,
 }
 
 impl AtlasConfig {
@@ -121,8 +159,9 @@ impl AtlasConfig {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            quality:         RasterQuality::High,
-            glyphs_per_page: DEFAULT_GLYPHS_PER_PAGE,
+            quality:              RasterQuality::High,
+            glyphs_per_page:      DEFAULT_GLYPHS_PER_PAGE,
+            glyph_worker_threads: GlyphWorkerThreads::Auto,
         }
     }
 }
@@ -130,8 +169,9 @@ impl AtlasConfig {
 impl Default for AtlasConfig {
     fn default() -> Self {
         Self {
-            quality:         RasterQuality::default(),
-            glyphs_per_page: DEFAULT_GLYPHS_PER_PAGE,
+            quality:              RasterQuality::default(),
+            glyphs_per_page:      DEFAULT_GLYPHS_PER_PAGE,
+            glyph_worker_threads: GlyphWorkerThreads::default(),
         }
     }
 }
@@ -152,6 +192,10 @@ impl AtlasConfig {
             self.glyphs_per_page
         }
     }
+
+    /// Returns the resolved glyph worker count for this machine.
+    #[must_use]
+    pub fn clamped_glyph_worker_threads(&self) -> usize { self.glyph_worker_threads.resolve() }
 
     /// Computes the atlas page size in pixels for this configuration.
     ///
@@ -205,12 +249,22 @@ impl AtlasConfig {
                 self.glyphs_per_page, MIN_GLYPHS_PER_PAGE, MAX_GLYPHS_PER_PAGE
             );
         }
+        if let GlyphWorkerThreads::Fixed(count) = self.glyph_worker_threads {
+            let available = available_parallelism().max(1);
+            if !(1..=available).contains(&count) {
+                warn!(
+                    "AtlasConfig: glyph_worker_threads {} clamped to 1–{} range",
+                    count, available
+                );
+            }
+        }
 
         let page_size = self.page_size();
         let bytes = self.estimated_page_bytes();
         let kb = bytes / 1024;
+        let worker_threads = self.clamped_glyph_worker_threads();
         info!(
-            "Atlas config: {:?}, ~{} glyphs/page (estimate), {page_size}x{page_size}px pages (~{kb}KB each)",
+            "Atlas config: {:?}, ~{} glyphs/page (estimate), {page_size}x{page_size}px pages (~{kb}KB each), {worker_threads} glyph workers",
             self.quality,
             self.clamped_glyphs_per_page()
         );
@@ -270,7 +324,25 @@ mod tests {
         let config = AtlasConfig::default();
         assert_eq!(config.quality, RasterQuality::High);
         assert_eq!(config.glyphs_per_page, 100);
+        assert_eq!(config.glyph_worker_threads, GlyphWorkerThreads::Auto);
         assert_eq!(config.canonical_size(), 64);
+    }
+
+    #[test]
+    fn glyph_worker_threads_auto_resolves_to_at_most_six() {
+        let resolved = GlyphWorkerThreads::Auto.resolve();
+        assert!(resolved >= 1);
+        assert!(resolved <= available_parallelism().max(1));
+        assert!(resolved <= DEFAULT_AUTO_GLYPH_WORKER_THREADS);
+    }
+
+    #[test]
+    fn glyph_worker_threads_fixed_clamps() {
+        assert_eq!(GlyphWorkerThreads::Fixed(0).resolve(), 1);
+        assert_eq!(
+            GlyphWorkerThreads::Fixed(usize::MAX).resolve(),
+            available_parallelism().max(1)
+        );
     }
 
     #[test]
@@ -285,6 +357,7 @@ mod tests {
                 let config = AtlasConfig {
                     quality,
                     glyphs_per_page: glyphs,
+                    glyph_worker_threads: GlyphWorkerThreads::Auto,
                 };
                 let size = config.page_size();
                 assert_eq!(

@@ -455,7 +455,6 @@ fn eb_garamond_shape_and_rasterize() {
 fn eb_garamond_measure_timing() {
     use std::sync::Arc;
     use std::sync::Mutex;
-    use std::sync::PoisonError;
 
     let mut font_cx = parley::FontContext::default();
     font_cx

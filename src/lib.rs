@@ -85,6 +85,7 @@ pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
 pub use plugin::DiegeticUiPluginConfigured;
+pub use plugin::GlyphWorkerThreads;
 pub use plugin::HueOffset;
 pub use plugin::LayoutPlugin;
 pub use plugin::RasterQuality;

@@ -26,6 +26,7 @@ mod parley_measurer_tests;
 
 pub use atlas::GlyphKey;
 pub use atlas::MsdfAtlas;
+pub(crate) use atlas::GlyphLookup;
 pub use font::Font;
 pub use font::FontMetrics;
 #[cfg(feature = "typography_overlay")]

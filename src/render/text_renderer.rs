@@ -28,6 +28,7 @@ use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
+use crate::text::GlyphLookup;
 use crate::text::MsdfAtlas;
 
 /// Z offset for text layer (above rectangles, below borders).
@@ -217,6 +218,32 @@ struct SharedMsdfMaterials {
     handles: HashMap<u32, Handle<MsdfTextMaterial>>,
 }
 
+/// Timing and queue diagnostics gathered while building text quads.
+#[derive(Clone, Debug, Default)]
+pub(super) struct TextBuildStats {
+    pub texts:         usize,
+    pub glyphs:        usize,
+    pub ready_glyphs:  usize,
+    pub queued_glyphs: usize,
+    pub pending_glyphs: usize,
+    pub emitted_quads: usize,
+    pub shape_ms:      f32,
+    pub atlas_ms:      f32,
+}
+
+impl TextBuildStats {
+    pub(super) fn accumulate(&mut self, other: &Self) {
+        self.texts += other.texts;
+        self.glyphs += other.glyphs;
+        self.ready_glyphs += other.ready_glyphs;
+        self.queued_glyphs += other.queued_glyphs;
+        self.pending_glyphs += other.pending_glyphs;
+        self.emitted_quads += other.emitted_quads;
+        self.shape_ms += other.shape_ms;
+        self.atlas_ms += other.atlas_ms;
+    }
+}
+
 /// Plugin that adds MSDF text rendering for diegetic panels.
 ///
 /// Registers the [`MsdfTextMaterial`], adds the text extraction system,
@@ -230,6 +257,7 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterials>();
         app.init_resource::<GlyphsReady>();
+        app.init_resource::<DiegeticPerfStats>();
         app.add_systems(
             PostUpdate,
             (
@@ -250,16 +278,59 @@ fn poll_atlas_glyphs(
     mut images: ResMut<Assets<Image>>,
     mut ready: ResMut<GlyphsReady>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
+    mut perf: ResMut<DiegeticPerfStats>,
 ) {
     // Clear last frame's flag before polling new results.
     ready.0 = false;
+    let poll_start = Instant::now();
+    let poll_stats = atlas.poll_async_glyphs_stats();
+    let poll_ms = poll_start.elapsed().as_secs_f32() * 1000.0;
+    let dirty_pages = atlas.dirty_page_count();
+    let mut sync_ms = 0.0;
 
-    if atlas.poll_async_glyphs() {
+    if poll_stats.inserted > 0 || poll_stats.invisible > 0 {
+        let sync_start = Instant::now();
         atlas.sync_to_gpu(&mut images);
+        sync_ms = sync_start.elapsed().as_secs_f32() * 1000.0;
         ready.0 = true;
         // Invalidate all shared materials so they get recreated with
         // updated atlas textures on the next extract_text_meshes run.
         shared_mats.handles.clear();
+    }
+
+    perf.last_atlas_poll_ms = poll_ms;
+    perf.last_atlas_sync_ms = sync_ms;
+    perf.last_atlas_completed_glyphs = poll_stats.completed;
+    perf.last_atlas_inserted_glyphs = poll_stats.inserted;
+    perf.last_atlas_invisible_glyphs = poll_stats.invisible;
+    perf.last_atlas_pages_added = poll_stats.pages_added;
+    perf.last_atlas_dirty_pages = dirty_pages;
+    perf.last_atlas_in_flight_glyphs = atlas.in_flight_count();
+    perf.last_atlas_active_jobs = atlas.active_job_count();
+    perf.last_atlas_peak_active_jobs = atlas.peak_active_job_count();
+    perf.last_atlas_worker_threads = poll_stats.worker_threads;
+    perf.last_atlas_avg_raster_ms = poll_stats.avg_raster_ms;
+    perf.last_atlas_max_raster_ms = poll_stats.max_raster_ms;
+    perf.last_atlas_batch_max_active_jobs = poll_stats.max_active_jobs;
+    perf.last_atlas_total_glyphs = atlas.glyph_count();
+
+    if poll_stats.completed > 0 || sync_ms > 0.0 {
+        bevy::log::info!(
+            "poll_atlas_glyphs: poll={poll_ms:.2}ms sync={sync_ms:.2}ms completed={} inserted={} invisible={} pages_added={} dirty_pages={} in_flight={} active_jobs={} peak_active={} workers={} avg_raster={:.2}ms max_raster={:.2}ms batch_max_active={} total_glyphs={}",
+            poll_stats.completed,
+            poll_stats.inserted,
+            poll_stats.invisible,
+            poll_stats.pages_added,
+            dirty_pages,
+            atlas.in_flight_count(),
+            atlas.active_job_count(),
+            atlas.peak_active_job_count(),
+            poll_stats.worker_threads,
+            poll_stats.avg_raster_ms,
+            poll_stats.max_raster_ms,
+            poll_stats.max_active_jobs,
+            atlas.glyph_count(),
+        );
     }
 }
 
@@ -299,11 +370,18 @@ fn extract_text_meshes(
     if !rebuild_all && changed_panels.is_empty() {
         perf.last_text_extract_ms = 0.0;
         perf.last_text_extract_panels = 0;
+        perf.last_text_shape_ms = 0.0;
+        perf.last_text_atlas_ms = 0.0;
+        perf.last_text_spawn_ms = 0.0;
+        perf.last_text_queued_glyphs = 0;
+        perf.last_text_pending_glyphs = 0;
         return;
     }
 
     let start = Instant::now();
     let mut panel_count = 0_usize;
+    let mut spawn_ms_total = 0.0_f32;
+    let mut text_stats = TextBuildStats::default();
 
     // Ensure at least page 0 has a GPU image.
     if atlas.image_handle(0).is_none() {
@@ -339,7 +417,7 @@ fn extract_text_meshes(
                 _ => continue,
             };
 
-            let tagged_quads = shape_text_to_quads(
+            let (tagged_quads, build_stats) = shape_text_to_quads(
                 text,
                 &config,
                 &cmd.bounds,
@@ -352,6 +430,7 @@ fn extract_text_meshes(
                 half_w,
                 half_h,
             );
+            text_stats.accumulate(&build_stats);
 
             for (page_index, quad) in tagged_quads {
                 let key = TextBatchKey {
@@ -379,6 +458,7 @@ fn extract_text_meshes(
             }
         }
 
+        let spawn_start = Instant::now();
         spawn_batch_meshes(
             &batches,
             panel_entity,
@@ -389,14 +469,36 @@ fn extract_text_meshes(
             &mut shared_mats,
             &mut commands,
         );
+        spawn_ms_total += spawn_start.elapsed().as_secs_f32() * 1000.0;
     }
 
     let extract_ms = start.elapsed().as_secs_f32() * 1000.0;
-    if extract_ms > 10.0 {
-        bevy::log::warn!("extract_text_meshes: {extract_ms:.1}ms for {panel_count} panels");
+    if extract_ms > 5.0
+        || ready.0
+        || text_stats.queued_glyphs > 0
+        || text_stats.pending_glyphs > 0
+    {
+        bevy::log::info!(
+            "extract_text_meshes: total={extract_ms:.1}ms panels={} texts={} shape={:.1}ms atlas={:.1}ms spawn={spawn_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={} rebuild_all={}",
+            panel_count,
+            text_stats.texts,
+            text_stats.shape_ms,
+            text_stats.atlas_ms,
+            text_stats.glyphs,
+            text_stats.ready_glyphs,
+            text_stats.queued_glyphs,
+            text_stats.pending_glyphs,
+            text_stats.emitted_quads,
+            rebuild_all,
+        );
     }
     perf.last_text_extract_ms = extract_ms;
     perf.last_text_extract_panels = panel_count;
+    perf.last_text_shape_ms = text_stats.shape_ms;
+    perf.last_text_atlas_ms = text_stats.atlas_ms;
+    perf.last_text_spawn_ms = spawn_ms_total;
+    perf.last_text_queued_glyphs = text_stats.queued_glyphs;
+    perf.last_text_pending_glyphs = text_stats.pending_glyphs;
 }
 
 /// Spawns visible mesh and optional shadow proxy entities for each batch
@@ -642,13 +744,21 @@ fn shape_text_to_quads(
     scale_y: f32,
     half_w: f32,
     half_h: f32,
-) -> Vec<(u32, GlyphQuadData)> {
+) -> (Vec<(u32, GlyphQuadData)>, TextBuildStats) {
+    let mut stats = TextBuildStats {
+        texts: 1,
+        ..Default::default()
+    };
+    let shape_start = Instant::now();
     let shaped = shape_text_cached(text, config, font_registry, shaping_cx, cache);
+    stats.shape_ms = shape_start.elapsed().as_secs_f32() * 1000.0;
+    stats.glyphs = shaped.glyphs.len();
 
     let font_data = font_registry
         .font(FontId(config.font_id()))
         .map_or(crate::text::EMBEDDED_FONT, Font::data);
 
+    let atlas_start = Instant::now();
     // Under `WhenReady`, trigger async rasterization for every glyph but
     // emit nothing until the entire string is cached in the atlas.
     if config.loading_policy() == GlyphLoadingPolicy::WhenReady {
@@ -658,12 +768,21 @@ fn shape_text_to_quads(
                 font_id:     config.font_id(),
                 glyph_index: sg.glyph_id,
             };
-            if atlas.get_or_insert(glyph_key, font_data).is_none() {
-                all_ready = false;
+            match atlas.lookup_or_queue(glyph_key, font_data) {
+                GlyphLookup::Ready(_) => {}
+                GlyphLookup::Pending => {
+                    stats.pending_glyphs += 1;
+                    all_ready = false;
+                },
+                GlyphLookup::Queued => {
+                    stats.queued_glyphs += 1;
+                    all_ready = false;
+                },
             }
         }
         if !all_ready {
-            return Vec::new();
+            stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+            return (Vec::new(), stats);
         }
     }
 
@@ -680,8 +799,19 @@ fn shape_text_to_quads(
             glyph_index: sg.glyph_id,
         };
 
-        let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) else {
-            continue;
+        let metrics = match atlas.lookup_or_queue(glyph_key, font_data) {
+            GlyphLookup::Ready(metrics) => {
+                stats.ready_glyphs += 1;
+                metrics
+            },
+            GlyphLookup::Pending => {
+                stats.pending_glyphs += 1;
+                continue;
+            },
+            GlyphLookup::Queued => {
+                stats.queued_glyphs += 1;
+                continue;
+            },
         };
 
         // Glyph position in layout coordinates (Y-down).
@@ -714,8 +844,10 @@ fn shape_text_to_quads(
     }
 
     super::glyph_quad::clip_overlapping_quads(&mut quads);
+    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+    stats.emitted_quads = quads.len();
 
-    quads
+    (quads, stats)
 }
 
 /// Syncs [`HueOffset`] to text materials on child meshes.
