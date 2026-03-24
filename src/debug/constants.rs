@@ -4,11 +4,24 @@
 /// unit between arrow columns.
 pub const ARROW_SPACING_RATIO: f32 = 0.25;
 
+/// Gap between labels and the elements they annotate, relative to font size.
+/// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
+pub const LABEL_GAP_RATIO: f32 = 0.02;
+
 /// Default line width for overlay gizmos (in pixels).
 pub const DEFAULT_LINE_WIDTH: f32 = 0.5;
 
-/// Radius of origin and advancement dots (world units).
-pub const DOT_RADIUS: f32 = 0.005;
+/// Radius of origin/advancement dots relative to font size.
+/// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
+pub const DOT_RADIUS_RATIO: f32 = 0.01;
+
+/// Arrowhead line length relative to font size.
+/// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
+pub const ARROWHEAD_RATIO: f32 = 0.017;
+
+/// Gap between arrow tips and metric lines relative to font size.
+/// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
+pub const ARROW_GAP_RATIO: f32 = 0.012;
 
 /// Label for the advancement dimension arrow.
 pub const LABEL_ADVANCEMENT: &str = "advancement";

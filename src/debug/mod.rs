@@ -7,3 +7,5 @@ mod typography_overlay;
 
 pub use typography_overlay::TypographyOverlay;
 pub use typography_overlay::build_typography_overlay;
+pub use typography_overlay::on_overlay_added;
+pub use typography_overlay::on_overlay_removed;

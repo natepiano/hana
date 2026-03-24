@@ -217,5 +217,9 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>) {
         .add_systems(Update, render_panel_gizmos.after(compute_panel_layouts));
 
     #[cfg(feature = "typography_overlay")]
-    app.add_systems(Update, crate::debug::build_typography_overlay);
+    {
+        app.add_observer(crate::debug::on_overlay_added);
+        app.add_observer(crate::debug::on_overlay_removed);
+        app.add_systems(Update, crate::debug::build_typography_overlay);
+    }
 }
