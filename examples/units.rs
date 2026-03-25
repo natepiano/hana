@@ -27,15 +27,9 @@ use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_inspector_egui::bevy_egui::EguiPlugin;
-use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
-use bevy_inspector_egui::prelude::ReflectInspectorOptions;
-use bevy_inspector_egui::quick::ResourceInspectorPlugin;
-use bevy_inspector_egui::InspectorOptions;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::CameraMoveList;
 use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
 use bevy_panorbit_camera_ext::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
@@ -84,11 +78,8 @@ fn main() {
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
-            EguiPlugin::default(),
             DiegeticUiPlugin,
-            ResourceInspectorPlugin::<CameraSettings>::default(),
         ))
-        .init_resource::<CameraSettings>()
         .add_systems(Startup, setup)
         .add_systems(Update, apply_camera_settings)
         .run();
@@ -208,7 +199,7 @@ fn setup(
         focus: Vec3::new(0.0, mid_y, 0.0),
         radius: Some(0.5),
         yaw: Some(0.0),
-        pitch: Some(0.0),
+        pitch: Some(0.1),
         button_orbit: MouseButton::Middle,
         button_pan: MouseButton::Middle,
         modifier_pan: Some(KeyCode::ShiftLeft),
@@ -223,53 +214,23 @@ fn setup(
     });
 }
 
-#[derive(Resource, Reflect, InspectorOptions)]
-#[reflect(Resource, InspectorOptions)]
-struct CameraSettings {
-    #[inspector(min = 0.00001, max = 1.0, display = NumberDisplay::Slider)]
-    near: f32,
-    #[inspector(min = 1.0, max = 10000.0, display = NumberDisplay::Slider)]
-    far:  f32,
-    #[inspector(min = 0.001, max = 2.0, display = NumberDisplay::Slider)]
-    fov:  f32,
-}
+const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_4;
+const MIN_FOV: f32 = 0.001;
+const FOV_THRESHOLD: f32 = 0.5;
 
-impl Default for CameraSettings {
-    fn default() -> Self {
-        Self {
-            near: 0.1,
-            far:  1000.0,
-            fov:  std::f32::consts::FRAC_PI_4,
-        }
-    }
-}
-
-fn apply_camera_settings(
-    settings: Res<CameraSettings>,
-    mut cameras: Query<(&mut Projection, &mut PanOrbitCamera, Option<&CameraMoveList>)>,
-) {
-    for (mut proj, mut poc, _animating) in &mut cameras {
-        let radius = poc.radius.unwrap_or(1.0);
+/// Narrows FOV as the camera gets closer to prevent frustum cone clipping.
+fn apply_camera_settings(mut cameras: Query<(&mut Projection, &mut PanOrbitCamera)>) {
+    for (mut proj, mut poc) in &mut cameras {
         if let Projection::Perspective(ref mut p) = *proj {
-            p.near = settings.near;
-            p.far = settings.far;
-
-            // Full FOV above 0.5m radius. Below that, narrow quadratically
-            // toward near-ortho to prevent frustum cone clipping.
             let radius = poc.radius.unwrap_or(1.0);
-            let new_fov = if radius >= 0.5 {
-                settings.fov
+            let new_fov = if radius >= FOV_THRESHOLD {
+                DEFAULT_FOV
             } else {
-                let t = radius / 0.5;
-                let min_fov = 0.001;
-                min_fov + (settings.fov - min_fov) * t * t
+                let t = radius / FOV_THRESHOLD;
+                MIN_FOV + (DEFAULT_FOV - MIN_FOV) * t * t
             };
 
             if (p.fov - new_fov).abs() > 0.0001 {
-                bevy::log::warn!(
-                    "FOV {:.4} → {:.4} radius={:.4}",
-                    p.fov, new_fov, radius,
-                );
                 p.fov = new_fov;
                 poc.force_update = true;
             }
