@@ -89,7 +89,7 @@ fn setup(
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(12.0, 12.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.3, 0.5, 0.3, 0.8),
+                base_color: Color::srgba(0.08, 0.08, 0.08, 0.8),
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
@@ -118,7 +118,14 @@ fn setup(
             illuminance: 5000.0,
             ..default()
         },
-        Transform::from_xyz(2.0, 6.0, 8.0).looking_at(Vec3::new(0.0, 2.0, 0.0), Vec3::Y),
+        Transform::from_xyz(2.0, 6.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(-2.0, 6.0, -8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Camera.

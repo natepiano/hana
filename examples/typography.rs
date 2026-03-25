@@ -169,7 +169,7 @@ fn setup(
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(5.4, 5.4))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.15, 0.15, 0.15),
+                base_color: Color::srgb(0.08, 0.08, 0.08),
                 double_sided: true,
                 cull_mode: None,
                 ..default()
@@ -224,7 +224,14 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(0.0, 1.5, 3.0).looking_at(Vec3::new(0.0, 0.0, -6.0), Vec3::Y),
+        Transform::from_xyz(0.0, 1.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 1.5, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Controls panel — upper left.

@@ -79,7 +79,7 @@ fn setup(
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.3, 0.5, 0.3),
+                base_color: Color::srgb(0.08, 0.08, 0.08),
                 double_sided: true,
                 cull_mode: None,
                 ..default()
@@ -129,15 +129,20 @@ fn setup(
         Transform::from_xyz(0.6, panel_center_y, 0.0),
     ));
 
-    // Light.
+    // Directional lights.
     commands.spawn((
-        PointLight {
-            intensity: 200_000.0,
+        DirectionalLight {
             shadows_enabled: true,
-            range: 30.0,
             ..default()
         },
-        Transform::from_xyz(0.0, panel_center_y, 4.0),
+        Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Camera.

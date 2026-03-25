@@ -215,7 +215,7 @@ fn setup(
         GroundPlane,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, STACK_DEPTH))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(0.3, 0.5, 0.3, 0.5),
+            base_color: Color::srgba(0.08, 0.08, 0.08, 0.5),
             alpha_mode: AlphaMode::Blend,
             double_sided: true,
             cull_mode: None,
@@ -223,15 +223,20 @@ fn setup(
         })),
     ));
 
-    // Point light.
+    // Directional lights.
     commands.spawn((
-        PointLight {
-            intensity: 500_000.0,
+        DirectionalLight {
             shadows_enabled: true,
-            range: 30.0,
             ..default()
         },
-        Transform::from_xyz(2.0, 5.0, 6.0),
+        Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Camera.

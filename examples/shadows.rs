@@ -135,7 +135,7 @@ fn setup(
     let ground = spawn_ground_and_backdrop(&mut commands, &mut meshes, &mut materials, &grid);
     spawn_grid_headers(&mut commands, ground, &render_modes, &shadow_modes, &grid);
     spawn_glyph_grid(&mut commands, ground, &render_modes, &shadow_modes, &grid);
-    spawn_lighting_and_camera(&mut commands, grid.grid_center_y);
+    spawn_lighting_and_camera(&mut commands);
     spawn_hud(&mut commands);
 }
 
@@ -151,7 +151,7 @@ fn spawn_ground_and_backdrop(
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(20.0, 20.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.3, 0.5, 0.3, 0.8),
+                base_color: Color::srgba(0.08, 0.08, 0.08, 0.8),
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
@@ -266,14 +266,21 @@ fn spawn_glyph_grid(
 }
 
 /// Spawns the directional light, ambient light, and camera.
-fn spawn_lighting_and_camera(commands: &mut Commands, grid_center_y: f32) {
+fn spawn_lighting_and_camera(commands: &mut Commands) {
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
             illuminance: 5000.0,
             ..default()
         },
-        Transform::from_xyz(0.0, 5.0, 8.0).looking_at(Vec3::new(0.0, grid_center_y, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 5.0, -8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     commands.spawn((

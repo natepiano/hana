@@ -96,7 +96,7 @@ fn spawn_ground(
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 8.0))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.15, 0.15, 0.2, 0.5),
+                base_color: Color::srgba(0.08, 0.08, 0.08, 0.5),
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
@@ -315,6 +315,13 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
             ..default()
         },
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(-4.0, 8.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     commands.spawn((PanOrbitCamera {
