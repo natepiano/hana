@@ -779,6 +779,9 @@ fn on_mesh_clicked(
     active_easing: Res<ActiveEasing>,
     time: Res<Time<Virtual>>,
 ) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     if time.is_paused() {
         return;
     }
@@ -805,6 +808,9 @@ fn on_ground_clicked(
     active_easing: Res<ActiveEasing>,
     time: Res<Time<Virtual>>,
 ) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     if time.is_paused() {
         return;
     }
@@ -829,6 +835,9 @@ fn on_below_clicked(
     active_easing: Res<ActiveEasing>,
     time: Res<Time<Virtual>>,
 ) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
     if time.is_paused() {
         return;
     }
