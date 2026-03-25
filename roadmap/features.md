@@ -31,13 +31,15 @@
 
 ## Phase 4 — Font ligatures & foundations
 
-| # | Feature                | Notes                                                              |
-|---|------------------------|--------------------------------------------------------------------|
-| 1 | Font ligatures         | Support OpenType GSUB ligatures (`::`, `->`, `=>`). Requires multi-character cluster quads spanning the full ligature width. Currently falls back to cmap glyph IDs. |
-| 2 | Text config cascade    | Default `TextConfig` on `DiegeticPanel` or any `El` container. All `b.text()` calls inside inherit it — child containers can override. Cascades like CSS inherited properties. Unlocks ergonomic styling for Phases 5–9. |
-| 3 | Panel rendering        | Real geometry replaces gizmo wireframes. Mesh quads for backgrounds/borders. Unlocks interaction (raycasting), images, corner radius. |
-| 4 | CJK font example       | Load Noto Sans JP, render Japanese text as `WorldText`. Validates multi-font + non-ASCII + multi-page atlas end-to-end. |
-| 5 | Physical font sizing   | Default `WorldText` scale matches real-world point sizes (1pt = 1/72 inch). Global `TextScale` resource + per-entity `TextScaleOverride` component. See [PHYSICAL_FONT_SIZING.md](PHYSICAL_FONT_SIZING.md). |
+| # | Feature                   | Notes                                                              |
+|---|---------------------------|--------------------------------------------------------------------|
+| 1 | Font ligatures            | ~~Support OpenType GSUB ligatures.~~ Done — `FontFeatureFlags` (liga, calt, dlig, kern), parley shaping. |
+| 2 | Panel rendering           | ~~Real geometry replaces gizmo wireframes.~~ Done — panels spawn `WorldText` children via `reconcile_panel_text_children`, unified readiness model with `PendingGlyphs` / `WorldTextReady`. |
+| 3 | Physical font sizing      | ~~Default `WorldText` scale matches real-world point sizes.~~ Done — `METERS_PER_POINT`, `TextScale` resource, `TextScaleOverride` per-entity. See [PHYSICAL_FONT_SIZING.md](PHYSICAL_FONT_SIZING.md). |
+| 4 | World/Text units          | Formalize the coordinate systems: layout units (points), world units (meters), and the conversion between them. Clear API boundaries for when each unit space applies. |
+| 5 | Type-safe font resolution | `ResolvedFont` couples font_id with font_data. Placeholder rendering with honest identity prevents atlas poisoning. Reactive `FontRegistered` observer swaps to real font when loaded. See [TYPE_SAFE_REACTIVE_FONTS.md](TYPE_SAFE_REACTIVE_FONTS.md). |
+| 6 | Text config cascade       | Default `TextConfig` on `DiegeticPanel` or any `El` container. All `b.text()` calls inside inherit it — child containers can override. Cascades like CSS inherited properties. Unlocks ergonomic styling for Phases 5–9. |
+| 7 | CJK font example          | Load Noto Sans JP, render Japanese text as `WorldText`. Validates multi-font + non-ASCII + multi-page atlas end-to-end. |
 
 ## Phase 5 — Text decoration
 
