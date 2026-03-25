@@ -92,6 +92,7 @@ pub(super) fn compute_panel_layouts(
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
+    unit_config: Res<super::UnitConfig>,
 ) {
     // Only process panels where DiegeticPanel actually changed.
     let changed_entities: Vec<Entity> = panels
@@ -157,16 +158,20 @@ pub(super) fn compute_panel_layouts(
         panel_count += 1;
 
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
+        let font_scale = panel_ref.font_scale(&unit_config);
         let result = engine.compute(
             &panel_ref.tree,
-            panel_ref.layout_width,
-            panel_ref.layout_height,
+            panel_ref.width,
+            panel_ref.height,
+            font_scale,
         );
 
         if let Some(bounds) = result.content_bounds() {
-            let scale_x = panel_ref.world_width / panel_ref.layout_width;
-            let scale_y = panel_ref.world_height / panel_ref.layout_height;
-            computed.set_content_size(bounds.width * scale_x, bounds.height * scale_y);
+            let mpu = panel_ref
+                .layout_unit
+                .unwrap_or(unit_config.layout)
+                .meters_per_unit();
+            computed.set_content_size(bounds.width * mpu, bounds.height * mpu);
         }
 
         computed.set_result(result);
@@ -200,16 +205,21 @@ pub(super) fn render_panel_gizmos(
     panels: Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
     mut gizmos: Gizmos<DiegeticPanelGizmoGroup>,
     show_text: Res<ShowTextGizmos>,
+    unit_config: Res<super::UnitConfig>,
 ) {
     for (panel, computed, global_transform) in &panels {
         let Some(result) = computed.result() else {
             continue;
         };
 
-        let scale_x = panel.world_width / panel.layout_width;
-        let scale_y = panel.world_height / panel.layout_height;
-        let half_w = panel.world_width * 0.5;
-        let half_h = panel.world_height * 0.5;
+        let mpu = panel
+            .layout_unit
+            .unwrap_or(unit_config.layout)
+            .meters_per_unit();
+        let scale_x = mpu;
+        let scale_y = mpu;
+        let half_w = panel.width * mpu * 0.5;
+        let half_h = panel.height * mpu * 0.5;
 
         for cmd in &result.commands {
             let z_offset = match &cmd.kind {
@@ -230,6 +240,22 @@ pub(super) fn render_panel_gizmos(
                 RenderCommandKind::Border { border } => border.color.with_alpha(0.2),
                 _ => continue,
             };
+
+            // DEBUG: log text command bounds
+            if matches!(&cmd.kind, RenderCommandKind::Text { .. }) {
+                let left = cmd.bounds.x.mul_add(scale_x, -half_w);
+                let top = (-cmd.bounds.y).mul_add(scale_y, half_h);
+                if let RenderCommandKind::Text { ref text, ref config } = cmd.kind {
+                    bevy::log::warn!(
+                        "GIZMO text: \"{:.20}\" bounds=({:.4}, {:.4}, w={:.4}, h={:.4}) \
+                         scale=({:.6}, {:.6}) half=({:.6}, {:.6}) \
+                         left={:.6} top={:.6} config.size={:.4}",
+                        text, cmd.bounds.x, cmd.bounds.y, cmd.bounds.width, cmd.bounds.height,
+                        scale_x, scale_y, half_w, half_h,
+                        left, top, config.size(),
+                    );
+                }
+            }
 
             draw_rect_outline(
                 &mut gizmos,
@@ -490,7 +516,12 @@ mod tests {
             let engine = LayoutEngine::new(Arc::clone(&measure));
             let iters = if rows <= 100 { 1000 } else { 100 };
             run_timing(&format!("engine_compute_{rows}_rows"), iters, || {
-                std::hint::black_box(engine.compute(&tree, PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT));
+                std::hint::black_box(engine.compute(
+                    &tree,
+                    PERF_LAYOUT_WIDTH,
+                    PERF_LAYOUT_HEIGHT,
+                    1.0,
+                ));
             });
         }
     }

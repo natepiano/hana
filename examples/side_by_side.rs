@@ -49,7 +49,8 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::ShowTextGizmos;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
-use bevy_diegetic::TextScale;
+use bevy_diegetic::Unit;
+use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -217,7 +218,10 @@ fn main() {
         .add_plugins(DiegeticUiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(WindowManagerPlugin)
-        .insert_resource(TextScale(0.01))
+        .insert_resource(UnitConfig {
+            layout: Unit::Meters,
+            font:   Unit::Custom(0.01),
+        })
         .init_gizmo_group::<ClayGizmoGroup>()
         .insert_resource(ShowTextGizmos(true))
         .init_resource::<ClayLayoutResult>()
@@ -336,7 +340,6 @@ fn setup(
     let layout_size = sizing.layout_size;
     let layout_height = layout_size * PANEL_ASPECT;
     let world_size = sizing.world_size;
-    let world_height = world_size * PANEL_ASPECT;
 
     // Clay panel (left) — just a marker entity for positioning + gizmo drawing.
     commands.spawn((ClayPanelMarker, Transform::from_xyz(-offset, 0.0, 0.0)));
@@ -347,10 +350,10 @@ fn setup(
     commands.spawn((
         DiegeticPanel {
             tree,
-            layout_width: layout_size,
-            layout_height,
-            world_width: world_size,
-            world_height,
+            width: layout_size,
+            height: layout_height,
+            layout_unit: Some(Unit::Custom(world_size / layout_size)),
+            ..default()
         },
         Transform::from_xyz(offset, 0.0, 0.0),
     ));
@@ -407,10 +410,9 @@ fn cycle_panel_size(
         for (mut t, mut panel) in &mut diegetic_panels {
             t.translation.x = offset;
             // Update panel dimensions to match new sizing.
-            panel.layout_width = sizing.layout_size;
-            panel.layout_height = sizing.layout_size * PANEL_ASPECT;
-            panel.world_width = sizing.world_size;
-            panel.world_height = sizing.world_size * PANEL_ASPECT;
+            panel.width = sizing.layout_size;
+            panel.height = sizing.layout_size * PANEL_ASPECT;
+            panel.layout_unit = Some(Unit::Custom(sizing.world_size / sizing.layout_size));
         }
     }
 }

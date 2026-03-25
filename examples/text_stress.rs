@@ -35,6 +35,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Unit;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -534,10 +535,10 @@ fn update_panels(
             StressPanel(idx),
             DiegeticPanel {
                 tree,
-                layout_width: MAX_LAYOUT_WIDTH,
-                layout_height: LAYOUT_HEIGHT,
-                world_width: ww,
-                world_height: wh,
+                width: MAX_LAYOUT_WIDTH,
+                height: LAYOUT_HEIGHT,
+                layout_unit: Some(Unit::Custom(SCALE)),
+                ..default()
             },
             panel_transform(idx, needed, ww, wh),
         ));

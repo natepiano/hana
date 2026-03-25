@@ -77,7 +77,7 @@ pub struct ComputedLayout {
 ///
 /// ```ignore
 /// let engine = LayoutEngine::new(measure_fn);
-/// let result = engine.compute(&tree, 800.0, 600.0);
+/// let result = engine.compute(&tree, 800.0, 600.0, 1.0);
 /// ```
 ///
 /// Viewport culling is always enabled — elements whose bounding box lies
@@ -96,11 +96,16 @@ impl LayoutEngine {
     /// Returns a list of render commands in draw order, and the computed layout
     /// for each element (indexed by element index).
     #[must_use]
+    /// Computes layout for the given tree within the specified viewport dimensions.
+    ///
+    /// `font_scale` converts font sizes from font units to layout units.
+    /// When font and layout units are the same, pass `1.0`.
     pub fn compute(
         &self,
         tree: &LayoutTree,
         viewport_width: f32,
         viewport_height: f32,
+        font_scale: f32,
     ) -> LayoutResult {
         let Some(root) = tree.root else {
             return LayoutResult::default();
@@ -110,7 +115,7 @@ impl LayoutEngine {
         let mut computed = vec![ComputedLayout::default(); element_count];
 
         // Initialize leaf sizes (text measurement, fixed values).
-        self.initialize_leaf_sizes(tree, &mut computed);
+        self.initialize_leaf_sizes(tree, &mut computed, font_scale);
 
         // Propagate Fit container sizes bottom-up from their children.
         propagate_fit_sizes(tree, &mut computed, root, true);
@@ -123,7 +128,7 @@ impl LayoutEngine {
         // This may change text heights (more lines), so we re-propagate Y
         // and re-size along Y afterwards — but only if wrapping actually changed sizes.
         let (wrapped, text_sizes_changed) =
-            rewrap_text_elements(tree, &mut computed, &self.measure_text);
+            rewrap_text_elements(tree, &mut computed, &self.measure_text, font_scale);
         if text_sizes_changed {
             propagate_fit_sizes(tree, &mut computed, root, false);
         }
@@ -139,13 +144,19 @@ impl LayoutEngine {
             &wrapped,
             viewport_width,
             viewport_height,
+            font_scale,
         );
 
         LayoutResult { computed, commands }
     }
 
     /// Initialize leaf element dimensions from text measurement and fixed sizing rules.
-    fn initialize_leaf_sizes(&self, tree: &LayoutTree, computed: &mut [ComputedLayout]) {
+    fn initialize_leaf_sizes(
+        &self,
+        tree: &LayoutTree,
+        computed: &mut [ComputedLayout],
+        font_scale: f32,
+    ) {
         for (index, element) in tree.elements.iter().enumerate() {
             // Set initial size from Fixed rules.
             computed[index].width = match element.width {
@@ -164,7 +175,7 @@ impl LayoutEngine {
                 ref config,
             } = element.content
             {
-                let dims = (self.measure_text)(text, &config.as_measure());
+                let dims = (self.measure_text)(text, &config.as_measure().scaled(font_scale));
                 computed[index].natural_text_width = dims.width;
                 if element.width.is_fit() {
                     computed[index].width = dims
@@ -226,8 +237,9 @@ fn wrap_text_words(
     config: &LayoutTextStyle,
     max_width: f32,
     measure: &MeasureTextFn,
+    font_scale: f32,
 ) -> WrappedText {
-    let text_measure = config.as_measure();
+    let text_measure = config.as_measure().scaled(font_scale);
     let space_dims = measure(" ", &text_measure);
     let line_height = space_dims.line_height;
     let space_width = space_dims.width;
@@ -305,8 +317,9 @@ fn wrap_text_newlines(
     text: &str,
     config: &LayoutTextStyle,
     measure: &MeasureTextFn,
+    font_scale: f32,
 ) -> WrappedText {
-    let text_measure = config.as_measure();
+    let text_measure = config.as_measure().scaled(font_scale);
     let mut lines = Vec::new();
     let mut line_height = 0.0_f32;
 
@@ -349,6 +362,7 @@ fn rewrap_text_elements(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     measure: &MeasureTextFn,
+    font_scale: f32,
 ) -> (Vec<Option<WrappedText>>, bool) {
     let mut wrapped: Vec<Option<WrappedText>> = (0..tree.len()).map(|_| None).collect();
     let mut any_changed = false;
@@ -376,14 +390,14 @@ fn rewrap_text_elements(
                     if !text.contains('\n') && natural_width <= max_width {
                         continue;
                     }
-                    wrap_text_words(text, config, max_width, measure)
+                    wrap_text_words(text, config, max_width, measure, font_scale)
                 },
                 TextWrap::Newlines => {
                     // Fast path: no explicit newlines means a single line.
                     if !text.contains('\n') {
                         continue;
                     }
-                    wrap_text_newlines(text, config, measure)
+                    wrap_text_newlines(text, config, measure, font_scale)
                 },
                 TextWrap::None => continue,
             };
@@ -766,6 +780,7 @@ fn emit_down_traversal_commands(
     bounds: BoundingBox,
     index: usize,
     offscreen: bool,
+    font_scale: f32,
 ) {
     // Emit rectangle if background is set.
     if !offscreen && let Some(color) = element.background {
@@ -796,7 +811,7 @@ fn emit_down_traversal_commands(
             ref text,
         } = element.content
     {
-        emit_text_commands(commands, wrapped, config, text, bounds, index);
+        emit_text_commands(commands, wrapped, config, text, bounds, index, font_scale);
     }
 }
 
@@ -808,7 +823,12 @@ fn emit_text_commands(
     text: &str,
     bounds: BoundingBox,
     index: usize,
+    font_scale: f32,
 ) {
+    // Render commands store font sizes in layout units so downstream
+    // renderers don't need to know about the font unit conversion.
+    let scaled_config = config.scaled(font_scale);
+
     if let Some(wrap_result) = wrapped {
         // Wrapped text: emit one command per line.
         for (line_idx, line) in wrap_result.lines.iter().enumerate() {
@@ -823,7 +843,7 @@ fn emit_text_commands(
                 },
                 kind:        RenderCommandKind::Text {
                     text:   line.text.clone(),
-                    config: config.clone(),
+                    config: scaled_config.clone(),
                 },
                 element_idx: index,
             });
@@ -834,7 +854,7 @@ fn emit_text_commands(
             bounds,
             kind: RenderCommandKind::Text {
                 text:   text.to_owned(),
-                config: config.clone(),
+                config: scaled_config,
             },
             element_idx: index,
         });
@@ -953,6 +973,7 @@ fn position_and_render(
     wrapped: &[Option<WrappedText>],
     viewport_width: f32,
     viewport_height: f32,
+    font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
 
@@ -1017,6 +1038,7 @@ fn position_and_render(
                 bounds,
                 index,
                 offscreen,
+                font_scale,
             );
 
             push_children_to_stack(tree, computed, &mut stack, index, x, y);

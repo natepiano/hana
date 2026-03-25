@@ -246,7 +246,7 @@ fn parity_fixed_root_with_grow_child() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -337,7 +337,7 @@ fn parity_header_body_divider() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -399,7 +399,7 @@ fn parity_key_value_row_with_spacer() {
     b.text("60", LayoutTextStyle::new(FONT_SIZE));
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -457,7 +457,7 @@ fn parity_vertical_center_alignment() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -583,7 +583,7 @@ fn build_diegetic_fit_parent_centering(size: f32) -> Vec<Bbox> {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     collect_diegetic_bboxes(&result)
 }
 
@@ -700,7 +700,7 @@ fn parity_compression_with_content_minimum() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, 100.0);
+    let result = engine.compute(&tree, size, 100.0, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -774,7 +774,7 @@ fn parity_cross_axis_grow_with_large_content() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, width, height);
+    let result = engine.compute(&tree, width, height, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -842,7 +842,7 @@ fn parity_two_grow_children_horizontal() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, 100.0);
+    let result = engine.compute(&tree, size, 100.0, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -914,7 +914,7 @@ fn parity_padding_and_child_gap() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -971,7 +971,7 @@ fn parity_right_alignment() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, 100.0);
+    let result = engine.compute(&tree, size, 100.0, 1.0);
     let diegetic_bboxes = collect_diegetic_bboxes(&result);
 
     assert_bboxes_match(&clay_bboxes, &diegetic_bboxes, BboxKind::Rectangle);
@@ -1155,7 +1155,7 @@ fn build_diegetic_status_panel(size: f32, labels: &[(&str, &str)]) -> Vec<Bbox> 
     build_diegetic_status_panel_body(&mut b, labels);
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
     collect_diegetic_bboxes(&result)
 }
 

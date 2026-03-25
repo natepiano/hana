@@ -21,6 +21,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Unit;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -39,7 +40,6 @@ const BODY_FONT_SIZE: f32 = 8.0;
 const CONTROLS_LAYOUT_WIDTH: f32 = 120.0;
 const CONTROLS_LAYOUT_HEIGHT: f32 = 30.0;
 const CONTROLS_WORLD_WIDTH: f32 = 0.8;
-const CONTROLS_WORLD_HEIGHT: f32 = 0.2;
 const CONTROLS_FONT_SIZE: f32 = 8.0;
 
 #[derive(Resource)]
@@ -125,10 +125,10 @@ fn setup(
             FpsPanel,
             DiegeticPanel {
                 tree,
-                layout_width: LAYOUT_WIDTH,
-                layout_height: LAYOUT_HEIGHT,
-                world_width: panel_w,
-                world_height: panel_h,
+                width: LAYOUT_WIDTH,
+                height: LAYOUT_HEIGHT,
+                layout_unit: Some(Unit::Custom(panel_w / LAYOUT_WIDTH)),
+                ..default()
             },
             // Transparent quad for picking / zoom-to-fit.
             Mesh3d(meshes.add(Rectangle::new(panel_w, panel_h))),
@@ -168,11 +168,11 @@ fn setup(
     commands.spawn((
         ControlsPanel,
         DiegeticPanel {
-            tree:          build_controls_panel(),
-            layout_width:  CONTROLS_LAYOUT_WIDTH,
-            layout_height: CONTROLS_LAYOUT_HEIGHT,
-            world_width:   CONTROLS_WORLD_WIDTH,
-            world_height:  CONTROLS_WORLD_HEIGHT,
+            tree: build_controls_panel(),
+            width: CONTROLS_LAYOUT_WIDTH,
+            height: CONTROLS_LAYOUT_HEIGHT,
+            layout_unit: Some(Unit::Custom(CONTROLS_WORLD_WIDTH / CONTROLS_LAYOUT_WIDTH)),
+            ..default()
         },
         Transform::from_xyz(-2.0, 2.5, 0.5),
     ));

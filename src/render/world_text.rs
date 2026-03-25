@@ -19,8 +19,7 @@ use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::WorldTextStyle;
-use crate::plugin::TextScale;
-use crate::plugin::TextScaleOverride;
+use crate::plugin::UnitConfig;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -149,11 +148,7 @@ pub(super) fn render_world_text(
         (
             With<WorldText>,
             Without<PanelTextChild>,
-            Or<(
-                Changed<WorldText>,
-                Changed<WorldTextStyle>,
-                Changed<TextScaleOverride>,
-            )>,
+            Or<(Changed<WorldText>, Changed<WorldTextStyle>)>,
         ),
     >,
     pending_texts: Query<
@@ -164,10 +159,7 @@ pub(super) fn render_world_text(
             Without<PanelTextChild>,
         ),
     >,
-    texts: Query<
-        (&WorldText, &WorldTextStyle, Option<&TextScaleOverride>),
-        Without<PanelTextChild>,
-    >,
+    texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -176,7 +168,7 @@ pub(super) fn render_world_text(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut commands: Commands,
-    text_scale: Res<TextScale>,
+    unit_config: Res<UnitConfig>,
 ) {
     // Collect entities that need processing: changed texts + pending texts.
     let mut to_process = Vec::new();
@@ -199,7 +191,7 @@ pub(super) fn render_world_text(
     let mut mesh_ms_total = 0.0_f32;
 
     for entity in to_process {
-        let Ok((world_text, style, scale_override)) = texts.get(entity) else {
+        let Ok((world_text, style)) = texts.get(entity) else {
             continue;
         };
         text_count += 1;
@@ -214,7 +206,7 @@ pub(super) fn render_world_text(
             continue;
         }
 
-        let scale = text_scale.0 * scale_override.map_or(1.0, |o| o.0);
+        let scale = unit_config.font.meters_per_unit();
 
         // Shape text and build quads in entity-local coordinates.
         let shaped = shape_world_text(

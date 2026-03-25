@@ -25,6 +25,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Unit;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -135,11 +136,11 @@ fn setup(
     commands.spawn((
         ShowcasePanel,
         DiegeticPanel {
-            tree:          build_panel(layout_w, layout_h, noto_id.0),
-            layout_width:  layout_w,
-            layout_height: layout_h,
-            world_width:   world_w,
-            world_height:  world_h,
+            tree: build_panel(layout_w, layout_h, noto_id.0),
+            width: layout_w,
+            height: layout_h,
+            layout_unit: Some(Unit::Custom(world_w / layout_w)),
+            ..default()
         },
         panel_transform(world_h),
     ));
@@ -225,18 +226,17 @@ fn resize_panel(
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
+        let new_unit = Unit::Custom(world_w / layout_w);
         #[allow(clippy::float_cmp)]
-        if panel.layout_width == layout_w
-            && panel.layout_height == layout_h
-            && panel.world_width == world_w
-            && panel.world_height == world_h
+        if panel.width == layout_w
+            && panel.height == layout_h
+            && panel.layout_unit == Some(new_unit)
         {
             continue;
         }
-        panel.layout_width = layout_w;
-        panel.layout_height = layout_h;
-        panel.world_width = world_w;
-        panel.world_height = world_h;
+        panel.width = layout_w;
+        panel.height = layout_h;
+        panel.layout_unit = Some(new_unit);
         panel.tree = build_panel(layout_w, layout_h, noto_id.0);
         *transform = panel_transform(world_h);
     }

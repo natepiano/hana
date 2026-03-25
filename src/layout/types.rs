@@ -904,6 +904,21 @@ impl TextProps<ForLayout> {
         self
     }
 
+    /// Returns a copy with font-related dimensions multiplied by `factor`.
+    ///
+    /// Used by the layout engine to convert font sizes from font units to
+    /// layout units in render commands. Non-dimensional fields (color, wrap
+    /// mode, font features, etc.) are preserved unchanged.
+    #[must_use]
+    pub fn scaled(&self, factor: f32) -> Self {
+        let mut copy = self.clone();
+        copy.size *= factor;
+        copy.line_height *= factor;
+        copy.letter_spacing *= factor;
+        copy.word_spacing *= factor;
+        copy
+    }
+
     /// Converts to a [`TextStyle`] for use with standalone [`WorldText`] entities.
     ///
     /// Copies all shared fields. The standalone-specific `anchor` defaults to
@@ -1033,6 +1048,21 @@ pub struct TextMeasure {
     pub word_spacing:   f32,
     /// OpenType feature overrides.
     pub font_features:  FontFeatures,
+}
+
+impl TextMeasure {
+    /// Returns a copy with font-related dimensions multiplied by `factor`.
+    ///
+    /// Used by the layout engine to convert font sizes from font units to
+    /// layout units when the two differ (e.g. points → millimeters).
+    #[must_use]
+    pub fn scaled(mut self, factor: f32) -> Self {
+        self.size *= factor;
+        self.line_height *= factor;
+        self.letter_spacing *= factor;
+        self.word_spacing *= factor;
+        self
+    }
 }
 
 /// Measured dimensions of a text string.

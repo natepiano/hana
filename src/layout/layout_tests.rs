@@ -64,7 +64,7 @@ fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < 0.01 }
 fn fixed_root_dimensions() {
     let tree = LayoutBuilder::new(100.0, 50.0).build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert_eq!(result.computed[0].width, 100.0);
     assert_eq!(result.computed[0].height, 50.0);
@@ -82,7 +82,7 @@ fn fixed_child_dimensions() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Child is index 1.
     assert_eq!(result.computed[1].width, 80.0);
@@ -98,7 +98,7 @@ fn single_grow_child_fills_parent() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert_eq!(result.computed[1].width, 200.0);
     assert_eq!(result.computed[1].height, 100.0);
@@ -120,7 +120,7 @@ fn two_grow_children_split_evenly_horizontal() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Parent is index 1, children are 2 and 3.
     assert!(approx_eq(result.computed[2].width, 100.0));
@@ -143,7 +143,7 @@ fn two_grow_children_split_evenly_vertical() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(approx_eq(result.computed[2].height, 50.0));
     assert!(approx_eq(result.computed[3].height, 50.0));
@@ -172,7 +172,7 @@ fn grow_with_min_max() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(approx_eq(result.computed[2].width, 60.0));
     assert!(approx_eq(result.computed[3].width, 140.0));
@@ -188,7 +188,7 @@ fn fit_wraps_text_content() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(approx_eq(result.computed[1].width, 48.0));
     assert!(approx_eq(result.computed[1].height, 16.0));
@@ -209,7 +209,7 @@ fn fit_with_min_respects_minimum() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Parent element (index 1) should be at least 100 wide.
     assert!(result.computed[1].width >= 100.0);
@@ -239,7 +239,7 @@ fn percent_sizing() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(approx_eq(result.computed[2].width, 60.0));
     assert!(approx_eq(result.computed[3].width, 140.0));
@@ -262,7 +262,7 @@ fn padding_reduces_child_space() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Parent is 200x100 with 10px padding on each side.
     // Child should be 180x80.
@@ -285,7 +285,7 @@ fn asymmetric_padding() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Horizontal padding: 5 + 15 = 20, vertical: 10 + 20 = 30.
     assert!(approx_eq(result.computed[2].width, 180.0));
@@ -312,7 +312,7 @@ fn child_gap_horizontal() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // 200 - 2*10 gap = 180 / 3 = 60 each.
     assert!(approx_eq(result.computed[2].width, 60.0));
@@ -337,7 +337,7 @@ fn child_gap_vertical() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // 100 - 5 gap = 95 / 2 = 47.5 each.
     assert!(approx_eq(result.computed[2].height, 47.5));
@@ -367,7 +367,7 @@ fn center_alignment_horizontal() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Find the child's render command to check position.
     // Extra space = 200 - 50 = 150. Center offset = 75.
@@ -396,7 +396,7 @@ fn right_alignment_horizontal() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let child_bounds = result.computed[2].bounds;
     assert!(approx_eq(child_bounds.x, 150.0));
@@ -423,7 +423,7 @@ fn center_alignment_vertical() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Cross-axis centering: (100 - 30) / 2 = 35.
     let child_bounds = result.computed[2].bounds;
@@ -451,7 +451,7 @@ fn bottom_alignment_vertical() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Bottom: (100 - 30) = 70.
     let child_bounds = result.computed[2].bounds;
@@ -486,7 +486,7 @@ fn left_to_right_positioning() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let first = result.computed[2].bounds;
     let second = result.computed[3].bounds;
@@ -520,7 +520,7 @@ fn top_to_bottom_positioning() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let first = result.computed[2].bounds;
     let second = result.computed[3].bounds;
@@ -574,7 +574,7 @@ fn overflow_compression_largest_first() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // `minDimensions` floor prevents compression below content size.
     assert!(approx_eq(result.computed[2].width, 60.0));
@@ -596,7 +596,7 @@ fn render_commands_include_rectangles() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let rect_commands: Vec<_> = result
         .commands
@@ -617,7 +617,7 @@ fn render_commands_include_text() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let text_commands: Vec<_> = result
         .commands
@@ -644,7 +644,7 @@ fn render_commands_include_borders() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let border_commands: Vec<_> = result
         .commands
@@ -703,7 +703,7 @@ fn nested_layout_header_body() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Root (0): 160x160.
     // Container (1): 160x160 (Grow fills root, which has no padding).
@@ -751,7 +751,7 @@ fn children_positioned_after_padding() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Child should start at (20, 30) — left padding, top padding.
     let child_bounds = result.computed[2].bounds;
@@ -780,7 +780,7 @@ fn fixed_and_grow_siblings() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(approx_eq(result.computed[2].width, 50.0));
     assert!(approx_eq(result.computed[3].width, 150.0));
@@ -805,7 +805,7 @@ fn text_positioned_correctly() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // "Hello" at (10, 10), "World" at (10, 26).
     let hello = result.computed[2].bounds;
@@ -839,7 +839,7 @@ fn key_value_row_layout() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // "fps:" is 4 chars * 7 * 0.6 = 16.8 wide.
     // "60" is 2 chars * 7 * 0.6 = 8.4 wide.
@@ -869,7 +869,7 @@ fn clip_emits_scissor_commands() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     let scissor_starts: Vec<_> = result
         .commands
@@ -892,7 +892,7 @@ fn clip_emits_scissor_commands() {
 fn empty_tree_produces_no_commands() {
     let tree = LayoutTree::new();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(result.commands.is_empty());
     assert!(result.computed.is_empty());
@@ -925,7 +925,7 @@ fn between_children_borders_emitted() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, VIEWPORT, VIEWPORT);
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     // Should have 2 between-children rectangles (3 children = 2 gaps).
     let rect_commands: Vec<_> = result
@@ -965,7 +965,7 @@ fn text_wraps_at_word_boundaries() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 80.0, 200.0);
+    let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Text element is index 2. Height should be 3 lines * 16 = 48.
     assert!(approx_eq(result.computed[2].height, 48.0));
@@ -995,7 +995,7 @@ fn text_no_wrap_overflows() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 40.0, 200.0);
+    let result = engine.compute(&tree, 40.0, 200.0, 1.0);
 
     // Height should remain single-line (16.0).
     assert!(approx_eq(result.computed[2].height, 16.0));
@@ -1028,7 +1028,7 @@ fn text_wraps_at_newlines_only() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 500.0, 200.0);
+    let result = engine.compute(&tree, 500.0, 200.0, 1.0);
 
     // 3 lines * 16 = 48.
     assert!(approx_eq(result.computed[2].height, 48.0));
@@ -1058,7 +1058,7 @@ fn word_wrap_long_word_does_not_break() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 80.0, 200.0);
+    let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Should be a single line (word never broken mid-word).
     assert!(approx_eq(result.computed[2].height, 16.0));
@@ -1089,7 +1089,7 @@ fn word_wrap_preserves_explicit_newlines() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 50.0, 200.0);
+    let result = engine.compute(&tree, 50.0, 200.0, 1.0);
 
     // 2 paragraphs, each fits on one line = 2 lines * 16 = 32.
     assert!(approx_eq(result.computed[2].height, 32.0));
@@ -1117,7 +1117,7 @@ fn word_wrap_empty_string() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 200.0, 200.0);
+    let result = engine.compute(&tree, 200.0, 200.0, 1.0);
 
     // Empty text produces one empty line — height = 1 * line_height = 16.
     assert!(approx_eq(result.computed[2].height, 16.0));
@@ -1140,7 +1140,7 @@ fn word_wrap_updates_parent_fit_height() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 80.0, 200.0);
+    let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Text wraps to 3 lines (see text_wraps_at_word_boundaries test).
     // Parent Fit height should be 48 (3 * 16).
@@ -1166,7 +1166,7 @@ fn word_wrap_render_commands_per_line() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 50.0, 200.0);
+    let result = engine.compute(&tree, 50.0, 200.0, 1.0);
 
     let text_commands: Vec<_> = result
         .commands
@@ -1233,7 +1233,7 @@ fn fit_parent_sees_grow_children_content_height() {
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 160.0, 160.0);
+    let result = engine.compute(&tree, 160.0, 160.0, 1.0);
 
     // text_row is index 2.
     let text_row_height = result.computed[2].height;
@@ -1299,7 +1299,7 @@ fn compression_respects_content_minimum_symmetric() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 80.0, 100.0);
+    let result = engine.compute(&tree, 80.0, 100.0, 1.0);
 
     // Indices: 0=root, 1=container, 2=fit_a, 3=fixed_a, 4=fit_b, 5=fixed_b
     let child_a = result.computed[2].width;
@@ -1351,7 +1351,7 @@ fn compression_respects_content_minimum_asymmetric() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 80.0, 100.0);
+    let result = engine.compute(&tree, 80.0, 100.0, 1.0);
 
     let child_a = result.computed[2].width;
     assert!(
@@ -1392,7 +1392,7 @@ fn cross_axis_grow_respects_content_minimum() {
     );
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
-    let result = engine.compute(&tree, 30.0, 100.0);
+    let result = engine.compute(&tree, 30.0, 100.0, 1.0);
 
     // Index 2 is the Grow child.
     let child_width = result.computed[2].width;
@@ -1496,7 +1496,7 @@ fn grow_body_compression_20_rows() {
     });
     let tree = b.build();
     let engine = LayoutEngine::new(measure);
-    let result = engine.compute(&tree, size, size);
+    let result = engine.compute(&tree, size, size, 1.0);
 
     // Root children by builder order: header (1), divider (8), body (9).
     // Available height = 160 - 16 (padding) - 10 (2 gaps) = 134.

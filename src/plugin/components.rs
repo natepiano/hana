@@ -10,29 +10,92 @@ use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
+use crate::plugin::config::Unit;
+use crate::plugin::config::UnitConfig;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///
-/// Defines a layout tree and the mapping between abstract layout units and
-/// physical world-space dimensions. The layout engine runs automatically
-/// when this component changes, storing results in [`ComputedDiegeticPanel`].
+/// Defines a layout tree and the panel's dimensions in layout units.
+/// World-space size is computed automatically from the `layout_unit`
+/// (or the global [`UnitConfig`] default). Font sizes in the tree are
+/// interpreted in `font_unit` (defaults to [`Unit::Points`]).
+///
+/// The layout engine runs automatically when this component changes,
+/// storing results in [`ComputedDiegeticPanel`].
 ///
 /// Requires a [`Transform`] for world-space positioning.
+///
+/// # Examples
+///
+/// ```ignore
+/// // A4 page in millimeters with point-sized fonts:
+/// DiegeticPanel {
+///     tree,
+///     width: 210.0,
+///     height: 297.0,
+///     layout_unit: Some(Unit::Millimeters),
+///     ..default()
+/// }
+///
+/// // US business card in inches:
+/// DiegeticPanel {
+///     tree,
+///     width: 3.5,
+///     height: 2.0,
+///     layout_unit: Some(Unit::Inches),
+///     ..default()
+/// }
+/// ```
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
 #[require(ComputedDiegeticPanel, Transform, Visibility)]
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    pub tree:          LayoutTree,
-    /// Width in abstract layout units (viewport width for the layout engine).
-    pub layout_width:  f32,
-    /// Height in abstract layout units (viewport height for the layout engine).
-    pub layout_height: f32,
-    /// Width of the panel in world units.
-    pub world_width:   f32,
-    /// Height of the panel in world units.
-    pub world_height:  f32,
+    pub tree:        LayoutTree,
+    /// Panel width in layout units.
+    pub width:       f32,
+    /// Panel height in layout units.
+    pub height:      f32,
+    /// Unit for `width`/`height`. `None` inherits from [`UnitConfig::layout`].
+    pub layout_unit: Option<Unit>,
+    /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
+    pub font_unit:   Option<Unit>,
+}
+
+impl DiegeticPanel {
+    /// Resolves the layout unit, falling back to the global [`UnitConfig`].
+    fn resolved_layout_unit(&self, config: &UnitConfig) -> Unit {
+        self.layout_unit.unwrap_or(config.layout)
+    }
+
+    /// Resolves the font unit, falling back to the global [`UnitConfig`].
+    fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {
+        self.font_unit.unwrap_or(config.font)
+    }
+
+    /// Panel width in meters (world units).
+    #[must_use]
+    pub fn world_width(&self, config: &UnitConfig) -> f32 {
+        self.width * self.resolved_layout_unit(config).meters_per_unit()
+    }
+
+    /// Panel height in meters (world units).
+    #[must_use]
+    pub fn world_height(&self, config: &UnitConfig) -> f32 {
+        self.height * self.resolved_layout_unit(config).meters_per_unit()
+    }
+
+    /// Font-to-layout conversion factor for this panel.
+    ///
+    /// Multiply a font size by this value to convert from font units
+    /// to layout units.
+    #[must_use]
+    pub fn font_scale(&self, config: &UnitConfig) -> f32 {
+        let font_mpu = self.resolved_font_unit(config).meters_per_unit();
+        let layout_mpu = self.resolved_layout_unit(config).meters_per_unit();
+        font_mpu / layout_mpu
+    }
 }
 
 /// Hue rotation applied to all text in a panel, in radians.
@@ -50,17 +113,6 @@ pub struct DiegeticPanel {
 /// See the `text_stress` example for usage.
 #[derive(Component, Default, Clone, Copy, Debug, Reflect)]
 pub struct HueOffset(pub f32);
-
-/// Per-entity scale multiplier applied on top of the effective text scale.
-///
-/// For [`WorldText`](crate::WorldText): multiplied with the global
-/// [`TextScale`](crate::TextScale) resource.
-/// For [`DiegeticPanel`](crate::DiegeticPanel): multiplied with the
-/// panel's `world_width / layout_width` scale.
-///
-/// Entities without this component behave as if it were `1.0`.
-#[derive(Component, Clone, Copy, Debug, Reflect)]
-pub struct TextScaleOverride(pub f32);
 
 /// Computed layout result for a [`DiegeticPanel`].
 ///

@@ -12,7 +12,8 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::TextAnchor;
-use bevy_diegetic::TextScale;
+use bevy_diegetic::Unit;
+use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -61,7 +62,10 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .insert_resource(TextScale(0.01))
+        .insert_resource(UnitConfig {
+            layout: Unit::Meters,
+            font:   Unit::Custom(0.01),
+        })
         .init_resource::<AnchorRotation>()
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_anchor_demo)

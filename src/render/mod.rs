@@ -8,7 +8,6 @@ mod msdf_material;
 mod text_renderer;
 mod world_text;
 
-pub use constants::METERS_PER_POINT;
 pub use text_renderer::LineMetricsSnapshot;
 pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;

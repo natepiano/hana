@@ -29,7 +29,7 @@ use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
-use crate::plugin::TextScaleOverride;
+use crate::plugin::UnitConfig;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -354,27 +354,26 @@ pub(super) struct PanelTextQuads {
 #[allow(clippy::too_many_arguments)]
 fn reconcile_panel_text_children(
     changed_panels: Query<
-        (
-            Entity,
-            &DiegeticPanel,
-            &ComputedDiegeticPanel,
-            Option<&TextScaleOverride>,
-        ),
+        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
         Changed<ComputedDiegeticPanel>,
     >,
     existing_children: Query<(Entity, &PanelTextChild, &ChildOf)>,
     mut commands: Commands,
+    unit_config: Res<UnitConfig>,
 ) {
-    for (panel_entity, panel, computed, scale_override) in &changed_panels {
+    for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
 
-        let override_mult = scale_override.map_or(1.0, |o| o.0);
-        let scale_x = panel.world_width / panel.layout_width * override_mult;
-        let scale_y = panel.world_height / panel.layout_height * override_mult;
-        let half_w = panel.world_width * 0.5 * override_mult;
-        let half_h = panel.world_height * 0.5 * override_mult;
+        let mpu = panel
+            .layout_unit
+            .unwrap_or(unit_config.layout)
+            .meters_per_unit();
+        let scale_x = mpu;
+        let scale_y = mpu;
+        let half_w = panel.width * mpu * 0.5;
+        let half_h = panel.height * mpu * 0.5;
 
         // Collect text commands from layout result.
         let text_commands: Vec<_> = result
@@ -777,6 +776,28 @@ pub(super) fn shape_text_cached(
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
 
+    // DEBUG: log what parley returns directly
+    {
+        let truncated: String = text.chars().take(20).collect();
+        for (i, line) in layout.lines().enumerate() {
+            let lm = line.metrics();
+            bevy::log::warn!(
+                "PARLEY line[{i}] \"{truncated}\" size={:.4}: ascent={:.4} descent={:.4} \
+                 baseline={:.4} line_height={:.4} min_coord={:.4} max_coord={:.4}",
+                config.size(), lm.ascent, lm.descent,
+                lm.baseline, lm.line_height, lm.min_coord, lm.max_coord,
+            );
+            for item in line.items() {
+                if let parley::layout::PositionedLayoutItem::GlyphRun(run) = item {
+                    bevy::log::warn!(
+                        "PARLEY run baseline={:.4} offset={:.4}",
+                        run.baseline(), run.offset(),
+                    );
+                }
+            }
+        }
+    }
+
     drop(font_cx);
     drop(layout_cx);
 
@@ -935,6 +956,21 @@ fn shape_text_to_quads(
         // Convert to panel-local (center origin, Y-up).
         let local_x = quad_layout_x.mul_add(scale_x, -half_w);
         let local_y = (-quad_layout_y).mul_add(scale_y, half_h);
+
+        // DEBUG: log first glyph of each text element
+        if quads.is_empty() {
+            bevy::log::warn!(
+                "TEXT quad[0]: bounds=({:.4}, {:.4}) sg=({:.4}, bl={:.4}) bearing=({:.4}, {:.4}) \
+                 quad_layout=({:.4}, {:.4}) scale=({:.6}, {:.6}) half=({:.6}, {:.6}) \
+                 local=({:.6}, {:.6}) config.size={:.4} em_scale={:.6}",
+                bounds.x, bounds.y, sg.x, sg.baseline,
+                metrics.bearing_x, metrics.bearing_y,
+                quad_layout_x, quad_layout_y,
+                scale_x, scale_y, half_w, half_h,
+                local_x, local_y,
+                config.size(), em_scale,
+            );
+        }
 
         quads.push((
             metrics.page_index,

@@ -271,27 +271,97 @@ impl AtlasConfig {
     }
 }
 
-/// Global scale factor for [`WorldText`](crate::WorldText) entities.
+/// Physical unit for interpreting numeric dimensions.
 ///
-/// Converts layout units (points) to world units (meters). The default
-/// is physically accurate: [`METERS_PER_POINT`](crate::METERS_PER_POINT)
-/// ≈ 0.000353, so 72pt text produces a 1-inch (0.0254m) em-square.
+/// Used by [`UnitConfig`] to define what "1.0" means for layout dimensions
+/// and font sizes. `Custom(f32)` is an escape hatch for any unit not
+/// covered by the named variants — the value is meters per unit.
 ///
-/// Does **not** affect [`DiegeticPanel`](crate::DiegeticPanel) text — panels
-/// derive scale from `world_width / layout_width`.
+/// # Examples
 ///
 /// ```ignore
-/// // Physically accurate (default):
-/// app.insert_resource(TextScale::default());
+/// Unit::Meters          // 1 unit = 1 meter (Bevy default)
+/// Unit::Millimeters     // 1 unit = 1mm
+/// Unit::Points          // 1 unit = 1 typographic point (1/72 inch)
+/// Unit::Inches          // 1 unit = 1 inch
+/// Unit::Custom(0.01)    // 1 unit = 1 centimeter
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub enum Unit {
+    /// 1 unit = 1 meter. Bevy's default world-space convention.
+    Meters,
+    /// 1 unit = 1 millimeter (0.001 m).
+    Millimeters,
+    /// 1 unit = 1 typographic point (1/72 inch ≈ 0.000353 m).
+    Points,
+    /// 1 unit = 1 inch (0.0254 m).
+    Inches,
+    /// 1 unit = the given number of meters.
+    Custom(f32),
+}
+
+impl Unit {
+    /// Returns the conversion factor from this unit to meters.
+    #[must_use]
+    pub const fn meters_per_unit(self) -> f32 {
+        match self {
+            Self::Meters => 1.0,
+            Self::Millimeters => 0.001,
+            Self::Points => 0.0254 / 72.0,
+            Self::Inches => 0.0254,
+            Self::Custom(mpu) => mpu,
+        }
+    }
+}
+
+/// Global unit configuration for layout dimensions and font sizes.
 ///
-/// // Restore legacy 0.01 scale:
-/// app.insert_resource(TextScale(0.01));
+/// Defines the default interpretation of numeric values throughout the
+/// system. Individual [`DiegeticPanel`](crate::DiegeticPanel) entities can
+/// override either field via their `layout_unit` and `font_unit` options.
+///
+/// # Defaults
+///
+/// - `layout`: [`Unit::Meters`] — panel dimensions are in meters
+/// - `font`: [`Unit::Points`] — font sizes are in typographic points
+///
+/// With these defaults, `DiegeticPanel { width: 0.210, height: 0.297, .. }`
+/// creates a panel 21cm × 29.7cm, and `LayoutTextStyle::new(24.0)` means
+/// 24pt text.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Physical defaults (no config needed):
+/// // layout = Meters, font = Points
+///
+/// // Legacy compatibility (font sizes are raw scale factors):
+/// UnitConfig { layout: Unit::Meters, font: Unit::Custom(0.01) }
 /// ```
 #[derive(Resource, Clone, Copy, Debug, Reflect)]
-pub struct TextScale(pub f32);
+pub struct UnitConfig {
+    /// Unit for panel `width`/`height` and layout dimensions.
+    pub layout: Unit,
+    /// Unit for font sizes specified in [`LayoutTextStyle`](crate::LayoutTextStyle).
+    pub font:   Unit,
+}
 
-impl Default for TextScale {
-    fn default() -> Self { Self(crate::render::METERS_PER_POINT) }
+impl Default for UnitConfig {
+    fn default() -> Self {
+        Self {
+            layout: Unit::Meters,
+            font:   Unit::Points,
+        }
+    }
+}
+
+impl UnitConfig {
+    /// Returns the font-to-layout conversion factor.
+    ///
+    /// Multiply a font size (in `self.font` units) by this value to get
+    /// the equivalent size in `self.layout` units.
+    #[must_use]
+    pub fn font_scale(&self) -> f32 { self.font.meters_per_unit() / self.layout.meters_per_unit() }
 }
 
 #[cfg(test)]

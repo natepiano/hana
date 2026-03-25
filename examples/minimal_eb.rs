@@ -13,6 +13,7 @@ use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Unit;
 
 /// Number of text elements to spawn.
 const TEXT_COUNT: usize = 20;
@@ -81,10 +82,10 @@ fn on_font(trigger: On<FontRegistered>, mut commands: Commands) {
         TestPanel,
         DiegeticPanel {
             tree,
-            layout_width: 800.0,
-            layout_height: 600.0,
-            world_width: 4.0,
-            world_height: 3.0,
+            width: 800.0,
+            height: 600.0,
+            layout_unit: Some(Unit::Custom(4.0 / 800.0)),
+            ..default()
         },
         Transform::from_xyz(0.0, 0.0, -3.0),
     ));

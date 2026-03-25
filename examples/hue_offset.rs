@@ -30,6 +30,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Unit;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -107,11 +108,11 @@ fn setup(
     commands.spawn((
         RotatingPanel,
         DiegeticPanel {
-            tree:          tree.clone(),
-            layout_width:  LAYOUT_SIZE,
-            layout_height: LAYOUT_SIZE * PANEL_ASPECT,
-            world_width:   1.0,
-            world_height:  panel_height,
+            tree: tree.clone(),
+            width: LAYOUT_SIZE,
+            height: LAYOUT_SIZE * PANEL_ASPECT,
+            layout_unit: Some(Unit::Custom(1.0 / LAYOUT_SIZE)),
+            ..default()
         },
         Transform::from_xyz(-0.6, panel_center_y, 0.0),
     ));
@@ -120,10 +121,10 @@ fn setup(
     commands.spawn((
         DiegeticPanel {
             tree,
-            layout_width: LAYOUT_SIZE,
-            layout_height: LAYOUT_SIZE * PANEL_ASPECT,
-            world_width: 1.0,
-            world_height: panel_height,
+            width: LAYOUT_SIZE,
+            height: LAYOUT_SIZE * PANEL_ASPECT,
+            layout_unit: Some(Unit::Custom(1.0 / LAYOUT_SIZE)),
+            ..default()
         },
         Transform::from_xyz(0.6, panel_center_y, 0.0),
     ));

@@ -29,9 +29,10 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextScale;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::TypographyOverlayReady;
+use bevy_diegetic::Unit;
+use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -55,7 +56,6 @@ const HOME_PITCH: f32 = 0.055;
 const CONTROLS_LAYOUT_W: f32 = 200.0;
 const CONTROLS_LAYOUT_H: f32 = 100.0;
 const CONTROLS_WORLD_W: f32 = 1.2;
-const CONTROLS_WORLD_H: f32 = 0.6;
 const CONTROLS_FONT_SIZE: f32 = 9.0;
 const CONTROLS_TITLE_SIZE: f32 = 10.5;
 const CONTROLS_ARROW_SIZE: f32 = CONTROLS_FONT_SIZE * 0.5;
@@ -136,7 +136,10 @@ fn main() {
             MeshPickingPlugin,
             DiegeticUiPlugin,
         ))
-        .insert_resource(TextScale(0.01))
+        .insert_resource(UnitConfig {
+            layout: Unit::Meters,
+            font:   Unit::Custom(0.01),
+        })
         .insert_resource(WordCycle {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
@@ -229,11 +232,11 @@ fn setup(
         .spawn((
             ControlsPanel,
             DiegeticPanel {
-                tree:          build_controls_panel(),
-                layout_width:  CONTROLS_LAYOUT_W,
-                layout_height: CONTROLS_LAYOUT_H,
-                world_width:   CONTROLS_WORLD_W,
-                world_height:  CONTROLS_WORLD_H,
+                tree: build_controls_panel(),
+                width: CONTROLS_LAYOUT_W,
+                height: CONTROLS_LAYOUT_H,
+                layout_unit: Some(Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W)),
+                ..default()
             },
             Transform::from_xyz(-1.2, 1.5, 0.5),
         ))
@@ -244,11 +247,11 @@ fn setup(
         .spawn((
             FontsPanel,
             DiegeticPanel {
-                tree:          build_fonts_panel(&registry),
-                layout_width:  CONTROLS_LAYOUT_W,
-                layout_height: CONTROLS_LAYOUT_H,
-                world_width:   CONTROLS_WORLD_W,
-                world_height:  CONTROLS_WORLD_H,
+                tree: build_fonts_panel(&registry),
+                width: CONTROLS_LAYOUT_W,
+                height: CONTROLS_LAYOUT_H,
+                layout_unit: Some(Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W)),
+                ..default()
             },
             Transform::from_xyz(1.2, 1.5, 0.5),
         ))

@@ -37,8 +37,7 @@ use crate::callouts::draw_dimension_arrow;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextAnchor;
 use crate::layout::WorldTextStyle;
-use crate::plugin::TextScale;
-use crate::plugin::TextScaleOverride;
+use crate::plugin::UnitConfig;
 use crate::render::ComputedWorldText;
 use crate::render::LineMetricsSnapshot;
 use crate::render::PendingGlyphs;
@@ -153,7 +152,6 @@ pub fn build_typography_overlay(
         &WorldTextStyle,
         &TypographyOverlay,
         &ComputedWorldText,
-        Option<&TextScaleOverride>,
     )>,
     text_changed: Query<
         Entity,
@@ -172,7 +170,7 @@ pub fn build_typography_overlay(
     containers: Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
     font_registry: Res<FontRegistry>,
     cache: Res<ShapedTextCache>,
-    text_scale: Res<TextScale>,
+    unit_config: Res<UnitConfig>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
@@ -180,7 +178,7 @@ pub fn build_typography_overlay(
 ) {
     let changed_entities: Vec<Entity> = text_changed.iter().collect();
 
-    for (entity, world_text, style, overlay, computed, scale_override) in &query {
+    for (entity, world_text, style, overlay, computed) in &query {
         if !changed_entities.contains(&entity) {
             continue;
         }
@@ -215,7 +213,7 @@ pub fn build_typography_overlay(
 
         let anchor_x = computed.anchor_x;
         let anchor_y = computed.anchor_y;
-        let scale = text_scale.0 * scale_override.map_or(1.0, |o| o.0);
+        let scale = unit_config.font.meters_per_unit();
 
         let measure = style.as_layout_config().as_measure();
         let Some(line_metrics) = cache
