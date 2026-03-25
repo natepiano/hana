@@ -366,14 +366,16 @@ fn reconcile_panel_text_children(
             continue;
         };
 
-        let mpu = panel
+        let layout_mpu = panel
             .layout_unit
             .unwrap_or(unit_config.layout)
             .meters_per_unit();
-        let scale_x = mpu;
-        let scale_y = mpu;
-        let half_w = panel.width * mpu * 0.5;
-        let half_h = panel.height * mpu * 0.5;
+        // Layout output is in points. Convert to world meters.
+        let pts_mpu = crate::plugin::Unit::Points.meters_per_unit();
+        let scale_x = pts_mpu;
+        let scale_y = pts_mpu;
+        let half_w = panel.width * layout_mpu * 0.5;
+        let half_h = panel.height * layout_mpu * 0.5;
 
         // Collect text commands from layout result.
         let text_commands: Vec<_> = result
@@ -776,28 +778,6 @@ pub(super) fn shape_text_cached(
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
 
-    // DEBUG: log what parley returns directly
-    {
-        let truncated: String = text.chars().take(20).collect();
-        for (i, line) in layout.lines().enumerate() {
-            let lm = line.metrics();
-            bevy::log::warn!(
-                "PARLEY line[{i}] \"{truncated}\" size={:.4}: ascent={:.4} descent={:.4} \
-                 baseline={:.4} line_height={:.4} min_coord={:.4} max_coord={:.4}",
-                config.size(), lm.ascent, lm.descent,
-                lm.baseline, lm.line_height, lm.min_coord, lm.max_coord,
-            );
-            for item in line.items() {
-                if let parley::layout::PositionedLayoutItem::GlyphRun(run) = item {
-                    bevy::log::warn!(
-                        "PARLEY run baseline={:.4} offset={:.4}",
-                        run.baseline(), run.offset(),
-                    );
-                }
-            }
-        }
-    }
-
     drop(font_cx);
     drop(layout_cx);
 
@@ -956,21 +936,6 @@ fn shape_text_to_quads(
         // Convert to panel-local (center origin, Y-up).
         let local_x = quad_layout_x.mul_add(scale_x, -half_w);
         let local_y = (-quad_layout_y).mul_add(scale_y, half_h);
-
-        // DEBUG: log first glyph of each text element
-        if quads.is_empty() {
-            bevy::log::warn!(
-                "TEXT quad[0]: bounds=({:.4}, {:.4}) sg=({:.4}, bl={:.4}) bearing=({:.4}, {:.4}) \
-                 quad_layout=({:.4}, {:.4}) scale=({:.6}, {:.6}) half=({:.6}, {:.6}) \
-                 local=({:.6}, {:.6}) config.size={:.4} em_scale={:.6}",
-                bounds.x, bounds.y, sg.x, sg.baseline,
-                metrics.bearing_x, metrics.bearing_y,
-                quad_layout_x, quad_layout_y,
-                scale_x, scale_y, half_w, half_h,
-                local_x, local_y,
-                config.size(), em_scale,
-            );
-        }
 
         quads.push((
             metrics.page_index,

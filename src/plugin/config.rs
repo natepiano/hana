@@ -300,8 +300,17 @@ pub enum Unit {
     Custom(f32),
 }
 
+/// Minimum `meters_per_unit` for [`Unit::Custom`], equal to [`Unit::Points`].
+///
+/// Units smaller than a typographic point would cause font sizes to shrink
+/// below 1.0 when converted to points for the layout engine, hitting parley's
+/// integer quantization and producing incorrect baselines.
+const MIN_CUSTOM_MPU: f32 = 0.0254 / 72.0;
+
 impl Unit {
     /// Returns the conversion factor from this unit to meters.
+    ///
+    /// [`Unit::Custom`] values below [`Unit::Points`] (0.000353 m) are clamped.
     #[must_use]
     pub const fn meters_per_unit(self) -> f32 {
         match self {
@@ -309,9 +318,19 @@ impl Unit {
             Self::Millimeters => 0.001,
             Self::Points => 0.0254 / 72.0,
             Self::Inches => 0.0254,
-            Self::Custom(mpu) => mpu,
+            Self::Custom(mpu) => {
+                if mpu < MIN_CUSTOM_MPU {
+                    MIN_CUSTOM_MPU
+                } else {
+                    mpu
+                }
+            },
         }
     }
+
+    /// Returns the multiplier to convert a value in this unit to typographic points.
+    #[must_use]
+    pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
 }
 
 /// Global unit configuration for layout dimensions and font sizes.

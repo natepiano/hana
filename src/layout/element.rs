@@ -169,4 +169,29 @@ impl LayoutTree {
     /// Returns `true` if the tree has no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
+
+    /// Returns a copy of this tree with all dimensions converted to points.
+    ///
+    /// `layout_scale` multiplies spatial values (padding, gaps, borders, fixed sizes).
+    /// `font_scale` multiplies font-related values (size, line height, letter/word spacing).
+    ///
+    /// Used by the panel layout system to ensure the layout engine and parley
+    /// always operate in points, avoiding parley's integer quantization at small sizes.
+    #[must_use]
+    pub fn scaled(&self, layout_scale: f32, font_scale: f32) -> Self {
+        let mut tree = self.clone();
+        for element in &mut tree.elements {
+            element.width = element.width.scaled(layout_scale);
+            element.height = element.height.scaled(layout_scale);
+            element.padding = element.padding.scaled(layout_scale);
+            element.child_gap *= layout_scale;
+            if let Some(ref mut border) = element.border {
+                *border = border.scaled(layout_scale);
+            }
+            if let ElementContent::Text { ref mut config, .. } = element.content {
+                *config = config.scaled(font_scale);
+            }
+        }
+        tree
+    }
 }

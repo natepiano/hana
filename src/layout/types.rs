@@ -264,6 +264,33 @@ impl Sizing {
     pub const fn is_resizable(&self) -> bool {
         matches!(self, Self::Fit { .. } | Self::Grow { .. })
     }
+
+    /// Returns a copy with spatial values multiplied by `factor`.
+    ///
+    /// `Percent` is unchanged (it's a fraction, not a spatial value).
+    #[must_use]
+    pub const fn scaled(self, factor: f32) -> Self {
+        match self {
+            Self::Fit { min, max } => Self::Fit {
+                min: min * factor,
+                max: if max == f32::MAX {
+                    f32::MAX
+                } else {
+                    max * factor
+                },
+            },
+            Self::Grow { min, max } => Self::Grow {
+                min: min * factor,
+                max: if max == f32::MAX {
+                    f32::MAX
+                } else {
+                    max * factor
+                },
+            },
+            Self::Fixed(size) => Self::Fixed(size * factor),
+            Self::Percent(frac) => Self::Percent(frac),
+        }
+    }
 }
 
 /// Direction in which children are laid out.
@@ -367,6 +394,17 @@ impl Padding {
     /// Total vertical padding (top + bottom).
     #[must_use]
     pub const fn vertical(&self) -> f32 { self.top + self.bottom }
+
+    /// Returns a copy with all sides multiplied by `factor`.
+    #[must_use]
+    pub const fn scaled(self, factor: f32) -> Self {
+        Self {
+            left:   self.left * factor,
+            right:  self.right * factor,
+            top:    self.top * factor,
+            bottom: self.bottom * factor,
+        }
+    }
 }
 
 /// Computed axis-aligned bounding box in layout coordinates (top-left origin).
@@ -1161,6 +1199,19 @@ impl Border {
     pub const fn between_children(mut self, width: f32) -> Self {
         self.between_children = width;
         self
+    }
+
+    /// Returns a copy with all widths multiplied by `factor`. Color is preserved.
+    #[must_use]
+    pub const fn scaled(self, factor: f32) -> Self {
+        Self {
+            left:             self.left * factor,
+            right:            self.right * factor,
+            top:              self.top * factor,
+            bottom:           self.bottom * factor,
+            color:            self.color,
+            between_children: self.between_children * factor,
+        }
     }
 }
 

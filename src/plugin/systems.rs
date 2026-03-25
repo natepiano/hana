@@ -157,21 +157,24 @@ pub(super) fn compute_panel_layouts(
         };
         panel_count += 1;
 
+        let layout_unit = panel_ref.layout_unit.unwrap_or(unit_config.layout);
+        let font_unit = panel_ref.font_unit.unwrap_or(unit_config.font);
+        let layout_to_pts = layout_unit.to_points();
+        let font_to_pts = font_unit.to_points();
+
+        // Pre-scale tree to points so parley always gets reasonable font sizes.
+        let scaled_tree = panel_ref.tree.scaled(layout_to_pts, font_to_pts);
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
-        let font_scale = panel_ref.font_scale(&unit_config);
         let result = engine.compute(
-            &panel_ref.tree,
-            panel_ref.width,
-            panel_ref.height,
-            font_scale,
+            &scaled_tree,
+            panel_ref.width * layout_to_pts,
+            panel_ref.height * layout_to_pts,
+            1.0, // tree is already in points — no additional font scaling
         );
 
         if let Some(bounds) = result.content_bounds() {
-            let mpu = panel_ref
-                .layout_unit
-                .unwrap_or(unit_config.layout)
-                .meters_per_unit();
-            computed.set_content_size(bounds.width * mpu, bounds.height * mpu);
+            let pts_mpu = super::Unit::Points.meters_per_unit();
+            computed.set_content_size(bounds.width * pts_mpu, bounds.height * pts_mpu);
         }
 
         computed.set_result(result);
@@ -212,14 +215,16 @@ pub(super) fn render_panel_gizmos(
             continue;
         };
 
-        let mpu = panel
+        // Layout output is in points. Convert to world meters.
+        let pts_mpu = super::Unit::Points.meters_per_unit();
+        let layout_mpu = panel
             .layout_unit
             .unwrap_or(unit_config.layout)
             .meters_per_unit();
-        let scale_x = mpu;
-        let scale_y = mpu;
-        let half_w = panel.width * mpu * 0.5;
-        let half_h = panel.height * mpu * 0.5;
+        let scale_x = pts_mpu;
+        let scale_y = pts_mpu;
+        let half_w = panel.width * layout_mpu * 0.5;
+        let half_h = panel.height * layout_mpu * 0.5;
 
         for cmd in &result.commands {
             let z_offset = match &cmd.kind {
@@ -240,22 +245,6 @@ pub(super) fn render_panel_gizmos(
                 RenderCommandKind::Border { border } => border.color.with_alpha(0.2),
                 _ => continue,
             };
-
-            // DEBUG: log text command bounds
-            if matches!(&cmd.kind, RenderCommandKind::Text { .. }) {
-                let left = cmd.bounds.x.mul_add(scale_x, -half_w);
-                let top = (-cmd.bounds.y).mul_add(scale_y, half_h);
-                if let RenderCommandKind::Text { ref text, ref config } = cmd.kind {
-                    bevy::log::warn!(
-                        "GIZMO text: \"{:.20}\" bounds=({:.4}, {:.4}, w={:.4}, h={:.4}) \
-                         scale=({:.6}, {:.6}) half=({:.6}, {:.6}) \
-                         left={:.6} top={:.6} config.size={:.4}",
-                        text, cmd.bounds.x, cmd.bounds.y, cmd.bounds.width, cmd.bounds.height,
-                        scale_x, scale_y, half_w, half_h,
-                        left, top, config.size(),
-                    );
-                }
-            }
 
             draw_rect_outline(
                 &mut gizmos,

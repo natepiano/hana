@@ -261,7 +261,10 @@ fn build_card(text_color: Color, dim_color: Color) -> bevy_diegetic::LayoutTree 
 
             // ── Main content (top) ───────────────────────────────────
             b.with(El::new().border(db), |b| {
-                b.text("JANE DOE", LayoutTextStyle::new(18.0).with_color(text_color));
+                b.text(
+                    "JANE DOE",
+                    LayoutTextStyle::new(18.0).with_color(text_color),
+                );
             });
             b.with(El::new().border(db), |b| {
                 b.text(
@@ -284,7 +287,10 @@ fn build_card(text_color: Color, dim_color: Color) -> bevy_diegetic::LayoutTree 
 
             // ── Spacer pushes footer to bottom ───────────────────────
             b.with(
-                El::new().width(Sizing::GROW).height(Sizing::GROW).border(db),
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .border(db),
                 |_| {},
             );
 
