@@ -1,5 +1,9 @@
 # Physical Font Sizing
 
+> **Superseded by [UNIT_SYSTEM.md](UNIT_SYSTEM.md).** The `TextScale`/`TextScaleOverride`/`METERS_PER_POINT`
+> approach described here is being replaced by a proper `Unit` enum and `UnitConfig` resource that
+> handles both layout and font unit conversion. This document is retained for historical context.
+
 ## Context
 
 Font "size" in the system is in abstract layout units with a hardcoded `0.01` scale

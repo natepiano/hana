@@ -35,8 +35,9 @@
 |---|---------------------------|--------------------------------------------------------------------|
 | 1 | Font ligatures            | ~~Support OpenType GSUB ligatures.~~ Done — `FontFeatureFlags` (liga, calt, dlig, kern), parley shaping. |
 | 2 | Panel rendering           | ~~Real geometry replaces gizmo wireframes.~~ Done — panels spawn `WorldText` children via `reconcile_panel_text_children`, unified readiness model with `PendingGlyphs` / `WorldTextReady`. |
-| 3 | Physical font sizing      | ~~Default `WorldText` scale matches real-world point sizes.~~ Done — `METERS_PER_POINT`, `TextScale` resource, `TextScaleOverride` per-entity. See [PHYSICAL_FONT_SIZING.md](PHYSICAL_FONT_SIZING.md). |
-| 4 | World/Text units          | Formalize the coordinate systems: layout units (points), world units (meters), and the conversion between them. Clear API boundaries for when each unit space applies. |
+| 3 | Physical font sizing      | ~~Default `WorldText` scale matches real-world point sizes.~~ Done — `METERS_PER_POINT`, `TextScale` resource, `TextScaleOverride` per-entity. Superseded by #4 (Unit System). See [PHYSICAL_FONT_SIZING.md](PHYSICAL_FONT_SIZING.md). |
+| 4 | World/Text units          | `Unit` enum (Meters, Millimeters, Points, Inches, Custom), `UnitConfig` resource, per-panel unit overrides. Replaces `TextScale`/`TextScaleOverride`/`METERS_PER_POINT`. See [UNIT_SYSTEM.md](UNIT_SYSTEM.md). |
+| 4b | Example unit migration   | Apply the unit system intelligently to all existing examples — choose appropriate layout and font units for each example rather than blanket `Custom(0.01)` compatibility shims. |
 | 5 | Type-safe font resolution | `ResolvedFont` couples font_id with font_data. Placeholder rendering with honest identity prevents atlas poisoning. Reactive `FontRegistered` observer swaps to real font when loaded. See [TYPE_SAFE_REACTIVE_FONTS.md](TYPE_SAFE_REACTIVE_FONTS.md). |
 | 6 | Text config cascade       | Default `TextConfig` on `DiegeticPanel` or any `El` container. All `b.text()` calls inside inherit it — child containers can override. Cascades like CSS inherited properties. Unlocks ergonomic styling for Phases 5–9. |
 | 7 | CJK font example          | Load Noto Sans JP, render Japanese text as `WorldText`. Validates multi-font + non-ASCII + multi-page atlas end-to-end. |
