@@ -15,9 +15,9 @@ use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
 use super::types::Direction;
+use super::types::LayoutTextStyle;
 use super::types::Padding;
 use super::types::Sizing;
-use super::types::TextConfig;
 
 /// A single element in the layout tree.
 ///
@@ -64,7 +64,7 @@ pub(super) enum ElementContent {
         /// The text string.
         text:   String,
         /// Text configuration.
-        config: TextConfig,
+        config: LayoutTextStyle,
     },
     /// Empty (no children, no text).
     Empty,

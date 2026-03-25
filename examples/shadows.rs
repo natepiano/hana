@@ -20,8 +20,8 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::GlyphRenderMode;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::TextScale;
-use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -247,7 +247,7 @@ fn spawn_glyph_grid(
             let glyph = commands
                 .spawn((
                     WorldText::new("A"),
-                    TextStyle::new()
+                    WorldTextStyle::new()
                         .with_size(GLYPH_SIZE)
                         .with_color(Color::srgb(0.2, 0.4, 0.9))
                         .with_render_mode(render_mode)
@@ -363,7 +363,7 @@ fn spawn_label(
     shadow_offset: Vec3,
     pos: Vec3,
 ) {
-    let style = TextStyle::new()
+    let style = WorldTextStyle::new()
         .with_size(size)
         .with_shadow_mode(GlyphShadowMode::None);
     let shadow = commands

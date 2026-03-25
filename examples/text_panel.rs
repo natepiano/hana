@@ -18,9 +18,9 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -210,7 +210,7 @@ fn build_panel(fps: &str, frame_ms: &str) -> bevy_diegetic::LayoutTree {
         |b| {
             // Upper text — GROW height to fill available space.
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
-                b.text("Hello, World!", TextConfig::new(TITLE_FONT_SIZE));
+                b.text("Hello, World!", LayoutTextStyle::new(TITLE_FONT_SIZE));
             });
             // Divider.
             b.with(
@@ -238,7 +238,7 @@ fn build_panel(fps: &str, frame_ms: &str) -> bevy_diegetic::LayoutTree {
             // Lower text — word-wrap test with enough text to break.
             b.text(
                 "The quick brown fox jumps over the lazy dog. MSDF rendering at any scale.",
-                TextConfig::new(BODY_FONT_SIZE),
+                LayoutTextStyle::new(BODY_FONT_SIZE),
             );
         },
     );
@@ -252,12 +252,12 @@ fn key_value_row(b: &mut LayoutBuilder, label: &str, value: &str) {
             .height(Sizing::FIT)
             .direction(Direction::LeftToRight),
         |b| {
-            b.text(label, TextConfig::new(BODY_FONT_SIZE));
+            b.text(label, LayoutTextStyle::new(BODY_FONT_SIZE));
             b.with(
                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                 |_| {},
             );
-            b.text(value, TextConfig::new(BODY_FONT_SIZE));
+            b.text(value, LayoutTextStyle::new(BODY_FONT_SIZE));
         },
     );
 }
@@ -296,7 +296,7 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
             .background(Color::srgb_u8(30, 34, 42))
             .border(Border::all(1.0, Color::srgb_u8(80, 90, 100))),
         |b| {
-            b.text("'D' toggle debug", TextConfig::new(CONTROLS_FONT_SIZE));
+            b.text("'D' toggle debug", LayoutTextStyle::new(CONTROLS_FONT_SIZE));
         },
     );
     builder.build()

@@ -32,9 +32,9 @@ use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -674,7 +674,8 @@ fn build_panel_tree(
                         if is_first {
                             b.text(
                                 "'+' add  '-' remove",
-                                TextConfig::new(FONT_SIZE).with_shadow_mode(GlyphShadowMode::None),
+                                LayoutTextStyle::new(FONT_SIZE)
+                                    .with_shadow_mode(GlyphShadowMode::None),
                             );
                             b.with(
                                 El::new()
@@ -695,7 +696,7 @@ fn build_panel_tree(
                             let color = Color::hsl(hue, 1.0, 0.7);
                             let label = format!("item {i}:");
                             let value = words[i % words.len()];
-                            let config = TextConfig::new(FONT_SIZE)
+                            let config = LayoutTextStyle::new(FONT_SIZE)
                                 .with_color(color)
                                 .with_shadow_mode(GlyphShadowMode::None);
                             b.with(

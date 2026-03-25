@@ -67,11 +67,11 @@ builder.with(
                 .width(Sizing::GROW)
                 .height(Sizing::fixed(20.0))
                 .background(BackgroundColor::rgb(60, 130, 180)),
-            |b| { b.text("STATUS", TextConfig::new(12)); },
+            |b| { b.text("STATUS", LayoutTextStyle::new(12)); },
         );
         b.with(
             El::new().width(Sizing::GROW).height(Sizing::GROW),
-            |b| { b.text("Hello, world", TextConfig::new(10)); },
+            |b| { b.text("Hello, world", LayoutTextStyle::new(10)); },
         );
     },
 );

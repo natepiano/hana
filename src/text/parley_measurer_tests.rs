@@ -5,8 +5,8 @@
 
 use super::FontRegistry;
 use super::create_parley_measurer;
+use crate::LayoutTextStyle;
 use crate::MeasureTextFn;
-use crate::TextConfig;
 use crate::TextMeasure;
 
 fn measurer() -> (FontRegistry, MeasureTextFn) {
@@ -15,7 +15,7 @@ fn measurer() -> (FontRegistry, MeasureTextFn) {
     (registry, measure_fn)
 }
 
-const fn default_measure(size: f32) -> TextMeasure { TextConfig::new(size).as_measure() }
+const fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_measure() }
 
 // ── Basic measurement ────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ fn monospace_equal_length_strings_have_similar_width() {
 fn bold_text_is_at_least_as_wide() {
     let (_registry, measure) = measurer();
     let normal = measure("Hello", &default_measure(16.0));
-    let bold_measure = TextConfig::new(16.0).bold().as_measure();
+    let bold_measure = LayoutTextStyle::new(16.0).bold().as_measure();
     let bold = measure("Hello", &bold_measure);
     // Bold glyphs are typically slightly wider. With a single weight font file
     // (Regular only), parley may synthesize or return the same width. Either

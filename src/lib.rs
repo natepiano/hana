@@ -39,6 +39,8 @@ mod text;
 // Debug overlay.
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
+#[cfg(feature = "typography_overlay")]
+pub use debug::TypographyOverlayReady;
 pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Border;
@@ -56,6 +58,7 @@ pub use layout::GlyphLoadingPolicy;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
 pub use layout::LayoutBuilder;
+pub use layout::LayoutTextStyle;
 pub use layout::LayoutTree;
 /// Function signature for custom text measurement. Takes a text string and
 /// a [`TextMeasure`] describing the font configuration, returns
@@ -66,7 +69,6 @@ pub use layout::Padding;
 pub use layout::Sizing;
 pub use layout::TextAlign;
 pub use layout::TextAnchor;
-pub use layout::TextConfig;
 /// Measured width and height of a text string, returned by [`MeasureTextFn`].
 pub use layout::TextDimensions;
 /// Font configuration passed to [`MeasureTextFn`]: font ID, size, weight,
@@ -75,8 +77,8 @@ pub use layout::TextDimensions;
 /// parley-backed measurement via this type.
 pub use layout::TextMeasure;
 pub use layout::TextProps;
-pub use layout::TextStyle;
 pub use layout::TextWrap;
+pub use layout::WorldTextStyle;
 // Bevy plugin.
 pub use plugin::AtlasConfig;
 pub use plugin::ComputedDiegeticPanel;

@@ -19,8 +19,8 @@ use bevy_diegetic::FontLoadFailed;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::TextScale;
-use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -181,7 +181,7 @@ fn on_font_registered(
     commands
         .spawn((
             WorldText::new(label),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(SAMPLE_SIZE)
                 .with_font(trigger.id.0)
                 .with_color(Color::srgb(0.2, 0.3, 0.9))

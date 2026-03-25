@@ -566,10 +566,10 @@ pub struct ForStandalone;
 // ── TextProps<C> ─────────────────────────────────────────────────────────────
 
 /// Type alias for layout engine text configuration.
-pub type TextConfig = TextProps<ForLayout>;
+pub type LayoutTextStyle = TextProps<ForLayout>;
 
 /// Type alias for standalone text styling (Bevy `Component`).
-pub type TextStyle = TextProps<ForStandalone>;
+pub type WorldTextStyle = TextProps<ForStandalone>;
 
 /// Default font size in layout units.
 const DEFAULT_FONT_SIZE: f32 = 16.0;

@@ -20,8 +20,8 @@ use super::types::AlignY;
 use super::types::Border;
 use super::types::BoundingBox;
 use super::types::Direction;
+use super::types::LayoutTextStyle;
 use super::types::Sizing;
-use super::types::TextConfig;
 use super::types::TextDimensions;
 use super::types::TextMeasure;
 use super::types::TextWrap;
@@ -223,7 +223,7 @@ struct WrappedText {
 /// own is placed on a single line without breaking.
 fn wrap_text_words(
     text: &str,
-    config: &TextConfig,
+    config: &LayoutTextStyle,
     max_width: f32,
     measure: &MeasureTextFn,
 ) -> WrappedText {
@@ -301,7 +301,11 @@ fn wrap_text_words(
 }
 
 /// Splits text at explicit `\n` characters and measures each line as a single run.
-fn wrap_text_newlines(text: &str, config: &TextConfig, measure: &MeasureTextFn) -> WrappedText {
+fn wrap_text_newlines(
+    text: &str,
+    config: &LayoutTextStyle,
+    measure: &MeasureTextFn,
+) -> WrappedText {
     let text_measure = config.as_measure();
     let mut lines = Vec::new();
     let mut line_height = 0.0_f32;
@@ -800,7 +804,7 @@ fn emit_down_traversal_commands(
 fn emit_text_commands(
     commands: &mut Vec<RenderCommand>,
     wrapped: Option<&WrappedText>,
-    config: &TextConfig,
+    config: &LayoutTextStyle,
     text: &str,
     bounds: BoundingBox,
     index: usize,

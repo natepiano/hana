@@ -43,15 +43,15 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::ShowTextGizmos;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextScale;
-use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -543,7 +543,7 @@ fn spawn_clay_text(
             commands.spawn((
                 ClayTextEntity,
                 WorldText::new(text),
-                TextStyle::new()
+                WorldTextStyle::new()
                     .with_size(font_size)
                     .with_anchor(bevy_diegetic::TextAnchor::TopLeft),
                 Transform::from_translation(world_pos).with_scale(Vec3::splat(text_entity_scale)),
@@ -605,7 +605,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder) {
                 |b| {
                     // Title slot.
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextConfig::new(FONT_SIZE));
+                        b.text("STATUS", LayoutTextStyle::new(FONT_SIZE));
                     });
                     // Grow spacer.
                     b.with(
@@ -619,7 +619,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder) {
                             .height(Sizing::GROW)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            b.text("DIEGETIC LAYOUT", TextConfig::new(SUBTITLE_FONT_SIZE));
+                            b.text("DIEGETIC LAYOUT", LayoutTextStyle::new(SUBTITLE_FONT_SIZE));
                         },
                     );
                 },
@@ -661,12 +661,12 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
                                 .height(Sizing::FIT)
                                 .direction(Direction::LeftToRight),
                             |b| {
-                                b.text(label, TextConfig::new(FONT_SIZE));
+                                b.text(label, LayoutTextStyle::new(FONT_SIZE));
                                 b.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                     |_| {},
                                 );
-                                b.text(value, TextConfig::new(FONT_SIZE));
+                                b.text(value, LayoutTextStyle::new(FONT_SIZE));
                             },
                         );
                     }
@@ -678,7 +678,7 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
                     );
 
                     // Word-wrap cell.
-                    b.text(WRAP_TEXT, TextConfig::new(FONT_SIZE));
+                    b.text(WRAP_TEXT, LayoutTextStyle::new(FONT_SIZE));
                 },
             );
         },

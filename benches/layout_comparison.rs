@@ -41,9 +41,9 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutPlugin;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use clay_layout::Clay;
@@ -317,7 +317,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder) {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextConfig::new(FONT_SIZE));
+                        b.text("STATUS", LayoutTextStyle::new(FONT_SIZE));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -329,7 +329,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder) {
                             .height(Sizing::GROW)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            b.text("BENCH", TextConfig::new(FONT_SIZE));
+                            b.text("BENCH", LayoutTextStyle::new(FONT_SIZE));
                         },
                     );
                 },
@@ -359,12 +359,12 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(&str, &str)]) {
                                 .height(Sizing::FIT)
                                 .direction(Direction::LeftToRight),
                             |b| {
-                                b.text(*label, TextConfig::new(FONT_SIZE));
+                                b.text(*label, LayoutTextStyle::new(FONT_SIZE));
                                 b.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                     |_| {},
                                 );
-                                b.text(*value, TextConfig::new(FONT_SIZE));
+                                b.text(*value, LayoutTextStyle::new(FONT_SIZE));
                             },
                         );
                     }

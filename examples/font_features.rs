@@ -22,9 +22,9 @@ use bevy_diegetic::FontFeatures;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -304,7 +304,7 @@ fn build_panel(
             // Title.
             b.text(
                 "Font Features",
-                TextConfig::new(SECTION_SIZE + 2.0)
+                LayoutTextStyle::new(SECTION_SIZE + 2.0)
                     .with_color(section_color)
                     .with_loading_policy(progressive),
             );
@@ -470,22 +470,22 @@ fn build_feature_column(
         FontFeatures::new()
     };
 
-    let on_config = TextConfig::new(SAMPLE_SIZE)
+    let on_config = LayoutTextStyle::new(SAMPLE_SIZE)
         .with_font(font_id)
         .with_color(on_color)
         .with_font_features(on_features)
         .with_loading_policy(loading_policy);
 
-    let off_config = TextConfig::new(SAMPLE_SIZE)
+    let off_config = LayoutTextStyle::new(SAMPLE_SIZE)
         .with_font(font_id)
         .with_color(off_color)
         .with_font_features(off_features)
         .with_loading_policy(loading_policy);
 
-    let label_config = TextConfig::new(LABEL_SIZE)
+    let label_config = LayoutTextStyle::new(LABEL_SIZE)
         .with_color(label_color)
         .with_loading_policy(loading_policy);
-    let font_name_config = TextConfig::new(FONT_NAME_SIZE)
+    let font_name_config = LayoutTextStyle::new(FONT_NAME_SIZE)
         .with_font(font_id)
         .with_color(label_color)
         .with_loading_policy(loading_policy);
@@ -509,7 +509,7 @@ fn build_feature_column(
                 |b| {
                     b.text(
                         title,
-                        TextConfig::new(SECTION_SIZE)
+                        LayoutTextStyle::new(SECTION_SIZE)
                             .with_color(section_color)
                             .with_loading_policy(loading_policy),
                     );
@@ -534,9 +534,9 @@ fn build_feature_column(
 fn build_sample_rows(
     b: &mut LayoutBuilder,
     samples: &[&str],
-    label_config: &TextConfig,
-    on_config: &TextConfig,
-    off_config: &TextConfig,
+    label_config: &LayoutTextStyle,
+    on_config: &LayoutTextStyle,
+    off_config: &LayoutTextStyle,
 ) {
     b.with(
         El::new()

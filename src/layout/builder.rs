@@ -35,9 +35,9 @@ use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
 use super::types::Direction;
+use super::types::LayoutTextStyle;
 use super::types::Padding;
 use super::types::Sizing;
-use super::types::TextConfig;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -281,7 +281,7 @@ impl LayoutBuilder {
     /// Text nodes are leaves, not containers, so they cannot receive children
     /// of their own. Use [`Self::with`] when you want to create another nested
     /// container instead of a text leaf.
-    pub fn text(&mut self, text: impl Into<String>, config: TextConfig) -> &mut Self {
+    pub fn text(&mut self, text: impl Into<String>, config: LayoutTextStyle) -> &mut Self {
         let parent = self.current_parent();
         self.tree.add_child(
             parent,

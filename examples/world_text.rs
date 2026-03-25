@@ -13,8 +13,8 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::TextAnchor;
 use bevy_diegetic::TextScale;
-use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -122,7 +122,7 @@ fn spawn_labeled_cube(
         ))
         .observe(on_mesh_clicked)
         .with_children(|parent| {
-            let face_style = TextStyle::new()
+            let face_style = WorldTextStyle::new()
                 .with_size(20.0)
                 .with_color(Color::srgb(0.9, 0.3, 0.1));
 
@@ -201,7 +201,7 @@ fn spawn_anchor_demo(
     commands
         .spawn((
             WorldText::new("Text Anchors"),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(16.0)
                 .with_color(Color::srgb(0.7, 0.8, 1.0))
                 .with_anchor(TextAnchor::TopCenter),
@@ -214,7 +214,7 @@ fn spawn_anchor_demo(
     commands
         .spawn((
             WorldText::new("red dot = Transform translation\n'X' 'Y' 'Z' to rotate around axis"),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(10.0)
                 .with_color(Color::WHITE)
                 .with_anchor(TextAnchor::TopCenter),
@@ -257,7 +257,7 @@ fn spawn_anchor_demo(
         commands
             .spawn((
                 WorldText::new(text),
-                TextStyle::new()
+                WorldTextStyle::new()
                     .with_size(12.5)
                     .with_color(Color::WHITE)
                     .with_anchor(anchor),
@@ -276,7 +276,7 @@ fn spawn_ground_text(commands: &mut Commands) {
     commands
         .spawn((
             WorldText::new("GROUND"),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(48.0)
                 .with_color(Color::srgb(0.9, 0.9, 0.1)),
             Transform::from_xyz(0.0, 0.001, 1.5)
@@ -287,7 +287,7 @@ fn spawn_ground_text(commands: &mut Commands) {
     commands
         .spawn((
             WorldText::new("click the box to zoom in\nclick the text to zoom in\nclick the plane to zoom back out"),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(16.0)
                 .with_color(Color::WHITE)
                 .with_anchor(TextAnchor::TopLeft),

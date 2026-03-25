@@ -24,16 +24,16 @@ use bevy_diegetic::Font;
 use bevy_diegetic::FontId;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
+use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
-use bevy_diegetic::PendingGlyphs;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextScale;
-use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
+use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextReady;
+use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -121,11 +121,6 @@ struct WordCycle {
     timer: Timer,
 }
 
-/// Zoom-to-fit marker: added at spawn, consumed once the entity and all
-/// descendants (overlay labels) are fully rendered with no pending glyphs.
-#[derive(Component)]
-struct ZoomWhenReady;
-
 /// Keeps loaded font handles alive so they don't get unloaded.
 #[derive(Resource, Default)]
 struct FontHandles(Vec<Handle<Font>>);
@@ -150,13 +145,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (
-                toggle_overlay,
-                home_camera,
-                switch_font,
-                cycle_word,
-                deferred_zoom_to_fit,
-            ),
+            (toggle_overlay, home_camera, switch_font, cycle_word),
         )
         .add_observer(on_world_text_added)
         .add_observer(on_font_registered)
@@ -203,21 +192,38 @@ fn setup(
     commands.insert_resource(SceneBounds(ground));
 
     // Display word with typography overlay.
-    commands.spawn((
-        DisplayText,
-        ZoomWhenReady,
-        WorldText::new(DISPLAY_WORDS[0]),
-        TextStyle::new()
-            .with_size(DISPLAY_SIZE)
-            .with_color(Color::srgb(0.9, 0.9, 0.9)),
-        TypographyOverlay::default(),
-        Transform::from_xyz(0.0, 0.5, 2.0),
-    ));
+    commands
+        .spawn((
+            DisplayText,
+            WorldText::new(DISPLAY_WORDS[0]),
+            WorldTextStyle::new()
+                .with_size(DISPLAY_SIZE)
+                .with_color(Color::srgb(0.9, 0.9, 0.9))
+                .with_loading_policy(GlyphLoadingPolicy::Progressive),
+            TypographyOverlay::default(),
+            Transform::from_xyz(0.0, 0.5, 2.0),
+        ))
+        .observe(
+            |trigger: On<TypographyOverlayReady>,
+             cameras: Query<Entity, With<PanOrbitCamera>>,
+             mut commands: Commands| {
+                info!("TypographyOverlayReady: {:?}", trigger.entity);
+                for camera in &cameras {
+                    commands.trigger(
+                        ZoomToFit::new(camera, trigger.entity)
+                            .margin(ZOOM_TO_FIT_MARGIN)
+                            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+                    );
+                }
+                // Only zoom on initial load — remove this observer.
+                commands.entity(trigger.observer()).despawn();
+            },
+        );
 
     // Hint text
     commands.spawn((
         WorldText::new("Click text to zoom in · Click plane to zoom out"),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(2.0)
             .with_color(Color::srgba(0.6, 0.6, 0.6, 0.8)),
         Transform::from_xyz(0.0, 0.0, 3.45),
@@ -327,8 +333,8 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
     let row_h = Sizing::fixed(CONTROLS_ROW_HEIGHT);
-    let cfg = TextConfig::new(CONTROLS_FONT_SIZE);
-    let arrow_cfg = TextConfig::new(CONTROLS_ARROW_SIZE);
+    let cfg = LayoutTextStyle::new(CONTROLS_FONT_SIZE);
+    let arrow_cfg = LayoutTextStyle::new(CONTROLS_ARROW_SIZE);
 
     let mut builder = LayoutBuilder::new(CONTROLS_LAYOUT_W, CONTROLS_LAYOUT_H);
     builder.with(
@@ -343,7 +349,7 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
         |b| {
             b.text(
                 "controls",
-                TextConfig::new(CONTROLS_TITLE_SIZE).with_color(CONTROLS_TITLE_COLOR),
+                LayoutTextStyle::new(CONTROLS_TITLE_SIZE).with_color(CONTROLS_TITLE_COLOR),
             );
             b.with(
                 El::new()
@@ -404,8 +410,8 @@ fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
     let row_h = Sizing::fixed(CONTROLS_ROW_HEIGHT);
-    let cfg = TextConfig::new(CONTROLS_FONT_SIZE);
-    let arrow_cfg = TextConfig::new(CONTROLS_ARROW_SIZE);
+    let cfg = LayoutTextStyle::new(CONTROLS_FONT_SIZE);
+    let arrow_cfg = LayoutTextStyle::new(CONTROLS_ARROW_SIZE);
 
     let key_cells: Vec<ColumnCell> = FONT_KEYS
         .iter()
@@ -439,7 +445,7 @@ fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
         |b| {
             b.text(
                 "fonts",
-                TextConfig::new(CONTROLS_TITLE_SIZE).with_color(CONTROLS_TITLE_COLOR),
+                LayoutTextStyle::new(CONTROLS_TITLE_SIZE).with_color(CONTROLS_TITLE_COLOR),
             );
             b.with(
                 El::new()
@@ -467,7 +473,7 @@ fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
 
 /// Cell content for a column.
 enum ColumnCell<'a> {
-    Text(&'a str, TextConfig),
+    Text(&'a str, LayoutTextStyle),
 }
 
 /// Builds a column of fixed-height rows.
@@ -589,7 +595,7 @@ fn cycle_word(
 fn switch_font(
     keyboard: Res<ButtonInput<KeyCode>>,
     registry: Res<FontRegistry>,
-    mut texts: Query<&mut TextStyle, With<DisplayText>>,
+    mut texts: Query<&mut WorldTextStyle, With<DisplayText>>,
 ) {
     let pressed = FONT_KEYS
         .iter()
@@ -602,43 +608,9 @@ fn switch_font(
         .unwrap_or(FontId::MONOSPACE)
         .0;
     for mut style in &mut texts {
-        *style = TextStyle::new()
+        *style = WorldTextStyle::new()
             .with_font(font_id)
             .with_size(DISPLAY_SIZE)
             .with_color(Color::srgb(0.9, 0.9, 0.9));
-    }
-}
-
-fn deferred_zoom_to_fit(
-    targets: Query<Entity, With<ZoomWhenReady>>,
-    pending: Query<(), With<PendingGlyphs>>,
-    children_query: Query<&Children>,
-    cameras: Query<Entity, With<PanOrbitCamera>>,
-    mut commands: Commands,
-) {
-    for entity in &targets {
-        // Wait until descendants exist (overlay has been built).
-        let has_descendants = children_query.iter_descendants(entity).next().is_some();
-        if !has_descendants {
-            continue;
-        }
-
-        // Wait until this entity and all descendants have no `PendingGlyphs`.
-        let any_pending = pending.get(entity).is_ok()
-            || children_query
-                .iter_descendants(entity)
-                .any(|d| pending.get(d).is_ok());
-        if any_pending {
-            continue;
-        }
-
-        commands.entity(entity).remove::<ZoomWhenReady>();
-        for camera in &cameras {
-            commands.trigger(
-                ZoomToFit::new(camera, entity)
-                    .margin(ZOOM_TO_FIT_MARGIN)
-                    .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-            );
-        }
     }
 }

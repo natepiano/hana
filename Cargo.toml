@@ -103,3 +103,6 @@ name = "font_features"
 
 [[example]]
 name = "minimal_eb"
+
+[[example]]
+name = "text_scale"

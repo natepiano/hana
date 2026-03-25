@@ -18,7 +18,7 @@ use super::text_renderer::shape_text_cached;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
-use crate::layout::TextStyle;
+use crate::layout::WorldTextStyle;
 use crate::plugin::TextScale;
 use crate::plugin::TextScaleOverride;
 use crate::text::Font;
@@ -68,7 +68,7 @@ pub struct ComputedWorldText {
 /// ));
 /// ```
 #[derive(Component, Clone, Debug, Reflect)]
-#[require(TextStyle, Transform, Visibility)]
+#[require(WorldTextStyle, Transform, Visibility)]
 pub struct WorldText(pub String);
 
 impl WorldText {
@@ -90,6 +90,11 @@ pub(super) struct WorldTextShadowProxy;
 /// become ready.
 #[derive(Component)]
 pub struct PendingGlyphs;
+
+/// Internal marker: glyphs are ready and meshes are spawned, but we
+/// wait for Bevy's transform propagation before firing [`WorldTextReady`].
+#[derive(Component)]
+pub struct AwaitingReady;
 
 /// Marker on a [`WorldText`] entity that was spawned as a child of a
 /// [`DiegeticPanel`](crate::DiegeticPanel). Stores the layout-computed
@@ -144,7 +149,7 @@ pub(super) fn render_world_text(
             Without<PanelTextChild>,
             Or<(
                 Changed<WorldText>,
-                Changed<TextStyle>,
+                Changed<WorldTextStyle>,
                 Changed<TextScaleOverride>,
             )>,
         ),
@@ -157,7 +162,10 @@ pub(super) fn render_world_text(
             Without<PanelTextChild>,
         ),
     >,
-    texts: Query<(&WorldText, &TextStyle, Option<&TextScaleOverride>), Without<PanelTextChild>>,
+    texts: Query<
+        (&WorldText, &WorldTextStyle, Option<&TextScaleOverride>),
+        Without<PanelTextChild>,
+    >,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -222,6 +230,8 @@ pub(super) fn render_world_text(
         let has_pending = shaped.stats.pending_glyphs > 0 || shaped.stats.queued_glyphs > 0;
 
         // Store computed layout data for the typography overlay.
+        // Only inserted when all glyphs are ready so the overlay
+        // appears atomically with the complete text.
         #[cfg(feature = "typography_overlay")]
         if all_ready {
             commands.entity(entity).insert(ComputedWorldText {
@@ -264,9 +274,7 @@ pub(super) fn render_world_text(
             commands.entity(entity).insert_if_new(PendingGlyphs);
         } else if all_ready {
             commands.entity(entity).remove::<PendingGlyphs>();
-            commands
-                .entity(entity)
-                .trigger(|e| WorldTextReady { entity: e });
+            commands.entity(entity).insert(AwaitingReady);
         }
     }
 
@@ -285,6 +293,21 @@ pub(super) fn render_world_text(
     }
 }
 
+/// Fires [`WorldTextReady`] for entities whose meshes and transforms are
+/// now fully propagated. Runs after `CalculateBounds` so that `Aabb` and
+/// `GlobalTransform` are available on mesh children.
+pub(super) fn emit_world_text_ready(
+    awaiting: Query<Entity, With<AwaitingReady>>,
+    mut commands: Commands,
+) {
+    for entity in &awaiting {
+        commands.entity(entity).remove::<AwaitingReady>();
+        commands
+            .entity(entity)
+            .trigger(|e| WorldTextReady { entity: e });
+    }
+}
+
 /// Spawns visible mesh and optional shadow proxy entities for each atlas page
 /// of glyph quads under the given `entity`. Returns accumulated mesh build time
 /// in milliseconds.
@@ -292,7 +315,7 @@ pub(super) fn render_world_text(
 fn spawn_world_text_meshes(
     page_quads: &HashMap<u32, Vec<GlyphQuadData>>,
     entity: Entity,
-    style: &TextStyle,
+    style: &WorldTextStyle,
     atlas: &MsdfAtlas,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<MsdfTextMaterial>,
@@ -420,7 +443,7 @@ impl ShapedWorldText {
 /// The `scale` parameter converts layout units to world units.
 fn shape_world_text(
     text: &str,
-    style: &TextStyle,
+    style: &WorldTextStyle,
     font_registry: &FontRegistry,
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,
@@ -546,7 +569,7 @@ fn shape_world_text(
 /// in the run is already cached in the atlas.
 fn ensure_all_glyphs_ready(
     glyphs: &[ShapedGlyph],
-    style: &TextStyle,
+    style: &WorldTextStyle,
     atlas: &mut MsdfAtlas,
     font_data: &[u8],
     stats: &mut TextBuildStats,
@@ -577,7 +600,7 @@ fn ensure_all_glyphs_ready(
 #[allow(clippy::too_many_arguments)]
 fn measure_anchor_offset(
     glyphs: &[ShapedGlyph],
-    style: &TextStyle,
+    style: &WorldTextStyle,
     font_registry: &FontRegistry,
     atlas: &mut MsdfAtlas,
     font_data: &[u8],

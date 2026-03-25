@@ -14,17 +14,17 @@ use bevy::prelude::*;
 use super::glyph_quad::GlyphQuadData;
 use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
+use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
-use super::world_text::WorldTextReady;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
+use crate::layout::LayoutTextStyle;
 use crate::layout::RenderCommandKind;
-use crate::layout::TextConfig;
 use crate::layout::TextMeasure;
-use crate::layout::TextStyle;
+use crate::layout::WorldTextStyle;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
@@ -262,6 +262,8 @@ impl Plugin for TextRenderPlugin {
                 build_panel_batched_meshes.after(shape_panel_text_children),
                 sync_panel_hue_offset.after(build_panel_batched_meshes),
                 super::world_text::render_world_text.after(poll_atlas_glyphs),
+                super::world_text::emit_world_text_ready
+                    .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
             ),
         );
     }
@@ -449,13 +451,13 @@ fn shape_panel_text_children(
             With<WorldText>,
             Or<(
                 Changed<WorldText>,
-                Changed<TextStyle>,
+                Changed<WorldTextStyle>,
                 Changed<PanelTextChild>,
             )>,
         ),
     >,
     pending_texts: Query<Entity, (With<PanelTextChild>, With<WorldText>, With<PendingGlyphs>)>,
-    texts: Query<(&WorldText, &TextStyle, &PanelTextChild)>,
+    texts: Query<(&WorldText, &WorldTextStyle, &PanelTextChild)>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -515,9 +517,7 @@ fn shape_panel_text_children(
                 shadow_mode: config.shadow_mode(),
             });
             commands.entity(entity).remove::<PendingGlyphs>();
-            commands
-                .entity(entity)
-                .trigger(|e| WorldTextReady { entity: e });
+            commands.entity(entity).insert(AwaitingReady);
         } else if has_pending {
             commands.entity(entity).insert_if_new(PendingGlyphs);
         }
@@ -720,7 +720,7 @@ fn spawn_batch_meshes(
 /// parley and inserts into the cache.
 pub(super) fn shape_text_cached(
     text: &str,
-    config: &TextConfig,
+    config: &LayoutTextStyle,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
@@ -838,7 +838,7 @@ pub(super) fn shape_text_cached(
 #[allow(clippy::too_many_arguments)]
 fn shape_text_to_quads(
     text: &str,
-    config: &TextConfig,
+    config: &LayoutTextStyle,
     bounds: &crate::layout::BoundingBox,
     font_registry: &FontRegistry,
     atlas: &mut MsdfAtlas,

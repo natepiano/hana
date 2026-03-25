@@ -291,8 +291,8 @@ mod tests {
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutEngine;
+    use crate::layout::LayoutTextStyle;
     use crate::layout::Sizing;
-    use crate::layout::TextConfig;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
 
@@ -339,12 +339,12 @@ mod tests {
                             .direction(Direction::LeftToRight)
                             .child_gap(4.0),
                         |b| {
-                            b.text(format!("item {i}:"), TextConfig::new(PERF_FONT_SIZE));
+                            b.text(format!("item {i}:"), LayoutTextStyle::new(PERF_FONT_SIZE));
                             b.with(
                                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                 |_| {},
                             );
-                            b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                            b.text("value", LayoutTextStyle::new(PERF_FONT_SIZE));
                         },
                     );
                 }
@@ -375,7 +375,7 @@ mod tests {
     fn perf_element_sizes() {
         println!(
             "TextConfig size: {} bytes",
-            std::mem::size_of::<TextConfig>()
+            std::mem::size_of::<LayoutTextStyle>()
         );
     }
 
@@ -409,12 +409,12 @@ mod tests {
                             .direction(Direction::LeftToRight)
                             .child_gap(4.0),
                         |b| {
-                            b.text(label, TextConfig::new(PERF_FONT_SIZE));
+                            b.text(label, LayoutTextStyle::new(PERF_FONT_SIZE));
                             b.with(
                                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                 |_| {},
                             );
-                            b.text("value", TextConfig::new(PERF_FONT_SIZE));
+                            b.text("value", LayoutTextStyle::new(PERF_FONT_SIZE));
                         },
                     );
                 }

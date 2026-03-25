@@ -6,6 +6,8 @@ mod constants;
 mod typography_overlay;
 
 pub use typography_overlay::TypographyOverlay;
+pub use typography_overlay::TypographyOverlayReady;
 pub use typography_overlay::build_typography_overlay;
+pub use typography_overlay::emit_typography_overlay_ready;
 pub use typography_overlay::on_overlay_added;
 pub use typography_overlay::on_overlay_removed;

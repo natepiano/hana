@@ -36,11 +36,12 @@ use crate::callouts::draw_dashed_line;
 use crate::callouts::draw_dimension_arrow;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextAnchor;
-use crate::layout::TextStyle;
+use crate::layout::WorldTextStyle;
 use crate::plugin::TextScale;
 use crate::plugin::TextScaleOverride;
 use crate::render::ComputedWorldText;
 use crate::render::LineMetricsSnapshot;
+use crate::render::PendingGlyphs;
 use crate::render::ShapedTextCache;
 use crate::render::WorldText;
 use crate::text::FontId;
@@ -101,6 +102,19 @@ impl Default for TypographyOverlay {
 #[derive(Component)]
 pub struct OverlayContainer;
 
+/// Fired on the [`WorldText`] entity when its [`TypographyOverlay`] and
+/// all descendant label text are fully rendered and interactable.
+#[derive(EntityEvent)]
+pub struct TypographyOverlayReady {
+    /// The [`WorldText`] entity whose overlay is ready.
+    pub entity: Entity,
+}
+
+/// Internal marker: overlay labels have been spawned, waiting for their
+/// glyphs to finish and transforms to propagate.
+#[derive(Component)]
+pub struct AwaitingOverlayReady;
+
 /// Observer: spawns an [`OverlayContainer`] child when
 /// [`TypographyOverlay`] is added to an entity.
 pub fn on_overlay_added(trigger: On<Add, TypographyOverlay>, mut commands: Commands) {
@@ -136,7 +150,7 @@ pub fn build_typography_overlay(
     query: Query<(
         Entity,
         &WorldText,
-        &TextStyle,
+        &WorldTextStyle,
         &TypographyOverlay,
         &ComputedWorldText,
         Option<&TextScaleOverride>,
@@ -145,11 +159,12 @@ pub fn build_typography_overlay(
         Entity,
         (
             With<TypographyOverlay>,
+            Without<PendingGlyphs>,
             Or<(
                 Added<TypographyOverlay>,
                 Changed<TypographyOverlay>,
                 Changed<WorldText>,
-                Changed<TextStyle>,
+                Changed<WorldTextStyle>,
                 Changed<ComputedWorldText>,
             )>,
         ),
@@ -243,6 +258,33 @@ pub fn build_typography_overlay(
                 &mut dot_materials,
             );
         }
+
+        // Mark for deferred readiness check — label glyphs may still
+        // need rasterization and transform propagation.
+        commands.entity(entity).insert(AwaitingOverlayReady);
+    }
+}
+
+/// Checks overlay label readiness and fires [`TypographyOverlayReady`]
+/// once all descendant [`WorldText`] labels have no [`PendingGlyphs`].
+/// Runs after `CalculateBounds` so transforms and AABBs are available.
+pub fn emit_typography_overlay_ready(
+    awaiting: Query<Entity, With<AwaitingOverlayReady>>,
+    pending: Query<(), With<super::super::render::PendingGlyphs>>,
+    children_query: Query<&Children>,
+    mut commands: Commands,
+) {
+    for entity in &awaiting {
+        let any_pending = children_query
+            .iter_descendants(entity)
+            .any(|d| pending.get(d).is_ok());
+        if any_pending {
+            continue;
+        }
+        commands.entity(entity).remove::<AwaitingOverlayReady>();
+        commands
+            .entity(entity)
+            .trigger(|e| TypographyOverlayReady { entity: e });
     }
 }
 
@@ -460,7 +502,7 @@ fn spawn_bounding_box_callout(
     let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y, scale);
     commands.entity(entity).with_child((
         WorldText::new(LABEL_BOUNDING_BOX),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(bbox_color)
             .with_anchor(TextAnchor::CenterRight)
@@ -552,7 +594,7 @@ fn spawn_origin_and_advancement(
     ));
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ORIGIN),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(overlay.color)
             .with_anchor(TextAnchor::Center)
@@ -666,7 +708,7 @@ fn spawn_advancement_arrow(
     let adv_label_y = spacing.mul_add(-0.5, arrow_y);
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ADVANCEMENT),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(overlay.color)
             .with_anchor(TextAnchor::TopCenter)
@@ -964,7 +1006,7 @@ fn spawn_line_edge_labels(
         let line_world_y = layout_to_world_y(layout_y, anchor_y, scale);
         commands.entity(parent).with_child((
             WorldText::new(label),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(label_size)
                 .with_color(color)
                 .with_anchor(TextAnchor::CenterRight)
@@ -999,7 +1041,7 @@ fn spawn_left_arrow_labels(
     let label_y_mid_world = layout_to_world_y(label_y_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_ASCENT),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
             .with_anchor(TextAnchor::CenterRight)
@@ -1012,7 +1054,7 @@ fn spawn_left_arrow_labels(
     let descent_mid_world = layout_to_world_y(descent_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_DESCENT),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
             .with_anchor(TextAnchor::CenterRight)
@@ -1023,7 +1065,7 @@ fn spawn_left_arrow_labels(
     // Line Height label: same vertical position as Ascent label.
     commands.entity(parent).with_child((
         WorldText::new(LABEL_LINE_HEIGHT),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
             .with_anchor(TextAnchor::CenterRight)
@@ -1039,7 +1081,7 @@ fn spawn_left_arrow_labels(
         layout_to_world_y(baseline_y, anchor_y, scale) - label_descent_offset;
     commands.entity(parent).with_child((
         WorldText::new(LABEL_BASELINE),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
             .with_anchor(TextAnchor::CenterRight)
@@ -1055,7 +1097,7 @@ fn spawn_left_arrow_labels(
         let no_gap_label = format!("no line gap for {font_name}");
         commands.entity(parent).with_child((
             WorldText::new(no_gap_label),
-            TextStyle::new()
+            WorldTextStyle::new()
                 .with_size(label_size)
                 .with_color(color)
                 .with_anchor(TextAnchor::BottomLeft)
@@ -1087,7 +1129,7 @@ fn spawn_right_arrow_labels(
     let x_height_mid_world = layout_to_world_y(x_height_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_X_HEIGHT),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
             .with_anchor(TextAnchor::CenterLeft)
@@ -1100,7 +1142,7 @@ fn spawn_right_arrow_labels(
     let cap_mid_world = layout_to_world_y(cap_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_CAP_HEIGHT),
-        TextStyle::new()
+        WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
             .with_anchor(TextAnchor::CenterLeft)

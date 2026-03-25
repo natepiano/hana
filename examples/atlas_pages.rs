@@ -18,8 +18,8 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::RasterQuality;
 use bevy_diegetic::TextScale;
-use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -123,7 +123,7 @@ fn setup(
 
     // Spawn printable ASCII characters.
     let chars: Vec<char> = (33_u8..=126).map(|c| c as char).collect();
-    let style = TextStyle::new()
+    let style = WorldTextStyle::new()
         .with_size(CHAR_SIZE)
         .with_color(Color::srgb(0.15, 0.25, 0.8))
         .with_shadow_mode(GlyphShadowMode::None);
@@ -193,7 +193,7 @@ fn spawn_char_at(
     parent: Entity,
     ch: char,
     index: usize,
-    style: &TextStyle,
+    style: &WorldTextStyle,
 ) {
     let col = index % GRID_COLS;
     let row = index / GRID_COLS;
@@ -232,7 +232,7 @@ fn handle_input(
     let block = UNICODE_BLOCKS[next_block.0];
     next_block.0 += 1;
 
-    let style = TextStyle::new()
+    let style = WorldTextStyle::new()
         .with_size(CHAR_SIZE)
         .with_color(Color::srgb(0.8, 0.2, 0.15))
         .with_shadow_mode(GlyphShadowMode::None);

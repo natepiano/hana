@@ -26,11 +26,11 @@ use super::El;
 use super::LayoutBuilder;
 use super::LayoutEngine;
 use super::LayoutResult;
+use super::LayoutTextStyle;
 use super::MeasureTextFn;
 use super::Padding;
 use super::RenderCommandKind;
 use super::Sizing;
-use super::TextConfig;
 use super::TextDimensions;
 use super::TextMeasure;
 
@@ -391,12 +391,12 @@ fn parity_key_value_row_with_spacer() {
             .direction(Direction::LeftToRight)
             .background(bevy::color::Color::srgb_u8(22, 28, 34)),
     );
-    b.text("fps:", TextConfig::new(FONT_SIZE));
+    b.text("fps:", LayoutTextStyle::new(FONT_SIZE));
     b.with(
         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
         |_| {},
     );
-    b.text("60", TextConfig::new(FONT_SIZE));
+    b.text("60", LayoutTextStyle::new(FONT_SIZE));
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, size, size);
@@ -568,14 +568,14 @@ fn build_diegetic_fit_parent_centering(size: f32) -> Vec<Bbox> {
                     .background(bevy::color::Color::srgb_u8(22, 28, 34)),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextConfig::new(FONT_SIZE));
+                        b.text("STATUS", LayoutTextStyle::new(FONT_SIZE));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                         |_| {},
                     );
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("SUB", TextConfig::new(FONT_SIZE));
+                        b.text("SUB", LayoutTextStyle::new(FONT_SIZE));
                     });
                 },
             );
@@ -1176,7 +1176,7 @@ fn build_diegetic_status_panel_header(b: &mut LayoutBuilder) {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextConfig::new(FONT_SIZE));
+                        b.text("STATUS", LayoutTextStyle::new(FONT_SIZE));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -1188,7 +1188,7 @@ fn build_diegetic_status_panel_header(b: &mut LayoutBuilder) {
                             .height(Sizing::GROW)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            b.text("DIEGETIC", TextConfig::new(FONT_SIZE));
+                            b.text("DIEGETIC", LayoutTextStyle::new(FONT_SIZE));
                         },
                     );
                 },
@@ -1219,12 +1219,12 @@ fn build_diegetic_status_panel_body(b: &mut LayoutBuilder, labels: &[(&str, &str
                                 .height(Sizing::FIT)
                                 .direction(Direction::LeftToRight),
                             |b| {
-                                b.text(*label, TextConfig::new(FONT_SIZE));
+                                b.text(*label, LayoutTextStyle::new(FONT_SIZE));
                                 b.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                     |_| {},
                                 );
-                                b.text(*value, TextConfig::new(FONT_SIZE));
+                                b.text(*value, LayoutTextStyle::new(FONT_SIZE));
                             },
                         );
                     }

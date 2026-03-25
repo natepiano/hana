@@ -11,8 +11,8 @@ use bevy_diegetic::Font;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 
 /// Number of text elements to spawn.
 const TEXT_COUNT: usize = 20;
@@ -66,7 +66,7 @@ fn on_font(trigger: On<FontRegistered>, mut commands: Commands) {
             for sample in samples.iter().take(TEXT_COUNT) {
                 b.text(
                     *sample,
-                    TextConfig::new(36.0)
+                    LayoutTextStyle::new(36.0)
                         .with_font(trigger.id.0)
                         .with_loading_policy(GlyphLoadingPolicy::Progressive),
                 );

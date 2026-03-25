@@ -4,7 +4,7 @@ use bevy::color::Color;
 
 use super::types::Border;
 use super::types::BoundingBox;
-use super::types::TextConfig;
+use super::types::LayoutTextStyle;
 
 /// A single render command produced by the layout pass.
 ///
@@ -48,7 +48,7 @@ pub enum RenderCommandKind {
         /// The text content.
         text:   String,
         /// Text configuration (font, size, etc.).
-        config: TextConfig,
+        config: LayoutTextStyle,
     },
     /// A border outline.
     Border {

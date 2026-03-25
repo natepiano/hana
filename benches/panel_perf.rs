@@ -26,9 +26,9 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutPlugin;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use criterion::Criterion;
@@ -116,12 +116,18 @@ fn build_panel_tree(rows: &[(String, &str)], text_color: Color) -> bevy_diegetic
                         .direction(Direction::LeftToRight)
                         .child_gap(5.0),
                     |b| {
-                        b.text(label, TextConfig::new(FONT_SIZE).with_color(text_color));
+                        b.text(
+                            label,
+                            LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
+                        );
                         b.with(
                             El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                             |_| {},
                         );
-                        b.text(*value, TextConfig::new(FONT_SIZE).with_color(text_color));
+                        b.text(
+                            *value,
+                            LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
+                        );
                     },
                 );
             }

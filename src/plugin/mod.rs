@@ -325,5 +325,10 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, text_scale: Option<
         app.add_observer(crate::debug::on_overlay_added);
         app.add_observer(crate::debug::on_overlay_removed);
         app.add_systems(Update, crate::debug::build_typography_overlay);
+        app.add_systems(
+            PostUpdate,
+            crate::debug::emit_typography_overlay_ready
+                .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
+        );
     }
 }

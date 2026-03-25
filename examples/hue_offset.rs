@@ -27,9 +27,9 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextConfig;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
@@ -190,7 +190,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
             for i in 0..ROW_COUNT {
                 let hue = 360.0 * (i as f32 / ROW_COUNT as f32);
                 let color = Color::hsl(hue, 0.8, 0.6);
-                let config = TextConfig::new(FONT_SIZE).with_color(color);
+                let config = LayoutTextStyle::new(FONT_SIZE).with_color(color);
                 b.with(
                     El::new()
                         .width(Sizing::GROW)
