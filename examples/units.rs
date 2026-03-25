@@ -81,7 +81,7 @@ fn main() {
             DiegeticUiPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, apply_camera_settings)
+        .add_systems(Update, dynamic_near_far)
         .run();
 }
 
@@ -195,7 +195,7 @@ fn setup(
     ));
 
     let mid_y = a4_h_m / 2.0 + LIFT;
-    commands.spawn(PanOrbitCamera {
+    commands.spawn((PanOrbitCamera {
         focus: Vec3::new(0.0, mid_y, 0.0),
         radius: Some(0.5),
         yaw: Some(0.0),
@@ -211,27 +211,32 @@ fn setup(
         trackpad_pinch_to_zoom_enabled: true,
         zoom_lower_limit: 0.0000001,
         ..default()
-    });
+    },
+    Projection::Perspective(PerspectiveProjection {
+        near: 0.001,
+        near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
+        ..default()
+    }),
+    ));
 }
 
-const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_4;
-const MIN_FOV: f32 = 0.001;
-const FOV_THRESHOLD: f32 = 0.5;
-
-/// Narrows FOV as the camera gets closer to prevent frustum cone clipping.
-fn apply_camera_settings(mut cameras: Query<(&mut Projection, &mut PanOrbitCamera)>) {
+/// Tightens near/far planes proportionally to camera radius.
+/// Keeps the near:far ratio constant regardless of zoom level,
+/// preventing depth clipping at close range.
+fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut PanOrbitCamera)>) {
     for (mut proj, mut poc) in &mut cameras {
         if let Projection::Perspective(ref mut p) = *proj {
             let radius = poc.radius.unwrap_or(1.0);
-            let new_fov = if radius >= FOV_THRESHOLD {
-                DEFAULT_FOV
-            } else {
-                let t = radius / FOV_THRESHOLD;
-                MIN_FOV + (DEFAULT_FOV - MIN_FOV) * t * t
-            };
 
-            if (p.fov - new_fov).abs() > 0.0001 {
-                p.fov = new_fov;
+            let new_near = (radius * 0.001).max(1e-6);
+            let new_far = (radius * 100.0).max(1000.0);
+
+            if (p.near - new_near).abs() > new_near * 0.1
+                || (p.far - new_far).abs() > new_far * 0.1
+            {
+                p.near = new_near;
+                p.far = new_far;
+                p.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -new_near);
                 poc.force_update = true;
             }
         }
