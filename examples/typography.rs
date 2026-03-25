@@ -160,21 +160,7 @@ fn setup(
     mut font_handles: ResMut<FontHandles>,
     registry: Res<FontRegistry>,
 ) {
-    font_handles
-        .0
-        .push(asset_server.load("fonts/NotoSans-Regular.ttf"));
-    font_handles
-        .0
-        .push(asset_server.load("fonts/EBGaramond-Regular.ttf"));
-    font_handles
-        .0
-        .push(asset_server.load("fonts/CrimsonText-Regular.ttf"));
-    font_handles
-        .0
-        .push(asset_server.load("fonts/LiberationSans-Regular.ttf"));
-    font_handles
-        .0
-        .push(asset_server.load("fonts/LiberationSerif-Regular.ttf"));
+    load_fonts(&asset_server, &mut font_handles);
     // Ground plane — subtle, light gray.
     let ground = commands
         .spawn((
@@ -285,6 +271,18 @@ fn setup(
         trackpad_pinch_to_zoom_enabled: true,
         ..default()
     },));
+}
+
+fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
+    for path in [
+        "fonts/NotoSans-Regular.ttf",
+        "fonts/EBGaramond-Regular.ttf",
+        "fonts/CrimsonText-Regular.ttf",
+        "fonts/LiberationSans-Regular.ttf",
+        "fonts/LiberationSerif-Regular.ttf",
+    ] {
+        font_handles.0.push(asset_server.load(path));
+    }
 }
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {

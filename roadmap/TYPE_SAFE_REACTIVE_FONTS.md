@@ -75,10 +75,10 @@ Replace every `map_or(EMBEDDED_FONT, ...)` and `unwrap_or("JetBrains Mono")` wit
 
 | File | Location | Current | Replacement |
 |------|----------|---------|-------------|
-| `src/render/text_renderer.rs` | `shape_text_cached` ~644 | `family_name(...).unwrap_or("JetBrains Mono")` | `resolved.name()` from `resolve_or_embedded()` |
-| `src/render/text_renderer.rs` | `shape_text_to_quads` ~754 | `font(...).map_or(EMBEDDED_FONT, Font::data)` | `resolved.data()` from `resolve_or_embedded()` |
-| `src/render/world_text.rs` | `shape_world_text` ~318 | `font(...).map_or(EMBEDDED_FONT, Font::data)` | `resolved.data()` from `resolve_or_embedded()` |
-| `src/render/world_text.rs` | line height calc ~377 | `font_registry.font(FontId(style.font_id())).map_or(style.size(), \|f\| f.metrics(...).line_height)` | `resolved.font().metrics(style.size()).line_height` |
+| `src/render/text_renderer.rs` | `shape_text_cached` ~746 | `family_name(...).unwrap_or("JetBrains Mono")` | `resolved.name()` from `resolve_or_embedded()` |
+| `src/render/text_renderer.rs` | `shape_text_to_quads` ~861 | `font(...).map_or(EMBEDDED_FONT, Font::data)` | `resolved.data()` from `resolve_or_embedded()` |
+| `src/render/world_text.rs` | `shape_world_text` ~465 | `font(...).map_or(EMBEDDED_FONT, Font::data)` | `resolved.data()` from `resolve_or_embedded()` |
+| `src/render/world_text.rs` | line height calc ~377 | `font_registry.font(...).map_or(style.size(), \|f\| f.metrics(...).line_height)` | `resolved.font().metrics(style.size()).line_height` |
 | `src/text/atlas.rs` | `preload` ~469 | silent early return | Change signature to take `&ResolvedFont` |
 
 **Critical change in shaping:** The `ShapedCacheKey` must use the *resolved* font_id (possibly 0 if falling back), not the *requested* font_id. This means `shape_text_cached` receives the `ResolvedFont` and uses `resolved.id()` for the cache key. When the real font loads, the cache key changes → cache miss → re-shapes with the correct font.
@@ -105,19 +105,21 @@ Replace every `map_or(EMBEDDED_FONT, ...)` and `unwrap_or("JetBrains Mono")` wit
 fn on_font_loaded(
     trigger: On<FontRegistered>,
     mut cache: ResMut<ShapedTextCache>,
-    mut world_texts: Query<&mut TextStyle, With<WorldText>>,
+    mut world_texts: Query<&mut WorldTextStyle, (With<WorldText>, Without<PanelTextChild>)>,
     mut panels: Query<&mut DiegeticPanel>,
 )
 ```
 
 Actions (no atlas purge needed — atlas was never poisoned):
 1. `cache.invalidate_font(trigger.id.0)` — remove shaping results produced with the placeholder font so they get re-shaped with the real font
-2. For each `WorldText` with matching *requested* `font_id` → touch `TextStyle` via `DerefMut` to trigger change detection
-3. For each `DiegeticPanel` whose tree uses that font → touch via `DerefMut` to trigger change detection and re-layout
+2. For each standalone `WorldText` (not `PanelTextChild`) with matching *requested* `font_id` → touch `WorldTextStyle` via `DerefMut` to trigger change detection in `render_world_text`
+3. For each `DiegeticPanel` whose tree uses that font → touch via `DerefMut` to trigger change detection → cascades through `compute_panel_layouts` → `reconcile_panel_text_children` → `shape_panel_text_children` → `build_panel_batched_meshes`
 
 Register with `app.add_observer(on_font_loaded)`.
 
-**Note on panel invalidation:** Accessing `&mut DiegeticPanel` via `DerefMut` triggers Bevy's change detection without needing `Clone`. The system `compute_panel_layouts` checks `is_changed()` and will recompute layout.
+**Note on unified pipeline:** Panels now spawn `WorldText` children via `reconcile_panel_text_children`. Touching the `DiegeticPanel` triggers the full cascade: re-layout → reconcile children → re-shape → rebuild meshes. Panel text children are excluded from the standalone `WorldText` query via `Without<PanelTextChild>` to avoid double invalidation.
+
+**Note on `PendingGlyphs`:** When the newly correct text is shaped and atlas rasterization is queued, the per-entity `PendingGlyphs` marker tracks readiness. `WorldTextReady` fires when all glyphs are done. No global rebuild needed.
 
 ### Phase 6: `ShapedTextCache::invalidate_font()`
 
@@ -184,14 +186,17 @@ Used by the `on_font_loaded` observer to filter panels that need re-layout.
 1. `consume_loaded_fonts` registers "EB Garamond", triggers `FontRegistered { id: FontId(2) }`
 2. `on_font_loaded` observer fires:
    - `cache.invalidate_font(2)` → clears placeholder shaping entries
-   - Touches `TextStyle`/`DiegeticPanel` for affected entities → change detection triggered
+   - Touches `WorldTextStyle` on standalone text and `DiegeticPanel` on panels → change detection triggered
    - Family names already updated (shared `Arc<RwLock<Vec<String>>>`)
-3. Next frame:
+3. Next frame (PostUpdate systems cascade):
    - `compute_panel_layouts` runs on changed panels → measurer uses "EB Garamond" name → correct measurements
+   - `reconcile_panel_text_children` spawns/updates `WorldText` children with correct `LayoutTextStyle`
+   - `shape_panel_text_children` shapes panel text with correct font
+   - `render_world_text` shapes standalone text with correct font
    - `resolve_or_embedded(FontId(2))` returns `ResolvedFont { id: FontId(2), font: &eb_garamond }`
-   - Shaping uses "EB Garamond" → correct glyph indices
    - `GlyphKey { font_id: 2, glyph_index: <EB Garamond index> }` → atlas cache miss → rasterized with correct data
-4. `WhenReady` waits for async rasterization → text appears in EB Garamond
+4. `PendingGlyphs` tracks per-entity rasterization progress
+5. `WorldTextReady` fires when all glyphs are done → text is interactable
 
 **No poisoning at any stage. No purge needed.**
 
@@ -205,8 +210,8 @@ Used by the `on_font_loaded` observer to filter panels that need re-layout.
 | `src/text/atlas.rs` | `GlyphKey::new()` constructor |
 | `src/text/measurer.rs` | `families` → `Arc<RwLock<Vec<String>>>` |
 | `src/text/mod.rs` | Export `ResolvedFont` |
-| `src/render/text_renderer.rs` | Replace 2 fallbacks with `resolve_or_embedded()`, add `ShapedTextCache::invalidate_font()` |
-| `src/render/world_text.rs` | Replace 1 fallback with `resolve_or_embedded()` |
+| `src/render/text_renderer.rs` | Replace 2 fallbacks in `shape_text_cached`/`shape_text_to_quads` with `resolve_or_embedded()`, add `ShapedTextCache::invalidate_font()` |
+| `src/render/world_text.rs` | Replace 2 fallbacks in `shape_world_text` (font data + line height) with `resolve_or_embedded()` |
 | `src/layout/element.rs` | `LayoutTree::uses_font()` |
 | `src/plugin/mod.rs` | `on_font_loaded` observer, shared families wiring |
 | `src/lib.rs` | Export `ResolvedFont` |

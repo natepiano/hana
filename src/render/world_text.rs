@@ -94,11 +94,13 @@ pub struct PendingGlyphs;
 /// Internal marker: glyphs are ready and meshes are spawned, but we
 /// wait for Bevy's transform propagation before firing [`WorldTextReady`].
 #[derive(Component)]
-pub struct AwaitingReady;
+pub(super) struct AwaitingReady;
 
-/// Marker on a [`WorldText`] entity that was spawned as a child of a
-/// [`DiegeticPanel`](crate::DiegeticPanel). Stores the layout-computed
-/// bounding box and panel scale factors needed to build panel-local quads.
+/// Marker on a [`WorldText`] entity spawned as a child of a
+/// [`DiegeticPanel`](crate::DiegeticPanel).
+///
+/// Stores the layout-computed bounding box and panel scale factors
+/// needed to build panel-local quads.
 #[derive(Component, Clone, Debug)]
 pub struct PanelTextChild {
     /// Index of the source element in the layout tree.
@@ -140,7 +142,7 @@ pub struct WorldTextReady {
 ///
 /// When all glyphs are ready, builds meshes and fires [`WorldTextReady`].
 /// When glyphs are still missing, adds/keeps [`PendingGlyphs`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn render_world_text(
     changed_texts: Query<
         Entity,

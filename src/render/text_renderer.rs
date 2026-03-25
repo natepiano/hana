@@ -334,7 +334,7 @@ fn poll_atlas_glyphs(
 /// Stores shaped glyph quads for a panel [`WorldText`] child, along with its
 /// render and shadow modes for batching into combined meshes.
 #[derive(Component)]
-pub struct PanelTextQuads {
+pub(super) struct PanelTextQuads {
     /// Per-glyph quads keyed by atlas page index.
     pub quads:       Vec<(u32, GlyphQuadData)>,
     /// The glyph render mode for this text element.
@@ -442,7 +442,7 @@ fn reconcile_panel_text_children(
 /// 1. Calls [`shape_text_to_quads`] using the [`PanelTextChild`] scale data.
 /// 2. If all glyphs are ready, stores results in [`PanelTextQuads`] and removes [`PendingGlyphs`].
 /// 3. If glyphs are still pending, inserts [`PendingGlyphs`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn shape_panel_text_children(
     changed_texts: Query<
         Entity,
@@ -534,7 +534,7 @@ fn shape_panel_text_children(
 /// 2. Groups quads by [`TextBatchKey`] (render mode, shadow mode, page index).
 /// 3. Despawns old [`DiegeticTextMesh`] / [`DiegeticShadowProxy`] children.
 /// 4. Spawns new batched mesh entities via [`spawn_batch_meshes`].
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn build_panel_batched_meshes(
     changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
     panel_children: Query<(&PanelTextQuads, &ChildOf), With<PanelTextChild>>,
