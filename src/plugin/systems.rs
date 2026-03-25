@@ -233,9 +233,9 @@ pub(super) fn render_panel_gizmos(
                     if !show_text.0 {
                         continue;
                     }
-                    0.001
+                    0.0
                 },
-                RenderCommandKind::Border { .. } => 0.002,
+                RenderCommandKind::Border { .. } => 0.0,
                 RenderCommandKind::ScissorStart | RenderCommandKind::ScissorEnd => continue,
             };
 
