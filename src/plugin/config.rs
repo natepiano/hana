@@ -3,6 +3,8 @@
 use bevy::prelude::*;
 use bevy::tasks::available_parallelism;
 
+use crate::layout::Unit;
+
 /// Minimum canonical rasterization size in pixels.
 const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
 
@@ -269,68 +271,6 @@ impl AtlasConfig {
             self.clamped_glyphs_per_page()
         );
     }
-}
-
-/// Physical unit for interpreting numeric dimensions.
-///
-/// Used by [`UnitConfig`] to define what "1.0" means for layout dimensions
-/// and font sizes. `Custom(f32)` is an escape hatch for any unit not
-/// covered by the named variants — the value is meters per unit.
-///
-/// # Examples
-///
-/// ```ignore
-/// Unit::Meters          // 1 unit = 1 meter (Bevy default)
-/// Unit::Millimeters     // 1 unit = 1mm
-/// Unit::Points          // 1 unit = 1 typographic point (1/72 inch)
-/// Unit::Inches          // 1 unit = 1 inch
-/// Unit::Custom(0.01)    // 1 unit = 1 centimeter
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub enum Unit {
-    /// 1 unit = 1 meter. Bevy's default world-space convention.
-    Meters,
-    /// 1 unit = 1 millimeter (0.001 m).
-    Millimeters,
-    /// 1 unit = 1 typographic point (1/72 inch ≈ 0.000353 m).
-    Points,
-    /// 1 unit = 1 inch (0.0254 m).
-    Inches,
-    /// 1 unit = the given number of meters.
-    Custom(f32),
-}
-
-/// Minimum `meters_per_unit` for [`Unit::Custom`], equal to [`Unit::Points`].
-///
-/// Units smaller than a typographic point would cause font sizes to shrink
-/// below 1.0 when converted to points for the layout engine, hitting parley's
-/// integer quantization and producing incorrect baselines.
-const MIN_CUSTOM_MPU: f32 = 0.0254 / 72.0;
-
-impl Unit {
-    /// Returns the conversion factor from this unit to meters.
-    ///
-    /// [`Unit::Custom`] values below [`Unit::Points`] (0.000353 m) are clamped.
-    #[must_use]
-    pub const fn meters_per_unit(self) -> f32 {
-        match self {
-            Self::Meters => 1.0,
-            Self::Millimeters => 0.001,
-            Self::Points => 0.0254 / 72.0,
-            Self::Inches => 0.0254,
-            Self::Custom(mpu) => {
-                if mpu < MIN_CUSTOM_MPU {
-                    MIN_CUSTOM_MPU
-                } else {
-                    mpu
-                }
-            },
-        }
-    }
-
-    /// Returns the multiplier to convert a value in this unit to typographic points.
-    #[must_use]
-    pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
 }
 
 /// Global unit configuration for layout dimensions and font sizes.

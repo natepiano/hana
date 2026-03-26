@@ -72,7 +72,7 @@ const HALF_TICK: f32 = 0.004;
 const QTR_TICK: f32 = 0.003;
 const EIGHTH_TICK: f32 = 0.002;
 const RULER_LINE_WIDTH: f32 = 1.0;
-const LABEL_SIZE: f32 = 0.003;
+const LABEL_SIZE: f32 = 8.0; // points
 const LABEL_GAP: f32 = 0.001;
 
 // ── Zoom ─────────────────────────────────────────────────────────────
@@ -153,6 +153,7 @@ fn setup(
     let ruler_color = Color::srgba(0.55, 0.55, 0.55, 0.7);
     let label_style = WorldTextStyle::new()
         .with_size(LABEL_SIZE)
+        .with_unit(Unit::Points)
         .with_color(ruler_color);
 
     // ── A4 page ──────────────────────────────────────────────────────
@@ -508,6 +509,7 @@ fn toggle_rulers(
     let ruler_color = Color::srgba(0.55, 0.55, 0.55, 0.7);
     let label_style = WorldTextStyle::new()
         .with_size(LABEL_SIZE)
+        .with_unit(Unit::Points)
         .with_color(ruler_color);
 
     for a4_entity in &a4_panels {

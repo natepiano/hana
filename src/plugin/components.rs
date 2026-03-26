@@ -5,7 +5,6 @@ use std::sync::Arc;
 use bevy::prelude::*;
 
 use super::config::PanelSize;
-use super::config::Unit;
 use super::config::UnitConfig;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
@@ -15,6 +14,7 @@ use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
+use crate::layout::Unit;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///

@@ -491,6 +491,72 @@ pub enum TextAlign {
     Right,
 }
 
+/// Physical unit for interpreting numeric dimensions.
+///
+/// Used by [`UnitConfig`](crate::UnitConfig) to define what "1.0" means for
+/// layout dimensions and font sizes, and by
+/// [`WorldTextStyle::with_unit`](TextProps::with_unit) to set per-entity
+/// size units.
+///
+/// `Custom(f32)` is an escape hatch for any unit not covered by the named
+/// variants — the value is meters per unit.
+///
+/// # Examples
+///
+/// ```ignore
+/// Unit::Meters          // 1 unit = 1 meter (Bevy default)
+/// Unit::Millimeters     // 1 unit = 1mm
+/// Unit::Points          // 1 unit = 1 typographic point (1/72 inch)
+/// Unit::Inches          // 1 unit = 1 inch
+/// Unit::Custom(0.01)    // 1 unit = 1 centimeter
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub enum Unit {
+    /// 1 unit = 1 meter. Bevy's default world-space convention.
+    Meters,
+    /// 1 unit = 1 millimeter (0.001 m).
+    Millimeters,
+    /// 1 unit = 1 typographic point (1/72 inch ≈ 0.000353 m).
+    Points,
+    /// 1 unit = 1 inch (0.0254 m).
+    Inches,
+    /// 1 unit = the given number of meters.
+    Custom(f32),
+}
+
+/// Minimum `meters_per_unit` for [`Unit::Custom`], equal to [`Unit::Points`].
+///
+/// Units smaller than a typographic point would cause font sizes to shrink
+/// below 1.0 when converted to points for the layout engine, hitting parley's
+/// integer quantization and producing incorrect baselines.
+const MIN_CUSTOM_MPU: f32 = 0.0254 / 72.0;
+
+impl Unit {
+    /// Returns the conversion factor from this unit to meters.
+    ///
+    /// [`Unit::Custom`] values below [`Unit::Points`] (0.000353 m) are clamped.
+    #[must_use]
+    pub const fn meters_per_unit(self) -> f32 {
+        match self {
+            Self::Meters => 1.0,
+            Self::Millimeters => 0.001,
+            Self::Points => 0.0254 / 72.0,
+            Self::Inches => 0.0254,
+            Self::Custom(mpu) => {
+                if mpu < MIN_CUSTOM_MPU {
+                    MIN_CUSTOM_MPU
+                } else {
+                    mpu
+                }
+            },
+        }
+    }
+
+    /// Returns the multiplier to convert a value in this unit to typographic points.
+    #[must_use]
+    pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
+}
+
 /// Anchor point for standalone text positioning.
 ///
 /// Determines which point of the text block's bounding box is placed
@@ -666,6 +732,12 @@ pub struct TextProps<C: Send + Sync + 'static> {
     shadow_mode:    GlyphShadowMode,
     loading_policy: GlyphLoadingPolicy,
     font_features:  FontFeatures,
+    /// What unit `size` is expressed in. `None` = inherit from global config.
+    /// Only meaningful for [`ForStandalone`] — ignored by layout text.
+    unit:           Option<Unit>,
+    /// Explicit meters-per-design-unit override. `None` = derive from `unit`.
+    /// Only meaningful for [`ForStandalone`] — ignored by layout text.
+    world_scale:    Option<f32>,
     #[reflect(ignore)]
     _context:       PhantomData<C>,
 }
@@ -687,6 +759,8 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.shadow_mode == other.shadow_mode
             && self.loading_policy == other.loading_policy
             && self.font_features == other.font_features
+            && self.unit == other.unit
+            && self.world_scale == other.world_scale
     }
 }
 
@@ -881,6 +955,9 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             render_mode: _,
             shadow_mode: _,
             loading_policy: _,
+            // Standalone-only — not relevant for layout shaping cache.
+            unit: _,
+            world_scale: _,
             _context: _,
         } = self;
 
@@ -940,6 +1017,8 @@ impl TextProps<ForLayout> {
             shadow_mode: GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
             font_features: FontFeatures::NONE,
+            unit: None,
+            world_scale: None,
             _context: PhantomData,
         }
     }
@@ -1026,6 +1105,8 @@ impl TextProps<ForStandalone> {
             shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
             font_features:  FontFeatures::NONE,
+            unit:           None,
+            world_scale:    None,
             _context:       PhantomData,
         }
     }
@@ -1051,6 +1132,46 @@ impl TextProps<ForStandalone> {
         self.anchor = anchor;
         self
     }
+
+    /// Sets the unit that [`size`](Self::size) is expressed in.
+    ///
+    /// When set, the renderer converts the size to world meters using the
+    /// unit's [`meters_per_unit`](Unit::meters_per_unit) factor. When `None`
+    /// (the default), the global
+    /// [`UnitConfig::world_font`](crate::UnitConfig) is used.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // 12-point text — auto-converts to world meters:
+    /// WorldTextStyle::new()
+    ///     .with_size(12.0)
+    ///     .with_unit(Unit::Points)
+    /// ```
+    #[must_use]
+    pub const fn with_unit(mut self, unit: Unit) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+
+    /// Sets an explicit meters-per-design-unit override.
+    ///
+    /// When set, this value is used directly instead of deriving it from
+    /// the unit. Use this when you need a specific physical scale that
+    /// doesn't correspond to a standard [`Unit`].
+    #[must_use]
+    pub const fn with_world_scale(mut self, meters_per_unit: f32) -> Self {
+        self.world_scale = Some(meters_per_unit);
+        self
+    }
+
+    /// Returns the per-entity unit override, if set.
+    #[must_use]
+    pub const fn unit(&self) -> Option<Unit> { self.unit }
+
+    /// Returns the per-entity world scale override, if set.
+    #[must_use]
+    pub const fn world_scale(&self) -> Option<f32> { self.world_scale }
 }
 
 impl Default for TextProps<ForStandalone> {

@@ -206,7 +206,10 @@ pub(super) fn render_world_text(
             continue;
         }
 
-        let scale = unit_config.world_font.meters_per_unit();
+        let scale = style
+            .world_scale()
+            .or_else(|| style.unit().map(|u| u.meters_per_unit()))
+            .unwrap_or(unit_config.world_font.meters_per_unit());
 
         // Shape text and build quads in entity-local coordinates.
         let shaped = shape_world_text(
@@ -448,7 +451,7 @@ fn shape_world_text(
     // rounds baselines to integers, which destroys metrics when the font
     // size is below 1.0 (e.g., 0.10 meters). We shape at the equivalent
     // point size and scale the output back down.
-    let pts_mpu = crate::plugin::Unit::Points.meters_per_unit();
+    let pts_mpu = crate::layout::Unit::Points.meters_per_unit();
     let boost = if pts_mpu > 0.0 { 1.0 / pts_mpu } else { 1.0 };
     let config = style.as_layout_config().scaled(boost);
 

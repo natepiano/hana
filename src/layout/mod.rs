@@ -77,4 +77,5 @@ pub use types::TextDimensions;
 pub use types::TextMeasure;
 pub use types::TextProps;
 pub use types::TextWrap;
+pub use types::Unit;
 pub use types::WorldTextStyle;
