@@ -11,6 +11,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
+use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -49,17 +50,20 @@ const GROUND_SIDE_MARGIN: f32 = 1.4;
 const GROUND_FRONT_MARGIN: f32 = 0.65;
 const GROUND_BACK_MARGIN: f32 = 2.0;
 
-/// Font size for feature samples (in layout units).
-const SAMPLE_SIZE: f32 = 140.0;
+/// Layout height in points (width follows window aspect ratio).
+const LAYOUT_HEIGHT: f32 = 792.0;
 
-/// Font size for labels and headers (in layout units).
-const ON_OFF_SIZE: f32 = 50.0;
+/// Font size for feature samples (pt).
+const SAMPLE_SIZE: f32 = 48.0;
 
-/// Font size for section headers (in layout units).
-const SECTION_SIZE: f32 = 83.0;
+/// Font size for Off/On labels (pt).
+const ON_OFF_SIZE: f32 = 14.0;
 
-/// Font size for the typeface label shown at the top-right of each cell (in layout units).
-const FONT_NAME_SIZE: f32 = 66.0;
+/// Font size for section headers (pt).
+const SECTION_SIZE: f32 = 18.0;
+
+/// Font size for the typeface label shown at the top-right of each cell (pt).
+const FONT_NAME_SIZE: f32 = 16.0;
 
 /// Marker for the showcase panel.
 #[derive(Component)]
@@ -110,7 +114,9 @@ fn setup(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (world_w, world_h) = world_dimensions(window);
+    let (layout_w, layout_h) = layout_dimensions(window);
+    let world_h = PANEL_WORLD_HEIGHT;
+    let world_w = world_h * (layout_w / layout_h);
     let (ground_w, ground_d) = ground_dimensions(world_w);
     let ground_z = ground_center_z();
 
@@ -126,16 +132,17 @@ fn setup(
         Transform::from_xyz(0.0, 0.0, ground_z),
     ));
 
-    warn!("MUTATE: setup spawning DiegeticPanel");
     commands.spawn((
         ShowcasePanel,
-        DiegeticPanel {
-            tree: build_panel(world_w, world_h, noto_id.0),
-            width: world_w,
-            height: world_h,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::builder()
+            .size((layout_w, layout_h))
+            .layout_unit(Unit::Points)
+            .world_height(PANEL_WORLD_HEIGHT)
+            .anchor(Anchor::TopLeft)
+            .layout(|b| {
+                build_panel_content(b, noto_id.0);
+            })
+            .build(),
         panel_transform(world_w, world_h),
     ));
 
@@ -171,10 +178,10 @@ fn setup(
     },));
 }
 
-fn world_dimensions(window: &Window) -> (f32, f32) {
+/// Returns layout dimensions in points, matching the window aspect ratio.
+fn layout_dimensions(window: &Window) -> (f32, f32) {
     let aspect = window.width() / window.height();
-    let world_h = PANEL_WORLD_HEIGHT;
-    (world_h * aspect, world_h)
+    (LAYOUT_HEIGHT * aspect, LAYOUT_HEIGHT)
 }
 
 fn ground_dimensions(world_w: f32) -> (f32, f32) {
@@ -211,18 +218,27 @@ fn resize_panel(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (world_w, world_h) = world_dimensions(window);
+    let (layout_w, layout_h) = layout_dimensions(window);
+    let world_h = PANEL_WORLD_HEIGHT;
+    let world_w = world_h * (layout_w / layout_h);
     let (ground_w, ground_d) = ground_dimensions(world_w);
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
         #[allow(clippy::float_cmp)]
-        if panel.width == world_w && panel.height == world_h {
+        if panel.width == layout_w && panel.height == layout_h {
             continue;
         }
-        panel.width = world_w;
-        panel.height = world_h;
-        panel.tree = build_panel(world_w, world_h, noto_id.0);
+        let new = DiegeticPanel::builder()
+            .size((layout_w, layout_h))
+            .layout_unit(Unit::Points)
+            .world_height(PANEL_WORLD_HEIGHT)
+            .anchor(Anchor::TopLeft)
+            .layout(|b| {
+                build_panel_content(b, noto_id.0);
+            })
+            .build();
+        *panel = new;
         *transform = panel_transform(world_w, world_h);
     }
 
@@ -247,25 +263,26 @@ fn on_font_registered(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (world_w, world_h) = world_dimensions(window);
+    let (layout_w, layout_h) = layout_dimensions(window);
     for mut panel in &mut panels {
-        warn!(
-            "MUTATE: on_font_registered rebuilding tree for {}",
-            trigger.name
-        );
-        panel.tree = build_panel(world_w, world_h, noto_id.0);
+        let new = DiegeticPanel::builder()
+            .size((layout_w, layout_h))
+            .layout_unit(Unit::Points)
+            .world_height(PANEL_WORLD_HEIGHT)
+            .anchor(Anchor::TopLeft)
+            .layout(|b| {
+                build_panel_content(b, noto_id.0);
+            })
+            .build();
+        *panel = new;
     }
 }
 
 // ── Panel layout ────────────────────────────────────────────────────────────
 
-fn build_panel(
-    layout_w: f32,
-    layout_h: f32,
-    serif_font_id: Option<u16>,
-) -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(layout_w, layout_h);
-
+/// Populates the panel layout. Called from the builder's `.layout()` closure.
+/// All spatial values are in points.
+fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
     let bg = Color::srgb_u8(40, 40, 45);
     let border_color = Color::srgb_u8(70, 75, 85);
     let column_border_color = Color::srgba(0.75, 0.8, 0.9, 0.3);
@@ -276,20 +293,19 @@ fn build_panel(
 
     let progressive = GlyphLoadingPolicy::Progressive;
 
-    builder.with(
+    b.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(0.04))
+            .padding(Padding::all(12.0))
             .direction(Direction::TopToBottom)
-            .child_gap(0.024)
+            .child_gap(8.0)
             .background(bg)
-            .border(Border::all(0.00225, border_color)),
+            .border(Border::all(1.0, border_color)),
         |b| {
-            // Title.
             b.text(
                 "Font Features",
-                LayoutTextStyle::new(SECTION_SIZE)
+                LayoutTextStyle::new(SECTION_SIZE + 4.0)
                     .with_color(section_color)
                     .with_loading_policy(progressive),
             );
@@ -301,9 +317,6 @@ fn build_panel(
                 "(loading...)"
             };
 
-            // 2x2 grid:
-            // LIGA | CALT
-            // DLIG | KERN
             build_feature_grid(
                 b,
                 serif_name,
@@ -317,8 +330,6 @@ fn build_panel(
             );
         },
     );
-
-    builder.build()
 }
 
 /// Builds the 2x2 feature grid (LIGA|CALT over DLIG|KERN).
@@ -339,14 +350,14 @@ fn build_feature_grid(
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom)
-            .child_gap(0.048),
+            .child_gap(12.0),
         |b| {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
                     .direction(Direction::LeftToRight)
-                    .child_gap(0.048),
+                    .child_gap(12.0),
                 |b| {
                     build_feature_column(
                         b,
@@ -385,7 +396,7 @@ fn build_feature_grid(
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
                     .direction(Direction::LeftToRight)
-                    .child_gap(0.048),
+                    .child_gap(12.0),
                 |b| {
                     build_feature_column(
                         b,
@@ -479,17 +490,17 @@ fn build_feature_column(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(0.024))
+            .padding(Padding::all(8.0))
             .direction(Direction::TopToBottom)
-            .child_gap(0.016)
-            .border(Border::all(0.0015, column_border_color)),
+            .child_gap(4.0)
+            .border(Border::all(0.75, column_border_color)),
         |b| {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
                     .direction(Direction::LeftToRight)
-                    .child_gap(0.032)
+                    .child_gap(8.0)
                     .child_align_y(AlignY::Top),
                 |b| {
                     b.text(
@@ -534,9 +545,9 @@ fn build_sample_rows(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::percent(0.11))
-                    .padding(Padding::new(0.024, 0.016, 0.0, 0.016))
+                    .padding(Padding::new(6.0, 4.0, 0.0, 4.0))
                     .direction(Direction::LeftToRight)
-                    .child_gap(0.048)
+                    .child_gap(10.0)
                     .child_align_y(AlignY::Bottom),
                 |b| {
                     b.with(
@@ -565,9 +576,9 @@ fn build_sample_rows(
                     El::new()
                         .width(Sizing::GROW)
                         .height(Sizing::GROW)
-                        .padding(Padding::new(0.0, 0.016, 0.0, 0.016))
+                        .padding(Padding::new(0.0, 4.0, 0.0, 4.0))
                         .direction(Direction::LeftToRight)
-                        .child_gap(0.04),
+                        .child_gap(10.0),
                     |b| {
                         b.with(
                             El::new()
