@@ -121,7 +121,7 @@ fn spawn_labeled_cube(
         .observe(on_mesh_clicked)
         .with_children(|parent| {
             let face_style = WorldTextStyle::new()
-                .with_size(20.0)
+                .with_size(0.20)
                 .with_color(Color::srgb(0.9, 0.3, 0.1));
 
             // Front face (+Z).
@@ -200,7 +200,7 @@ fn spawn_anchor_demo(
         .spawn((
             WorldText::new("Text Anchors"),
             WorldTextStyle::new()
-                .with_size(16.0)
+                .with_size(0.16)
                 .with_color(Color::srgb(0.7, 0.8, 1.0))
                 .with_anchor(TextAnchor::TopCenter),
             Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.4, 0.0))
@@ -213,7 +213,7 @@ fn spawn_anchor_demo(
         .spawn((
             WorldText::new("red dot = Transform translation\n'X' 'Y' 'Z' to rotate around axis"),
             WorldTextStyle::new()
-                .with_size(10.0)
+                .with_size(0.10)
                 .with_color(Color::WHITE)
                 .with_anchor(TextAnchor::TopCenter),
             Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.15, 0.0))
@@ -256,7 +256,7 @@ fn spawn_anchor_demo(
             .spawn((
                 WorldText::new(text),
                 WorldTextStyle::new()
-                    .with_size(12.5)
+                    .with_size(0.125)
                     .with_color(Color::WHITE)
                     .with_anchor(anchor),
                 Transform::from_translation(world_pos).with_rotation(demo_rotation),
@@ -275,7 +275,7 @@ fn spawn_ground_text(commands: &mut Commands) {
         .spawn((
             WorldText::new("GROUND"),
             WorldTextStyle::new()
-                .with_size(48.0)
+                .with_size(0.48)
                 .with_color(Color::srgb(0.9, 0.9, 0.1)),
             Transform::from_xyz(0.0, 0.001, 1.5)
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
@@ -286,7 +286,7 @@ fn spawn_ground_text(commands: &mut Commands) {
         .spawn((
             WorldText::new("click the box to zoom in\nclick the text to zoom in\nclick the plane to zoom back out"),
             WorldTextStyle::new()
-                .with_size(16.0)
+                .with_size(0.16)
                 .with_color(Color::WHITE)
                 .with_anchor(TextAnchor::TopLeft),
             Transform::from_xyz(-3.8, 0.001, -3.8)

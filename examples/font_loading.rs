@@ -42,7 +42,7 @@ const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 /// Font size for the sample text.
-const SAMPLE_SIZE: f32 = 28.0;
+const SAMPLE_SIZE: f32 = 0.28;
 
 /// Vertical spacing between font samples.
 const LINE_SPACING: f32 = 0.5;

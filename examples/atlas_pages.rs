@@ -42,7 +42,7 @@ const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 /// Font size for the character grid.
-const CHAR_SIZE: f32 = 32.0;
+const CHAR_SIZE: f32 = 0.32;
 
 /// Columns in the character grid.
 const GRID_COLS: usize = 16;
@@ -56,19 +56,19 @@ const QUALITY: RasterQuality = RasterQuality::Medium;
 /// Glyphs per atlas page.
 const GLYPHS_PER_PAGE: u16 = 30;
 
-/// Layout dimensions for the status panel (in mm).
-const STATUS_LAYOUT_WIDTH: f32 = 120.0;
-const STATUS_LAYOUT_HEIGHT: f32 = 50.0;
+/// Layout dimensions for the status panel (in meters, matching the scene scale).
+const STATUS_LAYOUT_WIDTH: f32 = 2.0;
+const STATUS_LAYOUT_HEIGHT: f32 = 0.8;
 
-/// Font sizes for the status panel (in points).
-const STATUS_FONT_SIZE: f32 = 10.0;
-const STATUS_TITLE_SIZE: f32 = 12.0;
+/// Font sizes for the status panel (in meters, matching the scene scale).
+const STATUS_FONT_SIZE: f32 = 0.04;
+const STATUS_TITLE_SIZE: f32 = 0.06;
 
 /// Background color for panels.
 const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
 
 /// Border color for panels.
-const PANEL_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
+const PANEL_BORDER_COLOR: Color = Color::WHITE;
 
 /// Unicode blocks added by pressing `+`. Each press adds the next block.
 const UNICODE_BLOCKS: &[&str] = &[
@@ -216,11 +216,29 @@ fn setup(
             }),
             width: STATUS_LAYOUT_WIDTH,
             height: STATUS_LAYOUT_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
-            font_unit:   Some(Unit::Points),
+            font_unit: Some(Unit::Meters),
             ..default()
         },
         Transform::from_xyz(-2.5, 4.5, 0.0),
+    ));
+
+    // Minimal test panel — just a border, nothing else.
+    let mut test_builder = LayoutBuilder::new(1.0, 0.5);
+    test_builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .border(Border::all(0.1, Color::WHITE)),
+        |_| {},
+    );
+    commands.spawn((
+        DiegeticPanel {
+            tree: test_builder.build(),
+            width: 1.0,
+            height: 0.5,
+            ..default()
+        },
+        Transform::from_xyz(-0.9, 4.65, 0.0),
     ));
 }
 
@@ -249,11 +267,11 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
         El::new()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.03))
             .direction(Direction::TopToBottom)
-            .child_gap(1.5)
+            .child_gap(0.02)
             .background(PANEL_BG)
-            .border(Border::all(0.5, PANEL_BORDER_COLOR)),
+            .border(Border::all(0.005, PANEL_BORDER_COLOR)),
         |b| {
             b.text("atlas", title_style);
 
@@ -261,7 +279,7 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(0.2))
+                    .height(Sizing::fixed(0.003))
                     .background(Color::srgb(0.45, 0.45, 0.5)),
                 |_| {},
             );
@@ -272,11 +290,11 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
                     .direction(Direction::LeftToRight)
-                    .child_gap(1.5),
+                    .child_gap(0.025),
                 |b| {
                     // Label column
                     b.with(
-                        El::new().direction(Direction::TopToBottom).child_gap(0.8),
+                        El::new().direction(Direction::TopToBottom).child_gap(0.01),
                         |b| {
                             b.text("quality", label_style.clone());
                             b.text("glyphs/page", label_style.clone());
@@ -286,7 +304,7 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
                     );
                     // Value column
                     b.with(
-                        El::new().direction(Direction::TopToBottom).child_gap(0.8),
+                        El::new().direction(Direction::TopToBottom).child_gap(10.0),
                         |b| {
                             b.text(&format!("{QUALITY:?}"), value_style.clone());
                             b.text(&format!("~{GLYPHS_PER_PAGE}"), value_style.clone());

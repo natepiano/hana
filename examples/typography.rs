@@ -43,7 +43,7 @@ use bevy_panorbit_camera_ext::PlayAnimation;
 use bevy_panorbit_camera_ext::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-const DISPLAY_SIZE: f32 = 48.0;
+const DISPLAY_SIZE: f32 = 0.48;
 const ZOOM_TO_FIT_MARGIN: f32 = 0.05;
 const ZOOM_DURATION_MS: u64 = 1000;
 
@@ -208,7 +208,7 @@ fn setup(
     commands.spawn((
         WorldText::new("Click text to zoom in · Click plane to zoom out"),
         WorldTextStyle::new()
-            .with_size(2.0)
+            .with_size(0.02)
             .with_color(Color::srgba(0.6, 0.6, 0.6, 0.8)),
         Transform::from_xyz(0.0, 0.0, 3.45),
     ));

@@ -43,10 +43,10 @@ const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 /// Font size for the large glyph.
-const GLYPH_SIZE: f32 = 64.0;
+const GLYPH_SIZE: f32 = 0.64;
 
 /// Font size for row and column headers.
-const HEADER_SIZE: f32 = 12.0;
+const HEADER_SIZE: f32 = 0.12;
 
 /// Horizontal spacing between columns.
 const COL_SPACING: f32 = 1.8;

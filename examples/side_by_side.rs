@@ -634,7 +634,7 @@ fn spawn_clay_text(
                 ClayTextEntity,
                 WorldText::new(text),
                 WorldTextStyle::new()
-                    .with_size(font_size)
+                    .with_size(font_size * WORLD_TEXT_SCALE)
                     .with_anchor(bevy_diegetic::TextAnchor::TopLeft),
                 Transform::from_translation(world_pos).with_scale(Vec3::splat(text_entity_scale)),
             ));

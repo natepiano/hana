@@ -242,7 +242,7 @@ pub(super) fn render_panel_gizmos(
             let color = match &cmd.kind {
                 RenderCommandKind::Rectangle { color, .. } => color.with_alpha(0.2),
                 RenderCommandKind::Text { .. } => Color::srgba(0.9, 0.9, 0.2, 0.2),
-                RenderCommandKind::Border { border } => border.color.with_alpha(0.2),
+                RenderCommandKind::Border { border } => border.color,
                 _ => continue,
             };
 

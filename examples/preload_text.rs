@@ -57,10 +57,10 @@ const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 /// Font size for the sample text.
-const SAMPLE_SIZE: f32 = 24.0;
+const SAMPLE_SIZE: f32 = 0.24;
 
 /// Font size for headers.
-const HEADER_SIZE: f32 = 14.0;
+const HEADER_SIZE: f32 = 0.14;
 
 /// The text to display.
 const SAMPLE_TEXT: &str = "The quick brown fox jumps over the lazy dog. 0123456789!?";
