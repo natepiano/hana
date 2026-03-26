@@ -1,13 +1,16 @@
 //! Demonstrates how to pause time without affecting the camera
 
 use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, (pause_game_system, cube_rotator_system))
         .run();
@@ -46,6 +49,11 @@ fn setup(
         Transform::from_xyz(0.0, 1.5, 5.0),
         PanOrbitCamera {
             use_real_time: true,
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
     ));

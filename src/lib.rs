@@ -30,7 +30,7 @@ use crate::traits::OptionalClamp;
 
 #[cfg(feature = "bevy_egui")]
 mod egui;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 mod extras;
 mod input;
 mod touch;
@@ -38,53 +38,53 @@ mod traits;
 mod util;
 
 // Extras re-exports
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::animation::CameraMove;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::animation::CameraMoveList;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::components::AnimationConflictPolicy;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::components::CameraInputInterruptBehavior;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::components::CurrentFitTarget;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::components::FitVisualization;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::AnimateToFit;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::AnimationBegin;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::AnimationCancelled;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::AnimationEnd;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::AnimationRejected;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::AnimationSource;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::CameraMoveBegin;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::CameraMoveEnd;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::LookAt;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::LookAtAndZoomToFit;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::PlayAnimation;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::SetFitTarget;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::ZoomBegin;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::ZoomCancelled;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::ZoomContext;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::ZoomEnd;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::events::ZoomToFit;
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 pub use extras::visualization::FitTargetVisualizationConfig;
 
 /// Bevy plugin that contains the systems for controlling `PanOrbitCamera` components.
@@ -135,7 +135,7 @@ impl Plugin for LagrangePlugin {
                 );
         }
 
-        #[cfg(feature = "extras_debug")]
+        #[cfg(feature = "zoom_overlay")]
         {
             extras::build_extras(app);
         }

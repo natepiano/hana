@@ -6,14 +6,17 @@ use bevy_egui::egui;
 use bevy_egui::EguiContexts;
 use bevy_egui::EguiPlugin;
 use bevy_egui::EguiPrimaryContextPass;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(EguiPrimaryContextPass, ui_example_system);
 
@@ -47,7 +50,14 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-        PanOrbitCamera::default(),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
     ));
 }
 

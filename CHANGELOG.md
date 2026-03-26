@@ -18,4 +18,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-viewport and multi-window support
 - Render-to-texture camera support
 - Optional `bevy_egui` feature to ignore input consumed by egui
-- Optional `extras_debug` feature: zoom-to-fit, queued camera animations, event-driven camera control (`LookAt`, `ZoomToFit`, `AnimateToFit`, `PlayAnimation`), and debug visualization of fit targets with gizmos and screen-space labels
+- Optional `zoom_overlay` feature: zoom-to-fit, queued camera animations, event-driven camera control (`LookAt`, `ZoomToFit`, `AnimateToFit`, `PlayAnimation`), and debug visualization of fit targets with gizmos and screen-space labels

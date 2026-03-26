@@ -3,13 +3,16 @@
 use bevy::camera::Viewport;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, set_camera_viewports)
         .run();
@@ -42,7 +45,14 @@ fn setup(
     // Main Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 0.5, 5.0)),
-        PanOrbitCamera::default(),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
     ));
     // Minimap Camera
     commands.spawn((
@@ -54,7 +64,14 @@ fn setup(
             clear_color: ClearColorConfig::None,
             ..default()
         },
-        PanOrbitCamera::default(),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
         MinimapCamera,
     ));
 }

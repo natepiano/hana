@@ -9,14 +9,17 @@
 use std::f32::consts::TAU;
 
 use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::PanOrbitCamera;
 use bevy_lagrange::TouchControls;
+use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_camera_controls_system)
         .run();
@@ -84,6 +87,11 @@ fn setup(
             reversed_zoom: true,
             // Use alternate touch controls
             touch_controls: TouchControls::TwoFingerOrbit,
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
     ));

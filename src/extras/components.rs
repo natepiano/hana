@@ -102,7 +102,7 @@ pub(super) struct PanOrbitCameraStash {
 ///
 /// Insert this component to enable visualization, remove it to disable.
 /// The presence or absence of the component is the toggle — no boolean field needed.
-#[cfg(feature = "extras_debug")]
+#[cfg(feature = "zoom_overlay")]
 #[derive(Component, Reflect, Default)]
 #[reflect(Component, Default)]
 pub struct FitVisualization;

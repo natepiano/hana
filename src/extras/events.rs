@@ -641,7 +641,7 @@ impl LookAtAndZoomToFit {
 
 /// Sets the debug visualization target without triggering a zoom.
 ///
-/// Only useful with the `extras_debug` feature enabled. This lets you point the
+/// Only useful with the `zoom_overlay` feature enabled. This lets you point the
 /// debug overlay (`FitVisualization`) at a specific entity so you can inspect its
 /// screen-space bounds before (or without) triggering [`ZoomToFit`].
 ///

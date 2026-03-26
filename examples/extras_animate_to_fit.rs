@@ -11,6 +11,7 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
@@ -27,6 +28,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_input)
         .add_observer(on_animation_begin)

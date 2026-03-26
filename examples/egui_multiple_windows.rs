@@ -12,8 +12,10 @@ use bevy_egui::EguiMultipassSchedule;
 use bevy_egui::EguiPlugin;
 use bevy_egui::EguiPrimaryContextPass;
 use bevy_egui::PrimaryEguiContext;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TrackpadBehavior;
 
 /// Schedule label for the second window's egui context pass.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
@@ -24,6 +26,7 @@ fn main() {
     app.add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(EguiPrimaryContextPass, ui_example_system_first_window)
         .add_systems(SecondWindowContextPass, ui_example_system_second_window);
@@ -58,7 +61,14 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-        PanOrbitCamera::default(),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
         PrimaryEguiContext,
     ));
 
@@ -75,7 +85,14 @@ fn setup(
         Camera::default(),
         RenderTarget::Window(WindowRef::Entity(second_window)),
         Transform::from_translation(Vec3::new(5.0, 1.5, 7.0)),
-        PanOrbitCamera::default(),
+        PanOrbitCamera {
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
+        },
         EguiMultipassSchedule::new(SecondWindowContextPass),
     ));
 }

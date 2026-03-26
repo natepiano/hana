@@ -22,7 +22,7 @@ Use it to quickly prototype, experiment, for model viewers, and more!
 - Works with multiple viewports and/or windows
 - Easy to control manually, e.g. for keyboard control or animation
 - Can control cameras that render to a texture
-- Zoom-to-fit, camera animations, and debug visualization (optional `extras_debug` feature)
+- Zoom-to-fit, camera animations, and debug visualization (optional `zoom_overlay` feature)
 
 ## Controls
 
@@ -64,14 +64,14 @@ all the possible configuration options.
 
 - `bevy_egui` (optional): Makes `PanOrbitCamera` ignore any input that `egui` uses, thus preventing moving the camera
   when interacting with egui windows
-- `extras_debug` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization of fit targets with gizmos and screen-space labels
+- `zoom_overlay` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization of fit targets with gizmos and screen-space labels
 
 ## Extras
 
-Enable the `extras_debug` feature for zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization:
+Enable the `zoom_overlay` feature for zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization:
 
 ```toml
-bevy_lagrange = { version = "0.0.1", features = ["extras_debug"] }
+bevy_lagrange = { version = "0.0.1", features = ["zoom_overlay"] }
 ```
 
 Trigger a zoom-to-fit:

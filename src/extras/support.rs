@@ -126,9 +126,9 @@ pub(super) struct PointDepths {
     pub max_x_depth: f32,
     pub min_y_depth: f32,
     pub max_y_depth: f32,
-    #[cfg(feature = "extras_debug")]
+    #[cfg(feature = "zoom_overlay")]
     pub depth_sum:   f32,
-    #[cfg(feature = "extras_debug")]
+    #[cfg(feature = "zoom_overlay")]
     pub point_count: usize,
 }
 
@@ -184,13 +184,13 @@ impl ScreenSpaceBounds {
         let mut max_x_depth = 0.0_f32;
         let mut min_y_depth = 0.0_f32;
         let mut max_y_depth = 0.0_f32;
-        #[cfg(feature = "extras_debug")]
+        #[cfg(feature = "zoom_overlay")]
         let mut depth_sum = 0.0_f32;
 
         for point in points {
             let (norm_x, norm_y, depth) = project_point(*point, &cam, is_ortho)?;
 
-            #[cfg(feature = "extras_debug")]
+            #[cfg(feature = "zoom_overlay")]
             {
                 depth_sum += depth;
             }
@@ -236,9 +236,9 @@ impl ScreenSpaceBounds {
             max_x_depth,
             min_y_depth,
             max_y_depth,
-            #[cfg(feature = "extras_debug")]
+            #[cfg(feature = "zoom_overlay")]
             depth_sum,
-            #[cfg(feature = "extras_debug")]
+            #[cfg(feature = "zoom_overlay")]
             point_count: points.len(),
         };
 

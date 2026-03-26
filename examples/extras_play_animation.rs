@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
@@ -24,6 +25,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
+        .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_input)
         .add_observer(on_move_begin)
