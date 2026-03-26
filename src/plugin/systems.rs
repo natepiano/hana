@@ -11,6 +11,7 @@ use super::Unit::Points;
 use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
+use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
 use crate::layout::MeasureTextFn;
@@ -206,6 +207,64 @@ pub struct ShowTextGizmos(pub bool);
 #[derive(Component)]
 pub(super) struct PanelGizmoChild;
 
+/// Approximate pixels-per-meter from the first camera's projection.
+fn pixels_per_meter(cameras: &Query<(&Camera, &Projection)>) -> f32 {
+    cameras
+        .iter()
+        .next()
+        .and_then(|(cam, proj)| {
+            let vp_height = cam.logical_viewport_size()?.y;
+            match proj {
+                Projection::Perspective(p) => Some(vp_height / (2.0 * (p.fov / 2.0).tan())),
+                Projection::Orthographic(o) => Some(vp_height / o.scale),
+                Projection::Custom(_) => None,
+            }
+        })
+        .unwrap_or(1000.0)
+}
+
+/// Parameters for spawning a gizmo rectangle on a panel.
+struct GizmoRect<'a> {
+    bounds:     &'a BoundingBox,
+    pts_mpu:    f32,
+    anchor_x:   f32,
+    anchor_y:   f32,
+    color:      Color,
+    line_width: f32,
+}
+
+/// Spawns a gizmo rectangle child on `panel_entity`.
+fn spawn_rect_gizmo(
+    commands: &mut Commands,
+    panel_entity: Entity,
+    gizmo_assets: &mut Assets<GizmoAsset>,
+    rect: &GizmoRect<'_>,
+) {
+    let mut asset = GizmoAsset::default();
+    add_rect_to_gizmo(
+        &mut asset,
+        rect.bounds,
+        rect.pts_mpu,
+        rect.anchor_x,
+        rect.anchor_y,
+        rect.color,
+    );
+    commands.entity(panel_entity).with_child((
+        PanelGizmoChild,
+        Gizmo {
+            handle: gizmo_assets.add(asset),
+            line_config: GizmoLineConfig {
+                width: rect.line_width,
+                perspective: false,
+                joints: GizmoLineJoint::Round(8),
+                ..default()
+            },
+            ..default()
+        },
+        Transform::IDENTITY,
+    ));
+}
+
 /// Rebuilds retained gizmo children for panels whose layout changed.
 ///
 /// Each render command (background, border, text box) gets its own
@@ -228,27 +287,7 @@ pub(super) fn rebuild_panel_gizmos(
         return;
     }
 
-    // Border pixel width: compute from camera distance and viewport.
-    // We use perspective: false (constant screen-space width) and
-    // recompute on layout change. TODO: update on camera move for
-    // truly accurate world-scale borders.
-    let ppm = cameras
-        .iter()
-        .next()
-        .and_then(|(cam, proj)| {
-            let vp_height = cam.logical_viewport_size()?.y;
-            match proj {
-                Projection::Perspective(p) => {
-                    // Approximate: pixels per meter at a typical viewing distance.
-                    // Use the current orbit radius if available, otherwise 1m.
-                    Some(vp_height / (2.0 * (p.fov / 2.0).tan()))
-                },
-                Projection::Orthographic(o) => Some(vp_height / o.scale),
-                _ => None,
-            }
-        })
-        .unwrap_or(1000.0);
-
+    let ppm = pixels_per_meter(&cameras);
     let pts_mpu = Points.meters_per_unit();
 
     for (panel_entity, panel, computed) in &changed_panels {
@@ -256,7 +295,6 @@ pub(super) fn rebuild_panel_gizmos(
             continue;
         };
 
-        // Despawn previous gizmo children.
         for (entity, child_of) in &existing_gizmos {
             if child_of.parent() == panel_entity {
                 commands.entity(entity).despawn();
@@ -265,8 +303,7 @@ pub(super) fn rebuild_panel_gizmos(
 
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
-        // Collect border widths per element index for background inset.
-        let mut border_by_idx: std::collections::HashMap<usize, &crate::layout::Border> =
+        let mut border_by_idx: std::collections::HashMap<usize, &Border> =
             std::collections::HashMap::new();
         for cmd in &result.commands {
             if let RenderCommandKind::Border { ref border } = cmd.kind {
@@ -277,9 +314,7 @@ pub(super) fn rebuild_panel_gizmos(
         for cmd in &result.commands {
             match &cmd.kind {
                 RenderCommandKind::Rectangle { color, .. } => {
-                    // Background: inset by border width if a border exists on this element.
                     let border = border_by_idx.get(&cmd.element_idx);
-                    // Border values are in points (pre-scaled), same as bounds.
                     let (il, ir, it, ib) =
                         border.map_or((0.0, 0.0, 0.0, 0.0), |b| (b.left, b.right, b.top, b.bottom));
                     let inset_bounds = BoundingBox {
@@ -288,33 +323,22 @@ pub(super) fn rebuild_panel_gizmos(
                         width:  (cmd.bounds.width - il - ir).max(0.0),
                         height: (cmd.bounds.height - it - ib).max(0.0),
                     };
-                    let mut asset = GizmoAsset::default();
-                    add_rect_to_gizmo(
-                        &mut asset,
-                        &inset_bounds,
-                        pts_mpu,
-                        anchor_x,
-                        anchor_y,
-                        *color,
-                    );
-                    commands.entity(panel_entity).with_child((
-                        PanelGizmoChild,
-                        Gizmo {
-                            handle: gizmo_assets.add(asset),
-                            line_config: GizmoLineConfig {
-                                width: 1.0,
-                                joints: GizmoLineJoint::Round(8),
-                                ..default()
-                            },
-                            ..default()
+                    spawn_rect_gizmo(
+                        &mut commands,
+                        panel_entity,
+                        &mut gizmo_assets,
+                        &GizmoRect {
+                            bounds: &inset_bounds,
+                            pts_mpu,
+                            anchor_x,
+                            anchor_y,
+                            color: *color,
+                            line_width: 1.0,
                         },
-                        Transform::IDENTITY,
-                    ));
+                    );
                 },
                 RenderCommandKind::Border { border } => {
-                    // Border: inset by half the border width (center of strip).
                     let hl = border.left * 0.5;
-                    // Border values are in points (pre-scaled), same as bounds.
                     let hr = border.right * 0.5;
                     let ht = border.top * 0.5;
                     let hb = border.bottom * 0.5;
@@ -324,65 +348,42 @@ pub(super) fn rebuild_panel_gizmos(
                         width:  (cmd.bounds.width - hl - hr).max(0.0),
                         height: (cmd.bounds.height - ht - hb).max(0.0),
                     };
-                    // Average border width: points → meters → pixels.
                     let avg_border_pts =
                         (border.left + border.right + border.top + border.bottom) / 4.0;
-                    let avg_border_m = avg_border_pts * pts_mpu;
-                    let border_px = (avg_border_m * ppm).max(1.0);
-
-                    let mut asset = GizmoAsset::default();
-                    add_rect_to_gizmo(
-                        &mut asset,
-                        &inset_bounds,
-                        pts_mpu,
-                        anchor_x,
-                        anchor_y,
-                        border.color,
-                    );
-                    commands.entity(panel_entity).with_child((
-                        PanelGizmoChild,
-                        Gizmo {
-                            handle: gizmo_assets.add(asset),
-                            line_config: GizmoLineConfig {
-                                width: border_px,
-                                perspective: false,
-                                joints: GizmoLineJoint::Round(8),
-                                ..default()
-                            },
-                            ..default()
+                    let border_px = (avg_border_pts * pts_mpu * ppm).max(1.0);
+                    spawn_rect_gizmo(
+                        &mut commands,
+                        panel_entity,
+                        &mut gizmo_assets,
+                        &GizmoRect {
+                            bounds: &inset_bounds,
+                            pts_mpu,
+                            anchor_x,
+                            anchor_y,
+                            color: border.color,
+                            line_width: border_px,
                         },
-                        Transform::IDENTITY,
-                    ));
+                    );
                 },
                 RenderCommandKind::Text { .. } => {
                     if !show_text.0 {
                         continue;
                     }
-                    let mut asset = GizmoAsset::default();
-                    add_rect_to_gizmo(
-                        &mut asset,
-                        &cmd.bounds,
-                        pts_mpu,
-                        anchor_x,
-                        anchor_y,
-                        Color::srgba(0.9, 0.9, 0.2, 0.2),
-                    );
-                    commands.entity(panel_entity).with_child((
-                        PanelGizmoChild,
-                        Gizmo {
-                            handle: gizmo_assets.add(asset),
-                            line_config: GizmoLineConfig {
-                                width: 1.0,
-                                perspective: false,
-                                joints: GizmoLineJoint::Round(8),
-                                ..default()
-                            },
-                            ..default()
+                    spawn_rect_gizmo(
+                        &mut commands,
+                        panel_entity,
+                        &mut gizmo_assets,
+                        &GizmoRect {
+                            bounds: &cmd.bounds,
+                            pts_mpu,
+                            anchor_x,
+                            anchor_y,
+                            color: Color::srgba(0.9, 0.9, 0.2, 0.2),
+                            line_width: 1.0,
                         },
-                        Transform::IDENTITY,
-                    ));
+                    );
                 },
-                _ => continue,
+                RenderCommandKind::ScissorStart | RenderCommandKind::ScissorEnd => {},
             }
         }
     }
