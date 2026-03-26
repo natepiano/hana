@@ -7,13 +7,15 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
-use super::DiegeticPanelGizmoGroup;
 use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
+use super::Unit::Points;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
+use crate::layout::MeasureTextFn;
 use crate::layout::RenderCommandKind;
+use crate::layout::TextMeasure;
 use crate::render::ShapedTextCache;
 
 /// Lightweight timing data for diegetic UI systems.
@@ -128,25 +130,24 @@ pub(super) fn compute_panel_layouts(
     let hits_clone = Arc::clone(&hits);
     let misses_clone = Arc::clone(&misses);
 
-    let cached_measure: crate::layout::MeasureTextFn =
-        Arc::new(move |text: &str, measure: &crate::layout::TextMeasure| {
-            // Check cache first.
-            {
-                let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-                if let Some(dims) = cache_guard.get_measurement(text, measure) {
-                    hits_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    return dims;
-                }
+    let cached_measure: MeasureTextFn = Arc::new(move |text: &str, measure: &TextMeasure| {
+        // Check cache first.
+        {
+            let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(dims) = cache_guard.get_measurement(text, measure) {
+                hits_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return dims;
             }
-            // Cache miss — measure via parley and write back to cache.
-            misses_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let dims = parley_fn(text, measure);
-            {
-                let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-                cache_guard.insert_measurement(text, measure, dims);
-            }
-            dims
-        });
+        }
+        // Cache miss — measure via parley and write back to cache.
+        misses_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dims = parley_fn(text, measure);
+        {
+            let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+            cache_guard.insert_measurement(text, measure, dims);
+        }
+        dims
+    });
 
     for entity in &changed_entities {
         let Ok((_, panel_ref)) = panels.get(*entity) else {
@@ -173,7 +174,7 @@ pub(super) fn compute_panel_layouts(
         );
 
         if let Some(bounds) = result.content_bounds() {
-            let pts_mpu = super::Unit::Points.meters_per_unit();
+            let pts_mpu = Points.meters_per_unit();
             computed.set_content_size(bounds.width * pts_mpu, bounds.height * pts_mpu);
         }
 
@@ -201,96 +202,216 @@ pub(super) fn compute_panel_layouts(
 #[derive(Resource, Default)]
 pub struct ShowTextGizmos(pub bool);
 
-/// Renders debug gizmo wireframes for all panels with computed layouts.
+/// Marker on gizmo entities spawned by [`rebuild_panel_gizmos`].
+#[derive(Component)]
+pub(super) struct PanelGizmoChild;
+
+/// Rebuilds retained gizmo children for panels whose layout changed.
 ///
-/// Skips text bounding boxes unless [`ShowTextGizmos`] is enabled.
-pub(super) fn render_panel_gizmos(
-    panels: Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
-    mut gizmos: Gizmos<DiegeticPanelGizmoGroup>,
+/// Each render command (background, border, text box) gets its own
+/// `GizmoAsset` entity with per-entity `GizmoLineConfig`. Borders use
+/// world-accurate line widths; backgrounds are inset by the border width.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn rebuild_panel_gizmos(
+    changed_panels: Query<
+        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+        Changed<ComputedDiegeticPanel>,
+    >,
+    existing_gizmos: Query<(Entity, &ChildOf), With<PanelGizmoChild>>,
     show_text: Res<ShowTextGizmos>,
     unit_config: Res<super::UnitConfig>,
+    cameras: Query<(&Camera, &Projection)>,
+    mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
+    mut commands: Commands,
 ) {
-    for (panel, computed, global_transform) in &panels {
+    if changed_panels.is_empty() {
+        return;
+    }
+
+    // Border pixel width: compute from camera distance and viewport.
+    // We use perspective: false (constant screen-space width) and
+    // recompute on layout change. TODO: update on camera move for
+    // truly accurate world-scale borders.
+    let ppm = cameras
+        .iter()
+        .next()
+        .and_then(|(cam, proj)| {
+            let vp_height = cam.logical_viewport_size()?.y;
+            match proj {
+                Projection::Perspective(p) => {
+                    // Approximate: pixels per meter at a typical viewing distance.
+                    // Use the current orbit radius if available, otherwise 1m.
+                    Some(vp_height / (2.0 * (p.fov / 2.0).tan()))
+                },
+                Projection::Orthographic(o) => Some(vp_height / o.scale),
+                _ => None,
+            }
+        })
+        .unwrap_or(1000.0);
+
+    let pts_mpu = Points.meters_per_unit();
+
+    for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
 
-        // Layout output is in points. Convert to world meters.
-        let pts_mpu = super::Unit::Points.meters_per_unit();
-        let scale_x = pts_mpu;
-        let scale_y = pts_mpu;
+        // Despawn previous gizmo children.
+        for (entity, child_of) in &existing_gizmos {
+            if child_of.parent() == panel_entity {
+                commands.entity(entity).despawn();
+            }
+        }
+
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
+        // Collect border widths per element index for background inset.
+        let mut border_by_idx: std::collections::HashMap<usize, &crate::layout::Border> =
+            std::collections::HashMap::new();
         for cmd in &result.commands {
-            let z_offset = match &cmd.kind {
-                RenderCommandKind::Rectangle { .. } => 0.0,
+            if let RenderCommandKind::Border { ref border } = cmd.kind {
+                border_by_idx.insert(cmd.element_idx, border);
+            }
+        }
+
+        for cmd in &result.commands {
+            match &cmd.kind {
+                RenderCommandKind::Rectangle { color, .. } => {
+                    // Background: inset by border width if a border exists on this element.
+                    let border = border_by_idx.get(&cmd.element_idx);
+                    // Border values are in points (pre-scaled), same as bounds.
+                    let (il, ir, it, ib) = border.map_or((0.0, 0.0, 0.0, 0.0), |b| {
+                        (b.left, b.right, b.top, b.bottom)
+                    });
+                    let inset_bounds = BoundingBox {
+                        x:      cmd.bounds.x + il,
+                        y:      cmd.bounds.y + it,
+                        width:  (cmd.bounds.width - il - ir).max(0.0),
+                        height: (cmd.bounds.height - it - ib).max(0.0),
+                    };
+                    let mut asset = GizmoAsset::default();
+                    add_rect_to_gizmo(
+                        &mut asset,
+                        &inset_bounds,
+                        pts_mpu,
+                        anchor_x,
+                        anchor_y,
+                        *color,
+                    );
+                    commands.entity(panel_entity).with_child((
+                        PanelGizmoChild,
+                        Gizmo {
+                            handle: gizmo_assets.add(asset),
+                            line_config: GizmoLineConfig {
+                                width: 1.0,
+                                joints: GizmoLineJoint::Round(8),
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        Transform::IDENTITY,
+                    ));
+                },
+                RenderCommandKind::Border { border } => {
+                    // Border: inset by half the border width (center of strip).
+                    let hl = border.left * 0.5;
+                    // Border values are in points (pre-scaled), same as bounds.
+                    let hr = border.right * 0.5;
+                    let ht = border.top * 0.5;
+                    let hb = border.bottom * 0.5;
+                    let inset_bounds = BoundingBox {
+                        x:      cmd.bounds.x + hl,
+                        y:      cmd.bounds.y + ht,
+                        width:  (cmd.bounds.width - hl - hr).max(0.0),
+                        height: (cmd.bounds.height - ht - hb).max(0.0),
+                    };
+                    // Average border width: points → meters → pixels.
+                    let avg_border_pts =
+                        (border.left + border.right + border.top + border.bottom) / 4.0;
+                    let avg_border_m = avg_border_pts * pts_mpu;
+                    let border_px = (avg_border_m * ppm).max(1.0);
+
+                    let mut asset = GizmoAsset::default();
+                    add_rect_to_gizmo(
+                        &mut asset,
+                        &inset_bounds,
+                        pts_mpu,
+                        anchor_x,
+                        anchor_y,
+                        border.color,
+                    );
+                    commands.entity(panel_entity).with_child((
+                        PanelGizmoChild,
+                        Gizmo {
+                            handle: gizmo_assets.add(asset),
+                            line_config: GizmoLineConfig {
+                                width: border_px,
+                                perspective: false,
+                                joints: GizmoLineJoint::Round(8),
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        Transform::IDENTITY,
+                    ));
+                },
                 RenderCommandKind::Text { .. } => {
                     if !show_text.0 {
                         continue;
                     }
-                    0.0
+                    let mut asset = GizmoAsset::default();
+                    add_rect_to_gizmo(
+                        &mut asset,
+                        &cmd.bounds,
+                        pts_mpu,
+                        anchor_x,
+                        anchor_y,
+                        Color::srgba(0.9, 0.9, 0.2, 0.2),
+                    );
+                    commands.entity(panel_entity).with_child((
+                        PanelGizmoChild,
+                        Gizmo {
+                            handle: gizmo_assets.add(asset),
+                            line_config: GizmoLineConfig {
+                                width: 1.0,
+                                perspective: false,
+                                joints: GizmoLineJoint::Round(8),
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        Transform::IDENTITY,
+                    ));
                 },
-                RenderCommandKind::Border { .. } => 0.0,
-                RenderCommandKind::ScissorStart | RenderCommandKind::ScissorEnd => continue,
-            };
-
-            let color = match &cmd.kind {
-                RenderCommandKind::Rectangle { color, .. } => color.with_alpha(0.2),
-                RenderCommandKind::Text { .. } => Color::srgba(0.9, 0.9, 0.2, 0.2),
-                RenderCommandKind::Border { border } => border.color,
                 _ => continue,
-            };
-
-            draw_rect_outline(
-                &mut gizmos,
-                global_transform,
-                &cmd.bounds,
-                scale_x,
-                scale_y,
-                anchor_x,
-                anchor_y,
-                z_offset,
-                color,
-            );
+            }
         }
     }
 }
 
-/// Draws a rectangle outline in world space from layout-space bounds.
-///
-/// Transforms layout coordinates (top-left origin, Y-down) to panel-local
-/// coordinates relative to the anchor point, then to world space via the
-/// entity's [`GlobalTransform`].
-#[allow(clippy::too_many_arguments)]
-fn draw_rect_outline(
-    gizmos: &mut Gizmos<DiegeticPanelGizmoGroup>,
-    global_transform: &GlobalTransform,
+/// Adds a rectangle outline to a `GizmoAsset` in panel-local coordinates.
+fn add_rect_to_gizmo(
+    asset: &mut GizmoAsset,
     bounds: &BoundingBox,
-    scale_x: f32,
-    scale_y: f32,
+    scale: f32,
     anchor_x: f32,
     anchor_y: f32,
-    z: f32,
     color: Color,
 ) {
-    // Layout coordinates → panel-local coordinates.
-    // Layout: origin at top-left, X-right, Y-down.
-    // Panel local: anchor point at entity origin, X-right, Y-up.
-    let left = bounds.x.mul_add(scale_x, -anchor_x);
-    let right = (bounds.x + bounds.width).mul_add(scale_x, -anchor_x);
-    let top = (-bounds.y).mul_add(scale_y, anchor_y);
-    let bottom = (-(bounds.y + bounds.height)).mul_add(scale_y, anchor_y);
+    let left = bounds.x.mul_add(scale, -anchor_x);
+    let right = (bounds.x + bounds.width).mul_add(scale, -anchor_x);
+    let top = (-bounds.y).mul_add(scale, anchor_y);
+    let bottom = (-(bounds.y + bounds.height)).mul_add(scale, anchor_y);
 
-    // Panel-local → world via the entity's transform.
-    let tl = global_transform.transform_point(Vec3::new(left, top, z));
-    let tr = global_transform.transform_point(Vec3::new(right, top, z));
-    let br = global_transform.transform_point(Vec3::new(right, bottom, z));
-    let bl = global_transform.transform_point(Vec3::new(left, bottom, z));
+    let tl = Vec3::new(left, top, 0.0);
+    let tr = Vec3::new(right, top, 0.0);
+    let br = Vec3::new(right, bottom, 0.0);
+    let bl = Vec3::new(left, bottom, 0.0);
 
-    gizmos.line(tl, tr, color);
-    gizmos.line(tr, br, color);
-    gizmos.line(br, bl, color);
-    gizmos.line(bl, tl, color);
+    asset.line(tl, tr, color);
+    asset.line(tr, br, color);
+    asset.line(br, bl, color);
+    asset.line(bl, tl, color);
 }
 
 #[cfg(test)]
@@ -302,11 +423,12 @@ mod tests {
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutEngine;
     use crate::layout::LayoutTextStyle;
+    use crate::layout::LayoutTree;
     use crate::layout::Sizing;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
 
-    fn monospace_measure() -> crate::layout::MeasureTextFn {
+    fn monospace_measure() -> MeasureTextFn {
         Arc::new(|text: &str, measure: &TextMeasure| {
             #[allow(clippy::cast_precision_loss)]
             let char_width = measure.size * 0.6;
@@ -330,7 +452,7 @@ mod tests {
     const PERF_LAYOUT_WIDTH: f32 = 800.0;
     const PERF_LAYOUT_HEIGHT: f32 = 1200.0;
 
-    fn build_stress_tree(row_count: usize) -> crate::layout::LayoutTree {
+    fn build_stress_tree(row_count: usize) -> LayoutTree {
         let mut builder = LayoutBuilder::new(PERF_LAYOUT_WIDTH, PERF_LAYOUT_HEIGHT);
         builder.with(
             El::new()

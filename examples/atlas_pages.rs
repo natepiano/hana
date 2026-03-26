@@ -60,9 +60,9 @@ const GLYPHS_PER_PAGE: u16 = 30;
 const STATUS_LAYOUT_WIDTH: f32 = 2.0;
 const STATUS_LAYOUT_HEIGHT: f32 = 0.8;
 
-/// Font sizes for the status panel (in meters, matching the scene scale).
-const STATUS_FONT_SIZE: f32 = 0.04;
-const STATUS_TITLE_SIZE: f32 = 0.06;
+/// Font sizes for the status panel (in millimeters).
+const STATUS_FONT_SIZE: f32 = 40.0;
+const STATUS_TITLE_SIZE: f32 = 60.0;
 
 /// Background color for panels.
 const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
@@ -216,30 +216,34 @@ fn setup(
             }),
             width: STATUS_LAYOUT_WIDTH,
             height: STATUS_LAYOUT_HEIGHT,
-            font_unit: Some(Unit::Meters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
         Transform::from_xyz(-2.5, 4.5, 0.0),
     ));
 
-    // Minimal test panel — just a border, nothing else.
-    let mut test_builder = LayoutBuilder::new(1.0, 0.5);
+    // Minimal test panel — mirrors atlas layout structure.
+    let mut test_builder = LayoutBuilder::new(2.0, 0.8);
     test_builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .border(Border::all(0.1, Color::WHITE)),
+            .direction(Direction::TopToBottom)
+            .child_gap(0.02)
+            .background(PANEL_BG)
+            .border(Border::all(0.001, Color::WHITE)),
         |_| {},
     );
     commands.spawn((
         DiegeticPanel {
             tree: test_builder.build(),
-            width: 1.0,
-            height: 0.5,
+            width: 2.0,
+            height: 0.8,
             ..default()
         },
-        Transform::from_xyz(-0.9, 4.65, 0.0),
+        Transform::from_xyz(-1.5, 4.5, 0.0),
     ));
+
 }
 
 struct StatusData {
@@ -271,7 +275,7 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
             .direction(Direction::TopToBottom)
             .child_gap(0.02)
             .background(PANEL_BG)
-            .border(Border::all(0.005, PANEL_BORDER_COLOR)),
+            .border(Border::all(0.001, PANEL_BORDER_COLOR)),
         |b| {
             b.text("atlas", title_style);
 
@@ -306,10 +310,10 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
                     b.with(
                         El::new().direction(Direction::TopToBottom).child_gap(10.0),
                         |b| {
-                            b.text(&format!("{QUALITY:?}"), value_style.clone());
-                            b.text(&format!("~{GLYPHS_PER_PAGE}"), value_style.clone());
-                            b.text(&format!("{}", data.pages), value_style.clone());
-                            b.text(&format!("{}", data.glyphs), value_style.clone());
+                            b.text(format!("{QUALITY:?}"), value_style.clone());
+                            b.text(format!("~{GLYPHS_PER_PAGE}"), value_style.clone());
+                            b.text(format!("{}", data.pages), value_style.clone());
+                            b.text(format!("{}", data.glyphs), value_style.clone());
                         },
                     );
                 },
@@ -317,7 +321,7 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
 
             // Instruction
             b.text(
-                &format!("'+' add Unicode block ({} remaining)", data.remaining),
+                format!("'+' add Unicode block ({} remaining)", data.remaining),
                 dim_style,
             );
         },

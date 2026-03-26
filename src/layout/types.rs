@@ -172,7 +172,7 @@ impl Default for Sizing {
     fn default() -> Self {
         Self::Fit {
             min: 0.0,
-            max: f32::MAX,
+            max: f32::INFINITY,
         }
     }
 }
@@ -247,7 +247,7 @@ impl Sizing {
         match self {
             Self::Fit { max, .. } | Self::Grow { max, .. } => *max,
             Self::Fixed(size) => *size,
-            Self::Percent(_) => f32::MAX,
+            Self::Percent(_) => f32::INFINITY,
         }
     }
 
@@ -273,19 +273,11 @@ impl Sizing {
         match self {
             Self::Fit { min, max } => Self::Fit {
                 min: min * factor,
-                max: if max == f32::MAX {
-                    f32::MAX
-                } else {
-                    max * factor
-                },
+                max: max * factor,
             },
             Self::Grow { min, max } => Self::Grow {
                 min: min * factor,
-                max: if max == f32::MAX {
-                    f32::MAX
-                } else {
-                    max * factor
-                },
+                max: max * factor,
             },
             Self::Fixed(size) => Self::Fixed(size * factor),
             Self::Percent(frac) => Self::Percent(frac),

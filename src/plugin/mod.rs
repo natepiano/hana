@@ -23,13 +23,14 @@ use diagnostics::install as install_perf_diagnostics;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 use systems::compute_panel_layouts;
-use systems::render_panel_gizmos;
+use systems::rebuild_panel_gizmos;
 
 use crate::layout::ForLayout;
 use crate::layout::ForStandalone;
 use crate::layout::TextProps;
 use crate::render::ShapedTextCache;
 use crate::render::TextRenderPlugin;
+use crate::text;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontLoadFailed;
@@ -38,7 +39,12 @@ use crate::text::FontRegistered;
 use crate::text::FontRegistry;
 use crate::text::FontSource;
 use crate::text::MsdfAtlas;
-use crate::text::create_parley_measurer;
+
+/// Enables perspective-scaled line widths on panel debug gizmos.
+fn configure_panel_gizmos(mut config_store: ResMut<bevy::prelude::GizmoConfigStore>) {
+    let (config, _) = config_store.config_mut::<DiegeticPanelGizmoGroup>();
+    config.line.perspective = true;
+}
 
 /// Creates the empty GPU `Image` for the MSDF atlas at startup and
 /// fires [`FontRegistered`] for the embedded default font.
@@ -281,7 +287,7 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
     // Initialize font registry and wire up parley-backed text measurement.
     let registry = FontRegistry::new();
     let measurer = DiegeticTextMeasurer {
-        measure_fn: create_parley_measurer(registry.font_context(), registry.family_names()),
+        measure_fn: text::create_parley_measurer(registry.font_context(), registry.family_names()),
     };
 
     // Initialize MSDF atlas — glyphs are rasterized on demand.
@@ -317,9 +323,12 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .register_type::<UnitConfig>()
         .add_plugins(TextRenderPlugin)
         .init_gizmo_group::<DiegeticPanelGizmoGroup>()
-        .add_systems(Startup, init_atlas_and_embedded_font)
+        .add_systems(
+            Startup,
+            (init_atlas_and_embedded_font, configure_panel_gizmos),
+        )
         .add_systems(PostUpdate, (consume_loaded_fonts, watch_font_failures))
-        .add_systems(Update, render_panel_gizmos.after(compute_panel_layouts));
+        .add_systems(Update, rebuild_panel_gizmos.after(compute_panel_layouts));
 
     #[cfg(feature = "typography_overlay")]
     {

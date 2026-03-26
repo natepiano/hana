@@ -6,15 +6,15 @@ use std::time::Instant;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
-use super::glyph_quad::build_glyph_mesh;
-use super::glyph_quad::clip_overlapping_quads;
 use super::msdf_material::MsdfTextMaterial;
+use super::text_renderer;
 use super::text_renderer::ShapedGlyph;
 use super::text_renderer::ShapedTextCache;
 use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
-use super::text_renderer::shape_text_cached;
+use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
@@ -105,7 +105,7 @@ pub struct PanelTextChild {
     /// Index of the source element in the layout tree.
     pub element_idx: usize,
     /// Layout-computed position and size in layout coordinates.
-    pub bounds:      crate::layout::BoundingBox,
+    pub bounds:      BoundingBox,
     /// X scale: points to meters.
     pub scale_x:     f32,
     /// Y scale: points to meters.
@@ -334,7 +334,7 @@ fn spawn_world_text_meshes(
         };
 
         let mesh_start = Instant::now();
-        let mesh = build_glyph_mesh(pq);
+        let mesh = glyph_quad::build_glyph_mesh(pq);
         let mesh_handle = meshes.add(mesh);
 
         // Spawn visible mesh (skip for Invisible render mode).
@@ -452,7 +452,7 @@ fn shape_world_text(
         ..Default::default()
     };
     let shape_start = Instant::now();
-    let shaped = shape_text_cached(text, &config, font_registry, shaping_cx, cache);
+    let shaped = text_renderer::shape_text_cached(text, &config, font_registry, shaping_cx, cache);
     stats.shape_ms = shape_start.elapsed().as_secs_f32() * 1000.0;
     stats.glyphs = shaped.glyphs.len();
 
@@ -540,7 +540,7 @@ fn shape_world_text(
         }
     }
 
-    clip_overlapping_quads(&mut quads);
+    glyph_quad::clip_overlapping_quads(&mut quads);
 
     let first_advance = shaped.glyphs.first().map_or(0.0, |sg| {
         glyph_advance(font_data, sg.glyph_id, style.size(), scale)

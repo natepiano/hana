@@ -2,8 +2,8 @@
 
 use bevy::prelude::Mesh;
 
+use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
-use super::glyph_quad::build_glyph_mesh;
 
 #[test]
 fn mesh_vertex_and_index_counts() {
@@ -28,7 +28,7 @@ fn mesh_vertex_and_index_counts() {
         },
     ];
 
-    let mesh = build_glyph_mesh(&quads);
+    let mesh = glyph_quad::build_glyph_mesh(&quads);
 
     // 3 glyphs × 4 vertices = 12.
     let vertex_count = mesh.count_vertices();
@@ -48,7 +48,7 @@ fn mesh_single_quad_has_uvs() {
         color:    [1.0, 0.0, 0.0, 1.0],
     }];
 
-    let mesh = build_glyph_mesh(&quads);
+    let mesh = glyph_quad::build_glyph_mesh(&quads);
 
     // Should have UV attribute with 4 vertices.
     #[allow(clippy::redundant_closure_for_method_calls)]
@@ -60,7 +60,7 @@ fn mesh_single_quad_has_uvs() {
 
 #[test]
 fn empty_quads_produce_empty_mesh() {
-    let mesh = build_glyph_mesh(&[]);
+    let mesh = glyph_quad::build_glyph_mesh(&[]);
 
     let vertex_count = mesh.count_vertices();
     assert_eq!(vertex_count, 0);

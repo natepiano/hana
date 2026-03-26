@@ -213,21 +213,7 @@ fn setup(
         Transform::from_xyz(0.0, 0.0, 3.45),
     ));
 
-    // Light
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 1.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 1.5, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
+    spawn_lights(&mut commands);
 
     // Controls panel — upper left.
     commands
@@ -276,6 +262,23 @@ fn setup(
         trackpad_pinch_to_zoom_enabled: true,
         ..default()
     },));
+}
+
+fn spawn_lights(commands: &mut Commands) {
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 1.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 1.5, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 }
 
 fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {

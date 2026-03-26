@@ -25,11 +25,11 @@ use etagere::size2;
 use super::font::Font;
 use super::font_registry::FontId;
 use super::font_registry::FontRegistry;
+use super::msdf_rasterizer;
 use super::msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
 use super::msdf_rasterizer::DEFAULT_GLYPH_PADDING;
 use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
 use super::msdf_rasterizer::MsdfBitmap;
-use super::msdf_rasterizer::rasterize_glyph;
 
 /// Default atlas page texture size in pixels.
 const DEFAULT_ATLAS_SIZE: u32 = 1024;
@@ -424,7 +424,7 @@ impl MsdfAtlas {
                 let active_now = active_jobs.fetch_add(1, Ordering::Relaxed) + 1;
                 peak_active_jobs.fetch_max(active_now, Ordering::Relaxed);
                 let start = Instant::now();
-                let bitmap = rasterize_glyph(
+                let bitmap = msdf_rasterizer::rasterize_glyph(
                     &font_data,
                     glyph_index,
                     canonical,
@@ -544,7 +544,7 @@ impl MsdfAtlas {
         if let Some(metrics) = self.glyphs.get(&key) {
             return Some(*metrics);
         }
-        let bitmap = rasterize_glyph(
+        let bitmap = msdf_rasterizer::rasterize_glyph(
             font_data,
             key.glyph_index,
             self.canonical_size,

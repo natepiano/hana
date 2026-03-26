@@ -11,24 +11,31 @@ use std::time::Instant;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
-use super::glyph_quad::build_glyph_mesh;
 use super::msdf_material::MsdfTextMaterial;
 use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
+use crate::layout::BoundingBox;
+use crate::layout::FontFeatures;
+use crate::layout::FontSlant::Italic;
+use crate::layout::FontSlant::Normal;
+use crate::layout::FontSlant::Oblique;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::LayoutTextStyle;
 use crate::layout::RenderCommandKind;
+use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
 use crate::layout::WorldTextStyle;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
+use crate::plugin::Unit::Points;
 use crate::plugin::UnitConfig;
 use crate::text::Font;
 use crate::text::FontId;
@@ -95,7 +102,7 @@ struct ShapedCacheKey {
     lh_q:          u32,
     ls_q:          i32,
     ws_q:          i32,
-    font_features: crate::layout::FontFeatures,
+    font_features: FontFeatures,
 }
 
 impl ShapedCacheKey {
@@ -109,9 +116,9 @@ impl ShapedCacheKey {
             size_q:        (m.size * 100.0) as u32,
             weight_q:      (m.weight.0 * 10.0) as u32,
             slant:         match m.slant {
-                crate::layout::FontSlant::Normal => 0,
-                crate::layout::FontSlant::Italic => 1,
-                crate::layout::FontSlant::Oblique => 2,
+                Normal => 0,
+                Italic => 1,
+                Oblique => 2,
             },
             lh_q:          (m.line_height * 100.0) as u32,
             ls_q:          (m.letter_spacing * 100.0) as i32,
@@ -131,18 +138,14 @@ impl ShapedCacheKey {
 #[derive(Resource, Clone, Default)]
 pub struct ShapedTextCache {
     entries:      HashMap<ShapedCacheKey, ShapedTextRun>,
-    measurements: HashMap<ShapedCacheKey, crate::layout::TextDimensions>,
+    measurements: HashMap<ShapedCacheKey, TextDimensions>,
 }
 
 impl ShapedTextCache {
     /// Returns cached measurement dimensions for the given text + config,
     /// or `None` if not yet cached.
     #[must_use]
-    pub fn get_measurement(
-        &self,
-        text: &str,
-        measure: &TextMeasure,
-    ) -> Option<crate::layout::TextDimensions> {
+    pub fn get_measurement(&self, text: &str, measure: &TextMeasure) -> Option<TextDimensions> {
         let key = ShapedCacheKey::new(text, measure);
         self.measurements.get(&key).copied()
     }
@@ -156,12 +159,7 @@ impl ShapedTextCache {
     }
 
     /// Inserts a measurement result into the cache.
-    pub fn insert_measurement(
-        &mut self,
-        text: &str,
-        measure: &TextMeasure,
-        dims: crate::layout::TextDimensions,
-    ) {
+    pub fn insert_measurement(&mut self, text: &str, measure: &TextMeasure, dims: TextDimensions) {
         let key = ShapedCacheKey::new(text, measure);
         self.measurements.insert(key, dims);
     }
@@ -367,7 +365,7 @@ fn reconcile_panel_text_children(
         };
 
         // Layout output is in points. Convert to world meters.
-        let pts_mpu = crate::plugin::Unit::Points.meters_per_unit();
+        let pts_mpu = Points.meters_per_unit();
         let scale_x = pts_mpu;
         let scale_y = pts_mpu;
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
@@ -618,7 +616,7 @@ fn spawn_batch_meshes(
             continue;
         };
 
-        let mesh = build_glyph_mesh(quads);
+        let mesh = glyph_quad::build_glyph_mesh(quads);
         let mesh_handle = meshes.add(mesh);
 
         let is_invisible = key.render_mode == GlyphRenderMode::Invisible;
@@ -835,7 +833,7 @@ pub(super) fn shape_text_cached(
 fn shape_text_to_quads(
     text: &str,
     config: &LayoutTextStyle,
-    bounds: &crate::layout::BoundingBox,
+    bounds: &BoundingBox,
     font_registry: &FontRegistry,
     atlas: &mut MsdfAtlas,
     shaping_cx: &TextShapingContext,

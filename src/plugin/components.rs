@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
+use super::config::Unit;
+use super::config::UnitConfig;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutResult;
@@ -11,8 +13,6 @@ use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
-use crate::plugin::config::Unit;
-use crate::plugin::config::UnitConfig;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///
@@ -103,7 +103,7 @@ impl DiegeticPanel {
         self.height * self.resolved_layout_unit(config).meters_per_unit()
     }
 
-    /// Returns the (x_offset, y_offset) in world meters for converting
+    /// Returns the (`x_offset`, `y_offset`) in world meters for converting
     /// layout coordinates (top-left origin, Y-down) to panel-local
     /// coordinates relative to the anchor point.
     ///
@@ -114,7 +114,7 @@ impl DiegeticPanel {
         let w = self.world_width(config);
         let h = self.world_height(config);
         let (fx, fy) = self.anchor.offset_fraction();
-        (w * fx, h * (1.0 - fy))
+        (w * fx, h * fy)
     }
 
     /// Font-to-layout conversion factor for this panel.

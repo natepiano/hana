@@ -32,8 +32,7 @@ use super::constants::LABEL_TOP;
 use super::constants::LABEL_X_HEIGHT;
 use super::constants::THICK_LINE_WIDTH;
 use super::constants::THIN_LINE_WIDTH;
-use crate::callouts::draw_dashed_line;
-use crate::callouts::draw_dimension_arrow;
+use crate::callouts;
 use crate::layout::Anchor;
 use crate::layout::GlyphShadowMode;
 use crate::layout::WorldTextStyle;
@@ -44,6 +43,7 @@ use crate::render::PendingGlyphs;
 use crate::render::ShapedTextCache;
 use crate::render::WorldText;
 use crate::text::FontId;
+use crate::text::FontMetrics;
 use crate::text::FontRegistry;
 
 /// Attach to a [`WorldText`] entity to render typography metric annotations.
@@ -268,7 +268,7 @@ pub fn build_typography_overlay(
 /// Runs after `CalculateBounds` so transforms and AABBs are available.
 pub fn emit_typography_overlay_ready(
     awaiting: Query<Entity, With<AwaitingOverlayReady>>,
-    pending: Query<(), With<super::super::render::PendingGlyphs>>,
+    pending: Query<(), With<PendingGlyphs>>,
     children_query: Query<&Children>,
     mut commands: Commands,
 ) {
@@ -292,7 +292,7 @@ fn spawn_font_metric_gizmos(
     commands: &mut Commands,
     entity: Entity,
     font_name: &str,
-    font_metrics: &crate::text::FontMetrics,
+    font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     overlay: &TypographyOverlay,
     computed: &ComputedWorldText,
@@ -365,7 +365,7 @@ fn spawn_font_metric_gizmos(
 fn spawn_glyph_metric_gizmos(
     commands: &mut Commands,
     entity: Entity,
-    font_metrics: &crate::text::FontMetrics,
+    font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     overlay: &TypographyOverlay,
     computed: &ComputedWorldText,
@@ -432,7 +432,7 @@ fn spawn_glyph_metric_gizmos(
 fn spawn_bounding_box_callout(
     commands: &mut Commands,
     entity: Entity,
-    font_metrics: &crate::text::FontMetrics,
+    font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     computed: &ComputedWorldText,
     anchor_y: f32,
@@ -662,7 +662,7 @@ fn spawn_advancement_arrow(
     let tick_below = arrow_y - head;
     let dash_len = spacing * 0.125;
     let gap_len = spacing * 0.125 / 2.0;
-    draw_dashed_line(
+    callouts::draw_dashed_line(
         &mut adv_gizmo,
         Vec3::new(origin_x, tick_below, z),
         Vec3::new(origin_x, tick_above, z),
@@ -670,7 +670,7 @@ fn spawn_advancement_arrow(
         gap_len,
         overlay.color,
     );
-    draw_dashed_line(
+    callouts::draw_dashed_line(
         &mut adv_gizmo,
         Vec3::new(advance_end_x, tick_below, z),
         Vec3::new(advance_end_x, tick_above, z),
@@ -680,7 +680,7 @@ fn spawn_advancement_arrow(
     );
 
     // Horizontal dimension arrow.
-    draw_dimension_arrow(
+    callouts::draw_dimension_arrow(
         &mut adv_gizmo,
         Vec3::new(origin_x, arrow_y, z),
         Vec3::new(advance_end_x, arrow_y, z),
@@ -776,7 +776,7 @@ struct GlyphExtents {
 /// Returns the lines gizmo, arrows gizmo, and the list of
 /// `(label, layout_y)` pairs for label spawning.
 fn build_metric_gizmos(
-    font_metrics: &crate::text::FontMetrics,
+    font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     overlay: &TypographyOverlay,
     anchor_y: f32,
@@ -847,7 +847,7 @@ fn build_metric_gizmos(
     let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left); // Line Height
 
     let g = &mut arrows_gizmo;
-    draw_dimension_arrow(
+    callouts::draw_dimension_arrow(
         g,
         Vec3::new(left_1, ascent_world, z),
         Vec3::new(left_1, baseline_world, z),
@@ -855,7 +855,7 @@ fn build_metric_gizmos(
         head,
         gap,
     );
-    draw_dimension_arrow(
+    callouts::draw_dimension_arrow(
         g,
         Vec3::new(left_1, baseline_world, z),
         Vec3::new(left_1, descent_world, z),
@@ -863,7 +863,7 @@ fn build_metric_gizmos(
         head,
         gap,
     );
-    draw_dimension_arrow(
+    callouts::draw_dimension_arrow(
         g,
         Vec3::new(left_2, ascent_world, z),
         Vec3::new(left_2, descent_world, z),
@@ -879,7 +879,7 @@ fn build_metric_gizmos(
     let right_1 = extents.last_right + extents.arrow_spacing; // x-Height
     let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right); // Cap Height
 
-    draw_dimension_arrow(
+    callouts::draw_dimension_arrow(
         g,
         Vec3::new(right_1, x_height_world, z),
         Vec3::new(right_1, baseline_world, z),
@@ -887,7 +887,7 @@ fn build_metric_gizmos(
         head,
         gap,
     );
-    draw_dimension_arrow(
+    callouts::draw_dimension_arrow(
         g,
         Vec3::new(right_2, cap_height_world, z),
         Vec3::new(right_2, baseline_world, z),
@@ -908,7 +908,7 @@ fn spawn_metric_labels(
     commands: &mut Commands,
     parent: Entity,
     font_name: &str,
-    font_metrics: &crate::text::FontMetrics,
+    font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     metric_lines: &[(&str, f32)],
     overlay: &TypographyOverlay,
