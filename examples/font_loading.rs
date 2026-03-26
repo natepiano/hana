@@ -47,12 +47,12 @@ const SAMPLE_SIZE: f32 = 0.28;
 /// Vertical spacing between font samples.
 const LINE_SPACING: f32 = 0.5;
 
-/// Layout dimensions for the status panel (in mm).
-const STATUS_LAYOUT_WIDTH: f32 = 80.0;
-const STATUS_LAYOUT_HEIGHT: f32 = 30.0;
+/// Layout dimensions for the status panel (in meters).
+const STATUS_LAYOUT_WIDTH: f32 = 0.08;
+const STATUS_LAYOUT_HEIGHT: f32 = 0.03;
 
-/// Font size for the status panel text (in points).
-const STATUS_FONT_SIZE: f32 = 10.0;
+/// Font size for the status panel text (in millimeters).
+const STATUS_FONT_SIZE: f32 = 3.5;
 
 /// Background color for panels.
 const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
@@ -177,10 +177,10 @@ fn setup(
             tree: build_status_panel("Fonts: loading..."),
             width: STATUS_LAYOUT_WIDTH,
             height: STATUS_LAYOUT_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(-1.5, 3.5, 0.0),
+        Transform::from_xyz(-1.54, 3.515, 0.0),
     ));
 }
 
@@ -190,11 +190,11 @@ fn build_status_panel(text: &str) -> LayoutTree {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.002))
             .direction(Direction::TopToBottom)
-            .child_gap(1.0)
+            .child_gap(0.001)
             .background(PANEL_BG)
-            .border(Border::all(0.5, PANEL_BORDER_COLOR)),
+            .border(Border::all(0.0005, PANEL_BORDER_COLOR)),
         |b| {
             b.text(
                 text,

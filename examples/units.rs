@@ -164,6 +164,7 @@ fn setup(
                 width: A4_W,
                 height: A4_H,
                 layout_unit: Some(Unit::Millimeters),
+                anchor: Anchor::Center,
                 ..default()
             },
             Transform::from_xyz(a4_x, a4_y, 0.0),
@@ -190,6 +191,7 @@ fn setup(
                 width: CARD_W,
                 height: CARD_H,
                 layout_unit: Some(Unit::Inches),
+                anchor: Anchor::Center,
                 ..default()
             },
             Transform::from_xyz(card_x, card_y, 0.0),
@@ -223,6 +225,7 @@ fn setup(
                 width: CTRL_W,
                 height: CTRL_H,
                 layout_unit: Some(Unit::Millimeters),
+                anchor: Anchor::Center,
                 ..default()
             },
             Transform::from_xyz(ctrl_x, ctrl_y, 0.0),

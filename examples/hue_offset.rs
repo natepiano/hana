@@ -39,18 +39,18 @@ use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
 use bevy_panorbit_camera_ext::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-const LAYOUT_SIZE: f32 = 120.0;
-const PANEL_ASPECT: f32 = 0.85;
-const FONT_SIZE: f32 = 7.0;
+const LAYOUT_W: f32 = 1.0;
+const LAYOUT_H: f32 = 0.85;
+const FONT_SIZE: f32 = 2.5;
 const ROW_COUNT: usize = 10;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
-// ── Info panel dimensions (mm) ───────────────────────────────────────
-const INFO_W: f32 = 140.0;
-const INFO_H: f32 = 30.0;
-const INFO_FONT: f32 = 10.0;
-const INFO_TITLE_FONT: f32 = 12.0;
+// ── Info panel dimensions (meters) ───────────────────────────────────
+const INFO_W: f32 = 0.14;
+const INFO_H: f32 = 0.03;
+const INFO_FONT: f32 = 3.5;
+const INFO_TITLE_FONT: f32 = 4.2;
 
 #[derive(Component)]
 struct RotatingPanel;
@@ -98,7 +98,7 @@ fn setup(
     commands.insert_resource(SceneBounds(ground));
 
     // Dark backdrop — bottom edge sits on the ground plane.
-    let panel_height = PANEL_ASPECT;
+    let panel_height = LAYOUT_H;
     let panel_center_y = panel_height.mul_add(0.5, 0.2);
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(3.0, panel_height + 0.4))),
@@ -116,24 +116,24 @@ fn setup(
         RotatingPanel,
         DiegeticPanel {
             tree: tree.clone(),
-            width: LAYOUT_SIZE,
-            height: LAYOUT_SIZE * PANEL_ASPECT,
-            layout_unit: Some(Unit::Custom(1.0 / LAYOUT_SIZE)),
+            width: LAYOUT_W,
+            height: LAYOUT_H,
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(-0.6, panel_center_y, 0.0),
+        Transform::from_xyz(-1.1, 1.05, 0.0),
     ));
 
     // Right panel — no hue offset (static colors).
     commands.spawn((
         DiegeticPanel {
             tree,
-            width: LAYOUT_SIZE,
-            height: LAYOUT_SIZE * PANEL_ASPECT,
-            layout_unit: Some(Unit::Custom(1.0 / LAYOUT_SIZE)),
+            width: LAYOUT_W,
+            height: LAYOUT_H,
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(0.6, panel_center_y, 0.0),
+        Transform::from_xyz(0.1, 1.05, 0.0),
     ));
 
     // Directional lights.
@@ -176,25 +176,25 @@ fn setup(
             tree: build_info_panel(),
             width: INFO_W,
             height: INFO_H,
-            layout_unit: Some(Unit::Millimeters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(0.0, -0.1, 0.0),
+        Transform::from_xyz(-0.07, -0.085, 0.0),
     ));
 }
 
 #[allow(clippy::cast_precision_loss)]
 fn build_panel() -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(LAYOUT_SIZE, LAYOUT_SIZE * PANEL_ASPECT);
+    let mut builder = LayoutBuilder::new(LAYOUT_W, LAYOUT_H);
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .padding(Padding::all(5.0))
+            .padding(Padding::all(0.042))
             .direction(Direction::TopToBottom)
-            .child_gap(2.0)
+            .child_gap(0.017)
             .background(Color::srgb_u8(30, 34, 42))
-            .border(Border::all(1.0, Color::srgb_u8(80, 90, 100))),
+            .border(Border::all(0.008, Color::srgb_u8(80, 90, 100))),
         |b| {
             for i in 0..ROW_COUNT {
                 let hue = 360.0 * (i as f32 / ROW_COUNT as f32);
@@ -208,7 +208,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                     |b| {
                         b.text(format!("row {i}:"), config.clone());
                         b.with(
-                            El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                            El::new().width(Sizing::GROW).height(Sizing::fixed(0.008)),
                             |_| {},
                         );
                         b.text("value", config);
@@ -238,11 +238,11 @@ fn build_info_panel() -> LayoutTree {
         El::new()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.002))
             .direction(Direction::TopToBottom)
-            .child_gap(1.0)
+            .child_gap(0.001)
             .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
-            .border(Border::all(0.5, border_color)),
+            .border(Border::all(0.0005, border_color)),
         |b| {
             b.text(
                 "hue offset",
@@ -251,7 +251,7 @@ fn build_info_panel() -> LayoutTree {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(0.2))
+                    .height(Sizing::fixed(0.0002))
                     .background(divider_color),
                 |_| {},
             );

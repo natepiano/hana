@@ -41,37 +41,36 @@ use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
 
-// ── Text / layout constants ──────────────────────────────────────────────────
+// ── Text / layout constants (meters) ─────────────────────────────────────────
 
-const FONT_SIZE: f32 = 6.0;
-const ROW_HEIGHT: f32 = FONT_SIZE + 1.0;
-const ROW_GAP: f32 = 5.0;
-const COLUMN_GAP: f32 = 5.0;
-const HEADER_HEIGHT: f32 = ROW_HEIGHT + 1.0;
+/// Font size for content panel text (in millimeters, matched to `font_unit`).
+const FONT_SIZE: f32 = 2.1;
+const ROW_HEIGHT: f32 = 0.07;
+const ROW_GAP: f32 = 0.05;
+const COLUMN_GAP: f32 = 0.05;
+const HEADER_HEIGHT: f32 = ROW_HEIGHT + 0.01;
 
-/// Column width in layout units.
+/// Column width in meters.
 ///
 /// This is an explicit layout constraint, not just an estimate. Panel width is
 /// budgeted from this value via `MAX_LAYOUT_WIDTH`, and each column is sized to
 /// this width in the layout tree.
-const COLUMN_WIDTH: f32 = 100.0;
-/// Layout height per panel.
-const LAYOUT_HEIGHT: f32 = 200.0;
-/// Scale: world units per layout unit.
-const SCALE: f32 = 0.01;
-/// Padding on the outer panel in layout units.
-const PANEL_PADDING: f32 = 6.0;
+const COLUMN_WIDTH: f32 = 1.0;
+/// Layout height per panel (meters).
+const LAYOUT_HEIGHT: f32 = 2.0;
+/// Padding on the outer panel in meters.
+const PANEL_PADDING: f32 = 0.06;
 
 // ── Scene constants ──────────────────────────────────────────────────────────
 
 /// How many columns per panel.
 const MAX_COLUMNS: usize = 8;
-/// Max layout width — exactly fits `MAX_COLUMNS` with gaps and padding.
+/// Max layout width — exactly fits `MAX_COLUMNS` with gaps and padding (meters).
 #[allow(clippy::cast_precision_loss)]
 const MAX_LAYOUT_WIDTH: f32 =
     COLUMN_WIDTH * MAX_COLUMNS as f32 + COLUMN_GAP * (MAX_COLUMNS - 1) as f32 + PANEL_PADDING * 2.0;
-/// Ground plane size — derived from panel width.
-const GROUND_SIZE: f32 = MAX_LAYOUT_WIDTH * SCALE;
+/// Ground plane size — same as panel width (layout is already in meters).
+const GROUND_SIZE: f32 = MAX_LAYOUT_WIDTH;
 /// Distance between stacked panels along Z (on the ground plane).
 const STACK_DEPTH: f32 = 1.25;
 
@@ -96,16 +95,16 @@ const OVERLAY_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
 /// Border color for overlay panels.
 const OVERLAY_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
 
-/// Font size for overlay panel text (in points).
-const OVERLAY_FONT_SIZE: f32 = 10.0;
+/// Font size for overlay panel text (in millimeters).
+const OVERLAY_FONT_SIZE: f32 = 3.5;
 
-/// Layout dimensions for the status panel (in mm).
-const STATUS_LAYOUT_WIDTH: f32 = 200.0;
-const STATUS_LAYOUT_HEIGHT: f32 = 30.0;
+/// Layout dimensions for the status panel (in meters).
+const STATUS_LAYOUT_WIDTH: f32 = 0.2;
+const STATUS_LAYOUT_HEIGHT: f32 = 0.03;
 
-/// Layout dimensions for the controls panel (in mm).
-const CONTROLS_LAYOUT_WIDTH: f32 = 80.0;
-const CONTROLS_LAYOUT_HEIGHT: f32 = 20.0;
+/// Layout dimensions for the controls panel (in meters).
+const CONTROLS_LAYOUT_WIDTH: f32 = 0.08;
+const CONTROLS_LAYOUT_HEIGHT: f32 = 0.02;
 
 /// Source text for row values.
 const SOURCE_TEXT: &str = "bevy diegetic layout engine text rendering msdf atlas glyph quad mesh \
@@ -268,10 +267,10 @@ fn setup(
             tree: build_status_panel("fps: --  ms: --  rows: 0  panels: 0"),
             width: STATUS_LAYOUT_WIDTH,
             height: STATUS_LAYOUT_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(4.0, 5.0, 2.0),
+        Transform::from_xyz(3.9, 5.015, 2.0),
     ));
 
     // Controls panel (static help text) — bottom-left area.
@@ -281,10 +280,10 @@ fn setup(
             tree: build_controls_panel(),
             width: CONTROLS_LAYOUT_WIDTH,
             height: CONTROLS_LAYOUT_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(-4.0, 0.5, 3.0),
+        Transform::from_xyz(-4.04, 0.51, 3.0),
     ));
 }
 
@@ -294,11 +293,11 @@ fn build_status_panel(text: &str) -> LayoutTree {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.002))
             .direction(Direction::TopToBottom)
-            .child_gap(1.0)
+            .child_gap(0.001)
             .background(OVERLAY_BG)
-            .border(Border::all(0.5, OVERLAY_BORDER_COLOR)),
+            .border(Border::all(0.0005, OVERLAY_BORDER_COLOR)),
         |b| {
             b.text(
                 text,
@@ -317,11 +316,11 @@ fn build_controls_panel() -> LayoutTree {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.002))
             .direction(Direction::TopToBottom)
-            .child_gap(1.0)
+            .child_gap(0.001)
             .background(OVERLAY_BG)
-            .border(Border::all(0.5, OVERLAY_BORDER_COLOR)),
+            .border(Border::all(0.0005, OVERLAY_BORDER_COLOR)),
         |b| {
             b.text(
                 "'+' add  '-' remove",
@@ -552,8 +551,8 @@ fn update_panels(
         }
     }
 
-    let ww = MAX_LAYOUT_WIDTH * SCALE;
-    let wh = LAYOUT_HEIGHT * SCALE;
+    let ww = MAX_LAYOUT_WIDTH;
+    let wh = LAYOUT_HEIGHT;
 
     // Spawn missing.
     for idx in *last_panel_count..needed {
@@ -567,7 +566,7 @@ fn update_panels(
                 tree,
                 width: MAX_LAYOUT_WIDTH,
                 height: LAYOUT_HEIGHT,
-                layout_unit: Some(Unit::Custom(SCALE)),
+                font_unit: Some(Unit::Millimeters),
                 ..default()
             },
             panel_transform(idx, needed, ww, wh),
@@ -645,11 +644,10 @@ fn panel_transform(
     let depth_from_front = (total - 1 - panel_idx) as f32;
     // Front panel at z=0 (forward edge of ground plane), older panels push back.
     let z = GROUND_SIZE.mul_add(0.5, -(depth_from_front * STACK_DEPTH));
-    // Panel left edge aligns with plane left edge.
-    let ww = MAX_LAYOUT_WIDTH * SCALE;
-    let x = (-GROUND_SIZE).mul_add(0.5, ww * 0.5);
-    // Panel bottom sits above the ground.
-    let y = world_height.mul_add(0.5, 0.3);
+    // Panel top-left edge aligns with plane left edge.
+    let x = -GROUND_SIZE * 0.5;
+    // Panel top sits above the ground (TopLeft anchor: y = top edge).
+    let y = world_height + 0.3;
     Transform::from_xyz(x, y, z)
 }
 
@@ -679,9 +677,9 @@ fn build_panel_tree(
             .height(Sizing::FIT)
             .direction(Direction::LeftToRight)
             .child_gap(COLUMN_GAP)
-            .padding(Padding::all(3.0))
+            .padding(Padding::all(0.03))
             .background(BG_COLOR)
-            .border(Border::all(1.0, BORDER_COLOR)),
+            .border(Border::all(0.01, BORDER_COLOR)),
         |b| {
             let mut row_cursor = panel_start;
             for col in 0..cols {
@@ -698,9 +696,9 @@ fn build_panel_tree(
                         .width(Sizing::fixed(COLUMN_WIDTH))
                         .height(Sizing::GROW)
                         .direction(Direction::TopToBottom)
-                        .child_gap(1.0)
-                        .padding(Padding::all(2.0))
-                        .border(Border::all(1.0, BORDER_COLOR)),
+                        .child_gap(0.01)
+                        .padding(Padding::all(0.02))
+                        .border(Border::all(0.01, BORDER_COLOR)),
                     |b| {
                         if is_first {
                             b.text(
@@ -711,7 +709,7 @@ fn build_panel_tree(
                             b.with(
                                 El::new()
                                     .width(Sizing::GROW)
-                                    .height(Sizing::fixed(1.0))
+                                    .height(Sizing::fixed(0.01))
                                     .background(DIVIDER_COLOR),
                                 |_| {},
                             );
@@ -739,7 +737,7 @@ fn build_panel_tree(
                                 |b| {
                                     b.text(&label, config.clone());
                                     b.with(
-                                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                        El::new().width(Sizing::GROW).height(Sizing::fixed(0.01)),
                                         |_| {},
                                     );
                                     b.text(value, config);

@@ -32,11 +32,6 @@ use bevy_panorbit_camera::TrackpadBehavior;
 use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
 use bevy_window_manager::WindowManagerPlugin;
 
-/// Fraction of screen width used as inset on each side.
-const SIDE_INSET_FRACTION: f32 = 0.05;
-const TOP_INSET_FRACTION: f32 = 0.06;
-const BOTTOM_INSET_FRACTION: f32 = 0.18;
-
 /// World-space panel height. Width follows the window aspect ratio.
 const PANEL_WORLD_HEIGHT: f32 = 3.1;
 
@@ -54,17 +49,17 @@ const GROUND_SIDE_MARGIN: f32 = 1.4;
 const GROUND_FRONT_MARGIN: f32 = 0.65;
 const GROUND_BACK_MARGIN: f32 = 2.0;
 
-/// Font size for feature samples.
-const SAMPLE_SIZE: f32 = 55.2;
+/// Font size for feature samples (in layout units).
+const SAMPLE_SIZE: f32 = 140.0;
 
-/// Font size for labels and headers.
-const LABEL_SIZE: f32 = 11.0;
+/// Font size for labels and headers (in layout units).
+const ON_OFF_SIZE: f32 = 50.0;
 
-/// Font size for section headers.
-const SECTION_SIZE: f32 = 13.0;
+/// Font size for section headers (in layout units).
+const SECTION_SIZE: f32 = 83.0;
 
-/// Font size for the typeface label shown at the top-right of each cell.
-const FONT_NAME_SIZE: f32 = 15.0;
+/// Font size for the typeface label shown at the top-right of each cell (in layout units).
+const FONT_NAME_SIZE: f32 = 66.0;
 
 /// Marker for the showcase panel.
 #[derive(Component)]
@@ -115,7 +110,6 @@ fn setup(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (layout_w, layout_h) = layout_dimensions(window);
     let (world_w, world_h) = world_dimensions(window);
     let (ground_w, ground_d) = ground_dimensions(world_w);
     let ground_z = ground_center_z();
@@ -136,13 +130,13 @@ fn setup(
     commands.spawn((
         ShowcasePanel,
         DiegeticPanel {
-            tree: build_panel(layout_w, layout_h, noto_id.0),
-            width: layout_w,
-            height: layout_h,
-            layout_unit: Some(Unit::Custom(world_w / layout_w)),
+            tree: build_panel(world_w, world_h, noto_id.0),
+            width: world_w,
+            height: world_h,
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        panel_transform(world_h),
+        panel_transform(world_w, world_h),
     ));
 
     commands.spawn((
@@ -177,16 +171,6 @@ fn setup(
     },));
 }
 
-fn layout_dimensions(window: &Window) -> (f32, f32) {
-    let side_inset = window.width() * SIDE_INSET_FRACTION;
-    let top_inset = window.height() * TOP_INSET_FRACTION;
-    let bottom_inset = window.height() * BOTTOM_INSET_FRACTION;
-    (
-        side_inset.mul_add(-2.0, window.width()),
-        window.height() - top_inset - bottom_inset,
-    )
-}
-
 fn world_dimensions(window: &Window) -> (f32, f32) {
     let aspect = window.width() / window.height();
     let world_h = PANEL_WORLD_HEIGHT;
@@ -209,8 +193,8 @@ fn panel_z() -> f32 {
     ground_d.mul_add(0.5 - PANEL_FRONT_DEPTH_FRACTION, ground_center_z())
 }
 
-fn panel_transform(world_h: f32) -> Transform {
-    Transform::from_xyz(0.0, world_h.mul_add(0.5, PANEL_GROUND_CLEARANCE), panel_z())
+fn panel_transform(world_w: f32, world_h: f32) -> Transform {
+    Transform::from_xyz(-world_w * 0.5, world_h + PANEL_GROUND_CLEARANCE, panel_z())
 }
 
 #[allow(clippy::type_complexity)]
@@ -227,25 +211,19 @@ fn resize_panel(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (layout_w, layout_h) = layout_dimensions(window);
     let (world_w, world_h) = world_dimensions(window);
     let (ground_w, ground_d) = ground_dimensions(world_w);
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
-        let new_unit = Unit::Custom(world_w / layout_w);
         #[allow(clippy::float_cmp)]
-        if panel.width == layout_w
-            && panel.height == layout_h
-            && panel.layout_unit == Some(new_unit)
-        {
+        if panel.width == world_w && panel.height == world_h {
             continue;
         }
-        panel.width = layout_w;
-        panel.height = layout_h;
-        panel.layout_unit = Some(new_unit);
-        panel.tree = build_panel(layout_w, layout_h, noto_id.0);
-        *transform = panel_transform(world_h);
+        panel.width = world_w;
+        panel.height = world_h;
+        panel.tree = build_panel(world_w, world_h, noto_id.0);
+        *transform = panel_transform(world_w, world_h);
     }
 
     for (mut mesh3d, mut transform) in &mut ground {
@@ -269,13 +247,13 @@ fn on_font_registered(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (layout_w, layout_h) = layout_dimensions(window);
+    let (world_w, world_h) = world_dimensions(window);
     for mut panel in &mut panels {
         warn!(
             "MUTATE: on_font_registered rebuilding tree for {}",
             trigger.name
         );
-        panel.tree = build_panel(layout_w, layout_h, noto_id.0);
+        panel.tree = build_panel(world_w, world_h, noto_id.0);
     }
 }
 
@@ -302,16 +280,16 @@ fn build_panel(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(10.0))
+            .padding(Padding::all(0.04))
             .direction(Direction::TopToBottom)
-            .child_gap(6.0)
+            .child_gap(0.024)
             .background(bg)
-            .border(Border::all(2.0, border_color)),
+            .border(Border::all(0.00225, border_color)),
         |b| {
             // Title.
             b.text(
                 "Font Features",
-                LayoutTextStyle::new(SECTION_SIZE + 2.0)
+                LayoutTextStyle::new(SECTION_SIZE)
                     .with_color(section_color)
                     .with_loading_policy(progressive),
             );
@@ -361,14 +339,14 @@ fn build_feature_grid(
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom)
-            .child_gap(12.0),
+            .child_gap(0.048),
         |b| {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
                     .direction(Direction::LeftToRight)
-                    .child_gap(12.0),
+                    .child_gap(0.048),
                 |b| {
                     build_feature_column(
                         b,
@@ -407,7 +385,7 @@ fn build_feature_grid(
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
                     .direction(Direction::LeftToRight)
-                    .child_gap(12.0),
+                    .child_gap(0.048),
                 |b| {
                     build_feature_column(
                         b,
@@ -489,7 +467,7 @@ fn build_feature_column(
         .with_font_features(off_features)
         .with_loading_policy(loading_policy);
 
-    let label_config = LayoutTextStyle::new(LABEL_SIZE)
+    let label_config = LayoutTextStyle::new(ON_OFF_SIZE)
         .with_color(label_color)
         .with_loading_policy(loading_policy);
     let font_name_config = LayoutTextStyle::new(FONT_NAME_SIZE)
@@ -501,17 +479,17 @@ fn build_feature_column(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(6.0))
+            .padding(Padding::all(0.024))
             .direction(Direction::TopToBottom)
-            .child_gap(4.0)
-            .border(Border::all(1.0, column_border_color)),
+            .child_gap(0.016)
+            .border(Border::all(0.0015, column_border_color)),
         |b| {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
                     .direction(Direction::LeftToRight)
-                    .child_gap(8.0)
+                    .child_gap(0.032)
                     .child_align_y(AlignY::Top),
                 |b| {
                     b.text(
@@ -556,9 +534,9 @@ fn build_sample_rows(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::percent(0.11))
-                    .padding(Padding::new(6.0, 4.0, 0.0, 4.0))
+                    .padding(Padding::new(0.024, 0.016, 0.0, 0.016))
                     .direction(Direction::LeftToRight)
-                    .child_gap(12.0)
+                    .child_gap(0.048)
                     .child_align_y(AlignY::Bottom),
                 |b| {
                     b.with(
@@ -587,9 +565,9 @@ fn build_sample_rows(
                     El::new()
                         .width(Sizing::GROW)
                         .height(Sizing::GROW)
-                        .padding(Padding::new(0.0, 4.0, 0.0, 4.0))
+                        .padding(Padding::new(0.0, 0.016, 0.0, 0.016))
                         .direction(Direction::LeftToRight)
-                        .child_gap(10.0),
+                        .child_gap(0.04),
                     |b| {
                         b.with(
                             El::new()

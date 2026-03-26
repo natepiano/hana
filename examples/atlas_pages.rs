@@ -14,6 +14,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::AlignX;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -65,7 +66,7 @@ const STATUS_FONT_SIZE: f32 = 40.0;
 const STATUS_TITLE_SIZE: f32 = 60.0;
 
 /// Background color for panels.
-const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
+const PANEL_BG: Color = Color::srgb(1.0, 1.0, 0.0);
 
 /// Border color for panels.
 const PANEL_BORDER_COLOR: Color = Color::WHITE;
@@ -221,29 +222,6 @@ fn setup(
         },
         Transform::from_xyz(-2.5, 4.5, 0.0),
     ));
-
-    // Minimal test panel — mirrors atlas layout structure.
-    let mut test_builder = LayoutBuilder::new(2.0, 0.8);
-    test_builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_gap(0.02)
-            .background(PANEL_BG)
-            .border(Border::all(0.001, Color::WHITE)),
-        |_| {},
-    );
-    commands.spawn((
-        DiegeticPanel {
-            tree: test_builder.build(),
-            width: 2.0,
-            height: 0.8,
-            ..default()
-        },
-        Transform::from_xyz(-1.5, 4.5, 0.0),
-    ));
-
 }
 
 struct StatusData {
@@ -275,7 +253,7 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
             .direction(Direction::TopToBottom)
             .child_gap(0.02)
             .background(PANEL_BG)
-            .border(Border::all(0.001, PANEL_BORDER_COLOR)),
+            .border(Border::all(0.002, PANEL_BORDER_COLOR)),
         |b| {
             b.text("atlas", title_style);
 
@@ -291,7 +269,7 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
             // Label/value rows
             b.with(
                 El::new()
-                    .width(Sizing::FIT)
+                    .width(Sizing::GROW)
                     .height(Sizing::FIT)
                     .direction(Direction::LeftToRight)
                     .child_gap(0.025),
@@ -308,7 +286,11 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
                     );
                     // Value column
                     b.with(
-                        El::new().direction(Direction::TopToBottom).child_gap(10.0),
+                        El::new()
+                            .width(Sizing::GROW)
+                            .direction(Direction::TopToBottom)
+                            .child_gap(0.01)
+                            .child_align_x(AlignX::Right),
                         |b| {
                             b.text(format!("{QUALITY:?}"), value_style.clone());
                             b.text(format!("~{GLYPHS_PER_PAGE}"), value_style.clone());
@@ -320,9 +302,17 @@ fn build_status_panel(data: &StatusData) -> LayoutTree {
             );
 
             // Instruction
-            b.text(
-                format!("'+' add Unicode block ({} remaining)", data.remaining),
-                dim_style,
+            b.with(
+                El::new().width(Sizing::GROW).child_align_x(AlignX::Center),
+                |b| {
+                    b.text("'+' add Unicode block", dim_style.clone());
+                },
+            );
+            b.with(
+                El::new().width(Sizing::GROW).child_align_x(AlignX::Center),
+                |b| {
+                    b.text(format!("{} remaining", data.remaining), dim_style);
+                },
             );
         },
     );

@@ -7,10 +7,10 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
+use super::Unit::Points;
 use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
-use super::Unit::Points;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
 use crate::layout::MeasureTextFn;
@@ -280,9 +280,8 @@ pub(super) fn rebuild_panel_gizmos(
                     // Background: inset by border width if a border exists on this element.
                     let border = border_by_idx.get(&cmd.element_idx);
                     // Border values are in points (pre-scaled), same as bounds.
-                    let (il, ir, it, ib) = border.map_or((0.0, 0.0, 0.0, 0.0), |b| {
-                        (b.left, b.right, b.top, b.bottom)
-                    });
+                    let (il, ir, it, ib) =
+                        border.map_or((0.0, 0.0, 0.0, 0.0), |b| (b.left, b.right, b.top, b.bottom));
                     let inset_bounds = BoundingBox {
                         x:      cmd.bounds.x + il,
                         y:      cmd.bounds.y + it,

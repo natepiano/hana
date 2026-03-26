@@ -33,14 +33,13 @@ const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
-const LAYOUT_WIDTH: f32 = 160.0;
-const LAYOUT_HEIGHT: f32 = 120.0;
-const TITLE_FONT_SIZE: f32 = 12.0;
-const BODY_FONT_SIZE: f32 = 8.0;
-const CONTROLS_LAYOUT_WIDTH: f32 = 120.0;
-const CONTROLS_LAYOUT_HEIGHT: f32 = 30.0;
-const CONTROLS_WORLD_WIDTH: f32 = 0.8;
-const CONTROLS_FONT_SIZE: f32 = 8.0;
+const LAYOUT_WIDTH: f32 = 2.0;
+const LAYOUT_HEIGHT: f32 = 1.5;
+const TITLE_FONT_SIZE: f32 = 4.2;
+const BODY_FONT_SIZE: f32 = 2.8;
+const CONTROLS_LAYOUT_WIDTH: f32 = 0.8;
+const CONTROLS_LAYOUT_HEIGHT: f32 = 0.2;
+const CONTROLS_FONT_SIZE: f32 = 2.8;
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -127,7 +126,7 @@ fn setup(
                 tree,
                 width: LAYOUT_WIDTH,
                 height: LAYOUT_HEIGHT,
-                layout_unit: Some(Unit::Custom(panel_w / LAYOUT_WIDTH)),
+                font_unit: Some(Unit::Millimeters),
                 ..default()
             },
             // Transparent quad for picking / zoom-to-fit.
@@ -137,7 +136,7 @@ fn setup(
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             })),
-            Transform::from_xyz(0.0, 1.5, 0.0),
+            Transform::from_xyz(-1.0, 2.25, 0.0),
         ))
         .observe(on_mesh_clicked);
 
@@ -176,10 +175,10 @@ fn setup(
             tree: build_controls_panel(),
             width: CONTROLS_LAYOUT_WIDTH,
             height: CONTROLS_LAYOUT_HEIGHT,
-            layout_unit: Some(Unit::Custom(CONTROLS_WORLD_WIDTH / CONTROLS_LAYOUT_WIDTH)),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(-2.0, 2.5, 0.5),
+        Transform::from_xyz(-2.4, 2.6, 0.5),
     ));
 
     // Camera.
@@ -207,11 +206,11 @@ fn build_panel(fps: &str, frame_ms: &str) -> bevy_diegetic::LayoutTree {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(8.0))
+            .padding(Padding::all(0.1))
             .direction(Direction::TopToBottom)
-            .child_gap(6.0)
+            .child_gap(0.075)
             .background(Color::srgb_u8(40, 44, 52))
-            .border(Border::all(2.0, Color::srgb_u8(120, 130, 140))),
+            .border(Border::all(0.025, Color::srgb_u8(120, 130, 140))),
         |b| {
             // Upper text — GROW height to fill available space.
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
@@ -221,7 +220,7 @@ fn build_panel(fps: &str, frame_ms: &str) -> bevy_diegetic::LayoutTree {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(2.0))
+                    .height(Sizing::fixed(0.025))
                     .background(Color::srgb_u8(60, 130, 180)),
                 |_| {},
             );
@@ -236,7 +235,7 @@ fn build_panel(fps: &str, frame_ms: &str) -> bevy_diegetic::LayoutTree {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(2.0))
+                    .height(Sizing::fixed(0.025))
                     .background(Color::srgb_u8(60, 130, 180)),
                 |_| {},
             );
@@ -259,7 +258,7 @@ fn key_value_row(b: &mut LayoutBuilder, label: &str, value: &str) {
         |b| {
             b.text(label, LayoutTextStyle::new(BODY_FONT_SIZE));
             b.with(
-                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                El::new().width(Sizing::GROW).height(Sizing::fixed(0.0125)),
                 |_| {},
             );
             b.text(value, LayoutTextStyle::new(BODY_FONT_SIZE));
@@ -295,11 +294,11 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(4.0))
+            .padding(Padding::all(0.027))
             .direction(Direction::TopToBottom)
-            .child_gap(2.0)
+            .child_gap(0.013)
             .background(Color::srgb_u8(30, 34, 42))
-            .border(Border::all(1.0, Color::srgb_u8(80, 90, 100))),
+            .border(Border::all(0.007, Color::srgb_u8(80, 90, 100))),
         |b| {
             b.text("'D' toggle debug", LayoutTextStyle::new(CONTROLS_FONT_SIZE));
         },

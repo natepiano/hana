@@ -85,8 +85,8 @@ const GUTTER_FRACTION: f32 = 0.06;
 const PANEL_ASPECT: f32 = 1.4;
 const HEADER_HEIGHT: f32 = 20.0;
 const DIVIDER_HEIGHT: f32 = 4.0;
-const FONT_SIZE: f32 = 7.0;
-const SUBTITLE_FONT_SIZE: f32 = 4.0;
+const FONT_SIZE: f32 = 2.5;
+const SUBTITLE_FONT_SIZE: f32 = 1.4;
 const CLAY_FONT_SIZE: u16 = 7;
 const CLAY_SUBTITLE_FONT_SIZE: u16 = 4;
 const CLAY_RENDERER: &str = "clay";
@@ -97,13 +97,13 @@ const WRAP_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit
 /// `WorldText` uses a fixed scale of 0.01 (layout units → world units).
 const WORLD_TEXT_SCALE: f32 = 0.01;
 
-// ── Controls panel dimensions (mm) ──────────────────────────────────
-const CTRL_W: f32 = 89.0;
-const CTRL_H: f32 = 30.0;
-const CTRL_FONT: f32 = 10.0;
-const CTRL_TITLE_FONT: f32 = 12.0;
+// ── Controls panel dimensions (meters) ──────────────────────────────
+const CTRL_W: f32 = 0.089;
+const CTRL_H: f32 = 0.03;
+const CTRL_FONT: f32 = 3.5;
+const CTRL_TITLE_FONT: f32 = 4.2;
 const CTRL_ARROW_SIZE: f32 = CTRL_FONT * 0.5;
-const CTRL_ROW_H: f32 = CTRL_FONT * 1.4;
+const CTRL_ROW_H: f32 = 0.005;
 
 // ── Gizmo groups ─────────────────────────────────────────────────────────────
 
@@ -345,8 +345,6 @@ fn setup(
 
     // Panel entities.
     let offset = panel_offset(&sizing);
-    let layout_size = sizing.layout_size;
-    let layout_height = layout_size * PANEL_ASPECT;
     let world_size = sizing.world_size;
 
     // Clay panel (left) — just a marker entity for positioning + gizmo drawing.
@@ -354,16 +352,17 @@ fn setup(
 
     // Diegetic panel (right) — uses the plugin for layout + text rendering.
     let diegetic_rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
-    let tree = build_diegetic_tree(&diegetic_rows, layout_size);
+    let tree = build_diegetic_tree(&diegetic_rows, world_size);
+    let world_height = world_size * PANEL_ASPECT;
     commands.spawn((
         DiegeticPanel {
             tree,
-            width: layout_size,
-            height: layout_height,
-            layout_unit: Some(Unit::Custom(world_size / layout_size)),
+            width: world_size,
+            height: world_height,
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(offset, 0.0, 0.0),
+        Transform::from_xyz(offset, world_height * 0.5, 0.0),
     ));
 
     // Controls panel — below the two panels.
@@ -372,10 +371,10 @@ fn setup(
             tree: build_controls_panel(),
             width: CTRL_W,
             height: CTRL_H,
-            layout_unit: Some(Unit::Millimeters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(0.0, -0.85, 0.0),
+        Transform::from_xyz(-CTRL_W * 0.5, -0.85 + CTRL_H * 0.5, 0.0),
     ));
 }
 
@@ -412,11 +411,12 @@ fn cycle_panel_size(
             t.translation.x = -offset;
         }
         for (mut t, mut panel) in &mut diegetic_panels {
+            let world_height = sizing.world_size * PANEL_ASPECT;
             t.translation.x = offset;
+            t.translation.y = world_height * 0.5;
             // Update panel dimensions to match new sizing.
-            panel.width = sizing.layout_size;
-            panel.height = sizing.layout_size * PANEL_ASPECT;
-            panel.layout_unit = Some(Unit::Custom(sizing.world_size / sizing.layout_size));
+            panel.width = sizing.world_size;
+            panel.height = world_height;
         }
     }
 }
@@ -461,17 +461,17 @@ fn build_controls_panel() -> LayoutTree {
         El::new()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.002))
             .direction(Direction::TopToBottom)
-            .child_gap(1.0)
+            .child_gap(0.001)
             .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
-            .border(Border::all(0.5, border_color)),
+            .border(Border::all(0.0005, border_color)),
         |b| {
             b.text("controls", title_cfg.with_color(Color::srgb(0.4, 0.5, 0.9)));
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(0.2))
+                    .height(Sizing::fixed(0.0002))
                     .background(divider_color),
                 |_| {},
             );
@@ -480,7 +480,7 @@ fn build_controls_panel() -> LayoutTree {
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
                     .direction(Direction::LeftToRight)
-                    .child_gap(1.5),
+                    .child_gap(0.0015),
                 |b| {
                     // Key column
                     b.with(
@@ -569,7 +569,7 @@ fn rebuild_diegetic_panel(
     }
     let rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
     for mut panel in &mut panels {
-        panel.tree = build_diegetic_tree(&rows, sizing.layout_size);
+        panel.tree = build_diegetic_tree(&rows, sizing.world_size);
     }
 }
 
@@ -646,13 +646,17 @@ fn spawn_clay_text(
 
 /// Builds the diegetic layout tree. Returns a `LayoutTree`.
 /// The plugin handles layout computation and text rendering.
-fn build_diegetic_tree(rows: &[(String, String)], layout_size: f32) -> LayoutTree {
-    let layout_height = layout_size * PANEL_ASPECT;
+///
+/// `world_size` is the panel width in meters (layout coordinates = meters).
+fn build_diegetic_tree(rows: &[(String, String)], world_size: f32) -> LayoutTree {
+    let world_height = world_size * PANEL_ASPECT;
+    // Scale factor: spatial values are proportional to world_size.
+    let s = world_size / 160.0;
     let mut builder = LayoutBuilder::with_root(
         El::new()
-            .width(Sizing::fixed(layout_size))
-            .height(Sizing::fixed(layout_height))
-            .padding(Padding::all(8.0))
+            .width(Sizing::fixed(world_size))
+            .height(Sizing::fixed(world_height))
+            .padding(Padding::all(8.0 * s))
             .direction(Direction::TopToBottom)
             .background(Color::srgb_u8(180, 96, 122)),
     );
@@ -662,15 +666,15 @@ fn build_diegetic_tree(rows: &[(String, String)], layout_size: f32) -> LayoutTre
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(5.0))
+            .padding(Padding::all(5.0 * s))
             .direction(Direction::TopToBottom)
-            .child_gap(5.0)
-            .border(Border::all(5.0, Color::srgb_u8(255, 255, 255)))
+            .child_gap(5.0 * s)
+            .border(Border::all(5.0 * s, Color::srgb_u8(255, 255, 255)))
             .background(Color::srgb_u8(56, 16, 24)),
         |b| {
-            build_diegetic_header(b);
-            build_diegetic_divider(b);
-            build_diegetic_body(b, rows);
+            build_diegetic_header(b, s);
+            build_diegetic_divider(b, s);
+            build_diegetic_body(b, rows, s);
         },
     );
 
@@ -678,12 +682,12 @@ fn build_diegetic_tree(rows: &[(String, String)], layout_size: f32) -> LayoutTre
 }
 
 /// Builds the header container with title and subtitle for the diegetic panel.
-fn build_diegetic_header(b: &mut LayoutBuilder) {
+fn build_diegetic_header(b: &mut LayoutBuilder, s: f32) {
     b.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::grow_range(FONT_SIZE, HEADER_HEIGHT))
-            .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
+            .height(Sizing::grow_range(7.0 * s, HEADER_HEIGHT * s))
+            .padding(Padding::new(5.0 * s, 5.0 * s, 4.0 * s, 4.0 * s))
             .child_align_y(AlignY::Center)
             .background(Color::srgb_u8(52, 98, 90)),
         |b| {
@@ -699,7 +703,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder) {
                     });
                     // Grow spacer.
                     b.with(
-                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
                         |_| {},
                     );
                     // Subtitle slot.
@@ -719,18 +723,18 @@ fn build_diegetic_header(b: &mut LayoutBuilder) {
 }
 
 /// Builds the accent divider bar.
-fn build_diegetic_divider(b: &mut LayoutBuilder) {
+fn build_diegetic_divider(b: &mut LayoutBuilder, s: f32) {
     b.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(DIVIDER_HEIGHT))
+            .height(Sizing::fixed(DIVIDER_HEIGHT * s))
             .background(Color::srgb_u8(74, 196, 172)),
         |_| {},
     );
 }
 
 /// Builds the body section containing key-value rows and wrap text.
-fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
+fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)], s: f32) {
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -740,9 +744,9 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .padding(Padding::all(5.0))
+                    .padding(Padding::all(5.0 * s))
                     .direction(Direction::TopToBottom)
-                    .child_gap(2.0),
+                    .child_gap(2.0 * s),
                 |b| {
                     for (label, value) in rows {
                         b.with(
@@ -753,7 +757,7 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
                             |b| {
                                 b.text(label, LayoutTextStyle::new(FONT_SIZE));
                                 b.with(
-                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
                                     |_| {},
                                 );
                                 b.text(value, LayoutTextStyle::new(FONT_SIZE));
@@ -763,7 +767,7 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)]) {
 
                     // Spacer.
                     b.with(
-                        El::new().width(Sizing::GROW).height(Sizing::fixed(4.0)),
+                        El::new().width(Sizing::GROW).height(Sizing::fixed(4.0 * s)),
                         |_| {},
                     );
 

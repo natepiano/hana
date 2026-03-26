@@ -57,11 +57,11 @@ const ROW_SPACING: f32 = 1.8;
 /// Distance between the text plane and the shadow-receiver panel.
 const PANEL_OFFSET: f32 = 2.0;
 
-// ── Info panel dimensions (mm) ───────────────────────────────────────
-const INFO_W: f32 = 120.0;
-const INFO_H: f32 = 30.0;
-const INFO_FONT: f32 = 10.0;
-const INFO_TITLE_FONT: f32 = 12.0;
+// ── Info panel dimensions (meters) ───────────────────────────────────
+const INFO_W: f32 = 0.12;
+const INFO_H: f32 = 0.03;
+const INFO_FONT: f32 = 3.5;
+const INFO_TITLE_FONT: f32 = 4.2;
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -153,10 +153,10 @@ fn setup(
             tree: build_info_panel(),
             width: INFO_W,
             height: INFO_H,
-            layout_unit: Some(Unit::Millimeters),
+            font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(0.0, 0.3, 0.0),
+        Transform::from_xyz(-0.06, 0.315, 0.0),
     ));
 }
 
@@ -341,11 +341,11 @@ fn build_info_panel() -> LayoutTree {
         El::new()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .padding(Padding::all(2.0))
+            .padding(Padding::all(0.002))
             .direction(Direction::TopToBottom)
-            .child_gap(1.0)
+            .child_gap(0.001)
             .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
-            .border(Border::all(0.5, border_color)),
+            .border(Border::all(0.0005, border_color)),
         |b| {
             b.text(
                 "grid axes",
@@ -354,7 +354,7 @@ fn build_info_panel() -> LayoutTree {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(0.2))
+                    .height(Sizing::fixed(0.0002))
                     .background(divider_color),
                 |_| {},
             );
