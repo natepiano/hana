@@ -47,6 +47,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use bevy_diegetic::Unit;
+use bevy_diegetic::UnitConfig;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -407,6 +408,7 @@ fn create_bench_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.insert_resource(monospace_measurer());
+    app.insert_resource(UnitConfig::default());
     app.add_plugins(LayoutPlugin);
     app.update();
     app
