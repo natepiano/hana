@@ -4,8 +4,8 @@
 //! Demonstrates loading fonts via `AssetServer` and observing
 //! `FontRegistered` / `FontLoadFailed` events. The embedded `JetBrains
 //! Mono` font is available at startup; `Noto Sans` loads asynchronously
-//! from the assets directory. A HUD shows registered fonts as they
-//! arrive, and `WorldText` labels render each font name in its own font.
+//! from the assets directory. A `DiegeticPanel` shows registered fonts as
+//! they arrive, and `WorldText` labels render each font name in its own font.
 
 use std::time::Duration;
 
@@ -13,13 +13,21 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::Border;
+use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontLoadFailed;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -39,6 +47,19 @@ const SAMPLE_SIZE: f32 = 28.0;
 /// Vertical spacing between font samples.
 const LINE_SPACING: f32 = 0.5;
 
+/// Layout dimensions for the status panel (in mm).
+const STATUS_LAYOUT_WIDTH: f32 = 80.0;
+const STATUS_LAYOUT_HEIGHT: f32 = 30.0;
+
+/// Font size for the status panel text (in points).
+const STATUS_FONT_SIZE: f32 = 10.0;
+
+/// Background color for panels.
+const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
+
+/// Border color for panels.
+const PANEL_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
+
 /// Tracks how many fonts have been registered (for vertical positioning).
 #[derive(Resource, Default)]
 struct FontCount(usize);
@@ -47,9 +68,9 @@ struct FontCount(usize);
 #[derive(Resource, Default)]
 struct FontHandles(Vec<Handle<Font>>);
 
-/// Marker for the HUD text.
+/// Marker for the status panel.
 #[derive(Component)]
-struct HudText;
+struct StatusPanel;
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -65,10 +86,6 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .insert_resource(UnitConfig {
-            layout: Unit::Meters,
-            font:   Unit::Custom(0.01),
-        })
         .init_resource::<FontCount>()
         .init_resource::<FontHandles>()
         .add_observer(on_font_registered)
@@ -153,22 +170,41 @@ fn setup(
         },
     ));
 
-    // HUD.
+    // Status panel.
     commands.spawn((
-        HudText,
-        Text::new("Fonts: loading..."),
-        TextFont {
-            font_size: 16.0,
+        StatusPanel,
+        DiegeticPanel {
+            tree: build_status_panel("Fonts: loading..."),
+            width: STATUS_LAYOUT_WIDTH,
+            height: STATUS_LAYOUT_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
+        Transform::from_xyz(-1.5, 3.5, 0.0),
     ));
+}
+
+fn build_status_panel(text: &str) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.0)
+            .background(PANEL_BG)
+            .border(Border::all(0.5, PANEL_BORDER_COLOR)),
+        |b| {
+            b.text(
+                text,
+                LayoutTextStyle::new(STATUS_FONT_SIZE)
+                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.9))
+                    .with_shadow_mode(GlyphShadowMode::None),
+            );
+        },
+    );
+    builder.build()
 }
 
 /// Observer: fires when a font is successfully registered.
@@ -176,7 +212,7 @@ fn setup(
 fn on_font_registered(
     trigger: On<FontRegistered>,
     mut font_count: ResMut<FontCount>,
-    mut hud: Query<&mut Text, With<HudText>>,
+    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
     mut commands: Commands,
 ) {
     let idx = font_count.0;
@@ -201,9 +237,10 @@ fn on_font_registered(
         ))
         .observe(on_text_clicked);
 
-    // Update HUD.
-    for mut text in &mut hud {
-        **text = format!("Fonts registered: {}", font_count.0);
+    // Update status panel.
+    let status = format!("Fonts registered: {}", font_count.0);
+    for mut panel in &mut panels {
+        panel.tree = build_status_panel(&status);
     }
 
     info!(
@@ -213,11 +250,15 @@ fn on_font_registered(
 }
 
 /// Observer: fires when a font fails to load.
-fn on_font_load_failed(trigger: On<FontLoadFailed>, mut hud: Query<&mut Text, With<HudText>>) {
+fn on_font_load_failed(
+    trigger: On<FontLoadFailed>,
+    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
+) {
     warn!("FontLoadFailed: {} — {}", trigger.path, trigger.error);
 
-    for mut text in &mut hud {
-        **text = format!("{}\nFAILED: {}", **text, trigger.path);
+    let status = format!("FAILED: {}", trigger.path);
+    for mut panel in &mut panels {
+        panel.tree = build_status_panel(&status);
     }
 }
 

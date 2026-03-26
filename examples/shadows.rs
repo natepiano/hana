@@ -16,11 +16,19 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::Border;
+use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
 use bevy_diegetic::GlyphRenderMode;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -49,6 +57,12 @@ const ROW_SPACING: f32 = 1.8;
 /// Distance between the text plane and the shadow-receiver panel.
 const PANEL_OFFSET: f32 = 2.0;
 
+// ── Info panel dimensions (mm) ───────────────────────────────────────
+const INFO_W: f32 = 120.0;
+const INFO_H: f32 = 30.0;
+const INFO_FONT: f32 = 10.0;
+const INFO_TITLE_FONT: f32 = 12.0;
+
 #[derive(Resource)]
 struct SceneBounds(Entity);
 
@@ -63,10 +77,6 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .insert_resource(UnitConfig {
-            layout: Unit::Meters,
-            font:   Unit::Custom(0.01),
-        })
         .add_systems(Startup, setup)
         .run();
 }
@@ -136,7 +146,18 @@ fn setup(
     spawn_grid_headers(&mut commands, ground, &render_modes, &shadow_modes, &grid);
     spawn_glyph_grid(&mut commands, ground, &render_modes, &shadow_modes, &grid);
     spawn_lighting_and_camera(&mut commands);
-    spawn_hud(&mut commands);
+
+    // Info panel — below the grid.
+    commands.spawn((
+        DiegeticPanel {
+            tree: build_info_panel(),
+            width: INFO_W,
+            height: INFO_H,
+            layout_unit: Some(Unit::Millimeters),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.3, 0.0),
+    ));
 }
 
 /// Spawns the ground plane and shadow-receiver backdrop panel.
@@ -309,22 +330,38 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
     ));
 }
 
-/// Spawns the HUD label describing the grid axes.
-fn spawn_hud(commands: &mut Commands) {
-    commands.spawn((
-        Text::new("rows: GlyphRenderMode, columns: GlyphShadowMode"),
-        TextFont {
-            font_size: 14.0,
-            ..default()
+fn build_info_panel() -> LayoutTree {
+    let border_color = Color::srgb(0.4, 0.4, 0.45);
+    let divider_color = Color::srgb(0.45, 0.45, 0.5);
+    let cfg = LayoutTextStyle::new(INFO_FONT);
+    let title_cfg = LayoutTextStyle::new(INFO_TITLE_FONT);
+
+    let mut builder = LayoutBuilder::new(INFO_W, INFO_H);
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.0)
+            .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
+            .border(Border::all(0.5, border_color)),
+        |b| {
+            b.text(
+                "grid axes",
+                title_cfg.with_color(Color::srgb(0.4, 0.5, 0.9)),
+            );
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(0.2))
+                    .background(divider_color),
+                |_| {},
+            );
+            b.text("rows: GlyphRenderMode, columns: GlyphShadowMode", cfg);
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
-    ));
+    );
+    builder.build()
 }
 
 fn on_entity_clicked(

@@ -213,7 +213,7 @@ pub fn build_typography_overlay(
 
         let anchor_x = computed.anchor_x;
         let anchor_y = computed.anchor_y;
-        let scale = unit_config.font.meters_per_unit();
+        let scale = unit_config.world_font.meters_per_unit();
 
         let measure = style.as_layout_config().as_measure();
         let Some(line_metrics) = cache

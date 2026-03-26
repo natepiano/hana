@@ -28,6 +28,7 @@ use bevy_diegetic::El;
 use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
@@ -44,6 +45,12 @@ const FONT_SIZE: f32 = 7.0;
 const ROW_COUNT: usize = 10;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
+
+// ── Info panel dimensions (mm) ───────────────────────────────────────
+const INFO_W: f32 = 140.0;
+const INFO_H: f32 = 30.0;
+const INFO_FONT: f32 = 10.0;
+const INFO_TITLE_FONT: f32 = 12.0;
 
 #[derive(Component)]
 struct RotatingPanel;
@@ -163,20 +170,16 @@ fn setup(
         ..default()
     },));
 
-    // Labels.
+    // Info panel — below the two panels.
     commands.spawn((
-        Text::new("Left panel rotates independently - materials are not shared"),
-        TextFont {
-            font_size: 14.0,
+        DiegeticPanel {
+            tree: build_info_panel(),
+            width: INFO_W,
+            height: INFO_H,
+            layout_unit: Some(Unit::Millimeters),
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
+        Transform::from_xyz(0.0, -0.1, 0.0),
     ));
 }
 
@@ -222,6 +225,43 @@ fn rotate_hue(panels: Query<Entity, With<RotatingPanel>>, mut commands: Commands
     for entity in &panels {
         commands.entity(entity).insert(HueOffset(hue));
     }
+}
+
+fn build_info_panel() -> LayoutTree {
+    let border_color = Color::srgb(0.4, 0.4, 0.45);
+    let divider_color = Color::srgb(0.45, 0.45, 0.5);
+    let cfg = LayoutTextStyle::new(INFO_FONT);
+    let title_cfg = LayoutTextStyle::new(INFO_TITLE_FONT);
+
+    let mut builder = LayoutBuilder::new(INFO_W, INFO_H);
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.0)
+            .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
+            .border(Border::all(0.5, border_color)),
+        |b| {
+            b.text(
+                "hue offset",
+                title_cfg.with_color(Color::srgb(0.4, 0.5, 0.9)),
+            );
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(0.2))
+                    .background(divider_color),
+                |_| {},
+            );
+            b.text(
+                "Left panel rotates independently - materials are not shared",
+                cfg,
+            );
+        },
+    );
+    builder.build()
 }
 
 fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {

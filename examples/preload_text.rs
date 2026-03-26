@@ -43,8 +43,6 @@ use bevy_diegetic::FontSource;
 use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::MsdfAtlas;
-use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -85,10 +83,6 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .insert_resource(UnitConfig {
-            layout: Unit::Meters,
-            font:   Unit::Custom(0.01),
-        })
         .init_resource::<FontHandles>()
         .add_observer(on_font_registered)
         .add_systems(Startup, setup)

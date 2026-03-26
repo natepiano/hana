@@ -1,7 +1,7 @@
 //! Text stress test — add/remove rows to measure per-element rendering cost.
 //!
 //! Press '+' to add rows, '-' to remove (hold for accelerating repeat).
-//! FPS shown via 2D overlay.
+//! Performance stats shown via `DiegeticPanel` overlays.
 //!
 //! Rows fill columns left-to-right within a panel. When the panel reaches
 //! screen width, it pushes backward and a new panel spawns in front.
@@ -33,6 +33,7 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
@@ -83,9 +84,28 @@ const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
-const BORDER_COLOR: bevy::color::Color = bevy::color::Color::srgb(0.39, 0.43, 0.47);
-const BG_COLOR: bevy::color::Color = bevy::color::Color::srgb(0.157, 0.173, 0.204);
-const DIVIDER_COLOR: bevy::color::Color = bevy::color::Color::srgb(0.235, 0.51, 0.706);
+const BORDER_COLOR: Color = Color::srgb(0.39, 0.43, 0.47);
+const BG_COLOR: Color = Color::srgb(0.157, 0.173, 0.204);
+const DIVIDER_COLOR: Color = Color::srgb(0.235, 0.51, 0.706);
+
+// ── Overlay panel constants ──────────────────────────────────────────────────
+
+/// Background color for overlay panels.
+const OVERLAY_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
+
+/// Border color for overlay panels.
+const OVERLAY_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
+
+/// Font size for overlay panel text (in points).
+const OVERLAY_FONT_SIZE: f32 = 10.0;
+
+/// Layout dimensions for the status panel (in mm).
+const STATUS_LAYOUT_WIDTH: f32 = 200.0;
+const STATUS_LAYOUT_HEIGHT: f32 = 30.0;
+
+/// Layout dimensions for the controls panel (in mm).
+const CONTROLS_LAYOUT_WIDTH: f32 = 80.0;
+const CONTROLS_LAYOUT_HEIGHT: f32 = 20.0;
 
 /// Source text for row values.
 const SOURCE_TEXT: &str = "bevy diegetic layout engine text rendering msdf atlas glyph quad mesh \
@@ -126,11 +146,13 @@ struct StressPanel(usize);
 #[derive(Component)]
 struct GroundPlane;
 
+/// Marker for the combined status overlay panel (FPS + row/panel counts).
 #[derive(Component)]
-struct FpsOverlay;
+struct StatusPanel;
 
+/// Marker for the controls help panel.
 #[derive(Component)]
-struct StatsOverlay;
+struct ControlsPanel;
 
 #[derive(Resource, Default)]
 #[allow(clippy::struct_field_names)]
@@ -143,18 +165,19 @@ struct StressPerfStats {
 
 #[derive(Clone, Copy)]
 struct PerfSnapshot {
-    timestamp:     f32,
-    fps:           f32,
-    frame_ms:      f32,
-    rows:          usize,
-    panels:        usize,
-    update_ms:     f32,
-    tree_ms:       f32,
-    tree_builds:   usize,
-    layout_ms:     f32,
-    layout_panels: usize,
-    text_ms:       f32,
-    text_panels:   usize,
+    timestamp: f32,
+    fps:       f32,
+    frame_ms:  f32,
+    update_ms: f32,
+    tree_ms:   f32,
+    layout_ms: f32,
+    text_ms:   f32,
+}
+
+/// Tracks the last displayed status values so we only rebuild when they change.
+#[derive(Resource, Default)]
+struct LastDisplayedStatus {
+    text: String,
 }
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -167,6 +190,7 @@ fn main() {
         .add_plugins(PanOrbitCameraPlugin)
         .init_resource::<StressControls>()
         .init_resource::<StressPerfStats>()
+        .init_resource::<LastDisplayedStatus>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -174,8 +198,7 @@ fn main() {
                 handle_input,
                 animate_row_count,
                 advance_color_rotation,
-                update_fps_overlay,
-                update_stats_overlay,
+                update_status_panel,
                 update_panels,
                 resize_ground_plane,
             )
@@ -185,31 +208,10 @@ fn main() {
 }
 
 fn setup(
-    asset_server: Res<AssetServer>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mono_font = asset_server.load("fonts/JetBrainsMono-Regular.ttf");
-
-    // FPS overlay.
-    commands.spawn((
-        FpsOverlay,
-        Text::new("fps: --  ms: --  rows: 0"),
-        TextFont {
-            font: mono_font.clone(),
-            font_size: 16.0,
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(8.0),
-            right: Val::Px(8.0),
-            ..default()
-        },
-    ));
-
     // Ground plane.
     commands.spawn((
         GroundPlane,
@@ -259,40 +261,83 @@ fn setup(
         },
     ));
 
-    // Help text.
+    // Status panel (combined FPS + row/panel counts) — top-right area.
     commands.spawn((
-        Text::new("'+' add  '-' remove  (hold to accelerate)"),
-        TextFont {
-            font: mono_font.clone(),
-            font_size: 14.0,
+        StatusPanel,
+        DiegeticPanel {
+            tree: build_status_panel("fps: --  ms: --  rows: 0  panels: 0"),
+            width: STATUS_LAYOUT_WIDTH,
+            height: STATUS_LAYOUT_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
+        Transform::from_xyz(4.0, 5.0, 2.0),
     ));
 
-    // Stats overlay (bottom right).
+    // Controls panel (static help text) — bottom-left area.
     commands.spawn((
-        StatsOverlay,
-        Text::new("rows: 0  panels: 0"),
-        TextFont {
-            font: mono_font,
-            font_size: 14.0,
+        ControlsPanel,
+        DiegeticPanel {
+            tree: build_controls_panel(),
+            width: CONTROLS_LAYOUT_WIDTH,
+            height: CONTROLS_LAYOUT_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            right: Val::Px(12.0),
-            ..default()
-        },
+        Transform::from_xyz(-4.0, 0.5, 3.0),
     ));
+}
+
+fn build_status_panel(text: &str) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.0)
+            .background(OVERLAY_BG)
+            .border(Border::all(0.5, OVERLAY_BORDER_COLOR)),
+        |b| {
+            b.text(
+                text,
+                LayoutTextStyle::new(OVERLAY_FONT_SIZE)
+                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.9))
+                    .with_shadow_mode(GlyphShadowMode::None),
+            );
+        },
+    );
+    builder.build()
+}
+
+fn build_controls_panel() -> LayoutTree {
+    let mut builder = LayoutBuilder::new(CONTROLS_LAYOUT_WIDTH, CONTROLS_LAYOUT_HEIGHT);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.0)
+            .background(OVERLAY_BG)
+            .border(Border::all(0.5, OVERLAY_BORDER_COLOR)),
+        |b| {
+            b.text(
+                "'+' add  '-' remove",
+                LayoutTextStyle::new(OVERLAY_FONT_SIZE)
+                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.7))
+                    .with_shadow_mode(GlyphShadowMode::None),
+            );
+            b.text(
+                "(hold to accelerate)",
+                LayoutTextStyle::new(OVERLAY_FONT_SIZE)
+                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.5))
+                    .with_shadow_mode(GlyphShadowMode::None),
+            );
+        },
+    );
+    builder.build()
 }
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -359,16 +404,17 @@ fn advance_color_rotation(
     }
 }
 
-// ── FPS overlay ──────────────────────────────────────────────────────────────
+// ── Status panel ─────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
-fn update_fps_overlay(
+fn update_status_panel(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
     state: Res<StressControls>,
     stress_perf: Res<StressPerfStats>,
     diegetic_perf: Res<DiegeticPerfStats>,
-    mut overlay: Query<&mut Text, With<FpsOverlay>>,
+    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
+    mut last_displayed: ResMut<LastDisplayedStatus>,
     mut timer: Local<Option<Timer>>,
     mut history: Local<VecDeque<PerfSnapshot>>,
 ) {
@@ -392,18 +438,13 @@ fn update_fps_overlay(
     let ms_str = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
 
     history.push_back(PerfSnapshot {
-        timestamp:     time.elapsed_secs(),
-        fps:           fps_value,
-        frame_ms:      frame_ms_value,
-        rows:          state.row_count,
-        panels:        stress_perf.last_panel_count,
-        update_ms:     stress_perf.last_panel_update_ms,
-        tree_ms:       stress_perf.last_tree_build_ms,
-        tree_builds:   stress_perf.last_tree_builds,
-        layout_ms:     diegetic_perf.last_compute_ms,
-        layout_panels: diegetic_perf.last_compute_panels,
-        text_ms:       diegetic_perf.last_text_extract_ms,
-        text_panels:   diegetic_perf.last_text_extract_panels,
+        timestamp: time.elapsed_secs(),
+        fps:       fps_value,
+        frame_ms:  frame_ms_value,
+        update_ms: stress_perf.last_panel_update_ms,
+        tree_ms:   stress_perf.last_tree_build_ms,
+        layout_ms: diegetic_perf.last_compute_ms,
+        text_ms:   diegetic_perf.last_text_extract_ms,
     });
 
     let cutoff = time.elapsed_secs() - PERF_PEAK_WINDOW_SECS;
@@ -416,60 +457,44 @@ fn update_fps_overlay(
 
     let mut max_fps = 0.0_f32;
     let mut max_frame_ms = 0.0_f32;
-    let mut max_rows = 0_usize;
-    let mut max_panels = 0_usize;
     let mut max_update_ms = 0.0_f32;
     let mut max_tree_ms = 0.0_f32;
-    let mut max_tree_builds = 0_usize;
     let mut max_layout_ms = 0.0_f32;
-    let mut max_layout_panels = 0_usize;
     let mut max_text_ms = 0.0_f32;
-    let mut max_text_panels = 0_usize;
     for sample in &history {
         max_fps = max_fps.max(sample.fps);
         max_frame_ms = max_frame_ms.max(sample.frame_ms);
-        max_rows = max_rows.max(sample.rows);
-        max_panels = max_panels.max(sample.panels);
         max_update_ms = max_update_ms.max(sample.update_ms);
         max_tree_ms = max_tree_ms.max(sample.tree_ms);
-        max_tree_builds = max_tree_builds.max(sample.tree_builds);
         max_layout_ms = max_layout_ms.max(sample.layout_ms);
-        max_layout_panels = max_layout_panels.max(sample.layout_panels);
         max_text_ms = max_text_ms.max(sample.text_ms);
-        max_text_panels = max_text_panels.max(sample.text_panels);
     }
 
-    for mut text in &mut overlay {
-        **text = format!(
-            "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms",
-            tag_now = "now",
-            tag_max = "5s max",
-            fps = fps_str,
-            frame = ms_str,
-            upd = format!("{:.1}", stress_perf.last_panel_update_ms),
-            tree = format!("{:.1}", stress_perf.last_tree_build_ms),
-            layout = format!("{:.1}", diegetic_perf.last_compute_ms),
-            text_ms = format!("{:.1}", diegetic_perf.last_text_extract_ms),
-            max_fps = format!("{:.0}", max_fps),
-            max_frame = format!("{:.1}", max_frame_ms),
-            max_upd = format!("{:.1}", max_update_ms),
-            max_tree = format!("{:.1}", max_tree_ms),
-            max_layout = format!("{:.1}", max_layout_ms),
-            max_text = format!("{:.1}", max_text_ms),
-        );
-    }
-}
+    let new_text = format!(
+        "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms\npanels: {}  rows: {}",
+        stress_perf.last_panel_count,
+        state.row_count,
+        tag_now = "now",
+        tag_max = "5s max",
+        fps = fps_str,
+        frame = ms_str,
+        upd = format!("{:.1}", stress_perf.last_panel_update_ms),
+        tree = format!("{:.1}", stress_perf.last_tree_build_ms),
+        layout = format!("{:.1}", diegetic_perf.last_compute_ms),
+        text_ms = format!("{:.1}", diegetic_perf.last_text_extract_ms),
+        max_fps = format!("{:.0}", max_fps),
+        max_frame = format!("{:.1}", max_frame_ms),
+        max_upd = format!("{:.1}", max_update_ms),
+        max_tree = format!("{:.1}", max_tree_ms),
+        max_layout = format!("{:.1}", max_layout_ms),
+        max_text = format!("{:.1}", max_text_ms),
+    );
 
-fn update_stats_overlay(
-    state: Res<StressControls>,
-    stress_perf: Res<StressPerfStats>,
-    mut overlay: Query<&mut Text, With<StatsOverlay>>,
-) {
-    for mut text in &mut overlay {
-        **text = format!(
-            "panels: {}  rows: {}",
-            stress_perf.last_panel_count, state.row_count,
-        );
+    if new_text != last_displayed.text {
+        last_displayed.text.clone_from(&new_text);
+        for mut panel in &mut panels {
+            panel.tree = build_status_panel(&new_text);
+        }
     }
 }
 

@@ -50,7 +50,6 @@ use bevy_diegetic::ShowTextGizmos;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -97,6 +96,14 @@ const WRAP_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit
 
 /// `WorldText` uses a fixed scale of 0.01 (layout units → world units).
 const WORLD_TEXT_SCALE: f32 = 0.01;
+
+// ── Controls panel dimensions (mm) ──────────────────────────────────
+const CTRL_W: f32 = 89.0;
+const CTRL_H: f32 = 30.0;
+const CTRL_FONT: f32 = 10.0;
+const CTRL_TITLE_FONT: f32 = 12.0;
+const CTRL_ARROW_SIZE: f32 = CTRL_FONT * 0.5;
+const CTRL_ROW_H: f32 = CTRL_FONT * 1.4;
 
 // ── Gizmo groups ─────────────────────────────────────────────────────────────
 
@@ -218,10 +225,6 @@ fn main() {
         .add_plugins(DiegeticUiPlugin)
         .add_plugins(PanOrbitCameraPlugin)
         .add_plugins(WindowManagerPlugin)
-        .insert_resource(UnitConfig {
-            layout: Unit::Meters,
-            font:   Unit::Custom(0.01),
-        })
         .init_gizmo_group::<ClayGizmoGroup>()
         .insert_resource(ShowTextGizmos(true))
         .init_resource::<ClayLayoutResult>()
@@ -363,20 +366,16 @@ fn setup(
         Transform::from_xyz(offset, 0.0, 0.0),
     ));
 
-    // Help text overlay.
+    // Controls panel — below the two panels.
     commands.spawn((
-        Text::new("'D' toggle debug  'S' cycle size"),
-        TextFont {
-            font_size: 14.0,
+        DiegeticPanel {
+            tree: build_controls_panel(),
+            width: CTRL_W,
+            height: CTRL_H,
+            layout_unit: Some(Unit::Millimeters),
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
+        Transform::from_xyz(0.0, -0.85, 0.0),
     ));
 }
 
@@ -446,6 +445,90 @@ fn update_dynamic_rows(
         dynamic.fps = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
         dynamic.frame_ms = frame_time.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
     }
+}
+
+fn build_controls_panel() -> LayoutTree {
+    let border_color = Color::srgb(0.4, 0.4, 0.45);
+    let divider_color = Color::srgb(0.45, 0.45, 0.5);
+    let cfg = LayoutTextStyle::new(CTRL_FONT);
+    let arrow_cfg = LayoutTextStyle::new(CTRL_ARROW_SIZE);
+    let title_cfg = LayoutTextStyle::new(CTRL_TITLE_FONT);
+    let row_h = Sizing::fixed(CTRL_ROW_H);
+    let dim_color = Color::srgba(0.6, 0.6, 0.6, 0.8);
+
+    let mut builder = LayoutBuilder::new(CTRL_W, CTRL_H);
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.0)
+            .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
+            .border(Border::all(0.5, border_color)),
+        |b| {
+            b.text("controls", title_cfg.with_color(Color::srgb(0.4, 0.5, 0.9)));
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(0.2))
+                    .background(divider_color),
+                |_| {},
+            );
+            b.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(1.5),
+                |b| {
+                    // Key column
+                    b.with(
+                        El::new()
+                            .direction(Direction::TopToBottom)
+                            .child_align_x(AlignX::Center),
+                        |b| {
+                            b.with(El::new().height(row_h), |b| {
+                                b.text("d", cfg.clone());
+                            });
+                            b.with(El::new().height(row_h), |b| {
+                                b.text("s", cfg.clone());
+                            });
+                        },
+                    );
+                    // Arrow column
+                    b.with(
+                        El::new()
+                            .direction(Direction::TopToBottom)
+                            .child_align_x(AlignX::Center),
+                        |b| {
+                            b.with(El::new().height(row_h), |b| {
+                                b.text("\u{2192}", arrow_cfg.clone().with_color(dim_color));
+                            });
+                            b.with(El::new().height(row_h), |b| {
+                                b.text("\u{2192}", arrow_cfg.clone().with_color(dim_color));
+                            });
+                        },
+                    );
+                    // Description column
+                    b.with(
+                        El::new()
+                            .direction(Direction::TopToBottom)
+                            .child_align_x(AlignX::Left),
+                        |b| {
+                            b.with(El::new().height(row_h), |b| {
+                                b.text("toggle debug", cfg.clone());
+                            });
+                            b.with(El::new().height(row_h), |b| {
+                                b.text("cycle size", cfg.clone());
+                            });
+                        },
+                    );
+                },
+            );
+        },
+    );
+    builder.build()
 }
 
 fn build_rows(

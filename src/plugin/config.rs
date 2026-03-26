@@ -337,45 +337,55 @@ impl Unit {
 ///
 /// Defines the default interpretation of numeric values throughout the
 /// system. Individual [`DiegeticPanel`](crate::DiegeticPanel) entities can
-/// override either field via their `layout_unit` and `font_unit` options.
+/// override `layout_unit` and `font_unit`. Individual
+/// [`WorldText`](crate::WorldText) entities can override their font unit
+/// with [`WorldFontUnit`](crate::WorldFontUnit).
 ///
 /// # Defaults
 ///
 /// - `layout`: [`Unit::Meters`] — panel dimensions are in meters
-/// - `font`: [`Unit::Points`] — font sizes are in typographic points
+/// - `font`: [`Unit::Points`] — panel font sizes are in typographic points
+/// - `world_font`: [`Unit::Meters`] — standalone `WorldText` sizes are in meters
 ///
-/// With these defaults, `DiegeticPanel { width: 0.210, height: 0.297, .. }`
-/// creates a panel 21cm × 29.7cm, and `LayoutTextStyle::new(24.0)` means
-/// 24pt text.
+/// Panel text uses points because panels are document-like (A4, business
+/// cards). Standalone `WorldText` uses meters because it lives in the 3D
+/// scene — `WorldTextStyle::new().with_size(0.2)` produces 20cm tall text,
+/// which is visible at typical viewing distances.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // Physical defaults (no config needed):
-/// // layout = Meters, font = Points
+/// // Default — no config needed:
+/// // panels: 18pt text on a 0.5m panel
+/// // world:  0.2m tall standalone text
 ///
-/// // Legacy compatibility (font sizes are raw scale factors):
-/// UnitConfig { layout: Unit::Meters, font: Unit::Custom(0.01) }
+/// // Override for a "human scale" scene where WorldText should use points:
+/// UnitConfig { world_font: Unit::Points, ..default() }
 /// ```
 #[derive(Resource, Clone, Copy, Debug, Reflect)]
 pub struct UnitConfig {
     /// Unit for panel `width`/`height` and layout dimensions.
-    pub layout: Unit,
-    /// Unit for font sizes specified in [`LayoutTextStyle`](crate::LayoutTextStyle).
-    pub font:   Unit,
+    pub layout:     Unit,
+    /// Unit for font sizes in [`LayoutTextStyle`](crate::LayoutTextStyle)
+    /// (used by [`DiegeticPanel`](crate::DiegeticPanel) text).
+    pub font:       Unit,
+    /// Unit for font sizes in [`WorldTextStyle`](crate::WorldTextStyle)
+    /// (used by standalone [`WorldText`](crate::WorldText) entities).
+    pub world_font: Unit,
 }
 
 impl Default for UnitConfig {
     fn default() -> Self {
         Self {
-            layout: Unit::Meters,
-            font:   Unit::Points,
+            layout:     Unit::Meters,
+            font:       Unit::Points,
+            world_font: Unit::Meters,
         }
     }
 }
 
 impl UnitConfig {
-    /// Returns the font-to-layout conversion factor.
+    /// Returns the font-to-layout conversion factor for panels.
     ///
     /// Multiply a font size (in `self.font` units) by this value to get
     /// the equivalent size in `self.layout` units.

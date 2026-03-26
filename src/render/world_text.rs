@@ -206,7 +206,7 @@ pub(super) fn render_world_text(
             continue;
         }
 
-        let scale = unit_config.font.meters_per_unit();
+        let scale = unit_config.world_font.meters_per_unit();
 
         // Shape text and build quads in entity-local coordinates.
         let shaped = shape_world_text(

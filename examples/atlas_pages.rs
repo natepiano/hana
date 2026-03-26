@@ -4,9 +4,9 @@
 //! Renders printable ASCII characters as `WorldText` entities in a grid,
 //! using a small atlas (30 glyphs/page, `Medium` quality) to force
 //! overflow onto multiple pages. Press `+` to add blocks of Unicode
-//! Latin Extended characters, growing the page count. A HUD overlay
-//! shows the atlas config and live diagnostics. Click any character to
-//! zoom-to-fit.
+//! Latin Extended characters, growing the page count. A `DiegeticPanel`
+//! overlay shows the atlas config and live diagnostics. Click any
+//! character to zoom-to-fit.
 
 use std::time::Duration;
 
@@ -14,11 +14,20 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::Border;
+use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::MsdfAtlas;
+use bevy_diegetic::Padding;
 use bevy_diegetic::RasterQuality;
+use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -47,6 +56,20 @@ const QUALITY: RasterQuality = RasterQuality::Medium;
 /// Glyphs per atlas page.
 const GLYPHS_PER_PAGE: u16 = 30;
 
+/// Layout dimensions for the status panel (in mm).
+const STATUS_LAYOUT_WIDTH: f32 = 120.0;
+const STATUS_LAYOUT_HEIGHT: f32 = 50.0;
+
+/// Font sizes for the status panel (in points).
+const STATUS_FONT_SIZE: f32 = 10.0;
+const STATUS_TITLE_SIZE: f32 = 12.0;
+
+/// Background color for panels.
+const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
+
+/// Border color for panels.
+const PANEL_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
+
 /// Unicode blocks added by pressing `+`. Each press adds the next block.
 const UNICODE_BLOCKS: &[&str] = &[
     // Latin Extended-A (subset)
@@ -59,9 +82,9 @@ const UNICODE_BLOCKS: &[&str] = &[
     "ŠšŢţŤťŦŧŨũŪūŬŭŮůŰűŲųŴŵŶŷŸŹźŻżŽž",
 ];
 
-/// Marker for the HUD diagnostics text.
+/// Marker for the status panel.
 #[derive(Component)]
-struct DiagnosticsHud;
+struct StatusPanel;
 
 /// Tracks which Unicode block to add next.
 #[derive(Resource)]
@@ -78,6 +101,12 @@ struct CharCount(usize);
 #[derive(Resource)]
 struct SceneBounds(Entity);
 
+/// Tracks the last displayed status text to avoid unnecessary rebuilds.
+#[derive(Resource, Default)]
+struct LastDisplayedStatus {
+    text: String,
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -91,11 +120,8 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .insert_resource(UnitConfig {
-            layout: Unit::Meters,
-            font:   Unit::Custom(0.01),
-        })
         .insert_resource(NextBlock(0))
+        .init_resource::<LastDisplayedStatus>()
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_input, update_diagnostics))
         .run();
@@ -179,22 +205,106 @@ fn setup(
         },
     ));
 
-    // HUD.
+    // Status panel.
     commands.spawn((
-        DiagnosticsHud,
-        Text::new("loading..."),
-        TextFont {
-            font_size: 16.0,
+        StatusPanel,
+        DiegeticPanel {
+            tree: build_status_panel(&StatusData {
+                pages:     0,
+                glyphs:    0,
+                remaining: UNICODE_BLOCKS.len(),
+            }),
+            width: STATUS_LAYOUT_WIDTH,
+            height: STATUS_LAYOUT_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
+            font_unit:   Some(Unit::Points),
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        },
+        Transform::from_xyz(-2.5, 4.5, 0.0),
     ));
+}
+
+struct StatusData {
+    pages:     usize,
+    glyphs:    usize,
+    remaining: usize,
+}
+
+fn build_status_panel(data: &StatusData) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT);
+    let label_style = LayoutTextStyle::new(STATUS_FONT_SIZE)
+        .with_color(Color::srgba(0.6, 0.6, 0.6, 0.9))
+        .with_shadow_mode(GlyphShadowMode::None);
+    let value_style = LayoutTextStyle::new(STATUS_FONT_SIZE)
+        .with_color(Color::WHITE)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let title_style = LayoutTextStyle::new(STATUS_TITLE_SIZE)
+        .with_color(Color::srgb(0.4, 0.5, 0.9))
+        .with_shadow_mode(GlyphShadowMode::None);
+    let dim_style = LayoutTextStyle::new(STATUS_FONT_SIZE)
+        .with_color(Color::srgba(0.5, 0.5, 0.5, 0.8))
+        .with_shadow_mode(GlyphShadowMode::None);
+
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(2.0))
+            .direction(Direction::TopToBottom)
+            .child_gap(1.5)
+            .background(PANEL_BG)
+            .border(Border::all(0.5, PANEL_BORDER_COLOR)),
+        |b| {
+            b.text("atlas", title_style);
+
+            // Divider
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(0.2))
+                    .background(Color::srgb(0.45, 0.45, 0.5)),
+                |_| {},
+            );
+
+            // Label/value rows
+            b.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(1.5),
+                |b| {
+                    // Label column
+                    b.with(
+                        El::new().direction(Direction::TopToBottom).child_gap(0.8),
+                        |b| {
+                            b.text("quality", label_style.clone());
+                            b.text("glyphs/page", label_style.clone());
+                            b.text("pages", label_style.clone());
+                            b.text("glyphs", label_style.clone());
+                        },
+                    );
+                    // Value column
+                    b.with(
+                        El::new().direction(Direction::TopToBottom).child_gap(0.8),
+                        |b| {
+                            b.text(&format!("{QUALITY:?}"), value_style.clone());
+                            b.text(&format!("~{GLYPHS_PER_PAGE}"), value_style.clone());
+                            b.text(&format!("{}", data.pages), value_style.clone());
+                            b.text(&format!("{}", data.glyphs), value_style.clone());
+                        },
+                    );
+                },
+            );
+
+            // Instruction
+            b.text(
+                &format!("'+' add Unicode block ({} remaining)", data.remaining),
+                dim_style,
+            );
+        },
+    );
+    builder.build()
 }
 
 /// Spawns a single character `WorldText` at the given grid index.
@@ -255,19 +365,26 @@ fn handle_input(
 }
 
 fn update_diagnostics(
-    atlas: Res<bevy_diegetic::MsdfAtlas>,
-    mut query: Query<&mut Text, With<DiagnosticsHud>>,
+    atlas: Res<MsdfAtlas>,
+    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
     next_block: Res<NextBlock>,
+    mut last_displayed: ResMut<LastDisplayedStatus>,
 ) {
+    let pages = atlas.page_count();
+    let glyphs = atlas.glyph_count();
     let remaining = UNICODE_BLOCKS.len() - next_block.0;
-    for mut text in &mut query {
-        **text = format!(
-            "quality: {QUALITY:?}, ~{GLYPHS_PER_PAGE} glyphs/page (estimate)\n\
-             pages: {}, glyphs: {}\n\
-             '+' to add Unicode block ({remaining} remaining)",
-            atlas.page_count(),
-            atlas.glyph_count(),
-        );
+    let fingerprint = format!("{pages}/{glyphs}/{remaining}");
+
+    if fingerprint != last_displayed.text {
+        last_displayed.text = fingerprint;
+        let data = StatusData {
+            pages,
+            glyphs,
+            remaining,
+        };
+        for mut panel in &mut panels {
+            panel.tree = build_status_panel(&data);
+        }
     }
 }
 

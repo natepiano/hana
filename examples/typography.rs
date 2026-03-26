@@ -32,7 +32,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -136,10 +135,6 @@ fn main() {
             MeshPickingPlugin,
             DiegeticUiPlugin,
         ))
-        .insert_resource(UnitConfig {
-            layout: Unit::Meters,
-            font:   Unit::Custom(0.01),
-        })
         .insert_resource(WordCycle {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
