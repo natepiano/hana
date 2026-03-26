@@ -1,13 +1,13 @@
 //! Demonstrates `LookAt`, `LookAtAndZoomToFit`, and `ZoomToFit`.
 //!
 //! Controls:
-//!   L — LookAt the red cube (rotates camera in place)
-//!   K — LookAtAndZoomToFit the red cube (rotates + frames)
-//!   Z — ZoomToFit the red cube (frames without changing look direction)
+//!   L — `LookAt` the red cube (rotates camera in place)
+//!   K — `LookAtAndZoomToFit` the red cube (rotates + frames)
+//!   Z — `ZoomToFit` the red cube (frames without changing look direction)
 //!   R — Reset camera
 //!
-//! Compare K vs Z: both frame the target, but LookAtAndZoomToFit also
-//! changes the orbit focus to the target, while ZoomToFit keeps the
+//! Compare K vs Z: both frame the target, but `LookAtAndZoomToFit` also
+//! changes the orbit focus to the target, while `ZoomToFit` keeps the
 //! current focus and only adjusts radius.
 
 use std::time::Duration;

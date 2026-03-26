@@ -1,10 +1,10 @@
-//! Demonstrates the ability to manually override which instance of PanOrbitCamera receives input
+//! Demonstrates the ability to manually override which instance of `PanOrbitCamera` receives input
 //! events, which is necessary when rendering to a texture/image instead of a window/viewport.
 //!
 //! In this example, input controls the camera that is rendering the texture applied to the cube,
 //! rather than the main window camera.
 //!
-//! This example is based off Bevy's render_to_texture example.
+//! This example is based off Bevy's `render_to_texture` example. See also `ActiveCameraData`.
 
 use std::f32::consts::PI;
 
@@ -149,20 +149,23 @@ fn setup(
     // is added, otherwise ActiveCameraData will be overwritten.
     // Note: you probably want to update the `viewport_size` and `window_size` whenever they change,
     // I haven't done this here for simplicity.
+    #[allow(clippy::expect_used)]
     let primary_window = windows
         .single()
         .expect("There is only ever one primary window");
+    #[allow(clippy::cast_precision_loss)]
+    let viewport_size = Some(Vec2::new(size.width as f32, size.height as f32));
     active_cam.set_if_neq(ActiveCameraData {
         // Set the entity to the entity ID of the camera you want to control. In this case, it's
         // the inner (first pass) cube that is rendered to the texture/image.
-        entity:        Some(pan_orbit_id),
+        entity: Some(pan_orbit_id),
         // What you set these values to will depend on your use case, but generally you want the
         // viewport size to match the size of the render target (image, viewport), and the window
         // size to match the size of the window that you are interacting with.
-        viewport_size: Some(Vec2::new(size.width as f32, size.height as f32)),
-        window_size:   Some(Vec2::new(primary_window.width(), primary_window.height())),
+        viewport_size,
+        window_size: Some(Vec2::new(primary_window.width(), primary_window.height())),
         // Setting manual to true ensures PanOrbitCameraPlugin will not overwrite this resource
-        manual:        true,
+        manual: true,
     });
 }
 

@@ -57,7 +57,7 @@ fn keyboard_controls(
     key_input: Res<ButtonInput<KeyCode>>,
     mut pan_orbit_query: Query<(&mut PanOrbitCamera, &mut Transform)>,
 ) {
-    for (mut pan_orbit, mut transform) in pan_orbit_query.iter_mut() {
+    for (mut pan_orbit, mut transform) in &mut pan_orbit_query {
         if key_input.pressed(KeyCode::ControlLeft) {
             // Jump focus point 1m using Ctrl+Shift + Arrows
             if key_input.pressed(KeyCode::ShiftLeft) {

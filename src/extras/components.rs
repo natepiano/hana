@@ -5,8 +5,10 @@ use bevy::prelude::*;
 use super::events::AnimationSource;
 use super::events::ZoomContext;
 
-/// Controls what happens when **user input to the camera** (orbit, pan, zoom) occurs during an
-/// in-flight animation.
+/// Controls what happens when user input occurs during an in-flight animation.
+///
+/// Specifically, this governs **user input to the camera** (orbit, pan, zoom) while an
+/// animation is playing.
 ///
 /// This is a required component on [`CameraMoveList`](crate::CameraMoveList) — if not
 /// explicitly inserted, it defaults to [`Ignore`](CameraInputInterruptBehavior::Ignore).
@@ -33,8 +35,7 @@ pub enum CameraInputInterruptBehavior {
     Complete,
 }
 
-/// Controls what happens when a **new animation request** arrives while one is already
-/// in-flight.
+/// Controls what happens when a new animation request conflicts with an active one.
 ///
 /// Insert this component on a camera entity to configure conflict resolution. If not
 /// present, defaults to [`LastWins`](AnimationConflictPolicy::LastWins).
@@ -59,6 +60,7 @@ pub enum AnimationConflictPolicy {
 }
 
 /// Marks the entity that the camera is currently fitted to.
+///
 /// Persists after fit completes to enable persistent visualization.
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
@@ -67,15 +69,17 @@ pub struct CurrentFitTarget(
     pub Entity,
 );
 
-/// Marker component that tracks a zoom-to-fit operation routed through the animation system.
+/// Tracks a zoom-to-fit operation routed through the animation system.
+///
 /// When `AnimationEnd` fires on an entity with this marker, `ZoomEnd` is triggered and the
 /// marker is removed. Wraps the [`ZoomContext`] that originated the zoom.
 #[derive(Component, Clone)]
 pub(super) struct ZoomAnimationMarker(pub ZoomContext);
 
-/// Marker component that tracks whether an animation was triggered by
-/// [`PlayAnimation`](crate::PlayAnimation), [`ZoomToFit`](crate::ZoomToFit), or
-/// [`AnimateToFit`](crate::AnimateToFit). Inserted alongside
+/// Tracks which trigger source started the current animation.
+///
+/// Records whether the animation was triggered by [`PlayAnimation`](crate::PlayAnimation),
+/// [`ZoomToFit`](crate::ZoomToFit), or [`AnimateToFit`](crate::AnimateToFit). Inserted alongside
 /// [`CameraMoveList`](crate::CameraMoveList) and removed when the animation ends or is cancelled.
 #[derive(Component)]
 pub(super) struct AnimationSourceMarker(pub AnimationSource);

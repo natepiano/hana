@@ -1,9 +1,9 @@
-//! Demonstrates how to configure the PanOrbitCamera to work like Blender.
+//! Demonstrates how to configure the `PanOrbitCamera` to use `BlenderLike` trackpad behavior.
 //!
 //! Controls:
 //!   Orbit: Middle click, trackpad scroll
-//!   Pan: Shift + Middle click, ShiftLeft + trackpad scroll
-//!   Zoom: Mousewheel, ControlLeft + trackpad scroll
+//!   Pan: Shift + Middle click, `ShiftLeft` + trackpad scroll
+//!   Zoom: Mousewheel, `ControlLeft` + trackpad scroll
 
 use std::f32::consts::TAU;
 

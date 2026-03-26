@@ -29,21 +29,19 @@ pub fn mouse_key_tracker(
     active_cam: Res<ActiveCameraData>,
     orbit_cameras: Query<&PanOrbitCamera>,
 ) {
-    let active_entity = match active_cam.entity {
-        Some(entity) => entity,
-        None => return,
+    let Some(active_entity) = active_cam.entity else {
+        return;
     };
 
-    let pan_orbit = match orbit_cameras.get(active_entity) {
-        Ok(camera) => camera,
-        Err(_) => return,
+    let Ok(pan_orbit) = orbit_cameras.get(active_entity) else {
+        return;
     };
 
     // Collect input deltas
     let mouse_delta = mouse_motion.read().map(|event| event.delta).sum::<Vec2>();
 
     // Collect scroll events
-    let scroll_events_vec: Vec<MouseWheel> = scroll_events.read().cloned().collect();
+    let scroll_events_vec: Vec<MouseWheel> = scroll_events.read().copied().collect();
 
     // scroll processing needs to account for mouse and trackpad
     // and when it's the trackpad, if we're in BlenderLike mode, we get back trackpad_orbit and
@@ -139,7 +137,7 @@ fn process_scroll_events(
 
             result
         },
-        _ => {
+        TrackpadBehavior::Default => {
             // Default behavior: all scroll events contribute to zoom
             let (scroll_line, scroll_pixel) = scroll_events
                 .iter()
@@ -185,7 +183,7 @@ fn process_pinch_events(
                 && modifier_pan.is_none_or(|modifier| !key_input.pressed(modifier))
                 && modifier_zoom.is_none_or(|modifier| !key_input.pressed(modifier))
         },
-        _ => {
+        TrackpadBehavior::Default => {
             // Just check regular modifiers
             pan_orbit
                 .modifier_orbit

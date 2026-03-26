@@ -10,6 +10,7 @@ pub fn calculate_from_translation_and_focus(
     let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
     let comp_vec = translation - focus;
     let mut radius = comp_vec.length();
+    #[allow(clippy::float_cmp)]
     if radius == 0.0 {
         radius = 0.05; // Radius 0 causes problems
     }
@@ -32,8 +33,17 @@ pub fn update_orbit_transform(
     let mut new_transform = Transform::IDENTITY;
     if let Projection::Orthographic(ref mut p) = *projection {
         p.scale = radius;
-        // (near + far) / 2.0 ensures that objects near `focus` are not clipped
-        radius = (p.near + p.far) / 2.0;
+        // IMPORTANT: Do NOT replace this with `f32::midpoint()`.
+        // On aarch64, `midpoint()` promotes to f64 intermediate precision:
+        //   ((self as f64 + other as f64) / 2.0) as f32
+        // This produces a subtly different camera distance than plain f32 arithmetic.
+        // That tiny difference shifts the projected screen-space bounds just enough
+        // to flip the fit visualization balance check (tolerance: 0.001) — causing
+        // all margin labels to show green/balanced when they should show red/unbalanced.
+        #[expect(clippy::manual_midpoint, reason = "f32::midpoint uses f64 on aarch64, breaking fit visualization balance detection")]
+        {
+            radius = (p.near + p.far) / 2.0;
+        }
     }
     let yaw_rot = Quat::from_axis_angle(axis[1], yaw);
     let pitch_rot = Quat::from_axis_angle(axis[0], -pitch);
@@ -63,6 +73,7 @@ pub fn lerp_and_snap_vec3(from: Vec3, to: Vec3, smoothness: f32, dt: f32) -> Vec
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal, clippy::float_cmp)]
 mod calculate_from_translation_and_focus_tests {
     use std::f32::consts::PI;
 
@@ -167,6 +178,7 @@ mod calculate_from_translation_and_focus_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal, clippy::float_cmp)]
 mod approx_equal_tests {
     use super::*;
 
@@ -187,6 +199,7 @@ mod approx_equal_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal, clippy::float_cmp)]
 mod lerp_and_snap_f32_tests {
     use super::*;
 
@@ -216,6 +229,7 @@ mod lerp_and_snap_f32_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::unreadable_literal, clippy::float_cmp)]
 mod lerp_and_snap_vec3_tests {
     use super::*;
 

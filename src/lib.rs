@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+#![allow(clippy::used_underscore_binding)]
 #![doc = include_str!("../README.md")]
 
 use std::f32::consts::PI;
@@ -13,6 +14,7 @@ use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 #[cfg(feature = "bevy_egui")]
 use bevy_egui::EguiPreUpdateSet;
+use touch::touch_tracker;
 
 #[cfg(feature = "bevy_egui")]
 pub use crate::egui::EguiFocusIncludesHover;
@@ -21,7 +23,6 @@ pub use crate::egui::EguiWantsFocus;
 use crate::input::button_zoom_just_pressed;
 use crate::input::mouse_key_tracker;
 use crate::input::MouseKeyTracker;
-use crate::touch::touch_tracker;
 pub use crate::touch::TouchControls;
 use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
@@ -90,11 +91,11 @@ pub use extras::visualization::FitTargetVisualizationConfig;
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_lagrange::{PanOrbitCameraPlugin, PanOrbitCamera};
+/// # use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 /// fn main() {
 ///     App::new()
 ///         .add_plugins(DefaultPlugins)
-///         .add_plugins(PanOrbitCameraPlugin)
+///         .add_plugins(LagrangePlugin)
 ///         .run();
 /// }
 /// ```
@@ -145,16 +146,17 @@ impl Plugin for LagrangePlugin {
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct PanOrbitCameraSystemSet;
 
-/// Tags an entity as capable of panning and orbiting, and provides a way to configure the
-/// camera's behaviour and controls.
+/// Tags an entity as capable of panning and orbiting.
+///
+/// Provides a way to configure the camera's behaviour and controls.
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_lagrange::{PanOrbitCameraPlugin, PanOrbitCamera};
+/// # use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 /// # fn main() {
 /// #     App::new()
 /// #         .add_plugins(DefaultPlugins)
-/// #         .add_plugins(PanOrbitCameraPlugin)
+/// #         .add_plugins(LagrangePlugin)
 /// #         .add_systems(Startup, setup)
 /// #         .run();
 /// # }
@@ -167,6 +169,7 @@ pub struct PanOrbitCameraSystemSet;
 /// ```
 #[derive(Component, Reflect, Copy, Clone, Debug, PartialEq)]
 #[reflect(Component)]
+#[allow(clippy::struct_excessive_bools)]
 #[require(Camera3d)]
 pub struct PanOrbitCamera {
     /// The point to orbit around, and what the camera looks at. Updated automatically.
@@ -302,9 +305,10 @@ pub struct PanOrbitCamera {
     pub touch_controls:                 TouchControls,
     /// The behavior for trackpad inputs.
     /// Defaults to `TrackpadBehavior::DefaultZoom`.
-    /// To enable orbit behavior similar to Blender, change this to TrackpadBehavior::BlenderLike.
-    /// For `BlenderLike` panning, add `ShiftLeft` to the `modifier_pan` field.
-    /// For `BlenderLike` zooming, add `ControlLeft` in `modifier_zoom` field.
+    /// To enable orbit behavior similar to Blender, change this to
+    /// `TrackpadBehavior::BlenderLike`. For `BlenderLike` panning, add `ShiftLeft` to the
+    /// `modifier_pan` field. For `BlenderLike` zooming, add `ControlLeft` in `modifier_zoom`
+    /// field.
     pub trackpad_behavior:              TrackpadBehavior,
     /// Whether to enable pinch-to-zoom functionality on trackpads.
     /// Defaults to `false`.
@@ -354,7 +358,7 @@ pub struct PanOrbitCamera {
 
 impl Default for PanOrbitCamera {
     fn default() -> Self {
-        PanOrbitCamera {
+        Self {
             focus:                          Vec3::ZERO,
             target_focus:                   Vec3::ZERO,
             radius:                         None,
@@ -401,9 +405,10 @@ impl Default for PanOrbitCamera {
     }
 }
 
-/// Tracks which `PanOrbitCamera` is active (should handle input events), along with the window
-/// and viewport dimensions, which are used for scaling mouse motion.
-/// `PanOrbitCameraPlugin` manages this resource automatically, in order to support multiple
+/// Tracks which `PanOrbitCamera` is active (should handle input events).
+///
+/// Also stores the window and viewport dimensions, which are used for scaling mouse motion.
+/// `LagrangePlugin` manages this resource automatically, in order to support multiple
 /// viewports/windows. However, if this doesn't work for you, you can take over and manage it
 /// yourself, e.g. when you want to control a camera that is rendering to a texture.
 #[derive(Resource, Default, Debug, PartialEq)]
@@ -419,7 +424,7 @@ pub struct ActiveCameraData {
     /// setting this to actual dimensions of the window that you want to control the camera from,
     /// and changing `PanOrbitCamera::orbit_sensitivity` to adjust the sensitivity if required.
     pub window_size:   Option<Vec2>,
-    /// Indicates to `PanOrbitCameraPlugin` that it should not update/overwrite this resource.
+    /// Indicates to `LagrangePlugin` that it should not update/overwrite this resource.
     /// If you are manually updating this resource you should set this to `true`.
     /// Note that setting this to `true` will effectively break multiple viewport/window support
     /// unless you manually reimplement it.
@@ -436,7 +441,7 @@ pub enum FocusBoundsShape {
 }
 
 /// The shape to restrict the camera's focus inside.
-#[derive(Clone, PartialEq, Debug, Reflect, Copy)]
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy)]
 pub enum ButtonZoomAxis {
     /// Zoom by moving the mouse along the x-axis.
     X,
@@ -455,9 +460,10 @@ impl From<Cuboid> for FocusBoundsShape {
 }
 
 /// Allows for changing the `TrackpadBehavior` from default to the way it works in Blender.
+///
 /// In Blender the trackpad orbits when scrolling. If you hold down the `ShiftLeft`, it Pans and
 /// holding down `ControlLeft` will Zoom.
-#[derive(Clone, PartialEq, Debug, Reflect, Copy)]
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy)]
 pub enum TrackpadBehavior {
     /// Default touchpad behavior. I.e., no special gesture support, scrolling on the touchpad
     /// (vertically) will zoom, as it does with a mouse.
@@ -475,7 +481,8 @@ pub enum TrackpadBehavior {
 
 impl TrackpadBehavior {
     /// Creates a `BlenderLike` variant with default modifiers (Shift for pan, Ctrl for zoom)
-    pub fn blender_default() -> Self {
+    #[must_use]
+    pub const fn blender_default() -> Self {
         Self::BlenderLike {
             modifier_pan:  Some(KeyCode::ShiftLeft),
             modifier_zoom: Some(KeyCode::ControlLeft),
@@ -502,7 +509,7 @@ fn active_viewport_data(
     let mut max_cam_order = 0;
 
     let mut has_input = false;
-    for (entity, camera, target, pan_orbit) in orbit_cameras.iter() {
+    for (entity, camera, target, pan_orbit) in &orbit_cameras {
         let input_just_activated = input::orbit_just_pressed(pan_orbit, &mouse_input, &key_input)
             || input::pan_just_pressed(pan_orbit, &mouse_input, &key_input)
             || !pinch_events.is_empty()
@@ -534,12 +541,13 @@ fn active_viewport_data(
                     // Note: there's a bug in winit that causes `window.cursor_position()` to return
                     // a `Some` value even if the cursor is not in this window, in very specific
                     // cases. See: https://github.com/natepiano/bevy_lagrange/issues/22
-                    if let Some(input_position) = window.cursor_position().or(touches
-                        .iter_just_pressed()
-                        .collect::<Vec<_>>()
-                        .first()
-                        .map(|touch| touch.position()))
-                    {
+                    if let Some(input_position) = window.cursor_position().or_else(|| {
+                        touches
+                            .iter_just_pressed()
+                            .collect::<Vec<_>>()
+                            .first()
+                            .map(|touch| touch.position())
+                    }) {
                         // Now check if cursor is within this camera's viewport
                         if let Some(Rect { min, max }) = camera.logical_viewport_rect() {
                             // Window coordinates have Y starting at the bottom, so we need to
@@ -575,6 +583,7 @@ fn active_viewport_data(
 }
 
 /// Main system for processing input and converting to transformations
+#[allow(clippy::too_many_lines)]
 fn pan_orbit_camera(
     active_cam: Res<ActiveCameraData>,
     mouse_key_tracker: Res<MouseKeyTracker>,
@@ -583,7 +592,7 @@ fn pan_orbit_camera(
     time_real: Res<Time<Real>>,
     time_virt: Res<Time<Virtual>>,
 ) {
-    for (entity, mut pan_orbit, mut transform, mut projection) in orbit_cameras.iter_mut() {
+    for (entity, mut pan_orbit, mut transform, mut projection) in &mut orbit_cameras {
         // Closures that apply limits to the yaw, pitch, and zoom values
         let apply_zoom_limits = {
             let zoom_upper_limit = pan_orbit.zoom_upper_limit;
@@ -673,10 +682,7 @@ fn pan_orbit_camera(
         // it might still be moving (lerping towards target values) when the user is not
         // actively controlling it.
         if pan_orbit.enabled && active_cam.entity == Some(entity) {
-            let zoom_direction = match pan_orbit.reversed_zoom {
-                true => -1.0,
-                false => 1.0,
-            };
+            let zoom_direction = if pan_orbit.reversed_zoom { -1.0 } else { 1.0 };
 
             orbit = mouse_key_tracker.orbit * pan_orbit.orbit_sensitivity;
             pan = mouse_key_tracker.pan * pan_orbit.pan_sensitivity;
@@ -810,6 +816,7 @@ fn pan_orbit_camera(
         if let (Some(yaw), Some(pitch), Some(radius)) =
             (pan_orbit.yaw, pan_orbit.pitch, pan_orbit.radius)
         {
+            #[allow(clippy::float_cmp)]
             if has_moved
                 // For smoothed values, we must check whether current value is different from target
                 // value. If we only checked whether the values were non-zero this frame, then

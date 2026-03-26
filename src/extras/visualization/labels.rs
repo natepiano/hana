@@ -3,8 +3,7 @@ use bevy::ui::UiTargetCamera;
 
 use super::super::fit::Edge;
 use super::super::support::ScreenSpaceBounds;
-use super::screen_space::norm_to_viewport;
-use super::screen_space::screen_edge_center;
+use super::screen_space;
 
 /// Font size used for all debug labels.
 const LABEL_FONT_SIZE: f32 = 11.0;
@@ -43,8 +42,8 @@ pub fn calculate_label_pixel_position(
     bounds: &ScreenSpaceBounds,
     viewport_size: Vec2,
 ) -> Vec2 {
-    let (screen_x, screen_y) = screen_edge_center(bounds, edge);
-    let px = norm_to_viewport(
+    let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
+    let px = screen_space::norm_to_viewport(
         screen_x,
         screen_y,
         bounds.half_extent_x,
@@ -118,7 +117,7 @@ pub fn update_or_create_margin_label(
     let mut found = false;
     for (_, label, mut label_text, mut node, mut text_color) in label_query {
         if label.camera == params.camera && label.edge == params.edge {
-            **label_text = params.text.clone();
+            (**label_text).clone_from(&params.text);
             text_color.0 = params.color;
             apply_margin_label_anchor(
                 &mut node,

@@ -62,6 +62,7 @@ fn setup(
 #[derive(Component)]
 struct MinimapCamera;
 
+#[allow(clippy::unwrap_used)]
 fn set_camera_viewports(
     windows: Query<&Window>,
     mut resize_events: MessageReader<WindowResized>,

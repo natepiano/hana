@@ -7,15 +7,15 @@ pub trait OptionalClamp {
 }
 
 impl OptionalClamp for f32 {
-    type N = f32;
+    type N = Self;
 
     fn clamp_optional(&self, min: Option<Self::N>, max: Option<Self::N>) -> Self::N {
         let mut new_val = *self;
         if let Some(min) = min {
-            new_val = f32::max(new_val, min);
+            new_val = Self::max(new_val, min);
         }
         if let Some(max) = max {
-            new_val = f32::min(new_val, max);
+            new_val = Self::min(new_val, max);
         }
         new_val
     }

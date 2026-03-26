@@ -12,6 +12,7 @@ pub struct FitTargetGizmo;
 /// Removed when fit target visualization is disabled.
 #[derive(Component, Reflect, Debug, Default, Clone)]
 #[reflect(Component)]
+#[allow(clippy::struct_field_names)]
 pub struct FitTargetViewportMargins {
     /// Left margin as a percentage of screen width.
     pub left_pct:   f32,

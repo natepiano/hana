@@ -1,11 +1,11 @@
 //! Demonstrates `ZoomToFit` — frames a target entity in the camera view.
 //!
 //! Controls:
-//!   Space — ZoomToFit the cube (animated)
+//!   Space — `ZoomToFit` the cube (animated)
 //!   D     — Toggle debug visualization
 //!   R     — Reset camera to starting position
 //!
-//! Observe ZoomBegin, ZoomEnd, ZoomCancelled via info!() logging.
+//! Observe `ZoomBegin`, `ZoomEnd`, `ZoomCancelled` via `info!()` logging.
 
 use std::time::Duration;
 

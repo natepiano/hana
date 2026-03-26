@@ -25,13 +25,19 @@ fn screen_edges_normalized(bounds: &ScreenSpaceBounds) -> (f32, f32, f32, f32) {
 }
 
 /// Returns the clamped vertical center of the bounds within the screen edges.
-fn clamped_center_y(bounds: &ScreenSpaceBounds, bottom_edge: f32, top_edge: f32) -> f32 {
-    (bounds.min_norm_y.max(bottom_edge) + bounds.max_norm_y.min(top_edge)) * 0.5
+const fn clamped_center_y(bounds: &ScreenSpaceBounds, bottom_edge: f32, top_edge: f32) -> f32 {
+    bounds
+        .min_norm_y
+        .max(bottom_edge)
+        .midpoint(bounds.max_norm_y.min(top_edge))
 }
 
 /// Returns the clamped horizontal center of the bounds within the screen edges.
-fn clamped_center_x(bounds: &ScreenSpaceBounds, left_edge: f32, right_edge: f32) -> f32 {
-    (bounds.min_norm_x.max(left_edge) + bounds.max_norm_x.min(right_edge)) * 0.5
+const fn clamped_center_x(bounds: &ScreenSpaceBounds, left_edge: f32, right_edge: f32) -> f32 {
+    bounds
+        .min_norm_x
+        .max(left_edge)
+        .midpoint(bounds.max_norm_x.min(right_edge))
 }
 
 /// Returns the center of a boundary edge in normalized space.

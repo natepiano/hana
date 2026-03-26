@@ -136,8 +136,10 @@ use bevy::prelude::*;
 
 use super::animation::CameraMove;
 
-/// Context for a zoom-to-fit operation, passed through [`PlayAnimation`] so
-/// that `on_play_animation` can fire [`ZoomBegin`] and insert
+/// Context for a zoom-to-fit operation.
+///
+/// Passed through [`PlayAnimation`] so that `on_play_animation` can fire
+/// [`ZoomBegin`] and insert
 /// [`ZoomAnimationMarker`](super::components::ZoomAnimationMarker) at the
 /// single point where conflict resolution has already completed.
 #[derive(Clone, Reflect)]
@@ -171,9 +173,9 @@ pub enum AnimationSource {
     LookAtAndZoomToFit,
 }
 
-/// `ZoomToFit` — frames a target entity in the camera view without changing the
-/// camera's viewing angle.
+/// `ZoomToFit` — frames a target entity in the camera view.
 ///
+/// The camera's viewing angle stays the same.
 /// The camera's yaw and pitch stay fixed. Only the focus and radius change so
 /// that the target fills the viewport with the requested margin. Because the
 /// viewing angle is preserved, the camera *translates* to a new position rather
@@ -219,6 +221,7 @@ pub struct ZoomToFit {
 
 impl ZoomToFit {
     /// Creates a new `ZoomToFit` event with default margin, instant duration, and cubic-out easing.
+    #[must_use]
     pub const fn new(camera: Entity, target: Entity) -> Self {
         Self {
             camera,
@@ -230,18 +233,21 @@ impl ZoomToFit {
     }
 
     /// Sets the margin.
+    #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.margin = margin;
         self
     }
 
     /// Sets the animation duration.
+    #[must_use]
     pub const fn duration(mut self, duration: Duration) -> Self {
         self.duration = duration;
         self
     }
 
     /// Sets the easing function.
+    #[must_use]
     pub const fn easing(mut self, easing: EaseFunction) -> Self {
         self.easing = easing;
         self
@@ -283,6 +289,7 @@ pub struct ZoomEnd {
 }
 
 /// `ZoomCancelled` — emitted when a [`ZoomToFit`] animation is cancelled before completion.
+///
 /// The camera stays at its current position — no snap to final.
 ///
 /// Cancellation happens in two scenarios:
@@ -329,6 +336,7 @@ pub struct PlayAnimation {
 
 impl PlayAnimation {
     /// Creates a new `PlayAnimation` event.
+    #[must_use]
     pub fn new(camera: Entity, camera_moves: impl IntoIterator<Item = CameraMove>) -> Self {
         Self {
             camera,
@@ -339,13 +347,15 @@ impl PlayAnimation {
     }
 
     /// Sets the animation source.
-    pub fn source(mut self, source: AnimationSource) -> Self {
+    #[must_use]
+    pub const fn source(mut self, source: AnimationSource) -> Self {
         self.source = source;
         self
     }
 
     /// Sets the zoom context (implies `AnimationSource::ZoomToFit`).
-    pub fn zoom_context(mut self, ctx: ZoomContext) -> Self {
+    #[must_use]
+    pub const fn zoom_context(mut self, ctx: ZoomContext) -> Self {
         self.zoom_context = Some(ctx);
         self.source = AnimationSource::ZoomToFit;
         self
@@ -376,8 +386,10 @@ pub struct AnimationEnd {
     pub source: AnimationSource,
 }
 
-/// `AnimationCancelled` — emitted when a [`PlayAnimation`], [`ZoomToFit`], or [`AnimateToFit`] is
-/// cancelled before completion. The camera stays at its current position — no snap to final.
+/// `AnimationCancelled` — emitted when an animation is cancelled before completion.
+///
+/// Applies to [`PlayAnimation`], [`ZoomToFit`], or [`AnimateToFit`].
+/// The camera stays at its current position — no snap to final.
 #[derive(EntityEvent, Reflect)]
 #[reflect(Event, FromReflect)]
 pub struct AnimationCancelled {
@@ -391,7 +403,9 @@ pub struct AnimationCancelled {
     pub camera_move: CameraMove,
 }
 
-/// `AnimationRejected` — emitted when an incoming animation request is rejected because
+/// `AnimationRejected` — emitted when an incoming animation request is rejected.
+///
+/// This occurs because
 /// [`AnimationConflictPolicy::FirstWins`](crate::AnimationConflictPolicy::FirstWins) is
 /// active and an animation is already in-flight.
 #[derive(EntityEvent, Reflect)]
@@ -426,9 +440,9 @@ pub struct CameraMoveEnd {
     pub camera_move: CameraMove,
 }
 
-/// `AnimateToFit` — animates the camera to a caller-specified orientation while
-/// framing a target entity in view.
+/// `AnimateToFit` — animates the camera to a caller-specified orientation.
 ///
+/// Frames a target entity in view.
 /// You specify the exact yaw and pitch the camera should end up at, and the
 /// system computes the radius needed to frame the target from that angle.
 ///
@@ -460,6 +474,7 @@ pub struct AnimateToFit {
 
 impl AnimateToFit {
     /// Creates a new `AnimateToFit` with default parameters.
+    #[must_use]
     pub const fn new(camera: Entity, target: Entity) -> Self {
         Self {
             camera,
@@ -473,30 +488,35 @@ impl AnimateToFit {
     }
 
     /// Sets the target yaw.
+    #[must_use]
     pub const fn yaw(mut self, yaw: f32) -> Self {
         self.yaw = yaw;
         self
     }
 
     /// Sets the target pitch.
+    #[must_use]
     pub const fn pitch(mut self, pitch: f32) -> Self {
         self.pitch = pitch;
         self
     }
 
     /// Sets the margin.
+    #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.margin = margin;
         self
     }
 
     /// Sets the animation duration.
+    #[must_use]
     pub const fn duration(mut self, duration: Duration) -> Self {
         self.duration = duration;
         self
     }
 
     /// Sets the easing function.
+    #[must_use]
     pub const fn easing(mut self, easing: EaseFunction) -> Self {
         self.easing = easing;
         self
@@ -531,6 +551,7 @@ pub struct LookAt {
 
 impl LookAt {
     /// Creates a new `LookAt` with instant duration and cubic-out easing.
+    #[must_use]
     pub const fn new(camera: Entity, target: Entity) -> Self {
         Self {
             camera,
@@ -541,21 +562,23 @@ impl LookAt {
     }
 
     /// Sets the animation duration.
+    #[must_use]
     pub const fn duration(mut self, duration: Duration) -> Self {
         self.duration = duration;
         self
     }
 
     /// Sets the easing function.
+    #[must_use]
     pub const fn easing(mut self, easing: EaseFunction) -> Self {
         self.easing = easing;
         self
     }
 }
 
-/// `LookAtAndZoomToFit` — rotates the camera to face a target entity and adjusts
-/// the radius to frame it in view, all in one fluid motion.
+/// `LookAtAndZoomToFit` — rotates the camera to face a target entity and frames it.
 ///
+/// Adjusts the radius to frame the target in view, all in one fluid motion.
 /// Combines [`LookAt`] (turn in place) with [`ZoomToFit`] (frame the target).
 /// The yaw and pitch are back-solved from the camera's current world position
 /// relative to the target's bounds center — you don't specify them.
@@ -583,6 +606,7 @@ pub struct LookAtAndZoomToFit {
 
 impl LookAtAndZoomToFit {
     /// Creates a new `LookAtAndZoomToFit` with default parameters.
+    #[must_use]
     pub const fn new(camera: Entity, target: Entity) -> Self {
         Self {
             camera,
@@ -594,18 +618,21 @@ impl LookAtAndZoomToFit {
     }
 
     /// Sets the margin.
+    #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.margin = margin;
         self
     }
 
     /// Sets the animation duration.
+    #[must_use]
     pub const fn duration(mut self, duration: Duration) -> Self {
         self.duration = duration;
         self
     }
 
     /// Sets the easing function.
+    #[must_use]
     pub const fn easing(mut self, easing: EaseFunction) -> Self {
         self.easing = easing;
         self
@@ -632,5 +659,6 @@ pub struct SetFitTarget {
 
 impl SetFitTarget {
     /// Creates a new `SetFitTarget` event.
+    #[must_use]
     pub const fn new(camera: Entity, target: Entity) -> Self { Self { camera, target } }
 }

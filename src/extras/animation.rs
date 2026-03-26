@@ -60,6 +60,7 @@ pub enum CameraMove {
 
 impl CameraMove {
     /// Returns the duration of this movement step.
+    #[must_use]
     pub const fn duration(&self) -> Duration {
         match self {
             Self::ToPosition { duration, .. } | Self::ToOrbit { duration, .. } => *duration,
@@ -67,9 +68,11 @@ impl CameraMove {
     }
 
     /// Returns the duration in milliseconds.
+    #[must_use]
     pub fn duration_ms(&self) -> f32 { self.duration().as_secs_f32() * 1000.0 }
 
     /// Returns the easing function for this movement step.
+    #[must_use]
     pub const fn easing(&self) -> EaseFunction {
         match self {
             Self::ToPosition { easing, .. } | Self::ToOrbit { easing, .. } => *easing,
@@ -77,6 +80,7 @@ impl CameraMove {
     }
 
     /// Returns the focus point for this movement step.
+    #[must_use]
     pub const fn focus(&self) -> Vec3 {
         match self {
             Self::ToPosition { focus, .. } | Self::ToOrbit { focus, .. } => *focus,
@@ -85,6 +89,7 @@ impl CameraMove {
 
     /// Returns the world-space camera position for this move.
     /// For `ToOrbit`, computes the position from orbital parameters.
+    #[must_use]
     pub fn translation(&self) -> Vec3 {
         match self {
             Self::ToPosition { translation, .. } => *translation,
@@ -198,6 +203,7 @@ pub struct CameraMoveList {
 
 impl CameraMoveList {
     /// Creates a new `CameraMoveList` from a queue of movements.
+    #[must_use]
     pub const fn new(camera_moves: VecDeque<CameraMove>) -> Self {
         Self {
             camera_moves,
@@ -210,11 +216,9 @@ impl CameraMoveList {
         // Get remaining time for current move
         let current_remaining = match &self.state {
             MoveState::InProgress { elapsed_ms, .. } => {
-                if let Some(current_move) = self.camera_moves.front() {
+                self.camera_moves.front().map_or(0.0, |current_move| {
                     (current_move.duration_ms() - elapsed_ms).max(0.0)
-                } else {
-                    0.0
-                }
+                })
             },
             MoveState::Ready => self
                 .camera_moves
@@ -271,7 +275,7 @@ fn handle_camera_input_interrupt(
     entity: Entity,
     pan_orbit: &mut PanOrbitCamera,
     queue: &CameraMoveList,
-    interrupt_behavior: &CameraInputInterruptBehavior,
+    interrupt_behavior: CameraInputInterruptBehavior,
     source: AnimationSource,
     current_move: &CameraMove,
     zoom_marker: Option<&ZoomAnimationMarker>,
@@ -506,7 +510,7 @@ pub(super) fn process_camera_move_list(
                 entity,
                 &mut pan_orbit,
                 &queue,
-                interrupt_behavior,
+                *interrupt_behavior,
                 source,
                 &current_move,
                 zoom_marker,
@@ -521,15 +525,13 @@ pub(super) fn process_camera_move_list(
 
         match &queue.state {
             MoveState::Ready => {
-                if handle_ready_state(
+                handle_ready_state(
                     &mut commands,
                     entity,
                     &mut pan_orbit,
                     &mut queue,
                     &current_move,
-                ) {
-                    continue;
-                }
+                );
             },
             MoveState::InProgress { .. } => {
                 handle_in_progress(

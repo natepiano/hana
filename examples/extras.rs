@@ -1,4 +1,4 @@
-//! Demonstrates clicking on meshes to zoom-to-fit`.
+//! Demonstrates clicking on meshes to zoom-to-fit.
 //!
 //! - Click a mesh to select it and zoom the camera to frame it
 //! - Click the ground to deselect and zoom out to the full scene
@@ -290,6 +290,7 @@ fn init_selection_gizmo(mut config_store: ResMut<GizmoConfigStore>) {
     config.render_layers = RenderLayers::layer(SELECTION_GIZMO_LAYER);
 }
 
+#[allow(clippy::too_many_lines)]
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -585,16 +586,16 @@ fn focused_camera(
     scene: &SceneEntities,
     second: Option<&SecondWindowEntities>,
     windows: &Query<&Window>,
-) -> Option<Entity> {
+) -> Entity {
     if let Some(sw) = second {
         if let Ok(win) = windows.get(sw.window) {
             if win.focused {
-                return Some(sw.camera);
+                return sw.camera;
             }
         }
     }
     // Primary window is the default fallback
-    Some(scene.camera)
+    scene.camera
 }
 
 fn toggle_second_window(
@@ -686,16 +687,15 @@ fn log_window_focus(
     mut log: ResMut<EventLog>,
     mut last_focused: Local<Option<Entity>>,
 ) {
-    if second.is_none() {
+    let Some(sw) = second else {
         *last_focused = None;
         return;
-    }
+    };
 
     let current_focused = windows.iter().find(|(_, w)| w.focused).map(|(e, _)| e);
 
     if current_focused != *last_focused {
         if let Some(focused) = current_focused {
-            let sw = second.unwrap();
             let label = if focused == sw.window {
                 "Window 2"
             } else {
@@ -891,9 +891,7 @@ fn look_at_hovered(
     let Some(target) = hovered.0 else {
         return;
     };
-    let Some(cam) = focused_camera(&scene, second.as_deref(), &windows) else {
-        return;
-    };
+    let cam = focused_camera(&scene, second.as_deref(), &windows);
     commands.trigger(
         LookAt::new(cam, target)
             .duration(Duration::from_millis(LOOK_AT_DURATION_MS))
@@ -916,9 +914,7 @@ fn look_at_and_zoom_to_fit_hovered(
     let Some(target) = hovered.0 else {
         return;
     };
-    let Some(cam) = focused_camera(&scene, second.as_deref(), &windows) else {
-        return;
-    };
+    let cam = focused_camera(&scene, second.as_deref(), &windows);
     commands.trigger(
         LookAtAndZoomToFit::new(cam, target)
             .margin(ZOOM_MARGIN_MESH)
@@ -1035,9 +1031,7 @@ fn toggle_debug_visualization(
         return;
     }
 
-    let Some(cam) = focused_camera(&scene, second.as_deref(), &windows) else {
-        return;
-    };
+    let cam = focused_camera(&scene, second.as_deref(), &windows);
     if viz_query.get(cam).is_ok() {
         commands.entity(cam).remove::<FitVisualization>();
     } else {
@@ -1058,9 +1052,7 @@ fn animate_camera(
         return;
     }
 
-    let Some(cam) = focused_camera(&scene, second.as_deref(), &windows) else {
-        return;
-    };
+    let cam = focused_camera(&scene, second.as_deref(), &windows);
     let Ok(camera) = camera_query.get(cam) else {
         return;
     };
@@ -1117,6 +1109,7 @@ fn randomize_easing(
     mut log: ResMut<EventLog>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let index = (time.elapsed_secs() * 1000.0) as usize % ALL_EASINGS.len();
         easing.0 = ALL_EASINGS[index];
         log.push(format!("Easing: {:#?}", easing.0));
@@ -1139,9 +1132,7 @@ fn animate_fit_to_scene(
         return;
     }
 
-    let Some(cam) = focused_camera(&scene, second.as_deref(), &windows) else {
-        return;
-    };
+    let cam = focused_camera(&scene, second.as_deref(), &windows);
     commands.trigger(
         AnimateToFit::new(cam, scene.scene_bounds)
             .yaw(CAMERA_START_YAW)
@@ -1213,7 +1204,7 @@ fn toggle_projection(
                     logged = true;
                 }
             },
-            _ => {},
+            Projection::Custom(_) => {},
         }
         camera.force_update = true;
     }
@@ -1255,14 +1246,17 @@ fn toggle_interrupt_behavior(
     }
 
     // Determine what the new behavior should be based on the primary camera
-    let new_behavior = match behavior_query.get(scene.camera) {
-        Ok(behavior) => match *behavior {
-            CameraInputInterruptBehavior::Ignore => CameraInputInterruptBehavior::Cancel,
-            CameraInputInterruptBehavior::Cancel => CameraInputInterruptBehavior::Complete,
-            CameraInputInterruptBehavior::Complete => CameraInputInterruptBehavior::Ignore,
-        },
-        Err(_) => CameraInputInterruptBehavior::Ignore,
-    };
+    let new_behavior =
+        behavior_query
+            .get(scene.camera)
+            .map_or(
+                CameraInputInterruptBehavior::Ignore,
+                |behavior| match *behavior {
+                    CameraInputInterruptBehavior::Ignore => CameraInputInterruptBehavior::Cancel,
+                    CameraInputInterruptBehavior::Cancel => CameraInputInterruptBehavior::Complete,
+                    CameraInputInterruptBehavior::Complete => CameraInputInterruptBehavior::Ignore,
+                },
+            );
 
     for cam in all_cameras(&scene, second.as_deref()) {
         if let Ok(mut behavior) = behavior_query.get_mut(cam) {
@@ -1304,13 +1298,13 @@ fn toggle_animation_conflict_policy(
     }
 
     // Determine what the new policy should be based on the primary camera
-    let new_policy = match policy_query.get(scene.camera) {
-        Ok(policy) => match *policy {
-            AnimationConflictPolicy::LastWins => AnimationConflictPolicy::FirstWins,
-            AnimationConflictPolicy::FirstWins => AnimationConflictPolicy::LastWins,
-        },
-        Err(_) => AnimationConflictPolicy::FirstWins,
-    };
+    let new_policy =
+        policy_query
+            .get(scene.camera)
+            .map_or(AnimationConflictPolicy::FirstWins, |policy| match *policy {
+                AnimationConflictPolicy::LastWins => AnimationConflictPolicy::FirstWins,
+                AnimationConflictPolicy::FirstWins => AnimationConflictPolicy::LastWins,
+            });
 
     for cam in all_cameras(&scene, second.as_deref()) {
         if let Ok(mut policy) = policy_query.get_mut(cam) {
@@ -1544,7 +1538,7 @@ fn update_event_log_text(
         let container_height = computed.size().y;
         let max_scroll =
             (content_height - container_height).max(0.0) * computed.inverse_scale_factor();
-        scroll.y = max_scroll + EVENT_LOG_SCROLL_SPEED * 4.0;
+        scroll.y = EVENT_LOG_SCROLL_SPEED.mul_add(4.0, max_scroll);
     }
 }
 

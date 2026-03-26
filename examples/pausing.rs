@@ -60,9 +60,9 @@ Press Space to pause the 'game'",
 fn pause_game_system(key_input: Res<ButtonInput<KeyCode>>, mut time: ResMut<Time<Virtual>>) {
     if key_input.just_pressed(KeyCode::Space) {
         if time.is_paused() {
-            time.unpause()
+            time.unpause();
         } else {
-            time.pause()
+            time.pause();
         }
     }
 }

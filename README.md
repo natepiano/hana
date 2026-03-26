@@ -103,8 +103,8 @@ See the `extras_*` examples for more.
 
 ## Version Compatibility
 
-| bevy | bevy_lagrange |
-|------|---------------|
+| bevy | `bevy_lagrange` |
+|------|-----------------|
 | 0.18 | 0.0.1        |
 
 ## Alternatives

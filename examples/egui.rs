@@ -1,4 +1,4 @@
-//! Demonstrates the bevy_egui feature which allows bevy_lagrange to ignore input events in
+//! Demonstrates the `bevy_egui` feature which allows `bevy_lagrange` to ignore input events in
 //! egui windows
 
 use bevy::prelude::*;

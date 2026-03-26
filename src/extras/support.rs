@@ -57,7 +57,7 @@ impl ProjectionParams {
                 (half_tan_vfov * viewport_aspect, half_tan_vfov)
             },
             Projection::Orthographic(o) => (o.area.width() * 0.5, o.area.height() * 0.5),
-            _ => return None,
+            Projection::Custom(_) => return None,
         };
         Some(Self {
             half_extent_x,
@@ -109,7 +109,7 @@ pub(super) fn projection_aspect_ratio(
             }
             Some(area.width() / area.height())
         },
-        _ => None,
+        Projection::Custom(_) => None,
     }
 }
 
@@ -161,6 +161,7 @@ pub(super) struct ScreenSpaceBounds {
 impl ScreenSpaceBounds {
     /// Projects world-space points to normalized screen space and computes margins.
     /// Returns `None` if any point is behind the camera (perspective only).
+    #[allow(clippy::similar_names)]
     pub fn from_points(
         points: &[Vec3],
         cam_global: &GlobalTransform,
@@ -307,7 +308,7 @@ pub(super) fn extract_mesh_vertices(
 
     let geometric_center = global_transform_query
         .get(entity)
-        .map_or(Vec3::ZERO, |gt| gt.translation());
+        .map_or(Vec3::ZERO, GlobalTransform::translation);
 
     Some((all_vertices, geometric_center))
 }

@@ -5,7 +5,7 @@ use bevy::prelude::*;
 /// The control scheme to use for touch input. Given that some touch gestures don't make sense
 /// being changed (e.g. pinch to zoom), there is just a set if different schemes rather than
 /// full customization.
-#[derive(Reflect, Default, Debug, Copy, Clone, PartialEq)]
+#[derive(Reflect, Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TouchControls {
     /// Touch controls where single finger orbits:
     ///  - One finger move: orbit
@@ -69,8 +69,6 @@ impl TouchTracker {
         // where this will return `TouchGestures::None`. From my testing, this does not result
         // in any adverse effects.
         match (self.curr_pressed, self.prev_pressed) {
-            // Zero fingers
-            ((None, None), (None, None)) => TouchGestures::None,
             // One finger
             ((Some(curr), None), (Some(prev), None)) => {
                 let curr_pos = curr.position();
@@ -124,13 +122,14 @@ impl TouchTracker {
                     rotation,
                 })
             },
-            // Three fingers and more not currently supported
+            // Zero fingers, three+ fingers, or mismatched counts
             _ => TouchGestures::None,
         }
     }
 }
 
-/// Read touch input and save it in TouchTracker resource for easy consumption by the main system
+/// Read touch input and save it in `TouchTracker` resource for easy consumption by the main system
+#[allow(clippy::unwrap_used)]
 pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTracker>) {
     let pressed: Vec<&Touch> = touches.iter().collect();
 

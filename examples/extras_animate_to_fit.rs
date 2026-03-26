@@ -2,10 +2,10 @@
 //! while framing a target entity.
 //!
 //! Controls:
-//!   Space — AnimateToFit with yaw=45° pitch=30°
+//!   Space — `AnimateToFit` with yaw=45 degrees pitch=30 degrees
 //!   R     — Reset camera
 //!
-//! Observe AnimationBegin and AnimationEnd via info!() logging.
+//! Observe `AnimationBegin` and `AnimationEnd` via `info!()` logging.
 
 use std::f32::consts::TAU;
 use std::time::Duration;

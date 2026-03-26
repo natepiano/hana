@@ -2,10 +2,10 @@ use bevy::prelude::*;
 use bevy_egui::EguiContext;
 
 /// A resource that tracks whether egui wants focus on the current and previous frames,
-/// in order to determine whether PanOrbitCamera should react to input events.
+/// in order to determine whether `PanOrbitCamera` should react to input events.
 ///
 /// The reason the previous frame's value is saved is because when you click inside an
-/// egui window, Context::wants_pointer_input() still returns false once before returning
+/// egui window, `Context::wants_pointer_input()` still returns false once before returning
 /// true. If the camera stops taking input only when it returns false, there's one frame
 /// where both egui and the camera are using the input events, which is not desirable.
 ///
@@ -19,10 +19,12 @@ pub struct EguiWantsFocus {
     pub curr: bool,
 }
 
-/// When true, just hovering over an egui panel/window will prevent PanOrbitCamera
-/// from reacting to input events. This is an optional, and hopefully temporary,
-/// workaround to this issue: https://github.com/Plonq/bevy_panorbit_camera/issues/75.
-/// Note that this will prevent PanOrbitCamera using reacting to input whenever the cursor
+/// When true, just hovering over an egui panel/window will prevent `PanOrbitCamera`
+/// from reacting to input events.
+///
+/// This is an optional, and hopefully temporary,
+/// workaround to this issue: <https://github.com/Plonq/bevy_panorbit_camera/issues/75>.
+/// Note that this will prevent `PanOrbitCamera` using reacting to input whenever the cursor
 /// is over an egui area, even if you're in the middle of dragging to rotate, so only use
 /// this if you use egui Panels (as opposed to Windows). If you use Windows exclusively
 /// then no workaround is required.
@@ -33,11 +35,11 @@ pub fn check_egui_wants_focus(
     mut contexts: Query<&mut EguiContext>,
     mut wants_focus: ResMut<EguiWantsFocus>,
     include_hover: Res<EguiFocusIncludesHover>,
-) -> Result {
+) {
     // Check all egui contexts to see if any of them want focus. If any context wants focus,
     // we assume that's the one the user is interacting with and prevent camera input.
     let mut new_wants_focus = false;
-    for mut context in contexts.iter_mut() {
+    for mut context in &mut contexts {
         let context = context.get_mut();
         let mut context_wants_focus =
             context.wants_pointer_input() || context.wants_keyboard_input();
@@ -52,5 +54,4 @@ pub fn check_egui_wants_focus(
         curr: new_wants_focus,
     };
     wants_focus.set_if_neq(new_res);
-    Ok(())
 }

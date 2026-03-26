@@ -6,7 +6,7 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
-use super::animation::orbital_params_from_offset;
+use super::animation;
 use super::animation::CameraMove;
 use super::animation::CameraMoveList;
 use super::components::AnimationConflictPolicy;
@@ -30,9 +30,8 @@ use super::events::ZoomCancelled;
 use super::events::ZoomContext;
 use super::events::ZoomEnd;
 use super::events::ZoomToFit;
-use super::fit::calculate_fit;
-use super::fit::FitSolution;
-use super::support::extract_mesh_vertices;
+use super::fit;
+use super::support;
 use crate::PanOrbitCamera;
 
 /// Parameters for an instant orbital snap.
@@ -111,8 +110,8 @@ fn prepare_fit_for_target(
     children_query: &Query<&Children>,
     global_transform_query: &Query<&GlobalTransform>,
     meshes: &Assets<Mesh>,
-) -> Option<FitSolution> {
-    let Some((vertices, geometric_center)) = extract_mesh_vertices(
+) -> Option<fit::FitSolution> {
+    let Some((vertices, geometric_center)) = support::extract_mesh_vertices(
         target,
         children_query,
         mesh_query,
@@ -123,7 +122,7 @@ fn prepare_fit_for_target(
         return None;
     };
 
-    let fit = match calculate_fit(
+    let Ok(fit) = fit::calculate_fit(
         &vertices,
         geometric_center,
         yaw,
@@ -131,12 +130,11 @@ fn prepare_fit_for_target(
         margin,
         projection,
         camera,
-    ) {
-        Ok(fit) => fit,
-        Err(error) => {
-            warn!("{context}: Failed to calculate fit for entity {target:?}: {error}");
-            return None;
-        },
+    )
+    .inspect_err(|error| {
+        warn!("{context}: Failed to calculate fit for entity {target:?}: {error}");
+    }) else {
+        return None;
     };
 
     Some(fit)
@@ -253,7 +251,7 @@ pub(super) fn on_zoom_to_fit(
 fn begin_zoom_if_needed(
     commands: &mut Commands,
     entity: Entity,
-    zoom_context: &Option<ZoomContext>,
+    zoom_context: Option<&ZoomContext>,
 ) {
     if let Some(ctx) = zoom_context {
         commands.trigger(ZoomBegin {
@@ -356,7 +354,7 @@ pub(super) fn on_play_animation(
 
     // Zoom lifecycle fires here — after conflict resolution has passed.
     // No command-ordering hazard since everything happens in the same observer.
-    begin_zoom_if_needed(&mut commands, entity, &zoom_context);
+    begin_zoom_if_needed(&mut commands, entity, zoom_context.as_ref());
 
     commands.trigger(AnimationBegin {
         camera: entity,
@@ -524,7 +522,7 @@ pub(super) fn on_look_at(
         );
     } else {
         // Instant path: back-solve orbital params and snap
-        let (yaw, pitch, radius) = orbital_params_from_offset(cam_pos - target_pos);
+        let (yaw, pitch, radius) = animation::orbital_params_from_offset(cam_pos - target_pos);
         snap_to_orbit(
             &mut commands,
             &mut panorbit,
@@ -575,7 +573,8 @@ pub(super) fn on_look_at_and_zoom_to_fit(
         return;
     };
     let target_pos = target_gt.translation();
-    let (preliminary_yaw, preliminary_pitch, _) = orbital_params_from_offset(cam_pos - target_pos);
+    let (preliminary_yaw, preliminary_pitch, _) =
+        animation::orbital_params_from_offset(cam_pos - target_pos);
 
     let Some(fit) = prepare_fit_for_target(
         "LookAtAndZoomToFit",
@@ -595,7 +594,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 
     // Recompute yaw/pitch relative to the fit's focus (bounds center), which may
     // differ slightly from the raw `GlobalTransform` translation.
-    let (yaw, pitch, _) = orbital_params_from_offset(cam_pos - fit.focus);
+    let (yaw, pitch, _) = animation::orbital_params_from_offset(cam_pos - fit.focus);
 
     if duration > Duration::ZERO {
         commands.trigger(

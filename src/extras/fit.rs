@@ -8,8 +8,7 @@ use core::fmt;
 
 use bevy::prelude::*;
 
-use super::support::projection_aspect_ratio;
-use super::support::ScreenSpaceBounds;
+use super::support;
 
 // ============================================================================
 // Constants
@@ -93,7 +92,10 @@ impl fmt::Display for FitError {
 
 /// Computes the target margins for the constraining dimension based on aspect ratios.
 /// Returns `(target_margin_x, target_margin_y)`.
-fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f32) -> (f32, f32) {
+fn calculate_target_margins(
+    bounds: &support::ScreenSpaceBounds,
+    zoom_multiplier: f32,
+) -> (f32, f32) {
     let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
     let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
 
@@ -146,6 +148,7 @@ fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f32) ->
 ///
 /// Note: A lateral camera shift doesn't change point depths, so the centering is geometrically
 /// exact for the constraining margin check.
+#[allow(clippy::too_many_lines)]
 pub fn calculate_fit(
     points: &[Vec3],
     geometric_center: Vec3,
@@ -160,13 +163,14 @@ pub fn calculate_fit(
     } else {
         margin.clamp(MIN_MARGIN, MAX_MARGIN)
     };
+    #[allow(clippy::float_cmp)]
     if clamped_margin != margin {
         warn!(
             "calculate_fit: clamped margin from {margin} to {clamped_margin} (expected [{MIN_MARGIN}, {MAX_MARGIN}])"
         );
     }
 
-    let aspect_ratio = projection_aspect_ratio(projection, camera.logical_viewport_size())
+    let aspect_ratio = support::projection_aspect_ratio(projection, camera.logical_viewport_size())
         .ok_or(FitError::NoViewport)?;
 
     // For ortho, the camera is always at a fixed distance from focus.
@@ -228,9 +232,12 @@ pub fn calculate_fit(
         let cam_global =
             GlobalTransform::from(Transform::from_translation(cam_pos).with_rotation(rot));
 
-        let Some((bounds, _)) =
-            ScreenSpaceBounds::from_points(points, &cam_global, &test_projection, aspect_ratio)
-        else {
+        let Some((bounds, _)) = support::ScreenSpaceBounds::from_points(
+            points,
+            &cam_global,
+            &test_projection,
+            aspect_ratio,
+        ) else {
             warn!(
                 "Iteration {iteration}: Points behind camera at radius {test_radius:.1}, searching higher"
             );
@@ -313,7 +320,6 @@ pub fn calculate_fit(
 /// since `PanOrbitCamera` maps `radius` → `OrthographicProjection::scale`.
 fn build_test_projection(projection: &Projection, test_radius: f32) -> Projection {
     match projection {
-        Projection::Perspective(_) => projection.clone(),
         Projection::Orthographic(ortho) => {
             // Compute what the area would be at this scale.
             // The current area is `base_size * current_scale`, so base_size = area / scale.
@@ -336,7 +342,7 @@ fn build_test_projection(projection: &Projection, test_radius: f32) -> Projectio
                 ..*ortho
             })
         },
-        _ => projection.clone(),
+        Projection::Perspective(_) | Projection::Custom(_) => projection.clone(),
     }
 }
 
@@ -369,7 +375,7 @@ fn refine_focus_centering(
         let cam_global =
             GlobalTransform::from(Transform::from_translation(cam_pos).with_rotation(rot));
         let Some((bounds, depths)) =
-            ScreenSpaceBounds::from_points(points, &cam_global, projection, aspect_ratio)
+            support::ScreenSpaceBounds::from_points(points, &cam_global, projection, aspect_ratio)
         else {
             break;
         };
@@ -397,6 +403,7 @@ fn refine_focus_centering(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

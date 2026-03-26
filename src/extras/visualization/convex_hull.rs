@@ -1,22 +1,18 @@
 use bevy::prelude::*;
 
-use super::super::support::project_point;
+use super::super::support;
 use super::super::support::CameraBasis;
 
 /// 2D cross product for three points (for convex hull turn detection).
 fn cross_2d(o: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
-    (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+    (a.0 - o.0).mul_add(b.1 - o.1, -(a.1 - o.1) * (b.0 - o.0))
 }
 
 /// Andrew's monotone chain algorithm for 2D convex hull.
 /// Returns hull vertices in counter-clockwise order.
 pub fn convex_hull_2d(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
     let mut sorted: Vec<(f32, f32)> = points.to_vec();
-    sorted.sort_by(|a, b| {
-        a.0.partial_cmp(&b.0)
-            .unwrap()
-            .then(a.1.partial_cmp(&b.1).unwrap())
-    });
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
     sorted.dedup();
 
     if sorted.len() <= 1 {
@@ -59,7 +55,7 @@ pub fn project_vertices_to_2d(
     vertices
         .iter()
         .filter_map(|v| {
-            let (norm_x, norm_y, _) = project_point(*v, cam, is_ortho)?;
+            let (norm_x, norm_y, _) = support::project_point(*v, cam, is_ortho)?;
             Some((norm_x, norm_y))
         })
         .collect()

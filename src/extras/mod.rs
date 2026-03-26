@@ -3,19 +3,19 @@
 //! Enabled via the `extras_debug` feature flag. All public types are re-exported
 //! at the crate root.
 
-pub(crate) mod animation;
-pub(crate) mod components;
-pub(crate) mod events;
-pub(crate) mod fit;
+pub mod animation;
+pub mod components;
+pub mod events;
+pub mod fit;
 mod observers;
 mod support;
 #[cfg(feature = "extras_debug")]
-pub(crate) mod visualization;
+pub mod visualization;
 
 use bevy::prelude::*;
 
 /// Registers extras observers, systems, and optional visualization.
-pub(super) fn build_extras(app: &mut App) {
+pub fn build_extras(app: &mut App) {
     app.add_observer(observers::on_camera_move_list_added)
         .add_observer(observers::restore_camera_state)
         .add_observer(observers::on_zoom_to_fit)

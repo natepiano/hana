@@ -1,6 +1,6 @@
-//! Demonstrates the bevy_egui feature together with multiple windows.
-//! This is a combination of the egui and multiple_windows examples, and doesn't show anything new,
-//! it's primarily here for easy e2e testing.
+//! Demonstrates the `bevy_egui` feature together with multiple windows.
+//! This is a combination of the `egui` and `multiple_windows` examples, and doesn't show anything
+//! new, it's primarily here for easy e2e testing.
 
 use bevy::camera::RenderTarget;
 use bevy::ecs::schedule::ScheduleLabel;
@@ -72,7 +72,7 @@ fn setup(
 
     // second window camera
     commands.spawn((
-        Camera { ..default() },
+        Camera::default(),
         RenderTarget::Window(WindowRef::Entity(second_window)),
         Transform::from_translation(Vec3::new(5.0, 1.5, 7.0)),
         PanOrbitCamera::default(),
@@ -82,18 +82,16 @@ fn setup(
 
 fn ui_example_system_first_window(
     mut egui_ctx: Single<&mut EguiContext, With<PrimaryEguiContext>>,
-) -> Result {
+) {
     egui::Window::new("Hello").show(egui_ctx.get_mut(), |ui| {
         ui.label("world");
     });
-    Ok(())
 }
 
 fn ui_example_system_second_window(
     mut egui_ctx: Single<&mut EguiContext, Without<PrimaryEguiContext>>,
-) -> Result {
+) {
     egui::Window::new("Hello").show(egui_ctx.get_mut(), |ui| {
         ui.label("world2");
     });
-    Ok(())
 }
