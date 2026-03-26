@@ -11,12 +11,12 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_panorbit_camera::AnimateToFit;
-use bevy_panorbit_camera::AnimationBegin;
-use bevy_panorbit_camera::AnimationEnd;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_lagrange::AnimateToFit;
+use bevy_lagrange::AnimationBegin;
+use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TrackpadBehavior;
 
 const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
 
@@ -26,7 +26,7 @@ struct Target;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_input)
         .add_observer(on_animation_begin)

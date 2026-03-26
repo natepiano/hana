@@ -9,7 +9,7 @@ use bevy_egui::{
     egui, EguiContext, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass,
     PrimaryEguiContext,
 };
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SecondWindowContextPass;
@@ -18,7 +18,7 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(EguiPrimaryContextPass, ui_example_system_first_window)
         .add_systems(SecondWindowContextPass, ui_example_system_second_window);

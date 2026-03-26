@@ -1,12 +1,12 @@
 //! Demonstrates how to pause time without affecting the camera
 
 use bevy::prelude::*;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (pause_game_system, cube_rotator_system))
         .run();

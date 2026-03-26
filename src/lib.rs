@@ -21,7 +21,7 @@ use crate::traits::OptionalClamp;
 
 #[cfg(feature = "bevy_egui")]
 mod egui;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 mod extras;
 mod input;
 mod touch;
@@ -29,51 +29,51 @@ mod traits;
 mod util;
 
 // Extras re-exports
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::animation::CameraMove;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::animation::CameraMoveList;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::components::AnimationConflictPolicy;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::components::CameraInputInterruptBehavior;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::components::CurrentFitTarget;
 #[cfg(feature = "extras_debug")]
 pub use extras::components::FitVisualization;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::AnimateToFit;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::AnimationBegin;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::AnimationCancelled;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::AnimationEnd;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::AnimationRejected;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::AnimationSource;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::CameraMoveBegin;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::CameraMoveEnd;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::LookAt;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::LookAtAndZoomToFit;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::PlayAnimation;
 #[cfg(feature = "extras_debug")]
 pub use extras::events::SetFitTarget;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::ZoomBegin;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::ZoomCancelled;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::ZoomContext;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::ZoomEnd;
-#[cfg(feature = "extras")]
+#[cfg(feature = "extras_debug")]
 pub use extras::events::ZoomToFit;
 #[cfg(feature = "extras_debug")]
 pub use extras::visualization::FitTargetVisualizationConfig;
@@ -82,7 +82,7 @@ pub use extras::visualization::FitTargetVisualizationConfig;
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_panorbit_camera::{PanOrbitCameraPlugin, PanOrbitCamera};
+/// # use bevy_lagrange::{PanOrbitCameraPlugin, PanOrbitCamera};
 /// fn main() {
 ///     App::new()
 ///         .add_plugins(DefaultPlugins)
@@ -90,9 +90,9 @@ pub use extras::visualization::FitTargetVisualizationConfig;
 ///         .run();
 /// }
 /// ```
-pub struct PanOrbitCameraPlugin;
+pub struct LagrangePlugin;
 
-impl Plugin for PanOrbitCameraPlugin {
+impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveCameraData>()
             .init_resource::<MouseKeyTracker>()
@@ -126,7 +126,7 @@ impl Plugin for PanOrbitCameraPlugin {
                 );
         }
 
-        #[cfg(feature = "extras")]
+        #[cfg(feature = "extras_debug")]
         {
             extras::build_extras(app);
         }
@@ -142,7 +142,7 @@ pub struct PanOrbitCameraSystemSet;
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_panorbit_camera::{PanOrbitCameraPlugin, PanOrbitCamera};
+/// # use bevy_lagrange::{PanOrbitCameraPlugin, PanOrbitCamera};
 /// # fn main() {
 /// #     App::new()
 /// #         .add_plugins(DefaultPlugins)
@@ -528,7 +528,7 @@ fn active_viewport_data(
                     // Is the cursor/touch in this window?
                     // Note: there's a bug in winit that causes `window.cursor_position()` to return
                     // a `Some` value even if the cursor is not in this window, in very specific cases.
-                    // See: https://github.com/Plonq/bevy_panorbit_camera/issues/22
+                    // See: https://github.com/natepiano/bevy_lagrange/issues/22
                     if let Some(input_position) = window.cursor_position().or(touches
                         .iter_just_pressed()
                         .collect::<Vec<_>>()

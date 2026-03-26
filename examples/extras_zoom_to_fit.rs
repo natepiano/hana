@@ -10,16 +10,16 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_panorbit_camera::AnimationEnd;
-use bevy_panorbit_camera::AnimationSource;
-use bevy_panorbit_camera::FitVisualization;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::SetFitTarget;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera::ZoomBegin;
-use bevy_panorbit_camera::ZoomEnd;
-use bevy_panorbit_camera::ZoomToFit;
+use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::AnimationSource;
+use bevy_lagrange::FitVisualization;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::SetFitTarget;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomBegin;
+use bevy_lagrange::ZoomEnd;
+use bevy_lagrange::ZoomToFit;
 
 const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
 
@@ -29,7 +29,7 @@ struct Target;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (keyboard_input, toggle_debug_visualization))
         .add_observer(on_zoom_begin)

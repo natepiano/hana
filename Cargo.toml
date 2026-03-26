@@ -1,34 +1,35 @@
 [package]
-name = "bevy_panorbit_camera"
-version = "0.34.0"
-authors = ["Plonq"]
+name = "bevy_lagrange"
+version = "0.0.1"
+authors = ["natepiano"]
 edition = "2021"
 description = "A basic pan and orbit camera in Bevy"
 keywords = ["gamedev", "bevy", "orbit", "camera"]
 categories = ["game-development"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Plonq/bevy_panorbit_camera"
-homepage = "https://github.com/Plonq/bevy_panorbit_camera"
+repository = "https://github.com/natepiano/bevy_lagrange"
+homepage = "https://github.com/natepiano/bevy_lagrange"
 readme = "README.md"
 
 [features]
 bevy_egui = ["dep:bevy_egui"]
-extras = ["bevy/bevy_asset", "bevy/bevy_log", "bevy/bevy_mesh"]
 extras_debug = [
-    "extras",
-    "bevy/bevy_gizmos",
-    "bevy/bevy_pbr",
-    "bevy/bevy_picking",
-    "bevy/bevy_state",
-    "bevy/bevy_text",
-    "bevy/bevy_ui",
+  "bevy/bevy_asset",
+  "bevy/bevy_log",
+  "bevy/bevy_mesh",
+  "bevy/bevy_gizmos",
+  "bevy/bevy_pbr",
+  "bevy/bevy_picking",
+  "bevy/bevy_state",
+  "bevy/bevy_text",
+  "bevy/bevy_ui",
 ]
 
 [dependencies]
 bevy = { version = "0.18", default-features = false, features = [
-    "bevy_core_pipeline",
-    "bevy_camera",
-    "bevy_window",
+  "bevy_core_pipeline",
+  "bevy_camera",
+  "bevy_window",
 ] }
 bevy_egui = { version = "0.39", optional = true, default-features = false }
 
@@ -36,12 +37,12 @@ bevy_egui = { version = "0.39", optional = true, default-features = false }
 bevy = { version = "0.18", default-features = false, features = ["3d"] }
 float-cmp = "0.10.0"
 bevy_egui = { version = "0.39", default-features = false, features = [
-    "render",
-    "default_fonts",
+  "render",
+  "default_fonts",
 ] }
 bevy_brp_extras = "0.19.0"
 bevy_window_manager = "0.19.0"
-bevy_panorbit_camera = { path = ".", features = ["extras_debug"] }
+bevy_lagrange = { path = ".", features = ["extras_debug"] }
 
 [[example]]
 name = "egui"
@@ -61,12 +62,12 @@ required-features = ["extras_debug"]
 
 [[example]]
 name = "extras_animate_to_fit"
-required-features = ["extras"]
+required-features = ["extras_debug"]
 
 [[example]]
 name = "extras_play_animation"
-required-features = ["extras"]
+required-features = ["extras_debug"]
 
 [[example]]
 name = "extras_look_at"
-required-features = ["extras"]
+required-features = ["extras_debug"]

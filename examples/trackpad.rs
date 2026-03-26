@@ -6,13 +6,13 @@
 //!   Zoom: Mousewheel, ControlLeft + trackpad scroll
 
 use bevy::prelude::*;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin, TrackpadBehavior};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera, TrackpadBehavior};
 use std::f32::consts::TAU;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .run();
 }

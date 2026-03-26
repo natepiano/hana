@@ -1,133 +1,21 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+> This crate is based on the work of [Plonq](https://github.com/Plonq) and his
+> [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera). Thank you
+> for graciously allowing this project to build on your foundation.
+
 ## [Unreleased]
 
-- Add optional `extras` feature: zoom-to-fit, queued camera animations, event-driven camera control
-- Add optional `extras_debug` feature: debug visualization of fit targets with gizmos and screen-space labels
-- Add `extras` example: full showcase with mesh picking, multi-window, animations, and debug visualization
-- Add 4 focused examples: `extras_zoom_to_fit`, `extras_animate_to_fit`, `extras_play_animation`, `extras_look_at`
-
-## 0.34.0
-
-- Update to Bevy 0.18
-
-## 0.33.1
-
-- Add `#[reflect(Component)]` on `PanOrbitCamera`
-
-## 0.33.0
-
-- Add `reversed_button_zoom` option (#130)
-
-## 0.32.0
-
-- Zoom with mouse button + motion (#129)
-
-## 0.31.0
-
-- Update `bevy_egui` to 0.38 (#126)
-
-## 0.30.0
-
-- Add option to use real time instead of virtual time (#125)
-
-## 0.29.0
-
-- Update to Bevy 0.17
-
-## 0.28.0
-
-- Update `bevy_egui` to 0.36 (#120)
-
-## 0.27.2
-
-- Simplifies the upside down detection
-
-## 0.27.1
-
-- Fixes upside down detection when using a custom axis (#118 thanks @guija)
-
-## 0.27.0
-
-- Update `bevy_egui` to 0.35 (#115 thanks @kiperz)
-
-## 0.26.0
-
-- Update to Bevy 0.16
-
-## 0.25.0
-
-- Adds better trackpad support, with Blender-style controls (thanks @natepiano)
-
-## 0.24.0
-
-- Add ability to change the base axes, e.g. to make Z up instead of Y up
-
-## 0.23.0
-
-- Update `bevy_egui` to 0.33
-
-## 0.22.2
-
-- Fix initial calculation of yaw from the camera's transform (translation)
-
-## 0.22.1
-
-- Add ability to limit the cameras `focus` to a cube or sphere shape (thanks @bytemunch)
-
-## 0.22.0
-
-- Update `bevy_egui` to 0.32
-
-## 0.21.2
-
-- Derive `Reflect` on `PanOrbitCamera`
-
-## 0.21.1
-
-- Add `Camera3d` as a required component (new feature of Bevy 0.15) of `PanOrbitCamera`, so it doesn't need to be added
-  manually
-
-## 0.21.0
-
-- Update to Bevy 0.15
-
-## 0.20.1
-
-- Update docs, explaining that setting sensitivity values to 0 will disable the respective control
-
-## 0.20.0
-
-- Change `zoom_lower_limit` from `Option<f32>` to `f32`, defaulting to `0.05`, and remove the hard coded lower zoom
-  limit of `0.05`.
-  This allows the lower limit to be lowered below 0.05, in case there is a need to work at very small scales.
-
-## 0.19.5
-
-- Update `bevy_egui` to 0.30 in order to resolve an issue with `bevy-inspector-egui`
-  0.27 ([#85](https://github.com/Plonq/bevy_panorbit_camera/pull/85))
-
-## 0.19.4
-
-- Re-fix bug that was fixed in 0.19.1 (see below for explanation).
-
-## 0.19.3
-
-- Update `bevy_egui` dependency to 0.29
-
-## 0.19.2
-
-- Fix bug with how egui feature deals with egui side panels and immovable windows. It should now act more
-  naturally - if you start dragging in the viewport, dragging over egui will continue to control the camera.
-  If you start the drag in any egui area, the camera won't be affected, even if the cursor leaves the egui area.
-  Thanks @thmxv!
-
-## 0.19.1
-
-- Fix panic if egui context for window doesn't exist. For example if a new window is created after startup.
-
-## 0.19.0
-
-- Update to Bevy 0.14
-
-## 0.18 and older
-
-Check [GitHub releases](https://github.com/Plonq/bevy_panorbit_camera/releases) for details
+### Added
+- Pan, orbit, and zoom camera controls with smoothing, customizable sensitivity, and configurable key/mouse bindings
+- Orthographic and perspective projection support
+- Touch controls (one finger orbit, two finger pan, pinch zoom)
+- Multi-viewport and multi-window support
+- Render-to-texture camera support
+- Optional `bevy_egui` feature to ignore input consumed by egui
+- Optional `extras_debug` feature: zoom-to-fit, queued camera animations, event-driven camera control (`LookAt`, `ZoomToFit`, `AnimateToFit`, `PlayAnimation`), and debug visualization of fit targets with gizmos and screen-space labels

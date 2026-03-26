@@ -2,12 +2,12 @@
 
 use bevy::window::WindowResized;
 use bevy::{camera::Viewport, prelude::*};
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, set_camera_viewports)
         .run();

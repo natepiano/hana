@@ -2,12 +2,12 @@
 
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin, PanOrbitCameraSystemSet};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera, PanOrbitCameraSystemSet};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, switch_projection.before(PanOrbitCameraSystemSet))
         .run();

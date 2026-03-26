@@ -17,12 +17,12 @@ use bevy::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
 };
-use bevy_panorbit_camera::{ActiveCameraData, PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_lagrange::{ActiveCameraData, LagrangePlugin, PanOrbitCamera};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, cube_rotator_system)
         .run();

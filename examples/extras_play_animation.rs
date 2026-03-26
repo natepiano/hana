@@ -10,20 +10,20 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_panorbit_camera::CameraMove;
-use bevy_panorbit_camera::CameraMoveBegin;
-use bevy_panorbit_camera::CameraMoveEnd;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::PlayAnimation;
-use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_lagrange::CameraMove;
+use bevy_lagrange::CameraMoveBegin;
+use bevy_lagrange::CameraMoveEnd;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::PlayAnimation;
+use bevy_lagrange::TrackpadBehavior;
 
 const START_POS: Vec3 = Vec3::new(0.0, 2.0, 6.0);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_input)
         .add_observer(on_move_begin)

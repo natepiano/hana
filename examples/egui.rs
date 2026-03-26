@@ -1,15 +1,15 @@
-//! Demonstrates the bevy_egui feature which allows bevy_panorbit_camera to ignore input events in
+//! Demonstrates the bevy_egui feature which allows bevy_lagrange to ignore input events in
 //! egui windows
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(EguiPrimaryContextPass, ui_example_system);
 

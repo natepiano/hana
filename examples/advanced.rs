@@ -7,13 +7,13 @@
 //!   Zoom: Mousewheel OR Right click + move mouse up/down
 
 use bevy::prelude::*;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin, TouchControls};
+use bevy_lagrange::{LagrangePlugin, PanOrbitCamera, TouchControls};
 use std::f32::consts::TAU;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_camera_controls_system)
         .run();

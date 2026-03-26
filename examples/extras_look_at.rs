@@ -13,14 +13,14 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_panorbit_camera::AnimationBegin;
-use bevy_panorbit_camera::AnimationEnd;
-use bevy_panorbit_camera::LookAt;
-use bevy_panorbit_camera::LookAtAndZoomToFit;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera::ZoomToFit;
+use bevy_lagrange::AnimationBegin;
+use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::LookAt;
+use bevy_lagrange::LookAtAndZoomToFit;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange
+use bevy_lagrange::ZoomToFit;
 
 // Camera starts close to the gray cube, with the red cube barely visible on the right
 const START_POS: Vec3 = Vec3::new(0.0, 1.5, 3.0);
@@ -31,7 +31,7 @@ struct Target;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_input)
         .add_observer(on_animation_begin)

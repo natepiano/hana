@@ -1,12 +1,12 @@
-[![Crates.io](https://img.shields.io/crates/v/bevy_panorbit_camera)](https://crates.io/crates/bevy_panorbit_camera)
-[![docs.rs](https://docs.rs/bevy_panorbit_camera/badge.svg)](https://docs.rs/bevy_panorbit_camera)
+[![Crates.io](https://img.shields.io/crates/v/bevy_lagrange)](https://crates.io/crates/bevy_lagrange)
+[![docs.rs](https://docs.rs/bevy_lagrange/badge.svg)](https://docs.rs/bevy_lagrange)
 [![Bevy tracking](https://img.shields.io/badge/Bevy%20tracking-released%20version-lightblue)](https://github.com/bevyengine/bevy/blob/main/docs/plugins_guidelines.md#main-branch-tracking)
 
 <div style="text-align: center">
   <h1>Bevy Pan/Orbit Camera</h1>
 </div>
 
-![A screen recording showing camera movement](https://user-images.githubusercontent.com/7709415/230715348-eb19d9a8-4826-4a73-a039-02cacdcb3dc9.gif "Demo of bevy_panorbit_camera")
+![A screen recording showing camera movement](https://user-images.githubusercontent.com/7709415/230715348-eb19d9a8-4826-4a73-a039-02cacdcb3dc9.gif "Demo of bevy_lagrange")
 
 ## Summary
 
@@ -22,7 +22,7 @@ Use it to quickly prototype, experiment, for model viewers, and more!
 - Works with multiple viewports and/or windows
 - Easy to control manually, e.g. for keyboard control or animation
 - Can control cameras that render to a texture
-- Zoom-to-fit, camera animations, and debug visualization (optional `extras` feature)
+- Zoom-to-fit, camera animations, and debug visualization (optional `extras_debug` feature)
 
 ## Controls
 
@@ -57,22 +57,21 @@ commands.spawn((
 
 This will set up a camera with good defaults.
 
-Check out the [advanced example](https://github.com/Plonq/bevy_panorbit_camera/tree/master/examples/advanced.rs) to see
+Check out the [advanced example](https://github.com/natepiano/bevy_lagrange/tree/master/examples/advanced.rs) to see
 all the possible configuration options.
 
 ## Cargo Features
 
 - `bevy_egui` (optional): Makes `PanOrbitCamera` ignore any input that `egui` uses, thus preventing moving the camera
   when interacting with egui windows
-- `extras` (optional): Zoom-to-fit, queued camera animations, and event-driven camera control
-- `extras_debug` (optional, enabling this implicitly enables `extras`): Debug visualization of fit targets with gizmos and screen-space labels
+- `extras_debug` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization of fit targets with gizmos and screen-space labels
 
 ## Extras
 
-Enable the `extras` feature for zoom-to-fit, queued camera animations, and event-driven camera control:
+Enable the `extras_debug` feature for zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization:
 
 ```toml
-bevy_panorbit_camera = { version = "0.35", features = ["extras"] }
+bevy_lagrange = { version = "0.0.1", features = ["extras_debug"] }
 ```
 
 Trigger a zoom-to-fit:
@@ -100,30 +99,21 @@ Look at a target:
 commands.entity(camera).trigger(LookAt { target, duration, easing });
 ```
 
-For debug visualization of fit targets, enable `extras_debug`:
-
-```toml
-bevy_panorbit_camera = { version = "0.35", features = ["extras_debug"] }
-```
-
 See the `extras_*` examples for more.
 
 ## Version Compatibility
 
-| bevy | bevy_panorbit_camera |
-|------|----------------------|
-| 0.18 | 0.34                 |
-| 0.17 | 0.29-0.33            |
-| 0.16 | 0.26-0.28            |
-| 0.15 | 0.21-0.25            |
-| 0.14 | 0.19-0.20            |
-| 0.13 | 0.14-0.18            |
-| 0.12 | 0.9-0.13             |
-| 0.11 | 0.6-0.8              |
-| 0.10 | 0.1-0.5              |
+| bevy | bevy_lagrange |
+|------|---------------|
+| 0.18 | 0.0.1        |
+
+## Alternatives
+
+If you're looking for a lighter-weight orbit camera, check out [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera) by [Plonq](https://github.com/Plonq), which this crate is based on.
 
 ## Credits
 
+- [Plonq](https://github.com/Plonq): For graciously allowing this project to build on [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera)
 - [Bevy Cheat Book](https://bevy-cheatbook.github.io): For providing an example that I started from
 - [babylon.js](https://www.babylonjs.com): I referenced their arc rotate camera for some of this
 - [bevy_pancam](https://github.com/johanhelsing/bevy_pancam): For the egui feature idea

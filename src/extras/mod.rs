@@ -1,6 +1,6 @@
 //! Camera extras: zoom-to-fit, queued animations, and debug visualization.
 //!
-//! Enabled via the `extras` feature flag. All public types are re-exported
+//! Enabled via the `extras_debug` feature flag. All public types are re-exported
 //! at the crate root.
 
 pub(crate) mod animation;

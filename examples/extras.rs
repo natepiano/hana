@@ -1,4 +1,4 @@
-//! Demonstrates clicking on meshes to zoom-to-fit using `bevy_panorbit_camera_ext`.
+//! Demonstrates clicking on meshes to zoom-to-fit`.
 //!
 //! - Click a mesh to select it and zoom the camera to frame it
 //! - Click the ground to deselect and zoom out to the full scene
@@ -20,28 +20,28 @@ use bevy::time::Virtual;
 use bevy::ui::UiTargetCamera;
 use bevy::window::WindowRef;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_panorbit_camera::AnimateToFit;
-use bevy_panorbit_camera::AnimationBegin;
-use bevy_panorbit_camera::AnimationCancelled;
-use bevy_panorbit_camera::AnimationConflictPolicy;
-use bevy_panorbit_camera::AnimationEnd;
-use bevy_panorbit_camera::AnimationRejected;
-use bevy_panorbit_camera::AnimationSource;
-use bevy_panorbit_camera::CameraInputInterruptBehavior;
-use bevy_panorbit_camera::CameraMove;
-use bevy_panorbit_camera::CameraMoveBegin;
-use bevy_panorbit_camera::CameraMoveEnd;
-use bevy_panorbit_camera::FitVisualization;
-use bevy_panorbit_camera::LookAt;
-use bevy_panorbit_camera::LookAtAndZoomToFit;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::PlayAnimation;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera::ZoomBegin;
-use bevy_panorbit_camera::ZoomCancelled;
-use bevy_panorbit_camera::ZoomEnd;
-use bevy_panorbit_camera::ZoomToFit;
+use bevy_lagrange::AnimateToFit;
+use bevy_lagrange::AnimationBegin;
+use bevy_lagrange::AnimationCancelled;
+use bevy_lagrange::AnimationConflictPolicy;
+use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::AnimationRejected;
+use bevy_lagrange::AnimationSource;
+use bevy_lagrange::CameraInputInterruptBehavior;
+use bevy_lagrange::CameraMove;
+use bevy_lagrange::CameraMoveBegin;
+use bevy_lagrange::CameraMoveEnd;
+use bevy_lagrange::FitVisualization;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::LookAt;
+use bevy_lagrange::LookAtAndZoomToFit;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::PlayAnimation;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomBegin;
+use bevy_lagrange::ZoomCancelled;
+use bevy_lagrange::ZoomEnd;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::ManagedWindow;
 use bevy_window_manager::WindowManagerPlugin;
 
@@ -225,7 +225,7 @@ fn main() {
                 }),
                 ..default()
             }),
-            PanOrbitCameraPlugin,
+            LagrangePlugin,
             MeshPickingPlugin,
             BrpExtrasPlugin::default(),
             WindowManagerPlugin,
