@@ -32,6 +32,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use bevy_diegetic::Unit;
+use bevy_diegetic::UnitConfig;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
@@ -144,6 +145,7 @@ fn create_bench_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.insert_resource(monospace_measurer());
+    app.insert_resource(UnitConfig::default());
     app.add_plugins(LayoutPlugin);
     app.update();
     app

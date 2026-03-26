@@ -374,7 +374,7 @@ fn setup(
             font_unit: Some(Unit::Millimeters),
             ..default()
         },
-        Transform::from_xyz(-CTRL_W * 0.5, -0.85 + CTRL_H * 0.5, 0.0),
+        Transform::from_xyz(-CTRL_W * 0.5, CTRL_H.mul_add(0.5, -0.85), 0.0),
     ));
 }
 
