@@ -100,3 +100,6 @@ name = "font_features"
 
 [[example]]
 name = "units"
+
+[[example]]
+name = "sizes"
