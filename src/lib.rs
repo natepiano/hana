@@ -51,6 +51,7 @@ pub use layout::Direction;
 pub use layout::El;
 pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
+pub use layout::FontSize;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;

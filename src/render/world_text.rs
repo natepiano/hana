@@ -62,7 +62,7 @@ pub struct ComputedWorldText {
 /// // With custom style:
 /// commands.spawn((
 ///     WorldText::new("Styled"),
-///     TextStyle::new().with_size(24.0).with_color(Color::RED),
+///     WorldTextStyle::new(24.0).with_color(Color::RED),
 ///     Transform::from_xyz(0.0, 2.0, 0.0),
 /// ));
 /// ```

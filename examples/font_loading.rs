@@ -228,8 +228,7 @@ fn on_font_registered(
     commands
         .spawn((
             WorldText::new(label),
-            WorldTextStyle::new()
-                .with_size(SAMPLE_SIZE)
+            WorldTextStyle::new(SAMPLE_SIZE)
                 .with_font(trigger.id.0)
                 .with_color(Color::srgb(0.2, 0.3, 0.9))
                 .with_shadow_mode(GlyphShadowMode::None),

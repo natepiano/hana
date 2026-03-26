@@ -58,7 +58,7 @@ use crate::text::FontRegistry;
 /// ```ignore
 /// commands.spawn((
 ///     WorldText::new("Typography"),
-///     TextStyle::new().with_size(48.0),
+///     TextStyle::new(48.0),
 ///     TypographyOverlay::default(),
 ///     Transform::from_xyz(0.0, 2.0, 0.0),
 /// ));
@@ -500,8 +500,7 @@ fn spawn_bounding_box_callout(
     let ascent_mid_world = layout_to_world_y(ascent_mid_layout, anchor_y, scale);
     commands.entity(entity).with_child((
         WorldText::new(LABEL_BOUNDING_BOX),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(bbox_color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -592,8 +591,7 @@ fn spawn_origin_and_advancement(
     ));
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ORIGIN),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(overlay.color)
             .with_anchor(Anchor::Center)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -706,8 +704,7 @@ fn spawn_advancement_arrow(
     let adv_label_y = spacing.mul_add(-0.5, arrow_y);
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ADVANCEMENT),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(overlay.color)
             .with_anchor(Anchor::TopCenter)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -1004,8 +1001,7 @@ fn spawn_line_edge_labels(
         let line_world_y = layout_to_world_y(layout_y, anchor_y, scale);
         commands.entity(parent).with_child((
             WorldText::new(label),
-            WorldTextStyle::new()
-                .with_size(label_size)
+            WorldTextStyle::new(label_size)
                 .with_color(color)
                 .with_anchor(Anchor::CenterRight)
                 .with_shadow_mode(GlyphShadowMode::None),
@@ -1039,8 +1035,7 @@ fn spawn_left_arrow_labels(
     let label_y_mid_world = layout_to_world_y(label_y_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_ASCENT),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -1052,8 +1047,7 @@ fn spawn_left_arrow_labels(
     let descent_mid_world = layout_to_world_y(descent_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_DESCENT),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -1063,8 +1057,7 @@ fn spawn_left_arrow_labels(
     // Line Height label: same vertical position as Ascent label.
     commands.entity(parent).with_child((
         WorldText::new(LABEL_LINE_HEIGHT),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -1079,8 +1072,7 @@ fn spawn_left_arrow_labels(
         layout_to_world_y(baseline_y, anchor_y, scale) - label_descent_offset;
     commands.entity(parent).with_child((
         WorldText::new(LABEL_BASELINE),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -1095,8 +1087,7 @@ fn spawn_left_arrow_labels(
         let no_gap_label = format!("no line gap for {font_name}");
         commands.entity(parent).with_child((
             WorldText::new(no_gap_label),
-            WorldTextStyle::new()
-                .with_size(label_size)
+            WorldTextStyle::new(label_size)
                 .with_color(color)
                 .with_anchor(Anchor::BottomLeft)
                 .with_shadow_mode(GlyphShadowMode::None),
@@ -1127,8 +1118,7 @@ fn spawn_right_arrow_labels(
     let x_height_mid_world = layout_to_world_y(x_height_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_X_HEIGHT),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -1140,8 +1130,7 @@ fn spawn_right_arrow_labels(
     let cap_mid_world = layout_to_world_y(cap_mid, anchor_y, scale);
     commands.entity(parent).with_child((
         WorldText::new(LABEL_CAP_HEIGHT),
-        WorldTextStyle::new()
-            .with_size(label_size)
+        WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(GlyphShadowMode::None),

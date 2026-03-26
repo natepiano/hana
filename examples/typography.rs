@@ -180,8 +180,7 @@ fn setup(
         .spawn((
             DisplayText,
             WorldText::new(DISPLAY_WORDS[0]),
-            WorldTextStyle::new()
-                .with_size(DISPLAY_SIZE)
+            WorldTextStyle::new(DISPLAY_SIZE)
                 .with_color(Color::srgb(0.9, 0.9, 0.9))
                 .with_loading_policy(GlyphLoadingPolicy::Progressive),
             TypographyOverlay::default(),
@@ -207,9 +206,7 @@ fn setup(
     // Hint text
     commands.spawn((
         WorldText::new("Click text to zoom in · Click plane to zoom out"),
-        WorldTextStyle::new()
-            .with_size(0.02)
-            .with_color(Color::srgba(0.6, 0.6, 0.6, 0.8)),
+        WorldTextStyle::new(0.02).with_color(Color::srgba(0.6, 0.6, 0.6, 0.8)),
         Transform::from_xyz(0.0, 0.0, 3.45),
     ));
 
@@ -614,9 +611,8 @@ fn switch_font(
         .unwrap_or(FontId::MONOSPACE)
         .0;
     for mut style in &mut texts {
-        *style = WorldTextStyle::new()
+        *style = WorldTextStyle::new(DISPLAY_SIZE)
             .with_font(font_id)
-            .with_size(DISPLAY_SIZE)
             .with_color(Color::srgb(0.9, 0.9, 0.9));
     }
 }

@@ -15,7 +15,7 @@ fn measurer() -> (FontRegistry, MeasureTextFn) {
     (registry, measure_fn)
 }
 
-const fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_measure() }
+fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_measure() }
 
 // ── Basic measurement ────────────────────────────────────────────────────────
 

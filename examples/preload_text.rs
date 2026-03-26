@@ -204,8 +204,7 @@ fn on_font_registered(
                 trigger.name,
                 font_id.0
             )),
-            WorldTextStyle::new()
-                .with_size(HEADER_SIZE)
+            WorldTextStyle::new(HEADER_SIZE)
                 .with_font(font_id.0)
                 .with_color(Color::srgb(0.6, 0.6, 0.6))
                 .with_shadow_mode(GlyphShadowMode::None)
@@ -218,8 +217,7 @@ fn on_font_registered(
     commands
         .spawn((
             WorldText::new(label),
-            WorldTextStyle::new()
-                .with_size(SAMPLE_SIZE)
+            WorldTextStyle::new(SAMPLE_SIZE)
                 .with_font(font_id.0)
                 .with_color(color)
                 .with_shadow_mode(GlyphShadowMode::None)

@@ -62,6 +62,7 @@ pub use types::BoundingBox;
 pub use types::Direction;
 pub use types::FontFeatureFlags;
 pub use types::FontFeatures;
+pub use types::FontSize;
 pub use types::FontSlant;
 pub use types::FontWeight;
 pub use types::ForLayout;

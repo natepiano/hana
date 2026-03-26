@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use bevy::tasks::available_parallelism;
 
+use crate::layout::FontSize;
 use crate::layout::Unit;
 
 /// Minimum canonical rasterization size in pixels.
@@ -289,7 +290,7 @@ impl AtlasConfig {
 ///
 /// Panel text uses points because panels are document-like (A4, business
 /// cards). Standalone `WorldText` uses meters because it lives in the 3D
-/// scene — `WorldTextStyle::new().with_size(0.2)` produces 20cm tall text,
+/// scene — `WorldTextStyle::new(0.2)` produces 20cm tall text,
 /// which is visible at typical viewing distances.
 ///
 /// # Examples
@@ -357,6 +358,33 @@ impl From<Mm> for f32 {
 
 impl From<In> for f32 {
     fn from(v: In) -> Self { v.0 * Unit::Inches.meters_per_unit() }
+}
+
+impl From<Pt> for FontSize {
+    fn from(v: Pt) -> Self {
+        Self {
+            value: v.0,
+            unit:  Some(Unit::Points),
+        }
+    }
+}
+
+impl From<Mm> for FontSize {
+    fn from(v: Mm) -> Self {
+        Self {
+            value: v.0,
+            unit:  Some(Unit::Millimeters),
+        }
+    }
+}
+
+impl From<In> for FontSize {
+    fn from(v: In) -> Self {
+        Self {
+            value: v.0,
+            unit:  Some(Unit::Inches),
+        }
+    }
 }
 
 // ── Paper sizes ──────────────────────────────────────────────────────────────

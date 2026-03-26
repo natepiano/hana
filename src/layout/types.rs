@@ -557,6 +557,28 @@ impl Unit {
     pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
 }
 
+/// A font size with an optional unit.
+///
+/// Carries both the numeric value and the unit it's expressed in.
+/// Created implicitly via `From` impls on [`Pt`](crate::Pt),
+/// [`Mm`](crate::Mm), [`In`](crate::In), and bare `f32`.
+///
+/// - `Pt(24.0).into()` → value 24.0, unit Points
+/// - `Mm(6.0).into()` → value 6.0, unit Millimeters
+/// - `In(0.24).into()` → value 0.24, unit Inches
+/// - `(24.0_f32).into()` → value 24.0, unit None (contextual default)
+#[derive(Clone, Copy, Debug)]
+pub struct FontSize {
+    /// The numeric size value.
+    pub value: f32,
+    /// The unit the value is expressed in. `None` = contextual default.
+    pub unit:  Option<Unit>,
+}
+
+impl From<f32> for FontSize {
+    fn from(value: f32) -> Self { Self { value, unit: None } }
+}
+
 /// Anchor point for standalone text positioning.
 ///
 /// Determines which point of the text block's bounding box is placed
@@ -713,7 +735,7 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// TextConfig::new(14.0).with_font(FontId::MONOSPACE.0).bold().no_wrap()
 ///
 /// // Standalone (aliased as TextStyle):
-/// TextStyle::new().with_font(FontId::MONOSPACE.0).with_size(24.0).bold().with_color(Color::RED)
+/// TextStyle::new(24.0).with_font(FontId::MONOSPACE.0).bold().with_color(Color::RED)
 /// ```
 #[derive(Component, Clone, Debug, Reflect)]
 pub struct TextProps<C: Send + Sync + 'static> {
@@ -795,17 +817,14 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn word_spacing(&self) -> f32 { self.word_spacing }
 
+    /// Returns the per-entity unit override, if set.
+    #[must_use]
+    pub const fn unit(&self) -> Option<Unit> { self.unit }
+
     /// Sets the font identifier.
     #[must_use]
     pub const fn with_font(mut self, font_id: u16) -> Self {
         self.font_id = font_id;
-        self
-    }
-
-    /// Sets the font size in layout units.
-    #[must_use]
-    pub const fn with_size(mut self, size: f32) -> Self {
-        self.size = size;
         self
     }
 
@@ -998,28 +1017,33 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 impl TextProps<ForLayout> {
     /// Creates a new layout config with the given font size.
     ///
+    /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
+    /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
+    /// panel's `font_unit`.
+    ///
     /// Defaults to word wrapping, normal weight, normal slant.
     #[must_use]
-    pub const fn new(size: f32) -> Self {
+    pub fn new(size: impl Into<FontSize>) -> Self {
+        let font_size = size.into();
         Self {
-            font_id: 0,
-            size,
-            weight: FontWeight::NORMAL,
-            slant: FontSlant::Normal,
-            line_height: 0.0,
+            font_id:        0,
+            size:           font_size.value,
+            weight:         FontWeight::NORMAL,
+            slant:          FontSlant::Normal,
+            line_height:    0.0,
             letter_spacing: 0.0,
-            word_spacing: 0.0,
-            wrap: TextWrap::Words,
-            color: Color::WHITE,
-            align: TextAlign::Left,
-            anchor: Anchor::Center,
-            render_mode: GlyphRenderMode::Text,
-            shadow_mode: GlyphShadowMode::Text,
+            word_spacing:   0.0,
+            wrap:           TextWrap::Words,
+            color:          Color::WHITE,
+            align:          TextAlign::Left,
+            anchor:         Anchor::Center,
+            render_mode:    GlyphRenderMode::Text,
+            shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
-            font_features: FontFeatures::NONE,
-            unit: None,
-            world_scale: None,
-            _context: PhantomData,
+            font_features:  FontFeatures::NONE,
+            unit:           font_size.unit,
+            world_scale:    None,
+            _context:       PhantomData,
         }
     }
 
@@ -1063,19 +1087,26 @@ impl TextProps<ForLayout> {
     /// engine rather than by an anchor offset.
     #[must_use]
     pub const fn as_standalone(&self) -> TextProps<ForStandalone> {
-        TextProps::<ForStandalone>::new()
-            .with_font(self.font_id)
-            .with_size(self.size)
-            .with_weight(self.weight)
-            .with_slant(self.slant)
-            .with_line_height(self.line_height)
-            .with_letter_spacing(self.letter_spacing)
-            .with_word_spacing(self.word_spacing)
-            .with_color(self.color)
-            .with_render_mode(self.render_mode)
-            .with_shadow_mode(self.shadow_mode)
-            .with_loading_policy(self.loading_policy)
-            .with_font_features(self.font_features)
+        TextProps::<ForStandalone> {
+            font_id:        self.font_id,
+            size:           self.size,
+            weight:         self.weight,
+            slant:          self.slant,
+            line_height:    self.line_height,
+            letter_spacing: self.letter_spacing,
+            word_spacing:   self.word_spacing,
+            wrap:           TextWrap::None,
+            color:          self.color,
+            align:          TextAlign::Left,
+            anchor:         Anchor::Center,
+            render_mode:    self.render_mode,
+            shadow_mode:    self.shadow_mode,
+            loading_policy: self.loading_policy,
+            font_features:  self.font_features,
+            unit:           self.unit,
+            world_scale:    None,
+            _context:       PhantomData,
+        }
     }
 }
 
@@ -1086,12 +1117,19 @@ impl Default for TextProps<ForLayout> {
 // ── Standalone-only methods ──────────────────────────────────────────────────
 
 impl TextProps<ForStandalone> {
-    /// Creates a new style with all defaults (16-unit white monospace, centered anchor).
+    /// Creates a new style with the given font size.
+    ///
+    /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
+    /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
+    /// global [`UnitConfig::world_font`](crate::UnitConfig).
+    ///
+    /// Defaults to centered anchor, white color, normal weight.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new(size: impl Into<FontSize>) -> Self {
+        let font_size = size.into();
         Self {
             font_id:        0,
-            size:           DEFAULT_FONT_SIZE,
+            size:           font_size.value,
             weight:         FontWeight::NORMAL,
             slant:          FontSlant::Normal,
             line_height:    0.0,
@@ -1105,7 +1143,7 @@ impl TextProps<ForStandalone> {
             shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
             font_features:  FontFeatures::NONE,
-            unit:           None,
+            unit:           font_size.unit,
             world_scale:    None,
             _context:       PhantomData,
         }
@@ -1143,10 +1181,11 @@ impl TextProps<ForStandalone> {
     /// # Example
     ///
     /// ```ignore
-    /// // 12-point text — auto-converts to world meters:
-    /// WorldTextStyle::new()
-    ///     .with_size(12.0)
-    ///     .with_unit(Unit::Points)
+    /// // Explicit unit override (rare — prefer newtypes in new()):
+    /// WorldTextStyle::new(12.0).with_unit(Unit::Points)
+    ///
+    /// // Preferred — newtype carries the unit:
+    /// WorldTextStyle::new(Pt(12.0))
     /// ```
     #[must_use]
     pub const fn with_unit(mut self, unit: Unit) -> Self {
@@ -1165,17 +1204,13 @@ impl TextProps<ForStandalone> {
         self
     }
 
-    /// Returns the per-entity unit override, if set.
-    #[must_use]
-    pub const fn unit(&self) -> Option<Unit> { self.unit }
-
     /// Returns the per-entity world scale override, if set.
     #[must_use]
     pub const fn world_scale(&self) -> Option<f32> { self.world_scale }
 }
 
 impl Default for TextProps<ForStandalone> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self { Self::new(DEFAULT_FONT_SIZE) }
 }
 
 impl TextProps<ForStandalone> {
@@ -1186,19 +1221,26 @@ impl TextProps<ForStandalone> {
     /// not word-wrap by default.
     #[must_use]
     pub const fn as_layout_config(&self) -> TextProps<ForLayout> {
-        TextProps::<ForLayout>::new(self.size)
-            .with_font(self.font_id)
-            .with_weight(self.weight)
-            .with_slant(self.slant)
-            .with_line_height(self.line_height)
-            .with_letter_spacing(self.letter_spacing)
-            .with_word_spacing(self.word_spacing)
-            .with_color(self.color)
-            .with_render_mode(self.render_mode)
-            .with_shadow_mode(self.shadow_mode)
-            .with_loading_policy(self.loading_policy)
-            .with_font_features(self.font_features)
-            .no_wrap()
+        TextProps::<ForLayout> {
+            font_id:        self.font_id,
+            size:           self.size,
+            weight:         self.weight,
+            slant:          self.slant,
+            line_height:    self.line_height,
+            letter_spacing: self.letter_spacing,
+            word_spacing:   self.word_spacing,
+            wrap:           TextWrap::None,
+            color:          self.color,
+            align:          TextAlign::Left,
+            anchor:         Anchor::Center,
+            render_mode:    self.render_mode,
+            shadow_mode:    self.shadow_mode,
+            loading_policy: self.loading_policy,
+            font_features:  self.font_features,
+            unit:           self.unit,
+            world_scale:    self.world_scale,
+            _context:       PhantomData,
+        }
     }
 }
 
