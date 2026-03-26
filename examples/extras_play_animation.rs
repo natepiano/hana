@@ -60,7 +60,7 @@ fn setup(
         Transform::from_translation(START_POS),
         PanOrbitCamera {
             trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
             },
             trackpad_pinch_to_zoom_enabled: true,

@@ -149,7 +149,7 @@ enum MeshShape {
 
 #[derive(Resource)]
 struct SceneEntities {
-    camera: Entity,
+    camera:       Entity,
     scene_bounds: Entity,
 }
 
@@ -157,9 +157,7 @@ struct SceneEntities {
 struct ActiveEasing(EaseFunction);
 
 impl Default for ActiveEasing {
-    fn default() -> Self {
-        Self(EaseFunction::CubicOut)
-    }
+    fn default() -> Self { Self(EaseFunction::CubicOut) }
 }
 
 #[derive(Component)]
@@ -201,7 +199,7 @@ struct HoveredEntity(Option<Entity>);
 struct EnableLogOnAnimationEnd;
 
 struct PendingLogEntry {
-    text: String,
+    text:  String,
     color: Color,
 }
 
@@ -396,7 +394,7 @@ fn setup(
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
             trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
             },
             trackpad_pinch_to_zoom_enabled: true,
@@ -743,9 +741,7 @@ fn despawn_window_labels(
 // Pause
 // ============================================================================
 
-fn not_paused(time: Res<Time<Virtual>>) -> bool {
-    !time.is_paused()
-}
+fn not_paused(time: Res<Time<Virtual>>) -> bool { !time.is_paused() }
 
 fn toggle_pause(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -949,14 +945,14 @@ fn draw_shape_gizmo(
                     .with_scale(*size * GIZMO_SCALE),
                 color,
             );
-        }
+        },
         MeshShape::Sphere(radius) => {
             gizmos.sphere(
                 Isometry3d::new(transform.translation, transform.rotation),
                 radius * GIZMO_SCALE,
                 color,
             );
-        }
+        },
         MeshShape::Torus {
             minor_radius,
             major_radius,
@@ -966,7 +962,7 @@ fn draw_shape_gizmo(
                 Isometry3d::new(transform.translation, transform.rotation),
                 color,
             );
-        }
+        },
     }
 }
 
@@ -1209,15 +1205,15 @@ fn toggle_projection(
                     log.push("Projection: Orthographic".into());
                     logged = true;
                 }
-            }
+            },
             Projection::Orthographic(_) => {
                 *projection = Projection::Perspective(PerspectiveProjection::default());
                 if !logged {
                     log.push("Projection: Perspective".into());
                     logged = true;
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
         camera.force_update = true;
     }
@@ -1286,11 +1282,11 @@ fn conflict_policy_hint_text(policy: AnimationConflictPolicy) -> String {
     match policy {
         AnimationConflictPolicy::LastWins => {
             "AnimationConflictPolicy::LastWins - new animation cancels current one".into()
-        }
+        },
         AnimationConflictPolicy::FirstWins => {
             "AnimationConflictPolicy::FirstWins - new animation is rejected while one is playing"
                 .into()
-        }
+        },
     }
 }
 
@@ -1451,15 +1447,13 @@ impl EventLog {
             return;
         }
         self.pending.push(PendingLogEntry {
-            text: EVENT_LOG_SEPARATOR.into(),
+            text:  EVENT_LOG_SEPARATOR.into(),
             color: EVENT_LOG_COLOR,
         });
     }
 }
 
-fn fmt_vec3(v: Vec3) -> String {
-    format!("({:.1}, {:.1}, {:.1})", v.x, v.y, v.z)
-}
+fn fmt_vec3(v: Vec3) -> String { format!("({:.1}, {:.1}, {:.1})", v.x, v.y, v.z) }
 
 fn log_animation_begin(event: On<AnimationBegin>, mut log: ResMut<EventLog>) {
     log.push(format!("AnimationBegin\n  source={:?}", event.source));

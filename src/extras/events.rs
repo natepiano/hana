@@ -143,13 +143,13 @@ use super::animation::CameraMove;
 #[derive(Clone, Reflect)]
 pub struct ZoomContext {
     /// The entity being framed.
-    pub target: Entity,
+    pub target:   Entity,
     /// The margin from the triggering [`ZoomToFit`].
-    pub margin: f32,
+    pub margin:   f32,
     /// The duration from the triggering [`ZoomToFit`].
     pub duration: Duration,
     /// The easing curve from the triggering [`ZoomToFit`].
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 /// Identifies which event triggered an animation lifecycle.
@@ -206,15 +206,15 @@ pub enum AnimationSource {
 pub struct ZoomToFit {
     /// The camera entity to zoom.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity to frame.
-    pub target: Entity,
+    pub target:   Entity,
     /// Fraction of screen to leave as margin.
-    pub margin: f32,
+    pub margin:   f32,
     /// Animation duration (`ZERO` for instant).
     pub duration: Duration,
     /// Easing curve for the animation.
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 impl ZoomToFit {
@@ -254,15 +254,15 @@ impl ZoomToFit {
 pub struct ZoomBegin {
     /// The camera that is zooming.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity being framed.
-    pub target: Entity,
+    pub target:   Entity,
     /// The margin from the triggering [`ZoomToFit`].
-    pub margin: f32,
+    pub margin:   f32,
     /// The duration from the triggering [`ZoomToFit`].
     pub duration: Duration,
     /// The easing curve from the triggering [`ZoomToFit`].
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 /// `ZoomEnd` — emitted when a [`ZoomToFit`] operation completes (both animated and instant).
@@ -271,15 +271,15 @@ pub struct ZoomBegin {
 pub struct ZoomEnd {
     /// The camera that finished zooming.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity that was framed.
-    pub target: Entity,
+    pub target:   Entity,
     /// The margin from the triggering [`ZoomToFit`].
-    pub margin: f32,
+    pub margin:   f32,
     /// The duration from the triggering [`ZoomToFit`].
     pub duration: Duration,
     /// The easing curve from the triggering [`ZoomToFit`].
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 /// `ZoomCancelled` — emitted when a [`ZoomToFit`] animation is cancelled before completion.
@@ -297,15 +297,15 @@ pub struct ZoomEnd {
 pub struct ZoomCancelled {
     /// The camera whose zoom was cancelled.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity that was being framed.
-    pub target: Entity,
+    pub target:   Entity,
     /// The margin from the triggering [`ZoomToFit`].
-    pub margin: f32,
+    pub margin:   f32,
     /// The duration from the triggering [`ZoomToFit`].
     pub duration: Duration,
     /// The easing curve from the triggering [`ZoomToFit`].
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 /// `PlayAnimation` — plays a queued sequence of [`CameraMove`] steps.
@@ -318,11 +318,11 @@ pub struct ZoomCancelled {
 pub struct PlayAnimation {
     /// The camera entity to animate.
     #[event_target]
-    pub camera: Entity,
+    pub camera:       Entity,
     /// The queue of camera movements.
     pub camera_moves: VecDeque<CameraMove>,
     /// The source of this animation.
-    pub source: AnimationSource,
+    pub source:       AnimationSource,
     /// Optional zoom context when this animation originates from [`ZoomToFit`].
     pub zoom_context: Option<ZoomContext>,
 }
@@ -383,10 +383,10 @@ pub struct AnimationEnd {
 pub struct AnimationCancelled {
     /// The camera whose animation was cancelled.
     #[event_target]
-    pub camera: Entity,
+    pub camera:      Entity,
     /// Whether this animation originated from [`PlayAnimation`], [`ZoomToFit`], or
     /// [`AnimateToFit`].
-    pub source: AnimationSource,
+    pub source:      AnimationSource,
     /// The [`CameraMove`] that was in progress when cancelled.
     pub camera_move: CameraMove,
 }
@@ -410,7 +410,7 @@ pub struct AnimationRejected {
 pub struct CameraMoveBegin {
     /// The camera being animated.
     #[event_target]
-    pub camera: Entity,
+    pub camera:      Entity,
     /// The [`CameraMove`] step that is starting.
     pub camera_move: CameraMove,
 }
@@ -421,7 +421,7 @@ pub struct CameraMoveBegin {
 pub struct CameraMoveEnd {
     /// The camera that finished this move step.
     #[event_target]
-    pub camera: Entity,
+    pub camera:      Entity,
     /// The [`CameraMove`] step that completed.
     pub camera_move: CameraMove,
 }
@@ -443,19 +443,19 @@ pub struct CameraMoveEnd {
 pub struct AnimateToFit {
     /// The camera entity.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity to frame.
-    pub target: Entity,
+    pub target:   Entity,
     /// Final yaw in radians.
-    pub yaw: f32,
+    pub yaw:      f32,
     /// Final pitch in radians.
-    pub pitch: f32,
+    pub pitch:    f32,
     /// Fraction of screen to leave as margin.
-    pub margin: f32,
+    pub margin:   f32,
     /// Animation duration (`ZERO` for instant).
     pub duration: Duration,
     /// Easing curve for the animation.
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 impl AnimateToFit {
@@ -520,13 +520,13 @@ impl AnimateToFit {
 pub struct LookAt {
     /// The camera entity.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity to look at.
-    pub target: Entity,
+    pub target:   Entity,
     /// Animation duration (`ZERO` for instant).
     pub duration: Duration,
     /// Easing curve for the animation.
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 impl LookAt {
@@ -570,15 +570,15 @@ impl LookAt {
 pub struct LookAtAndZoomToFit {
     /// The camera entity.
     #[event_target]
-    pub camera: Entity,
+    pub camera:   Entity,
     /// The entity to frame.
-    pub target: Entity,
+    pub target:   Entity,
     /// Fraction of screen to leave as margin.
-    pub margin: f32,
+    pub margin:   f32,
     /// Animation duration (`ZERO` for instant).
     pub duration: Duration,
     /// Easing curve for the animation.
-    pub easing: EaseFunction,
+    pub easing:   EaseFunction,
 }
 
 impl LookAtAndZoomToFit {
@@ -632,7 +632,5 @@ pub struct SetFitTarget {
 
 impl SetFitTarget {
     /// Creates a new `SetFitTarget` event.
-    pub const fn new(camera: Entity, target: Entity) -> Self {
-        Self { camera, target }
-    }
+    pub const fn new(camera: Entity, target: Entity) -> Self { Self { camera, target } }
 }

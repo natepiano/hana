@@ -1,8 +1,10 @@
 //! Demonstrates usage with multiple windows
 
+use bevy::camera::RenderTarget;
+use bevy::prelude::*;
 use bevy::window::WindowRef;
-use bevy::{camera::RenderTarget, prelude::*};
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()

@@ -1,7 +1,9 @@
 //! Demonstrates how to keep the camera's focus inside a shape.
 
-use bevy::{color::palettes::css::WHITE, prelude::*};
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+use bevy::color::palettes::css::WHITE;
+use bevy::prelude::*;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()

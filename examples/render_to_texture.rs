@@ -9,15 +9,18 @@
 use std::f32::consts::PI;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::camera::ImageRenderTarget;
+use bevy::camera::RenderTarget;
+use bevy::prelude::*;
+use bevy::render::render_resource::Extent3d;
+use bevy::render::render_resource::TextureDescriptor;
+use bevy::render::render_resource::TextureDimension;
+use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::TextureUsages;
 use bevy::window::PrimaryWindow;
-use bevy::{
-    camera::{ImageRenderTarget, RenderTarget},
-    prelude::*,
-    render::render_resource::{
-        Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    },
-};
-use bevy_lagrange::{ActiveCameraData, LagrangePlugin, PanOrbitCamera};
+use bevy_lagrange::ActiveCameraData;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()
@@ -80,7 +83,8 @@ fn setup(
         ..default()
     });
 
-    // This specifies the layer used for the first pass, which will be attached to the first pass camera and cube.
+    // This specifies the layer used for the first pass, which will be attached to the first pass
+    // camera and cube.
     let first_pass_layer = RenderLayers::layer(1);
 
     // The cube that will be rendered to the texture.
@@ -151,14 +155,14 @@ fn setup(
     active_cam.set_if_neq(ActiveCameraData {
         // Set the entity to the entity ID of the camera you want to control. In this case, it's
         // the inner (first pass) cube that is rendered to the texture/image.
-        entity: Some(pan_orbit_id),
+        entity:        Some(pan_orbit_id),
         // What you set these values to will depend on your use case, but generally you want the
         // viewport size to match the size of the render target (image, viewport), and the window
         // size to match the size of the window that you are interacting with.
         viewport_size: Some(Vec2::new(size.width as f32, size.height as f32)),
-        window_size: Some(Vec2::new(primary_window.width(), primary_window.height())),
+        window_size:   Some(Vec2::new(primary_window.width(), primary_window.height())),
         // Setting manual to true ensures PanOrbitCameraPlugin will not overwrite this resource
-        manual: true,
+        manual:        true,
     });
 }
 

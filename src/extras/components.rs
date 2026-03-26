@@ -88,9 +88,9 @@ pub(super) struct AnimationSourceMarker(pub AnimationSource);
 /// Original values are stored here and restored when the animation completes.
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub(super) struct PanOrbitCameraStash {
-    pub zoom: f32,
-    pub pan: f32,
-    pub orbit: f32,
+    pub zoom:    f32,
+    pub pan:     f32,
+    pub orbit:   f32,
     pub enabled: bool,
 }
 

@@ -15,17 +15,17 @@ const LABEL_PIXEL_OFFSET: f32 = 8.0;
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 pub struct MarginLabel {
-    pub edge: Edge,
+    pub edge:   Edge,
     pub camera: Entity,
 }
 
 /// Parameters for creating or updating a margin label.
 pub struct MarginLabelParams {
-    pub camera: Entity,
-    pub edge: Edge,
-    pub text: String,
-    pub color: Color,
-    pub screen_pos: Vec2,
+    pub camera:        Entity,
+    pub edge:          Edge,
+    pub text:          String,
+    pub color:         Color,
+    pub screen_pos:    Vec2,
     pub viewport_size: Vec2,
 }
 
@@ -83,19 +83,19 @@ fn apply_margin_label_anchor(node: &mut Node, edge: Edge, screen_pos: Vec2, view
             node.top = Val::Px(screen_pos.y);
             node.right = Val::Auto;
             node.bottom = Val::Auto;
-        }
+        },
         Edge::Right => {
             node.right = Val::Px(viewport_size.x - screen_pos.x);
             node.top = Val::Px(screen_pos.y);
             node.left = Val::Auto;
             node.bottom = Val::Auto;
-        }
+        },
         Edge::Bottom => {
             node.left = Val::Px(screen_pos.x);
             node.bottom = Val::Px(viewport_size.y - screen_pos.y);
             node.right = Val::Auto;
             node.top = Val::Auto;
-        }
+        },
     }
 }
 
@@ -141,7 +141,7 @@ pub fn update_or_create_margin_label(
             TextColor(params.color),
             margin_label_node(params.edge, params.screen_pos, params.viewport_size),
             MarginLabel {
-                edge: params.edge,
+                edge:   params.edge,
                 camera: params.camera,
             },
             UiTargetCamera(params.camera),

@@ -1,8 +1,10 @@
 //! Demonstrates how to have the camera follow a target object
 
-use bevy::prelude::*;
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 use std::f32::consts::TAU;
+
+use bevy::prelude::*;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()

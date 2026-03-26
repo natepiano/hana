@@ -44,10 +44,10 @@ pub struct TwoFingerGestures {
     /// The delta movement of both touches.
     /// Uses the midpoint between the touches to calculate movement. Thus, if the midpoint doesn't
     /// move then this will be zero (or close to zero), like when pinching.
-    pub motion: Vec2,
+    pub motion:   Vec2,
     /// The delta distance between both touches.
     /// Use this to implement pinch gestures.
-    pub pinch: f32,
+    pub pinch:    f32,
     /// The delta angle of the two touches.
     /// Positive values correspond to rotating clockwise.
     #[allow(dead_code)]
@@ -79,7 +79,7 @@ impl TouchTracker {
                 let motion = curr_pos - prev_pos;
 
                 TouchGestures::OneFinger(OneFingerGestures { motion })
-            }
+            },
             // Two fingers
             ((Some(curr1), Some(curr2)), (Some(prev1), Some(prev2))) => {
                 let curr1_pos = curr1.position();
@@ -109,9 +109,9 @@ impl TouchTracker {
                 // The angle between -1deg and +1deg is 358deg according to Vec2::angle_between,
                 // but we want the answer to be +2deg (or -2deg if swapped). Therefore, we calculate
                 // two angles - one from UP and one from DOWN, and use the one with the smallest
-                // absolute value. This is necessary to get a predictable result when the two touches
-                // swap sides (i.e. mobile 1's X position being less than the other, to the other way
-                // round).
+                // absolute value. This is necessary to get a predictable result when the two
+                // touches swap sides (i.e. mobile 1's X position being less than
+                // the other, to the other way round).
                 let rotation = if rotate_angle_negy.abs() < rotate_angle_posy.abs() {
                     rotate_angle_negy
                 } else {
@@ -123,7 +123,7 @@ impl TouchTracker {
                     pinch,
                     rotation,
                 })
-            }
+            },
             // Three fingers and more not currently supported
             _ => TouchGestures::None,
         }
@@ -138,18 +138,18 @@ pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTrack
         0 => {
             touch_tracker.curr_pressed = (None, None);
             touch_tracker.prev_pressed = (None, None);
-        }
+        },
         1 => {
             let touch: &Touch = pressed.first().unwrap();
             touch_tracker.prev_pressed = touch_tracker.curr_pressed;
             touch_tracker.curr_pressed = (Some(*touch), None);
-        }
+        },
         2 => {
             let touch1: &Touch = pressed.first().unwrap();
             let touch2: &Touch = pressed.last().unwrap();
             touch_tracker.prev_pressed = touch_tracker.curr_pressed;
             touch_tracker.curr_pressed = (Some(*touch1), Some(*touch2));
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }

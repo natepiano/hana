@@ -1,7 +1,8 @@
 //! Visualization system for fit target debugging.
 //!
 //! Provides screen-aligned boundary box and silhouette polygon visualization for the current
-//! camera fit target. Uses Bevy's `GizmoConfigGroup` pattern (similar to `Avian3D`'s `PhysicsGizmos`).
+//! camera fit target. Uses Bevy's `GizmoConfigGroup` pattern (similar to `Avian3D`'s
+//! `PhysicsGizmos`).
 
 mod convex_hull;
 mod labels;

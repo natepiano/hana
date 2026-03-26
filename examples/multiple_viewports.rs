@@ -1,8 +1,10 @@
 //! Demonstrates usage with multiple viewports
 
+use bevy::camera::Viewport;
+use bevy::prelude::*;
 use bevy::window::WindowResized;
-use bevy::{camera::Viewport, prelude::*};
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()

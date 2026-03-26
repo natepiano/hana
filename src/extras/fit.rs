@@ -39,9 +39,7 @@ pub const DEGENERATE_EXTENT_THRESHOLD: f32 = 1e-6;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
 /// For example, a margin of 0.08 returns 1.087 (8% margin).
-pub const fn zoom_margin_multiplier(margin: f32) -> f32 {
-    1.0 / (1.0 - margin)
-}
+pub const fn zoom_margin_multiplier(margin: f32) -> f32 { 1.0 / (1.0 - margin) }
 
 // ============================================================================
 // Types
@@ -66,7 +64,7 @@ pub struct FitSolution {
     /// The optimal orbital radius.
     pub radius: f32,
     /// The centered focus point.
-    pub focus: Vec3,
+    pub focus:  Vec3,
 }
 
 /// Explicit fit calculation failures.
@@ -84,7 +82,7 @@ impl fmt::Display for FitError {
             Self::NoViewport => write!(f, "camera viewport size is unavailable"),
             Self::PointsBehindCamera => {
                 write!(f, "all candidate fits project points behind camera")
-            }
+            },
         }
     }
 }
@@ -289,7 +287,7 @@ pub fn calculate_fit(
             );
             return Ok(FitSolution {
                 radius: best_radius,
-                focus: best_focus,
+                focus:  best_focus,
             });
         }
     }
@@ -304,7 +302,7 @@ pub fn calculate_fit(
 
     Ok(FitSolution {
         radius: best_radius,
-        focus: best_focus,
+        focus:  best_focus,
     })
 }
 
@@ -337,7 +335,7 @@ fn build_test_projection(projection: &Projection, test_radius: f32) -> Projectio
                 area: new_area,
                 ..*ortho
             })
-        }
+        },
         _ => projection.clone(),
     }
 }

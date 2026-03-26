@@ -3,14 +3,19 @@
 //! it's primarily here for easy e2e testing.
 
 use bevy::camera::RenderTarget;
+use bevy::ecs::schedule::ScheduleLabel;
+use bevy::prelude::*;
 use bevy::window::WindowRef;
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
-use bevy_egui::{
-    egui, EguiContext, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass,
-    PrimaryEguiContext,
-};
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+use bevy_egui::egui;
+use bevy_egui::EguiContext;
+use bevy_egui::EguiMultipassSchedule;
+use bevy_egui::EguiPlugin;
+use bevy_egui::EguiPrimaryContextPass;
+use bevy_egui::PrimaryEguiContext;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
+/// Schedule label for the second window's egui context pass.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SecondWindowContextPass;
 

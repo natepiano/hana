@@ -33,28 +33,28 @@ pub enum CameraMove {
         /// World-space camera position.
         translation: Vec3,
         /// World-space focus point the camera looks at.
-        focus: Vec3,
+        focus:       Vec3,
         /// Duration of this movement step.
-        duration: Duration,
+        duration:    Duration,
         /// Easing curve for the interpolation.
-        easing: EaseFunction,
+        easing:      EaseFunction,
     },
     /// Animate to orbital parameters around a focus point.
     /// Avoids gimbal lock at extreme pitch angles (±PI/2) where world-space
     /// decomposition via `atan2` loses yaw information.
     ToOrbit {
         /// World-space focus point the camera orbits around.
-        focus: Vec3,
+        focus:    Vec3,
         /// Target yaw in radians.
-        yaw: f32,
+        yaw:      f32,
         /// Target pitch in radians.
-        pitch: f32,
+        pitch:    f32,
         /// Target orbital radius.
-        radius: f32,
+        radius:   f32,
         /// Duration of this movement step.
         duration: Duration,
         /// Easing curve for the interpolation.
-        easing: EaseFunction,
+        easing:   EaseFunction,
     },
 }
 
@@ -67,9 +67,7 @@ impl CameraMove {
     }
 
     /// Returns the duration in milliseconds.
-    pub fn duration_ms(&self) -> f32 {
-        self.duration().as_secs_f32() * 1000.0
-    }
+    pub fn duration_ms(&self) -> f32 { self.duration().as_secs_f32() * 1000.0 }
 
     /// Returns the easing function for this movement step.
     pub const fn easing(&self) -> EaseFunction {
@@ -101,7 +99,7 @@ impl CameraMove {
                 let pitch_rot = Quat::from_axis_angle(Vec3::X, -*pitch);
                 let rotation = yaw_rot * pitch_rot;
                 *focus + rotation * Vec3::new(0.0, 0.0, *radius)
-            }
+            },
         }
     }
 
@@ -137,17 +135,17 @@ const EXTERNAL_INPUT_TOLERANCE: f32 = 1e-6;
 #[derive(Clone, Reflect, Default, Debug)]
 enum MoveState {
     InProgress {
-        elapsed_ms: f32,
-        start_focus: Vec3,
-        start_pitch: f32,
-        start_radius: f32,
-        start_yaw: f32,
+        elapsed_ms:          f32,
+        start_focus:         Vec3,
+        start_pitch:         f32,
+        start_radius:        f32,
+        start_yaw:           f32,
         /// Values written by the animation last frame — if the camera's current
         /// values differ, external input occurred and the animation may interrupt
         /// depending on `CameraInputInterruptBehavior`.
-        last_written_focus: Vec3,
-        last_written_yaw: f32,
-        last_written_pitch: f32,
+        last_written_focus:  Vec3,
+        last_written_yaw:    f32,
+        last_written_pitch:  f32,
         last_written_radius: f32,
     },
     #[default]
@@ -175,7 +173,7 @@ impl MoveState {
                 let radius_changed =
                     (last_written_radius - camera.target_radius).abs() > EXTERNAL_INPUT_TOLERANCE;
                 focus_changed || yaw_changed || pitch_changed || radius_changed
-            }
+            },
             Self::Ready => false,
         }
     }
@@ -195,7 +193,7 @@ impl MoveState {
 pub struct CameraMoveList {
     /// The queue of camera movements to process.
     pub camera_moves: VecDeque<CameraMove>,
-    state: MoveState,
+    state:            MoveState,
 }
 
 impl CameraMoveList {
@@ -217,7 +215,7 @@ impl CameraMoveList {
                 } else {
                     0.0
                 }
-            }
+            },
             MoveState::Ready => self
                 .camera_moves
                 .front()
@@ -256,11 +254,11 @@ fn handle_empty_queue(
     if let Some(marker) = zoom_marker {
         commands.entity(entity).remove::<ZoomAnimationMarker>();
         commands.trigger(ZoomEnd {
-            camera: entity,
-            target: marker.0.target,
-            margin: marker.0.margin,
+            camera:   entity,
+            target:   marker.0.target,
+            margin:   marker.0.margin,
             duration: marker.0.duration,
-            easing: marker.0.easing,
+            easing:   marker.0.easing,
         });
     }
 }
@@ -293,15 +291,15 @@ fn handle_camera_input_interrupt(
             if let Some(marker) = zoom_marker {
                 commands.entity(entity).remove::<ZoomAnimationMarker>();
                 commands.trigger(ZoomCancelled {
-                    camera: entity,
-                    target: marker.0.target,
-                    margin: marker.0.margin,
+                    camera:   entity,
+                    target:   marker.0.target,
+                    margin:   marker.0.margin,
                     duration: marker.0.duration,
-                    easing: marker.0.easing,
+                    easing:   marker.0.easing,
                 });
             }
             CameraInputInterruptBehavior::Cancel
-        }
+        },
         CameraInputInterruptBehavior::Complete => {
             // Jump to the final position of the entire queue
             if let Some(final_move) = queue.camera_moves.back() {
@@ -323,15 +321,15 @@ fn handle_camera_input_interrupt(
             if let Some(marker) = zoom_marker {
                 commands.entity(entity).remove::<ZoomAnimationMarker>();
                 commands.trigger(ZoomEnd {
-                    camera: entity,
-                    target: marker.0.target,
-                    margin: marker.0.margin,
+                    camera:   entity,
+                    target:   marker.0.target,
+                    margin:   marker.0.margin,
                     duration: marker.0.duration,
-                    easing: marker.0.easing,
+                    easing:   marker.0.easing,
                 });
             }
             CameraInputInterruptBehavior::Complete
-        }
+        },
     }
 }
 
@@ -346,7 +344,7 @@ fn handle_ready_state(
 ) -> bool {
     if current_move.duration().is_zero() {
         commands.trigger(CameraMoveBegin {
-            camera: entity,
+            camera:      entity,
             camera_move: current_move.clone(),
         });
 
@@ -358,7 +356,7 @@ fn handle_ready_state(
         pan_orbit.force_update = true;
 
         commands.trigger(CameraMoveEnd {
-            camera: entity,
+            camera:      entity,
             camera_move: current_move.clone(),
         });
         queue.camera_moves.pop_front();
@@ -367,19 +365,19 @@ fn handle_ready_state(
 
     // Transition to `InProgress` with captured starting orbital parameters
     queue.state = MoveState::InProgress {
-        elapsed_ms: 0.0,
-        start_focus: pan_orbit.target_focus,
-        start_radius: pan_orbit.target_radius,
-        start_yaw: pan_orbit.target_yaw,
-        start_pitch: pan_orbit.target_pitch,
-        last_written_focus: pan_orbit.target_focus,
-        last_written_yaw: pan_orbit.target_yaw,
-        last_written_pitch: pan_orbit.target_pitch,
+        elapsed_ms:          0.0,
+        start_focus:         pan_orbit.target_focus,
+        start_radius:        pan_orbit.target_radius,
+        start_yaw:           pan_orbit.target_yaw,
+        start_pitch:         pan_orbit.target_pitch,
+        last_written_focus:  pan_orbit.target_focus,
+        last_written_yaw:    pan_orbit.target_yaw,
+        last_written_pitch:  pan_orbit.target_pitch,
         last_written_radius: pan_orbit.target_radius,
     };
 
     commands.trigger(CameraMoveBegin {
-        camera: entity,
+        camera:      entity,
         camera_move: current_move.clone(),
     });
 
@@ -466,7 +464,7 @@ fn handle_in_progress(
     // Check if move complete and advance to next
     if is_final_frame {
         commands.trigger(CameraMoveEnd {
-            camera: entity,
+            camera:      entity,
             camera_move: current_move.clone(),
         });
         queue.camera_moves.pop_front();
@@ -514,10 +512,10 @@ pub(super) fn process_camera_move_list(
                 zoom_marker,
             );
             match outcome {
-                CameraInputInterruptBehavior::Ignore => {}
+                CameraInputInterruptBehavior::Ignore => {},
                 CameraInputInterruptBehavior::Cancel | CameraInputInterruptBehavior::Complete => {
                     continue;
-                }
+                },
             }
         }
 
@@ -532,7 +530,7 @@ pub(super) fn process_camera_move_list(
                 ) {
                     continue;
                 }
-            }
+            },
             MoveState::InProgress { .. } => {
                 handle_in_progress(
                     &mut commands,
@@ -542,7 +540,7 @@ pub(super) fn process_camera_move_list(
                     &current_move,
                     time.delta_secs(),
                 );
-            }
+            },
         }
     }
 }

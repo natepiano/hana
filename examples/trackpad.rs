@@ -5,9 +5,12 @@
 //!   Pan: Shift + Middle click, ShiftLeft + trackpad scroll
 //!   Zoom: Mousewheel, ControlLeft + trackpad scroll
 
-use bevy::prelude::*;
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera, TrackpadBehavior};
 use std::f32::consts::TAU;
+
+use bevy::prelude::*;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
     App::new()
@@ -63,7 +66,7 @@ fn setup(
             // you can use this helper method:
             // `trackpad_behavior: TrackpadBehavior::blender_default(),`
             trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan: Some(KeyCode::ShiftLeft),
+                modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
             },
             trackpad_sensitivity: 1.0,

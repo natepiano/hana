@@ -6,9 +6,12 @@
 //!   Pan: Shift + Middle click
 //!   Zoom: Mousewheel OR Right click + move mouse up/down
 
-use bevy::prelude::*;
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera, TouchControls};
 use std::f32::consts::TAU;
+
+use bevy::prelude::*;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::TouchControls;
 
 fn main() {
     App::new()

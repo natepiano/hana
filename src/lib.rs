@@ -3,20 +3,28 @@
 
 use std::f32::consts::PI;
 
-use bevy::camera::{CameraUpdateSystems, RenderTarget};
+use bevy::camera::CameraUpdateSystems;
+use bevy::camera::RenderTarget;
 use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
-use bevy::window::{PrimaryWindow, WindowRef};
+use bevy::window::PrimaryWindow;
+use bevy::window::WindowRef;
 #[cfg(feature = "bevy_egui")]
 use bevy_egui::EguiPreUpdateSet;
 
 #[cfg(feature = "bevy_egui")]
-pub use crate::egui::{EguiFocusIncludesHover, EguiWantsFocus};
-use crate::input::{button_zoom_just_pressed, mouse_key_tracker, MouseKeyTracker};
+pub use crate::egui::EguiFocusIncludesHover;
+#[cfg(feature = "bevy_egui")]
+pub use crate::egui::EguiWantsFocus;
+use crate::input::button_zoom_just_pressed;
+use crate::input::mouse_key_tracker;
+use crate::input::MouseKeyTracker;
+use crate::touch::touch_tracker;
 pub use crate::touch::TouchControls;
-use crate::touch::{touch_tracker, TouchGestures, TouchTracker};
+use crate::touch::TouchGestures;
+use crate::touch::TouchTracker;
 use crate::traits::OptionalClamp;
 
 #[cfg(feature = "bevy_egui")]
@@ -151,12 +159,11 @@ pub struct PanOrbitCameraSystemSet;
 /// #         .run();
 /// # }
 /// fn setup(mut commands: Commands) {
-///     commands
-///         .spawn((
-///             Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-///             PanOrbitCamera::default(),
-///         ));
-///  }
+///     commands.spawn((
+///         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
+///         PanOrbitCamera::default(),
+///     ));
+/// }
 /// ```
 #[derive(Component, Reflect, Copy, Clone, Debug, PartialEq)]
 #[reflect(Component)]
@@ -166,14 +173,14 @@ pub struct PanOrbitCamera {
     /// If you want to change the focus programmatically after initialization, set `target_focus`
     /// instead.
     /// Defaults to `Vec3::ZERO`.
-    pub focus: Vec3,
+    pub focus:                          Vec3,
     /// The radius of the orbit, or the distance from the `focus` point.
     /// For orthographic projection, this is ignored, and the projection's `scale` is used instead.
     /// If set to `None`, it will be calculated from the camera's current position during
     /// initialization.
     /// Automatically updated.
     /// Defaults to `None`.
-    pub radius: Option<f32>,
+    pub radius:                         Option<f32>,
     /// Rotation in radians around the global Y axis (longitudinal). Updated automatically.
     /// If both `yaw` and `pitch` are `0.0`, then the camera will be looking forward, i.e. in
     /// the `Vec3::NEG_Z` direction, with up being `Vec3::Y`.
@@ -181,7 +188,7 @@ pub struct PanOrbitCamera {
     /// initialization.
     /// You should not update this after initialization - use `target_yaw` instead.
     /// Defaults to `None`.
-    pub yaw: Option<f32>,
+    pub yaw:                            Option<f32>,
     /// Rotation in radians around the local X axis (latitudinal). Updated automatically.
     /// If both `yaw` and `pitch` are `0.0`, then the camera will be looking forward, i.e. in
     /// the `Vec3::NEG_Z` direction, with up being `Vec3::Y`.
@@ -189,116 +196,116 @@ pub struct PanOrbitCamera {
     /// initialization.
     /// You should not update this after initialization - use `target_pitch` instead.
     /// Defaults to `None`.
-    pub pitch: Option<f32>,
+    pub pitch:                          Option<f32>,
     /// The target focus point. The camera will smoothly transition to this value. Updated
     /// automatically, but you can also update it manually to control the camera independently of
     /// the mouse controls, e.g. with the keyboard.
     /// Defaults to `Vec3::ZERO`.
-    pub target_focus: Vec3,
+    pub target_focus:                   Vec3,
     /// The target yaw value. The camera will smoothly transition to this value. Updated
     /// automatically, but you can also update it manually to control the camera independently of
     /// the mouse controls, e.g. with the keyboard.
     /// Defaults to `0.0`.
-    pub target_yaw: f32,
+    pub target_yaw:                     f32,
     /// The target pitch value. The camera will smoothly transition to this value Updated
     /// automatically, but you can also update it manually to control the camera independently of
     /// the mouse controls, e.g. with the keyboard.
     /// Defaults to `0.0`.
-    pub target_pitch: f32,
+    pub target_pitch:                   f32,
     /// The target radius value. The camera will smoothly transition to this value. Updated
     /// automatically, but you can also update it manually to control the camera independently of
     /// the mouse controls, e.g. with the keyboard.
     /// Defaults to `1.0`.
-    pub target_radius: f32,
+    pub target_radius:                  f32,
     /// Upper limit on the `yaw` value, in radians. Use this to restrict the maximum rotation
     /// around the global Y axis.
     /// Defaults to `None`.
-    pub yaw_upper_limit: Option<f32>,
+    pub yaw_upper_limit:                Option<f32>,
     /// Lower limit on the `yaw` value, in radians. Use this to restrict the maximum rotation
     /// around the global Y axis.
     /// Defaults to `None`.
-    pub yaw_lower_limit: Option<f32>,
+    pub yaw_lower_limit:                Option<f32>,
     /// Upper limit on the `pitch` value, in radians. Use this to restrict the maximum rotation
     /// around the local X axis.
     /// Defaults to `None`.
-    pub pitch_upper_limit: Option<f32>,
+    pub pitch_upper_limit:              Option<f32>,
     /// Lower limit on the `pitch` value, in radians. Use this to restrict the maximum rotation
     /// around the local X axis.
     /// Defaults to `None`.
-    pub pitch_lower_limit: Option<f32>,
+    pub pitch_lower_limit:              Option<f32>,
     /// The origin for a shape to restrict the cameras `focus` position.
     /// Defaults to `Vec3::ZERO`.
-    pub focus_bounds_origin: Vec3,
+    pub focus_bounds_origin:            Vec3,
     /// The shape (Sphere or Cuboid) that the `focus` is restricted by. Centered on the
     /// `focus_bounds_origin`.
     /// Defaults to `None`.
-    pub focus_bounds_shape: Option<FocusBoundsShape>,
+    pub focus_bounds_shape:             Option<FocusBoundsShape>,
     /// Upper limit on the zoom. This applies to `radius`, in the case of using a perspective
     /// camera, or the projection's scale in the case of using an orthographic camera.
     /// Defaults to `None`.
-    pub zoom_upper_limit: Option<f32>,
+    pub zoom_upper_limit:               Option<f32>,
     /// Lower limit on the zoom. This applies to `radius`, in the case of using a perspective
     /// camera, or the projection's scale in the case of using an orthographic camera.
     /// Should always be >0 otherwise you'll get stuck at 0.
     /// Defaults to `0.05`.
-    pub zoom_lower_limit: f32,
+    pub zoom_lower_limit:               f32,
     /// The sensitivity of the orbiting motion. A value of `0.0` disables orbiting.
     /// Defaults to `1.0`.
-    pub orbit_sensitivity: f32,
+    pub orbit_sensitivity:              f32,
     /// How much smoothing is applied to the orbit motion. A value of `0.0` disables smoothing,
     /// so there's a 1:1 mapping of input to camera position. A value of `1.0` is infinite
     /// smoothing.
     /// Defaults to `0.8`.
-    pub orbit_smoothness: f32,
+    pub orbit_smoothness:               f32,
     /// The sensitivity of the panning motion. A value of `0.0` disables panning.
     /// Defaults to `1.0`.
-    pub pan_sensitivity: f32,
+    pub pan_sensitivity:                f32,
     /// How much smoothing is applied to the panning motion. A value of `0.0` disables smoothing,
     /// so there's a 1:1 mapping of input to camera position. A value of `1.0` is infinite
     /// smoothing.
     /// Defaults to `0.6`.
-    pub pan_smoothness: f32,
+    pub pan_smoothness:                 f32,
     /// The sensitivity of moving the camera closer or further way using the scroll wheel.
     /// A value of `0.0` disables zooming.
     /// Defaults to `1.0`.
-    pub zoom_sensitivity: f32,
+    pub zoom_sensitivity:               f32,
     /// How much smoothing is applied to the zoom motion. A value of `0.0` disables smoothing,
     /// so there's a 1:1 mapping of input to camera position. A value of `1.0` is infinite
     /// smoothing.
     /// Defaults to `0.8`.
     /// Note that this setting does not apply to pixel-based scroll events, as they are typically
     /// already smooth. It only applies to line-based scroll events.
-    pub zoom_smoothness: f32,
+    pub zoom_smoothness:                f32,
     /// Button used to orbit the camera.
     /// Defaults to `Button::Left`.
-    pub button_orbit: MouseButton,
+    pub button_orbit:                   MouseButton,
     /// Button used to pan the camera.
     /// Defaults to `Button::Right`.
-    pub button_pan: MouseButton,
+    pub button_pan:                     MouseButton,
     /// Button used to zoom the camera, by holding it down and moving the mouse forward and back.
     /// Defaults to `None`.
-    pub button_zoom: Option<MouseButton>,
+    pub button_zoom:                    Option<MouseButton>,
     /// Which axis should zoom the camera when using `button_zoom`.
     /// Defaults to `ButtonZoomAxis::Y`.
-    pub button_zoom_axis: ButtonZoomAxis,
+    pub button_zoom_axis:               ButtonZoomAxis,
     /// Key that must be pressed for `button_orbit` to work.
     /// Defaults to `None` (no modifier).
-    pub modifier_orbit: Option<KeyCode>,
+    pub modifier_orbit:                 Option<KeyCode>,
     /// Key that must be pressed for `button_pan` to work.
     /// Defaults to `None` (no modifier).
-    pub modifier_pan: Option<KeyCode>,
+    pub modifier_pan:                   Option<KeyCode>,
     /// Whether touch controls are enabled.
     /// Defaults to `true`.
-    pub touch_enabled: bool,
+    pub touch_enabled:                  bool,
     /// The control scheme for touch inputs.
     /// Defaults to `TouchControls::OneFingerOrbit`.
-    pub touch_controls: TouchControls,
+    pub touch_controls:                 TouchControls,
     /// The behavior for trackpad inputs.
     /// Defaults to `TrackpadBehavior::DefaultZoom`.
     /// To enable orbit behavior similar to Blender, change this to TrackpadBehavior::BlenderLike.
     /// For `BlenderLike` panning, add `ShiftLeft` to the `modifier_pan` field.
     /// For `BlenderLike` zooming, add `ControlLeft` in `modifier_zoom` field.
-    pub trackpad_behavior: TrackpadBehavior,
+    pub trackpad_behavior:              TrackpadBehavior,
     /// Whether to enable pinch-to-zoom functionality on trackpads.
     /// Defaults to `false`.
     pub trackpad_pinch_to_zoom_enabled: bool,
@@ -306,90 +313,90 @@ pub struct PanOrbitCamera {
     /// effectively disables trackpad orbit/pan functionality. This applies to both orbit and pan.
     /// operations when using a trackpad with the `BlenderLike` behavior mode.
     /// Defaults to `1.0`.
-    pub trackpad_sensitivity: f32,
+    pub trackpad_sensitivity:           f32,
     /// Whether to reverse the zoom direction. This applies to the button-based zoom `button_zoom`
     /// as well. If you want button zoom to remain the same, set `button_zoom_reverse` to `true`.
     /// Defaults to `false`.
-    pub reversed_zoom: bool,
+    pub reversed_zoom:                  bool,
     /// Whether the zoom direction when using `button_zoom` is reversed.
     /// Defaults to `false`.
-    pub reversed_button_zoom: bool,
+    pub reversed_button_zoom:           bool,
     /// Whether the camera is currently upside down. Updated automatically.
     /// This is used to determine which way to orbit, because it's more intuitive to reverse the
     /// orbit direction when upside down.
     /// Should not be set manually unless you know what you're doing.
     /// Defaults to `false` (but will be updated immediately).
-    pub is_upside_down: bool,
+    pub is_upside_down:                 bool,
     /// Whether to allow the camera to go upside down.
     /// Defaults to `false`.
-    pub allow_upside_down: bool,
+    pub allow_upside_down:              bool,
     /// If `false`, disable control of the camera. Defaults to `true`.
-    pub enabled: bool,
+    pub enabled:                        bool,
     /// Whether `PanOrbitCamera` has been initialized with the initial config.
     /// Set to `true` if you want the camera to smoothly animate to its initial position.
     /// Defaults to `false`.
-    pub initialized: bool,
+    pub initialized:                    bool,
     /// Whether to update the camera's transform regardless of whether there are any changes/input.
     /// Set this to `true` if you want to modify values directly.
     /// This will be automatically set back to `false` after one frame.
     /// Defaults to `false`.
-    pub force_update: bool,
+    pub force_update:                   bool,
     /// Axis order definition. This can be used to e.g. define a different default
     /// up direction. The default up is Y, but if you want the camera rotated.
     /// The axis can be switched.
     /// Defaults to `[Vec3::X, Vec3::Y, Vec3::Z]`.
-    pub axis: [Vec3; 3],
+    pub axis:                           [Vec3; 3],
     /// Use real time instead of virtual time. Set this to `true` if you want to pause virtual
     /// time without affecting the camera, for example in a game.
     /// Defaults to `false`.
-    pub use_real_time: bool,
+    pub use_real_time:                  bool,
 }
 
 impl Default for PanOrbitCamera {
     fn default() -> Self {
         PanOrbitCamera {
-            focus: Vec3::ZERO,
-            target_focus: Vec3::ZERO,
-            radius: None,
-            is_upside_down: false,
-            allow_upside_down: false,
-            orbit_sensitivity: 1.0,
-            orbit_smoothness: 0.1,
-            pan_sensitivity: 1.0,
-            pan_smoothness: 0.02,
-            zoom_sensitivity: 1.0,
-            zoom_smoothness: 0.1,
-            button_orbit: MouseButton::Left,
-            button_pan: MouseButton::Right,
-            button_zoom: None,
-            button_zoom_axis: ButtonZoomAxis::Y,
-            reversed_button_zoom: false,
-            modifier_orbit: None,
-            modifier_pan: None,
-            touch_enabled: true,
-            touch_controls: TouchControls::OneFingerOrbit,
-            trackpad_behavior: TrackpadBehavior::Default,
+            focus:                          Vec3::ZERO,
+            target_focus:                   Vec3::ZERO,
+            radius:                         None,
+            is_upside_down:                 false,
+            allow_upside_down:              false,
+            orbit_sensitivity:              1.0,
+            orbit_smoothness:               0.1,
+            pan_sensitivity:                1.0,
+            pan_smoothness:                 0.02,
+            zoom_sensitivity:               1.0,
+            zoom_smoothness:                0.1,
+            button_orbit:                   MouseButton::Left,
+            button_pan:                     MouseButton::Right,
+            button_zoom:                    None,
+            button_zoom_axis:               ButtonZoomAxis::Y,
+            reversed_button_zoom:           false,
+            modifier_orbit:                 None,
+            modifier_pan:                   None,
+            touch_enabled:                  true,
+            touch_controls:                 TouchControls::OneFingerOrbit,
+            trackpad_behavior:              TrackpadBehavior::Default,
             trackpad_pinch_to_zoom_enabled: false,
-            trackpad_sensitivity: 1.0,
-            reversed_zoom: false,
-            enabled: true,
-            yaw: None,
-            pitch: None,
-            target_yaw: 0.0,
-            target_pitch: 0.0,
-            target_radius: 1.0,
-            initialized: false,
-            yaw_upper_limit: None,
-            yaw_lower_limit: None,
-            pitch_upper_limit: None,
-            pitch_lower_limit: None,
-            focus_bounds_origin: Vec3::ZERO,
-            focus_bounds_shape: None,
-            zoom_upper_limit: None,
-            zoom_lower_limit: 0.05,
-            force_update: false,
-            axis: [Vec3::X, Vec3::Y, Vec3::Z],
-            use_real_time: false,
+            trackpad_sensitivity:           1.0,
+            reversed_zoom:                  false,
+            enabled:                        true,
+            yaw:                            None,
+            pitch:                          None,
+            target_yaw:                     0.0,
+            target_pitch:                   0.0,
+            target_radius:                  1.0,
+            initialized:                    false,
+            yaw_upper_limit:                None,
+            yaw_lower_limit:                None,
+            pitch_upper_limit:              None,
+            pitch_lower_limit:              None,
+            focus_bounds_origin:            Vec3::ZERO,
+            focus_bounds_shape:             None,
+            zoom_upper_limit:               None,
+            zoom_lower_limit:               0.05,
+            force_update:                   false,
+            axis:                           [Vec3::X, Vec3::Y, Vec3::Z],
+            use_real_time:                  false,
         }
     }
 }
@@ -403,7 +410,7 @@ impl Default for PanOrbitCamera {
 pub struct ActiveCameraData {
     /// ID of the entity with `PanOrbitCamera` that will handle user input. In other words, this
     /// is the camera that will move when you orbit/pan/zoom.
-    pub entity: Option<Entity>,
+    pub entity:        Option<Entity>,
     /// The viewport size. This is only used to scale the panning mouse motion. I recommend setting
     /// this to the actual render target dimensions (e.g. the image or viewport), and changing
     /// `PanOrbitCamera::pan_sensitivity` to adjust the sensitivity if required.
@@ -411,12 +418,12 @@ pub struct ActiveCameraData {
     /// The size of the window. This is only used to scale the orbit mouse motion. I recommend
     /// setting this to actual dimensions of the window that you want to control the camera from,
     /// and changing `PanOrbitCamera::orbit_sensitivity` to adjust the sensitivity if required.
-    pub window_size: Option<Vec2>,
+    pub window_size:   Option<Vec2>,
     /// Indicates to `PanOrbitCameraPlugin` that it should not update/overwrite this resource.
     /// If you are manually updating this resource you should set this to `true`.
     /// Note that setting this to `true` will effectively break multiple viewport/window support
     /// unless you manually reimplement it.
-    pub manual: bool,
+    pub manual:        bool,
 }
 
 /// The shape to restrict the camera's focus inside.
@@ -440,15 +447,11 @@ pub enum ButtonZoomAxis {
 }
 
 impl From<Sphere> for FocusBoundsShape {
-    fn from(value: Sphere) -> Self {
-        Self::Sphere(value)
-    }
+    fn from(value: Sphere) -> Self { Self::Sphere(value) }
 }
 
 impl From<Cuboid> for FocusBoundsShape {
-    fn from(value: Cuboid) -> Self {
-        Self::Cuboid(value)
-    }
+    fn from(value: Cuboid) -> Self { Self::Cuboid(value) }
 }
 
 /// Allows for changing the `TrackpadBehavior` from default to the way it works in Blender.
@@ -456,9 +459,11 @@ impl From<Cuboid> for FocusBoundsShape {
 /// holding down `ControlLeft` will Zoom.
 #[derive(Clone, PartialEq, Debug, Reflect, Copy)]
 pub enum TrackpadBehavior {
-    /// Default touchpad behavior. I.e., no special gesture support, scrolling on the touchpad (vertically) will zoom, as it does with a mouse.
+    /// Default touchpad behavior. I.e., no special gesture support, scrolling on the touchpad
+    /// (vertically) will zoom, as it does with a mouse.
     Default,
-    /// Blender-like touchpad behavior. Scrolling on the touchpad will orbit, and you can pinch to zoom. Optionally you can pan, or switch scroll to zoom, by holding down a modifier.
+    /// Blender-like touchpad behavior. Scrolling on the touchpad will orbit, and you can pinch to
+    /// zoom. Optionally you can pan, or switch scroll to zoom, by holding down a modifier.
     BlenderLike {
         /// Modifier key that enables panning while scrolling
         modifier_pan: Option<KeyCode>,
@@ -472,7 +477,7 @@ impl TrackpadBehavior {
     /// Creates a `BlenderLike` variant with default modifiers (Shift for pan, Ctrl for zoom)
     pub fn blender_default() -> Self {
         Self::BlenderLike {
-            modifier_pan: Some(KeyCode::ShiftLeft),
+            modifier_pan:  Some(KeyCode::ShiftLeft),
             modifier_zoom: Some(KeyCode::ControlLeft),
         }
     }
@@ -527,8 +532,8 @@ fn active_viewport_data(
 
                     // Is the cursor/touch in this window?
                     // Note: there's a bug in winit that causes `window.cursor_position()` to return
-                    // a `Some` value even if the cursor is not in this window, in very specific cases.
-                    // See: https://github.com/natepiano/bevy_lagrange/issues/22
+                    // a `Some` value even if the cursor is not in this window, in very specific
+                    // cases. See: https://github.com/natepiano/bevy_lagrange/issues/22
                     if let Some(input_position) = window.cursor_position().or(touches
                         .iter_just_pressed()
                         .collect::<Vec<_>>()
@@ -537,21 +542,23 @@ fn active_viewport_data(
                     {
                         // Now check if cursor is within this camera's viewport
                         if let Some(Rect { min, max }) = camera.logical_viewport_rect() {
-                            // Window coordinates have Y starting at the bottom, so we need to reverse
-                            // the y component before comparing with the viewport rect
+                            // Window coordinates have Y starting at the bottom, so we need to
+                            // reverse the y component before comparing
+                            // with the viewport rect
                             let cursor_in_vp = input_position.x > min.x
                                 && input_position.x < max.x
                                 && input_position.y > min.y
                                 && input_position.y < max.y;
 
-                            // Only set if camera order is higher. This may overwrite a previous value
-                            // in the case the viewport is overlapping another viewport.
+                            // Only set if camera order is higher. This may overwrite a previous
+                            // value in the case the viewport is
+                            // overlapping another viewport.
                             if cursor_in_vp && camera.order >= max_cam_order {
                                 new_resource = ActiveCameraData {
-                                    entity: Some(entity),
+                                    entity:        Some(entity),
                                     viewport_size: camera.logical_viewport_size(),
-                                    window_size: Some(Vec2::new(window.width(), window.height())),
-                                    manual: false,
+                                    window_size:   Some(Vec2::new(window.width(), window.height())),
+                                    manual:        false,
                                 };
                                 max_cam_order = camera.order;
                             }
@@ -685,7 +692,7 @@ fn pan_orbit_camera(
                         TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
                         TouchGestures::OneFinger(one_finger_gestures) => {
                             (one_finger_gestures.motion, Vec2::ZERO, 0.0)
-                        }
+                        },
                         TouchGestures::TwoFinger(two_finger_gestures) => (
                             Vec2::ZERO,
                             two_finger_gestures.motion,
@@ -696,7 +703,7 @@ fn pan_orbit_camera(
                         TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
                         TouchGestures::OneFinger(one_finger_gestures) => {
                             (Vec2::ZERO, one_finger_gestures.motion, 0.0)
-                        }
+                        },
                         TouchGestures::TwoFinger(two_finger_gestures) => (
                             two_finger_gestures.motion,
                             Vec2::ZERO,
@@ -751,10 +758,10 @@ fn pan_orbit_camera(
                         if let Some(radius) = pan_orbit.radius {
                             multiplier = radius;
                         }
-                    }
+                    },
                     Projection::Orthographic(ref p) => {
                         pan *= Vec2::new(p.area.width(), p.area.height()) / vp_size;
-                    }
+                    },
                     Projection::Custom(_) => todo!(),
                 }
                 // Translate by local axes

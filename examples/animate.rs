@@ -1,8 +1,10 @@
 //! Demonstrates how you can animate the movement of the camera
 
-use bevy::prelude::*;
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
 use std::f32::consts::TAU;
+
+use bevy::prelude::*;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()

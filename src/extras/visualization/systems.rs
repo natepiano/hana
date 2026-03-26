@@ -42,14 +42,14 @@ const fn calculate_edge_color(
             } else {
                 config.unbalanced_color
             }
-        }
+        },
         Edge::Top | Edge::Bottom => {
             if v_balanced {
                 config.balanced_color
             } else {
                 config.unbalanced_color
             }
-        }
+        },
     }
 }
 

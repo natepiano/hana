@@ -2,7 +2,9 @@
 
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera, PanOrbitCameraSystemSet};
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::PanOrbitCameraSystemSet;
 
 fn main() {
     App::new()

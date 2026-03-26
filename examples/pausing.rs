@@ -1,7 +1,8 @@
 //! Demonstrates how to pause time without affecting the camera
 
 use bevy::prelude::*;
-use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::PanOrbitCamera;
 
 fn main() {
     App::new()

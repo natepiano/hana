@@ -42,9 +42,7 @@ pub fn update_orbit_transform(
     *transform = new_transform;
 }
 
-pub fn approx_equal(a: f32, b: f32) -> bool {
-    (a - b).abs() < EPSILON
-}
+pub fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
 
 pub fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
     let t = smoothness.powi(7);
@@ -66,9 +64,11 @@ pub fn lerp_and_snap_vec3(from: Vec3, to: Vec3, smoothness: f32, dt: f32) -> Vec
 
 #[cfg(test)]
 mod calculate_from_translation_and_focus_tests {
-    use super::*;
-    use float_cmp::approx_eq;
     use std::f32::consts::PI;
+
+    use float_cmp::approx_eq;
+
+    use super::*;
     const AXIS: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
     const AXIS_Z_UP: [Vec3; 3] = [Vec3::X, Vec3::Z, Vec3::Y];
 

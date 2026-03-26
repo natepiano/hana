@@ -14,11 +14,11 @@ pub struct FitTargetGizmo;
 #[reflect(Component)]
 pub struct FitTargetViewportMargins {
     /// Left margin as a percentage of screen width.
-    pub left_pct: f32,
+    pub left_pct:   f32,
     /// Right margin as a percentage of screen width.
-    pub right_pct: f32,
+    pub right_pct:  f32,
     /// Top margin as a percentage of screen height.
-    pub top_pct: f32,
+    pub top_pct:    f32,
     /// Bottom margin as a percentage of screen height.
     pub bottom_pct: f32,
 }
@@ -30,9 +30,9 @@ impl FitTargetViewportMargins {
         let screen_width = 2.0 * bounds.half_extent_x;
         let screen_height = 2.0 * bounds.half_extent_y;
         Self {
-            left_pct: (bounds.left_margin / screen_width) * 100.0,
-            right_pct: (bounds.right_margin / screen_width) * 100.0,
-            top_pct: (bounds.top_margin / screen_height) * 100.0,
+            left_pct:   (bounds.left_margin / screen_width) * 100.0,
+            right_pct:  (bounds.right_margin / screen_width) * 100.0,
+            top_pct:    (bounds.top_margin / screen_height) * 100.0,
             bottom_pct: (bounds.bottom_margin / screen_height) * 100.0,
         }
     }
@@ -43,25 +43,25 @@ impl FitTargetViewportMargins {
 #[reflect(Resource)]
 pub struct FitTargetVisualizationConfig {
     /// Color for the screen-aligned bounding rectangle.
-    pub rectangle_color: Color,
+    pub rectangle_color:  Color,
     /// Color for the silhouette convex hull.
     pub silhouette_color: Color,
     /// Color for balanced margins (left ≈ right, top ≈ bottom).
-    pub balanced_color: Color,
+    pub balanced_color:   Color,
     /// Color for unbalanced margins.
     pub unbalanced_color: Color,
     /// Line width for gizmo rendering.
-    pub line_width: f32,
+    pub line_width:       f32,
 }
 
 impl Default for FitTargetVisualizationConfig {
     fn default() -> Self {
         Self {
-            rectangle_color: Color::srgb(1.0, 1.0, 0.0),  // Yellow
+            rectangle_color:  Color::srgb(1.0, 1.0, 0.0), // Yellow
             silhouette_color: Color::srgb(1.0, 0.5, 0.0), // Orange
-            balanced_color: Color::srgb(0.0, 1.0, 0.0),   // Green
+            balanced_color:   Color::srgb(0.0, 1.0, 0.0), // Green
             unbalanced_color: Color::srgb(1.0, 0.0, 0.0), // Red
-            line_width: 2.0,
+            line_width:       2.0,
         }
     }
 }

@@ -37,9 +37,9 @@ use crate::PanOrbitCamera;
 
 /// Parameters for an instant orbital snap.
 struct SnapOrbit {
-    focus: Vec3,
-    yaw: Option<f32>,
-    pitch: Option<f32>,
+    focus:  Vec3,
+    yaw:    Option<f32>,
+    pitch:  Option<f32>,
     radius: f32,
 }
 
@@ -78,9 +78,9 @@ fn stash_camera_state(
 ) {
     if !has_existing_stash {
         let stash = PanOrbitCameraStash {
-            zoom: camera.zoom_smoothness,
-            pan: camera.pan_smoothness,
-            orbit: camera.orbit_smoothness,
+            zoom:    camera.zoom_smoothness,
+            pan:     camera.pan_smoothness,
+            orbit:   camera.orbit_smoothness,
             enabled: camera.enabled,
         };
         commands.entity(entity).insert(stash);
@@ -136,7 +136,7 @@ fn prepare_fit_for_target(
         Err(error) => {
             warn!("{context}: Failed to calculate fit for entity {target:?}: {error}");
             return None;
-        }
+        },
     };
 
     Some(fit)
@@ -220,9 +220,9 @@ pub(super) fn on_zoom_to_fit(
             &mut commands,
             &mut panorbit,
             SnapOrbit {
-                focus: fit.focus,
-                yaw: None,
-                pitch: None,
+                focus:  fit.focus,
+                yaw:    None,
+                pitch:  None,
                 radius: fit.radius,
             },
             |commands| {
@@ -257,11 +257,11 @@ fn begin_zoom_if_needed(
 ) {
     if let Some(ctx) = zoom_context {
         commands.trigger(ZoomBegin {
-            camera: entity,
-            target: ctx.target,
-            margin: ctx.margin,
+            camera:   entity,
+            target:   ctx.target,
+            margin:   ctx.margin,
             duration: ctx.duration,
-            easing: ctx.easing,
+            easing:   ctx.easing,
         });
         commands
             .entity(entity)
@@ -313,7 +313,7 @@ pub(super) fn on_play_animation(
                     source,
                 });
                 return;
-            }
+            },
             AnimationConflictPolicy::LastWins => {
                 // Cancel in-flight animation — read source from existing marker
                 let in_flight_source = source_marker_query
@@ -326,12 +326,12 @@ pub(super) fn on_play_animation(
                             .front()
                             .cloned()
                             .unwrap_or(CameraMove::ToOrbit {
-                                focus: Vec3::ZERO,
-                                yaw: 0.0,
-                                pitch: 0.0,
-                                radius: 1.0,
+                                focus:    Vec3::ZERO,
+                                yaw:      0.0,
+                                pitch:    0.0,
+                                radius:   1.0,
                                 duration: Duration::ZERO,
-                                easing: EaseFunction::Linear,
+                                easing:   EaseFunction::Linear,
                             });
                     commands.trigger(AnimationCancelled {
                         camera: entity,
@@ -343,14 +343,14 @@ pub(super) fn on_play_animation(
                 if let Ok(marker) = marker_query.get(entity) {
                     commands.entity(entity).remove::<ZoomAnimationMarker>();
                     commands.trigger(ZoomCancelled {
-                        camera: entity,
-                        target: marker.0.target,
-                        margin: marker.0.margin,
+                        camera:   entity,
+                        target:   marker.0.target,
+                        margin:   marker.0.margin,
                         duration: marker.0.duration,
-                        easing: marker.0.easing,
+                        easing:   marker.0.easing,
                     });
                 }
-            }
+            },
         }
     }
 
@@ -468,9 +468,9 @@ pub(super) fn on_animate_to_fit(
             &mut commands,
             &mut panorbit,
             SnapOrbit {
-                focus: fit.focus,
-                yaw: Some(yaw),
-                pitch: Some(pitch),
+                focus:  fit.focus,
+                yaw:    Some(yaw),
+                pitch:  Some(pitch),
                 radius: fit.radius,
             },
             |commands| {
@@ -617,9 +617,9 @@ pub(super) fn on_look_at_and_zoom_to_fit(
             &mut commands,
             &mut panorbit,
             SnapOrbit {
-                focus: fit.focus,
-                yaw: Some(yaw),
-                pitch: Some(pitch),
+                focus:  fit.focus,
+                yaw:    Some(yaw),
+                pitch:  Some(pitch),
                 radius: fit.radius,
             },
             |commands| {
