@@ -444,8 +444,13 @@ fn shape_world_text(
     cache: &mut ShapedTextCache,
     scale: f32,
 ) -> ShapedWorldText {
-    // Convert TextStyle to TextConfig for shaping (same underlying fields).
-    let config = style.as_layout_config();
+    // Pre-scale font size to points for shaping. Parley's quantize mode
+    // rounds baselines to integers, which destroys metrics when the font
+    // size is below 1.0 (e.g., 0.10 meters). We shape at the equivalent
+    // point size and scale the output back down.
+    let pts_mpu = crate::plugin::Unit::Points.meters_per_unit();
+    let boost = if pts_mpu > 0.0 { 1.0 / pts_mpu } else { 1.0 };
+    let config = style.as_layout_config().scaled(boost);
 
     let mut stats = TextBuildStats {
         texts: 1,
@@ -461,8 +466,6 @@ fn shape_world_text(
         .map_or(crate::text::EMBEDDED_FONT, Font::data);
 
     let atlas_start = Instant::now();
-    // Under `WhenReady`, trigger async rasterization for every glyph but
-    // emit nothing until the entire string is cached in the atlas.
     if style.loading_policy() == GlyphLoadingPolicy::WhenReady
         && !ensure_all_glyphs_ready(&shaped.glyphs, style, atlas, font_data, &mut stats)
     {
@@ -473,17 +476,31 @@ fn shape_world_text(
     let linear: LinearRgba = style.color().into();
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 
+    // em_scale uses the boosted config size (in points) for atlas lookup,
+    // then the final quad positions are multiplied by `scale` (which already
+    // accounts for meters_per_unit). The boost cancels out:
+    //   quad_world = (glyph_pts * em_scale_pts) * scale_meters
+    // where em_scale_pts = config.size() / canonical and scale includes
+    // the 1/boost factor to convert back from points to the original unit.
     #[allow(clippy::cast_precision_loss)]
-    let em_scale = style.size() / atlas.canonical_size() as f32;
+    let em_scale = config.size() / atlas.canonical_size() as f32;
 
+    // The boosted config is `ForLayout` (no anchor field). Convert to
+    // standalone and restore the *original* style's anchor so the offset
+    // computation uses the user's intended anchor, not the default Center.
     let (anchor_x, anchor_y) = measure_anchor_offset(
         &shaped.glyphs,
-        style,
+        &config.as_standalone().with_anchor(style.anchor()),
         font_registry,
         atlas,
         font_data,
         em_scale,
     );
+
+    // Constant across all glyphs — hoist above the loop so they remain
+    // in scope for the `first_advance` calculation below.
+    let boosted_size = config.size();
+    let world_scale = scale * pts_mpu; // points → world meters
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
     let mut glyph_rects = Vec::with_capacity(shaped.glyphs.len());
@@ -513,14 +530,14 @@ fn shape_world_text(
         #[allow(clippy::cast_precision_loss)]
         let quad_h = metrics.pixel_height as f32 * em_scale;
 
-        let quad_x = metrics.bearing_x.mul_add(style.size(), sg.x) - anchor_x;
-        let quad_y = -(metrics.bearing_y.mul_add(-style.size(), sg.baseline - sg.y) - anchor_y);
+        let quad_x = metrics.bearing_x.mul_add(boosted_size, sg.x) - anchor_x;
+        let quad_y = -(metrics.bearing_y.mul_add(-boosted_size, sg.baseline - sg.y) - anchor_y);
 
         quads.push((
             metrics.page_index,
             GlyphQuadData {
-                position: [quad_x * scale, quad_y * scale, 0.0],
-                size:     [quad_w * scale, quad_h * scale],
+                position: [quad_x * world_scale, quad_y * world_scale, 0.0],
+                size:     [quad_w * world_scale, quad_h * world_scale],
                 uv_rect:  metrics.uv_rect,
                 color:    color_arr,
             },
@@ -529,12 +546,12 @@ fn shape_world_text(
         if let Some(rect) = ink_rect(
             font_data,
             sg.glyph_id,
-            style.size(),
+            boosted_size,
             sg.x,
             sg.baseline - sg.y,
             anchor_x,
             anchor_y,
-            scale,
+            world_scale,
         ) {
             glyph_rects.push(rect);
         }
@@ -543,16 +560,18 @@ fn shape_world_text(
     glyph_quad::clip_overlapping_quads(&mut quads);
 
     let first_advance = shaped.glyphs.first().map_or(0.0, |sg| {
-        glyph_advance(font_data, sg.glyph_id, style.size(), scale)
+        glyph_advance(font_data, sg.glyph_id, boosted_size, world_scale)
     });
 
     stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
     stats.emitted_quads = quads.len();
 
+    // Anchor values are in boosted (points) space. Scale back to original
+    // units for downstream consumers (typography overlay).
     ShapedWorldText {
         quads,
-        anchor_x,
-        anchor_y,
+        anchor_x: anchor_x * pts_mpu,
+        anchor_y: anchor_y * pts_mpu,
         glyph_rects,
         first_advance,
         stats,

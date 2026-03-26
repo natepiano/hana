@@ -1246,3 +1246,60 @@ const _: () = assert!(GlyphRenderMode::Invisible as u32 == 0);
 const _: () = assert!(GlyphRenderMode::Text as u32 == 1);
 const _: () = assert!(GlyphRenderMode::PunchOut as u32 == 2);
 const _: () = assert!(GlyphRenderMode::SolidQuad as u32 == 3);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn as_standalone_from_layout_preserves_size() {
+        let layout = TextProps::<ForLayout>::new(24.0);
+        let standalone = layout.as_standalone();
+        assert!(
+            (standalone.size() - 24.0).abs() < f32::EPSILON,
+            "size should be preserved"
+        );
+    }
+
+    #[test]
+    fn as_standalone_from_layout_defaults_to_center_anchor() {
+        // Regression guard: `as_standalone()` on a `ForLayout` config has no
+        // anchor to copy, so it defaults to `Center`. Callers that need a
+        // specific anchor must chain `.with_anchor()` after conversion.
+        let layout = TextProps::<ForLayout>::new(12.0);
+        let standalone = layout.as_standalone();
+        assert_eq!(
+            standalone.anchor(),
+            Anchor::Center,
+            "as_standalone() should default to Center (callers must override)"
+        );
+    }
+
+    #[test]
+    fn with_anchor_overrides_default() {
+        let layout = TextProps::<ForLayout>::new(12.0);
+        let standalone = layout.as_standalone().with_anchor(Anchor::TopLeft);
+        assert_eq!(standalone.anchor(), Anchor::TopLeft);
+    }
+
+    #[test]
+    fn anchor_offset_top_left_is_zero() {
+        let (x, y) = Anchor::TopLeft.offset(100.0, 50.0);
+        assert!((x).abs() < f32::EPSILON);
+        assert!((y).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn anchor_offset_center_is_half() {
+        let (x, y) = Anchor::Center.offset(100.0, 50.0);
+        assert!((x - 50.0).abs() < f32::EPSILON);
+        assert!((y - 25.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn anchor_offset_bottom_right_is_full() {
+        let (x, y) = Anchor::BottomRight.offset(100.0, 50.0);
+        assert!((x - 100.0).abs() < f32::EPSILON);
+        assert!((y - 50.0).abs() < f32::EPSILON);
+    }
+}

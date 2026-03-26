@@ -49,12 +49,26 @@ pub(super) struct GlyphQuadData {
 /// This function splits each overlap at its midpoint — the left half goes
 /// to the earlier glyph, the right half to the later glyph — and adjusts
 /// UV coordinates proportionally. O(n) linear pass over sorted quads.
+///
+/// Only clips pairs on the **same line** (matching Y position within
+/// tolerance). Cross-line pairs are skipped to prevent the last glyph of
+/// one line from destroying the first glyph of the next line.
 pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
+    /// Two quads are considered on different lines when their Y positions
+    /// differ by more than this threshold.
+    const LINE_TOLERANCE: f32 = 0.001;
+
     if quads.len() < 2 {
         return;
     }
 
     for i in 0..quads.len() - 1 {
+        // Skip pairs on different lines — they cannot meaningfully overlap.
+        let y_delta = (quads[i].1.position[1] - quads[i + 1].1.position[1]).abs();
+        if y_delta > LINE_TOLERANCE {
+            continue;
+        }
+
         let right_edge_i = quads[i].1.position[0] + quads[i].1.size[0];
         let left_edge_next = quads[i + 1].1.position[0];
 

@@ -71,9 +71,6 @@ name = "hue_offset"
 [[example]]
 name = "side_by_side"
 
-[[example]]
-name = "text_panel"
-
 [[bench]]
 harness = false
 name    = "layout_comparison"

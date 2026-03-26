@@ -72,7 +72,7 @@ const HALF_TICK: f32 = 0.004;
 const QTR_TICK: f32 = 0.003;
 const EIGHTH_TICK: f32 = 0.002;
 const RULER_LINE_WIDTH: f32 = 1.0;
-const LABEL_SIZE: f32 = 8.0;
+const LABEL_SIZE: f32 = 0.003;
 const LABEL_GAP: f32 = 0.001;
 
 // ── Zoom ─────────────────────────────────────────────────────────────

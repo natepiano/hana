@@ -286,7 +286,11 @@ impl DiegeticPanel {
         let layout_unit = self.resolved_layout_unit(config);
         let viewport_pts_h = self.height * layout_unit.to_points();
         let wh = self.world_height(config);
-        if viewport_pts_h > 0.0 { wh / viewport_pts_h } else { Unit::Points.meters_per_unit() }
+        if viewport_pts_h > 0.0 {
+            wh / viewport_pts_h
+        } else {
+            Unit::Points.meters_per_unit()
+        }
     }
 
     /// Font-to-layout conversion factor for this panel.

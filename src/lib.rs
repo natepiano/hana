@@ -116,6 +116,7 @@ pub use text::FontRegistry;
 pub use text::FontSource;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphBounds;
+pub use text::GlyphKey;
 pub use text::GlyphMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
