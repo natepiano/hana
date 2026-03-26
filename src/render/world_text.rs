@@ -106,14 +106,14 @@ pub struct PanelTextChild {
     pub element_idx: usize,
     /// Layout-computed position and size in layout coordinates.
     pub bounds:      crate::layout::BoundingBox,
-    /// X scale: `world_width / layout_width * override`.
+    /// X scale: points to meters.
     pub scale_x:     f32,
-    /// Y scale: `world_height / layout_height * override`.
+    /// Y scale: points to meters.
     pub scale_y:     f32,
-    /// Half panel width in world units.
-    pub half_w:      f32,
-    /// Half panel height in world units.
-    pub half_h:      f32,
+    /// Anchor X offset in world units.
+    pub anchor_x:    f32,
+    /// Anchor Y offset in world units.
+    pub anchor_y:    f32,
 }
 
 /// Fired on a [`WorldText`] entity when all its glyphs are rasterized
@@ -626,7 +626,7 @@ fn measure_anchor_offset(
     };
     #[allow(clippy::cast_precision_loss)]
     let max_y = natural_line_height * line_count as f32;
-    anchor_offset(style.anchor(), max_x, max_y)
+    style.anchor().offset(max_x, max_y)
 }
 
 /// Computes the ink bounding box for a single glyph, returned as `[x, y, w, h]`
@@ -672,20 +672,4 @@ fn glyph_advance(font_data: &[u8], glyph_id: u16, font_size: f32, scale: f32) ->
             })
         })
         .unwrap_or(0.0)
-}
-
-/// Returns the anchor offset in layout units for centering/alignment.
-fn anchor_offset(anchor: crate::layout::TextAnchor, width: f32, height: f32) -> (f32, f32) {
-    use crate::layout::TextAnchor;
-    let x = match anchor {
-        TextAnchor::TopLeft | TextAnchor::CenterLeft | TextAnchor::BottomLeft => 0.0,
-        TextAnchor::TopCenter | TextAnchor::Center | TextAnchor::BottomCenter => width * 0.5,
-        TextAnchor::TopRight | TextAnchor::CenterRight | TextAnchor::BottomRight => width,
-    };
-    let y = match anchor {
-        TextAnchor::TopLeft | TextAnchor::TopCenter | TextAnchor::TopRight => 0.0,
-        TextAnchor::CenterLeft | TextAnchor::Center | TextAnchor::CenterRight => height * 0.5,
-        TextAnchor::BottomLeft | TextAnchor::BottomCenter | TextAnchor::BottomRight => height,
-    };
-    (x, y)
 }

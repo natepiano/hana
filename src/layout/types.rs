@@ -504,7 +504,7 @@ pub enum TextAlign {
 /// Determines which point of the text block's bounding box is placed
 /// at the entity's [`Transform`] position.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub enum TextAnchor {
+pub enum Anchor {
     /// Top-left corner at the transform position.
     TopLeft,
     /// Top-center at the transform position.
@@ -524,6 +524,34 @@ pub enum TextAnchor {
     BottomCenter,
     /// Bottom-right corner at the transform position.
     BottomRight,
+}
+
+impl Anchor {
+    /// Returns the offset from the top-left corner as a fraction of (width, height).
+    ///
+    /// For `TopLeft` this is (0, 0). For `Center` it's (0.5, 0.5).
+    /// Multiply by the actual width/height to get the offset in whatever units.
+    #[must_use]
+    pub const fn offset_fraction(self) -> (f32, f32) {
+        let x = match self {
+            Self::TopLeft | Self::CenterLeft | Self::BottomLeft => 0.0,
+            Self::TopCenter | Self::Center | Self::BottomCenter => 0.5,
+            Self::TopRight | Self::CenterRight | Self::BottomRight => 1.0,
+        };
+        let y = match self {
+            Self::TopLeft | Self::TopCenter | Self::TopRight => 0.0,
+            Self::CenterLeft | Self::Center | Self::CenterRight => 0.5,
+            Self::BottomLeft | Self::BottomCenter | Self::BottomRight => 1.0,
+        };
+        (x, y)
+    }
+
+    /// Returns the anchor offset for a bounding box of the given size.
+    #[must_use]
+    pub fn offset(self, width: f32, height: f32) -> (f32, f32) {
+        let (fx, fy) = self.offset_fraction();
+        (width * fx, height * fy)
+    }
 }
 
 /// How the visible glyph renders.
@@ -641,7 +669,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     wrap:           TextWrap,
     color:          Color,
     align:          TextAlign,
-    anchor:         TextAnchor,
+    anchor:         Anchor,
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
     loading_policy: GlyphLoadingPolicy,
@@ -915,7 +943,7 @@ impl TextProps<ForLayout> {
             wrap: TextWrap::Words,
             color: Color::WHITE,
             align: TextAlign::Left,
-            anchor: TextAnchor::Center,
+            anchor: Anchor::Center,
             render_mode: GlyphRenderMode::Text,
             shadow_mode: GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
@@ -1001,7 +1029,7 @@ impl TextProps<ForStandalone> {
             wrap:           TextWrap::None,
             color:          Color::WHITE,
             align:          TextAlign::Left,
-            anchor:         TextAnchor::Center,
+            anchor:         Anchor::Center,
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
@@ -1016,7 +1044,7 @@ impl TextProps<ForStandalone> {
 
     /// Returns the anchor point.
     #[must_use]
-    pub const fn anchor(&self) -> TextAnchor { self.anchor }
+    pub const fn anchor(&self) -> Anchor { self.anchor }
 
     /// Sets horizontal text alignment within bounds.
     #[must_use]
@@ -1027,7 +1055,7 @@ impl TextProps<ForStandalone> {
 
     /// Sets the anchor point within the text block's bounding box.
     #[must_use]
-    pub const fn with_anchor(mut self, anchor: TextAnchor) -> Self {
+    pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
         self
     }

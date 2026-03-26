@@ -366,16 +366,11 @@ fn reconcile_panel_text_children(
             continue;
         };
 
-        let layout_mpu = panel
-            .layout_unit
-            .unwrap_or(unit_config.layout)
-            .meters_per_unit();
         // Layout output is in points. Convert to world meters.
         let pts_mpu = crate::plugin::Unit::Points.meters_per_unit();
         let scale_x = pts_mpu;
         let scale_y = pts_mpu;
-        let half_w = panel.width * layout_mpu * 0.5;
-        let half_h = panel.height * layout_mpu * 0.5;
+        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
         // Collect text commands from layout result.
         let text_commands: Vec<_> = result
@@ -407,8 +402,8 @@ fn reconcile_panel_text_children(
                 bounds: *bounds,
                 scale_x,
                 scale_y,
-                half_w,
-                half_h,
+                anchor_x,
+                anchor_y,
             };
 
             visited_indices.push(*element_idx);
@@ -504,8 +499,8 @@ fn shape_panel_text_children(
             &mut cache,
             ptc.scale_x,
             ptc.scale_y,
-            ptc.half_w,
-            ptc.half_h,
+            ptc.anchor_x,
+            ptc.anchor_y,
         );
 
         let all_ready = stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs;
@@ -847,8 +842,8 @@ fn shape_text_to_quads(
     cache: &mut ShapedTextCache,
     scale_x: f32,
     scale_y: f32,
-    half_w: f32,
-    half_h: f32,
+    anchor_x: f32,
+    anchor_y: f32,
 ) -> (Vec<(u32, GlyphQuadData)>, TextBuildStats) {
     let mut stats = TextBuildStats {
         texts: 1,
@@ -933,9 +928,9 @@ fn shape_text_to_quads(
         let quad_layout_x = metrics.bearing_x.mul_add(config.size(), glyph_x);
         let quad_layout_y = (-metrics.bearing_y).mul_add(config.size(), glyph_y);
 
-        // Convert to panel-local (center origin, Y-up).
-        let local_x = quad_layout_x.mul_add(scale_x, -half_w);
-        let local_y = (-quad_layout_y).mul_add(scale_y, half_h);
+        // Convert to panel-local (anchor origin, Y-up).
+        let local_x = quad_layout_x.mul_add(scale_x, -anchor_x);
+        let local_y = (-quad_layout_y).mul_add(scale_y, anchor_y);
 
         quads.push((
             metrics.page_index,

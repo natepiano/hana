@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 
+use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -46,7 +47,7 @@ use crate::plugin::config::UnitConfig;
 ///     ..default()
 /// }
 /// ```
-#[derive(Component, Default, Reflect)]
+#[derive(Component, Reflect)]
 #[reflect(Component)]
 #[require(ComputedDiegeticPanel, Transform, Visibility)]
 pub struct DiegeticPanel {
@@ -61,6 +62,22 @@ pub struct DiegeticPanel {
     pub layout_unit: Option<Unit>,
     /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
     pub font_unit:   Option<Unit>,
+    /// Which point on the panel sits at the entity's [`Transform`] position.
+    /// Defaults to [`Anchor::TopLeft`].
+    pub anchor:      Anchor,
+}
+
+impl Default for DiegeticPanel {
+    fn default() -> Self {
+        Self {
+            tree:        LayoutTree::default(),
+            width:       0.0,
+            height:      0.0,
+            layout_unit: None,
+            font_unit:   None,
+            anchor:      Anchor::TopLeft,
+        }
+    }
 }
 
 impl DiegeticPanel {
@@ -84,6 +101,20 @@ impl DiegeticPanel {
     #[must_use]
     pub fn world_height(&self, config: &UnitConfig) -> f32 {
         self.height * self.resolved_layout_unit(config).meters_per_unit()
+    }
+
+    /// Returns the (x_offset, y_offset) in world meters for converting
+    /// layout coordinates (top-left origin, Y-down) to panel-local
+    /// coordinates relative to the anchor point.
+    ///
+    /// Layout local position = `(layout_x * scale - x_offset, -layout_y * scale + y_offset)`
+    /// where `scale` is `points_mpu`.
+    #[must_use]
+    pub fn anchor_offsets(&self, config: &UnitConfig) -> (f32, f32) {
+        let w = self.world_width(config);
+        let h = self.world_height(config);
+        let (fx, fy) = self.anchor.offset_fraction();
+        (w * fx, h * (1.0 - fy))
     }
 
     /// Font-to-layout conversion factor for this panel.

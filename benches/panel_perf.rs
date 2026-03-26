@@ -31,6 +31,7 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
+use bevy_diegetic::Unit;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
@@ -39,6 +40,7 @@ use criterion::criterion_main;
 
 const FONT_SIZE: f32 = 7.0;
 const LAYOUT_SIZE: f32 = 160.0;
+const LAYOUT_MPU: f32 = 1.0 / LAYOUT_SIZE;
 
 fn monospace_measurer() -> DiegeticTextMeasurer {
     DiegeticTextMeasurer {
@@ -147,6 +149,16 @@ fn create_bench_app() -> App {
     app
 }
 
+fn bench_panel(tree: bevy_diegetic::LayoutTree) -> DiegeticPanel {
+    DiegeticPanel {
+        tree,
+        width: LAYOUT_SIZE,
+        height: LAYOUT_SIZE,
+        layout_unit: Some(Unit::Custom(LAYOUT_MPU)),
+        font_unit: Some(Unit::Custom(LAYOUT_MPU)),
+    }
+}
+
 // ── Benchmarks ──────────────────────────────────────────────────────────
 
 fn bench_panel_layout(c: &mut Criterion) {
@@ -161,16 +173,7 @@ fn bench_panel_layout(c: &mut Criterion) {
                 || {
                     let mut app = create_bench_app();
                     let tree = build_panel_tree(&rows, Color::WHITE);
-                    let entity = app
-                        .world_mut()
-                        .spawn(DiegeticPanel {
-                            tree,
-                            layout_width: LAYOUT_SIZE,
-                            layout_height: LAYOUT_SIZE,
-                            world_width: 1.0,
-                            world_height: 1.0,
-                        })
-                        .id();
+                    let entity = app.world_mut().spawn(bench_panel(tree)).id();
                     (app, entity)
                 },
                 |(mut app, entity)| {
@@ -184,16 +187,7 @@ fn bench_panel_layout(c: &mut Criterion) {
         group.bench_function("warm", |b| {
             let mut app = create_bench_app();
             let tree = build_panel_tree(&rows, Color::WHITE);
-            let entity = app
-                .world_mut()
-                .spawn(DiegeticPanel {
-                    tree,
-                    layout_width: LAYOUT_SIZE,
-                    layout_height: LAYOUT_SIZE,
-                    world_width: 1.0,
-                    world_height: 1.0,
-                })
-                .id();
+            let entity = app.world_mut().spawn(bench_panel(tree)).id();
             app.update(); // Initial layout.
 
             b.iter(|| {
@@ -213,16 +207,7 @@ fn bench_panel_layout(c: &mut Criterion) {
         group.bench_function("color_only", |b| {
             let mut app = create_bench_app();
             let tree = build_panel_tree(&rows, Color::WHITE);
-            let entity = app
-                .world_mut()
-                .spawn(DiegeticPanel {
-                    tree,
-                    layout_width: LAYOUT_SIZE,
-                    layout_height: LAYOUT_SIZE,
-                    world_width: 1.0,
-                    world_height: 1.0,
-                })
-                .id();
+            let entity = app.world_mut().spawn(bench_panel(tree)).id();
             app.update(); // Initial layout.
 
             let mut toggle = false;

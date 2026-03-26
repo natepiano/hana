@@ -34,8 +34,8 @@ use super::constants::THICK_LINE_WIDTH;
 use super::constants::THIN_LINE_WIDTH;
 use crate::callouts::draw_dashed_line;
 use crate::callouts::draw_dimension_arrow;
+use crate::layout::Anchor;
 use crate::layout::GlyphShadowMode;
-use crate::layout::TextAnchor;
 use crate::layout::WorldTextStyle;
 use crate::plugin::UnitConfig;
 use crate::render::ComputedWorldText;
@@ -503,7 +503,7 @@ fn spawn_bounding_box_callout(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(bbox_color)
-            .with_anchor(TextAnchor::CenterRight)
+            .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(
             shelf_end_x - label_gap(font_size, scale),
@@ -595,7 +595,7 @@ fn spawn_origin_and_advancement(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(overlay.color)
-            .with_anchor(TextAnchor::Center)
+            .with_anchor(Anchor::Center)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(first_mid_x, origin_label_y, z),
     ));
@@ -709,7 +709,7 @@ fn spawn_advancement_arrow(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(overlay.color)
-            .with_anchor(TextAnchor::TopCenter)
+            .with_anchor(Anchor::TopCenter)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(adv_mid_x, adv_label_y, z),
     ));
@@ -1007,7 +1007,7 @@ fn spawn_line_edge_labels(
             WorldTextStyle::new()
                 .with_size(label_size)
                 .with_color(color)
-                .with_anchor(TextAnchor::CenterRight)
+                .with_anchor(Anchor::CenterRight)
                 .with_shadow_mode(GlyphShadowMode::None),
             Transform::from_xyz(label_x - label_gap, line_world_y, z),
         ));
@@ -1042,7 +1042,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterRight)
+            .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(left_1 - label_gap, label_y_mid_world, z),
     ));
@@ -1055,7 +1055,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterRight)
+            .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(left_1 - label_gap, descent_mid_world, z),
     ));
@@ -1066,7 +1066,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterRight)
+            .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(left_2 - label_gap, label_y_mid_world, z),
     ));
@@ -1082,7 +1082,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterRight)
+            .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(left_2 - label_gap, baseline_label_world, z),
     ));
@@ -1098,7 +1098,7 @@ fn spawn_left_arrow_labels(
             WorldTextStyle::new()
                 .with_size(label_size)
                 .with_color(color)
-                .with_anchor(TextAnchor::BottomLeft)
+                .with_anchor(Anchor::BottomLeft)
                 .with_shadow_mode(GlyphShadowMode::None),
             Transform::from_xyz(left_2, ascent_world, z),
         ));
@@ -1130,7 +1130,7 @@ fn spawn_right_arrow_labels(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterLeft)
+            .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(right_1 + label_gap, x_height_mid_world, z),
     ));
@@ -1143,7 +1143,7 @@ fn spawn_right_arrow_labels(
         WorldTextStyle::new()
             .with_size(label_size)
             .with_color(color)
-            .with_anchor(TextAnchor::CenterLeft)
+            .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(right_2 + label_gap, cap_mid_world, z),
     ));

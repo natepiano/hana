@@ -10,8 +10,8 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::TextAnchor;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -202,7 +202,7 @@ fn spawn_anchor_demo(
             WorldTextStyle::new()
                 .with_size(0.16)
                 .with_color(Color::srgb(0.7, 0.8, 1.0))
-                .with_anchor(TextAnchor::TopCenter),
+                .with_anchor(Anchor::TopCenter),
             Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.4, 0.0))
                 .with_rotation(demo_rotation),
         ))
@@ -215,22 +215,22 @@ fn spawn_anchor_demo(
             WorldTextStyle::new()
                 .with_size(0.10)
                 .with_color(Color::WHITE)
-                .with_anchor(TextAnchor::TopCenter),
+                .with_anchor(Anchor::TopCenter),
             Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.15, 0.0))
                 .with_rotation(demo_rotation),
         ))
         .observe(on_text_clicked);
 
     let anchor_demo = [
-        (TextAnchor::TopLeft, "TopLeft", -1.3, 0.5),
-        (TextAnchor::TopCenter, "TopCenter", 0.0, 0.5),
-        (TextAnchor::TopRight, "TopRight", 1.3, 0.5),
-        (TextAnchor::CenterLeft, "CenterLeft", -1.3, -0.2),
-        (TextAnchor::Center, "Center", 0.0, -0.2),
-        (TextAnchor::CenterRight, "CenterRight", 1.3, -0.2),
-        (TextAnchor::BottomLeft, "BottomLeft", -1.3, -0.9),
-        (TextAnchor::BottomCenter, "BottomCenter", 0.0, -0.9),
-        (TextAnchor::BottomRight, "BottomRight", 1.3, -0.9),
+        (Anchor::TopLeft, "TopLeft", -1.3, 0.5),
+        (Anchor::TopCenter, "TopCenter", 0.0, 0.5),
+        (Anchor::TopRight, "TopRight", 1.3, 0.5),
+        (Anchor::CenterLeft, "CenterLeft", -1.3, -0.2),
+        (Anchor::Center, "Center", 0.0, -0.2),
+        (Anchor::CenterRight, "CenterRight", 1.3, -0.2),
+        (Anchor::BottomLeft, "BottomLeft", -1.3, -0.9),
+        (Anchor::BottomCenter, "BottomCenter", 0.0, -0.9),
+        (Anchor::BottomRight, "BottomRight", 1.3, -0.9),
     ];
 
     let sphere_mesh = meshes.add(Sphere::new(0.025));
@@ -288,7 +288,7 @@ fn spawn_ground_text(commands: &mut Commands) {
             WorldTextStyle::new()
                 .with_size(0.16)
                 .with_color(Color::WHITE)
-                .with_anchor(TextAnchor::TopLeft),
+                .with_anchor(Anchor::TopLeft),
             Transform::from_xyz(-3.8, 0.001, -3.8)
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         ))

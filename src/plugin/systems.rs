@@ -217,14 +217,9 @@ pub(super) fn render_panel_gizmos(
 
         // Layout output is in points. Convert to world meters.
         let pts_mpu = super::Unit::Points.meters_per_unit();
-        let layout_mpu = panel
-            .layout_unit
-            .unwrap_or(unit_config.layout)
-            .meters_per_unit();
         let scale_x = pts_mpu;
         let scale_y = pts_mpu;
-        let half_w = panel.width * layout_mpu * 0.5;
-        let half_h = panel.height * layout_mpu * 0.5;
+        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
         for cmd in &result.commands {
             let z_offset = match &cmd.kind {
@@ -252,8 +247,8 @@ pub(super) fn render_panel_gizmos(
                 &cmd.bounds,
                 scale_x,
                 scale_y,
-                half_w,
-                half_h,
+                anchor_x,
+                anchor_y,
                 z_offset,
                 color,
             );
@@ -264,8 +259,8 @@ pub(super) fn render_panel_gizmos(
 /// Draws a rectangle outline in world space from layout-space bounds.
 ///
 /// Transforms layout coordinates (top-left origin, Y-down) to panel-local
-/// coordinates (center origin, Y-up), then to world space via the entity's
-/// [`GlobalTransform`].
+/// coordinates relative to the anchor point, then to world space via the
+/// entity's [`GlobalTransform`].
 #[allow(clippy::too_many_arguments)]
 fn draw_rect_outline(
     gizmos: &mut Gizmos<DiegeticPanelGizmoGroup>,
@@ -273,18 +268,18 @@ fn draw_rect_outline(
     bounds: &BoundingBox,
     scale_x: f32,
     scale_y: f32,
-    half_w: f32,
-    half_h: f32,
+    anchor_x: f32,
+    anchor_y: f32,
     z: f32,
     color: Color,
 ) {
     // Layout coordinates → panel-local coordinates.
     // Layout: origin at top-left, X-right, Y-down.
-    // Panel local: origin at center, X-right, Y-up.
-    let left = bounds.x.mul_add(scale_x, -half_w);
-    let right = (bounds.x + bounds.width).mul_add(scale_x, -half_w);
-    let top = (-bounds.y).mul_add(scale_y, half_h);
-    let bottom = (-(bounds.y + bounds.height)).mul_add(scale_y, half_h);
+    // Panel local: anchor point at entity origin, X-right, Y-up.
+    let left = bounds.x.mul_add(scale_x, -anchor_x);
+    let right = (bounds.x + bounds.width).mul_add(scale_x, -anchor_x);
+    let top = (-bounds.y).mul_add(scale_y, anchor_y);
+    let bottom = (-(bounds.y + bounds.height)).mul_add(scale_y, anchor_y);
 
     // Panel-local → world via the entity's transform.
     let tl = global_transform.transform_point(Vec3::new(left, top, z));

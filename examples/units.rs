@@ -18,6 +18,7 @@ use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignX;
+use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -27,7 +28,6 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextAnchor;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
@@ -372,8 +372,8 @@ fn spawn_metric_labels(
     let vx = -half_w - RULER_GAP - CM_TICK - LABEL_GAP;
     let hy = -half_h - RULER_GAP - CM_TICK - LABEL_GAP;
 
-    let v_style = style.clone().with_anchor(TextAnchor::CenterRight);
-    let h_style = style.with_anchor(TextAnchor::TopCenter);
+    let v_style = style.clone().with_anchor(Anchor::CenterRight);
+    let h_style = style.with_anchor(Anchor::TopCenter);
 
     let h_cm = (h / MM_TO_M / 10.0).floor() as i32;
     for cm in 1..=h_cm {
@@ -408,8 +408,8 @@ fn spawn_inch_labels(
     let vx = half_w + RULER_GAP + INCH_TICK + LABEL_GAP;
     let hy = -half_h - RULER_GAP - INCH_TICK - LABEL_GAP;
 
-    let v_style = style.clone().with_anchor(TextAnchor::CenterLeft);
-    let h_style = style.with_anchor(TextAnchor::TopCenter);
+    let v_style = style.clone().with_anchor(Anchor::CenterLeft);
+    let h_style = style.with_anchor(Anchor::TopCenter);
 
     let h_in = (h / IN_TO_M).floor() as i32;
     for inch in 1..=h_in {

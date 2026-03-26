@@ -43,6 +43,7 @@ pub use debug::TypographyOverlay;
 pub use debug::TypographyOverlayReady;
 pub use layout::AlignX;
 pub use layout::AlignY;
+pub use layout::Anchor;
 pub use layout::Border;
 pub use layout::BoundingBox;
 pub use layout::Direction;
@@ -68,7 +69,6 @@ pub use layout::MeasureTextFn;
 pub use layout::Padding;
 pub use layout::Sizing;
 pub use layout::TextAlign;
-pub use layout::TextAnchor;
 /// Measured width and height of a text string, returned by [`MeasureTextFn`].
 pub use layout::TextDimensions;
 /// Font configuration passed to [`MeasureTextFn`]: font ID, size, weight,

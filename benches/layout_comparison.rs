@@ -46,6 +46,7 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
+use bevy_diegetic::Unit;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -411,6 +412,17 @@ fn create_bench_app() -> App {
     app
 }
 
+fn bench_panel(tree: bevy_diegetic::LayoutTree, size: f32) -> DiegeticPanel {
+    let layout_mpu = 1.0 / size;
+    DiegeticPanel {
+        tree,
+        width: size,
+        height: size,
+        layout_unit: Some(Unit::Custom(layout_mpu)),
+        font_unit: Some(Unit::Custom(layout_mpu)),
+    }
+}
+
 // ── Benchmark runners ───────────────────────────────────────────────────
 
 fn run_clay_layout(rows: &[(&str, &str)], size: f32) {
@@ -451,16 +463,7 @@ fn bench_status_panel(c: &mut Criterion) {
         group.bench_function("diegetic", |b| {
             let mut app = create_bench_app();
             let tree = build_diegetic_tree(&rows, size);
-            let entity = app
-                .world_mut()
-                .spawn(DiegeticPanel {
-                    tree,
-                    layout_width: size,
-                    layout_height: size,
-                    world_width: 1.0,
-                    world_height: 1.0,
-                })
-                .id();
+            let entity = app.world_mut().spawn(bench_panel(tree, size)).id();
             // First update to compute initial layout.
             app.update();
 
