@@ -35,7 +35,6 @@ use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
-use crate::plugin::Unit::Points;
 use crate::plugin::UnitConfig;
 use crate::text::Font;
 use crate::text::FontId;
@@ -364,8 +363,9 @@ fn reconcile_panel_text_children(
             continue;
         };
 
-        // Layout output is in points. Convert to world meters.
-        let pts_mpu = Points.meters_per_unit();
+        // Layout output is in points. Convert to world meters
+        // (incorporates world_width/world_height scaling).
+        let pts_mpu = panel.points_to_world(&unit_config);
         let scale_x = pts_mpu;
         let scale_y = pts_mpu;
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);

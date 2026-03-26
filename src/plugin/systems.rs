@@ -7,7 +7,6 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
-use super::Unit::Points;
 use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
@@ -174,8 +173,8 @@ pub(super) fn compute_panel_layouts(
         );
 
         if let Some(bounds) = result.content_bounds() {
-            let pts_mpu = Points.meters_per_unit();
-            computed.set_content_size(bounds.width * pts_mpu, bounds.height * pts_mpu);
+            let s = panel_ref.points_to_world(&unit_config);
+            computed.set_content_size(bounds.width * s, bounds.height * s);
         }
 
         computed.set_result(result);
@@ -249,12 +248,12 @@ pub(super) fn rebuild_panel_gizmos(
         })
         .unwrap_or(1000.0);
 
-    let pts_mpu = Points.meters_per_unit();
-
     for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
+
+        let pts_mpu = panel.points_to_world(&unit_config);
 
         // Despawn previous gizmo children.
         for (entity, child_of) in &existing_gizmos {

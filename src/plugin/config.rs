@@ -393,6 +393,222 @@ impl UnitConfig {
     pub fn font_scale(&self) -> f32 { self.font.meters_per_unit() / self.layout.meters_per_unit() }
 }
 
+// ── Dimensional newtypes ─────────────────────────────────────────────────────
+
+/// A value in typographic points (1/72 inch ≈ 0.353 mm).
+#[derive(Clone, Copy, Debug)]
+pub struct Pt(pub f32);
+
+/// A value in millimeters.
+#[derive(Clone, Copy, Debug)]
+pub struct Mm(pub f32);
+
+/// A value in inches.
+#[derive(Clone, Copy, Debug)]
+pub struct In(pub f32);
+
+impl From<Pt> for f32 {
+    fn from(v: Pt) -> Self { v.0 * Unit::Points.meters_per_unit() }
+}
+
+impl From<Mm> for f32 {
+    fn from(v: Mm) -> Self { v.0 * Unit::Millimeters.meters_per_unit() }
+}
+
+impl From<In> for f32 {
+    fn from(v: In) -> Self { v.0 * Unit::Inches.meters_per_unit() }
+}
+
+// ── Paper sizes ──────────────────────────────────────────────────────────────
+
+/// Standard paper and card sizes.
+///
+/// Each variant stores its dimensions in millimeters internally and
+/// converts to meters (or any [`Unit`]) on request. Implements
+/// [`PanelSize`] so it can be passed directly to
+/// [`DiegeticPanelBuilder::size`](crate::DiegeticPanelBuilder::size).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+pub enum PaperSize {
+    // ── ISO A series ─────────────────────────────────────────────────
+    /// A0 — 841 × 1189 mm.
+    A0,
+    /// A1 — 594 × 841 mm.
+    A1,
+    /// A2 — 420 × 594 mm.
+    A2,
+    /// A3 — 297 × 420 mm.
+    A3,
+    /// A4 — 210 × 297 mm.
+    A4,
+    /// A5 — 148 × 210 mm.
+    A5,
+    /// A6 — 105 × 148 mm.
+    A6,
+    /// A7 — 74 × 105 mm.
+    A7,
+    /// A8 — 52 × 74 mm.
+    A8,
+
+    // ── ISO B series ─────────────────────────────────────────────────
+    /// B0 — 1000 × 1414 mm.
+    B0,
+    /// B1 — 707 × 1000 mm.
+    B1,
+    /// B2 — 500 × 707 mm.
+    B2,
+    /// B3 — 353 × 500 mm.
+    B3,
+    /// B4 — 250 × 353 mm.
+    B4,
+    /// B5 — 176 × 250 mm.
+    B5,
+
+    // ── North American ───────────────────────────────────────────────
+    /// US Letter — 8.5 × 11 inches (215.9 × 279.4 mm).
+    USLetter,
+    /// US Legal — 8.5 × 14 inches (215.9 × 355.6 mm).
+    USLegal,
+    /// US Ledger / Tabloid — 11 × 17 inches (279.4 × 431.8 mm).
+    USLedger,
+    /// US Executive — 7.25 × 10.5 inches (184.2 × 266.7 mm).
+    USExecutive,
+
+    // ── Cards ────────────────────────────────────────────────────────
+    /// US Business Card — 3.5 × 2 inches (88.9 × 50.8 mm).
+    BusinessCard,
+    /// Index Card 3 × 5 inches (76.2 × 127.0 mm).
+    IndexCard3x5,
+    /// Index Card 4 × 6 inches (101.6 × 152.4 mm).
+    IndexCard4x6,
+    /// Index Card 5 × 8 inches (127.0 × 203.2 mm).
+    IndexCard5x8,
+
+    // ── Photo ────────────────────────────────────────────────────────
+    /// Photo 4 × 6 inches (101.6 × 152.4 mm).
+    Photo4x6,
+    /// Photo 5 × 7 inches (127.0 × 177.8 mm).
+    Photo5x7,
+    /// Photo 8 × 10 inches (203.2 × 254.0 mm).
+    Photo8x10,
+
+    // ── Poster ───────────────────────────────────────────────────────
+    /// Poster 18 × 24 inches (457.2 × 609.6 mm).
+    Poster18x24,
+    /// Poster 24 × 36 inches (609.6 × 914.4 mm).
+    Poster24x36,
+}
+
+impl PaperSize {
+    /// Width in millimeters (shorter dimension).
+    #[must_use]
+    pub const fn width_mm(self) -> f32 {
+        match self {
+            Self::A0 => 841.0,
+            Self::A1 => 594.0,
+            Self::A2 => 420.0,
+            Self::A3 => 297.0,
+            Self::A4 => 210.0,
+            Self::A5 => 148.0,
+            Self::A6 => 105.0,
+            Self::A7 => 74.0,
+            Self::A8 => 52.0,
+            Self::B0 => 1000.0,
+            Self::B1 => 707.0,
+            Self::B2 => 500.0,
+            Self::B3 => 353.0,
+            Self::B4 => 250.0,
+            Self::B5 => 176.0,
+            Self::USLetter => 215.9,
+            Self::USLegal => 215.9,
+            Self::USLedger => 279.4,
+            Self::USExecutive => 184.15,
+            Self::BusinessCard => 88.9,
+            Self::IndexCard3x5 => 76.2,
+            Self::IndexCard4x6 => 101.6,
+            Self::IndexCard5x8 => 127.0,
+            Self::Photo4x6 => 101.6,
+            Self::Photo5x7 => 127.0,
+            Self::Photo8x10 => 203.2,
+            Self::Poster18x24 => 457.2,
+            Self::Poster24x36 => 609.6,
+        }
+    }
+
+    /// Height in millimeters (longer dimension).
+    #[must_use]
+    pub const fn height_mm(self) -> f32 {
+        match self {
+            Self::A0 => 1189.0,
+            Self::A1 => 841.0,
+            Self::A2 => 594.0,
+            Self::A3 => 420.0,
+            Self::A4 => 297.0,
+            Self::A5 => 210.0,
+            Self::A6 => 148.0,
+            Self::A7 => 105.0,
+            Self::A8 => 74.0,
+            Self::B0 => 1414.0,
+            Self::B1 => 1000.0,
+            Self::B2 => 707.0,
+            Self::B3 => 500.0,
+            Self::B4 => 353.0,
+            Self::B5 => 250.0,
+            Self::USLetter => 279.4,
+            Self::USLegal => 355.6,
+            Self::USLedger => 431.8,
+            Self::USExecutive => 266.7,
+            Self::BusinessCard => 50.8,
+            Self::IndexCard3x5 => 127.0,
+            Self::IndexCard4x6 => 152.4,
+            Self::IndexCard5x8 => 203.2,
+            Self::Photo4x6 => 152.4,
+            Self::Photo5x7 => 177.8,
+            Self::Photo8x10 => 254.0,
+            Self::Poster18x24 => 609.6,
+            Self::Poster24x36 => 914.4,
+        }
+    }
+
+    /// Width in meters.
+    #[must_use]
+    pub const fn width(self) -> f32 { self.width_mm() * 0.001 }
+
+    /// Height in meters.
+    #[must_use]
+    pub const fn height(self) -> f32 { self.height_mm() * 0.001 }
+
+    /// Width in the given unit.
+    #[must_use]
+    pub fn width_in(self, unit: Unit) -> f32 {
+        self.width_mm() * Unit::Millimeters.meters_per_unit() / unit.meters_per_unit()
+    }
+
+    /// Height in the given unit.
+    #[must_use]
+    pub fn height_in(self, unit: Unit) -> f32 {
+        self.height_mm() * Unit::Millimeters.meters_per_unit() / unit.meters_per_unit()
+    }
+}
+
+// ── PanelSize trait ──────────────────────────────────────────────────────────
+
+/// Trait for types that can provide panel dimensions in meters.
+///
+/// Implemented by [`PaperSize`] and tuples of values convertible to `f32`
+/// (e.g., `(Pt(612.0), Pt(792.0))` or `(Mm(210.0), Mm(297.0))`).
+pub trait PanelSize {
+    /// Returns `(width, height)` in meters.
+    fn dimensions(self) -> (f32, f32);
+}
+
+impl PanelSize for PaperSize {
+    fn dimensions(self) -> (f32, f32) { (self.width(), self.height()) }
+}
+
+impl<W: Into<f32>, H: Into<f32>> PanelSize for (W, H) {
+    fn dimensions(self) -> (f32, f32) { (self.0.into(), self.1.into()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
