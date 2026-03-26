@@ -33,6 +33,9 @@ pub const MIN_RADIUS_MULTIPLIER: f32 = 0.1;
 pub const MAX_RADIUS_MULTIPLIER: f32 = 100.0;
 /// Initial best-guess radius as a multiple of the object radius (2x).
 pub const INITIAL_RADIUS_MULTIPLIER: f32 = 2.0;
+/// Minimum screen-space extent before treating a dimension as degenerate (edge-on).
+/// Below this threshold the dimension is ignored for fit purposes.
+pub const DEGENERATE_EXTENT_THRESHOLD: f32 = 1e-6;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
 /// For example, a margin of 0.08 returns 1.087 (8% margin).
@@ -93,8 +96,23 @@ impl fmt::Display for FitError {
 /// Computes the target margins for the constraining dimension based on aspect ratios.
 /// Returns `(target_margin_x, target_margin_y)`.
 fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f32) -> (f32, f32) {
-    let boundary_aspect =
-        (bounds.max_norm_x - bounds.min_norm_x) / (bounds.max_norm_y - bounds.min_norm_y);
+    let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
+    let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
+
+    // Guard against degenerate screen-space extents (edge-on flat objects).
+    // When one dimension is near-zero, fit based on the non-degenerate dimension only.
+    // Setting the target margin to the full half-extent ensures the degenerate
+    // dimension never constrains the binary search.
+    if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
+        let target_x = bounds.half_extent_x / zoom_multiplier;
+        return (bounds.half_extent_x - target_x, bounds.half_extent_y);
+    }
+    if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
+        let target_y = bounds.half_extent_y / zoom_multiplier;
+        return (bounds.half_extent_x, bounds.half_extent_y - target_y);
+    }
+
+    let boundary_aspect = horizontal_extent / vertical_extent;
     let screen_aspect = bounds.half_extent_x / bounds.half_extent_y;
 
     // If boundary is wider (relative to height) than screen, width constrains
@@ -225,15 +243,25 @@ pub fn calculate_fit(
 
         let (target_margin_x, target_margin_y) = calculate_target_margins(&bounds, zoom_multiplier);
 
-        // Find constraining dimension (minimum margin)
+        // Find constraining dimension (minimum margin).
+        // When a dimension has degenerate (near-zero) screen extent, force the
+        // other dimension to constrain — the degenerate dimension has no
+        // meaningful projection to fit against.
         let h_min = bounds.left_margin.min(bounds.right_margin);
         let v_min = bounds.top_margin.min(bounds.bottom_margin);
+        let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
+        let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
 
-        let (current_margin, target_margin, dimension) = if h_min < v_min {
-            (h_min, target_margin_x, "H")
-        } else {
-            (v_min, target_margin_y, "V")
-        };
+        let (current_margin, target_margin, dimension) =
+            if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
+                (h_min, target_margin_x, "H")
+            } else if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
+                (v_min, target_margin_y, "V")
+            } else if h_min < v_min {
+                (h_min, target_margin_x, "H")
+            } else {
+                (v_min, target_margin_y, "V")
+            };
 
         debug!(
             "Iteration {iteration}: radius={test_radius:.1} | {dimension} margin={current_margin:.3} \
@@ -450,5 +478,76 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    /// Flat quad in XZ at Y=0, camera at pitch=0 (edge-on). The vertical screen
+    /// extent is zero, which previously caused `calculate_target_margins` to
+    /// divide by zero and the binary search to converge on an absurd radius.
+    #[test]
+    fn edge_on_flat_plane_produces_reasonable_radius() {
+        let projection = default_perspective();
+        let camera = Camera::default();
+        let points = [
+            Vec3::new(-0.5, 0.0, -0.5),
+            Vec3::new(0.5, 0.0, -0.5),
+            Vec3::new(-0.5, 0.0, 0.5),
+            Vec3::new(0.5, 0.0, 0.5),
+        ];
+        let object_radius = points.iter().map(|p| p.length()).fold(0.0_f32, f32::max);
+
+        let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 0.1, &projection, &camera)
+            .expect("edge-on flat plane should produce a valid fit");
+
+        assert!(
+            fit.radius < object_radius * 10.0,
+            "radius {:.1} should be less than 10x object_radius {:.3}",
+            fit.radius,
+            object_radius,
+        );
+    }
+
+    /// Same flat quad but with a tiny pitch (near-degenerate). Should converge
+    /// to a similar radius as a non-degenerate case.
+    #[test]
+    fn near_edge_on_flat_plane_still_converges() {
+        let projection = default_perspective();
+        let camera = Camera::default();
+        let points = [
+            Vec3::new(-0.5, 0.0, -0.5),
+            Vec3::new(0.5, 0.0, -0.5),
+            Vec3::new(-0.5, 0.0, 0.5),
+            Vec3::new(0.5, 0.0, 0.5),
+        ];
+        let object_radius = points.iter().map(|p| p.length()).fold(0.0_f32, f32::max);
+
+        let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.001, 0.1, &projection, &camera)
+            .expect("near-edge-on flat plane should produce a valid fit");
+
+        assert!(
+            fit.radius < object_radius * 10.0,
+            "radius {:.1} should be less than 10x object_radius {:.3}",
+            fit.radius,
+            object_radius,
+        );
+    }
+
+    /// Vertical line segment (zero horizontal extent) viewed head-on.
+    /// Mirror of the edge-on plane case — ensures the degenerate guard is symmetric.
+    #[test]
+    fn vertical_line_zero_horizontal_extent_produces_reasonable_radius() {
+        let projection = default_perspective();
+        let camera = Camera::default();
+        let points = [Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+        let object_radius = 1.0;
+
+        let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 0.1, &projection, &camera)
+            .expect("vertical line should produce a valid fit");
+
+        assert!(
+            fit.radius < object_radius * 10.0,
+            "radius {:.1} should be less than 10x object_radius {:.1}",
+            fit.radius,
+            object_radius,
+        );
     }
 }
