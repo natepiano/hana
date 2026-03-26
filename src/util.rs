@@ -40,7 +40,10 @@ pub fn update_orbit_transform(
         // That tiny difference shifts the projected screen-space bounds just enough
         // to flip the fit visualization balance check (tolerance: 0.001) — causing
         // all margin labels to show green/balanced when they should show red/unbalanced.
-        #[expect(clippy::manual_midpoint, reason = "f32::midpoint uses f64 on aarch64, breaking fit visualization balance detection")]
+        #[expect(
+            clippy::manual_midpoint,
+            reason = "f32::midpoint uses f64 on aarch64, breaking fit visualization balance detection"
+        )]
         {
             radius = (p.near + p.far) / 2.0;
         }

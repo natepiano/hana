@@ -2,11 +2,11 @@
 //! egui windows
 
 use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_egui::egui;
 use bevy_egui::EguiContexts;
 use bevy_egui::EguiPlugin;
 use bevy_egui::EguiPrimaryContextPass;
-use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::PanOrbitCamera;
 use bevy_lagrange::TrackpadBehavior;
