@@ -272,8 +272,7 @@ fn spawn_glyph_grid(
             let glyph = commands
                 .spawn((
                     WorldText::new("A"),
-                    WorldTextStyle::new()
-                        .with_size(GLYPH_SIZE)
+                    WorldTextStyle::new(GLYPH_SIZE)
                         .with_color(Color::srgb(0.2, 0.4, 0.9))
                         .with_render_mode(render_mode)
                         .with_shadow_mode(shadow_mode),
@@ -411,9 +410,7 @@ fn spawn_label(
     shadow_offset: Vec3,
     pos: Vec3,
 ) {
-    let style = WorldTextStyle::new()
-        .with_size(size)
-        .with_shadow_mode(GlyphShadowMode::None);
+    let style = WorldTextStyle::new(size).with_shadow_mode(GlyphShadowMode::None);
     let shadow = commands
         .spawn((
             WorldText::new(text),

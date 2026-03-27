@@ -36,6 +36,7 @@ use super::element::LayoutTree;
 use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
+use super::types::Dimension;
 use super::types::Direction;
 use super::types::LayoutTextStyle;
 use super::types::Padding;
@@ -87,8 +88,8 @@ impl El {
     }
 
     /// Sets the gap between adjacent children along the layout direction.
-    pub const fn child_gap(mut self, gap: f32) -> Self {
-        self.child_gap = gap;
+    pub fn child_gap(mut self, gap: impl Into<Dimension>) -> Self {
+        self.child_gap = gap.into().value;
         self
     }
 
@@ -180,11 +181,11 @@ impl LayoutBuilder {
     /// wrapper and want the root element itself to be content-driven (`Fit`),
     /// growable, or otherwise fully caller-defined.
     #[must_use]
-    pub fn new(width: f32, height: f32) -> Self {
+    pub fn new(width: impl Into<Dimension>, height: impl Into<Dimension>) -> Self {
         let mut tree = LayoutTree::new();
         let root = tree.add(Element {
-            width: Sizing::Fixed(width),
-            height: Sizing::Fixed(height),
+            width: Sizing::Fixed(width.into().value),
+            height: Sizing::Fixed(height.into().value),
             ..Element::default()
         });
         tree.set_root(root);
@@ -200,11 +201,15 @@ impl LayoutBuilder {
     /// Each row of content typically creates 3–5 elements. Pre-allocating
     /// avoids repeated vec reallocations during tree construction.
     #[must_use]
-    pub fn with_capacity(width: f32, height: f32, capacity: usize) -> Self {
+    pub fn with_capacity(
+        width: impl Into<Dimension>,
+        height: impl Into<Dimension>,
+        capacity: usize,
+    ) -> Self {
         let mut tree = LayoutTree::with_capacity(capacity);
         let root = tree.add(Element {
-            width: Sizing::Fixed(width),
-            height: Sizing::Fixed(height),
+            width: Sizing::Fixed(width.into().value),
+            height: Sizing::Fixed(height.into().value),
             ..Element::default()
         });
         tree.set_root(root);

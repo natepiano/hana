@@ -202,30 +202,50 @@ impl Sizing {
     ///
     /// The element will never be smaller than `min`, even if content is smaller.
     #[must_use]
-    pub const fn fit_min(min: f32) -> Self { Self::Fit { min, max: f32::MAX } }
+    pub fn fit_min(min: impl Into<Dimension>) -> Self {
+        Self::Fit {
+            min: min.into().value,
+            max: f32::MAX,
+        }
+    }
 
     /// Shrink-wrap to content, clamped to `[min, max]`.
     ///
     /// Content smaller than `min` grows to `min`; content larger than `max`
     /// is capped at `max`.
     #[must_use]
-    pub const fn fit_range(min: f32, max: f32) -> Self { Self::Fit { min, max } }
+    pub fn fit_range(min: impl Into<Dimension>, max: impl Into<Dimension>) -> Self {
+        Self::Fit {
+            min: min.into().value,
+            max: max.into().value,
+        }
+    }
 
     /// Expand to fill available space with a minimum floor.
     ///
     /// The element is guaranteed at least `min` even if no space remains.
     #[must_use]
-    pub const fn grow_min(min: f32) -> Self { Self::Grow { min, max: f32::MAX } }
+    pub fn grow_min(min: impl Into<Dimension>) -> Self {
+        Self::Grow {
+            min: min.into().value,
+            max: f32::MAX,
+        }
+    }
 
     /// Expand to fill available space, clamped to `[min, max]`.
     ///
     /// `min` is a guaranteed floor; `max` caps expansion.
     #[must_use]
-    pub const fn grow_range(min: f32, max: f32) -> Self { Self::Grow { min, max } }
+    pub fn grow_range(min: impl Into<Dimension>, max: impl Into<Dimension>) -> Self {
+        Self::Grow {
+            min: min.into().value,
+            max: max.into().value,
+        }
+    }
 
     /// Exact size in layout units, ignoring content and siblings.
     #[must_use]
-    pub const fn fixed(size: f32) -> Self { Self::Fixed(size) }
+    pub fn fixed(size: impl Into<Dimension>) -> Self { Self::Fixed(size.into().value) }
 
     /// Fraction of the parent's content area (0.0–1.0).
     #[must_use]
@@ -348,7 +368,8 @@ pub struct Padding {
 impl Padding {
     /// Uniform padding on all sides.
     #[must_use]
-    pub const fn all(value: f32) -> Self {
+    pub fn all(value: impl Into<Dimension>) -> Self {
+        let value = value.into().value;
         Self {
             left:   value,
             right:  value,
@@ -359,7 +380,9 @@ impl Padding {
 
     /// Symmetric padding: `x` for left/right, `y` for top/bottom.
     #[must_use]
-    pub const fn xy(x: f32, y: f32) -> Self {
+    pub fn xy(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self {
+        let x = x.into().value;
+        let y = y.into().value;
         Self {
             left:   x,
             right:  x,
@@ -370,12 +393,17 @@ impl Padding {
 
     /// Individual padding per side.
     #[must_use]
-    pub const fn new(left: f32, right: f32, top: f32, bottom: f32) -> Self {
+    pub fn new(
+        left: impl Into<Dimension>,
+        right: impl Into<Dimension>,
+        top: impl Into<Dimension>,
+        bottom: impl Into<Dimension>,
+    ) -> Self {
         Self {
-            left,
-            right,
-            top,
-            bottom,
+            left:   left.into().value,
+            right:  right.into().value,
+            top:    top.into().value,
+            bottom: bottom.into().value,
         }
     }
 
@@ -557,6 +585,28 @@ impl Unit {
     pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
 }
 
+/// A dimension with an optional unit.
+///
+/// Carries both the numeric value and the unit it's expressed in.
+/// Created implicitly via `From` impls on [`Pt`](crate::Pt),
+/// [`Mm`](crate::Mm), [`In`](crate::In), and bare `f32`.
+///
+/// - `Pt(24.0).into()` → value 24.0, unit Points
+/// - `Mm(6.0).into()` → value 6.0, unit Millimeters
+/// - `In(0.24).into()` → value 0.24, unit Inches
+/// - `(24.0_f32).into()` → value 24.0, unit None (contextual default)
+#[derive(Clone, Copy, Debug)]
+pub struct Dimension {
+    /// The numeric size value.
+    pub value: f32,
+    /// The unit the value is expressed in. `None` = contextual default.
+    pub unit:  Option<Unit>,
+}
+
+impl From<f32> for Dimension {
+    fn from(value: f32) -> Self { Self { value, unit: None } }
+}
+
 /// Anchor point for standalone text positioning.
 ///
 /// Determines which point of the text block's bounding box is placed
@@ -713,7 +763,7 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// TextConfig::new(14.0).with_font(FontId::MONOSPACE.0).bold().no_wrap()
 ///
 /// // Standalone (aliased as TextStyle):
-/// TextStyle::new().with_font(FontId::MONOSPACE.0).with_size(24.0).bold().with_color(Color::RED)
+/// TextStyle::new(24.0).with_font(FontId::MONOSPACE.0).bold().with_color(Color::RED)
 /// ```
 #[derive(Component, Clone, Debug, Reflect)]
 pub struct TextProps<C: Send + Sync + 'static> {
@@ -795,17 +845,14 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn word_spacing(&self) -> f32 { self.word_spacing }
 
+    /// Returns the per-entity unit override, if set.
+    #[must_use]
+    pub const fn unit(&self) -> Option<Unit> { self.unit }
+
     /// Sets the font identifier.
     #[must_use]
     pub const fn with_font(mut self, font_id: u16) -> Self {
         self.font_id = font_id;
-        self
-    }
-
-    /// Sets the font size in layout units.
-    #[must_use]
-    pub const fn with_size(mut self, size: f32) -> Self {
-        self.size = size;
         self
     }
 
@@ -998,28 +1045,33 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 impl TextProps<ForLayout> {
     /// Creates a new layout config with the given font size.
     ///
+    /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
+    /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
+    /// panel's `font_unit`.
+    ///
     /// Defaults to word wrapping, normal weight, normal slant.
     #[must_use]
-    pub const fn new(size: f32) -> Self {
+    pub fn new(size: impl Into<Dimension>) -> Self {
+        let font_size = size.into();
         Self {
-            font_id: 0,
-            size,
-            weight: FontWeight::NORMAL,
-            slant: FontSlant::Normal,
-            line_height: 0.0,
+            font_id:        0,
+            size:           font_size.value,
+            weight:         FontWeight::NORMAL,
+            slant:          FontSlant::Normal,
+            line_height:    0.0,
             letter_spacing: 0.0,
-            word_spacing: 0.0,
-            wrap: TextWrap::Words,
-            color: Color::WHITE,
-            align: TextAlign::Left,
-            anchor: Anchor::Center,
-            render_mode: GlyphRenderMode::Text,
-            shadow_mode: GlyphShadowMode::Text,
+            word_spacing:   0.0,
+            wrap:           TextWrap::Words,
+            color:          Color::WHITE,
+            align:          TextAlign::Left,
+            anchor:         Anchor::Center,
+            render_mode:    GlyphRenderMode::Text,
+            shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
-            font_features: FontFeatures::NONE,
-            unit: None,
-            world_scale: None,
-            _context: PhantomData,
+            font_features:  FontFeatures::NONE,
+            unit:           font_size.unit,
+            world_scale:    None,
+            _context:       PhantomData,
         }
     }
 
@@ -1063,19 +1115,26 @@ impl TextProps<ForLayout> {
     /// engine rather than by an anchor offset.
     #[must_use]
     pub const fn as_standalone(&self) -> TextProps<ForStandalone> {
-        TextProps::<ForStandalone>::new()
-            .with_font(self.font_id)
-            .with_size(self.size)
-            .with_weight(self.weight)
-            .with_slant(self.slant)
-            .with_line_height(self.line_height)
-            .with_letter_spacing(self.letter_spacing)
-            .with_word_spacing(self.word_spacing)
-            .with_color(self.color)
-            .with_render_mode(self.render_mode)
-            .with_shadow_mode(self.shadow_mode)
-            .with_loading_policy(self.loading_policy)
-            .with_font_features(self.font_features)
+        TextProps::<ForStandalone> {
+            font_id:        self.font_id,
+            size:           self.size,
+            weight:         self.weight,
+            slant:          self.slant,
+            line_height:    self.line_height,
+            letter_spacing: self.letter_spacing,
+            word_spacing:   self.word_spacing,
+            wrap:           TextWrap::None,
+            color:          self.color,
+            align:          TextAlign::Left,
+            anchor:         Anchor::Center,
+            render_mode:    self.render_mode,
+            shadow_mode:    self.shadow_mode,
+            loading_policy: self.loading_policy,
+            font_features:  self.font_features,
+            unit:           self.unit,
+            world_scale:    None,
+            _context:       PhantomData,
+        }
     }
 }
 
@@ -1086,12 +1145,19 @@ impl Default for TextProps<ForLayout> {
 // ── Standalone-only methods ──────────────────────────────────────────────────
 
 impl TextProps<ForStandalone> {
-    /// Creates a new style with all defaults (16-unit white monospace, centered anchor).
+    /// Creates a new style with the given font size.
+    ///
+    /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
+    /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
+    /// global [`UnitConfig::world_font`](crate::UnitConfig).
+    ///
+    /// Defaults to centered anchor, white color, normal weight.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new(size: impl Into<Dimension>) -> Self {
+        let font_size = size.into();
         Self {
             font_id:        0,
-            size:           DEFAULT_FONT_SIZE,
+            size:           font_size.value,
             weight:         FontWeight::NORMAL,
             slant:          FontSlant::Normal,
             line_height:    0.0,
@@ -1105,7 +1171,7 @@ impl TextProps<ForStandalone> {
             shadow_mode:    GlyphShadowMode::Text,
             loading_policy: GlyphLoadingPolicy::WhenReady,
             font_features:  FontFeatures::NONE,
-            unit:           None,
+            unit:           font_size.unit,
             world_scale:    None,
             _context:       PhantomData,
         }
@@ -1143,10 +1209,11 @@ impl TextProps<ForStandalone> {
     /// # Example
     ///
     /// ```ignore
-    /// // 12-point text — auto-converts to world meters:
-    /// WorldTextStyle::new()
-    ///     .with_size(12.0)
-    ///     .with_unit(Unit::Points)
+    /// // Explicit unit override (rare — prefer newtypes in new()):
+    /// WorldTextStyle::new(12.0).with_unit(Unit::Points)
+    ///
+    /// // Preferred — newtype carries the unit:
+    /// WorldTextStyle::new(Pt(12.0))
     /// ```
     #[must_use]
     pub const fn with_unit(mut self, unit: Unit) -> Self {
@@ -1165,17 +1232,13 @@ impl TextProps<ForStandalone> {
         self
     }
 
-    /// Returns the per-entity unit override, if set.
-    #[must_use]
-    pub const fn unit(&self) -> Option<Unit> { self.unit }
-
     /// Returns the per-entity world scale override, if set.
     #[must_use]
     pub const fn world_scale(&self) -> Option<f32> { self.world_scale }
 }
 
 impl Default for TextProps<ForStandalone> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self { Self::new(DEFAULT_FONT_SIZE) }
 }
 
 impl TextProps<ForStandalone> {
@@ -1186,19 +1249,26 @@ impl TextProps<ForStandalone> {
     /// not word-wrap by default.
     #[must_use]
     pub const fn as_layout_config(&self) -> TextProps<ForLayout> {
-        TextProps::<ForLayout>::new(self.size)
-            .with_font(self.font_id)
-            .with_weight(self.weight)
-            .with_slant(self.slant)
-            .with_line_height(self.line_height)
-            .with_letter_spacing(self.letter_spacing)
-            .with_word_spacing(self.word_spacing)
-            .with_color(self.color)
-            .with_render_mode(self.render_mode)
-            .with_shadow_mode(self.shadow_mode)
-            .with_loading_policy(self.loading_policy)
-            .with_font_features(self.font_features)
-            .no_wrap()
+        TextProps::<ForLayout> {
+            font_id:        self.font_id,
+            size:           self.size,
+            weight:         self.weight,
+            slant:          self.slant,
+            line_height:    self.line_height,
+            letter_spacing: self.letter_spacing,
+            word_spacing:   self.word_spacing,
+            wrap:           TextWrap::None,
+            color:          self.color,
+            align:          TextAlign::Left,
+            anchor:         Anchor::Center,
+            render_mode:    self.render_mode,
+            shadow_mode:    self.shadow_mode,
+            loading_policy: self.loading_policy,
+            font_features:  self.font_features,
+            unit:           self.unit,
+            world_scale:    self.world_scale,
+            _context:       PhantomData,
+        }
     }
 }
 
@@ -1289,7 +1359,8 @@ impl Border {
 
     /// Uniform border on all sides.
     #[must_use]
-    pub const fn all(width: f32, color: Color) -> Self {
+    pub fn all(width: impl Into<Dimension>, color: Color) -> Self {
+        let width = width.into().value;
         Self {
             left: width,
             right: width,
@@ -1302,29 +1373,29 @@ impl Border {
 
     /// Sets the left border width.
     #[must_use]
-    pub const fn left(mut self, width: f32) -> Self {
-        self.left = width;
+    pub fn left(mut self, width: impl Into<Dimension>) -> Self {
+        self.left = width.into().value;
         self
     }
 
     /// Sets the right border width.
     #[must_use]
-    pub const fn right(mut self, width: f32) -> Self {
-        self.right = width;
+    pub fn right(mut self, width: impl Into<Dimension>) -> Self {
+        self.right = width.into().value;
         self
     }
 
     /// Sets the top border width.
     #[must_use]
-    pub const fn top(mut self, width: f32) -> Self {
-        self.top = width;
+    pub fn top(mut self, width: impl Into<Dimension>) -> Self {
+        self.top = width.into().value;
         self
     }
 
     /// Sets the bottom border width.
     #[must_use]
-    pub const fn bottom(mut self, width: f32) -> Self {
-        self.bottom = width;
+    pub fn bottom(mut self, width: impl Into<Dimension>) -> Self {
+        self.bottom = width.into().value;
         self
     }
 
@@ -1337,8 +1408,8 @@ impl Border {
 
     /// Sets the width of lines drawn between children.
     #[must_use]
-    pub const fn between_children(mut self, width: f32) -> Self {
-        self.between_children = width;
+    pub fn between_children(mut self, width: impl Into<Dimension>) -> Self {
+        self.between_children = width.into().value;
         self
     }
 

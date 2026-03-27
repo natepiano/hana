@@ -59,6 +59,7 @@ pub use types::AlignY;
 pub use types::Anchor;
 pub use types::Border;
 pub use types::BoundingBox;
+pub use types::Dimension;
 pub use types::Direction;
 pub use types::FontFeatureFlags;
 pub use types::FontFeatures;

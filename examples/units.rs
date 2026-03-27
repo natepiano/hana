@@ -151,8 +151,7 @@ fn setup(
     let card_y = a4_top - card_h_m / 2.0;
 
     let ruler_color = Color::srgba(0.55, 0.55, 0.55, 0.7);
-    let label_style = WorldTextStyle::new()
-        .with_size(LABEL_SIZE)
+    let label_style = WorldTextStyle::new(LABEL_SIZE)
         .with_unit(Unit::Points)
         .with_color(ruler_color);
 
@@ -507,8 +506,7 @@ fn toggle_rulers(
     let card_w_m = CARD_W * IN_TO_M;
     let card_h_m = CARD_H * IN_TO_M;
     let ruler_color = Color::srgba(0.55, 0.55, 0.55, 0.7);
-    let label_style = WorldTextStyle::new()
-        .with_size(LABEL_SIZE)
+    let label_style = WorldTextStyle::new(LABEL_SIZE)
         .with_unit(Unit::Points)
         .with_color(ruler_color);
 
@@ -570,7 +568,7 @@ fn spawn_ruler_on_panel(
 
 // ── Panel content ────────────────────────────────────────────────────
 
-const fn debug_border(debug: bool) -> Option<Border> {
+fn debug_border(debug: bool) -> Option<Border> {
     if debug {
         Some(Border::all(0.002, Color::srgba(1.0, 0.3, 0.3, 0.4)))
     } else {

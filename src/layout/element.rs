@@ -198,7 +198,11 @@ impl LayoutTree {
                 *border = border.scaled(layout_scale);
             }
             if let ElementContent::Text { ref mut config, .. } = element.content {
-                *config = config.scaled(font_scale);
+                // If this text element carries an explicit unit (e.g., from
+                // `LayoutTextStyle::new(Mm(6.0))`), convert from that unit to
+                // points directly. Otherwise use the panel-wide font_scale.
+                let scale = config.unit().map(|u| u.to_points()).unwrap_or(font_scale);
+                *config = config.scaled(scale);
             }
         }
         tree
