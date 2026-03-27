@@ -478,7 +478,7 @@ fn handle_in_progress(
 
 /// System that processes camera movement queues with duration-based interpolation.
 ///
-/// When a `PanOrbitCamera` has a `CameraMoveList`, interpolates toward the target over
+/// When a `OrbitCam` has a `CameraMoveList`, interpolates toward the target over
 /// the specified duration with easing. When a move completes, automatically moves to the
 /// next. Removes the `CameraMoveList` component when all moves are complete.
 #[allow(clippy::type_complexity)]

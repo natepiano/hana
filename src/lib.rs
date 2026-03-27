@@ -87,11 +87,11 @@ pub use extras::events::ZoomToFit;
 #[cfg(feature = "zoom_overlay")]
 pub use extras::visualization::FitTargetVisualizationConfig;
 
-/// Bevy plugin that contains the systems for controlling `PanOrbitCamera` components.
+/// Bevy plugin that contains the systems for controlling `OrbitCam` components.
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+/// # use bevy_lagrange::{LagrangePlugin, OrbitCam};
 /// fn main() {
 ///     App::new()
 ///         .add_plugins(DefaultPlugins)
@@ -142,7 +142,7 @@ impl Plugin for LagrangePlugin {
     }
 }
 
-/// Base system set to allow ordering of `PanOrbitCamera`
+/// Base system set to allow ordering of `OrbitCam`
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct OrbitCamSystemSet;
 
@@ -152,7 +152,7 @@ pub struct OrbitCamSystemSet;
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_lagrange::{LagrangePlugin, PanOrbitCamera};
+/// # use bevy_lagrange::{LagrangePlugin, OrbitCam};
 /// # fn main() {
 /// #     App::new()
 /// #         .add_plugins(DefaultPlugins)
@@ -163,7 +163,7 @@ pub struct OrbitCamSystemSet;
 /// fn setup(mut commands: Commands) {
 ///     commands.spawn((
 ///         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-///         PanOrbitCamera::default(),
+///         OrbitCam::default(),
 ///     ));
 /// }
 /// ```
@@ -336,7 +336,7 @@ pub struct OrbitCam {
     pub allow_upside_down:              bool,
     /// If `false`, disable control of the camera. Defaults to `true`.
     pub enabled:                        bool,
-    /// Whether `PanOrbitCamera` has been initialized with the initial config.
+    /// Whether `OrbitCam` has been initialized with the initial config.
     /// Set to `true` if you want the camera to smoothly animate to its initial position.
     /// Defaults to `false`.
     pub initialized:                    bool,
@@ -405,7 +405,7 @@ impl Default for OrbitCam {
     }
 }
 
-/// Tracks which `PanOrbitCamera` is active (should handle input events).
+/// Tracks which `OrbitCam` is active (should handle input events).
 ///
 /// Also stores the window and viewport dimensions, which are used for scaling mouse motion.
 /// `LagrangePlugin` manages this resource automatically, in order to support multiple
@@ -413,16 +413,16 @@ impl Default for OrbitCam {
 /// yourself, e.g. when you want to control a camera that is rendering to a texture.
 #[derive(Resource, Default, Debug, PartialEq)]
 pub struct ActiveCameraData {
-    /// ID of the entity with `PanOrbitCamera` that will handle user input. In other words, this
+    /// ID of the entity with `OrbitCam` that will handle user input. In other words, this
     /// is the camera that will move when you orbit/pan/zoom.
     pub entity:        Option<Entity>,
     /// The viewport size. This is only used to scale the panning mouse motion. I recommend setting
     /// this to the actual render target dimensions (e.g. the image or viewport), and changing
-    /// `PanOrbitCamera::pan_sensitivity` to adjust the sensitivity if required.
+    /// `OrbitCam::pan_sensitivity` to adjust the sensitivity if required.
     pub viewport_size: Option<Vec2>,
     /// The size of the window. This is only used to scale the orbit mouse motion. I recommend
     /// setting this to actual dimensions of the window that you want to control the camera from,
-    /// and changing `PanOrbitCamera::orbit_sensitivity` to adjust the sensitivity if required.
+    /// and changing `OrbitCam::orbit_sensitivity` to adjust the sensitivity if required.
     pub window_size:   Option<Vec2>,
     /// Indicates to `LagrangePlugin` that it should not update/overwrite this resource.
     /// If you are manually updating this resource you should set this to `true`.

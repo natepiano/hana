@@ -171,16 +171,16 @@ fn keyboard_input(
         info!("PlayAnimation triggered (5 steps)");
     }
 
-    if keys.just_pressed(KeyCode::KeyR) {
-        if let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera) {
-            let radius = START_POS.length();
-            pan_orbit.target_focus = Vec3::ZERO;
-            pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
-            pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
-            pan_orbit.target_radius = radius;
-            pan_orbit.force_update = true;
-            info!("Camera reset");
-        }
+    if keys.just_pressed(KeyCode::KeyR)
+        && let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera)
+    {
+        let radius = START_POS.length();
+        pan_orbit.target_focus = Vec3::ZERO;
+        pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
+        pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
+        pan_orbit.target_radius = radius;
+        pan_orbit.force_update = true;
+        info!("Camera reset");
     }
 }
 

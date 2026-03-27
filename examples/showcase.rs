@@ -587,12 +587,11 @@ fn focused_camera(
     second: Option<&SecondWindowEntities>,
     windows: &Query<&Window>,
 ) -> Entity {
-    if let Some(sw) = second {
-        if let Ok(win) = windows.get(sw.window) {
-            if win.focused {
-                return sw.camera;
-            }
-        }
+    if let Some(sw) = second
+        && let Ok(win) = windows.get(sw.window)
+        && win.focused
+    {
+        return sw.camera;
     }
     // Primary window is the default fallback
     scene.camera
@@ -1145,7 +1144,7 @@ fn animate_fit_to_scene(
 
 /// Toggles between perspective and orthographic projection, then re-fits the scene.
 ///
-/// The fit is deferred one frame via `pending_fit` because `PanOrbitCamera` needs to
+/// The fit is deferred one frame via `pending_fit` because `OrbitCam` needs to
 /// process the projection change (syncing radius ↔ orthographic scale) before the
 /// fit calculation can produce correct results.
 #[allow(clippy::too_many_arguments)]
@@ -1159,7 +1158,7 @@ fn toggle_projection(
     mut log: ResMut<EventLog>,
     mut pending_fit: Local<bool>,
 ) {
-    // Deferred fit: projection was changed last frame, `PanOrbitCamera` has now synced.
+    // Deferred fit: projection was changed last frame, `OrbitCam` has now synced.
     if *pending_fit {
         *pending_fit = false;
         for cam in all_cameras(&scene, second.as_deref()) {

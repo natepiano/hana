@@ -91,7 +91,7 @@ pub(super) struct AnimationSourceMarker(pub AnimationSource);
 /// [`CameraInputInterruptBehavior`], camera input may also be temporarily disabled.
 /// Original values are stored here and restored when the animation completes.
 #[derive(Component, Debug, Clone, Copy, Default)]
-pub(super) struct PanOrbitCameraStash {
+pub(super) struct OrbitCamStash {
     pub zoom:    f32,
     pub pan:     f32,
     pub orbit:   f32,

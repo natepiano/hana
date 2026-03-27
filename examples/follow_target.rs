@@ -85,13 +85,13 @@ fn animate_cube(
 
 /// Set the camera's focus to the cube's position
 fn cam_follow(mut pan_orbit_q: Query<&mut OrbitCam>, cube_q: Query<&Transform, With<Cube>>) {
-    if let Ok(mut pan_orbit) = pan_orbit_q.single_mut() {
-        if let Ok(cube_tfm) = cube_q.single() {
-            pan_orbit.target_focus = cube_tfm.translation;
-            // Whenever changing properties manually like this, it's necessary to force
-            // PanOrbitCamera to update this frame (by default it only updates when there are
-            // input events).
-            pan_orbit.force_update = true;
-        }
+    if let Ok(mut pan_orbit) = pan_orbit_q.single_mut()
+        && let Ok(cube_tfm) = cube_q.single()
+    {
+        pan_orbit.target_focus = cube_tfm.translation;
+        // Whenever changing properties manually like this, it's necessary to force
+        // OrbitCam to update this frame (by default it only updates when there are
+        // input events).
+        pan_orbit.force_update = true;
     }
 }

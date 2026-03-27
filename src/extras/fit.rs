@@ -174,7 +174,7 @@ pub fn calculate_fit(
         .ok_or(FitError::NoViewport)?;
 
     // For ortho, the camera is always at a fixed distance from focus.
-    // PanOrbitCamera sets this to `(near + far) / 2.0`.
+    // OrbitCam sets this to `(near + far) / 2.0`.
     let ortho_fixed_distance = match projection {
         Projection::Orthographic(o) => Some((o.near + o.far) * 0.5),
         _ => None,
@@ -195,7 +195,7 @@ pub fn calculate_fit(
 
     // Binary search for the correct radius.
     // For perspective: radius = camera distance (changes apparent size).
-    // For ortho: PanOrbitCamera maps radius → `OrthographicProjection::scale`,
+    // For ortho: OrbitCam maps radius → `OrthographicProjection::scale`,
     //   so searching over radius effectively searches over scale.
     let mut min_radius = object_radius * MIN_RADIUS_MULTIPLIER;
     let mut max_radius = object_radius * MAX_RADIUS_MULTIPLIER;
@@ -317,7 +317,7 @@ pub fn calculate_fit(
 ///
 /// For perspective, returns the original projection unchanged.
 /// For orthographic, creates a modified projection with `area` recomputed for the test scale,
-/// since `PanOrbitCamera` maps `radius` → `OrthographicProjection::scale`.
+/// since `OrbitCam` maps `radius` → `OrthographicProjection::scale`.
 fn build_test_projection(projection: &Projection, test_radius: f32) -> Projection {
     match projection {
         Projection::Orthographic(ortho) => {

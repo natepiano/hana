@@ -13,7 +13,7 @@ use super::components::AnimationConflictPolicy;
 use super::components::AnimationSourceMarker;
 use super::components::CameraInputInterruptBehavior;
 use super::components::CurrentFitTarget;
-use super::components::PanOrbitCameraStash;
+use super::components::OrbitCamStash;
 use super::components::ZoomAnimationMarker;
 use super::events::AnimateToFit;
 use super::events::AnimationBegin;
@@ -76,7 +76,7 @@ fn stash_camera_state(
     interrupt_behavior: CameraInputInterruptBehavior,
 ) {
     if !has_existing_stash {
-        let stash = PanOrbitCameraStash {
+        let stash = OrbitCamStash {
             zoom:    camera.zoom_smoothness,
             pan:     camera.pan_smoothness,
             orbit:   camera.orbit_smoothness,
@@ -277,7 +277,7 @@ pub(super) fn on_play_animation(
     mut commands: Commands,
     mut camera_query: Query<(
         &mut OrbitCam,
-        Option<&PanOrbitCameraStash>,
+        Option<&OrbitCamStash>,
         Option<&CameraInputInterruptBehavior>,
         Option<&AnimationConflictPolicy>,
     )>,
@@ -384,7 +384,7 @@ pub(super) fn on_camera_move_list_added(
     mut commands: Commands,
     mut camera_query: Query<(
         &mut OrbitCam,
-        Option<&PanOrbitCameraStash>,
+        Option<&OrbitCamStash>,
         Option<&CameraInputInterruptBehavior>,
     )>,
 ) {
@@ -636,7 +636,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 pub(super) fn restore_camera_state(
     remove: On<Remove, CameraMoveList>,
     mut commands: Commands,
-    mut query: Query<(&PanOrbitCameraStash, &mut OrbitCam)>,
+    mut query: Query<(&OrbitCamStash, &mut OrbitCam)>,
 ) {
     let entity = remove.entity;
 
@@ -649,5 +649,5 @@ pub(super) fn restore_camera_state(
     camera.orbit_smoothness = stash.orbit;
     camera.enabled = stash.enabled;
 
-    commands.entity(entity).remove::<PanOrbitCameraStash>();
+    commands.entity(entity).remove::<OrbitCamStash>();
 }

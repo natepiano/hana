@@ -1,4 +1,4 @@
-//! Demonstrates the ability to manually override which instance of `PanOrbitCamera` receives input
+//! Demonstrates the ability to manually override which instance of `OrbitCam` receives input
 //! events, which is necessary when rendering to a texture/image instead of a window/viewport.
 //!
 //! In this example, input controls the camera that is rendering the texture applied to the cube,
@@ -107,7 +107,7 @@ fn setup(
     ));
 
     // The camera for the first pass cube that will be rendered to the texture. This is the camera
-    // that is controlled by PanOrbitCamera.
+    // that is controlled by OrbitCam.
     let pan_orbit_id = commands
         .spawn((
             Camera {
@@ -155,7 +155,7 @@ fn setup(
         Transform::from_xyz(0.0, 0.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Set up manual override of PanOrbitCamera. Note that this must run after PanOrbitCameraPlugin
+    // Set up manual override of OrbitCam. Note that this must run after OrbitCamPlugin
     // is added, otherwise ActiveCameraData will be overwritten.
     // Note: you probably want to update the `viewport_size` and `window_size` whenever they change,
     // I haven't done this here for simplicity.
@@ -174,7 +174,7 @@ fn setup(
         // size to match the size of the window that you are interacting with.
         viewport_size,
         window_size: Some(Vec2::new(primary_window.width(), primary_window.height())),
-        // Setting manual to true ensures PanOrbitCameraPlugin will not overwrite this resource
+        // Setting manual to true ensures OrbitCamPlugin will not overwrite this resource
         manual: true,
     });
 }

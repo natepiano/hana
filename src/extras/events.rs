@@ -191,7 +191,7 @@ pub enum AnimationSource {
 ///
 /// # Fields
 ///
-/// - `camera` — the entity with a `PanOrbitCamera` component.
+/// - `camera` — the entity with a `OrbitCam` component.
 /// - `target` — the entity to frame; must have a `Mesh3d` (direct or on descendants).
 /// - `margin` — total fraction of the screen to leave as space between the target's screen-space
 ///   bounding box and the screen edge, split equally across both sides of the constraining

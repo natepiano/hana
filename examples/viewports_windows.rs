@@ -1,5 +1,5 @@
 //! Demonstrates multiple viewports in a single window and multiple windows,
-//! each with an independent `PanOrbitCamera`.
+//! each with an independent `OrbitCam`.
 //!
 //! The primary window has a full-size view and a minimap overlay in the
 //! top-right corner. A second OS window shows a separate camera angle.

@@ -43,15 +43,15 @@ Default touch controls:
 Add the plugin:
 
 ```rust ignore
-.add_plugins(PanOrbitCameraPlugin)
+.add_plugins(LagrangePlugin)
 ```
 
-Add `PanOrbitCamera` (this will automatically add a `Camera3d` but you can add it manually if necessary):
+Add `OrbitCam` (this will automatically add a `Camera3d` but you can add it manually if necessary):
 
 ```rust ignore
 commands.spawn((
     Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-    PanOrbitCamera::default(),
+    OrbitCam::default(),
 ));
 ```
 
@@ -62,7 +62,7 @@ all the possible configuration options.
 
 ## Cargo Features
 
-- `bevy_egui` (optional): Makes `PanOrbitCamera` ignore any input that `egui` uses, thus preventing moving the camera
+- `bevy_egui` (optional): Makes `OrbitCam` ignore any input that `egui` uses, thus preventing moving the camera
   when interacting with egui windows
 - `zoom_overlay` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization of fit targets with gizmos and screen-space labels
 
