@@ -253,6 +253,7 @@ impl Plugin for TextRenderPlugin {
             (
                 poll_atlas_glyphs,
                 reconcile_panel_text_children.after(poll_atlas_glyphs),
+                reconcile_panel_image_children.after(poll_atlas_glyphs),
                 shape_panel_text_children
                     .after(reconcile_panel_text_children)
                     .after(poll_atlas_glyphs),
@@ -422,6 +423,113 @@ fn reconcile_panel_text_children(
         // Despawn children whose `element_idx` is no longer present.
         for (entity, ptc, child_of) in &existing_children {
             if child_of.parent() == panel_entity && !visited_indices.contains(&ptc.element_idx) {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+// ── System 1b: reconcile_panel_image_children ───────────────────────────────
+
+/// Marker on image child entities spawned by the panel image reconciler.
+#[derive(Component, Clone, Debug)]
+pub(super) struct PanelImageChild {
+    /// Index of the source element in the layout tree.
+    pub element_idx: usize,
+}
+
+/// Reconciles image children for each changed [`ComputedDiegeticPanel`].
+///
+/// For each `RenderCommandKind::Image` in the layout result, spawns or
+/// updates a child entity with `Mesh3d` + `MeshMaterial3d` using the
+/// image handle and tint from the command.
+fn reconcile_panel_image_children(
+    changed_panels: Query<
+        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+        Changed<ComputedDiegeticPanel>,
+    >,
+    existing_children: Query<(Entity, &PanelImageChild, &ChildOf)>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    unit_config: Res<UnitConfig>,
+) {
+    for (panel_entity, panel, computed) in &changed_panels {
+        let Some(result) = computed.result() else {
+            continue;
+        };
+
+        let pts_mpu = panel.points_to_world(&unit_config);
+        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+
+        // Collect image commands.
+        let image_commands: Vec<_> = result
+            .commands
+            .iter()
+            .filter_map(|cmd| match &cmd.kind {
+                RenderCommandKind::Image { handle, tint } => {
+                    Some((cmd.element_idx, handle.clone(), *tint, cmd.bounds))
+                },
+                _ => None,
+            })
+            .collect();
+
+        // Build a map of existing image children by `element_idx`.
+        let mut existing_by_idx: HashMap<usize, Entity> = HashMap::new();
+        for (entity, pic, child_of) in &existing_children {
+            if child_of.parent() == panel_entity {
+                existing_by_idx.insert(pic.element_idx, entity);
+            }
+        }
+
+        let mut visited_indices: Vec<usize> = Vec::new();
+
+        for (element_idx, handle, tint, bounds) in &image_commands {
+            visited_indices.push(*element_idx);
+
+            // Convert layout bounds to world-space dimensions.
+            let world_w = bounds.width * pts_mpu;
+            let world_h = bounds.height * pts_mpu;
+            let world_x = bounds.x.mul_add(pts_mpu, world_w * 0.5) - anchor_x;
+            let world_y = -(bounds.y.mul_add(pts_mpu, world_h * 0.5) - anchor_y);
+
+            let mesh_handle = meshes.add(Rectangle::new(world_w, world_h));
+            let material_handle = materials.add(StandardMaterial {
+                base_color: *tint,
+                base_color_texture: Some(handle.clone()),
+                unlit: true,
+                double_sided: true,
+                cull_mode: None,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            });
+
+            let transform = Transform::from_xyz(world_x, world_y, TEXT_Z_OFFSET);
+
+            if let Some(&child_entity) = existing_by_idx.get(element_idx) {
+                commands.entity(child_entity).insert((
+                    PanelImageChild {
+                        element_idx: *element_idx,
+                    },
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(material_handle),
+                    transform,
+                ));
+            } else {
+                commands.entity(panel_entity).with_child((
+                    PanelImageChild {
+                        element_idx: *element_idx,
+                    },
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(material_handle),
+                    transform,
+                ));
+            }
+        }
+
+        // Despawn image children no longer present.
+        for (entity, pic, child_of) in &existing_children {
+            if child_of.parent() == panel_entity && !visited_indices.contains(&pic.element_idx) {
                 commands.entity(entity).despawn();
             }
         }

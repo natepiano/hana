@@ -26,7 +26,9 @@
 //!     .build();
 //! ```
 
+use bevy::asset::Handle;
 use bevy::color::Color;
+use bevy::image::Image;
 
 use super::element::Element;
 use super::element::ElementContent;
@@ -292,6 +294,24 @@ impl LayoutBuilder {
                 },
                 ..Element::default()
             },
+        );
+        self
+    }
+
+    /// Adds an image leaf as a child of the current parent.
+    ///
+    /// Image elements are leaves — they cannot have children. The element's
+    /// [`Sizing`] rules control the rendered dimensions. Use
+    /// [`Sizing::GROW`] to fill the parent or [`Sizing::fixed`] for an
+    /// explicit size.
+    ///
+    /// The `tint` color is multiplied against the texture sample
+    /// ([`Color::WHITE`] = no tint).
+    pub fn image(&mut self, el: El, handle: Handle<Image>, tint: Color) -> &mut Self {
+        let parent = self.current_parent();
+        self.tree.add_child(
+            parent,
+            el.into_element(ElementContent::Image { handle, tint }),
         );
         self
     }

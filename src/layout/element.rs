@@ -8,7 +8,9 @@
 //! provides a fluent API that converts into an `Element` via `into_element()`. Think of `El`
 //! as the ergonomic front door and `Element` as the canonical storage format.
 
+use bevy::asset::Handle;
 use bevy::color::Color;
+use bevy::image::Image;
 use smallvec::SmallVec;
 
 use super::types::AlignX;
@@ -65,6 +67,13 @@ pub(super) enum ElementContent {
         text:   String,
         /// Text configuration.
         config: LayoutTextStyle,
+    },
+    /// Image leaf — rendered as a textured quad.
+    Image {
+        /// Handle to the image asset.
+        handle: Handle<Image>,
+        /// Tint color multiplied against the texture (white = no tint).
+        tint:   Color,
     },
     /// Empty (no children, no text).
     Empty,
@@ -138,8 +147,8 @@ impl LayoutTree {
                     parent_element.content =
                         ElementContent::Children(SmallVec::from_elem(child_index, 1));
                 },
-                ElementContent::Text { .. } => {
-                    // Text elements cannot have children — this is a programming error.
+                ElementContent::Text { .. } | ElementContent::Image { .. } => {
+                    // Leaf elements cannot have children — this is a programming error.
                     // In release builds we silently ignore it; debug builds will catch it
                     // via the orphan check in layout computation.
                 },

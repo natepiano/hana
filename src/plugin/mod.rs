@@ -28,7 +28,8 @@ use diagnostics::install as install_perf_diagnostics;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 use systems::compute_panel_layouts;
-use systems::rebuild_panel_gizmos;
+use systems::render_debug_gizmos;
+use systems::render_layout_gizmos;
 
 use crate::layout::ForLayout;
 use crate::layout::ForStandalone;
@@ -334,7 +335,13 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
             (init_atlas_and_embedded_font, configure_panel_gizmos),
         )
         .add_systems(PostUpdate, (consume_loaded_fonts, watch_font_failures))
-        .add_systems(Update, rebuild_panel_gizmos.after(compute_panel_layouts));
+        .add_systems(
+            Update,
+            (
+                render_layout_gizmos.after(compute_panel_layouts),
+                render_debug_gizmos.after(compute_panel_layouts),
+            ),
+        );
 
     #[cfg(feature = "typography_overlay")]
     {

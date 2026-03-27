@@ -301,6 +301,15 @@ impl MsdfAtlas {
         self.glyphs.get(&key).copied()
     }
 
+    /// Iterates over all glyphs currently stored in the atlas.
+    ///
+    /// This exposes the atlas's canonical glyph keys and metrics, which is
+    /// necessary for tooling that needs to inspect shaped glyph storage without
+    /// reconstructing keys from source characters.
+    pub fn iter_glyphs(&self) -> impl Iterator<Item = (&GlyphKey, &GlyphMetrics)> {
+        self.glyphs.iter()
+    }
+
     /// Returns the raw RGBA pixel data for a page.
     #[must_use]
     pub fn page_pixels(&self, page: usize) -> Option<&[u8]> {

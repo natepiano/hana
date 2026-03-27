@@ -191,20 +191,18 @@ pub(super) fn compute_panel_layouts(
     perf.last_compute_panels = panel_count;
 }
 
-/// Controls whether text bounding-box gizmos are drawn.
-///
-/// When `false` (the default), only rectangles and borders are shown.
-/// Toggle at runtime to debug text measurement and positioning.
-///
-/// **Note:** This API is provisional. Once panels render real geometry
-/// (Phase 4), debug visualization will likely move to a per-panel debug
-/// mode rather than a global resource.
+/// Controls whether debug gizmos (text bounding boxes, element outlines)
+/// are drawn. Toggle at runtime to debug layout measurement and positioning.
 #[derive(Resource, Default)]
 pub struct ShowTextGizmos(pub bool);
 
-/// Marker on gizmo entities spawned by [`rebuild_panel_gizmos`].
+/// Marker on gizmo entities spawned by the layout gizmo renderer.
 #[derive(Component)]
 pub(super) struct PanelGizmoChild;
+
+/// Marker on gizmo entities spawned by the debug gizmo renderer.
+#[derive(Component)]
+pub(super) struct DebugGizmoChild;
 
 /// Approximate pixels-per-meter from the first camera's projection.
 fn pixels_per_meter(cameras: &Query<(&Camera, &Projection)>) -> f32 {
@@ -222,6 +220,12 @@ fn pixels_per_meter(cameras: &Query<(&Camera, &Projection)>) -> f32 {
         .unwrap_or(1000.0)
 }
 
+/// Which gizmo system spawned the child.
+enum GizmoChildMarker {
+    Layout,
+    Debug,
+}
+
 /// Parameters for spawning a gizmo rectangle on a panel.
 struct GizmoRect<'a> {
     bounds:     &'a BoundingBox,
@@ -230,6 +234,7 @@ struct GizmoRect<'a> {
     anchor_y:   f32,
     color:      Color,
     line_width: f32,
+    marker:     GizmoChildMarker,
 }
 
 /// Spawns a gizmo rectangle child on `panel_entity`.
@@ -248,35 +253,40 @@ fn spawn_rect_gizmo(
         rect.anchor_y,
         rect.color,
     );
-    commands.entity(panel_entity).with_child((
-        PanelGizmoChild,
-        Gizmo {
-            handle: gizmo_assets.add(asset),
-            line_config: GizmoLineConfig {
-                width: rect.line_width,
-                perspective: false,
-                joints: GizmoLineJoint::Round(8),
-                ..default()
-            },
+    let gizmo = Gizmo {
+        handle: gizmo_assets.add(asset),
+        line_config: GizmoLineConfig {
+            width: rect.line_width,
+            perspective: false,
+            joints: GizmoLineJoint::Round(8),
             ..default()
         },
-        Transform::IDENTITY,
-    ));
+        ..default()
+    };
+    match rect.marker {
+        GizmoChildMarker::Layout => {
+            commands
+                .entity(panel_entity)
+                .with_child((PanelGizmoChild, gizmo, Transform::IDENTITY));
+        },
+        GizmoChildMarker::Debug => {
+            commands
+                .entity(panel_entity)
+                .with_child((DebugGizmoChild, gizmo, Transform::IDENTITY));
+        },
+    }
 }
 
-/// Rebuilds retained gizmo children for panels whose layout changed.
-///
-/// Each render command (background, border, text box) gets its own
-/// `GizmoAsset` entity with per-entity `GizmoLineConfig`. Borders use
-/// world-accurate line widths; backgrounds are inset by the border width.
+/// Renders layout visuals (backgrounds, borders, between-children
+/// dividers) as retained gizmos. This is the production rendering
+/// path for panel layout geometry — always active.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn rebuild_panel_gizmos(
+pub(super) fn render_layout_gizmos(
     changed_panels: Query<
         (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
         Changed<ComputedDiegeticPanel>,
     >,
     existing_gizmos: Query<(Entity, &ChildOf), With<PanelGizmoChild>>,
-    show_text: Res<ShowTextGizmos>,
     unit_config: Res<super::UnitConfig>,
     cameras: Query<(&Camera, &Projection)>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
@@ -333,6 +343,7 @@ pub(super) fn rebuild_panel_gizmos(
                             anchor_y,
                             color: *color,
                             line_width: 1.0,
+                            marker: GizmoChildMarker::Layout,
                         },
                     );
                 },
@@ -341,48 +352,92 @@ pub(super) fn rebuild_panel_gizmos(
                     let hr = border.right * 0.5;
                     let ht = border.top * 0.5;
                     let hb = border.bottom * 0.5;
-                    let inset_bounds = BoundingBox {
-                        x:      cmd.bounds.x + hl,
-                        y:      cmd.bounds.y + ht,
-                        width:  (cmd.bounds.width - hl - hr).max(0.0),
-                        height: (cmd.bounds.height - ht - hb).max(0.0),
-                    };
-                    let avg_border_pts =
-                        (border.left + border.right + border.top + border.bottom) / 4.0;
-                    let border_px = (avg_border_pts * pts_mpu * ppm).max(1.0);
-                    spawn_rect_gizmo(
-                        &mut commands,
-                        panel_entity,
-                        &mut gizmo_assets,
-                        &GizmoRect {
-                            bounds: &inset_bounds,
-                            pts_mpu,
-                            anchor_x,
-                            anchor_y,
-                            color: border.color,
-                            line_width: border_px,
-                        },
-                    );
-                },
-                RenderCommandKind::Text { .. } => {
-                    if !show_text.0 {
-                        continue;
+                    let has_sides = border.left > 0.0
+                        || border.right > 0.0
+                        || border.top > 0.0
+                        || border.bottom > 0.0;
+                    if has_sides {
+                        let inset_bounds = BoundingBox {
+                            x:      cmd.bounds.x + hl,
+                            y:      cmd.bounds.y + ht,
+                            width:  (cmd.bounds.width - hl - hr).max(0.0),
+                            height: (cmd.bounds.height - ht - hb).max(0.0),
+                        };
+                        let avg_border_pts =
+                            (border.left + border.right + border.top + border.bottom) / 4.0;
+                        let border_px = (avg_border_pts * pts_mpu * ppm).max(1.0);
+                        spawn_rect_gizmo(
+                            &mut commands,
+                            panel_entity,
+                            &mut gizmo_assets,
+                            &GizmoRect {
+                                bounds: &inset_bounds,
+                                pts_mpu,
+                                anchor_x,
+                                anchor_y,
+                                color: border.color,
+                                line_width: border_px,
+                                marker: GizmoChildMarker::Layout,
+                            },
+                        );
                     }
-                    spawn_rect_gizmo(
-                        &mut commands,
-                        panel_entity,
-                        &mut gizmo_assets,
-                        &GizmoRect {
-                            bounds: &cmd.bounds,
-                            pts_mpu,
-                            anchor_x,
-                            anchor_y,
-                            color: Color::srgba(0.9, 0.9, 0.2, 0.2),
-                            line_width: 1.0,
-                        },
-                    );
+                    // between_children dividers are emitted as Rectangle
+                    // commands by the layout engine — handled above.
                 },
-                RenderCommandKind::ScissorStart | RenderCommandKind::ScissorEnd => {},
+                _ => {},
+            }
+        }
+    }
+}
+
+/// Renders debug overlays (text bounding boxes, element outlines) as
+/// retained gizmos. Only active when [`ShowTextGizmos`] is enabled.
+/// Separate from layout gizmos so debug can be toggled independently.
+pub(super) fn render_debug_gizmos(
+    changed_panels: Query<
+        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+        Changed<ComputedDiegeticPanel>,
+    >,
+    existing_gizmos: Query<(Entity, &ChildOf), With<DebugGizmoChild>>,
+    show_text: Res<ShowTextGizmos>,
+    unit_config: Res<super::UnitConfig>,
+    mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
+    mut commands: Commands,
+) {
+    if !show_text.0 || changed_panels.is_empty() {
+        return;
+    }
+
+    for (panel_entity, panel, computed) in &changed_panels {
+        let Some(result) = computed.result() else {
+            continue;
+        };
+
+        let pts_mpu = panel.points_to_world(&unit_config);
+        for (entity, child_of) in &existing_gizmos {
+            if child_of.parent() == panel_entity {
+                commands.entity(entity).despawn();
+            }
+        }
+
+        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+
+        for cmd in &result.commands {
+            if matches!(cmd.kind, RenderCommandKind::Text { .. }) {
+                spawn_rect_gizmo(
+                    &mut commands,
+                    panel_entity,
+                    &mut gizmo_assets,
+                    &GizmoRect {
+                        bounds: &cmd.bounds,
+                        pts_mpu,
+                        anchor_x,
+                        anchor_y,
+                        color: Color::srgba(0.9, 0.9, 0.2, 0.2),
+                        line_width: 1.0,
+                        marker: GizmoChildMarker::Debug,
+                    },
+                );
             }
         }
     }

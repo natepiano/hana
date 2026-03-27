@@ -612,6 +612,47 @@ fn atlas_overflows_to_second_page() {
 }
 
 #[test]
+fn atlas_iter_glyphs_reports_page_distribution() {
+    let mut atlas = MsdfAtlas::with_size(128, 128);
+    let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
+
+    for c in (33_u8..=126).map(|c| c as char) {
+        let Some(glyph_id) = face.glyph_index(c) else {
+            continue;
+        };
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_id.0,
+        };
+        atlas.get_or_insert_sync(key, FONT_DATA);
+    }
+
+    let mut per_page_counts = vec![0_usize; atlas.page_count()];
+    let mut iter_count = 0_usize;
+
+    for (_, metrics) in atlas.iter_glyphs() {
+        let page = metrics.page_index as usize;
+        assert!(
+            page < atlas.page_count(),
+            "iter_glyphs returned page {page} >= page_count {}",
+            atlas.page_count()
+        );
+        per_page_counts[page] += 1;
+        iter_count += 1;
+    }
+
+    assert_eq!(
+        iter_count,
+        atlas.glyph_count(),
+        "iter_glyphs should expose every cached glyph exactly once"
+    );
+    assert!(
+        per_page_counts.iter().any(|&count| count > 0),
+        "expected at least one page to contain glyphs"
+    );
+}
+
+#[test]
 fn atlas_single_page_no_overflow() {
     let mut atlas = MsdfAtlas::new(); // Default 1024x1024
     let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();

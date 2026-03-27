@@ -1,20 +1,17 @@
 //! @generated `bevy_example_template`
-//! MSDF atlas paging — querying the atlas with [`GlyphKey`] and [`GlyphMetrics`].
+//! MSDF atlas paging — inspecting committed atlas pages directly.
 //!
-//! Demonstrates how to inspect the MSDF texture atlas at runtime:
-//!
-//! - **Character → glyph ID** via `ttf_parser::Face::glyph_index`
-//! - **Glyph ID → atlas page** via [`MsdfAtlas::get_metrics`] with a [`GlyphKey`]
-//! - **Atlas page → GPU texture** via [`MsdfAtlas::image_handle`]
+//! Demonstrates how to inspect the MSDF texture atlas at runtime while
+//! comparing rendered glyph examples against the raw atlas page texture.
 //!
 //! Renders a tilted grid (Star Wars crawl style) where each cell
 //! represents an actual atlas page in memory. The left side of each
-//! cell shows the rendered glyphs on that page; the right side shows
-//! the raw MSDF atlas texture. Printable ASCII characters are loaded
+//! cell shows rendered glyph examples for that page; the right side shows
+//! the committed MSDF atlas texture.
+//! Printable ASCII characters are loaded
 //! at startup; pressing `+` adds Unicode Latin Extended blocks,
 //! growing the atlas. A status panel shows live diagnostics.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
@@ -29,10 +26,6 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
-use bevy_diegetic::Font;
-use bevy_diegetic::FontId;
-use bevy_diegetic::FontRegistry;
-use bevy_diegetic::GlyphKey;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
@@ -56,53 +49,64 @@ const GRID_COLUMNS: usize = 4;
 /// Rows in the page grid.
 const GRID_ROWS: usize = 2;
 
-/// Grid layout width in points.
-const GRID_LAYOUT_WIDTH: f32 = 3600.0;
+/// Layout width per column in points.
+const COLUMN_LAYOUT_WIDTH: f32 = 900.0;
 
-/// Grid layout height in points.
-const GRID_LAYOUT_HEIGHT: f32 = 1200.0;
+/// Layout height per row in points.
+const ROW_LAYOUT_HEIGHT: f32 = 600.0;
 
-/// World-space height of the grid in meters.
-const GRID_WORLD_HEIGHT: f32 = 5.0;
+/// World-space width per column in meters.
+const COLUMN_WORLD_WIDTH: f32 = 3.75;
+
+/// World-space height per row in meters.
+const ROW_WORLD_HEIGHT: f32 = 2.5;
 
 /// Tilt angle from vertical, in degrees.
-const TILT_DEGREES: f32 = 45.0;
+const TILT_DEGREES: f32 = 0.0;
 
 // ── Atlas config ───────────────────────────────────────────────────
 
 /// Atlas rasterization quality.
 const ATLAS_QUALITY: RasterQuality = RasterQuality::Medium;
 
-/// Glyphs per atlas page (budget — actual count varies).
+/// Glyphs per atlas page (budget for atlas packer — display is independent).
 const GLYPHS_PER_PAGE: u16 = 30;
 
-/// Characters per row inside each glyph cell.
-const GLYPHS_PER_ROW: usize = 6;
+/// Characters per display cell.
+const CHARS_PER_CELL: usize = 30;
+
+/// Characters per row inside each display cell.
+const CHARS_PER_ROW: usize = 6;
 
 // ── Visual style ───────────────────────────────────────────────────
 
 /// Font size for glyphs in cells (points).
-const GLYPH_FONT_SIZE: f32 = 18.0;
+const GLYPH_FONT_SIZE: f32 = 48.0;
 
 /// Extra letter spacing between glyphs (points).
-const GLYPH_LETTER_SPACING: f32 = 3.0;
+/// Font size for header/footer labels in cells (points).
+const CELL_LABEL_SIZE: f32 = 40.0;
 
-/// Font size for page number labels (points).
-const PAGE_LABEL_SIZE: f32 = 14.0;
+/// Color for header/footer labels.
+const CELL_LABEL_COLOR: Color = Color::srgb(0.55, 0.75, 1.0);
 
-/// Grid outer border width (points).
-const GRID_BORDER_WIDTH: f32 = 0.5;
+const ASCII_GLYPH_COLOR: Color = Color::WHITE;
+const UNICODE_GLYPH_COLOR: Color = Color::WHITE;
+const FALLBACK_GLYPH_COLOR: Color = Color::WHITE;
 
-/// Divider width between cells and rows (points).
-const CELL_DIVIDER_WIDTH: f32 = 0.5;
+/// Padding inside each cell's text column (points).
+const CELL_TEXT_PADDING: f32 = 26.0;
 
-/// Debug border width on glyph panel elements (points, 0 to hide).
-const GLYPH_PANEL_DEBUG_BORDER: f32 = 0.5;
+/// Gap between glyph rows (points).
+const GLYPH_ROW_GAP: f32 = 6.0;
+
+/// Gap between individual glyph cells in a row (points).
+const GLYPH_CELL_GAP: f32 = 4.0;
 
 /// Grid interior padding (points).
 const GRID_INTERIOR_PADDING: f32 = 12.0;
 
-/// Horizontal offset for atlas texture quad within cell (fraction of cell width).
+/// Atlas quad horizontal offset within a cell (fraction of cell width).
 const ATLAS_QUAD_OFFSET: f32 = 0.25;
 
 /// Atlas quad size as fraction of cell height.
@@ -117,13 +121,8 @@ const ZOOM_MARGIN_CELL: f32 = 0.15;
 /// Zoom-to-fit animation duration in milliseconds.
 const ZOOM_DURATION_MS: u64 = 1000;
 
-/// How much larger the back plane is than the grid (fraction extra).
+/// How much larger the back plane is than the grid (ensures clickable after orbiting).
 const BACK_PLANE_OVERFLOW: f32 = 0.15;
-
-const GRID_BORDER_COLOR: Color = Color::srgba(0.5, 0.55, 0.7, 0.6);
-const PAGE_LABEL_COLOR: Color = Color::srgba(0.4, 0.4, 0.5, 0.5);
-const ASCII_GLYPH_COLOR: Color = Color::srgb(0.15, 0.25, 0.8);
-const UNICODE_GLYPH_COLOR: Color = Color::srgb(0.8, 0.2, 0.15);
 
 // ── Status panel ───────────────────────────────────────────────────
 
@@ -137,21 +136,25 @@ const STATUS_BORDER_COLOR: Color = Color::WHITE;
 
 // ── Unicode blocks ─────────────────────────────────────────────────
 
-/// Unicode blocks added by pressing `+`. Each press adds the next block.
-const UNICODE_BLOCKS: &[&str] = &[
+/// Character batches added by pressing `+`. Each press adds one batch.
+/// The first batch is loaded at startup; subsequent batches are added
+/// interactively. Batches are sized to roughly fill one atlas page each.
+const CHARACTER_BATCHES: &[&str] = &[
+    // Latin Extended-A
     "ĀāĂăĄąĆćĈĉĊċČčĎďĐđĒēĔĕĖėĘęĚěĜĝĞğ",
     "ĠġĢģĤĥĦħĨĩĪīĬĭĮįİıĲĳĴĵĶķĸĹĺĻļĽľĿ",
+    // Latin Extended-B
     "ŀŁłŃńŅņŇňŉŊŋŌōŎŏŐőŒœŔŕŖŗŘřŚśŜŝŞş",
     "ŠšŢţŤťŦŧŨũŪūŬŭŮůŰűŲųŴŵŶŷŸŹźŻżŽž",
 ];
 
 // ── Components ─────────────────────────────────────────────────────
 
-/// Marker for the grid panel (single panel containing all cell text).
+/// Marker for the visible grid panel.
 #[derive(Component)]
 struct GridPanel;
 
-/// Marks an atlas texture quad spawned by the atlas sync system.
+/// Marks a committed atlas texture quad spawned beside the text grid.
 #[derive(Component)]
 struct AtlasTextureQuad;
 
@@ -173,15 +176,46 @@ struct TiltRoot(Entity);
 #[derive(Resource)]
 struct SceneBounds(Entity);
 
-/// Tracks which Unicode block to add next.
+/// Camera entity for deferred initial zoom-to-fit.
 #[derive(Resource)]
-struct NextBlock(usize);
+struct CameraEntity(Entity);
 
-/// All characters accumulated so far.
+/// Tracks which character batch to add next.
+#[derive(Resource)]
+struct NextBatch(usize);
+
+/// All characters fed to the atlas so far.
 #[derive(Resource)]
 struct AccumulatedCharacters(Vec<char>);
 
-/// Entities spawned by the atlas sync system (atlas quads + click planes).
+/// A display page — exactly `CHARS_PER_CELL` characters (or fewer for
+/// the last page). Not tied to atlas page boundaries.
+struct CommittedPage {
+    chars: Vec<char>,
+}
+
+/// Atlas state machine.
+#[derive(Resource)]
+enum AtlasPhase {
+    /// Waiting for all `AccumulatedCharacters` to be rasterized.
+    Loading {
+        start:            std::time::Instant,
+        last_glyph_count: usize,
+        stable_frames:    u32,
+    },
+    /// All current chars rasterized, pages committed.
+    Ready,
+}
+
+/// Frozen page assignments — the single source of truth for display.
+#[derive(Resource, Default)]
+struct CommittedPages(Vec<CommittedPage>);
+
+/// How many committed pages to display (invariant: <= committed.len()).
+#[derive(Resource)]
+struct PagesRevealed(usize);
+
+/// Entities spawned by the display system (atlas quads + click planes).
 #[derive(Resource, Default)]
 struct SpawnedCellEntities(Vec<Entity>);
 
@@ -189,12 +223,13 @@ struct SpawnedCellEntities(Vec<Entity>);
 #[derive(Resource)]
 struct InvisibleMaterial(Handle<StandardMaterial>);
 
-/// Change-detection state for the atlas sync system.
+/// Triggers a grid rebuild when true.
 #[derive(Resource, Default)]
-struct AtlasSyncState {
-    last_glyph_count: usize,
-    last_char_count:  usize,
-}
+struct DisplayDirty(bool);
+
+/// Whether the initial zoom-to-fit has fired.
+#[derive(Resource, Default)]
+struct InitialZoomFired(bool);
 
 /// Deduplicates status panel updates.
 #[derive(Resource, Default)]
@@ -217,24 +252,39 @@ fn main() {
             WindowManagerPlugin,
             MeshPickingPlugin,
         ))
-        .insert_resource(NextBlock(0))
+        .insert_resource(NextBatch(0))
+        .insert_resource(PagesRevealed(0))
+        .init_resource::<CommittedPages>()
         .init_resource::<SpawnedCellEntities>()
-        .init_resource::<AtlasSyncState>()
+        .init_resource::<DisplayDirty>()
+        .init_resource::<InitialZoomFired>()
         .init_resource::<LastDisplayedStatus>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (handle_input, sync_atlas_cells, update_diagnostics))
+        .add_systems(
+            Update,
+            (
+                commit_atlas_pages,
+                display_committed_pages,
+                handle_input,
+                update_diagnostics,
+            ),
+        )
         .run();
 }
 
 // ── Setup ──────────────────────────────────────────────────────────
 
 fn setup(
+    atlas: Res<MsdfAtlas>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let grid_w = grid_world_width();
-    let grid_h = GRID_WORLD_HEIGHT;
+    // Backdrop sized for max grid; panel grows dynamically.
+    #[allow(clippy::cast_precision_loss)]
+    let grid_w = COLUMN_WORLD_WIDTH * GRID_COLUMNS as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let grid_h = ROW_WORLD_HEIGHT * GRID_ROWS as f32;
 
     // Tilted root — Star Wars crawl angle.
     let tilt_radians = TILT_DEGREES.to_radians();
@@ -246,8 +296,8 @@ fn setup(
     commands.insert_resource(TiltRoot(tilt_root));
 
     // Visible backdrop — opaque dark panel behind the grid.
-    let backdrop_w = grid_w * (1.1 + BACK_PLANE_OVERFLOW);
-    let backdrop_h = grid_h * (1.1 + BACK_PLANE_OVERFLOW);
+    let backdrop_w = grid_w * (1.0 + BACK_PLANE_OVERFLOW);
+    let backdrop_h = grid_h * (1.0 + BACK_PLANE_OVERFLOW);
     let ground = commands
         .spawn((
             Mesh3d(meshes.add(Rectangle::new(backdrop_w, backdrop_h))),
@@ -276,20 +326,24 @@ fn setup(
     });
     commands.insert_resource(InvisibleMaterial(invisible_material));
 
-    // Grid panel — single panel containing all cell outlines and text.
-    // Built empty; `sync_atlas_cells` populates the cells.
+    // Grid panel — visible display, built from committed snapshots.
     let grid_entity = commands
-        .spawn((
-            GridPanel,
-            build_grid_panel(&BTreeMap::new(), &[]),
-            Transform::IDENTITY,
-        ))
+        .spawn((GridPanel, build_grid_panel(&[]), Transform::IDENTITY))
         .id();
     commands.entity(tilt_root).add_child(grid_entity);
 
-    // Initial ASCII characters. Cell content built by `sync_atlas_cells`.
+    // Load all ASCII at startup. The grid panel initially shows all chars
+    // in a single "loading" cell to trigger atlas rasterization. Once
+    // committed, it rebuilds with proper per-page cells.
     let ascii_chars: Vec<char> = (33_u8..=126).map(|c| c as char).collect();
     commands.insert_resource(AccumulatedCharacters(ascii_chars));
+    commands.insert_resource(AtlasPhase::Loading {
+        start:            std::time::Instant::now(),
+        last_glyph_count: atlas.glyph_count(),
+        stable_frames:    0,
+    });
+    // Mark dirty so the display system builds the loading view.
+    commands.insert_resource(DisplayDirty(true));
 
     // Lighting — shadows on primary, fill from behind.
     commands.spawn((
@@ -317,10 +371,10 @@ fn setup(
                 affects_lightmapped_meshes: false,
             },
             PanOrbitCamera {
-                focus: Vec3::new(0.0, 0.5, 0.0),
+                focus: Vec3::ZERO,
                 radius: Some(12.0),
                 yaw: Some(0.0),
-                pitch: Some(-0.15),
+                pitch: Some(0.0),
                 button_orbit: MouseButton::Middle,
                 button_pan: MouseButton::Middle,
                 modifier_pan: Some(KeyCode::ShiftLeft),
@@ -335,12 +389,9 @@ fn setup(
         ))
         .id();
 
-    // Initial zoom-to-fit on the back plane.
-    commands.trigger(
-        ZoomToFit::new(camera, ground)
-            .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-    );
+    // Initial zoom-to-fit is deferred to `display_committed_pages` so the
+    // ground plane bounds are propagated before framing.
+    commands.insert_resource(CameraEntity(camera));
 
     // Status panel (floating in world, outside the tilt hierarchy).
     commands.spawn((
@@ -348,7 +399,7 @@ fn setup(
         build_status_panel(&StatusData {
             pages:     0,
             glyphs:    0,
-            remaining: UNICODE_BLOCKS.len(),
+            remaining: CHARACTER_BATCHES.len(),
         }),
         Transform::from_xyz(-6.0, 4.0, 2.0),
     ));
@@ -356,76 +407,59 @@ fn setup(
 
 // ── Grid geometry helpers ──────────────────────────────────────────
 
-fn grid_world_width() -> f32 { GRID_WORLD_HEIGHT * (GRID_LAYOUT_WIDTH / GRID_LAYOUT_HEIGHT) }
+fn cell_world_width() -> f32 { COLUMN_WORLD_WIDTH }
 
-#[allow(clippy::cast_precision_loss)]
-fn cell_world_width() -> f32 { grid_world_width() / GRID_COLUMNS as f32 }
-
-#[allow(clippy::cast_precision_loss)]
-fn cell_world_height() -> f32 { GRID_WORLD_HEIGHT / GRID_ROWS as f32 }
+fn cell_world_height() -> f32 { ROW_WORLD_HEIGHT }
 
 /// World position for the center of cell `(row, col)` relative to the
 /// grid panel with [`Anchor::Center`].
 #[allow(clippy::cast_precision_loss)]
-fn cell_center_position(row: usize, col: usize) -> Vec3 {
+fn cell_center_position(row: usize, col: usize, total_rows: usize, total_cols: usize) -> Vec3 {
     let cw = cell_world_width();
     let ch = cell_world_height();
-    let x = (GRID_COLUMNS as f32).mul_add(-0.5, col as f32 + 0.5) * cw;
-    let y = (GRID_ROWS as f32).mul_add(0.5, -(row as f32) - 0.5) * ch;
+    let x = (total_cols as f32).mul_add(-0.5, col as f32 + 0.5) * cw;
+    let y = (total_rows as f32).mul_add(0.5, -(row as f32) - 0.5) * ch;
     Vec3::new(x, y, 0.0)
 }
 
 // ── Grid panel (single panel with all cell content) ────────────────
 
-/// Holds the per-page data needed to populate a grid cell.
+/// Holds the per-cell data needed to populate a grid cell.
 struct PageCellData<'a> {
-    page:        u32,
+    cell_index:  usize,
     chars:       &'a [char],
-    glyph_count: usize,
-    color:       Color,
+    glyph_color: Color,
+    atlas_image: Option<Handle<Image>>,
 }
 
-/// Builds the single grid panel containing all cell outlines and text.
-fn build_grid_panel(page_groups: &BTreeMap<u32, Vec<char>>, unresolved: &[char]) -> DiegeticPanel {
-    // Collect page data into cell slots.
-    let mut cells: Vec<Option<PageCellData>> =
-        (0..GRID_COLUMNS * GRID_ROWS).map(|_| None).collect();
-    for (cell_index, (&page, chars)) in page_groups.iter().enumerate() {
-        if cell_index >= cells.len() {
-            break;
-        }
-        let first_char = chars.first().copied().unwrap_or('?');
-        let color = if first_char <= '\u{007E}' {
-            ASCII_GLYPH_COLOR
-        } else {
-            UNICODE_GLYPH_COLOR
-        };
-        cells[cell_index] = Some(PageCellData {
-            page,
-            chars,
-            glyph_count: chars.len(),
-            color,
-        });
+fn glyph_color_for(chars: &[char]) -> Color {
+    let Some(first_char) = chars.first().copied() else {
+        return FALLBACK_GLYPH_COLOR;
+    };
+    if first_char <= '\u{007E}' {
+        ASCII_GLYPH_COLOR
+    } else {
+        UNICODE_GLYPH_COLOR
     }
-    // Unresolved chars go in the next available cell.
-    if !unresolved.is_empty() {
-        let next = page_groups.len();
-        if next < cells.len() {
-            cells[next] = Some(PageCellData {
-                page:        u32::MAX,
-                chars:       unresolved,
-                glyph_count: unresolved.len(),
-                color:       Color::srgba(0.5, 0.5, 0.5, 0.4),
-            });
-        }
-    }
+}
 
-    let dbg_border = Border::all(GLYPH_PANEL_DEBUG_BORDER, Color::WHITE);
+/// Builds the single grid panel containing committed page text cells.
+fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
+    let total_cells = cells.len();
+    let cols = GRID_COLUMNS.min(total_cells).max(1);
+    let rows = total_cells.div_ceil(cols).max(1);
+
+    #[allow(clippy::cast_precision_loss)]
+    let layout_width = COLUMN_LAYOUT_WIDTH * cols as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let layout_height = ROW_LAYOUT_HEIGHT * rows as f32;
+    #[allow(clippy::cast_precision_loss)]
+    let world_height = ROW_WORLD_HEIGHT * rows as f32;
 
     DiegeticPanel::builder()
-        .size((GRID_LAYOUT_WIDTH, GRID_LAYOUT_HEIGHT))
+        .size((layout_width, layout_height))
         .layout_unit(Unit::Points)
-        .world_height(GRID_WORLD_HEIGHT)
+        .world_height(world_height)
         .anchor(Anchor::Center)
         .layout(|b| {
             b.with(
@@ -434,26 +468,20 @@ fn build_grid_panel(page_groups: &BTreeMap<u32, Vec<char>>, unresolved: &[char])
                     .height(Sizing::GROW)
                     .padding(Padding::all(GRID_INTERIOR_PADDING))
                     .direction(Direction::TopToBottom)
-                    .border(
-                        Border::all(GRID_BORDER_WIDTH, GRID_BORDER_COLOR)
-                            .between_children(CELL_DIVIDER_WIDTH),
-                    ),
+                    .border(Border::all(0.5, Color::WHITE)),
                 |b| {
-                    for row in 0..GRID_ROWS {
+                    for row in 0..rows {
                         b.with(
                             El::new()
                                 .width(Sizing::GROW)
                                 .height(Sizing::GROW)
                                 .direction(Direction::LeftToRight)
-                                .border(
-                                    Border::new()
-                                        .color(GRID_BORDER_COLOR)
-                                        .between_children(CELL_DIVIDER_WIDTH),
-                                ),
+                                .border(Border::new().color(Color::WHITE).between_children(0.5)),
                             |b| {
-                                for col in 0..GRID_COLUMNS {
-                                    let idx = row * GRID_COLUMNS + col;
-                                    build_cell(b, cells[idx].as_ref(), dbg_border);
+                                let start = row * cols;
+                                let end = (start + cols).min(total_cells);
+                                for cell in &cells[start..end] {
+                                    build_cell(b, Some(cell), cols);
                                 }
                             },
                         );
@@ -464,166 +492,282 @@ fn build_grid_panel(page_groups: &BTreeMap<u32, Vec<char>>, unresolved: &[char])
         .build()
 }
 
-/// Builds a single cell: page label (top), glyph rows (center), glyph
-/// count (bottom). Empty cells get a plain spacer.
-fn build_cell(b: &mut LayoutBuilder, data: Option<&PageCellData>, dbg_border: Border) {
+/// Builds a single text cell with a header, glyph grid, and footer.
+#[allow(clippy::cast_precision_loss)]
+fn build_cell(b: &mut LayoutBuilder, data: Option<&PageCellData>, cols: usize) {
+    let cell_width = Sizing::percent(1.0 / cols as f32);
+
     let Some(data) = data else {
-        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+        b.with(El::new().width(cell_width).height(Sizing::GROW), |_| {});
         return;
     };
 
-    let glyph_style = LayoutTextStyle::new(GLYPH_FONT_SIZE)
-        .with_color(data.color)
-        .with_shadow_mode(GlyphShadowMode::None)
-        .with_letter_spacing(GLYPH_LETTER_SPACING);
-    let label_style = LayoutTextStyle::new(PAGE_LABEL_SIZE)
-        .with_color(PAGE_LABEL_COLOR)
-        .with_shadow_mode(GlyphShadowMode::None);
+    let header_style = LayoutTextStyle::new(CELL_LABEL_SIZE).with_color(CELL_LABEL_COLOR);
+    let glyph_style = LayoutTextStyle::new(GLYPH_FONT_SIZE).with_color(data.glyph_color);
 
-    let page_label = if data.page == u32::MAX {
-        "pending".to_string()
-    } else {
-        format!("{}", data.page)
-    };
+    let page_label = format!("page {}", data.cell_index);
 
-    let row_count = data.chars.len().div_ceil(GLYPHS_PER_ROW);
-
+    // Cell: left-to-right — text column | atlas image.
     b.with(
         El::new()
-            .width(Sizing::GROW)
+            .width(cell_width)
             .height(Sizing::GROW)
-            .padding(Padding::all(4.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(2.0)
-            .border(dbg_border),
+            .padding(Padding::new(
+                CELL_TEXT_PADDING,
+                CELL_TEXT_PADDING,
+                CELL_TEXT_PADDING * 0.5,
+                CELL_TEXT_PADDING * 0.5,
+            ))
+            .direction(Direction::LeftToRight)
+            .child_gap(CELL_TEXT_PADDING),
         |b| {
-            // Page number — upper left.
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .child_align_x(AlignX::Left)
-                    .border(dbg_border),
-                |b| {
-                    b.text(page_label, label_style.clone());
-                },
-            );
-
-            // Glyph rows — centered.
+            // ── Left column: header, glyph grid, footer ──
             b.with(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
                     .direction(Direction::TopToBottom)
-                    .child_gap(2.0)
-                    .child_alignment(AlignX::Center, AlignY::Center)
-                    .border(dbg_border),
+                    .child_gap(6.0)
+                    .border(Border::all(0.5, Color::srgba(1.0, 1.0, 1.0, 0.2))),
                 |b| {
-                    for row_index in 0..row_count {
-                        let start = row_index * GLYPHS_PER_ROW;
-                        let end = (start + GLYPHS_PER_ROW).min(data.chars.len());
-                        let row_text: String = data.chars[start..end].iter().copied().collect();
-                        b.text(row_text, glyph_style.clone());
-                    }
+                    // Header: "atlas page: N"
+                    b.text(page_label, header_style.clone());
+
+                    // Glyph grid — rows of individually spaced characters.
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .padding(Padding::all(30.0))
+                            .direction(Direction::TopToBottom)
+                            .child_gap(GLYPH_ROW_GAP)
+                            .child_alignment(AlignX::Center, AlignY::Center),
+                        |b| {
+                            build_glyph_grid(b, &data.chars, &glyph_style);
+                        },
+                    );
+
+                    // Footer: "glyphs: N"
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .child_align_x(AlignX::Right),
+                        |b| {
+                            b.text(format!("chars: {}", data.chars.len()), header_style);
+                        },
+                    );
                 },
             );
 
-            // Glyph count — bottom right.
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .child_align_x(AlignX::Right)
-                    .border(dbg_border),
-                |b| {
-                    b.text(format!("glyphs: {}", data.glyph_count), label_style);
-                },
-            );
+            // ── Right column: atlas page texture ──
+            if let Some(ref handle) = data.atlas_image {
+                b.image(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .border(Border::all(0.5, Color::srgba(1.0, 1.0, 1.0, 0.2))),
+                    handle.clone(),
+                    Color::WHITE,
+                );
+            }
         },
     );
 }
 
-// ── Atlas sync system ──────────────────────────────────────────────
+/// Builds the glyph grid: rows of evenly-spaced, centered glyphs.
+fn build_glyph_grid(b: &mut LayoutBuilder, chars: &[char], glyph_style: &LayoutTextStyle) {
+    let row_count = chars.len().div_ceil(CHARS_PER_ROW);
+    for row_index in 0..row_count {
+        let start = row_index * CHARS_PER_ROW;
+        let end = (start + CHARS_PER_ROW).min(chars.len());
 
-/// Groups characters by their actual atlas page using [`GlyphKey`] and
-/// [`MsdfAtlas::get_metrics`], then updates the grid panel tree and
-/// spawns atlas texture quads.
-#[allow(clippy::cast_precision_loss)]
-fn sync_atlas_cells(
+        b.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .direction(Direction::LeftToRight)
+                .child_gap(GLYPH_CELL_GAP),
+            |b| {
+                for &ch in &chars[start..end] {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .child_alignment(AlignX::Center, AlignY::Center),
+                        |b| {
+                            b.text(String::from(ch), glyph_style.clone());
+                        },
+                    );
+                }
+            },
+        );
+    }
+}
+
+// ── State machine systems ──────────────────────────────────────────
+//
+// Three concerns are fully separated:
+//   1. commit_atlas_pages — reads live atlas, writes CommittedPages snapshot
+//   2. display_committed_pages — reads CommittedPages only, writes grid panel
+//   3. handle_input — reads CommittedPages, writes PagesRevealed or queues batch
+//
+// Invariants:
+//   - revealed <= committed.len()
+//   - rendering/status derive ONLY from committed[..revealed]
+//   - live atlas state is ONLY read by the commit system
+
+/// Watches the atlas during the Loading phase. Once glyph rasterization
+/// stabilizes, chunks `AccumulatedCharacters` into display pages of
+/// `CHARS_PER_CELL` and transitions to Ready.
+fn commit_atlas_pages(
     atlas: Res<MsdfAtlas>,
-    registry: Res<FontRegistry>,
+    all_chars: Res<AccumulatedCharacters>,
+    mut phase: ResMut<AtlasPhase>,
+    mut committed: ResMut<CommittedPages>,
+    mut revealed: ResMut<PagesRevealed>,
+    mut dirty: ResMut<DisplayDirty>,
+) {
+    let current_glyph_count = atlas.glyph_count();
+    let start = {
+        let AtlasPhase::Loading {
+            start,
+            last_glyph_count,
+            stable_frames,
+        } = &mut *phase
+        else {
+            return;
+        };
+
+        // Don't consider stable until at least one glyph exists.
+        if current_glyph_count == 0 {
+            return;
+        }
+
+        if *last_glyph_count == current_glyph_count {
+            *stable_frames += 1;
+        } else {
+            *last_glyph_count = current_glyph_count;
+            *stable_frames = 0;
+        }
+
+        if *stable_frames < 2 {
+            return;
+        }
+
+        *start
+    };
+
+    if all_chars.0.is_empty() {
+        return;
+    }
+
+    // Chunk characters into display pages of CHARS_PER_CELL.
+    let elapsed = start.elapsed();
+    info!(
+        "Atlas rasterization stabilized: {} glyphs in {:.1}ms — committing {} chars in {} display pages",
+        current_glyph_count,
+        elapsed.as_secs_f64() * 1000.0,
+        all_chars.0.len(),
+        all_chars.0.len().div_ceil(CHARS_PER_CELL),
+    );
+
+    let previous_count = committed.0.len();
+    committed.0.clear();
+    for chunk in all_chars.0.chunks(CHARS_PER_CELL) {
+        committed.0.push(CommittedPage {
+            chars: chunk.to_vec(),
+        });
+    }
+
+    // Reveal the first new page (or keep current if re-committing).
+    if previous_count == 0 {
+        revealed.0 = 1;
+    } else {
+        revealed.0 = (previous_count + 1).min(committed.0.len());
+    }
+
+    *phase = AtlasPhase::Ready;
+    dirty.0 = true;
+}
+
+/// Rebuilds the grid panel from committed snapshots (Ready) or shows
+/// a loading cell with all chars (Loading) to trigger rasterization.
+#[allow(clippy::cast_precision_loss)]
+fn display_committed_pages(
+    atlas: Res<MsdfAtlas>,
+    phase: Res<AtlasPhase>,
+    committed: Res<CommittedPages>,
+    revealed: Res<PagesRevealed>,
     all_chars: Res<AccumulatedCharacters>,
     tilt_root: Res<TiltRoot>,
     invisible_mat: Res<InvisibleMaterial>,
-    mut sync_state: ResMut<AtlasSyncState>,
+    mut dirty: ResMut<DisplayDirty>,
+    mut initial_zoom: ResMut<InitialZoomFired>,
     mut spawned: ResMut<SpawnedCellEntities>,
     mut grid_panels: Query<&mut DiegeticPanel, With<GridPanel>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    camera_entity: Res<CameraEntity>,
+    scene_bounds: Res<SceneBounds>,
 ) {
-    let glyph_count = atlas.glyph_count();
-    let char_count = all_chars.0.len();
-
-    // Early-out if nothing changed.
-    if glyph_count == sync_state.last_glyph_count && char_count == sync_state.last_char_count {
+    if !dirty.0 {
         return;
     }
-    sync_state.last_glyph_count = glyph_count;
-    sync_state.last_char_count = char_count;
+    dirty.0 = false;
 
-    // Parse the default font for char → glyph ID mapping.
-    let Some(font_data) = registry.font(FontId(0)).map(Font::data) else {
-        return;
-    };
-    let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
-        return;
-    };
-
-    // Map each character to its atlas page.
-    let mut page_groups: BTreeMap<u32, Vec<char>> = BTreeMap::new();
-    let mut unresolved: Vec<char> = Vec::new();
-
-    for &ch in &all_chars.0 {
-        let Some(glyph_id) = face.glyph_index(ch) else {
-            continue;
-        };
-        let key = GlyphKey {
-            font_id:     0,
-            glyph_index: glyph_id.0,
-        };
-        if let Some(metrics) = atlas.get_metrics(key) {
-            page_groups.entry(metrics.page_index).or_default().push(ch);
-        } else {
-            unresolved.push(ch);
+    let mut cells: Vec<PageCellData> = Vec::new();
+    if matches!(*phase, AtlasPhase::Loading { .. }) {
+        // During loading, show all chars in a single cell to trigger
+        // atlas rasterization.
+        if !all_chars.0.is_empty() {
+            cells.push(PageCellData {
+                cell_index:  0,
+                chars:       &all_chars.0,
+                glyph_color: glyph_color_for(&all_chars.0),
+                atlas_image: None,
+            });
+        }
+    } else {
+        let shown = revealed.0.min(committed.0.len());
+        for (i, page) in committed.0[..shown].iter().enumerate() {
+            cells.push(PageCellData {
+                cell_index:  i,
+                chars:       &page.chars,
+                glyph_color: glyph_color_for(&page.chars),
+                atlas_image: atlas.image_handle(i as u32).cloned(),
+            });
         }
     }
 
-    // Update the grid panel tree with real page data.
+    // Update the grid panel tree.
     for mut panel in &mut grid_panels {
-        *panel = build_grid_panel(&page_groups, &unresolved);
+        *panel = build_grid_panel(&cells);
     }
 
-    // Despawn previous atlas quads and click planes.
+    // Despawn previous click planes.
     for entity in spawned.0.drain(..) {
         commands.entity(entity).despawn();
     }
 
+    let total_cells = cells.len();
+    let cols = GRID_COLUMNS.min(total_cells).max(1);
+    let rows = total_cells.div_ceil(cols).max(1);
     let cw = cell_world_width();
     let ch = cell_world_height();
     let quad_size = ch * ATLAS_QUAD_SCALE;
 
-    // Spawn atlas texture quads and per-cell click planes.
-    for (cell_index, (&page, _)) in page_groups.iter().enumerate() {
-        let row = cell_index / GRID_COLUMNS;
-        let col = cell_index % GRID_COLUMNS;
-        if row >= GRID_ROWS {
+    // Spawn committed atlas texture quads and per-cell invisible click planes.
+    for cell_index in 0..total_cells {
+        let row = cell_index / cols;
+        let col = cell_index % cols;
+        if row >= rows {
             break;
         }
-        let center = cell_center_position(row, col);
+        let center = cell_center_position(row, col, rows, cols);
 
-        // Atlas texture quad — right side of cell.
-        if let Some(image_handle) = atlas.image_handle(page) {
+        if let Some(ref image_handle) = cells[cell_index].atlas_image {
             let quad_pos = center + Vec3::new(cw * ATLAS_QUAD_OFFSET, 0.0, 0.001);
             let quad_entity = commands
                 .spawn((
@@ -644,7 +788,6 @@ fn sync_atlas_cells(
             spawned.0.push(quad_entity);
         }
 
-        // Invisible per-cell click plane — zoom-to-fit this cell.
         let cell_plane = commands
             .spawn((
                 CellClickPlane,
@@ -657,25 +800,59 @@ fn sync_atlas_cells(
         commands.entity(tilt_root.0).add_child(cell_plane);
         spawned.0.push(cell_plane);
     }
+
+    // Initial zoom-to-fit after first display.
+    if !initial_zoom.0 && total_cells > 0 {
+        initial_zoom.0 = true;
+        commands.trigger(
+            ZoomToFit::new(camera_entity.0, scene_bounds.0)
+                .margin(ZOOM_MARGIN_SCENE)
+                .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+        );
+    }
 }
 
 // ── Input ──────────────────────────────────────────────────────────
 
 fn handle_input(
+    atlas: Res<MsdfAtlas>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut next_block: ResMut<NextBlock>,
+    committed: Res<CommittedPages>,
+    mut revealed: ResMut<PagesRevealed>,
+    mut next_batch: ResMut<NextBatch>,
     mut all_chars: ResMut<AccumulatedCharacters>,
+    mut atlas_phase: ResMut<AtlasPhase>,
+    mut dirty: ResMut<DisplayDirty>,
 ) {
     if !keys.just_pressed(KeyCode::Equal) {
         return;
     }
-    if next_block.0 >= UNICODE_BLOCKS.len() {
+    // Don't accept input while loading.
+    if matches!(*atlas_phase, AtlasPhase::Loading { .. }) {
         return;
     }
 
-    let block = UNICODE_BLOCKS[next_block.0];
-    next_block.0 += 1;
-    all_chars.0.extend(block.chars());
+    // If there are unrevealed committed pages, reveal the next one.
+    if revealed.0 < committed.0.len() {
+        revealed.0 += 1;
+        dirty.0 = true;
+        return;
+    }
+
+    // All committed pages revealed — add the next character batch
+    // and enter loading phase.
+    if next_batch.0 >= CHARACTER_BATCHES.len() {
+        return;
+    }
+    let batch = CHARACTER_BATCHES[next_batch.0];
+    next_batch.0 += 1;
+    all_chars.0.extend(batch.chars());
+    *atlas_phase = AtlasPhase::Loading {
+        start:            std::time::Instant::now(),
+        last_glyph_count: atlas.glyph_count(),
+        stable_frames:    0,
+    };
+    dirty.0 = true;
 }
 
 // ── Click handlers ─────────────────────────────────────────────────
@@ -808,7 +985,7 @@ fn build_status_instructions(
     b.with(
         El::new().width(Sizing::GROW).child_align_x(AlignX::Center),
         |b| {
-            b.text("'+' add Unicode block", dim_style.clone());
+            b.text("'+' reveal page / add batch", dim_style.clone());
         },
     );
     b.with(
@@ -820,15 +997,17 @@ fn build_status_instructions(
 }
 
 fn update_diagnostics(
-    atlas: Res<MsdfAtlas>,
+    committed: Res<CommittedPages>,
+    revealed: Res<PagesRevealed>,
     mut status_panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
-    next_block: Res<NextBlock>,
+    next_batch: Res<NextBatch>,
     mut last_displayed: ResMut<LastDisplayedStatus>,
 ) {
-    let pages = atlas.page_count();
-    let glyphs = atlas.glyph_count();
-    let remaining = UNICODE_BLOCKS.len() - next_block.0;
-    let fingerprint = format!("{pages}/{glyphs}/{remaining}");
+    let shown = revealed.0.min(committed.0.len());
+    let glyphs: usize = committed.0[..shown].iter().map(|p| p.chars.len()).sum();
+    let unrevealed = committed.0.len() - shown;
+    let remaining = unrevealed + CHARACTER_BATCHES.len() - next_batch.0;
+    let fingerprint = format!("{shown}/{glyphs}/{remaining}");
 
     if fingerprint == last_displayed.fingerprint {
         return;
@@ -836,7 +1015,7 @@ fn update_diagnostics(
     last_displayed.fingerprint = fingerprint;
 
     let data = StatusData {
-        pages,
+        pages: shown,
         glyphs,
         remaining,
     };

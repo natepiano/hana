@@ -813,6 +813,18 @@ fn emit_down_traversal_commands(
     {
         emit_text_commands(commands, wrapped, config, text, bounds, index, font_scale);
     }
+
+    // Emit image render commands.
+    if !offscreen && let ElementContent::Image { ref handle, tint } = element.content {
+        commands.push(RenderCommand {
+            bounds,
+            kind: RenderCommandKind::Image {
+                handle: handle.clone(),
+                tint,
+            },
+            element_idx: index,
+        });
+    }
 }
 
 /// Emits render commands for text content (both wrapped and unwrapped).

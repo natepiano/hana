@@ -1,6 +1,8 @@
 //! Render commands produced by the layout engine.
 
+use bevy::asset::Handle;
 use bevy::color::Color;
+use bevy::image::Image;
 
 use super::types::Border;
 use super::types::BoundingBox;
@@ -54,6 +56,13 @@ pub enum RenderCommandKind {
     Border {
         /// Border specification.
         border: Border,
+    },
+    /// An image (textured quad).
+    Image {
+        /// Handle to the image asset.
+        handle: Handle<Image>,
+        /// Tint color multiplied against the texture (white = no tint).
+        tint:   Color,
     },
     /// Begin a clipping region. All subsequent commands until the matching
     /// [`ScissorEnd`](Self::ScissorEnd) are clipped to this bounding box.
