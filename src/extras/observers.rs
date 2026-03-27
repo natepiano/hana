@@ -32,7 +32,7 @@ use super::events::ZoomEnd;
 use super::events::ZoomToFit;
 use super::fit;
 use super::support;
-use crate::PanOrbitCamera;
+use crate::OrbitCam;
 
 /// Parameters for an instant orbital snap.
 struct SnapOrbit {
@@ -46,7 +46,7 @@ struct SnapOrbit {
 /// caller-provided lifecycle events via `emit_events`.
 fn snap_to_orbit(
     commands: &mut Commands,
-    panorbit: &mut PanOrbitCamera,
+    panorbit: &mut OrbitCam,
     snap: SnapOrbit,
     emit_events: impl FnOnce(&mut Commands),
 ) {
@@ -71,7 +71,7 @@ fn snap_to_orbit(
 fn stash_camera_state(
     commands: &mut Commands,
     entity: Entity,
-    camera: &mut PanOrbitCamera,
+    camera: &mut OrbitCam,
     has_existing_stash: bool,
     interrupt_behavior: CameraInputInterruptBehavior,
 ) {
@@ -149,7 +149,7 @@ fn prepare_fit_for_target(
 pub(super) fn on_zoom_to_fit(
     zoom: On<ZoomToFit>,
     mut commands: Commands,
-    mut camera_query: Query<(&mut PanOrbitCamera, &Projection, &Camera)>,
+    mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera)>,
     mesh_query: Query<&Mesh3d>,
     children_query: Query<&Children>,
     global_transform_query: Query<&GlobalTransform>,
@@ -276,7 +276,7 @@ pub(super) fn on_play_animation(
     start: On<PlayAnimation>,
     mut commands: Commands,
     mut camera_query: Query<(
-        &mut PanOrbitCamera,
+        &mut OrbitCam,
         Option<&PanOrbitCameraStash>,
         Option<&CameraInputInterruptBehavior>,
         Option<&AnimationConflictPolicy>,
@@ -383,7 +383,7 @@ pub(super) fn on_camera_move_list_added(
     add: On<Add, CameraMoveList>,
     mut commands: Commands,
     mut camera_query: Query<(
-        &mut PanOrbitCamera,
+        &mut OrbitCam,
         Option<&PanOrbitCameraStash>,
         Option<&CameraInputInterruptBehavior>,
     )>,
@@ -415,7 +415,7 @@ pub(super) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Comm
 pub(super) fn on_animate_to_fit(
     event: On<AnimateToFit>,
     mut commands: Commands,
-    mut camera_query: Query<(&mut PanOrbitCamera, &Projection, &Camera)>,
+    mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera)>,
     mesh_query: Query<&Mesh3d>,
     children_query: Query<&Children>,
     global_transform_query: Query<&GlobalTransform>,
@@ -487,7 +487,7 @@ pub(super) fn on_animate_to_fit(
 pub(super) fn on_look_at(
     event: On<LookAt>,
     mut commands: Commands,
-    mut camera_query: Query<(&mut PanOrbitCamera, &GlobalTransform)>,
+    mut camera_query: Query<(&mut OrbitCam, &GlobalTransform)>,
     global_transform_query: Query<&GlobalTransform>,
 ) {
     let camera = event.camera;
@@ -547,7 +547,7 @@ pub(super) fn on_look_at(
 pub(super) fn on_look_at_and_zoom_to_fit(
     event: On<LookAtAndZoomToFit>,
     mut commands: Commands,
-    mut camera_query: Query<(&mut PanOrbitCamera, &Projection, &Camera, &GlobalTransform)>,
+    mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera, &GlobalTransform)>,
     mesh_query: Query<&Mesh3d>,
     children_query: Query<&Children>,
     global_transform_query: Query<&GlobalTransform>,
@@ -636,7 +636,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 pub(super) fn restore_camera_state(
     remove: On<Remove, CameraMoveList>,
     mut commands: Commands,
-    mut query: Query<(&PanOrbitCameraStash, &mut PanOrbitCamera)>,
+    mut query: Query<(&PanOrbitCameraStash, &mut OrbitCam)>,
 ) {
     let entity = remove.entity;
 

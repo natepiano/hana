@@ -18,7 +18,7 @@ use super::events::CameraMoveBegin;
 use super::events::CameraMoveEnd;
 use super::events::ZoomCancelled;
 use super::events::ZoomEnd;
-use crate::PanOrbitCamera;
+use crate::OrbitCam;
 
 /// Individual camera movement with target position and duration.
 ///
@@ -160,7 +160,7 @@ enum MoveState {
 impl MoveState {
     /// Returns `true` if the camera's orbital parameters have been modified by
     /// something other than the animation system since the last frame.
-    fn externally_modified(&self, camera: &PanOrbitCamera) -> bool {
+    fn externally_modified(&self, camera: &OrbitCam) -> bool {
         match self {
             Self::InProgress {
                 last_written_focus,
@@ -273,7 +273,7 @@ fn handle_empty_queue(
 fn handle_camera_input_interrupt(
     commands: &mut Commands,
     entity: Entity,
-    pan_orbit: &mut PanOrbitCamera,
+    pan_orbit: &mut OrbitCam,
     queue: &CameraMoveList,
     interrupt_behavior: CameraInputInterruptBehavior,
     source: AnimationSource,
@@ -342,7 +342,7 @@ fn handle_camera_input_interrupt(
 fn handle_ready_state(
     commands: &mut Commands,
     entity: Entity,
-    pan_orbit: &mut PanOrbitCamera,
+    pan_orbit: &mut OrbitCam,
     queue: &mut CameraMoveList,
     current_move: &CameraMove,
 ) -> bool {
@@ -393,7 +393,7 @@ fn handle_ready_state(
 fn handle_in_progress(
     commands: &mut Commands,
     entity: Entity,
-    pan_orbit: &mut PanOrbitCamera,
+    pan_orbit: &mut OrbitCam,
     queue: &mut CameraMoveList,
     current_move: &CameraMove,
     delta_secs: f32,
@@ -487,7 +487,7 @@ pub(super) fn process_camera_move_list(
     time: Res<Time>,
     mut camera_query: Query<(
         Entity,
-        &mut PanOrbitCamera,
+        &mut OrbitCam,
         &mut CameraMoveList,
         &CameraInputInterruptBehavior,
         Option<&ZoomAnimationMarker>,

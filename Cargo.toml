@@ -1,8 +1,8 @@
 [package]
 authors     = ["natepiano"]
 categories  = ["game-development"]
-description = "A basic pan and orbit camera in Bevy"
-edition     = "2021"
+description = "Bevy camera controller with pan, orbit, zoom-to-fit, queued animations, and trackpad support"
+edition     = "2024"
 homepage    = "https://github.com/natepiano/bevy_lagrange"
 keywords    = ["bevy", "camera", "gamedev", "orbit"]
 license     = "MIT OR Apache-2.0"
@@ -68,25 +68,13 @@ name              = "egui"
 required-features = ["bevy_egui"]
 
 [[example]]
-name              = "egui_multiple_windows"
-required-features = ["bevy_egui"]
-
-[[example]]
 name              = "showcase"
 required-features = ["zoom_overlay"]
 
 [[example]]
-name              = "extras_zoom_to_fit"
+name              = "zoom_to_fit"
 required-features = ["zoom_overlay"]
 
 [[example]]
-name              = "extras_animate_to_fit"
-required-features = ["zoom_overlay"]
-
-[[example]]
-name              = "extras_play_animation"
-required-features = ["zoom_overlay"]
-
-[[example]]
-name              = "extras_look_at"
+name              = "camera_animation"
 required-features = ["zoom_overlay"]

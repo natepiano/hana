@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -45,7 +45,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-        PanOrbitCamera {
+        OrbitCam {
             // Disable smoothing, since the animation takes care of that
             orbit_smoothness: 0.0,
             // Probably want to disable the controls
@@ -61,7 +61,7 @@ fn setup(
 }
 
 // Animate the camera's position
-fn animate(time: Res<Time>, mut pan_orbit_query: Query<&mut PanOrbitCamera>) {
+fn animate(time: Res<Time>, mut pan_orbit_query: Query<&mut OrbitCam>) {
     for mut pan_orbit in &mut pan_orbit_query {
         // Must set target values, not yaw/pitch directly
         pan_orbit.target_yaw += 15f32.to_radians() * time.delta_secs();

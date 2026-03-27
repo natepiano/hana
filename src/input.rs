@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::ActiveCameraData;
 use crate::ButtonZoomAxis;
-use crate::PanOrbitCamera;
+use crate::OrbitCam;
 use crate::TrackpadBehavior;
 
 #[derive(Resource, Default, Debug)]
@@ -27,7 +27,7 @@ pub fn mouse_key_tracker(
     mut pinch_events: MessageReader<PinchGesture>,
     mut scroll_events: MessageReader<MouseWheel>,
     active_cam: Res<ActiveCameraData>,
-    orbit_cameras: Query<&PanOrbitCamera>,
+    orbit_cameras: Query<&OrbitCam>,
 ) {
     let Some(active_entity) = active_cam.entity else {
         return;
@@ -101,7 +101,7 @@ struct ScrollProcessingResult {
 /// mimic how blender _doesn't_ handle pinch gestures when modifiers are pressed
 fn process_scroll_events(
     scroll_events: &[MouseWheel],
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> ScrollProcessingResult {
     match pan_orbit.trackpad_behavior {
@@ -160,7 +160,7 @@ fn process_scroll_events(
 
 fn process_pinch_events(
     pinch_events: &mut MessageReader<PinchGesture>,
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> f32 {
     if !pan_orbit.trackpad_pinch_to_zoom_enabled {
@@ -205,7 +205,7 @@ fn process_pinch_events(
 }
 
 pub fn orbit_pressed(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
@@ -221,7 +221,7 @@ pub fn orbit_pressed(
 }
 
 pub fn orbit_just_pressed(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
@@ -237,7 +237,7 @@ pub fn orbit_just_pressed(
 }
 
 pub fn orbit_just_released(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
@@ -253,7 +253,7 @@ pub fn orbit_just_released(
 }
 
 pub fn pan_pressed(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
@@ -269,7 +269,7 @@ pub fn pan_pressed(
 }
 
 pub fn pan_just_pressed(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
@@ -285,7 +285,7 @@ pub fn pan_just_pressed(
 }
 
 pub fn button_zoom_pressed(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
 ) -> bool {
     pan_orbit
@@ -294,7 +294,7 @@ pub fn button_zoom_pressed(
 }
 
 pub fn button_zoom_just_pressed(
-    pan_orbit: &PanOrbitCamera,
+    pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
 ) -> bool {
     pan_orbit

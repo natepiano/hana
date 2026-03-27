@@ -1,11 +1,17 @@
-//! Demonstrates usage with multiple viewports
+//! Demonstrates multiple viewports in a single window and multiple windows,
+//! each with an independent `PanOrbitCamera`.
+//!
+//! The primary window has a full-size view and a minimap overlay in the
+//! top-right corner. A second OS window shows a separate camera angle.
 
+use bevy::camera::RenderTarget;
 use bevy::camera::Viewport;
 use bevy::prelude::*;
+use bevy::window::WindowRef;
 use bevy::window::WindowResized;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -16,6 +22,17 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, set_camera_viewports)
         .run();
+}
+
+fn pan_orbit_default() -> OrbitCam {
+    OrbitCam {
+        trackpad_behavior: TrackpadBehavior::BlenderLike {
+            modifier_pan:  Some(KeyCode::ShiftLeft),
+            modifier_zoom: Some(KeyCode::ControlLeft),
+        },
+        trackpad_pinch_to_zoom_enabled: true,
+        ..default()
+    }
 }
 
 fn setup(
@@ -42,37 +59,38 @@ fn setup(
         },
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
-    // Main Camera
+
+    // --- Primary window: main camera ---
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 0.5, 5.0)),
-        PanOrbitCamera {
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
-            ..default()
-        },
+        pan_orbit_default(),
     ));
-    // Minimap Camera
+
+    // --- Primary window: minimap viewport overlay ---
     commands.spawn((
         Transform::from_translation(Vec3::new(1.0, 1.5, 4.0)),
         Camera {
-            // Renders the minimap camera after the main camera, so it is rendered on top
             order: 1,
-            // Don't clear on the second camera because the first camera already cleared the window
             clear_color: ClearColorConfig::None,
             ..default()
         },
-        PanOrbitCamera {
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
-            ..default()
-        },
+        pan_orbit_default(),
         MinimapCamera,
+    ));
+
+    // --- Second OS window ---
+    let second_window = commands
+        .spawn(Window {
+            title: "Second window".to_owned(),
+            ..default()
+        })
+        .id();
+
+    commands.spawn((
+        Transform::from_translation(Vec3::new(5.0, 1.5, 7.0)),
+        Camera::default(),
+        RenderTarget::Window(WindowRef::Entity(second_window)),
+        pan_orbit_default(),
     ));
 }
 

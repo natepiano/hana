@@ -9,7 +9,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -49,7 +49,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-        PanOrbitCamera {
+        OrbitCam {
             trackpad_behavior: TrackpadBehavior::BlenderLike {
                 modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
@@ -65,7 +65,7 @@ fn keyboard_controls(
     // here too, so you can control the camera while virtual time is paused.
     time: Res<Time>,
     key_input: Res<ButtonInput<KeyCode>>,
-    mut pan_orbit_query: Query<(&mut PanOrbitCamera, &mut Transform)>,
+    mut pan_orbit_query: Query<(&mut OrbitCam, &mut Transform)>,
 ) {
     for (mut pan_orbit, mut transform) in &mut pan_orbit_query {
         if key_input.pressed(KeyCode::ControlLeft) {

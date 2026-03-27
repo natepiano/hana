@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -50,7 +50,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-        PanOrbitCamera {
+        OrbitCam {
             // Panning the camera changes the focus, and so you most likely want to disable
             // panning when setting the focus manually
             pan_sensitivity: 0.0,
@@ -84,7 +84,7 @@ fn animate_cube(
 }
 
 /// Set the camera's focus to the cube's position
-fn cam_follow(mut pan_orbit_q: Query<&mut PanOrbitCamera>, cube_q: Query<&Transform, With<Cube>>) {
+fn cam_follow(mut pan_orbit_q: Query<&mut OrbitCam>, cube_q: Query<&Transform, With<Cube>>) {
     if let Ok(mut pan_orbit) = pan_orbit_q.single_mut() {
         if let Ok(cube_tfm) = cube_q.single() {
             pan_orbit.target_focus = cube_tfm.translation;

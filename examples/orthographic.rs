@@ -4,8 +4,8 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
-use bevy_lagrange::PanOrbitCameraSystemSet;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamSystemSet;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -14,7 +14,7 @@ fn main() {
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, switch_projection.before(PanOrbitCameraSystemSet))
+        .add_systems(Update, switch_projection.before(OrbitCamSystemSet))
         .run();
 }
 
@@ -53,7 +53,7 @@ fn setup(
             },
             ..OrthographicProjection::default_3d()
         }),
-        PanOrbitCamera {
+        OrbitCam {
             trackpad_behavior: TrackpadBehavior::BlenderLike {
                 modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
@@ -67,7 +67,7 @@ fn setup(
 fn switch_projection(
     mut next_projection: Local<Projection>,
     key_input: Res<ButtonInput<KeyCode>>,
-    mut camera_query: Query<(&mut PanOrbitCamera, &mut Projection)>,
+    mut camera_query: Query<(&mut OrbitCam, &mut Projection)>,
 ) {
     if key_input.just_pressed(KeyCode::KeyR) {
         let Ok((mut camera, mut projection)) = camera_query.single_mut() else {

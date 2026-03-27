@@ -11,7 +11,7 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TouchControls;
 use bevy_lagrange::TrackpadBehavior;
 
@@ -53,7 +53,7 @@ fn setup(
     commands.spawn((
         // Note we're setting the initial position below with yaw, pitch, and radius, hence
         // we don't set transform on the camera.
-        PanOrbitCamera {
+        OrbitCam {
             // Set focal point (what the camera should look at)
             focus: Vec3::new(0.0, 1.0, 0.0),
             // Set the starting position, relative to focus (overrides camera's transform).
@@ -101,7 +101,7 @@ fn setup(
 // Press 'T' to toggle the camera controls.
 fn toggle_camera_controls_system(
     key_input: Res<ButtonInput<KeyCode>>,
-    mut pan_orbit_query: Query<&mut PanOrbitCamera>,
+    mut pan_orbit_query: Query<&mut OrbitCam>,
 ) {
     if key_input.just_pressed(KeyCode::KeyT) {
         for mut pan_orbit in &mut pan_orbit_query {

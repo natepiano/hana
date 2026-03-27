@@ -1,25 +1,34 @@
-//! Demonstrates `PlayAnimation` — plays a queued sequence of camera movements.
+//! Demonstrates `AnimateToFit` and `PlayAnimation`.
 //!
 //! Controls:
-//!   Space — Play a 5-step camera animation sequence
+//!   A     — `AnimateToFit` the cube (yaw=45 degrees, pitch=30 degrees)
+//!   Space — Play a 5-step camera animation sequence via `PlayAnimation`
 //!   R     — Reset camera
 //!
-//! Observe CameraMoveBegin/CameraMoveEnd for each step via info!() logging.
+//! Observe lifecycle events (`AnimationBegin`/`AnimationEnd`,
+//! `CameraMoveBegin`/`CameraMoveEnd`) via `info!()` logging.
 
+use std::f32::consts::TAU;
 use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::AnimateToFit;
+use bevy_lagrange::AnimationBegin;
+use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadBehavior;
 
-const START_POS: Vec3 = Vec3::new(0.0, 2.0, 6.0);
+const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
+
+#[derive(Component)]
+struct Target;
 
 fn main() {
     App::new()
@@ -28,6 +37,8 @@ fn main() {
         .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_input)
+        .add_observer(on_animation_begin)
+        .add_observer(on_animation_end)
         .add_observer(on_move_begin)
         .add_observer(on_move_end)
         .run();
@@ -43,11 +54,12 @@ fn setup(
         Mesh3d(meshes.add(Plane3d::default().mesh().size(10.0, 10.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
     ));
-    // Cube
+    // Target cube
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        Mesh3d(meshes.add(Cuboid::new(1.5, 1.5, 1.5))),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(0.0, 0.5, 0.0),
+        Transform::from_xyz(0.0, 0.75, 0.0),
+        Target,
     ));
     // Light
     commands.spawn((
@@ -60,7 +72,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(START_POS),
-        PanOrbitCamera {
+        OrbitCam {
             trackpad_behavior: TrackpadBehavior::BlenderLike {
                 modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),
@@ -72,22 +84,41 @@ fn setup(
 
     // Instructions
     commands.spawn(Text::new(
-        "Space - Play 5-step animation sequence\nR - Reset camera",
+        "A - AnimateToFit (yaw=45 pitch=30)\n\
+         Space - Play 5-step animation sequence\n\
+         R - Reset camera",
     ));
 }
 
 fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    camera_query: Query<Entity, With<PanOrbitCamera>>,
-    mut pan_orbit_query: Query<&mut PanOrbitCamera>,
+    camera_query: Query<Entity, With<OrbitCam>>,
+    target_query: Query<Entity, With<Target>>,
+    mut pan_orbit_query: Query<&mut OrbitCam>,
 ) {
     let Ok(camera) = camera_query.single() else {
         return;
     };
 
+    // AnimateToFit — animates to a specific orientation while framing the target
+    if keys.just_pressed(KeyCode::KeyA) {
+        let Ok(target) = target_query.single() else {
+            return;
+        };
+        commands.trigger(
+            AnimateToFit::new(camera, target)
+                .yaw(TAU / 8.0)
+                .pitch(TAU / 12.0)
+                .margin(0.15)
+                .duration(Duration::from_millis(1200)),
+        );
+        info!("AnimateToFit triggered");
+    }
+
+    // PlayAnimation — queues a multi-step camera movement sequence
     if keys.just_pressed(KeyCode::Space) {
-        let focus = Vec3::new(0.0, 0.5, 0.0);
+        let focus = Vec3::new(0.0, 0.75, 0.0);
         let moves = [
             // Step 1: orbit to the side and slightly closer
             CameraMove::ToOrbit {
@@ -130,13 +161,14 @@ fn keyboard_input(
                 focus,
                 yaw: 0.0,
                 pitch: 0.3,
-                radius: 6.0,
+                radius: 8.0,
                 duration: Duration::from_millis(1200),
                 easing: EaseFunction::BounceOut,
             },
         ];
 
         commands.trigger(PlayAnimation::new(camera, moves));
+        info!("PlayAnimation triggered (5 steps)");
     }
 
     if keys.just_pressed(KeyCode::KeyR) {
@@ -150,6 +182,20 @@ fn keyboard_input(
             info!("Camera reset");
         }
     }
+}
+
+fn on_animation_begin(trigger: On<AnimationBegin>) {
+    info!(
+        "AnimationBegin: camera={:?} source={:?}",
+        trigger.camera, trigger.source
+    );
+}
+
+fn on_animation_end(trigger: On<AnimationEnd>) {
+    info!(
+        "AnimationEnd: camera={:?} source={:?}",
+        trigger.camera, trigger.source
+    );
 }
 
 fn on_move_begin(trigger: On<CameraMoveBegin>) {

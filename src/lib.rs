@@ -118,7 +118,7 @@ impl Plugin for LagrangePlugin {
                     pan_orbit_camera,
                 )
                     .chain()
-                    .in_set(PanOrbitCameraSystemSet)
+                    .in_set(OrbitCamSystemSet)
                     .before(TransformSystems::Propagate)
                     .before(CameraUpdateSystems),
             );
@@ -131,7 +131,7 @@ impl Plugin for LagrangePlugin {
                     PostUpdate,
                     egui::check_egui_wants_focus
                         .after(EguiPreUpdateSet::InitContexts)
-                        .before(PanOrbitCameraSystemSet),
+                        .before(OrbitCamSystemSet),
                 );
         }
 
@@ -144,7 +144,7 @@ impl Plugin for LagrangePlugin {
 
 /// Base system set to allow ordering of `PanOrbitCamera`
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct PanOrbitCameraSystemSet;
+pub struct OrbitCamSystemSet;
 
 /// Tags an entity as capable of panning and orbiting.
 ///
@@ -171,7 +171,7 @@ pub struct PanOrbitCameraSystemSet;
 #[reflect(Component)]
 #[allow(clippy::struct_excessive_bools)]
 #[require(Camera3d)]
-pub struct PanOrbitCamera {
+pub struct OrbitCam {
     /// The point to orbit around, and what the camera looks at. Updated automatically.
     /// If you want to change the focus programmatically after initialization, set `target_focus`
     /// instead.
@@ -356,7 +356,7 @@ pub struct PanOrbitCamera {
     pub use_real_time:                  bool,
 }
 
-impl Default for PanOrbitCamera {
+impl Default for OrbitCam {
     fn default() -> Self {
         Self {
             focus:                          Vec3::ZERO,
@@ -502,7 +502,7 @@ fn active_viewport_data(
     touches: Res<Touches>,
     primary_windows: Query<&Window, With<PrimaryWindow>>,
     other_windows: Query<&Window, Without<PrimaryWindow>>,
-    orbit_cameras: Query<(Entity, &Camera, &RenderTarget, &PanOrbitCamera)>,
+    orbit_cameras: Query<(Entity, &Camera, &RenderTarget, &OrbitCam)>,
     #[cfg(feature = "bevy_egui")] egui_wants_focus: Res<EguiWantsFocus>,
 ) {
     let mut new_resource = ActiveCameraData::default();
@@ -588,7 +588,7 @@ fn pan_orbit_camera(
     active_cam: Res<ActiveCameraData>,
     mouse_key_tracker: Res<MouseKeyTracker>,
     touch_tracker: Res<TouchTracker>,
-    mut orbit_cameras: Query<(Entity, &mut PanOrbitCamera, &mut Transform, &mut Projection)>,
+    mut orbit_cameras: Query<(Entity, &mut OrbitCam, &mut Transform, &mut Projection)>,
     time_real: Res<Time<Real>>,
     time_virt: Res<Time<Virtual>>,
 ) {

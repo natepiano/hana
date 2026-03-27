@@ -21,7 +21,7 @@ use bevy::window::PrimaryWindow;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::ActiveCameraData;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -118,7 +118,7 @@ fn setup(
             },
             RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
             Transform::from_translation(Vec3::new(0.0, 0.0, 15.0)).looking_at(Vec3::ZERO, Vec3::Y),
-            PanOrbitCamera {
+            OrbitCam {
                 trackpad_behavior: TrackpadBehavior::BlenderLike {
                     modifier_pan:  Some(KeyCode::ShiftLeft),
                     modifier_zoom: Some(KeyCode::ControlLeft),

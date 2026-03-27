@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -45,7 +45,7 @@ fn setup(
     // Camera
     // Swaps the axis of the camera to use Z as up instead of Y as up which is the default.
     let swapped_axis = [Vec3::X, Vec3::Z, Vec3::Y];
-    let camera = PanOrbitCamera {
+    let camera = OrbitCam {
         axis: swapped_axis,
         pitch: Some(-45f32.to_radians()),
         trackpad_behavior: TrackpadBehavior::BlenderLike {

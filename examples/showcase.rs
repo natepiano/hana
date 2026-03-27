@@ -35,7 +35,7 @@ use bevy_lagrange::FitVisualization;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::ZoomBegin;
@@ -390,7 +390,7 @@ fn setup(
 
     // Camera (middle-click orbit, shift+middle pan, trackpad support)
     let camera = commands
-        .spawn(PanOrbitCamera {
+        .spawn(OrbitCam {
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
@@ -604,7 +604,7 @@ fn toggle_second_window(
     scene: Res<SceneEntities>,
     second: Option<Res<SecondWindowEntities>>,
     easing: Res<ActiveEasing>,
-    camera_query: Query<&PanOrbitCamera>,
+    camera_query: Query<&OrbitCam>,
     mut log: ResMut<EventLog>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyW) {
@@ -994,7 +994,7 @@ type GizmoLayerQuery<'w, 's> = Query<
         Option<&'static FitVisualization>,
         Option<&'static RenderLayers>,
     ),
-    With<PanOrbitCamera>,
+    With<OrbitCam>,
 >;
 
 /// Cameras with `FitVisualization` lose the selection gizmo layer so the outline
@@ -1045,7 +1045,7 @@ fn animate_camera(
     scene: Res<SceneEntities>,
     second: Option<Res<SecondWindowEntities>>,
     easing: Res<ActiveEasing>,
-    camera_query: Query<&PanOrbitCamera>,
+    camera_query: Query<&OrbitCam>,
     windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyA) {
@@ -1155,7 +1155,7 @@ fn toggle_projection(
     scene: Res<SceneEntities>,
     second: Option<Res<SecondWindowEntities>>,
     active_easing: Res<ActiveEasing>,
-    mut camera_query: Query<(&mut Projection, &mut PanOrbitCamera)>,
+    mut camera_query: Query<(&mut Projection, &mut OrbitCam)>,
     mut log: ResMut<EventLog>,
     mut pending_fit: Local<bool>,
 ) {

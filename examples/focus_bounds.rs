@@ -4,7 +4,7 @@ use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -44,7 +44,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-        PanOrbitCamera {
+        OrbitCam {
             // Shape can take Cuboid or Sphere
             focus_bounds_shape: Some(Cuboid::new(1.0, 1.0, 1.0).into()),
             // Move the origin of the shape

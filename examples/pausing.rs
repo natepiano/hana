@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::PanOrbitCamera;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
 
 fn main() {
@@ -47,7 +47,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_xyz(0.0, 1.5, 5.0),
-        PanOrbitCamera {
+        OrbitCam {
             use_real_time: true,
             trackpad_behavior: TrackpadBehavior::BlenderLike {
                 modifier_pan:  Some(KeyCode::ShiftLeft),
