@@ -46,12 +46,12 @@ pub use layout::AlignY;
 pub use layout::Anchor;
 pub use layout::Border;
 pub use layout::BoundingBox;
+pub use layout::Dimension;
 pub use layout::Direction;
 // Layout tree.
 pub use layout::El;
 pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
-pub use layout::FontSize;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;

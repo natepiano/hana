@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy::tasks::available_parallelism;
 
-use crate::layout::FontSize;
+use crate::layout::Dimension;
 use crate::layout::Unit;
 
 /// Minimum canonical rasterization size in pixels.
@@ -360,7 +360,7 @@ impl From<In> for f32 {
     fn from(v: In) -> Self { v.0 * Unit::Inches.meters_per_unit() }
 }
 
-impl From<Pt> for FontSize {
+impl From<Pt> for Dimension {
     fn from(v: Pt) -> Self {
         Self {
             value: v.0,
@@ -369,7 +369,7 @@ impl From<Pt> for FontSize {
     }
 }
 
-impl From<Mm> for FontSize {
+impl From<Mm> for Dimension {
     fn from(v: Mm) -> Self {
         Self {
             value: v.0,
@@ -378,7 +378,7 @@ impl From<Mm> for FontSize {
     }
 }
 
-impl From<In> for FontSize {
+impl From<In> for Dimension {
     fn from(v: In) -> Self {
         Self {
             value: v.0,

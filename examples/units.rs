@@ -568,7 +568,7 @@ fn spawn_ruler_on_panel(
 
 // ── Panel content ────────────────────────────────────────────────────
 
-const fn debug_border(debug: bool) -> Option<Border> {
+fn debug_border(debug: bool) -> Option<Border> {
     if debug {
         Some(Border::all(0.002, Color::srgba(1.0, 0.3, 0.3, 0.4)))
     } else {

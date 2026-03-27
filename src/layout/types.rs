@@ -202,30 +202,50 @@ impl Sizing {
     ///
     /// The element will never be smaller than `min`, even if content is smaller.
     #[must_use]
-    pub const fn fit_min(min: f32) -> Self { Self::Fit { min, max: f32::MAX } }
+    pub fn fit_min(min: impl Into<Dimension>) -> Self {
+        Self::Fit {
+            min: min.into().value,
+            max: f32::MAX,
+        }
+    }
 
     /// Shrink-wrap to content, clamped to `[min, max]`.
     ///
     /// Content smaller than `min` grows to `min`; content larger than `max`
     /// is capped at `max`.
     #[must_use]
-    pub const fn fit_range(min: f32, max: f32) -> Self { Self::Fit { min, max } }
+    pub fn fit_range(min: impl Into<Dimension>, max: impl Into<Dimension>) -> Self {
+        Self::Fit {
+            min: min.into().value,
+            max: max.into().value,
+        }
+    }
 
     /// Expand to fill available space with a minimum floor.
     ///
     /// The element is guaranteed at least `min` even if no space remains.
     #[must_use]
-    pub const fn grow_min(min: f32) -> Self { Self::Grow { min, max: f32::MAX } }
+    pub fn grow_min(min: impl Into<Dimension>) -> Self {
+        Self::Grow {
+            min: min.into().value,
+            max: f32::MAX,
+        }
+    }
 
     /// Expand to fill available space, clamped to `[min, max]`.
     ///
     /// `min` is a guaranteed floor; `max` caps expansion.
     #[must_use]
-    pub const fn grow_range(min: f32, max: f32) -> Self { Self::Grow { min, max } }
+    pub fn grow_range(min: impl Into<Dimension>, max: impl Into<Dimension>) -> Self {
+        Self::Grow {
+            min: min.into().value,
+            max: max.into().value,
+        }
+    }
 
     /// Exact size in layout units, ignoring content and siblings.
     #[must_use]
-    pub const fn fixed(size: f32) -> Self { Self::Fixed(size) }
+    pub fn fixed(size: impl Into<Dimension>) -> Self { Self::Fixed(size.into().value) }
 
     /// Fraction of the parent's content area (0.0–1.0).
     #[must_use]
@@ -348,7 +368,8 @@ pub struct Padding {
 impl Padding {
     /// Uniform padding on all sides.
     #[must_use]
-    pub const fn all(value: f32) -> Self {
+    pub fn all(value: impl Into<Dimension>) -> Self {
+        let value = value.into().value;
         Self {
             left:   value,
             right:  value,
@@ -359,7 +380,9 @@ impl Padding {
 
     /// Symmetric padding: `x` for left/right, `y` for top/bottom.
     #[must_use]
-    pub const fn xy(x: f32, y: f32) -> Self {
+    pub fn xy(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self {
+        let x = x.into().value;
+        let y = y.into().value;
         Self {
             left:   x,
             right:  x,
@@ -370,12 +393,17 @@ impl Padding {
 
     /// Individual padding per side.
     #[must_use]
-    pub const fn new(left: f32, right: f32, top: f32, bottom: f32) -> Self {
+    pub fn new(
+        left: impl Into<Dimension>,
+        right: impl Into<Dimension>,
+        top: impl Into<Dimension>,
+        bottom: impl Into<Dimension>,
+    ) -> Self {
         Self {
-            left,
-            right,
-            top,
-            bottom,
+            left:   left.into().value,
+            right:  right.into().value,
+            top:    top.into().value,
+            bottom: bottom.into().value,
         }
     }
 
@@ -557,7 +585,7 @@ impl Unit {
     pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
 }
 
-/// A font size with an optional unit.
+/// A dimension with an optional unit.
 ///
 /// Carries both the numeric value and the unit it's expressed in.
 /// Created implicitly via `From` impls on [`Pt`](crate::Pt),
@@ -568,14 +596,14 @@ impl Unit {
 /// - `In(0.24).into()` → value 0.24, unit Inches
 /// - `(24.0_f32).into()` → value 24.0, unit None (contextual default)
 #[derive(Clone, Copy, Debug)]
-pub struct FontSize {
+pub struct Dimension {
     /// The numeric size value.
     pub value: f32,
     /// The unit the value is expressed in. `None` = contextual default.
     pub unit:  Option<Unit>,
 }
 
-impl From<f32> for FontSize {
+impl From<f32> for Dimension {
     fn from(value: f32) -> Self { Self { value, unit: None } }
 }
 
@@ -1023,7 +1051,7 @@ impl TextProps<ForLayout> {
     ///
     /// Defaults to word wrapping, normal weight, normal slant.
     #[must_use]
-    pub fn new(size: impl Into<FontSize>) -> Self {
+    pub fn new(size: impl Into<Dimension>) -> Self {
         let font_size = size.into();
         Self {
             font_id:        0,
@@ -1125,7 +1153,7 @@ impl TextProps<ForStandalone> {
     ///
     /// Defaults to centered anchor, white color, normal weight.
     #[must_use]
-    pub fn new(size: impl Into<FontSize>) -> Self {
+    pub fn new(size: impl Into<Dimension>) -> Self {
         let font_size = size.into();
         Self {
             font_id:        0,
@@ -1331,7 +1359,8 @@ impl Border {
 
     /// Uniform border on all sides.
     #[must_use]
-    pub const fn all(width: f32, color: Color) -> Self {
+    pub fn all(width: impl Into<Dimension>, color: Color) -> Self {
+        let width = width.into().value;
         Self {
             left: width,
             right: width,
@@ -1344,29 +1373,29 @@ impl Border {
 
     /// Sets the left border width.
     #[must_use]
-    pub const fn left(mut self, width: f32) -> Self {
-        self.left = width;
+    pub fn left(mut self, width: impl Into<Dimension>) -> Self {
+        self.left = width.into().value;
         self
     }
 
     /// Sets the right border width.
     #[must_use]
-    pub const fn right(mut self, width: f32) -> Self {
-        self.right = width;
+    pub fn right(mut self, width: impl Into<Dimension>) -> Self {
+        self.right = width.into().value;
         self
     }
 
     /// Sets the top border width.
     #[must_use]
-    pub const fn top(mut self, width: f32) -> Self {
-        self.top = width;
+    pub fn top(mut self, width: impl Into<Dimension>) -> Self {
+        self.top = width.into().value;
         self
     }
 
     /// Sets the bottom border width.
     #[must_use]
-    pub const fn bottom(mut self, width: f32) -> Self {
-        self.bottom = width;
+    pub fn bottom(mut self, width: impl Into<Dimension>) -> Self {
+        self.bottom = width.into().value;
         self
     }
 
@@ -1379,8 +1408,8 @@ impl Border {
 
     /// Sets the width of lines drawn between children.
     #[must_use]
-    pub const fn between_children(mut self, width: f32) -> Self {
-        self.between_children = width;
+    pub fn between_children(mut self, width: impl Into<Dimension>) -> Self {
+        self.between_children = width.into().value;
         self
     }
 
