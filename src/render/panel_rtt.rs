@@ -16,7 +16,7 @@ use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 
-use super::constants::default_panel_material;
+use super::constants;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::RenderMode;
@@ -118,6 +118,7 @@ impl Plugin for PanelRttPlugin {
 /// 3. Spawns a display quad showing the texture to the main camera
 ///
 /// Only runs for panels that don't already have RTT children.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn setup_panel_rtt(
     panels: Query<
         (
@@ -163,10 +164,21 @@ pub(super) fn setup_panel_rtt(
         let world_h = panel.world_height(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
-        // Compute texture dimensions.
+        // Compute texture dimensions. Casts are safe: values are clamped
+        // to [64, 4096] which fits in u32 without precision loss.
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
         let tex_w = (world_w * DEFAULT_TEXELS_PER_METER)
             .round()
             .clamp(MIN_TEXTURE_SIZE as f32, MAX_TEXTURE_SIZE as f32) as u32;
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
         let tex_h = (world_h * DEFAULT_TEXELS_PER_METER)
             .round()
             .clamp(MIN_TEXTURE_SIZE as f32, MAX_TEXTURE_SIZE as f32) as u32;
@@ -183,8 +195,8 @@ pub(super) fn setup_panel_rtt(
         // Camera center: the midpoint of the panel content area.
         // Content spans from (-anchor_x, anchor_y) [TL] to
         // (world_w - anchor_x, anchor_y - world_h) [BR].
-        let cam_x = world_w * 0.5 - anchor_x;
-        let cam_y = anchor_y - world_h * 0.5;
+        let cam_x = world_w.mul_add(0.5, -anchor_x);
+        let cam_y = world_h.mul_add(-0.5, anchor_y);
 
         // Spawn orthographic camera targeting the render texture.
         commands.entity(panel_entity).with_child((
@@ -228,21 +240,8 @@ pub(super) fn setup_panel_rtt(
         // Spawn display quad — visible to the panel's scene layer.
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let quad_mesh = meshes.add(Rectangle::new(world_w, world_h));
-        // Display quad inherits PBR properties from the panel's material.
-        // The RTT texture is applied as the base color, and
-        // `AlphaMode::Premultiplied` handles the composited alpha correctly.
-        let mut quad_mat = panel
-            .material
-            .clone()
-            .unwrap_or_else(default_panel_material);
-        quad_mat.base_color_texture = Some(image_handle);
-        quad_mat.base_color = Color::WHITE;
-        quad_mat.alpha_mode = AlphaMode::Premultiplied;
-        quad_mat.double_sided = true;
-        quad_mat.cull_mode = None;
-        // Suppress specular on transparent RTT regions.
-        quad_mat.reflectance = 0.0;
-        let quad_material = materials.add(quad_mat);
+        let quad_material =
+            materials.add(display_quad_material(panel.material.as_ref(), image_handle));
 
         // Position the quad at the center of the panel content area.
         let quad_base = (
@@ -272,4 +271,21 @@ fn cleanup_removed_panels(
     registry
         .assignments
         .retain(|entity, _| active.contains(entity));
+}
+
+/// Builds the display quad `StandardMaterial` from the panel's material.
+fn display_quad_material(
+    panel_material: Option<&StandardMaterial>,
+    image_handle: Handle<Image>,
+) -> StandardMaterial {
+    let mut mat = panel_material
+        .cloned()
+        .unwrap_or_else(constants::default_panel_material);
+    mat.base_color_texture = Some(image_handle);
+    mat.base_color = Color::WHITE;
+    mat.alpha_mode = AlphaMode::Premultiplied;
+    mat.double_sided = true;
+    mat.cull_mode = None;
+    mat.reflectance = 0.0;
+    mat
 }

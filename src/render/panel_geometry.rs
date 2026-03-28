@@ -11,12 +11,12 @@ use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 
-use super::constants::LAYER_Z_STEP;
-use super::constants::resolve_material;
+use super::constants;
 use super::panel_rtt::PanelRttRegistry;
 use super::sdf_material::SdfPanelMaterial;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
+use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
@@ -108,182 +108,58 @@ fn build_panel_geometry(
         despawn_children_of(&old_interaction, panel_entity, &mut commands);
 
         // ── Gather fill + border per element ────────────────────────
-        let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
-        let mut divider_commands: Vec<(usize, BoundingBox, Color)> = Vec::new();
-
-        for (cmd_index, cmd) in result.commands.iter().enumerate() {
-            match &cmd.kind {
-                RenderCommandKind::Rectangle { color, source } => {
-                    if *source == RectangleSource::BetweenChildrenBorder {
-                        // Between-children dividers are simple quads, not SDF.
-                        divider_commands.push((cmd_index, cmd.bounds, *color));
-                    } else {
-                        surfaces
-                            .entry(cmd.element_idx)
-                            .or_insert_with(|| ElementSurface {
-                                element_idx:   cmd.element_idx,
-                                bounds:        cmd.bounds,
-                                fill_color:    None,
-                                border_widths: [0.0; 4],
-                                border_color:  None,
-                                command_index: cmd_index,
-                            })
-                            .fill_color = Some(*color);
-                    }
-                },
-                RenderCommandKind::Border { border } => {
-                    let surface =
-                        surfaces
-                            .entry(cmd.element_idx)
-                            .or_insert_with(|| ElementSurface {
-                                element_idx:   cmd.element_idx,
-                                bounds:        cmd.bounds,
-                                fill_color:    None,
-                                border_widths: [0.0; 4],
-                                border_color:  None,
-                                command_index: cmd_index,
-                            });
-                    surface.border_widths = [
-                        border.top.value,
-                        border.right.value,
-                        border.bottom.value,
-                        border.left.value,
-                    ];
-                    surface.border_color = Some(border.color);
-                },
-                _ => {},
-            }
-        }
+        let gathered = gather_surfaces(&result.commands);
 
         // ── Spawn SDF quads ─────────────────────────────────────────
-        for surface in surfaces.values() {
-            let element_mat = panel.tree.element_material(surface.element_idx);
-            let corner_radius = panel.tree.element_corner_radius(surface.element_idx);
+        let layout_mpu = panel
+            .layout_unit
+            .map_or(unit_config.layout, |u| u)
+            .meters_per_unit();
 
-            // Fill color comes from .background() or the element's own
-            // .material() base_color — never from the panel-level material.
-            // Panel material provides PBR properties (roughness, metallic,
-            // unlit) but not fill color. Border-only elements with no
-            // background and no element material are always transparent.
-            let effective_color = surface.fill_color.or_else(|| {
-                if element_mat.is_some() {
-                    None // element has a custom material — use its base_color
-                } else {
-                    Some(Color::NONE) // no fill, no element material → transparent
-                }
-            });
-            let mut base = resolve_material(element_mat, panel.material.as_ref(), effective_color);
-            if !is_geometry {
-                base.unlit = true;
-            }
-
-            // Convert layout bounds to world dimensions.
-            let world_w = surface.bounds.width * pts_mpu;
-            let world_h = surface.bounds.height * pts_mpu;
-            let half_w = world_w * 0.5;
-            let half_h = world_h * 0.5;
-
-            // Convert corner radii directly to world meters from their
-            // original units (Mm, Pt, etc.). Bare f32 values use the
-            // panel's layout unit conversion factor.
-            let layout_mpu = panel
-                .layout_unit
-                .map_or(unit_config.layout, |u| u)
-                .meters_per_unit();
-            let world_radii = corner_radius.to_meters_array(layout_mpu);
-
-            // Convert border widths to world units.
-            let world_borders = [
-                surface.border_widths[0] * pts_mpu,
-                surface.border_widths[1] * pts_mpu,
-                surface.border_widths[2] * pts_mpu,
-                surface.border_widths[3] * pts_mpu,
-            ];
-
-            let sdf_mat = super::sdf_material::sdf_panel_material(
-                base,
-                half_w,
-                half_h,
-                world_radii,
-                world_borders,
-                surface.border_color,
+        for surface in gathered.surfaces.values() {
+            spawn_sdf_element(
+                panel,
+                surface,
+                is_geometry,
+                suppress_shadow,
+                pts_mpu,
+                layout_mpu,
+                anchor_x,
+                anchor_y,
+                &layer,
+                &mut meshes,
+                &mut sdf_materials,
+                &mut commands,
+                panel_entity,
             );
-
-            // World-space position.
-            let world_rect = bounds_to_world_rect(&surface.bounds, pts_mpu, anchor_x, anchor_y);
-
-            #[allow(clippy::cast_precision_loss)]
-            let z_offset = if is_geometry {
-                surface.command_index as f32 * LAYER_Z_STEP
-            } else {
-                0.0
-            };
-
-            let mesh = meshes.add(Rectangle::new(world_w, world_h));
-            let mat_handle = sdf_materials.add(sdf_mat);
-
-            let base_components = (
-                PanelSdfMesh,
-                Mesh3d(mesh),
-                MeshMaterial3d(mat_handle),
-                Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
-                layer.clone(),
-            );
-            if suppress_shadow {
-                commands
-                    .entity(panel_entity)
-                    .with_child((base_components, NotShadowCaster));
-            } else {
-                commands.entity(panel_entity).with_child(base_components);
-            }
         }
 
         // ── Spawn between-children dividers (simple quads) ──────────
-        for (cmd_index, bounds, color) in &divider_commands {
-            let element_mat_option: Option<&StandardMaterial> = None;
-            let mut base =
-                resolve_material(element_mat_option, panel.material.as_ref(), Some(*color));
-            base.alpha_mode = AlphaMode::Blend;
-            base.double_sided = true;
-            base.cull_mode = None;
-            if !is_geometry {
-                base.unlit = true;
-            }
-
-            let world_rect = bounds_to_world_rect(bounds, pts_mpu, anchor_x, anchor_y);
-
-            #[allow(clippy::cast_precision_loss)]
-            let z_offset = if is_geometry {
-                *cmd_index as f32 * LAYER_Z_STEP
-            } else {
-                0.0
-            };
-
-            let mesh = meshes.add(Rectangle::new(world_rect.width, world_rect.height));
-            let mat_handle = standard_materials.add(base);
-
-            let base_components = (
-                PanelDividerMesh,
-                Mesh3d(mesh),
-                MeshMaterial3d(mat_handle),
-                Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
-                layer.clone(),
+        for (cmd_index, bounds, color) in &gathered.dividers {
+            spawn_divider(
+                panel,
+                *cmd_index,
+                bounds,
+                *color,
+                is_geometry,
+                suppress_shadow,
+                pts_mpu,
+                anchor_x,
+                anchor_y,
+                &layer,
+                &mut meshes,
+                &mut standard_materials,
+                &mut commands,
+                panel_entity,
             );
-            if suppress_shadow {
-                commands
-                    .entity(panel_entity)
-                    .with_child((base_components, NotShadowCaster));
-            } else {
-                commands.entity(panel_entity).with_child(base_components);
-            }
         }
 
         // ── Interaction mesh (Geometry mode only) ───────────────────
         if is_geometry {
             let world_w = panel.world_width(&unit_config);
             let world_h = panel.world_height(&unit_config);
-            let center_x = world_w * 0.5 - anchor_x;
-            let center_y = anchor_y - world_h * 0.5;
+            let center_x = world_w.mul_add(0.5, -anchor_x);
+            let center_y = world_h.mul_add(-0.5, anchor_y);
 
             let interact_mat = standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
@@ -299,7 +175,7 @@ fn build_panel_geometry(
                 NotShadowCaster,
                 Mesh3d(meshes.add(Rectangle::new(world_w, world_h))),
                 MeshMaterial3d(interact_mat),
-                Transform::from_xyz(center_x, center_y, -LAYER_Z_STEP),
+                Transform::from_xyz(center_x, center_y, -constants::LAYER_Z_STEP),
                 layer,
             ));
         }
@@ -307,6 +183,189 @@ fn build_panel_geometry(
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+struct GatheredCommands {
+    surfaces: HashMap<usize, ElementSurface>,
+    dividers: Vec<(usize, BoundingBox, Color)>,
+}
+
+/// Gathers fill + border data per element from render commands.
+fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
+    let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
+    let mut dividers: Vec<(usize, BoundingBox, Color)> = Vec::new();
+
+    for (cmd_index, cmd) in commands.iter().enumerate() {
+        match &cmd.kind {
+            RenderCommandKind::Rectangle { color, source } => {
+                if *source == RectangleSource::BetweenChildrenBorder {
+                    dividers.push((cmd_index, cmd.bounds, *color));
+                } else {
+                    surfaces
+                        .entry(cmd.element_idx)
+                        .or_insert_with(|| ElementSurface {
+                            element_idx:   cmd.element_idx,
+                            bounds:        cmd.bounds,
+                            fill_color:    None,
+                            border_widths: [0.0; 4],
+                            border_color:  None,
+                            command_index: cmd_index,
+                        })
+                        .fill_color = Some(*color);
+                }
+            },
+            RenderCommandKind::Border { border } => {
+                let surface = surfaces
+                    .entry(cmd.element_idx)
+                    .or_insert_with(|| ElementSurface {
+                        element_idx:   cmd.element_idx,
+                        bounds:        cmd.bounds,
+                        fill_color:    None,
+                        border_widths: [0.0; 4],
+                        border_color:  None,
+                        command_index: cmd_index,
+                    });
+                surface.border_widths = [
+                    border.top.value,
+                    border.right.value,
+                    border.bottom.value,
+                    border.left.value,
+                ];
+                surface.border_color = Some(border.color);
+            },
+            _ => {},
+        }
+    }
+
+    GatheredCommands { surfaces, dividers }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_sdf_element(
+    panel: &DiegeticPanel,
+    surface: &ElementSurface,
+    is_geometry: bool,
+    suppress_shadow: bool,
+    pts_mpu: f32,
+    layout_mpu: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    layer: &RenderLayers,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
+    commands: &mut Commands,
+    panel_entity: Entity,
+) {
+    let element_mat = panel.tree.element_material(surface.element_idx);
+    let corner_radius = panel.tree.element_corner_radius(surface.element_idx);
+
+    // Fill color from .background() or element .material() — never panel material.
+    let effective_color = surface.fill_color.or_else(|| {
+        if element_mat.is_some() {
+            None
+        } else {
+            Some(Color::NONE)
+        }
+    });
+    let mut base =
+        constants::resolve_material(element_mat, panel.material.as_ref(), effective_color);
+    if !is_geometry {
+        base.unlit = true;
+    }
+
+    let world_w = surface.bounds.width * pts_mpu;
+    let world_h = surface.bounds.height * pts_mpu;
+    let world_radii = corner_radius.to_meters_array(layout_mpu);
+    let world_borders = surface.border_widths.map(|w| w * pts_mpu);
+
+    let sdf_mat = super::sdf_material::sdf_panel_material(
+        base,
+        world_w * 0.5,
+        world_h * 0.5,
+        world_radii,
+        world_borders,
+        surface.border_color,
+    );
+
+    let world_rect = bounds_to_world_rect(&surface.bounds, pts_mpu, anchor_x, anchor_y);
+
+    #[allow(clippy::cast_precision_loss)]
+    let z_offset = if is_geometry {
+        surface.command_index as f32 * constants::LAYER_Z_STEP
+    } else {
+        0.0
+    };
+
+    let mesh = meshes.add(Rectangle::new(world_w, world_h));
+    let mat_handle = sdf_materials.add(sdf_mat);
+    let base_components = (
+        PanelSdfMesh,
+        Mesh3d(mesh),
+        MeshMaterial3d(mat_handle),
+        Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
+        layer.clone(),
+    );
+    if suppress_shadow {
+        commands
+            .entity(panel_entity)
+            .with_child((base_components, NotShadowCaster));
+    } else {
+        commands.entity(panel_entity).with_child(base_components);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_divider(
+    panel: &DiegeticPanel,
+    cmd_index: usize,
+    bounds: &BoundingBox,
+    color: Color,
+    is_geometry: bool,
+    suppress_shadow: bool,
+    pts_mpu: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    layer: &RenderLayers,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    commands: &mut Commands,
+    panel_entity: Entity,
+) {
+    let element_mat_option: Option<&StandardMaterial> = None;
+    let mut base =
+        constants::resolve_material(element_mat_option, panel.material.as_ref(), Some(color));
+    base.alpha_mode = AlphaMode::Blend;
+    base.double_sided = true;
+    base.cull_mode = None;
+    if !is_geometry {
+        base.unlit = true;
+    }
+
+    let world_rect = bounds_to_world_rect(bounds, pts_mpu, anchor_x, anchor_y);
+
+    #[allow(clippy::cast_precision_loss)]
+    let z_offset = if is_geometry {
+        cmd_index as f32 * constants::LAYER_Z_STEP
+    } else {
+        0.0
+    };
+
+    let mesh = meshes.add(Rectangle::new(world_rect.width, world_rect.height));
+    let mat_handle = materials.add(base);
+    let base_components = (
+        PanelDividerMesh,
+        Mesh3d(mesh),
+        MeshMaterial3d(mat_handle),
+        Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
+        layer.clone(),
+    );
+    if suppress_shadow {
+        commands
+            .entity(panel_entity)
+            .with_child((base_components, NotShadowCaster));
+    } else {
+        commands.entity(panel_entity).with_child(base_components);
+    }
+}
 
 fn despawn_children_of<C: Component>(
     query: &Query<(Entity, &ChildOf), With<C>>,
@@ -339,8 +398,8 @@ fn bounds_to_world_rect(
     let top = -(bounds.y.mul_add(pts_mpu, -anchor_y));
 
     WorldRect {
-        center_x: left + width * 0.5,
-        center_y: top - height * 0.5,
+        center_x: width.mul_add(0.5, left),
+        center_y: height.mul_add(-0.5, top),
         width,
         height,
     }

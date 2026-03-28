@@ -12,8 +12,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
-use super::constants::LAYER_Z_STEP;
-use super::constants::default_panel_material;
+use super::constants;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
@@ -730,13 +729,13 @@ fn build_panel_batched_meshes(
 
         let content_layer = rtt_registry
             .get_layer(panel_entity)
-            .map_or(scene_layer.clone(), RenderLayers::layer);
+            .map_or_else(|| scene_layer.clone(), RenderLayers::layer);
 
         // Resolve the base StandardMaterial for text in this panel.
         let mut text_base = panel
             .text_material
             .clone()
-            .unwrap_or_else(default_panel_material);
+            .unwrap_or_else(constants::default_panel_material);
         text_base.alpha_mode = AlphaMode::Blend;
         text_base.double_sided = true;
         text_base.cull_mode = None;
@@ -748,7 +747,7 @@ fn build_panel_batched_meshes(
         // on top of all geometry at or below that index.
         #[allow(clippy::cast_precision_loss)]
         let text_z = if is_geometry {
-            max_command_index as f32 * LAYER_Z_STEP
+            max_command_index as f32 * constants::LAYER_Z_STEP
         } else {
             0.0
         };

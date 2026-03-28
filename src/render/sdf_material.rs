@@ -56,7 +56,7 @@ impl MaterialExtension for SdfPanelExtension {
 /// Creates a new [`SdfPanelMaterial`] from a resolved base `StandardMaterial`.
 ///
 /// The base material's PBR properties (roughness, metallic, reflectance,
-/// base_color) are preserved. `alpha_mode`, `double_sided`, and `cull_mode`
+/// `base_color`) are preserved. `alpha_mode`, `double_sided`, and `cull_mode`
 /// are overridden for panel rendering.
 #[must_use]
 pub(super) fn sdf_panel_material(

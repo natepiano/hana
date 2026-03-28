@@ -95,10 +95,10 @@ impl MaterialExtension for MsdfExtension {
 ///
 /// The base material's `alpha_mode`, `double_sided`, and `cull_mode` are
 /// overridden for text rendering. All other PBR properties (roughness,
-/// metallic, reflectance, base_color, unlit) are preserved from the caller.
+/// metallic, reflectance, `base_color`, unlit) are preserved from the caller.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
-pub(super) fn msdf_text_material(
+pub(super) const fn msdf_text_material(
     mut base: StandardMaterial,
     sdf_range: f32,
     atlas_width: u32,
@@ -134,7 +134,7 @@ pub(super) fn msdf_text_material(
 /// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
-pub(super) fn msdf_shadow_proxy_material(
+pub(super) const fn msdf_shadow_proxy_material(
     mut base: StandardMaterial,
     sdf_range: f32,
     atlas_width: u32,

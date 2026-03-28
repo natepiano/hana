@@ -57,6 +57,7 @@ use crate::text::MsdfAtlas;
 /// Ensures all `Camera3d` entities have OIT enabled for correct
 /// transparent panel rendering. Disables MSAA on cameras where OIT is
 /// added (OIT requires MSAA off).
+#[allow(clippy::type_complexity)]
 fn ensure_oit_on_cameras(
     cameras: Query<
         (Entity, Option<&Msaa>),

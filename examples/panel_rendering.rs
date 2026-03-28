@@ -189,10 +189,10 @@ fn cycle_lighting_preset(
     let Some(idx) = new else { return };
 
     // Save current illuminance before switching away from lights-on.
-    if preset.lights_on() {
-        if let Some(light) = lights.iter().next() {
-            preset.saved_illuminance = light.illuminance;
-        }
+    if preset.lights_on()
+        && let Some(light) = lights.iter().next()
+    {
+        preset.saved_illuminance = light.illuminance;
     }
 
     preset.index = idx;
@@ -384,6 +384,7 @@ fn setup(mut commands: Commands) {
 /// Single panel with three cards laid out side by side.
 /// No panel-level background — the cards' own backgrounds make them
 /// appear as three separate panels within one RTT texture.
+#[allow(clippy::too_many_lines)]
 fn build_unified_panel() -> bevy_diegetic::LayoutTree {
     let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
     let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
