@@ -165,7 +165,7 @@ fn cycle_lighting_preset(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut preset: ResMut<LightingPreset>,
     mut panels: Query<&mut DiegeticPanel>,
-    mut lights: Query<&mut Visibility, With<SceneLight>>,
+    mut lights: Query<&mut DirectionalLight, With<SceneLight>>,
     mut hud: Query<&mut Text, With<HudText>>,
 ) {
     let new = if keyboard.just_pressed(KeyCode::Digit1) {
@@ -195,11 +195,15 @@ fn cycle_lighting_preset(
         text_mat.unlit = unlit;
     }
 
-    for mut vis in &mut lights {
-        *vis = if lights_visible {
-            Visibility::Visible
+    // Set illuminance to 0 instead of hiding the light entity.
+    // Hiding the entity can cause Bevy to skip rendering passes,
+    // which breaks unlit materials that still need the pass to run.
+    let default_illuminance = DirectionalLight::default().illuminance;
+    for mut light in &mut lights {
+        light.illuminance = if lights_visible {
+            default_illuminance
         } else {
-            Visibility::Hidden
+            0.0
         };
     }
 

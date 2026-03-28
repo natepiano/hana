@@ -682,6 +682,13 @@ fn build_panel_batched_meshes(
         }
     }
 
+    // Clear the shared materials cache so material property changes
+    // (like unlit toggling) create fresh materials instead of reusing
+    // stale cached ones.
+    if !dirty_panels.is_empty() {
+        shared_mats.handles.clear();
+    }
+
     for panel_entity in dirty_panels {
         let Ok((panel, hue_offset, panel_layers)) = panels.get(panel_entity) else {
             continue;
