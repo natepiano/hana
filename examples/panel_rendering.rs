@@ -21,6 +21,7 @@ use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
+use bevy_diegetic::RenderMode;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_panorbit_camera::PanOrbitCamera;
@@ -138,6 +139,7 @@ fn setup(mut commands: Commands) {
                 height: PANEL_HEIGHT,
                 layout_unit: Some(Unit::Millimeters),
                 anchor: Anchor::TopCenter,
+                render_mode: RenderMode::Geometry,
                 ..default()
             },
             Transform::from_xyz(0.0, 0.0, 0.0),
@@ -145,12 +147,23 @@ fn setup(mut commands: Commands) {
         .observe(on_panel_clicked);
 
     // ── Lighting ────────────────────────────────────────────────────
+    // Key light — from the front-right.
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
+            illuminance: 15_000.0,
             ..default()
         },
-        Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.5, 0.5, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    // Fill light — from the front-left, softer.
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            illuminance: 8_000.0,
+            ..default()
+        },
+        Transform::from_xyz(-0.5, 0.3, 1.5).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // ── Camera ──────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ use bevy::render::render_resource::TextureFormat;
 
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
+use crate::plugin::RenderMode;
 use crate::plugin::UnitConfig;
 
 /// Render layer offset — panel layers start here to avoid conflicts with
@@ -127,6 +128,11 @@ pub(super) fn setup_panel_rtt(
 ) {
     for (panel_entity, panel, computed) in &panels {
         if computed.result().is_none() {
+            continue;
+        }
+
+        // Geometry mode renders directly — no RTT infrastructure needed.
+        if panel.render_mode == RenderMode::Geometry {
             continue;
         }
 

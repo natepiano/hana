@@ -6,6 +6,7 @@
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
+use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 
 use super::panel_rtt::PanelRttRegistry;
@@ -13,13 +14,27 @@ use crate::layout::BoundingBox;
 use crate::layout::RenderCommandKind;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
+use crate::plugin::RenderMode;
 use crate::plugin::UnitConfig;
+
+/// Sort-key bias for the interaction mesh in Geometry mode.
+/// Largest positive = furthest back = draws first, behind everything.
+const INTERACTION_DEPTH_BIAS: f32 = 4.0;
+
+/// Sort-key bias for background rectangles in Geometry mode.
+/// Positive = farther from camera = draws first (behind everything).
+const BACKGROUND_DEPTH_BIAS: f32 = 2.0;
+
+/// Sort-key bias for border edges in Geometry mode.
+/// Negative = closer to camera = draws last (on top of everything).
+const BORDER_DEPTH_BIAS: f32 = -2.0;
 
 /// Z offset for background rectangles (at the panel plane, behind text).
 const RECTANGLE_Z_OFFSET: f32 = 0.0;
 
-/// Z offset for border edges (in front of text at 0.001).
-const BORDER_Z_OFFSET: f32 = 0.002;
+/// Z offset for border edges. Zero because layer ordering is handled by
+/// `depth_bias` (Geometry mode) or is irrelevant (Texture mode composites flat).
+const BORDER_Z_OFFSET: f32 = 0.0;
 
 /// Marker for rectangle mesh entities spawned by the panel geometry renderer.
 #[derive(Component)]
@@ -29,10 +44,22 @@ struct PanelRectMesh;
 #[derive(Component)]
 struct PanelBorderMesh;
 
-/// Cached shared material for vertex-colored panel geometry.
+/// Marker for the invisible full-panel interaction mesh (Geometry mode only).
+/// Enables picking across the entire panel area including transparent gaps.
+#[derive(Component)]
+struct PanelInteractionMesh;
+
+/// Cached shared materials for vertex-colored panel geometry.
 #[derive(Resource, Default)]
-struct SharedPanelMaterial {
-    handle: Option<Handle<StandardMaterial>>,
+struct SharedPanelMaterials {
+    /// Unlit material for RTT mode (all layers share one material).
+    rtt:                 Option<Handle<StandardMaterial>>,
+    /// Lit material with background depth bias for Geometry mode.
+    geometry_background: Option<Handle<StandardMaterial>>,
+    /// Lit material with border depth bias for Geometry mode.
+    geometry_border:     Option<Handle<StandardMaterial>>,
+    /// Fully transparent material for the interaction mesh (Geometry mode).
+    interaction:         Option<Handle<StandardMaterial>>,
 }
 
 /// Per-quad data for building vertex-colored meshes.
@@ -50,7 +77,7 @@ pub struct PanelGeometryPlugin;
 
 impl Plugin for PanelGeometryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SharedPanelMaterial>();
+        app.init_resource::<SharedPanelMaterials>();
         app.add_systems(
             PostUpdate,
             build_panel_geometry.after(super::panel_rtt::setup_panel_rtt),
@@ -58,13 +85,13 @@ impl Plugin for PanelGeometryPlugin {
     }
 }
 
-/// Returns the shared vertex-colored panel material, creating it on first use.
-fn get_or_create_material(
-    shared: &mut SharedPanelMaterial,
+/// Returns the shared RTT material (unlit, no depth bias).
+fn rtt_material(
+    shared: &mut SharedPanelMaterials,
     materials: &mut Assets<StandardMaterial>,
 ) -> Handle<StandardMaterial> {
     shared
-        .handle
+        .rtt
         .get_or_insert_with(|| {
             materials.add(StandardMaterial {
                 base_color: Color::WHITE,
@@ -72,6 +99,66 @@ fn get_or_create_material(
                 double_sided: true,
                 cull_mode: None,
                 unlit: true,
+                ..default()
+            })
+        })
+        .clone()
+}
+
+/// Returns the Geometry-mode background material (lit, positive depth bias).
+fn geometry_background_material(
+    shared: &mut SharedPanelMaterials,
+    materials: &mut Assets<StandardMaterial>,
+) -> Handle<StandardMaterial> {
+    shared
+        .geometry_background
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                depth_bias: BACKGROUND_DEPTH_BIAS,
+                ..default()
+            })
+        })
+        .clone()
+}
+
+/// Returns the Geometry-mode border material (lit, negative depth bias).
+fn geometry_border_material(
+    shared: &mut SharedPanelMaterials,
+    materials: &mut Assets<StandardMaterial>,
+) -> Handle<StandardMaterial> {
+    shared
+        .geometry_border
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                depth_bias: BORDER_DEPTH_BIAS,
+                ..default()
+            })
+        })
+        .clone()
+}
+
+/// Returns the fully transparent interaction material (Geometry mode).
+fn interaction_material(
+    shared: &mut SharedPanelMaterials,
+    materials: &mut Assets<StandardMaterial>,
+) -> Handle<StandardMaterial> {
+    shared
+        .interaction
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                depth_bias: INTERACTION_DEPTH_BIAS,
                 ..default()
             })
         })
@@ -87,9 +174,10 @@ fn build_panel_geometry(
     >,
     old_rects: Query<(Entity, &ChildOf), With<PanelRectMesh>>,
     old_borders: Query<(Entity, &ChildOf), With<PanelBorderMesh>>,
+    old_interaction: Query<(Entity, &ChildOf), With<PanelInteractionMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut shared_mat: ResMut<SharedPanelMaterial>,
+    mut shared_mats: ResMut<SharedPanelMaterials>,
     unit_config: Res<UnitConfig>,
     rtt_registry: Res<PanelRttRegistry>,
     mut commands: Commands,
@@ -155,33 +243,70 @@ fn build_panel_geometry(
                 commands.entity(entity).despawn();
             }
         }
+        for (entity, child_of) in &old_interaction {
+            if child_of.parent() == panel_entity {
+                commands.entity(entity).despawn();
+            }
+        }
 
         // ── Spawn new geometry ──────────────────────────────────────
-        let material = get_or_create_material(&mut shared_mat, &mut materials);
+        let is_geometry = panel.render_mode == RenderMode::Geometry;
         let layer = rtt_registry
             .get_layer(panel_entity)
             .map_or(RenderLayers::layer(0), RenderLayers::layer);
 
         if !rect_quads.is_empty() {
+            let rect_material = if is_geometry {
+                geometry_background_material(&mut shared_mats, &mut materials)
+            } else {
+                rtt_material(&mut shared_mats, &mut materials)
+            };
             let mesh = build_colored_quad_mesh(&rect_quads);
             commands.entity(panel_entity).with_child((
                 PanelRectMesh,
                 NotShadowCaster,
                 Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(material.clone()),
+                MeshMaterial3d(rect_material),
                 Transform::IDENTITY,
                 layer.clone(),
             ));
         }
 
         if !border_quads.is_empty() {
+            let border_material = if is_geometry {
+                geometry_border_material(&mut shared_mats, &mut materials)
+            } else {
+                rtt_material(&mut shared_mats, &mut materials)
+            };
             let mesh = build_colored_quad_mesh(&border_quads);
             commands.entity(panel_entity).with_child((
                 PanelBorderMesh,
                 NotShadowCaster,
                 Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(material),
+                MeshMaterial3d(border_material),
                 Transform::IDENTITY,
+                layer.clone(),
+            ));
+        }
+
+        // ── Interaction mesh (Geometry mode only) ───────────────────
+        // A full-panel transparent rectangle for picking. In RTT mode
+        // the display quad already covers the full area.
+        if is_geometry {
+            let world_w = panel.world_width(&unit_config);
+            let world_h = panel.world_height(&unit_config);
+            let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+            let center_x = world_w * 0.5 - anchor_x;
+            let center_y = anchor_y - world_h * 0.5;
+
+            let interact_mat = interaction_material(&mut shared_mats, &mut materials);
+            commands.entity(panel_entity).with_child((
+                PanelInteractionMesh,
+                RayCastBackfaces,
+                NotShadowCaster,
+                Mesh3d(meshes.add(Rectangle::new(world_w, world_h))),
+                MeshMaterial3d(interact_mat),
+                Transform::from_xyz(center_x, center_y, 0.0),
                 layer,
             ));
         }

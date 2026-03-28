@@ -37,6 +37,7 @@ use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::DiegeticPerfStats;
 use crate::plugin::HueOffset;
+use crate::plugin::RenderMode;
 use crate::plugin::UnitConfig;
 use crate::text::Font;
 use crate::text::FontId;
@@ -654,7 +655,7 @@ fn build_panel_batched_meshes(
     changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
     panel_children: Query<(&PanelTextQuads, &ChildOf), With<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
-    panels: Query<Option<&HueOffset>, With<DiegeticPanel>>,
+    panels: Query<(&DiegeticPanel, Option<&HueOffset>)>,
     atlas: Res<MsdfAtlas>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
@@ -673,7 +674,11 @@ fn build_panel_batched_meshes(
     }
 
     for panel_entity in dirty_panels {
-        let hue = panels.get(panel_entity).ok().flatten().map_or(0.0, |h| h.0);
+        let Ok((panel, hue_offset)) = panels.get(panel_entity) else {
+            continue;
+        };
+        let hue = hue_offset.map_or(0.0, |h| h.0);
+        let is_geometry = panel.render_mode == RenderMode::Geometry;
 
         // Collect all quads from this panel's `PanelTextChild` children.
         let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
@@ -716,6 +721,7 @@ fn build_panel_batched_meshes(
             &mut materials,
             &mut shared_mats,
             &layer,
+            !is_geometry,
             &mut commands,
         );
     }
@@ -733,6 +739,7 @@ fn spawn_batch_meshes(
     materials: &mut Assets<MsdfTextMaterial>,
     shared_mats: &mut SharedMsdfMaterials,
     render_layer: &RenderLayers,
+    unlit: bool,
     commands: &mut Commands,
 ) {
     for (key, quads) in batches {
@@ -777,7 +784,7 @@ fn spawn_batch_meshes(
                                 page_image.clone(),
                                 0.0,
                                 GlyphRenderMode::Text as u32,
-                                false,
+                                unlit,
                             ))
                         })
                         .clone()
@@ -789,7 +796,7 @@ fn spawn_batch_meshes(
                         page_image.clone(),
                         hue,
                         render_mode_u32,
-                        false,
+                        unlit,
                     ))
                 };
 
@@ -828,7 +835,7 @@ fn spawn_batch_meshes(
                 page_image,
                 hue,
                 shadow_render_mode,
-                false,
+                unlit,
             ));
 
             commands.entity(panel_entity).with_child((

@@ -38,6 +38,7 @@ bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_image",
   "bevy_log",
   "bevy_pbr",
+  "bevy_picking",
   "bevy_render",
 ] }
 bitflags = "2"

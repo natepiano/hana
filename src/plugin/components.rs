@@ -16,6 +16,19 @@ use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
 use crate::layout::Unit;
 
+/// How the panel's visual content is rendered to the screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum RenderMode {
+    /// Render-to-texture: all content composited into an offscreen texture,
+    /// displayed as a single textured quad. Fixed resolution, one draw call.
+    #[default]
+    Texture,
+    /// Direct 3D geometry: backgrounds, borders, and text rendered as
+    /// separate meshes in the scene. Infinite resolution, multiple draw
+    /// calls. Layer ordering uses `depth_bias` on the transparent sort key.
+    Geometry,
+}
+
 /// A diegetic UI panel attached to a 3D entity.
 ///
 /// Defines a layout tree and the panel's dimensions in layout units.
@@ -68,6 +81,8 @@ pub struct DiegeticPanel {
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
     pub world_height: Option<f32>,
+    /// How the panel renders its content. Defaults to [`RenderMode::Texture`].
+    pub render_mode:  RenderMode,
 }
 
 impl Default for DiegeticPanel {
@@ -81,6 +96,7 @@ impl Default for DiegeticPanel {
             anchor:       Anchor::TopLeft,
             world_width:  None,
             world_height: None,
+            render_mode:  RenderMode::Texture,
         }
     }
 }
@@ -118,6 +134,7 @@ pub struct DiegeticPanelBuilder {
     anchor:       Option<Anchor>,
     world_width:  Option<f32>,
     world_height: Option<f32>,
+    render_mode:  RenderMode,
     tree:         Option<LayoutTree>,
 }
 
@@ -179,6 +196,13 @@ impl DiegeticPanelBuilder {
         self
     }
 
+    /// Sets the rendering mode. Defaults to [`RenderMode::Texture`].
+    #[must_use]
+    pub const fn render_mode(mut self, mode: RenderMode) -> Self {
+        self.render_mode = mode;
+        self
+    }
+
     /// Consumes the builder and returns a [`DiegeticPanel`] component.
     #[must_use]
     pub fn build(self) -> DiegeticPanel {
@@ -191,6 +215,7 @@ impl DiegeticPanelBuilder {
             anchor:       self.anchor.unwrap_or(Anchor::TopLeft),
             world_width:  self.world_width,
             world_height: self.world_height,
+            render_mode:  self.render_mode,
         }
     }
 }

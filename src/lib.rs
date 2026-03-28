@@ -99,6 +99,7 @@ pub use plugin::PanelSize;
 pub use plugin::PaperSize;
 pub use plugin::Pt;
 pub use plugin::RasterQuality;
+pub use plugin::RenderMode;
 pub use plugin::ShowTextGizmos;
 pub use plugin::Unit;
 pub use plugin::UnitConfig;
