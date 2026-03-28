@@ -348,6 +348,14 @@ pub struct Mm(pub f32);
 #[derive(Clone, Copy, Debug)]
 pub struct In(pub f32);
 
+/// A value in logical pixels.
+///
+/// On [`ScreenSpace`](crate::ScreenSpace) panels, pixels map 1:1 to
+/// on-screen logical pixels. On world-space panels, the system resolves
+/// pixel dimensions per-frame using the active camera's projection.
+#[derive(Clone, Copy, Debug)]
+pub struct Px(pub f32);
+
 impl From<Pt> for f32 {
     fn from(v: Pt) -> Self { v.0 * Unit::Points.meters_per_unit() }
 }
@@ -383,6 +391,15 @@ impl From<In> for Dimension {
         Self {
             value: v.0,
             unit:  Some(Unit::Inches),
+        }
+    }
+}
+
+impl From<Px> for Dimension {
+    fn from(v: Px) -> Self {
+        Self {
+            value: v.0,
+            unit:  Some(Unit::Pixels),
         }
     }
 }

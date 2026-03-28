@@ -119,10 +119,25 @@ fn setup(
     let max_content_h = panel_h.max(note_h);
     let lift = max_content_h * 0.10; // shift everything up 10%
     let header_y = max_content_h + HEADER_GAP + lift;
-    let content_top = header_y - HEADER_GAP - Pt(9.0).0 * Unit::Points.meters_per_unit();
+    let content_top = Pt(9.0)
+        .0
+        .mul_add(-Unit::Points.meters_per_unit(), header_y - HEADER_GAP);
 
-    // ── Backdrop for ZoomToFit ───────────────────────────────────────
     let total_h = header_y;
+    spawn_backdrop(&mut commands, &mut meshes, &mut materials, total_w, total_h);
+    spawn_headers(&mut commands, &header_style, left_x, note_x, header_y);
+    spawn_panels(&mut commands, left_x, note_x, content_top);
+    spawn_world_text_column(&mut commands, header_style, right_x, header_y);
+    spawn_lighting_and_camera(&mut commands, total_h);
+}
+
+fn spawn_backdrop(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    total_w: f32,
+    total_h: f32,
+) {
     let backdrop = commands
         .spawn((
             Mesh3d(meshes.add(Plane3d::new(
@@ -139,22 +154,28 @@ fn setup(
         ))
         .id();
     commands.insert_resource(Backdrop(backdrop));
+}
 
-    // ── Three top-aligned headers ────────────────────────────────────
+fn spawn_headers(
+    commands: &mut Commands,
+    header_style: &WorldTextStyle,
+    left_x: f32,
+    note_x: f32,
+    header_y: f32,
+) {
     commands.spawn((
         WorldText::new("DiegeticPanel"),
         header_style.clone(),
         Transform::from_xyz(left_x, header_y, 0.0),
     ));
-
-    // "How font sizes work" header above the commentary panel.
     commands.spawn((
         WorldText::new("How font sizes work"),
         header_style.clone(),
         Transform::from_xyz(note_x, header_y, 0.0),
     ));
+}
 
-    // ── Left: DiegeticPanel (no title inside) ────────────────────────
+fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: f32) {
     commands.spawn((
         DiegeticPanel {
             tree: build_demo_panel(),
@@ -166,8 +187,25 @@ fn setup(
         },
         Transform::from_xyz(left_x, content_top, 0.0),
     ));
+    commands.spawn((
+        DiegeticPanel {
+            tree: build_commentary(),
+            width: NOTE_WIDTH,
+            height: NOTE_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
+            anchor: Anchor::TopLeft,
+            ..default()
+        },
+        Transform::from_xyz(note_x, content_top, 0.0),
+    ));
+}
 
-    // ── Center: WorldText column (children of title entity) ──────────
+fn spawn_world_text_column(
+    commands: &mut Commands,
+    header_style: WorldTextStyle,
+    right_x: f32,
+    header_y: f32,
+) {
     let wt_title = commands
         .spawn((
             WorldText::new("WorldText"),
@@ -187,9 +225,7 @@ fn setup(
         WorldTextStyle::new(SIZE_BARE_WORLD).with_color(SAMPLE_COLOR),
     ];
 
-    // Child offsets are relative to the title entity.
-    // Y offset from title to first content row.
-    let first_row_dy = -(HEADER_GAP + (PANEL_PAD + BORDER_WIDTH) * MM_TO_M);
+    let first_row_dy = -(PANEL_PAD + BORDER_WIDTH).mul_add(MM_TO_M, HEADER_GAP);
     let sample_dx = LABEL_COL * MM_TO_M;
     let row_step = (SIZE_MM + ROW_GAP + 2.0) * MM_TO_M;
 
@@ -197,35 +233,20 @@ fn setup(
         #[allow(clippy::cast_precision_loss)]
         let dy = first_row_dy - row_step * i as f32;
 
-        // Label child.
         commands.entity(wt_title).with_child((
             WorldText::new(*label),
             label_style.clone(),
             Transform::from_xyz(0.0, dy, 0.0),
         ));
-
-        // Sample child.
         commands.entity(wt_title).with_child((
             WorldText::new("Hello"),
             style.clone().with_anchor(Anchor::TopLeft),
             Transform::from_xyz(sample_dx, dy, 0.0),
         ));
     }
+}
 
-    // ── Right: Commentary panel (no title inside) ────────────────────
-    commands.spawn((
-        DiegeticPanel {
-            tree: build_commentary(),
-            width: NOTE_WIDTH,
-            height: NOTE_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
-        Transform::from_xyz(note_x, content_top, 0.0),
-    ));
-
-    // ── Lighting ─────────────────────────────────────────────────────
+fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
@@ -241,7 +262,6 @@ fn setup(
         Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // ── Camera ───────────────────────────────────────────────────────
     commands.spawn((
         PanOrbitCamera {
             focus: Vec3::new(0.0, total_h / 2.0, 0.0),

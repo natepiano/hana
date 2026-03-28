@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use super::config::PanelSize;
@@ -170,6 +171,7 @@ pub struct DiegeticPanelBuilder {
     material:       Option<StandardMaterial>,
     text_material:  Option<StandardMaterial>,
     tree:           Option<LayoutTree>,
+    screen_space:   Option<ScreenSpace>,
 }
 
 impl DiegeticPanelBuilder {
@@ -262,6 +264,67 @@ impl DiegeticPanelBuilder {
     pub fn text_material(mut self, material: StandardMaterial) -> Self {
         self.text_material = Some(material);
         self
+    }
+
+    /// Sets the panel dimensions in logical pixels and uses [`Unit::Points`]
+    /// as the layout unit (1 pt ≈ 1 px in the layout engine).
+    ///
+    /// For [`ScreenSpace`] panels, these map 1:1 to on-screen pixels.
+    /// For world-space panels, the system can resolve pixel dimensions
+    /// per-frame using the active camera's projection.
+    #[must_use]
+    pub const fn size_px(mut self, width: f32, height: f32) -> Self {
+        self.width = width;
+        self.height = height;
+        self.layout_unit = Some(Unit::Pixels);
+        self
+    }
+
+    /// Stores a custom [`ScreenSpace`] configuration for use with
+    /// [`build_screen_space`](Self::build_screen_space).
+    ///
+    /// If not called, [`build_screen_space`](Self::build_screen_space)
+    /// uses [`ScreenSpace::default`].
+    #[must_use]
+    pub fn screen_space_with(mut self, config: ScreenSpace) -> Self {
+        self.screen_space = Some(config);
+        self
+    }
+
+    /// Consumes the builder and returns a `(DiegeticPanel, ScreenSpace)` tuple.
+    ///
+    /// The tuple is a valid Bevy bundle — pass it directly to
+    /// `commands.spawn(...)`. Sets `layout_unit` to [`Unit::Pixels`] and
+    /// `world_height` to match the panel height so that `points_to_world`
+    /// equals 1.0 (1 layout point = 1 world unit = 1 screen pixel under
+    /// the orthographic overlay camera).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// commands.spawn(
+    ///     DiegeticPanel::builder()
+    ///         .size_px(400.0, 300.0)
+    ///         .layout(|b| {
+    ///             b.text("Score: 999", LayoutTextStyle::new(24.0));
+    ///         })
+    ///         .build_screen_space()
+    /// );
+    /// ```
+    #[must_use]
+    pub fn build_screen_space(mut self) -> (DiegeticPanel, ScreenSpace) {
+        let screen_space = self.screen_space.take().unwrap_or_default();
+        // Ensure layout unit is pixel-compatible.
+        if self.layout_unit.is_none() {
+            self.layout_unit = Some(Unit::Pixels);
+        }
+        // Set world_height = height so points_to_world = 1.0.
+        // (viewport_pts_h = height * to_points() = height * 1.0 = height,
+        //  so points_to_world = world_height / viewport_pts_h = height / height = 1.0)
+        if self.world_height.is_none() && self.world_width.is_none() {
+            self.world_height = Some(self.height);
+        }
+        (self.build(), screen_space)
     }
 
     /// Consumes the builder and returns a [`DiegeticPanel`] component.
@@ -391,6 +454,54 @@ impl DiegeticPanel {
         let font_mpu = self.resolved_font_unit(config).meters_per_unit();
         let layout_mpu = self.resolved_layout_unit(config).meters_per_unit();
         font_mpu / layout_mpu
+    }
+}
+
+/// Marker component that renders a [`DiegeticPanel`] in screen space.
+///
+/// When attached, the plugin spawns a dedicated orthographic camera
+/// (1 world unit = 1 logical pixel) on a separate [`RenderLayers`] layer,
+/// plus a directional light on the same layer. The panel renders as a 2D
+/// overlay on top of the 3D scene, with layout units mapping 1:1 to
+/// screen pixels.
+///
+/// Use [`DiegeticPanelBuilder::build_screen_space`] to construct a panel
+/// with this component already attached.
+///
+/// # Camera order
+///
+/// `camera_order` controls rendering priority relative to other cameras.
+/// The default (`1`) renders after the typical scene camera (`0`). Override
+/// if your app already uses camera order 1 for something else.
+///
+/// # Render layer
+///
+/// `render_layer` isolates the panel from the scene camera. The default
+/// (`31`) uses the highest standard Bevy render layer to minimize
+/// collisions with user-defined layers.
+#[derive(Component, Clone, Debug, Reflect)]
+#[reflect(Component)]
+pub struct ScreenSpace {
+    /// Camera render order. Matches [`Camera::order`] (`isize`).
+    /// Higher orders render on top. Default: `1`.
+    pub camera_order:  isize,
+    /// Render layers for isolation from the scene camera.
+    /// Default: `RenderLayers::layer(31)`.
+    pub render_layers: RenderLayers,
+}
+
+/// Default camera order for [`ScreenSpace`] overlay cameras.
+const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
+
+/// Default render layer for [`ScreenSpace`] panels.
+const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
+
+impl Default for ScreenSpace {
+    fn default() -> Self {
+        Self {
+            camera_order:  DEFAULT_SCREEN_SPACE_CAMERA_ORDER,
+            render_layers: RenderLayers::layer(DEFAULT_SCREEN_SPACE_RENDER_LAYER),
+        }
     }
 }
 

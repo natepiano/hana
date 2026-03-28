@@ -11,6 +11,7 @@ use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
 use super::components::RenderMode;
+use super::components::ScreenSpace;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
@@ -284,7 +285,12 @@ fn spawn_rect_gizmo(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_layout_gizmos(
     changed_panels: Query<
-        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+        (
+            Entity,
+            &DiegeticPanel,
+            &ComputedDiegeticPanel,
+            Has<ScreenSpace>,
+        ),
         Changed<ComputedDiegeticPanel>,
     >,
     existing_gizmos: Query<(Entity, &ChildOf), With<PanelGizmoChild>>,
@@ -299,7 +305,7 @@ pub(super) fn render_layout_gizmos(
 
     let ppm = pixels_per_meter(&cameras);
 
-    for (panel_entity, panel, computed) in &changed_panels {
+    for (panel_entity, panel, computed, is_screen_space) in &changed_panels {
         // Geometry mode renders real meshes — gizmos are redundant.
         if panel.render_mode == RenderMode::Geometry {
             continue;
@@ -375,7 +381,14 @@ pub(super) fn render_layout_gizmos(
                             + border.top.value
                             + border.bottom.value)
                             / 4.0;
-                        let border_px = (avg_border_pts * pts_mpu * ppm).max(1.0);
+                        // Screen-space panels: 1 layout pt = 1 screen px,
+                        // so border width in points IS the pixel width.
+                        // World-space panels: convert through camera projection.
+                        let border_px = if is_screen_space {
+                            avg_border_pts.max(1.0)
+                        } else {
+                            (avg_border_pts * pts_mpu * ppm).max(1.0)
+                        };
                         spawn_rect_gizmo(
                             &mut commands,
                             panel_entity,
