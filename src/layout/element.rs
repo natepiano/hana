@@ -193,9 +193,7 @@ impl LayoutTree {
     /// Returns the PBR material override for the element at `index`, if any.
     #[must_use]
     pub fn element_material(&self, index: usize) -> Option<&StandardMaterial> {
-        self.elements
-            .get(index)
-            .and_then(|e| e.material.as_deref())
+        self.elements.get(index).and_then(|e| e.material.as_deref())
     }
 
     /// Returns a copy of this tree with all dimensions converted to points.

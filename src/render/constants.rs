@@ -3,6 +3,12 @@
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
+/// Per-command Z offset for Geometry mode layer ordering.
+/// Each render command is offset slightly toward the camera so that
+/// later commands (children, borders) render on top of earlier ones
+/// (parent backgrounds). 10 micrometers per layer.
+pub(super) const LAYER_Z_STEP: f32 = 0.00001;
+
 /// Default roughness for panel surfaces. Matte paper-like appearance.
 pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
 

@@ -12,6 +12,8 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
+use super::constants::LAYER_Z_STEP;
+use super::constants::default_panel_material;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
@@ -379,14 +381,20 @@ fn reconcile_panel_text_children(
         let scale_y = pts_mpu;
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
-        // Collect text commands from layout result.
+        // Collect text commands from layout result, preserving the
+        // command index for Z-offset layering in Geometry mode.
         let text_commands: Vec<_> = result
             .commands
             .iter()
-            .filter_map(|cmd| match &cmd.kind {
-                RenderCommandKind::Text { text, config } => {
-                    Some((cmd.element_idx, text.clone(), config.clone(), cmd.bounds))
-                },
+            .enumerate()
+            .filter_map(|(cmd_index, cmd)| match &cmd.kind {
+                RenderCommandKind::Text { text, config } => Some((
+                    cmd.element_idx,
+                    cmd_index,
+                    text.clone(),
+                    config.clone(),
+                    cmd.bounds,
+                )),
                 _ => None,
             })
             .collect();
@@ -402,10 +410,11 @@ fn reconcile_panel_text_children(
         // Track which existing indices we visited so we can despawn extras.
         let mut visited_indices: Vec<usize> = Vec::new();
 
-        for (element_idx, text, config, bounds) in &text_commands {
+        for (element_idx, cmd_index, text, config, bounds) in &text_commands {
             let style = config.as_standalone();
             let ptc = PanelTextChild {
                 element_idx: *element_idx,
+                command_index: *cmd_index,
                 bounds: *bounds,
                 scale_x,
                 scale_y,
@@ -653,7 +662,7 @@ fn shape_panel_text_children(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn build_panel_batched_meshes(
     changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
-    panel_children: Query<(&PanelTextQuads, &ChildOf), With<PanelTextChild>>,
+    panel_children: Query<(&PanelTextQuads, &PanelTextChild, &ChildOf)>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
     panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
     atlas: Res<MsdfAtlas>,
@@ -681,12 +690,15 @@ fn build_panel_batched_meshes(
         let is_geometry = panel.render_mode == RenderMode::Geometry;
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
 
-        // Collect all quads from this panel's `PanelTextChild` children.
+        // Collect all quads from this panel's `PanelTextChild` children
+        // and track the maximum command index for Z-offset layering.
         let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
-        for (ptq, child_of) in &panel_children {
+        let mut max_command_index: usize = 0;
+        for (ptq, ptc, child_of) in &panel_children {
             if child_of.parent() != panel_entity {
                 continue;
             }
+            max_command_index = max_command_index.max(ptc.command_index);
             for (page_index, quad) in &ptq.quads {
                 let key = TextBatchKey {
                     render_mode: ptq.render_mode,
@@ -713,6 +725,27 @@ fn build_panel_batched_meshes(
             .get_layer(panel_entity)
             .map_or(scene_layer.clone(), RenderLayers::layer);
 
+        // Resolve the base StandardMaterial for text in this panel.
+        let mut text_base = panel
+            .text_material
+            .clone()
+            .unwrap_or_else(default_panel_material);
+        text_base.alpha_mode = AlphaMode::Blend;
+        text_base.double_sided = true;
+        text_base.cull_mode = None;
+        if !is_geometry {
+            text_base.unlit = true;
+        }
+
+        // Text Z offset: use the max command index so text renders
+        // on top of all geometry at or below that index.
+        #[allow(clippy::cast_precision_loss)]
+        let text_z = if is_geometry {
+            max_command_index as f32 * LAYER_Z_STEP
+        } else {
+            0.0
+        };
+
         spawn_batch_meshes(
             &batches,
             panel_entity,
@@ -723,7 +756,8 @@ fn build_panel_batched_meshes(
             &mut shared_mats,
             &content_layer,
             &scene_layer,
-            !is_geometry,
+            &text_base,
+            text_z,
             &mut commands,
         );
     }
@@ -742,7 +776,8 @@ fn spawn_batch_meshes(
     shared_mats: &mut SharedMsdfMaterials,
     content_layer: &RenderLayers,
     scene_layer: &RenderLayers,
-    unlit: bool,
+    text_base: &StandardMaterial,
+    text_z: f32,
     commands: &mut Commands,
 ) {
     for (key, quads) in batches {
@@ -781,27 +816,29 @@ fn spawn_batch_meshes(
                         .entry(key.page_index)
                         .or_insert_with(|| {
                             materials.add(super::msdf_material::msdf_text_material(
+                                text_base.clone(),
                                 atlas.sdf_range() as f32,
                                 atlas.width(),
                                 atlas.height(),
                                 page_image.clone(),
                                 0.0,
                                 GlyphRenderMode::Text as u32,
-                                unlit,
                             ))
                         })
                         .clone()
                 } else {
                     materials.add(super::msdf_material::msdf_text_material(
+                        text_base.clone(),
                         atlas.sdf_range() as f32,
                         atlas.width(),
                         atlas.height(),
                         page_image.clone(),
                         hue,
                         render_mode_u32,
-                        unlit,
                     ))
                 };
+
+            let text_transform = Transform::from_xyz(0.0, 0.0, text_z);
 
             if suppress_shadow {
                 commands.entity(panel_entity).with_child((
@@ -809,7 +846,7 @@ fn spawn_batch_meshes(
                     NotShadowCaster,
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
-                    Transform::IDENTITY,
+                    text_transform,
                     content_layer.clone(),
                 ));
             } else {
@@ -817,7 +854,7 @@ fn spawn_batch_meshes(
                     DiegeticTextMesh,
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
-                    Transform::IDENTITY,
+                    text_transform,
                     content_layer.clone(),
                 ));
             }
@@ -832,20 +869,20 @@ fn spawn_batch_meshes(
 
             #[allow(clippy::cast_possible_truncation)]
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
+                text_base.clone(),
                 atlas.sdf_range() as f32,
                 atlas.width(),
                 atlas.height(),
                 page_image,
                 hue,
                 shadow_render_mode,
-                unlit,
             ));
 
             commands.entity(panel_entity).with_child((
                 DiegeticShadowProxy,
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(proxy_material),
-                Transform::IDENTITY,
+                Transform::from_xyz(0.0, 0.0, text_z),
                 scene_layer.clone(),
             ));
         }
@@ -1145,14 +1182,15 @@ mod tests {
         let atlas_image = images.add(Image::default());
 
         // Create the shared default material (hue_offset = 0).
+        let base = StandardMaterial::default();
         let shared_handle = materials.add(super::super::msdf_material::msdf_text_material(
+            base.clone(),
             4.0,
             256,
             256,
             atlas_image.clone(),
             0.0,
             0,
-            false,
         ));
 
         // Simulate the decision logic from extract_text_meshes.
@@ -1161,13 +1199,13 @@ mod tests {
                 shared_handle.clone()
             } else {
                 materials.add(super::super::msdf_material::msdf_text_material(
+                    base.clone(),
                     4.0,
                     256,
                     256,
                     atlas_image.clone(),
                     hue,
                     0,
-                    false,
                 ))
             }
         };

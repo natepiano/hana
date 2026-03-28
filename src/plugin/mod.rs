@@ -9,7 +9,10 @@ mod diagnostics;
 mod systems;
 
 use bevy::asset::AssetLoadFailedEvent;
+use bevy::camera::Camera3d;
+use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
+use bevy::render::view::Msaa;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
 pub use components::DiegeticPanelBuilder;
@@ -50,6 +53,30 @@ use crate::text::FontRegistered;
 use crate::text::FontRegistry;
 use crate::text::FontSource;
 use crate::text::MsdfAtlas;
+
+/// Ensures all `Camera3d` entities have OIT enabled for correct
+/// transparent panel rendering. Disables MSAA on cameras where OIT is
+/// added (OIT requires MSAA off).
+fn ensure_oit_on_cameras(
+    cameras: Query<
+        (Entity, Option<&Msaa>),
+        (
+            With<Camera3d>,
+            Without<OrderIndependentTransparencySettings>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, msaa) in &cameras {
+        // Disable MSAA if it's enabled — OIT panics with MSAA > 1.
+        if msaa.is_some_and(|m| m.samples() > 1) {
+            commands.entity(entity).insert(Msaa::Off);
+        }
+        commands
+            .entity(entity)
+            .insert(OrderIndependentTransparencySettings::default());
+    }
+}
 
 /// Enables perspective-scaled line widths on panel debug gizmos.
 fn configure_panel_gizmos(mut config_store: ResMut<bevy::prelude::GizmoConfigStore>) {
@@ -344,6 +371,7 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .add_systems(
             Update,
             (
+                ensure_oit_on_cameras,
                 render_layout_gizmos.after(compute_panel_layouts),
                 render_debug_gizmos.after(compute_panel_layouts),
             ),

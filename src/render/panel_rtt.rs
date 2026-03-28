@@ -16,6 +16,7 @@ use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 
+use super::constants::default_panel_material;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::RenderMode;
@@ -227,18 +228,21 @@ pub(super) fn setup_panel_rtt(
         // Spawn display quad — visible to the panel's scene layer.
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let quad_mesh = meshes.add(Rectangle::new(world_w, world_h));
-        let quad_material = materials.add(StandardMaterial {
-            base_color_texture: Some(image_handle),
-            alpha_mode: AlphaMode::Premultiplied,
-            double_sided: true,
-            cull_mode: None,
-            // Purely diffuse surface — no specular highlights or Fresnel
-            // reflections. Without this, PBR adds a gray specular tint to
-            // transparent regions of the RTT texture.
-            reflectance: 0.0,
-            perceptual_roughness: 1.0,
-            ..default()
-        });
+        // Display quad inherits PBR properties from the panel's material.
+        // The RTT texture is applied as the base color, and
+        // `AlphaMode::Premultiplied` handles the composited alpha correctly.
+        let mut quad_mat = panel
+            .material
+            .clone()
+            .unwrap_or_else(default_panel_material);
+        quad_mat.base_color_texture = Some(image_handle);
+        quad_mat.base_color = Color::WHITE;
+        quad_mat.alpha_mode = AlphaMode::Premultiplied;
+        quad_mat.double_sided = true;
+        quad_mat.cull_mode = None;
+        // Suppress specular on transparent RTT regions.
+        quad_mat.reflectance = 0.0;
+        let quad_material = materials.add(quad_mat);
 
         // Position the quad at the center of the panel content area.
         let quad_base = (

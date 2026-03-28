@@ -33,12 +33,12 @@ use bevy_panorbit_camera_ext::SetFitTarget;
 use bevy_panorbit_camera_ext::ZoomToFit;
 
 // ── Colors ──────────────────────────────────────────────────────────
-const DARK_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.9);
+const DARK_BG: Color = Color::srgba(0.3, 0.3, 0.35, 1.0);
 const BLUE_BG: Color = Color::srgba(0.12, 0.18, 0.28, 0.95);
 const GREEN_BG: Color = Color::srgba(0.08, 0.20, 0.12, 0.95);
-const RED_ACCENT: Color = Color::srgba(0.8, 0.2, 0.2, 1.0);
-const BLUE_ACCENT: Color = Color::srgba(0.3, 0.5, 0.9, 1.0);
-const GREEN_ACCENT: Color = Color::srgba(0.3, 0.8, 0.4, 1.0);
+const RED_ACCENT: Color = Color::srgb(1.0, 0.0, 0.0);
+const BLUE_ACCENT: Color = Color::srgb(0.0, 0.0, 1.0);
+const GREEN_ACCENT: Color = Color::srgb(0.0, 1.0, 0.0);
 const DIVIDER_COLOR: Color = Color::srgba(0.4, 0.4, 0.5, 0.6);
 const TEXT_COLOR: Color = Color::WHITE;
 const SUBTLE_TEXT: Color = Color::srgba(0.6, 0.6, 0.65, 0.9);
@@ -147,23 +147,13 @@ fn setup(mut commands: Commands) {
         .observe(on_panel_clicked);
 
     // ── Lighting ────────────────────────────────────────────────────
-    // Key light — from the front-right.
+    // Single directional light, default illuminance, straight at the panel.
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
-            illuminance: 15_000.0,
             ..default()
         },
-        Transform::from_xyz(0.5, 0.5, 2.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    // Fill light — from the front-left, softer.
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: false,
-            illuminance: 8_000.0,
-            ..default()
-        },
-        Transform::from_xyz(-0.5, 0.3, 1.5).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 0.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // ── Camera ──────────────────────────────────────────────────────

@@ -91,32 +91,28 @@ impl MaterialExtension for MsdfExtension {
     fn prepass_fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
 }
 
-/// Creates a new [`MsdfTextMaterial`] with sensible defaults.
+/// Creates a new [`MsdfTextMaterial`] from a resolved base `StandardMaterial`.
 ///
-/// The base `StandardMaterial` is configured for text rendering:
-/// - `alpha_mode: Blend` for smooth edges
-/// - `double_sided: true` for visibility from both sides
-/// - `cull_mode: None` (no back-face culling)
-/// - White base color (vertex colors override per-glyph)
+/// The base material's `alpha_mode`, `double_sided`, and `cull_mode` are
+/// overridden for text rendering. All other PBR properties (roughness,
+/// metallic, reflectance, base_color, unlit) are preserved from the caller.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn msdf_text_material(
+    mut base: StandardMaterial,
     sdf_range: f32,
     atlas_width: u32,
     atlas_height: u32,
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
-    unlit: bool,
 ) -> MsdfTextMaterial {
+    base.alpha_mode = AlphaMode::Blend;
+    base.double_sided = true;
+    base.cull_mode = None;
+
     ExtendedMaterial {
-        base:      StandardMaterial {
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            unlit,
-            ..StandardMaterial::default()
-        },
+        base,
         extension: MsdfExtension {
             uniforms: MsdfTextUniform {
                 sdf_range,
@@ -131,30 +127,28 @@ pub(super) fn msdf_text_material(
     }
 }
 
-/// Creates a shadow proxy [`MsdfTextMaterial`].
+/// Creates a shadow proxy [`MsdfTextMaterial`] from a resolved base.
 ///
 /// Same as [`msdf_text_material`] but configured for shadow-only rendering:
 /// - `alpha_mode: Mask(0.5)` so the shadow prepass runs the fragment shader
-/// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments (invisible)
+/// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn msdf_shadow_proxy_material(
+    mut base: StandardMaterial,
     sdf_range: f32,
     atlas_width: u32,
     atlas_height: u32,
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
-    unlit: bool,
 ) -> MsdfTextMaterial {
+    base.alpha_mode = AlphaMode::Mask(0.5);
+    base.double_sided = true;
+    base.cull_mode = None;
+
     ExtendedMaterial {
-        base:      StandardMaterial {
-            alpha_mode: AlphaMode::Mask(0.5),
-            double_sided: true,
-            cull_mode: None,
-            unlit,
-            ..StandardMaterial::default()
-        },
+        base,
         extension: MsdfExtension {
             uniforms: MsdfTextUniform {
                 sdf_range,

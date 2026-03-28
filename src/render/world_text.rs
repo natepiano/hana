@@ -104,17 +104,20 @@ pub(super) struct AwaitingReady;
 #[derive(Component, Clone, Debug)]
 pub struct PanelTextChild {
     /// Index of the source element in the layout tree.
-    pub element_idx: usize,
+    pub element_idx:   usize,
+    /// Index of the render command that produced this text child.
+    /// Used for Z-offset layering in Geometry mode.
+    pub command_index: usize,
     /// Layout-computed position and size in layout coordinates.
-    pub bounds:      BoundingBox,
+    pub bounds:        BoundingBox,
     /// X scale: points to meters.
-    pub scale_x:     f32,
+    pub scale_x:       f32,
     /// Y scale: points to meters.
-    pub scale_y:     f32,
+    pub scale_y:       f32,
     /// Anchor X offset in world units.
-    pub anchor_x:    f32,
+    pub anchor_x:      f32,
     /// Anchor Y offset in world units.
-    pub anchor_y:    f32,
+    pub anchor_y:      f32,
 }
 
 /// Fired on a [`WorldText`] entity when all its glyphs are rasterized
@@ -347,13 +350,13 @@ fn spawn_world_text_meshes(
 
             #[allow(clippy::cast_possible_truncation)]
             let mat = super::msdf_material::msdf_text_material(
+                StandardMaterial::default(),
                 atlas.sdf_range() as f32,
                 atlas.width(),
                 atlas.height(),
                 page_image.clone(),
                 0.0,
                 render_mode_u32,
-                false,
             );
 
             let material_handle = materials.add(mat);
@@ -386,13 +389,13 @@ fn spawn_world_text_meshes(
 
             #[allow(clippy::cast_possible_truncation)]
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
+                StandardMaterial::default(),
                 atlas.sdf_range() as f32,
                 atlas.width(),
                 atlas.height(),
                 page_image,
                 0.0,
                 shadow_render_mode,
-                false,
             ));
 
             commands.entity(entity).with_child((

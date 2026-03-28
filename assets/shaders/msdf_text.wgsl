@@ -20,6 +20,7 @@
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
+    pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
 }
 
 #ifdef PREPASS_PIPELINE
@@ -30,6 +31,14 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+}
+#endif
+
+#ifdef OIT_ENABLED
+#import bevy_core_pipeline::oit::oit_draw
+#import bevy_pbr::pbr_types::{
+    STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
+    STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE,
 }
 #endif
 
@@ -157,9 +166,24 @@ fn fragment(
         pbr_input.material.base_color,
     );
 
+    // Lighting: respect the unlit flag from StandardMaterial.
     var out: FragmentOutput;
-    out.color = apply_pbr_lighting(pbr_input);
+    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+        out.color = apply_pbr_lighting(pbr_input);
+    } else {
+        out.color = pbr_input.material.base_color;
+    }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+
+    // OIT: transparent fragments go through the OIT linked-list resolve
+    // pass instead of standard alpha blending.
+#ifdef OIT_ENABLED
+    let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
+        oit_draw(in.position, out.color);
+        discard;
+    }
+#endif
 
     return out;
 }
