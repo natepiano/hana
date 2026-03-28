@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use bevy::camera::RenderTarget;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
+use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
@@ -117,8 +118,7 @@ impl Plugin for PanelRttPlugin {
 /// Only runs for panels that don't already have RTT children.
 pub(super) fn setup_panel_rtt(
     panels: Query<(Entity, &DiegeticPanel, &ComputedDiegeticPanel), Changed<ComputedDiegeticPanel>>,
-    existing_cameras: Query<(Entity, &ChildOf), With<PanelRttCamera>>,
-    existing_quads: Query<(Entity, &ChildOf), With<PanelDisplayQuad>>,
+    existing_cameras: Query<&ChildOf, With<PanelRttCamera>>,
     mut registry: ResMut<PanelRttRegistry>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -133,6 +133,15 @@ pub(super) fn setup_panel_rtt(
 
         // Geometry mode renders directly — no RTT infrastructure needed.
         if panel.render_mode == RenderMode::Geometry {
+            continue;
+        }
+
+        // The RTT camera renders live every frame — content changes are
+        // automatically reflected. Only create infrastructure on first setup.
+        let has_camera = existing_cameras
+            .iter()
+            .any(|child_of| child_of.parent() == panel_entity);
+        if has_camera {
             continue;
         }
 
@@ -160,18 +169,6 @@ pub(super) fn setup_panel_rtt(
             Some(TextureFormat::Rgba8UnormSrgb),
         );
         let image_handle = images.add(image);
-
-        // Despawn old RTT infrastructure if the panel changed.
-        for (entity, child_of) in &existing_cameras {
-            if child_of.parent() == panel_entity {
-                commands.entity(entity).despawn();
-            }
-        }
-        for (entity, child_of) in &existing_quads {
-            if child_of.parent() == panel_entity {
-                commands.entity(entity).despawn();
-            }
-        }
 
         // Camera center: the midpoint of the panel content area.
         // Content spans from (-anchor_x, anchor_y) [TL] to
@@ -237,6 +234,7 @@ pub(super) fn setup_panel_rtt(
         commands.entity(panel_entity).with_child((
             PanelDisplayQuad,
             RayCastBackfaces,
+            NotShadowCaster,
             Mesh3d(quad_mesh),
             MeshMaterial3d(quad_material),
             RenderLayers::layer(0),

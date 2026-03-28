@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -396,6 +397,7 @@ fn setup(
     // Status panel (floating in world, outside the tilt hierarchy).
     commands.spawn((
         StatusPanel,
+        NotShadowCaster,
         build_status_panel(&StatusData {
             pages:     0,
             glyphs:    0,
@@ -917,7 +919,6 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
                     .padding(Padding::all(8.0))
                     .direction(Direction::TopToBottom)
                     .child_gap(4.0)
-                    .background(STATUS_BACKGROUND)
                     .border(Border::all(0.25, STATUS_BORDER_COLOR)),
                 |b| {
                     b.text("atlas", title_style);
