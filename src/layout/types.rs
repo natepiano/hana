@@ -138,10 +138,10 @@ pub enum Sizing {
     /// If content is smaller than `min`, the element grows to `min`.
     /// If content is larger than `max`, the element is capped at `max`.
     Fit {
-        /// Minimum size in layout units.
-        min: f32,
-        /// Maximum size in layout units.
-        max: f32,
+        /// Minimum size.
+        min: Dimension,
+        /// Maximum size.
+        max: Dimension,
     },
     /// Expand to fill remaining parent space, clamped to `[min, max]`.
     ///
@@ -154,13 +154,13 @@ pub enum Sizing {
     /// `min` acts as a guaranteed floor -- the element never shrinks below it.
     /// `max` caps expansion -- the element stops growing once it reaches `max`.
     Grow {
-        /// Minimum size in layout units.
-        min: f32,
-        /// Maximum size in layout units.
-        max: f32,
+        /// Minimum size.
+        min: Dimension,
+        /// Maximum size.
+        max: Dimension,
     },
-    /// Exact size in layout units.
-    Fixed(f32),
+    /// Exact size.
+    Fixed(Dimension),
     /// Fraction of the parent's size along this axis (0.0--1.0).
     ///
     /// Along the parent's layout direction, padding and child gaps are
@@ -171,8 +171,14 @@ pub enum Sizing {
 impl Default for Sizing {
     fn default() -> Self {
         Self::Fit {
-            min: 0.0,
-            max: f32::INFINITY,
+            min: Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            max: Dimension {
+                value: f32::INFINITY,
+                unit:  None,
+            },
         }
     }
 }
@@ -184,8 +190,14 @@ impl Sizing {
     /// or children accumulation) and used as-is — there is no minimum floor
     /// and no maximum cap.
     pub const FIT: Self = Self::Fit {
-        min: 0.0,
-        max: f32::MAX,
+        min: Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+        max: Dimension {
+            value: f32::MAX,
+            unit:  None,
+        },
     };
 
     /// Expand to fill available space with no size constraints.
@@ -194,8 +206,14 @@ impl Sizing {
     /// among `Grow` siblings using a smallest-first equalising heuristic.
     /// With no constraints, this element will absorb as much space as possible.
     pub const GROW: Self = Self::Grow {
-        min: 0.0,
-        max: f32::MAX,
+        min: Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+        max: Dimension {
+            value: f32::MAX,
+            unit:  None,
+        },
     };
 
     /// Shrink-wrap to content with a minimum floor.
@@ -204,8 +222,11 @@ impl Sizing {
     #[must_use]
     pub fn fit_min(min: impl Into<Dimension>) -> Self {
         Self::Fit {
-            min: min.into().value,
-            max: f32::MAX,
+            min: min.into(),
+            max: Dimension {
+                value: f32::MAX,
+                unit:  None,
+            },
         }
     }
 
@@ -216,8 +237,8 @@ impl Sizing {
     #[must_use]
     pub fn fit_range(min: impl Into<Dimension>, max: impl Into<Dimension>) -> Self {
         Self::Fit {
-            min: min.into().value,
-            max: max.into().value,
+            min: min.into(),
+            max: max.into(),
         }
     }
 
@@ -227,8 +248,11 @@ impl Sizing {
     #[must_use]
     pub fn grow_min(min: impl Into<Dimension>) -> Self {
         Self::Grow {
-            min: min.into().value,
-            max: f32::MAX,
+            min: min.into(),
+            max: Dimension {
+                value: f32::MAX,
+                unit:  None,
+            },
         }
     }
 
@@ -238,35 +262,35 @@ impl Sizing {
     #[must_use]
     pub fn grow_range(min: impl Into<Dimension>, max: impl Into<Dimension>) -> Self {
         Self::Grow {
-            min: min.into().value,
-            max: max.into().value,
+            min: min.into(),
+            max: max.into(),
         }
     }
 
-    /// Exact size in layout units, ignoring content and siblings.
+    /// Exact size, ignoring content and siblings.
     #[must_use]
-    pub fn fixed(size: impl Into<Dimension>) -> Self { Self::Fixed(size.into().value) }
+    pub fn fixed(size: impl Into<Dimension>) -> Self { Self::Fixed(size.into()) }
 
     /// Fraction of the parent's content area (0.0–1.0).
     #[must_use]
     pub const fn percent(fraction: f32) -> Self { Self::Percent(fraction) }
 
-    /// Returns the minimum bound for this sizing rule.
+    /// Returns the minimum bound for this sizing rule (resolved `.value`).
     #[must_use]
     pub const fn min_size(&self) -> f32 {
         match self {
-            Self::Fit { min, .. } | Self::Grow { min, .. } => *min,
-            Self::Fixed(size) => *size,
+            Self::Fit { min, .. } | Self::Grow { min, .. } => min.value,
+            Self::Fixed(size) => size.value,
             Self::Percent(_) => 0.0,
         }
     }
 
-    /// Returns the maximum bound for this sizing rule.
+    /// Returns the maximum bound for this sizing rule (resolved `.value`).
     #[must_use]
     pub const fn max_size(&self) -> f32 {
         match self {
-            Self::Fit { max, .. } | Self::Grow { max, .. } => *max,
-            Self::Fixed(size) => *size,
+            Self::Fit { max, .. } | Self::Grow { max, .. } => max.value,
+            Self::Fixed(size) => size.value,
             Self::Percent(_) => f32::INFINITY,
         }
     }
@@ -285,21 +309,38 @@ impl Sizing {
         matches!(self, Self::Fit { .. } | Self::Grow { .. })
     }
 
-    /// Returns a copy with spatial values multiplied by `factor`.
+    /// Resolves all dimensions to points and returns a copy with plain values.
     ///
+    /// Dimensions with an explicit unit convert via `unit.to_points()`.
+    /// Dimensions without a unit (bare `f32`) use `default_scale`.
     /// `Percent` is unchanged (it's a fraction, not a spatial value).
     #[must_use]
-    pub const fn scaled(self, factor: f32) -> Self {
+    pub fn resolved(self, default_scale: f32) -> Self {
         match self {
             Self::Fit { min, max } => Self::Fit {
-                min: min * factor,
-                max: max * factor,
+                min: Dimension {
+                    value: min.to_points(default_scale),
+                    unit:  None,
+                },
+                max: Dimension {
+                    value: max.to_points(default_scale),
+                    unit:  None,
+                },
             },
             Self::Grow { min, max } => Self::Grow {
-                min: min * factor,
-                max: max * factor,
+                min: Dimension {
+                    value: min.to_points(default_scale),
+                    unit:  None,
+                },
+                max: Dimension {
+                    value: max.to_points(default_scale),
+                    unit:  None,
+                },
             },
-            Self::Fixed(size) => Self::Fixed(size * factor),
+            Self::Fixed(size) => Self::Fixed(Dimension {
+                value: size.to_points(default_scale),
+                unit:  None,
+            }),
             Self::Percent(frac) => Self::Percent(frac),
         }
     }
@@ -353,23 +394,46 @@ pub enum AlignY {
 ///
 /// Note: [`Sizing::Percent`] on child elements is computed against the parent's
 /// content area (i.e., after this padding and child gap are subtracted).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Padding {
-    /// Left padding in layout units.
-    pub left:   f32,
-    /// Right padding in layout units.
-    pub right:  f32,
-    /// Top padding in layout units.
-    pub top:    f32,
-    /// Bottom padding in layout units.
-    pub bottom: f32,
+    /// Left padding.
+    pub left:   Dimension,
+    /// Right padding.
+    pub right:  Dimension,
+    /// Top padding.
+    pub top:    Dimension,
+    /// Bottom padding.
+    pub bottom: Dimension,
+}
+
+impl Default for Padding {
+    fn default() -> Self {
+        Self {
+            left:   Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            right:  Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            top:    Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            bottom: Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+        }
+    }
 }
 
 impl Padding {
     /// Uniform padding on all sides.
     #[must_use]
     pub fn all(value: impl Into<Dimension>) -> Self {
-        let value = value.into().value;
+        let value = value.into();
         Self {
             left:   value,
             right:  value,
@@ -381,8 +445,8 @@ impl Padding {
     /// Symmetric padding: `x` for left/right, `y` for top/bottom.
     #[must_use]
     pub fn xy(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self {
-        let x = x.into().value;
-        let y = y.into().value;
+        let x = x.into();
+        let y = y.into();
         Self {
             left:   x,
             right:  x,
@@ -400,29 +464,45 @@ impl Padding {
         bottom: impl Into<Dimension>,
     ) -> Self {
         Self {
-            left:   left.into().value,
-            right:  right.into().value,
-            top:    top.into().value,
-            bottom: bottom.into().value,
+            left:   left.into(),
+            right:  right.into(),
+            top:    top.into(),
+            bottom: bottom.into(),
         }
     }
 
-    /// Total horizontal padding (left + right).
+    /// Total horizontal padding (left + right) in resolved units.
     #[must_use]
-    pub const fn horizontal(&self) -> f32 { self.left + self.right }
+    pub fn horizontal(&self) -> f32 { self.left.value + self.right.value }
 
-    /// Total vertical padding (top + bottom).
+    /// Total vertical padding (top + bottom) in resolved units.
     #[must_use]
-    pub const fn vertical(&self) -> f32 { self.top + self.bottom }
+    pub fn vertical(&self) -> f32 { self.top.value + self.bottom.value }
 
-    /// Returns a copy with all sides multiplied by `factor`.
+    /// Resolves all dimensions to points and returns a copy with plain values.
+    ///
+    /// Dimensions with an explicit unit convert via `unit.to_points()`.
+    /// Dimensions without a unit (bare f32) use `default_scale` (typically
+    /// `layout_to_pts`).
     #[must_use]
-    pub const fn scaled(self, factor: f32) -> Self {
+    pub fn resolved(self, default_scale: f32) -> Self {
         Self {
-            left:   self.left * factor,
-            right:  self.right * factor,
-            top:    self.top * factor,
-            bottom: self.bottom * factor,
+            left:   Dimension {
+                value: self.left.to_points(default_scale),
+                unit:  None,
+            },
+            right:  Dimension {
+                value: self.right.to_points(default_scale),
+                unit:  None,
+            },
+            top:    Dimension {
+                value: self.top.to_points(default_scale),
+                unit:  None,
+            },
+            bottom: Dimension {
+                value: self.bottom.to_points(default_scale),
+                unit:  None,
+            },
         }
     }
 }
@@ -595,12 +675,27 @@ impl Unit {
 /// - `Mm(6.0).into()` → value 6.0, unit Millimeters
 /// - `In(0.24).into()` → value 0.24, unit Inches
 /// - `(24.0_f32).into()` → value 24.0, unit None (contextual default)
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Dimension {
     /// The numeric size value.
     pub value: f32,
     /// The unit the value is expressed in. `None` = contextual default.
     pub unit:  Option<Unit>,
+}
+
+impl Dimension {
+    /// Resolves this dimension to points.
+    ///
+    /// If the dimension carries an explicit unit, converts using that
+    /// unit's `to_points()`. Otherwise multiplies by `default_scale`
+    /// (typically `layout_to_pts` or `font_to_pts`).
+    #[must_use]
+    pub fn to_points(self, default_scale: f32) -> f32 {
+        match self.unit {
+            Some(unit) => self.value * unit.to_points(),
+            None => self.value * default_scale,
+        }
+    }
 }
 
 impl From<f32> for Dimension {
@@ -1327,20 +1422,48 @@ pub struct TextDimensions {
 }
 
 /// Border widths for an element.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Border {
     /// Left border width.
-    pub left:             f32,
+    pub left:             Dimension,
     /// Right border width.
-    pub right:            f32,
+    pub right:            Dimension,
     /// Top border width.
-    pub top:              f32,
+    pub top:              Dimension,
     /// Bottom border width.
-    pub bottom:           f32,
+    pub bottom:           Dimension,
     /// Color of the border.
     pub color:            Color,
     /// Width of lines drawn between children (0 = none).
-    pub between_children: f32,
+    pub between_children: Dimension,
+}
+
+impl Default for Border {
+    fn default() -> Self {
+        Self {
+            left:             Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            right:            Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            top:              Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            bottom:           Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            color:            Color::BLACK,
+            between_children: Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+        }
+    }
 }
 
 impl Border {
@@ -1348,54 +1471,72 @@ impl Border {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            left:             0.0,
-            right:            0.0,
-            top:              0.0,
-            bottom:           0.0,
+            left:             Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            right:            Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            top:              Dimension {
+                value: 0.0,
+                unit:  None,
+            },
+            bottom:           Dimension {
+                value: 0.0,
+                unit:  None,
+            },
             color:            Color::BLACK,
-            between_children: 0.0,
+            between_children: Dimension {
+                value: 0.0,
+                unit:  None,
+            },
         }
     }
 
     /// Uniform border on all sides.
     #[must_use]
     pub fn all(width: impl Into<Dimension>, color: Color) -> Self {
-        let width = width.into().value;
+        let width = width.into();
         Self {
             left: width,
             right: width,
             top: width,
             bottom: width,
             color,
-            between_children: 0.0,
+            between_children: Dimension {
+                value: 0.0,
+                unit:  None,
+            },
         }
     }
 
     /// Sets the left border width.
     #[must_use]
     pub fn left(mut self, width: impl Into<Dimension>) -> Self {
-        self.left = width.into().value;
+        self.left = width.into();
         self
     }
 
     /// Sets the right border width.
     #[must_use]
     pub fn right(mut self, width: impl Into<Dimension>) -> Self {
-        self.right = width.into().value;
+        self.right = width.into();
         self
     }
 
     /// Sets the top border width.
     #[must_use]
     pub fn top(mut self, width: impl Into<Dimension>) -> Self {
-        self.top = width.into().value;
+        self.top = width.into();
         self
     }
 
     /// Sets the bottom border width.
     #[must_use]
     pub fn bottom(mut self, width: impl Into<Dimension>) -> Self {
-        self.bottom = width.into().value;
+        self.bottom = width.into();
         self
     }
 
@@ -1409,20 +1550,39 @@ impl Border {
     /// Sets the width of lines drawn between children.
     #[must_use]
     pub fn between_children(mut self, width: impl Into<Dimension>) -> Self {
-        self.between_children = width.into().value;
+        self.between_children = width.into();
         self
     }
 
-    /// Returns a copy with all widths multiplied by `factor`. Color is preserved.
+    /// Resolves all dimensions to points and returns a copy with plain values.
+    ///
+    /// Dimensions with an explicit unit convert via `unit.to_points()`.
+    /// Dimensions without a unit (bare `f32`) use `default_scale`.
+    /// Color is preserved.
     #[must_use]
-    pub const fn scaled(self, factor: f32) -> Self {
+    pub fn resolved(self, default_scale: f32) -> Self {
         Self {
-            left:             self.left * factor,
-            right:            self.right * factor,
-            top:              self.top * factor,
-            bottom:           self.bottom * factor,
+            left:             Dimension {
+                value: self.left.to_points(default_scale),
+                unit:  None,
+            },
+            right:            Dimension {
+                value: self.right.to_points(default_scale),
+                unit:  None,
+            },
+            top:              Dimension {
+                value: self.top.to_points(default_scale),
+                unit:  None,
+            },
+            bottom:           Dimension {
+                value: self.bottom.to_points(default_scale),
+                unit:  None,
+            },
             color:            self.color,
-            between_children: self.between_children * factor,
+            between_children: Dimension {
+                value: self.between_children.to_points(default_scale),
+                unit:  None,
+            },
         }
     }
 }

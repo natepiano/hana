@@ -106,4 +106,10 @@ name = "units"
 name = "sizes"
 
 [[example]]
+name = "dimensions"
+
+[[example]]
 name = "panel_rendering"
+
+[[example]]
+name = "paper_sizes"

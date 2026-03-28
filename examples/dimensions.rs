@@ -1,0 +1,358 @@
+//! @generated `bevy_example_template`
+//! Layout dimensions — `Dimension` newtypes in spatial properties.
+//!
+//! Demonstrates that every spatial property in the layout system —
+//! padding, border width, child gap, element sizing, and font size —
+//! accepts `Pt`, `Mm`, `In`, or bare `f32` via the `Dimension` type.
+//!
+//! The left panel shows code snippets of each property using different
+//! newtypes. The right panel explains how `Dimension` works.
+
+use std::time::Duration;
+
+use bevy::picking::mesh_picking::MeshPickingPlugin;
+use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::Anchor;
+use bevy_diegetic::Border;
+use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticUiPlugin;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::In;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::Mm;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Pt;
+use bevy_diegetic::Sizing;
+use bevy_diegetic::Unit;
+use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
+use bevy_panorbit_camera::PanOrbitCamera;
+use bevy_panorbit_camera::PanOrbitCameraPlugin;
+use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
+use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_window_manager::WindowManagerPlugin;
+
+// ── Layout ───────────────────────────────────────────────────────────
+const DEMO_WIDTH: f32 = 90.0; // mm
+const DEMO_HEIGHT: f32 = 60.0; // mm
+const COL_GAP: f32 = 0.008; // meters
+const HEADER_GAP: f32 = 0.003; // meters
+const MARGIN: f32 = 0.004; // meters
+const MM_TO_M: f32 = 0.001;
+
+// ── Commentary ───────────────────────────────────────────────────────
+const NOTE_WIDTH: f32 = 85.0; // mm
+const NOTE_HEIGHT: f32 = 60.0; // mm
+const NOTE_PAD: f32 = 3.5; // mm
+const NOTE_FONT: f32 = 8.0; // pt
+
+// ── Visual ───────────────────────────────────────────────────────────
+const LABEL_COLOR: Color = Color::srgba(0.55, 0.55, 0.55, 0.9);
+const CODE_COLOR: Color = Color::srgba(0.85, 0.75, 0.55, 1.0);
+const SAMPLE_COLOR: Color = Color::WHITE;
+const HEADER_COLOR: Color = Color::srgba(0.65, 0.75, 0.95, 1.0);
+const BOX_COLOR: Color = Color::srgba(0.22, 0.25, 0.32, 0.6);
+const CONTENT_BG: Color = Color::srgba(0.18, 0.20, 0.25, 0.4);
+const PAD_LABEL_COLOR: Color = Color::srgba(0.5, 0.65, 0.5, 0.8);
+
+// ── Zoom ─────────────────────────────────────────────────────────────
+const ZOOM_MARGIN: f32 = 0.06;
+const ZOOM_DURATION_MS: u64 = 600;
+
+#[derive(Resource)]
+struct Backdrop(Entity);
+
+fn main() {
+    App::new()
+        .add_plugins((
+            DefaultPlugins,
+            PanOrbitCameraPlugin,
+            PanOrbitCameraExtPlugin,
+            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
+            WindowManagerPlugin,
+            MeshPickingPlugin,
+            DiegeticUiPlugin,
+        ))
+        .add_systems(Startup, setup)
+        .add_systems(PostStartup, fit_camera_on_start)
+        .run();
+}
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let demo_w = DEMO_WIDTH * MM_TO_M;
+    let demo_h = DEMO_HEIGHT * MM_TO_M;
+    let note_w = NOTE_WIDTH * MM_TO_M;
+    let note_h = NOTE_HEIGHT * MM_TO_M;
+
+    let total_w = demo_w + COL_GAP + note_w;
+    let left_x = -total_w / 2.0;
+    let note_x = left_x + demo_w + COL_GAP;
+    let max_h = demo_h.max(note_h);
+    let header_y = max_h + HEADER_GAP;
+    let content_top = header_y - HEADER_GAP - Pt(9.0).0 * Unit::Points.meters_per_unit();
+
+    // ── Backdrop ─────────────────────────────────────────────────────
+    let total_h = header_y;
+    let backdrop = commands
+        .spawn((
+            Mesh3d(meshes.add(Plane3d::new(
+                Vec3::Z,
+                Vec2::new(total_w / 2.0 + MARGIN, total_h / 2.0 + MARGIN),
+            ))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgba(0.12, 0.12, 0.14, 0.0),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, total_h / 2.0, -0.001),
+        ))
+        .id();
+    commands.insert_resource(Backdrop(backdrop));
+
+    // ── Headers ──────────────────────────────────────────────────────
+    let header_style = WorldTextStyle::new(Pt(9.0))
+        .with_color(HEADER_COLOR)
+        .with_anchor(Anchor::TopLeft);
+
+    commands.spawn((
+        WorldText::new("Dimension in layout properties"),
+        header_style.clone(),
+        Transform::from_xyz(left_x, header_y, 0.0),
+    ));
+    commands.spawn((
+        WorldText::new("How it works"),
+        header_style,
+        Transform::from_xyz(note_x, header_y, 0.0),
+    ));
+
+    // ── Demo panel ───────────────────────────────────────────────────
+    commands.spawn((
+        DiegeticPanel {
+            tree: build_demo(),
+            width: DEMO_WIDTH,
+            height: DEMO_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
+            anchor: Anchor::TopLeft,
+            ..default()
+        },
+        Transform::from_xyz(left_x, content_top, 0.0),
+    ));
+
+    // ── Commentary panel ─────────────────────────────────────────────
+    commands.spawn((
+        DiegeticPanel {
+            tree: build_commentary(),
+            width: NOTE_WIDTH,
+            height: NOTE_HEIGHT,
+            layout_unit: Some(Unit::Millimeters),
+            anchor: Anchor::TopLeft,
+            ..default()
+        },
+        Transform::from_xyz(note_x, content_top, 0.0),
+    ));
+
+    // ── Lighting ─────────────────────────────────────────────────────
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    // ── Camera ───────────────────────────────────────────────────────
+    commands.spawn((
+        PanOrbitCamera {
+            focus: Vec3::new(0.0, total_h / 2.0, 0.0),
+            radius: Some(0.25),
+            yaw: Some(0.0),
+            pitch: Some(0.0),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_sensitivity: 1.0,
+            trackpad_pinch_to_zoom_enabled: true,
+            zoom_sensitivity: 1.0,
+            zoom_lower_limit: 0.000_000_1,
+            ..default()
+        },
+        Projection::Perspective(PerspectiveProjection {
+            near: 0.001,
+            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
+            ..default()
+        }),
+    ));
+}
+
+fn fit_camera_on_start(
+    backdrop: Res<Backdrop>,
+    cameras: Query<Entity, With<PanOrbitCamera>>,
+    mut commands: Commands,
+) {
+    if let Ok(camera) = cameras.single() {
+        commands.trigger(
+            ZoomToFit::new(camera, backdrop.0)
+                .margin(ZOOM_MARGIN)
+                .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+        );
+    }
+}
+
+// ── Panel builders ───────────────────────────────────────────────────
+
+/// Demo panel showing every spatial property using Dimension newtypes.
+/// The panel layout_unit is Millimeters, so bare f32 values are in mm.
+///
+/// Structure: outer border → padding (visible gap) → content background.
+/// Each padding side is labeled with its unit. Inner content shows
+/// child_gap and fixed sizing.
+fn build_demo() -> bevy_diegetic::LayoutTree {
+    let code = LayoutTextStyle::new(Pt(7.0)).with_color(CODE_COLOR);
+    let label = LayoutTextStyle::new(Pt(6.0)).with_color(LABEL_COLOR);
+    let pad_label = LayoutTextStyle::new(Pt(5.5)).with_color(PAD_LABEL_COLOR);
+    let text = LayoutTextStyle::new(Pt(10.0)).with_color(SAMPLE_COLOR);
+
+    let mut builder = LayoutBuilder::new(DEMO_WIDTH, DEMO_HEIGHT);
+
+    // Outer container: border + padding. The padding is the visible gap
+    // between the border and the content background.
+    builder.with(
+        El::new()
+            .direction(Direction::TopToBottom)
+            .padding(Padding::new(
+                Mm(5.0),   // left: Mm
+                Mm(5.0),   // right: Mm
+                Pt(14.17), // top: Pt (≈ 5mm)
+                In(0.197), // bottom: In (≈ 5mm)
+            ))
+            .border(Border::all(Mm(1.0), CODE_COLOR))
+            .width(Sizing::grow_min(0.0))
+            .height(Sizing::grow_min(0.0)),
+        |b| {
+            // Padding labels — sit in the padding space.
+            b.text("top: Pt(14.17)", pad_label.clone());
+
+            // Content area with visible background.
+            b.with(
+                El::new()
+                    .direction(Direction::TopToBottom)
+                    .padding(Padding::all(2.0))
+                    .child_gap(Mm(2.0))
+                    .background(CONTENT_BG)
+                    .border(Border::all(Mm(0.8), CODE_COLOR))
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::grow_min(0.0)),
+                |b| {
+                    // Padding description.
+                    b.text(
+                        "Padding: Mm(5) left/right, Pt(14) top, In(0.2) bottom",
+                        code.clone(),
+                    );
+                    b.text("visible gap between border and this box", label.clone());
+
+                    // Border description.
+                    b.text("Border::all(Mm(1.0), color)", code.clone());
+
+                    // child_gap description.
+                    b.text("child_gap(Mm(2.0)) — space between rows", code.clone());
+
+                    // Fixed-size boxes.
+                    b.text("Sizing::fixed(Mm(8.0)):", code.clone());
+                    b.with(
+                        El::new()
+                            .direction(Direction::LeftToRight)
+                            .child_gap(Mm(2.0))
+                            .width(Sizing::grow_min(0.0))
+                            .height(Sizing::fit_min(0.0)),
+                        |b| {
+                            for label_text in &["A", "B", "C", "D"] {
+                                b.with(
+                                    El::new()
+                                        .width(Sizing::fixed(Mm(8.0)))
+                                        .height(Sizing::fixed(Mm(8.0)))
+                                        .background(BOX_COLOR),
+                                    |b| {
+                                        b.text(*label_text, text.clone());
+                                    },
+                                );
+                            }
+                        },
+                    );
+                },
+            );
+
+            // Bottom padding label.
+            b.text("bottom: In(0.197)", pad_label);
+        },
+    );
+    builder.build()
+}
+
+/// Commentary panel.
+fn build_commentary() -> bevy_diegetic::LayoutTree {
+    let note_color = Color::srgba(0.72, 0.72, 0.72, 0.95);
+    let note = LayoutTextStyle::new(Pt(NOTE_FONT)).with_color(note_color);
+
+    let mut builder = LayoutBuilder::new(NOTE_WIDTH, NOTE_HEIGHT);
+    builder.with(
+        El::new()
+            .direction(Direction::TopToBottom)
+            .padding(Padding::all(NOTE_PAD))
+            .child_gap(2.5)
+            .border(Border::all(Mm(1.0), CODE_COLOR))
+            .width(Sizing::grow_min(0.0))
+            .height(Sizing::grow_min(0.0)),
+        |b| {
+            b.text(
+                "The Dimension type — used by Pt (Points), \
+                 Mm (Millimeters), In (Inches), and bare f32 — \
+                 is accepted by every spatial property in the \
+                 layout system.",
+                note.clone(),
+            );
+            b.text(
+                "Padding, Border width, child_gap, Sizing, \
+                 and font size all take impl Into<Dimension>. \
+                 This means you can mix units freely within \
+                 a single element.",
+                note.clone(),
+            );
+            b.text(
+                "Bare f32 uses the panel's layout_unit \
+                 (Millimeters in this example). Newtypes \
+                 carry their unit explicitly.",
+                note.clone(),
+            );
+            b.text(
+                "The demo panel on the left uses Mm for \
+                 padding sides, Pt for top padding, In for \
+                 bottom padding, Mm for borders and gaps, \
+                 and Mm for fixed box sizing — all in one \
+                 layout tree.",
+                note,
+            );
+        },
+    );
+    builder.build()
+}

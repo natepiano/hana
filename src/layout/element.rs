@@ -16,10 +16,12 @@ use smallvec::SmallVec;
 use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
+use super::types::Dimension;
 use super::types::Direction;
 use super::types::LayoutTextStyle;
 use super::types::Padding;
 use super::types::Sizing;
+use super::types::Unit;
 
 /// A single element in the layout tree.
 ///
@@ -34,7 +36,7 @@ pub(super) struct Element {
     /// Interior padding.
     pub(super) padding:       Padding,
     /// Gap between children along the layout axis.
-    pub(super) child_gap:     f32,
+    pub(super) child_gap:     Dimension,
     /// Direction children are laid out.
     pub(super) direction:     Direction,
     /// Horizontal alignment of children.
@@ -85,7 +87,10 @@ impl Default for Element {
             width:         Sizing::FIT,
             height:        Sizing::FIT,
             padding:       Padding::default(),
-            child_gap:     0.0,
+            child_gap:     Dimension {
+                value: 0.0,
+                unit:  None,
+            },
             direction:     Direction::default(),
             child_align_x: AlignX::default(),
             child_align_y: AlignY::default(),
@@ -190,18 +195,21 @@ impl LayoutTree {
     pub fn scaled(&self, layout_scale: f32, font_scale: f32) -> Self {
         let mut tree = self.clone();
         for element in &mut tree.elements {
-            element.width = element.width.scaled(layout_scale);
-            element.height = element.height.scaled(layout_scale);
-            element.padding = element.padding.scaled(layout_scale);
-            element.child_gap *= layout_scale;
+            element.width = element.width.resolved(layout_scale);
+            element.height = element.height.resolved(layout_scale);
+            element.padding = element.padding.resolved(layout_scale);
+            element.child_gap = Dimension {
+                value: element.child_gap.to_points(layout_scale),
+                unit:  None,
+            };
             if let Some(ref mut border) = element.border {
-                *border = border.scaled(layout_scale);
+                *border = border.resolved(layout_scale);
             }
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
                 // `LayoutTextStyle::new(Mm(6.0))`), convert from that unit to
                 // points directly. Otherwise use the panel-wide font_scale.
-                let scale = config.unit().map(|u| u.to_points()).unwrap_or(font_scale);
+                let scale = config.unit().map_or(font_scale, Unit::to_points);
                 *config = config.scaled(scale);
             }
         }
