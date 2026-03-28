@@ -53,6 +53,7 @@ pub use element::LayoutTree;
 pub use engine::LayoutEngine;
 pub use engine::LayoutResult;
 pub use engine::MeasureTextFn;
+pub use render::RectangleSource;
 pub use render::RenderCommandKind;
 pub use types::AlignX;
 pub use types::AlignY;

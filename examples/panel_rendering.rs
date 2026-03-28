@@ -12,6 +12,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -55,6 +56,36 @@ const PANEL_HEIGHT: f32 = CARD_HEIGHT; // same height
 const ZOOM_MARGIN: f32 = 0.02;
 const ZOOM_DURATION_MS: u64 = 600;
 
+/// Marker for the scene's directional light.
+#[derive(Component)]
+struct SceneLight;
+
+/// Marker for the HUD text overlay.
+#[derive(Component)]
+struct HudText;
+
+/// Current lighting/material preset.
+#[derive(Resource, Clone, Copy)]
+struct LightingPreset(u8);
+
+impl Default for LightingPreset {
+    fn default() -> Self { Self(0) }
+}
+
+impl LightingPreset {
+    const fn is_unlit(self) -> bool { self.0 == 1 || self.0 == 3 }
+    const fn lights_on(self) -> bool { self.0 == 0 || self.0 == 1 }
+
+    const fn label(self) -> &'static str {
+        match self.0 {
+            0 => "[1] Lit + Lights On",
+            1 => "[2] Unlit + Lights On",
+            2 => "[3] Lit + Lights Off",
+            _ => "[4] Unlit + Lights Off",
+        }
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -65,8 +96,22 @@ fn main() {
             MeshPickingPlugin,
             DiegeticUiPlugin,
         ))
+        .init_resource::<LightingPreset>()
+        .insert_resource(bevy::light::GlobalAmbientLight {
+            color:                      Color::BLACK,
+            brightness:                 0.0,
+            affects_lightmapped_meshes: false,
+        })
         .add_systems(Startup, setup)
-        .add_systems(Update, (zoom_to_panel, toggle_fit_visualization))
+        .add_systems(
+            Update,
+            (
+                zoom_to_panel,
+                toggle_fit_visualization,
+                cycle_lighting_preset,
+                home_camera,
+            ),
+        )
         .run();
 }
 
@@ -115,6 +160,79 @@ fn toggle_fit_visualization(
     }
 }
 
+/// Cycles through lighting presets with keys 1-4.
+fn cycle_lighting_preset(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut preset: ResMut<LightingPreset>,
+    mut panels: Query<&mut DiegeticPanel>,
+    mut lights: Query<&mut Visibility, With<SceneLight>>,
+    mut hud: Query<&mut Text, With<HudText>>,
+) {
+    let new = if keyboard.just_pressed(KeyCode::Digit1) {
+        Some(0)
+    } else if keyboard.just_pressed(KeyCode::Digit2) {
+        Some(1)
+    } else if keyboard.just_pressed(KeyCode::Digit3) {
+        Some(2)
+    } else if keyboard.just_pressed(KeyCode::Digit4) {
+        Some(3)
+    } else {
+        None
+    };
+
+    let Some(idx) = new else { return };
+    preset.0 = idx;
+
+    let unlit = preset.is_unlit();
+    let lights_visible = preset.lights_on();
+
+    for mut panel in &mut panels {
+        let mat = panel.material.get_or_insert_with(StandardMaterial::default);
+        mat.unlit = unlit;
+        let text_mat = panel
+            .text_material
+            .get_or_insert_with(StandardMaterial::default);
+        text_mat.unlit = unlit;
+    }
+
+    for mut vis in &mut lights {
+        *vis = if lights_visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    for mut text in &mut hud {
+        **text = format!(
+            "{}1: Lit+On  {}2: Unlit+On  {}3: Lit+Off  {}4: Unlit+Off  [H] Home  [D] Fit Viz",
+            if idx == 0 { ">" } else { " " },
+            if idx == 1 { ">" } else { " " },
+            if idx == 2 { ">" } else { " " },
+            if idx == 3 { ">" } else { " " },
+        );
+    }
+}
+
+/// Resets the camera to the home position and zooms to fit.
+fn home_camera(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    panels: Query<Entity, With<DiegeticPanel>>,
+    cameras: Query<Entity, With<PanOrbitCamera>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyH) {
+        return;
+    }
+    let Ok(panel) = panels.single() else { return };
+    let Ok(camera) = cameras.single() else { return };
+    commands.trigger(
+        ZoomToFit::new(camera, panel)
+            .margin(ZOOM_MARGIN)
+            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+    );
+}
+
 fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     if click.button != PointerButton::Primary {
         return;
@@ -147,13 +265,30 @@ fn setup(mut commands: Commands) {
         .observe(on_panel_clicked);
 
     // ── Lighting ────────────────────────────────────────────────────
-    // Single directional light, default illuminance, straight at the panel.
     commands.spawn((
+        SceneLight,
         DirectionalLight {
             shadows_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    // ── HUD ─────────────────────────────────────────────────────────
+    commands.spawn((
+        HudText,
+        Text::new(">1: Lit+On   2: Unlit+On   3: Lit+Off   4: Unlit+Off  [H] Home  [D] Fit Viz"),
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
+        TextColor(Color::srgba(0.8, 0.8, 0.8, 0.7)),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(10.0),
+            left: Val::Px(10.0),
+            ..default()
+        },
     ));
 
     // ── Camera ──────────────────────────────────────────────────────
@@ -208,6 +343,7 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                     .padding(Padding::all(CARD_PAD))
                     .child_gap(CHILD_GAP)
                     .background(DARK_BG)
+                    .corner_radius(CornerRadius::all(Mm(3.0)))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
@@ -224,6 +360,7 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                             b.with(
                                 El::new()
                                     .background(RED_ACCENT)
+                                    .corner_radius(CornerRadius::all(Mm(1.5)))
                                     .padding(Padding::all(3.0))
                                     .width(Sizing::grow_min(0.0))
                                     .height(Sizing::grow_min(0.0)),
@@ -234,6 +371,7 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                             b.with(
                                 El::new()
                                     .background(BLUE_ACCENT)
+                                    .corner_radius(CornerRadius::all(Mm(1.5)))
                                     .padding(Padding::all(3.0))
                                     .width(Sizing::grow_min(0.0))
                                     .height(Sizing::grow_min(0.0)),
@@ -244,6 +382,7 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                             b.with(
                                 El::new()
                                     .background(GREEN_ACCENT)
+                                    .corner_radius(CornerRadius::all(Mm(1.5)))
                                     .padding(Padding::all(3.0))
                                     .width(Sizing::grow_min(0.0))
                                     .height(Sizing::grow_min(0.0)),
@@ -326,6 +465,7 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                     .child_gap(CHILD_GAP)
                     .background(DARK_BG)
                     .border(Border::all(Mm(0.5), BLUE_ACCENT))
+                    .corner_radius(CornerRadius::all(Mm(3.0)))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {

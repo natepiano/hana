@@ -7,6 +7,7 @@ mod glyph_quad;
 mod msdf_material;
 mod panel_geometry;
 mod panel_rtt;
+mod sdf_material;
 mod text_renderer;
 mod world_text;
 

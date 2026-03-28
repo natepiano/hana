@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
+use super::components::RenderMode;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
@@ -299,6 +300,11 @@ pub(super) fn render_layout_gizmos(
     let ppm = pixels_per_meter(&cameras);
 
     for (panel_entity, panel, computed) in &changed_panels {
+        // Geometry mode renders real meshes — gizmos are redundant.
+        if panel.render_mode == RenderMode::Geometry {
+            continue;
+        }
+
         let Some(result) = computed.result() else {
             continue;
         };

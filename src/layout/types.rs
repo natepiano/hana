@@ -696,6 +696,19 @@ impl Dimension {
             None => self.value * default_scale,
         }
     }
+
+    /// Converts this dimension to world meters.
+    ///
+    /// Dimensions with an explicit unit convert via `unit.meters_per_unit()`.
+    /// Dimensions without a unit (bare `f32`) use `default_meters_per_unit`
+    /// (typically the panel's layout unit conversion factor).
+    #[must_use]
+    pub fn to_meters(self, default_meters_per_unit: f32) -> f32 {
+        match self.unit {
+            Some(unit) => self.value * unit.meters_per_unit(),
+            None => self.value * default_meters_per_unit,
+        }
+    }
 }
 
 impl From<f32> for Dimension {
@@ -1506,6 +1519,19 @@ impl CornerRadius {
             self.top_right.value,
             self.bottom_right.value,
             self.bottom_left.value,
+        ]
+    }
+
+    /// Returns the four radii converted to world meters.
+    ///
+    /// `default_meters_per_unit` is used for bare `f32` values (no unit).
+    #[must_use]
+    pub fn to_meters_array(&self, default_meters_per_unit: f32) -> [f32; 4] {
+        [
+            self.top_left.to_meters(default_meters_per_unit),
+            self.top_right.to_meters(default_meters_per_unit),
+            self.bottom_right.to_meters(default_meters_per_unit),
+            self.bottom_left.to_meters(default_meters_per_unit),
         ]
     }
 
