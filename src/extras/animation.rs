@@ -4,8 +4,8 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use bevy::math::curve::easing::EaseFunction;
 use bevy::math::curve::Curve;
+use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
 use super::components::AnimationSourceMarker;

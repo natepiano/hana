@@ -31,6 +31,15 @@ pub struct EguiWantsFocus {
 #[derive(Resource, PartialEq, Eq, Default)]
 pub struct EguiFocusIncludesHover(pub bool);
 
+/// Blocks an `OrbitCam` from receiving input when egui has focus.
+///
+/// Add this component to a camera entity to prevent it from responding
+/// to orbit/pan/zoom input while the user interacts with egui.
+/// Cameras without this component are unaffected by egui focus.
+#[derive(Component, Reflect, Debug, Default)]
+#[reflect(Component)]
+pub struct BlockOnEguiFocus;
+
 pub fn check_egui_wants_focus(
     mut contexts: Query<&mut EguiContext>,
     mut wants_focus: ResMut<EguiWantsFocus>,

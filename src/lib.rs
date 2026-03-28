@@ -17,12 +17,14 @@ use bevy_egui::EguiPreUpdateSet;
 use touch::touch_tracker;
 
 #[cfg(feature = "bevy_egui")]
+pub use crate::egui::BlockOnEguiFocus;
+#[cfg(feature = "bevy_egui")]
 pub use crate::egui::EguiFocusIncludesHover;
 #[cfg(feature = "bevy_egui")]
 pub use crate::egui::EguiWantsFocus;
+use crate::input::MouseKeyTracker;
 use crate::input::button_zoom_just_pressed;
 use crate::input::mouse_key_tracker;
-use crate::input::MouseKeyTracker;
 pub use crate::touch::TouchControls;
 use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
@@ -504,6 +506,7 @@ fn active_viewport_data(
     other_windows: Query<&Window, Without<PrimaryWindow>>,
     orbit_cameras: Query<(Entity, &Camera, &RenderTarget, &OrbitCam)>,
     #[cfg(feature = "bevy_egui")] egui_wants_focus: Res<EguiWantsFocus>,
+    #[cfg(feature = "bevy_egui")] block_on_egui_query: Query<&crate::egui::BlockOnEguiFocus>,
 ) {
     let mut new_resource = ActiveCameraData::default();
     let mut max_cam_order = 0;
@@ -524,7 +527,9 @@ fn active_viewport_data(
             let mut should_get_input = true;
             #[cfg(feature = "bevy_egui")]
             {
-                should_get_input = !egui_wants_focus.prev && !egui_wants_focus.curr;
+                if block_on_egui_query.contains(entity) {
+                    should_get_input = !egui_wants_focus.prev && !egui_wants_focus.curr;
+                }
             }
             if should_get_input {
                 // First check if cursor is in the same window as this camera
