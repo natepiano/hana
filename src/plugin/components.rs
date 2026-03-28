@@ -100,6 +100,17 @@ pub struct DiegeticPanel {
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via [`GlyphShadowMode`].
     pub surface_shadow: SurfaceShadow,
+    /// Default PBR material for backgrounds and borders. When `None`, the
+    /// library uses a matte default (roughness 0.95, reflectance 0.02).
+    /// Individual elements can override via [`El::material`].
+    /// `base_color` is overridden by the layout color when both are set.
+    #[reflect(ignore)]
+    pub material:       Option<StandardMaterial>,
+    /// Default PBR material for text. When `None`, uses the same default as
+    /// `material`. Individual text elements can override.
+    /// `base_color` is overridden by [`LayoutTextStyle::color`] when set.
+    #[reflect(ignore)]
+    pub text_material:  Option<StandardMaterial>,
 }
 
 impl Default for DiegeticPanel {
@@ -115,6 +126,8 @@ impl Default for DiegeticPanel {
             world_height:   None,
             render_mode:    RenderMode::Texture,
             surface_shadow: SurfaceShadow::Off,
+            material:       None,
+            text_material:  None,
         }
     }
 }
@@ -154,6 +167,8 @@ pub struct DiegeticPanelBuilder {
     world_height:   Option<f32>,
     render_mode:    RenderMode,
     surface_shadow: SurfaceShadow,
+    material:       Option<StandardMaterial>,
+    text_material:  Option<StandardMaterial>,
     tree:           Option<LayoutTree>,
 }
 
@@ -230,6 +245,25 @@ impl DiegeticPanelBuilder {
         self
     }
 
+    /// Sets the default PBR material for backgrounds and borders.
+    ///
+    /// `base_color` is overridden by the layout color when both are set.
+    /// Individual elements can override via [`El::material`].
+    #[must_use]
+    pub fn material(mut self, material: StandardMaterial) -> Self {
+        self.material = Some(material);
+        self
+    }
+
+    /// Sets the default PBR material for text.
+    ///
+    /// `base_color` is overridden by [`LayoutTextStyle::color`] when set.
+    #[must_use]
+    pub fn text_material(mut self, material: StandardMaterial) -> Self {
+        self.text_material = Some(material);
+        self
+    }
+
     /// Consumes the builder and returns a [`DiegeticPanel`] component.
     #[must_use]
     pub fn build(self) -> DiegeticPanel {
@@ -244,6 +278,8 @@ impl DiegeticPanelBuilder {
             world_height:   self.world_height,
             render_mode:    self.render_mode,
             surface_shadow: self.surface_shadow,
+            material:       self.material,
+            text_material:  self.text_material,
         }
     }
 }

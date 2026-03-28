@@ -11,6 +11,7 @@
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
+use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
 use super::types::AlignX;
@@ -49,6 +50,10 @@ pub(super) struct Element {
     pub(super) border:        Option<Border>,
     /// Whether this element clips overflowing children.
     pub(super) clip:          bool,
+    /// Optional PBR material override for this element's surface (backgrounds, borders).
+    /// When present, the rendering system uses this instead of the panel-level default.
+    /// `base_color` is overridden by the layout color if both are set.
+    pub(super) material:      Option<Box<StandardMaterial>>,
     /// Content of this element.
     pub(super) content:       ElementContent,
 }
@@ -97,6 +102,7 @@ impl Default for Element {
             background:    None,
             border:        None,
             clip:          false,
+            material:      None,
             content:       ElementContent::Empty,
         }
     }
@@ -183,6 +189,14 @@ impl LayoutTree {
     /// Returns `true` if the tree has no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
+
+    /// Returns the PBR material override for the element at `index`, if any.
+    #[must_use]
+    pub fn element_material(&self, index: usize) -> Option<&StandardMaterial> {
+        self.elements
+            .get(index)
+            .and_then(|e| e.material.as_deref())
+    }
 
     /// Returns a copy of this tree with all dimensions converted to points.
     ///

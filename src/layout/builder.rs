@@ -29,6 +29,7 @@
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
+use bevy::pbr::StandardMaterial;
 
 use super::element::Element;
 use super::element::ElementContent;
@@ -59,6 +60,7 @@ pub struct El {
     background:    Option<Color>,
     border:        Option<Border>,
     clip:          bool,
+    material:      Option<Box<StandardMaterial>>,
 }
 
 impl El {
@@ -136,8 +138,18 @@ impl El {
         self
     }
 
+    /// Sets a PBR material override for this element.
+    ///
+    /// Controls surface properties (roughness, metallic, reflectance, etc.)
+    /// for backgrounds and borders on this element. If the element also has
+    /// a `.background()` color, that color overrides the material's `base_color`.
+    pub fn material(mut self, material: StandardMaterial) -> Self {
+        self.material = Some(Box::new(material));
+        self
+    }
+
     /// Converts this declaration into an [`Element`] with the given content.
-    const fn into_element(self, content: ElementContent) -> Element {
+    fn into_element(self, content: ElementContent) -> Element {
         Element {
             width: self.width,
             height: self.height,
@@ -149,6 +161,7 @@ impl El {
             background: self.background,
             border: self.border,
             clip: self.clip,
+            material: self.material,
             content,
         }
     }
