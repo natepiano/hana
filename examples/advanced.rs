@@ -1,4 +1,4 @@
-//! Demonstrates all common configuration options,
+//! Demonstrates common configuration options,
 //! and how to modify them at runtime
 //!
 //! Controls:
