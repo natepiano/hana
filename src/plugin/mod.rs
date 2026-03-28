@@ -63,8 +63,13 @@ use crate::text::MsdfAtlas;
 /// Ensures all `Camera3d` entities have OIT enabled for correct
 /// transparent panel rendering. Disables MSAA on cameras where OIT is
 /// added (OIT requires MSAA off).
+///
+/// Only activates when at least one panel uses [`RenderMode::Geometry`],
+/// since OIT is unnecessary for texture-only panels and requires depth
+/// textures with `TEXTURE_BINDING` usage that the default setup lacks.
 #[allow(clippy::type_complexity)]
 fn ensure_oit_on_cameras(
+    panels: Query<&DiegeticPanel>,
     cameras: Query<
         (Entity, Option<&Msaa>),
         (
@@ -74,6 +79,11 @@ fn ensure_oit_on_cameras(
     >,
     mut commands: Commands,
 ) {
+    let needs_oit = panels.iter().any(|p| p.render_mode == RenderMode::Geometry);
+    if !needs_oit {
+        return;
+    }
+
     for (entity, msaa) in &cameras {
         // Disable MSAA if it's enabled — OIT panics with MSAA > 1.
         if msaa.is_some_and(|m| m.samples() > 1) {
