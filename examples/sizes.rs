@@ -328,7 +328,7 @@ fn build_demo_panel() -> bevy_diegetic::LayoutTree {
                     |b| {
                         b.with(
                             El::new()
-                                .width(Sizing::Fixed(LABEL_COL))
+                                .width(Sizing::fixed(LABEL_COL))
                                 .height(Sizing::fit_min(0.0)),
                             |b| {
                                 b.text(*label, label_style.clone());

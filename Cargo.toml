@@ -103,3 +103,6 @@ name = "units"
 
 [[example]]
 name = "sizes"
+
+[[example]]
+name = "dimensions"

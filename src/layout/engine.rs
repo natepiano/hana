@@ -160,11 +160,11 @@ impl LayoutEngine {
         for (index, element) in tree.elements.iter().enumerate() {
             // Set initial size from Fixed rules.
             computed[index].width = match element.width {
-                Sizing::Fixed(size) => size,
+                Sizing::Fixed(size) => size.value,
                 _ => 0.0,
             };
             computed[index].height = match element.height {
-                Sizing::Fixed(size) => size,
+                Sizing::Fixed(size) => size.value,
                 _ => 0.0,
             };
 
@@ -523,7 +523,7 @@ fn propagate_fit_sizes(
     if let Sizing::Fixed(size) = sizing {
         let min = 0.0_f32.clamp(sizing.min_size(), sizing.max_size());
         set_min_size(&mut computed[index], x_axis, min);
-        return size;
+        return size.value;
     }
 
     let padding = if x_axis {
@@ -534,7 +534,7 @@ fn propagate_fit_sizes(
 
     let gap_total = if is_along && children.len() > 1 {
         #[allow(clippy::cast_precision_loss)]
-        let gap = element.child_gap * (children.len() - 1) as f32;
+        let gap = element.child_gap.value * (children.len() - 1) as f32;
         gap
     } else {
         0.0
@@ -584,8 +584,10 @@ fn size_along_axis(
     let root_size = get_size(computed[root], x_axis);
     if root_size <= 0.0 {
         let new_size = match get_sizing(root_element, x_axis) {
-            Sizing::Grow { min, max } | Sizing::Fit { min, max } => viewport_size.clamp(min, max),
-            Sizing::Fixed(size) => size,
+            Sizing::Grow { min, max } | Sizing::Fit { min, max } => {
+                viewport_size.clamp(min.value, max.value)
+            },
+            Sizing::Fixed(size) => size.value,
             Sizing::Percent(frac) => viewport_size * frac,
         };
         set_size(&mut computed[root], x_axis, new_size);
@@ -613,7 +615,7 @@ fn size_along_axis(
 
         let gap_total = if is_along && children.len() > 1 {
             #[allow(clippy::cast_precision_loss)]
-            let gap = parent_element.child_gap * (children.len() - 1) as f32;
+            let gap = parent_element.child_gap.value * (children.len() - 1) as f32;
             gap
         } else {
             0.0
@@ -714,16 +716,16 @@ fn size_children_cross_axis(
         let min_dim = get_min_size(computed[child_idx], x_axis);
 
         let new_size = match child_sizing {
-            Sizing::Grow { min, max } => max_size.clamp(min, max),
+            Sizing::Grow { min, max } => max_size.clamp(min.value, max.value),
             Sizing::Fit { min, max } => {
                 // Fit elements keep their propagated content size.
                 if current > f32::EPSILON {
-                    current.clamp(min, max)
+                    current.clamp(min.value, max.value)
                 } else {
-                    min
+                    min.value
                 }
             },
-            Sizing::Fixed(size) => size,
+            Sizing::Fixed(size) => size.value,
             Sizing::Percent(frac) => (parent_size * frac).max(0.0),
         };
 
@@ -757,7 +759,7 @@ fn emit_up_traversal_commands(
         });
 
         // Between-children borders.
-        if border.between_children > 0.0 {
+        if border.between_children.value > 0.0 {
             emit_between_borders(tree, computed, commands, index, border);
         }
     }
@@ -906,7 +908,7 @@ fn push_children_to_stack(
 
     let gap_total = if children.len() > 1 {
         #[allow(clippy::cast_precision_loss)]
-        let g = parent_el.child_gap * (children.len() - 1) as f32;
+        let g = parent_el.child_gap.value * (children.len() - 1) as f32;
         g
     } else {
         0.0
@@ -952,8 +954,8 @@ fn push_children_to_stack(
                 AlignY::Bottom => (cross_available - child_h).max(0.0),
             };
             (
-                x + parent_el.padding.left + reverse_cursor,
-                y + parent_el.padding.top + cross_offset,
+                x + parent_el.padding.left.value + reverse_cursor,
+                y + parent_el.padding.top.value + cross_offset,
             )
         } else {
             let cross_available = parent_w - parent_el.padding.horizontal();
@@ -963,13 +965,13 @@ fn push_children_to_stack(
                 AlignX::Right => (cross_available - child_w).max(0.0),
             };
             (
-                x + parent_el.padding.left + cross_offset,
-                y + parent_el.padding.top + reverse_cursor,
+                x + parent_el.padding.left.value + cross_offset,
+                y + parent_el.padding.top.value + reverse_cursor,
             )
         };
 
         stack.push((child_idx, cx, cy, false));
-        reverse_cursor -= parent_el.child_gap;
+        reverse_cursor -= parent_el.child_gap.value;
     }
 }
 
@@ -1088,12 +1090,12 @@ fn emit_between_borders(
         if is_horizontal {
             let midpoint = (b_bounds.x - (a_bounds.x + a_bounds.width))
                 .mul_add(0.5, a_bounds.x + a_bounds.width);
-            let line_x = border.between_children.mul_add(-0.5, midpoint);
+            let line_x = border.between_children.value.mul_add(-0.5, midpoint);
             commands.push(RenderCommand {
                 bounds:      BoundingBox {
                     x:      line_x,
-                    y:      parent_bounds.y + parent.padding.top,
-                    width:  border.between_children,
+                    y:      parent_bounds.y + parent.padding.top.value,
+                    width:  border.between_children.value,
                     height: parent_bounds.height - parent.padding.vertical(),
                 },
                 kind:        RenderCommandKind::Rectangle {
@@ -1105,13 +1107,13 @@ fn emit_between_borders(
         } else {
             let midpoint = (b_bounds.y - (a_bounds.y + a_bounds.height))
                 .mul_add(0.5, a_bounds.y + a_bounds.height);
-            let line_y = border.between_children.mul_add(-0.5, midpoint);
+            let line_y = border.between_children.value.mul_add(-0.5, midpoint);
             commands.push(RenderCommand {
                 bounds:      BoundingBox {
-                    x:      parent_bounds.x + parent.padding.left,
+                    x:      parent_bounds.x + parent.padding.left.value,
                     y:      line_y,
                     width:  parent_bounds.width - parent.padding.horizontal(),
-                    height: border.between_children,
+                    height: border.between_children.value,
                 },
                 kind:        RenderCommandKind::Rectangle {
                     color:  border.color,

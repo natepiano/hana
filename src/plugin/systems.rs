@@ -324,8 +324,9 @@ pub(super) fn render_layout_gizmos(
             match &cmd.kind {
                 RenderCommandKind::Rectangle { color, .. } => {
                     let border = border_by_idx.get(&cmd.element_idx);
-                    let (il, ir, it, ib) =
-                        border.map_or((0.0, 0.0, 0.0, 0.0), |b| (b.left, b.right, b.top, b.bottom));
+                    let (il, ir, it, ib) = border.map_or((0.0, 0.0, 0.0, 0.0), |b| {
+                        (b.left.value, b.right.value, b.top.value, b.bottom.value)
+                    });
                     let inset_bounds = BoundingBox {
                         x:      cmd.bounds.x + il,
                         y:      cmd.bounds.y + it,
@@ -348,14 +349,14 @@ pub(super) fn render_layout_gizmos(
                     );
                 },
                 RenderCommandKind::Border { border } => {
-                    let hl = border.left * 0.5;
-                    let hr = border.right * 0.5;
-                    let ht = border.top * 0.5;
-                    let hb = border.bottom * 0.5;
-                    let has_sides = border.left > 0.0
-                        || border.right > 0.0
-                        || border.top > 0.0
-                        || border.bottom > 0.0;
+                    let hl = border.left.value * 0.5;
+                    let hr = border.right.value * 0.5;
+                    let ht = border.top.value * 0.5;
+                    let hb = border.bottom.value * 0.5;
+                    let has_sides = border.left.value > 0.0
+                        || border.right.value > 0.0
+                        || border.top.value > 0.0
+                        || border.bottom.value > 0.0;
                     if has_sides {
                         let inset_bounds = BoundingBox {
                             x:      cmd.bounds.x + hl,
@@ -363,8 +364,11 @@ pub(super) fn render_layout_gizmos(
                             width:  (cmd.bounds.width - hl - hr).max(0.0),
                             height: (cmd.bounds.height - ht - hb).max(0.0),
                         };
-                        let avg_border_pts =
-                            (border.left + border.right + border.top + border.bottom) / 4.0;
+                        let avg_border_pts = (border.left.value
+                            + border.right.value
+                            + border.top.value
+                            + border.bottom.value)
+                            / 4.0;
                         let border_px = (avg_border_pts * pts_mpu * ppm).max(1.0);
                         spawn_rect_gizmo(
                             &mut commands,

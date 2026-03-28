@@ -52,7 +52,7 @@ pub struct El {
     width:         Sizing,
     height:        Sizing,
     padding:       Padding,
-    child_gap:     f32,
+    child_gap:     Dimension,
     direction:     Direction,
     child_align_x: AlignX,
     child_align_y: AlignY,
@@ -89,7 +89,7 @@ impl El {
 
     /// Sets the gap between adjacent children along the layout direction.
     pub fn child_gap(mut self, gap: impl Into<Dimension>) -> Self {
-        self.child_gap = gap.into().value;
+        self.child_gap = gap.into();
         self
     }
 
@@ -184,8 +184,8 @@ impl LayoutBuilder {
     pub fn new(width: impl Into<Dimension>, height: impl Into<Dimension>) -> Self {
         let mut tree = LayoutTree::new();
         let root = tree.add(Element {
-            width: Sizing::Fixed(width.into().value),
-            height: Sizing::Fixed(height.into().value),
+            width: Sizing::Fixed(width.into()),
+            height: Sizing::Fixed(height.into()),
             ..Element::default()
         });
         tree.set_root(root);
@@ -208,8 +208,8 @@ impl LayoutBuilder {
     ) -> Self {
         let mut tree = LayoutTree::with_capacity(capacity);
         let root = tree.add(Element {
-            width: Sizing::Fixed(width.into().value),
-            height: Sizing::Fixed(height.into().value),
+            width: Sizing::Fixed(width.into()),
+            height: Sizing::Fixed(height.into()),
             ..Element::default()
         });
         tree.set_root(root);
