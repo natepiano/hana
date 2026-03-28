@@ -106,3 +106,6 @@ name = "sizes"
 
 [[example]]
 name = "dimensions"
+
+[[example]]
+name = "paper_sizes"

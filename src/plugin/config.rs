@@ -552,6 +552,38 @@ impl PaperSize {
     pub fn height_in(self, unit: Unit) -> f32 {
         self.height_mm() * Unit::Millimeters.meters_per_unit() / unit.meters_per_unit()
     }
+
+    /// Returns `(width, height)` in portrait orientation (taller than wide).
+    ///
+    /// If the paper is already portrait, returns as-is. If landscape
+    /// (wider than tall), swaps width and height. Returns [`Mm`]
+    /// newtypes so the result works directly with
+    /// [`DiegeticPanelBuilder::size`](crate::DiegeticPanelBuilder::size).
+    #[must_use]
+    pub fn portrait(self) -> (Mm, Mm) {
+        let (w, h) = (self.width_mm(), self.height_mm());
+        if w > h {
+            (Mm(h), Mm(w))
+        } else {
+            (Mm(w), Mm(h))
+        }
+    }
+
+    /// Returns `(width, height)` in landscape orientation (wider than tall).
+    ///
+    /// If the paper is already landscape, returns as-is. If portrait
+    /// (taller than wide), swaps width and height. Returns [`Mm`]
+    /// newtypes so the result works directly with
+    /// [`DiegeticPanelBuilder::size`](crate::DiegeticPanelBuilder::size).
+    #[must_use]
+    pub fn landscape(self) -> (Mm, Mm) {
+        let (w, h) = (self.width_mm(), self.height_mm());
+        if h > w {
+            (Mm(h), Mm(w))
+        } else {
+            (Mm(w), Mm(h))
+        }
+    }
 }
 
 // ── PanelSize trait ──────────────────────────────────────────────────────────
