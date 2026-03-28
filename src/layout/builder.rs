@@ -37,6 +37,7 @@ use super::element::LayoutTree;
 use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
+use super::types::CornerRadius;
 use super::types::Dimension;
 use super::types::Direction;
 use super::types::LayoutTextStyle;
@@ -59,6 +60,7 @@ pub struct El {
     child_align_y: AlignY,
     background:    Option<Color>,
     border:        Option<Border>,
+    corner_radius: CornerRadius,
     clip:          bool,
     material:      Option<Box<StandardMaterial>>,
 }
@@ -132,6 +134,15 @@ impl El {
         self
     }
 
+    /// Sets the corner radius for rounded backgrounds and borders.
+    ///
+    /// Accepts `CornerRadius::all(8.0)`, `CornerRadius::new(tl, tr, br, bl)`,
+    /// or a bare `f32` for uniform radius on all corners.
+    pub fn corner_radius(mut self, radius: impl Into<CornerRadius>) -> Self {
+        self.corner_radius = radius.into();
+        self
+    }
+
     /// Enables clipping of overflowing children.
     pub const fn clip(mut self) -> Self {
         self.clip = true;
@@ -160,6 +171,7 @@ impl El {
             child_align_y: self.child_align_y,
             background: self.background,
             border: self.border,
+            corner_radius: self.corner_radius,
             clip: self.clip,
             material: self.material,
             content,

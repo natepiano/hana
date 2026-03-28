@@ -46,6 +46,7 @@ pub use layout::AlignY;
 pub use layout::Anchor;
 pub use layout::Border;
 pub use layout::BoundingBox;
+pub use layout::CornerRadius;
 pub use layout::Dimension;
 pub use layout::Direction;
 // Layout tree.

@@ -17,6 +17,7 @@ use smallvec::SmallVec;
 use super::types::AlignX;
 use super::types::AlignY;
 use super::types::Border;
+use super::types::CornerRadius;
 use super::types::Dimension;
 use super::types::Direction;
 use super::types::LayoutTextStyle;
@@ -48,6 +49,8 @@ pub(super) struct Element {
     pub(super) background:    Option<Color>,
     /// Optional border.
     pub(super) border:        Option<Border>,
+    /// Corner radius for rounded backgrounds and borders.
+    pub(super) corner_radius: CornerRadius,
     /// Whether this element clips overflowing children.
     pub(super) clip:          bool,
     /// Optional PBR material override for this element's surface (backgrounds, borders).
@@ -101,6 +104,7 @@ impl Default for Element {
             child_align_y: AlignY::default(),
             background:    None,
             border:        None,
+            corner_radius: CornerRadius::ZERO,
             clip:          false,
             material:      None,
             content:       ElementContent::Empty,
@@ -196,6 +200,14 @@ impl LayoutTree {
         self.elements.get(index).and_then(|e| e.material.as_deref())
     }
 
+    /// Returns the corner radius for the element at `index`.
+    #[must_use]
+    pub fn element_corner_radius(&self, index: usize) -> CornerRadius {
+        self.elements
+            .get(index)
+            .map_or(CornerRadius::ZERO, |e| e.corner_radius)
+    }
+
     /// Returns a copy of this tree with all dimensions converted to points.
     ///
     /// `layout_scale` multiplies spatial values (padding, gaps, borders, fixed sizes).
@@ -217,6 +229,7 @@ impl LayoutTree {
             if let Some(ref mut border) = element.border {
                 *border = border.resolved(layout_scale);
             }
+            element.corner_radius = element.corner_radius.resolved(layout_scale);
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
                 // `LayoutTextStyle::new(Mm(6.0))`), convert from that unit to

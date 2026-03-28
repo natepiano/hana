@@ -1421,6 +1421,122 @@ pub struct TextDimensions {
     pub line_height: f32,
 }
 
+/// Per-corner radius for rounded rectangles.
+///
+/// Each corner can have an independent radius. Values use [`Dimension`],
+/// so units like `Mm(3.0)` or `Pt(8.0)` work the same as `Padding` and
+/// `Border`. A value of `0.0` produces a sharp corner.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CornerRadius {
+    /// Top-left corner radius.
+    pub top_left:     Dimension,
+    /// Top-right corner radius.
+    pub top_right:    Dimension,
+    /// Bottom-right corner radius.
+    pub bottom_right: Dimension,
+    /// Bottom-left corner radius.
+    pub bottom_left:  Dimension,
+}
+
+impl CornerRadius {
+    /// All corners sharp (zero radius).
+    pub const ZERO: Self = Self {
+        top_left:     Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+        top_right:    Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+        bottom_right: Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+        bottom_left:  Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+    };
+
+    /// Uniform radius on all corners.
+    #[must_use]
+    pub fn all(radius: impl Into<Dimension>) -> Self {
+        let radius = radius.into();
+        Self {
+            top_left:     radius,
+            top_right:    radius,
+            bottom_right: radius,
+            bottom_left:  radius,
+        }
+    }
+
+    /// Per-corner radii: top-left, top-right, bottom-right, bottom-left.
+    #[must_use]
+    pub fn new(
+        top_left: impl Into<Dimension>,
+        top_right: impl Into<Dimension>,
+        bottom_right: impl Into<Dimension>,
+        bottom_left: impl Into<Dimension>,
+    ) -> Self {
+        Self {
+            top_left:     top_left.into(),
+            top_right:    top_right.into(),
+            bottom_right: bottom_right.into(),
+            bottom_left:  bottom_left.into(),
+        }
+    }
+
+    /// Returns `true` if all corners are sharp (zero radius).
+    #[must_use]
+    pub const fn is_zero(&self) -> bool {
+        self.top_left.value == 0.0
+            && self.top_right.value == 0.0
+            && self.bottom_right.value == 0.0
+            && self.bottom_left.value == 0.0
+    }
+
+    /// Returns the four resolved radii as an array: `[TL, TR, BR, BL]`.
+    ///
+    /// Values are in layout points (after unit conversion by `scaled()`).
+    #[must_use]
+    pub const fn to_array(&self) -> [f32; 4] {
+        [
+            self.top_left.value,
+            self.top_right.value,
+            self.bottom_right.value,
+            self.bottom_left.value,
+        ]
+    }
+
+    /// Returns a copy with all radii converted to points using `scale`.
+    #[must_use]
+    pub fn resolved(&self, scale: f32) -> Self {
+        Self {
+            top_left:     Dimension {
+                value: self.top_left.to_points(scale),
+                unit:  None,
+            },
+            top_right:    Dimension {
+                value: self.top_right.to_points(scale),
+                unit:  None,
+            },
+            bottom_right: Dimension {
+                value: self.bottom_right.to_points(scale),
+                unit:  None,
+            },
+            bottom_left:  Dimension {
+                value: self.bottom_left.to_points(scale),
+                unit:  None,
+            },
+        }
+    }
+}
+
+impl From<f32> for CornerRadius {
+    fn from(radius: f32) -> Self { Self::all(radius) }
+}
+
 /// Border widths for an element.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Border {
