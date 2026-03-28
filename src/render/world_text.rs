@@ -352,6 +352,7 @@ fn spawn_world_text_meshes(
                 page_image.clone(),
                 0.0,
                 render_mode_u32,
+                false,
             );
 
             let material_handle = materials.add(mat);
@@ -390,6 +391,7 @@ fn spawn_world_text_meshes(
                 page_image,
                 0.0,
                 shadow_render_mode,
+                false,
             ));
 
             commands.entity(entity).with_child((

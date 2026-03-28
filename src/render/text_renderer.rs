@@ -8,12 +8,14 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Instant;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
+use super::panel_rtt::PanelRttRegistry;
 use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
@@ -251,9 +253,14 @@ impl Plugin for TextRenderPlugin {
         app.add_systems(
             PostUpdate,
             (
+                super::panel_rtt::setup_panel_rtt,
                 poll_atlas_glyphs,
-                reconcile_panel_text_children.after(poll_atlas_glyphs),
-                reconcile_panel_image_children.after(poll_atlas_glyphs),
+                reconcile_panel_text_children
+                    .after(poll_atlas_glyphs)
+                    .after(super::panel_rtt::setup_panel_rtt),
+                reconcile_panel_image_children
+                    .after(poll_atlas_glyphs)
+                    .after(super::panel_rtt::setup_panel_rtt),
                 shape_panel_text_children
                     .after(reconcile_panel_text_children)
                     .after(poll_atlas_glyphs),
@@ -453,6 +460,7 @@ fn reconcile_panel_image_children(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     unit_config: Res<UnitConfig>,
+    rtt_registry: Res<PanelRttRegistry>,
 ) {
     for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
@@ -461,6 +469,9 @@ fn reconcile_panel_image_children(
 
         let pts_mpu = panel.points_to_world(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let layer = rtt_registry
+            .get_layer(panel_entity)
+            .map_or(RenderLayers::layer(0), RenderLayers::layer);
 
         // Collect image commands.
         let image_commands: Vec<_> = result
@@ -514,6 +525,7 @@ fn reconcile_panel_image_children(
                     Mesh3d(mesh_handle),
                     MeshMaterial3d(material_handle),
                     transform,
+                    layer.clone(),
                 ));
             } else {
                 commands.entity(panel_entity).with_child((
@@ -523,6 +535,7 @@ fn reconcile_panel_image_children(
                     Mesh3d(mesh_handle),
                     MeshMaterial3d(material_handle),
                     transform,
+                    layer.clone(),
                 ));
             }
         }
@@ -646,6 +659,7 @@ fn build_panel_batched_meshes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
+    rtt_registry: Res<PanelRttRegistry>,
     mut commands: Commands,
 ) {
     // Collect the set of panel entities that have at least one child with
@@ -689,6 +703,10 @@ fn build_panel_batched_meshes(
             }
         }
 
+        let layer = rtt_registry
+            .get_layer(panel_entity)
+            .map_or(RenderLayers::layer(0), RenderLayers::layer);
+
         spawn_batch_meshes(
             &batches,
             panel_entity,
@@ -697,6 +715,7 @@ fn build_panel_batched_meshes(
             &mut meshes,
             &mut materials,
             &mut shared_mats,
+            &layer,
             &mut commands,
         );
     }
@@ -713,6 +732,7 @@ fn spawn_batch_meshes(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<MsdfTextMaterial>,
     shared_mats: &mut SharedMsdfMaterials,
+    render_layer: &RenderLayers,
     commands: &mut Commands,
 ) {
     for (key, quads) in batches {
@@ -757,6 +777,7 @@ fn spawn_batch_meshes(
                                 page_image.clone(),
                                 0.0,
                                 GlyphRenderMode::Text as u32,
+                                false,
                             ))
                         })
                         .clone()
@@ -768,6 +789,7 @@ fn spawn_batch_meshes(
                         page_image.clone(),
                         hue,
                         render_mode_u32,
+                        false,
                     ))
                 };
 
@@ -778,6 +800,7 @@ fn spawn_batch_meshes(
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
                     Transform::IDENTITY,
+                    render_layer.clone(),
                 ));
             } else {
                 commands.entity(panel_entity).with_child((
@@ -785,6 +808,7 @@ fn spawn_batch_meshes(
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
                     Transform::IDENTITY,
+                    render_layer.clone(),
                 ));
             }
         }
@@ -804,6 +828,7 @@ fn spawn_batch_meshes(
                 page_image,
                 hue,
                 shadow_render_mode,
+                false,
             ));
 
             commands.entity(panel_entity).with_child((
@@ -811,6 +836,7 @@ fn spawn_batch_meshes(
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(proxy_material),
                 Transform::IDENTITY,
+                render_layer.clone(),
             ));
         }
     }
@@ -1116,6 +1142,7 @@ mod tests {
             atlas_image.clone(),
             0.0,
             0,
+            false,
         ));
 
         // Simulate the decision logic from extract_text_meshes.
@@ -1130,6 +1157,7 @@ mod tests {
                     atlas_image.clone(),
                     hue,
                     0,
+                    false,
                 ))
             }
         };

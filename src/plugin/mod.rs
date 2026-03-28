@@ -35,6 +35,8 @@ use crate::layout::ForLayout;
 use crate::layout::ForStandalone;
 use crate::layout::TextProps;
 pub use crate::layout::Unit;
+use crate::render::PanelGeometryPlugin;
+use crate::render::PanelRttPlugin;
 use crate::render::ShapedTextCache;
 use crate::render::TextRenderPlugin;
 use crate::text;
@@ -329,6 +331,8 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .register_type::<Unit>()
         .register_type::<UnitConfig>()
         .add_plugins(TextRenderPlugin)
+        .add_plugins(PanelGeometryPlugin)
+        .add_plugins(PanelRttPlugin)
         .init_gizmo_group::<DiegeticPanelGizmoGroup>()
         .add_systems(
             Startup,

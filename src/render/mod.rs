@@ -5,9 +5,13 @@ mod constants;
 mod glyph_mesh_tests;
 mod glyph_quad;
 mod msdf_material;
+mod panel_geometry;
+mod panel_rtt;
 mod text_renderer;
 mod world_text;
 
+pub use panel_geometry::PanelGeometryPlugin;
+pub use panel_rtt::PanelRttPlugin;
 pub use text_renderer::LineMetricsSnapshot;
 pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;

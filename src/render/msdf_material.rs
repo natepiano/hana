@@ -107,12 +107,14 @@ pub(super) fn msdf_text_material(
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
+    unlit: bool,
 ) -> MsdfTextMaterial {
     ExtendedMaterial {
         base:      StandardMaterial {
             alpha_mode: AlphaMode::Blend,
             double_sided: true,
             cull_mode: None,
+            unlit,
             ..StandardMaterial::default()
         },
         extension: MsdfExtension {
@@ -143,12 +145,14 @@ pub(super) fn msdf_shadow_proxy_material(
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
+    unlit: bool,
 ) -> MsdfTextMaterial {
     ExtendedMaterial {
         base:      StandardMaterial {
             alpha_mode: AlphaMode::Mask(0.5),
             double_sided: true,
             cull_mode: None,
+            unlit,
             ..StandardMaterial::default()
         },
         extension: MsdfExtension {
