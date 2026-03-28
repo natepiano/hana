@@ -19,6 +19,7 @@ use bevy::render::render_resource::TextureFormat;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::RenderMode;
+use crate::plugin::SurfaceShadow;
 use crate::plugin::UnitConfig;
 
 /// Render layer offset — panel layers start here to avoid conflicts with
@@ -117,7 +118,15 @@ impl Plugin for PanelRttPlugin {
 ///
 /// Only runs for panels that don't already have RTT children.
 pub(super) fn setup_panel_rtt(
-    panels: Query<(Entity, &DiegeticPanel, &ComputedDiegeticPanel), Changed<ComputedDiegeticPanel>>,
+    panels: Query<
+        (
+            Entity,
+            &DiegeticPanel,
+            &ComputedDiegeticPanel,
+            Option<&RenderLayers>,
+        ),
+        Changed<ComputedDiegeticPanel>,
+    >,
     existing_cameras: Query<&ChildOf, With<PanelRttCamera>>,
     mut registry: ResMut<PanelRttRegistry>,
     mut images: ResMut<Assets<Image>>,
@@ -126,7 +135,7 @@ pub(super) fn setup_panel_rtt(
     unit_config: Res<UnitConfig>,
     mut commands: Commands,
 ) {
-    for (panel_entity, panel, computed) in &panels {
+    for (panel_entity, panel, computed, panel_layers) in &panels {
         if computed.result().is_none() {
             continue;
         }
@@ -215,7 +224,8 @@ pub(super) fn setup_panel_rtt(
                 .looking_at(Vec3::new(cam_x, cam_y, 0.0), Vec3::Y),
         ));
 
-        // Spawn display quad — visible to main camera only (layer 0).
+        // Spawn display quad — visible to the panel's scene layer.
+        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let quad_mesh = meshes.add(Rectangle::new(world_w, world_h));
         let quad_material = materials.add(StandardMaterial {
             base_color_texture: Some(image_handle),
@@ -231,15 +241,21 @@ pub(super) fn setup_panel_rtt(
         });
 
         // Position the quad at the center of the panel content area.
-        commands.entity(panel_entity).with_child((
+        let quad_base = (
             PanelDisplayQuad,
             RayCastBackfaces,
-            NotShadowCaster,
             Mesh3d(quad_mesh),
             MeshMaterial3d(quad_material),
-            RenderLayers::layer(0),
+            scene_layer,
             Transform::from_xyz(cam_x, cam_y, 0.0),
-        ));
+        );
+        if panel.surface_shadow == SurfaceShadow::On {
+            commands.entity(panel_entity).with_child(quad_base);
+        } else {
+            commands
+                .entity(panel_entity)
+                .with_child((quad_base, NotShadowCaster));
+        }
     }
 }
 

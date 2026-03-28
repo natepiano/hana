@@ -29,6 +29,20 @@ pub enum RenderMode {
     Geometry,
 }
 
+/// Whether the panel's surface geometry casts 3D shadows.
+///
+/// "Surface" means backgrounds, borders, and the RTT display quad — the
+/// structural parts of the panel. Text shadow casting is controlled
+/// independently per text element via [`GlyphShadowMode`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum SurfaceShadow {
+    /// Surface geometry does not cast shadows (default).
+    #[default]
+    Off,
+    /// Surface geometry participates in shadow casting.
+    On,
+}
+
 /// A diegetic UI panel attached to a 3D entity.
 ///
 /// Defines a layout tree and the panel's dimensions in layout units.
@@ -61,42 +75,46 @@ pub enum RenderMode {
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    pub tree:         LayoutTree,
+    pub tree:           LayoutTree,
     /// Panel width in layout units.
-    pub width:        f32,
+    pub width:          f32,
     /// Panel height in layout units.
-    pub height:       f32,
+    pub height:         f32,
     /// Unit for `width`/`height`. `None` inherits from [`UnitConfig::layout`].
-    pub layout_unit:  Option<Unit>,
+    pub layout_unit:    Option<Unit>,
     /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
-    pub font_unit:    Option<Unit>,
+    pub font_unit:      Option<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
-    pub anchor:       Anchor,
+    pub anchor:         Anchor,
     /// Target world width in meters. When set, the panel is uniformly scaled
     /// so its width matches this value (height follows aspect ratio).
     /// If both `world_width` and `world_height` are set, non-uniform scaling
     /// is applied.
-    pub world_width:  Option<f32>,
+    pub world_width:    Option<f32>,
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
-    pub world_height: Option<f32>,
+    pub world_height:   Option<f32>,
     /// How the panel renders its content. Defaults to [`RenderMode::Texture`].
-    pub render_mode:  RenderMode,
+    pub render_mode:    RenderMode,
+    /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
+    /// Text shadow casting is controlled per-element via [`GlyphShadowMode`].
+    pub surface_shadow: SurfaceShadow,
 }
 
 impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
-            tree:         LayoutTree::default(),
-            width:        0.0,
-            height:       0.0,
-            layout_unit:  None,
-            font_unit:    None,
-            anchor:       Anchor::TopLeft,
-            world_width:  None,
-            world_height: None,
-            render_mode:  RenderMode::Texture,
+            tree:           LayoutTree::default(),
+            width:          0.0,
+            height:         0.0,
+            layout_unit:    None,
+            font_unit:      None,
+            anchor:         Anchor::TopLeft,
+            world_width:    None,
+            world_height:   None,
+            render_mode:    RenderMode::Texture,
+            surface_shadow: SurfaceShadow::Off,
         }
     }
 }
@@ -127,15 +145,16 @@ impl DiegeticPanel {
 /// ```
 #[derive(Default)]
 pub struct DiegeticPanelBuilder {
-    width:        f32,
-    height:       f32,
-    layout_unit:  Option<Unit>,
-    font_unit:    Option<Unit>,
-    anchor:       Option<Anchor>,
-    world_width:  Option<f32>,
-    world_height: Option<f32>,
-    render_mode:  RenderMode,
-    tree:         Option<LayoutTree>,
+    width:          f32,
+    height:         f32,
+    layout_unit:    Option<Unit>,
+    font_unit:      Option<Unit>,
+    anchor:         Option<Anchor>,
+    world_width:    Option<f32>,
+    world_height:   Option<f32>,
+    render_mode:    RenderMode,
+    surface_shadow: SurfaceShadow,
+    tree:           Option<LayoutTree>,
 }
 
 impl DiegeticPanelBuilder {
@@ -203,19 +222,28 @@ impl DiegeticPanelBuilder {
         self
     }
 
+    /// Sets whether the panel surface casts 3D shadows.
+    /// Defaults to [`SurfaceShadow::Off`].
+    #[must_use]
+    pub const fn surface_shadow(mut self, shadow: SurfaceShadow) -> Self {
+        self.surface_shadow = shadow;
+        self
+    }
+
     /// Consumes the builder and returns a [`DiegeticPanel`] component.
     #[must_use]
     pub fn build(self) -> DiegeticPanel {
         DiegeticPanel {
-            tree:         self.tree.unwrap_or_default(),
-            width:        self.width,
-            height:       self.height,
-            layout_unit:  self.layout_unit,
-            font_unit:    self.font_unit,
-            anchor:       self.anchor.unwrap_or(Anchor::TopLeft),
-            world_width:  self.world_width,
-            world_height: self.world_height,
-            render_mode:  self.render_mode,
+            tree:           self.tree.unwrap_or_default(),
+            width:          self.width,
+            height:         self.height,
+            layout_unit:    self.layout_unit,
+            font_unit:      self.font_unit,
+            anchor:         self.anchor.unwrap_or(Anchor::TopLeft),
+            world_width:    self.world_width,
+            world_height:   self.world_height,
+            render_mode:    self.render_mode,
+            surface_shadow: self.surface_shadow,
         }
     }
 }

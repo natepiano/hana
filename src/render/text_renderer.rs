@@ -655,7 +655,7 @@ fn build_panel_batched_meshes(
     changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
     panel_children: Query<(&PanelTextQuads, &ChildOf), With<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
-    panels: Query<(&DiegeticPanel, Option<&HueOffset>)>,
+    panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
     atlas: Res<MsdfAtlas>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
@@ -674,11 +674,12 @@ fn build_panel_batched_meshes(
     }
 
     for panel_entity in dirty_panels {
-        let Ok((panel, hue_offset)) = panels.get(panel_entity) else {
+        let Ok((panel, hue_offset, panel_layers)) = panels.get(panel_entity) else {
             continue;
         };
         let hue = hue_offset.map_or(0.0, |h| h.0);
         let is_geometry = panel.render_mode == RenderMode::Geometry;
+        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
 
         // Collect all quads from this panel's `PanelTextChild` children.
         let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
@@ -708,9 +709,9 @@ fn build_panel_batched_meshes(
             }
         }
 
-        let layer = rtt_registry
+        let content_layer = rtt_registry
             .get_layer(panel_entity)
-            .map_or(RenderLayers::layer(0), RenderLayers::layer);
+            .map_or(scene_layer.clone(), RenderLayers::layer);
 
         spawn_batch_meshes(
             &batches,
@@ -720,7 +721,8 @@ fn build_panel_batched_meshes(
             &mut meshes,
             &mut materials,
             &mut shared_mats,
-            &layer,
+            &content_layer,
+            &scene_layer,
             !is_geometry,
             &mut commands,
         );
@@ -738,7 +740,8 @@ fn spawn_batch_meshes(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<MsdfTextMaterial>,
     shared_mats: &mut SharedMsdfMaterials,
-    render_layer: &RenderLayers,
+    content_layer: &RenderLayers,
+    scene_layer: &RenderLayers,
     unlit: bool,
     commands: &mut Commands,
 ) {
@@ -807,7 +810,7 @@ fn spawn_batch_meshes(
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
                     Transform::IDENTITY,
-                    render_layer.clone(),
+                    content_layer.clone(),
                 ));
             } else {
                 commands.entity(panel_entity).with_child((
@@ -815,7 +818,7 @@ fn spawn_batch_meshes(
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
                     Transform::IDENTITY,
-                    render_layer.clone(),
+                    content_layer.clone(),
                 ));
             }
         }
@@ -843,7 +846,7 @@ fn spawn_batch_meshes(
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(proxy_material),
                 Transform::IDENTITY,
-                render_layer.clone(),
+                scene_layer.clone(),
             ));
         }
     }

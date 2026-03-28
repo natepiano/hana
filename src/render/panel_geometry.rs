@@ -15,6 +15,7 @@ use crate::layout::RenderCommandKind;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::RenderMode;
+use crate::plugin::SurfaceShadow;
 use crate::plugin::UnitConfig;
 
 /// Sort-key bias for the interaction mesh in Geometry mode.
@@ -169,7 +170,12 @@ fn interaction_material(
 /// builds batched vertex-colored quad meshes, and spawns them as children.
 fn build_panel_geometry(
     changed_panels: Query<
-        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+        (
+            Entity,
+            &DiegeticPanel,
+            &ComputedDiegeticPanel,
+            Option<&RenderLayers>,
+        ),
         Changed<ComputedDiegeticPanel>,
     >,
     old_rects: Query<(Entity, &ChildOf), With<PanelRectMesh>>,
@@ -182,7 +188,7 @@ fn build_panel_geometry(
     rtt_registry: Res<PanelRttRegistry>,
     mut commands: Commands,
 ) {
-    for (panel_entity, panel, computed) in &changed_panels {
+    for (panel_entity, panel, computed, panel_layers) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
@@ -251,9 +257,11 @@ fn build_panel_geometry(
 
         // ── Spawn new geometry ──────────────────────────────────────
         let is_geometry = panel.render_mode == RenderMode::Geometry;
+        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let layer = rtt_registry
             .get_layer(panel_entity)
-            .map_or(RenderLayers::layer(0), RenderLayers::layer);
+            .map_or(scene_layer.clone(), RenderLayers::layer);
+        let suppress_surface_shadow = panel.surface_shadow == SurfaceShadow::Off;
 
         if !rect_quads.is_empty() {
             let rect_material = if is_geometry {
@@ -262,14 +270,20 @@ fn build_panel_geometry(
                 rtt_material(&mut shared_mats, &mut materials)
             };
             let mesh = build_colored_quad_mesh(&rect_quads);
-            commands.entity(panel_entity).with_child((
+            let rect_base = (
                 PanelRectMesh,
-                NotShadowCaster,
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(rect_material),
                 Transform::IDENTITY,
                 layer.clone(),
-            ));
+            );
+            if suppress_surface_shadow {
+                commands
+                    .entity(panel_entity)
+                    .with_child((rect_base, NotShadowCaster));
+            } else {
+                commands.entity(panel_entity).with_child(rect_base);
+            }
         }
 
         if !border_quads.is_empty() {
@@ -279,14 +293,20 @@ fn build_panel_geometry(
                 rtt_material(&mut shared_mats, &mut materials)
             };
             let mesh = build_colored_quad_mesh(&border_quads);
-            commands.entity(panel_entity).with_child((
+            let border_base = (
                 PanelBorderMesh,
-                NotShadowCaster,
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(border_material),
                 Transform::IDENTITY,
                 layer.clone(),
-            ));
+            );
+            if suppress_surface_shadow {
+                commands
+                    .entity(panel_entity)
+                    .with_child((border_base, NotShadowCaster));
+            } else {
+                commands.entity(panel_entity).with_child(border_base);
+            }
         }
 
         // ── Interaction mesh (Geometry mode only) ───────────────────

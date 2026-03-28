@@ -16,6 +16,7 @@ pub use components::DiegeticPanelBuilder;
 pub use components::DiegeticTextMeasurer;
 pub use components::HueOffset;
 pub use components::RenderMode;
+pub use components::SurfaceShadow;
 pub use config::AtlasConfig;
 pub use config::GlyphWorkerThreads;
 pub use config::In;

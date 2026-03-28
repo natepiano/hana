@@ -14,7 +14,6 @@
 
 use std::time::Duration;
 
-use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -397,7 +396,6 @@ fn setup(
     // Status panel (floating in world, outside the tilt hierarchy).
     commands.spawn((
         StatusPanel,
-        NotShadowCaster,
         build_status_panel(&StatusData {
             pages:     0,
             glyphs:    0,
