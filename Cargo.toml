@@ -76,5 +76,5 @@ name              = "zoom_to_fit"
 required-features = ["zoom_overlay"]
 
 [[example]]
-name              = "camera_animation"
+name              = "animation"
 required-features = ["zoom_overlay"]

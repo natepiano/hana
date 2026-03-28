@@ -1,12 +1,16 @@
-//! Demonstrates `AnimateToFit` and `PlayAnimation`.
+//! Demonstrates two approaches to camera animation.
+//!
+//! **Manual** (per-frame): directly writes `OrbitCam` fields each frame
+//! for a continuous orbit loop. Input is disabled during manual animation.
+//!
+//! **Event-driven** (extras): triggers `PlayAnimation` or `AnimateToFit`
+//! events. The plugin handles interpolation, easing, and queuing.
 //!
 //! Controls:
-//!   A     — `AnimateToFit` the cube (yaw=45 degrees, pitch=30 degrees)
-//!   Space — Play a 5-step camera animation sequence via `PlayAnimation`
+//!   M     — Toggle manual orbit animation on/off
+//!   Space — `PlayAnimation` 5-step sequence (event-driven)
+//!   A     — `AnimateToFit` the cube (event-driven)
 //!   R     — Reset camera
-//!
-//! Observe lifecycle events (`AnimationBegin`/`AnimationEnd`,
-//! `CameraMoveBegin`/`CameraMoveEnd`) via `info!()` logging.
 
 use std::f32::consts::TAU;
 use std::time::Duration;
@@ -26,17 +30,22 @@ use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadBehavior;
 
 const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
+const INSTRUCTIONS_FONT_SIZE: f32 = 18.0;
 
 #[derive(Component)]
 struct Target;
+
+#[derive(Resource, Default)]
+struct ManualAnimationActive(bool);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .init_resource::<ManualAnimationActive>()
         .add_systems(Startup, setup)
-        .add_systems(Update, keyboard_input)
+        .add_systems(Update, (keyboard_input, manual_animate).chain())
         .add_observer(on_animation_begin)
         .add_observer(on_animation_end)
         .add_observer(on_move_begin)
@@ -83,26 +92,68 @@ fn setup(
     ));
 
     // Instructions
-    commands.spawn(Text::new(
-        "A - AnimateToFit (yaw=45 pitch=30)\n\
-         Space - Play 5-step animation sequence\n\
-         R - Reset camera",
+    commands.spawn((
+        Text::new(
+            "M - Toggle manual orbit animation\n\
+             Space - PlayAnimation (5-step sequence)\n\
+             A - AnimateToFit (yaw=45 pitch=30)\n\
+             R - Reset camera",
+        ),
+        TextFont {
+            font_size: INSTRUCTIONS_FONT_SIZE,
+            ..default()
+        },
     ));
+}
+
+fn stop_manual(manual: &mut ManualAnimationActive, cam: &mut OrbitCam) {
+    if manual.0 {
+        manual.0 = false;
+        cam.enabled = true;
+        cam.orbit_smoothness = 0.8;
+        cam.zoom_smoothness = 0.8;
+        cam.pan_smoothness = 0.8;
+        info!("Manual animation OFF");
+    }
 }
 
 fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
+    mut manual: ResMut<ManualAnimationActive>,
     camera_query: Query<Entity, With<OrbitCam>>,
     target_query: Query<Entity, With<Target>>,
-    mut pan_orbit_query: Query<&mut OrbitCam>,
+    mut orbit_cam_query: Query<&mut OrbitCam>,
 ) {
     let Ok(camera) = camera_query.single() else {
         return;
     };
+    let Ok(mut cam) = orbit_cam_query.get_mut(camera) else {
+        return;
+    };
 
-    // AnimateToFit — animates to a specific orientation while framing the target
+    // Toggle manual animation
+    if keys.just_pressed(KeyCode::KeyM) {
+        if manual.0 {
+            stop_manual(&mut manual, &mut cam);
+        } else {
+            manual.0 = true;
+            cam.enabled = false;
+            cam.orbit_smoothness = 0.0;
+            cam.zoom_smoothness = 0.0;
+            cam.pan_smoothness = 0.0;
+            // Sync so there's no lerp gap
+            if let (Some(yaw), Some(pitch)) = (cam.yaw, cam.pitch) {
+                cam.target_yaw = yaw;
+                cam.target_pitch = pitch;
+            }
+            info!("Manual animation ON");
+        }
+    }
+
+    // AnimateToFit — event-driven
     if keys.just_pressed(KeyCode::KeyA) {
+        stop_manual(&mut manual, &mut cam);
         let Ok(target) = target_query.single() else {
             return;
         };
@@ -116,11 +167,11 @@ fn keyboard_input(
         info!("AnimateToFit triggered");
     }
 
-    // PlayAnimation — queues a multi-step camera movement sequence
+    // PlayAnimation — event-driven multi-step sequence
     if keys.just_pressed(KeyCode::Space) {
+        stop_manual(&mut manual, &mut cam);
         let focus = Vec3::new(0.0, 0.75, 0.0);
         let moves = [
-            // Step 1: orbit to the side and slightly closer
             CameraMove::ToOrbit {
                 focus,
                 yaw: 1.5,
@@ -129,7 +180,6 @@ fn keyboard_input(
                 duration: Duration::from_millis(800),
                 easing: EaseFunction::CubicInOut,
             },
-            // Step 2: dramatic zoom out — pull way back and high overhead
             CameraMove::ToOrbit {
                 focus,
                 yaw: 2.5,
@@ -138,7 +188,6 @@ fn keyboard_input(
                 duration: Duration::from_millis(1200),
                 easing: EaseFunction::CubicIn,
             },
-            // Step 3: sweep around to the opposite side while staying wide
             CameraMove::ToOrbit {
                 focus,
                 yaw: 4.5,
@@ -147,7 +196,6 @@ fn keyboard_input(
                 duration: Duration::from_millis(1200),
                 easing: EaseFunction::SineInOut,
             },
-            // Step 4: dramatic zoom back in — swoop down close
             CameraMove::ToOrbit {
                 focus,
                 yaw: 5.5,
@@ -156,7 +204,6 @@ fn keyboard_input(
                 duration: Duration::from_millis(1000),
                 easing: EaseFunction::CubicIn,
             },
-            // Step 5: bounce back to starting view
             CameraMove::ToOrbit {
                 focus,
                 yaw: 0.0,
@@ -171,16 +218,34 @@ fn keyboard_input(
         info!("PlayAnimation triggered (5 steps)");
     }
 
-    if keys.just_pressed(KeyCode::KeyR)
-        && let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera)
-    {
+    // Reset
+    if keys.just_pressed(KeyCode::KeyR) {
+        stop_manual(&mut manual, &mut cam);
         let radius = START_POS.length();
-        pan_orbit.target_focus = Vec3::ZERO;
-        pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
-        pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
-        pan_orbit.target_radius = radius;
-        pan_orbit.force_update = true;
+        cam.target_focus = Vec3::ZERO;
+        cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);
+        cam.target_pitch = f32::asin(START_POS.y / radius);
+        cam.target_radius = radius;
+        cam.force_update = true;
         info!("Camera reset");
+    }
+}
+
+/// Per-frame manual animation — only runs when the resource flag is active.
+fn manual_animate(
+    time: Res<Time>,
+    manual: Res<ManualAnimationActive>,
+    mut query: Query<&mut OrbitCam>,
+) {
+    if !manual.0 {
+        return;
+    }
+    for mut cam in &mut query {
+        cam.target_yaw += 15f32.to_radians() * time.delta_secs();
+        cam.target_pitch = time.elapsed_secs_wrapped().sin() * TAU * 0.1;
+        cam.radius =
+            Some((((time.elapsed_secs_wrapped() * 2.0).cos() + 1.0) * 0.5).mul_add(2.0, 4.0));
+        cam.force_update = true;
     }
 }
 
