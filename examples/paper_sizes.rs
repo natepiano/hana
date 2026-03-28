@@ -59,8 +59,11 @@ const CODE_COLOR: Color = Color::srgba(0.85, 0.75, 0.55, 1.0);
 const ZOOM_MARGIN: f32 = 0.06;
 const ZOOM_DURATION_MS: u64 = 600;
 
-/// Four groups of 4 paper sizes each. `bool` = show in inches.
-const GROUPS: &[(&str, bool, &[(PaperSize, &str)])] = &[
+/// Group entry: `(title, show_in_inches, sizes)`.
+type PaperGroup = (&'static str, bool, &'static [(PaperSize, &'static str)]);
+
+/// Four groups of 4 paper sizes each.
+const GROUPS: &[PaperGroup] = &[
     (
         "A-Series",
         false,
@@ -124,7 +127,7 @@ fn max_portrait_width(sizes: &[(PaperSize, &str)]) -> f32 {
     sizes
         .iter()
         .map(|(size, _)| size.portrait().0.0)
-        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .reduce(f32::max)
         .unwrap_or(0.0)
 }
 
@@ -133,7 +136,7 @@ fn max_landscape_width(sizes: &[(PaperSize, &str)]) -> f32 {
     sizes
         .iter()
         .map(|(size, _)| size.landscape().0.0)
-        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .reduce(f32::max)
         .unwrap_or(0.0)
 }
 
@@ -273,7 +276,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
     let code_style = LayoutTextStyle::new(8.0).with_color(CODE_COLOR);
 
     // Column content width = (PANEL_W - padding*2 - gaps) / 5.
-    let col_content_w = (PANEL_W - OUTER_PAD * 2.0 - COL_GAP * 4.0) / 5.0;
+    let col_content_w = OUTER_PAD.mul_add(-2.0, COL_GAP.mul_add(-4.0, PANEL_W)) / 5.0;
     // Each paper pair (portrait + gap + landscape) must fit in col_content_w - some margin.
     let pair_max_w = col_content_w - 8.0; // leave room for column padding
 
@@ -319,13 +322,15 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                                         b,
                                         *size,
                                         name,
-                                        scale,
-                                        portrait_slot,
-                                        landscape_slot,
-                                        spacing,
-                                        *inches,
-                                        &name_style,
-                                        &dim_style,
+                                        &PaperRowParams {
+                                            scale,
+                                            portrait_slot,
+                                            landscape_slot,
+                                            pair_spacing: spacing,
+                                            inches: *inches,
+                                            name_style: &name_style,
+                                            dim_style: &dim_style,
+                                        },
                                     );
                                 },
                             );
@@ -374,28 +379,28 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
     builder.build()
 }
 
-/// Adds one paper size row to the builder: name, dimensions, portrait + landscape pair.
-fn build_paper_row(
-    b: &mut LayoutBuilder,
-    size: PaperSize,
-    name: &str,
-    scale: f32,
-    portrait_slot: f32,
+/// Parameters for [`build_paper_row`].
+struct PaperRowParams<'a> {
+    scale:          f32,
+    portrait_slot:  f32,
     landscape_slot: f32,
-    pair_spacing: f32,
-    inches: bool,
-    name_style: &LayoutTextStyle,
-    dim_style: &LayoutTextStyle,
-) {
+    pair_spacing:   f32,
+    inches:         bool,
+    name_style:     &'a LayoutTextStyle,
+    dim_style:      &'a LayoutTextStyle,
+}
+
+/// Adds one paper size row to the builder: name, dimensions, portrait + landscape pair.
+fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &PaperRowParams) {
     let (pw, ph) = size.portrait();
     let (lw, lh) = size.landscape();
 
-    let sp_w = pw.0 * scale;
-    let sp_h = ph.0 * scale;
-    let sl_w = lw.0 * scale;
-    let sl_h = lh.0 * scale;
+    let portrait_width = pw.0 * params.scale;
+    let portrait_height = ph.0 * params.scale;
+    let landscape_width = lw.0 * params.scale;
+    let landscape_height = lh.0 * params.scale;
 
-    let label = if inches {
+    let label = if params.inches {
         let w_in = pw.0 / 25.4;
         let h_in = ph.0 / 25.4;
         format!("{name} — {w_in:.1}x{h_in:.1}in")
@@ -410,52 +415,48 @@ fn build_paper_row(
             .width(Sizing::grow_min(0.0))
             .height(Sizing::fit_min(0.0)),
         |b| {
-            b.text(label, name_style.clone());
+            b.text(label, params.name_style.clone());
 
-            // Portrait + landscape with fixed slots, equal margins.
-            // Left pad = gap = right pad = spacing.
             b.with(
                 El::new()
                     .direction(Direction::LeftToRight)
-                    .child_gap(pair_spacing)
-                    .padding(Padding::xy(pair_spacing, 0.0))
+                    .child_gap(params.pair_spacing)
+                    .padding(Padding::xy(params.pair_spacing, 0.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::fit_min(0.0)),
                 |b| {
-                    // Fixed-width portrait slot.
                     b.with(
                         El::new()
                             .direction(Direction::TopToBottom)
                             .child_gap(1.0)
-                            .width(Sizing::fixed(portrait_slot))
+                            .width(Sizing::fixed(params.portrait_slot))
                             .height(Sizing::fit_min(0.0)),
                         |b| {
                             b.with(
                                 El::new()
-                                    .width(Sizing::fixed(sp_w))
-                                    .height(Sizing::fixed(sp_h))
+                                    .width(Sizing::fixed(portrait_width))
+                                    .height(Sizing::fixed(portrait_height))
                                     .border(Border::all(Pt(0.5), BORDER_COLOR)),
                                 |_| {},
                             );
-                            b.text("portrait", dim_style.clone());
+                            b.text("portrait", params.dim_style.clone());
                         },
                     );
-                    // Fixed-width landscape slot.
                     b.with(
                         El::new()
                             .direction(Direction::TopToBottom)
                             .child_gap(1.0)
-                            .width(Sizing::fixed(landscape_slot))
+                            .width(Sizing::fixed(params.landscape_slot))
                             .height(Sizing::fit_min(0.0)),
                         |b| {
                             b.with(
                                 El::new()
-                                    .width(Sizing::fixed(sl_w))
-                                    .height(Sizing::fixed(sl_h))
+                                    .width(Sizing::fixed(landscape_width))
+                                    .height(Sizing::fixed(landscape_height))
                                     .border(Border::all(Pt(0.5), BORDER_COLOR)),
                                 |_| {},
                             );
-                            b.text("landscape", dim_style.clone());
+                            b.text("landscape", params.dim_style.clone());
                         },
                     );
                 },

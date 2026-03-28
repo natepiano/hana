@@ -211,7 +211,7 @@ enum AtlasPhase {
 #[derive(Resource, Default)]
 struct CommittedPages(Vec<CommittedPage>);
 
-/// How many committed pages to display (invariant: <= committed.len()).
+/// How many committed pages to display (invariant: <= `committed.len()`).
 #[derive(Resource)]
 struct PagesRevealed(usize);
 
@@ -407,9 +407,9 @@ fn setup(
 
 // ── Grid geometry helpers ──────────────────────────────────────────
 
-fn cell_world_width() -> f32 { COLUMN_WORLD_WIDTH }
+const fn cell_world_width() -> f32 { COLUMN_WORLD_WIDTH }
 
-fn cell_world_height() -> f32 { ROW_WORLD_HEIGHT }
+const fn cell_world_height() -> f32 { ROW_WORLD_HEIGHT }
 
 /// World position for the center of cell `(row, col)` relative to the
 /// grid panel with [`Anchor::Center`].
@@ -432,7 +432,7 @@ struct PageCellData<'a> {
     atlas_image: Option<Handle<Image>>,
 }
 
-fn glyph_color_for(chars: &[char]) -> Color {
+const fn glyph_color_for(chars: &[char]) -> Color {
     let Some(first_char) = chars.first().copied() else {
         return FALLBACK_GLYPH_COLOR;
     };
@@ -543,7 +543,7 @@ fn build_cell(b: &mut LayoutBuilder, data: Option<&PageCellData>, cols: usize) {
                             .child_gap(GLYPH_ROW_GAP)
                             .child_alignment(AlignX::Center, AlignY::Center),
                         |b| {
-                            build_glyph_grid(b, &data.chars, &glyph_style);
+                            build_glyph_grid(b, data.chars, &glyph_style);
                         },
                     );
 
@@ -693,7 +693,7 @@ fn commit_atlas_pages(
 
 /// Rebuilds the grid panel from committed snapshots (Ready) or shows
 /// a loading cell with all chars (Loading) to trigger rasterization.
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn display_committed_pages(
     atlas: Res<MsdfAtlas>,
     phase: Res<AtlasPhase>,
@@ -733,10 +733,15 @@ fn display_committed_pages(
         let shown = revealed.0.min(committed.0.len());
         for (i, page) in committed.0[..shown].iter().enumerate() {
             cells.push(PageCellData {
-                cell_index:  i,
-                chars:       &page.chars,
-                glyph_color: glyph_color_for(&page.chars),
-                atlas_image: atlas.image_handle(i as u32).cloned(),
+                cell_index:                                             i,
+                chars:                                                  &page.chars,
+                glyph_color:                                            glyph_color_for(
+                    &page.chars,
+                ),
+                #[allow(clippy::cast_possible_truncation)]
+                atlas_image:                                            atlas
+                    .image_handle(i as u32)
+                    .cloned(),
             });
         }
     }
@@ -759,7 +764,7 @@ fn display_committed_pages(
     let quad_size = ch * ATLAS_QUAD_SCALE;
 
     // Spawn committed atlas texture quads and per-cell invisible click planes.
-    for cell_index in 0..total_cells {
+    for (cell_index, cell) in cells.iter().enumerate().take(total_cells) {
         let row = cell_index / cols;
         let col = cell_index % cols;
         if row >= rows {
@@ -767,7 +772,7 @@ fn display_committed_pages(
         }
         let center = cell_center_position(row, col, rows, cols);
 
-        if let Some(ref image_handle) = cells[cell_index].atlas_image {
+        if let Some(ref image_handle) = cell.atlas_image {
             let quad_pos = center + Vec3::new(cw * ATLAS_QUAD_OFFSET, 0.0, 0.001);
             let quad_entity = commands
                 .spawn((
@@ -814,6 +819,7 @@ fn display_committed_pages(
 
 // ── Input ──────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn handle_input(
     atlas: Res<MsdfAtlas>,
     keys: Res<ButtonInput<KeyCode>>,
