@@ -50,7 +50,10 @@ pub struct TwoFingerGestures {
     pub pinch:    f32,
     /// The delta angle of the two touches.
     /// Positive values correspond to rotating clockwise.
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "computed but not yet wired — planned for touch-based camera roll"
+    )]
     pub rotation: f32,
 }
 

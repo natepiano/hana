@@ -18,7 +18,6 @@ pub struct MouseKeyTracker {
     pub orbit_button_changed: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn mouse_key_tracker(
     mut camera_movement: ResMut<MouseKeyTracker>,
     mouse_input: Res<ButtonInput<MouseButton>>,

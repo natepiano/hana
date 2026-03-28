@@ -269,7 +269,6 @@ fn handle_empty_queue(
 
 /// Handles external camera input according to `CameraInputInterruptBehavior`.
 /// Returns the concrete handling outcome for this frame.
-#[allow(clippy::too_many_arguments)]
 fn handle_camera_input_interrupt(
     commands: &mut Commands,
     entity: Entity,
@@ -481,7 +480,6 @@ fn handle_in_progress(
 /// When a `OrbitCam` has a `CameraMoveList`, interpolates toward the target over
 /// the specified duration with easing. When a move completes, automatically moves to the
 /// next. Removes the `CameraMoveList` component when all moves are complete.
-#[allow(clippy::type_complexity)]
 pub(super) fn process_camera_move_list(
     mut commands: Commands,
     time: Res<Time>,

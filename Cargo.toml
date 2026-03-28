@@ -27,6 +27,12 @@ pedantic = { level = "deny", priority = -1 }
 multiple_crate_versions = "allow"
 needless_pass_by_value  = "allow"
 
+# Bevy-specific allows
+option_if_let_else = "allow" # False positives with Bevy reflect macros
+too_many_arguments = "allow" # Bevy systems often require many params
+type_complexity    = "allow" # Bevy query types are inherently complex
+wildcard_imports   = "allow" # Bevy prelude convention
+
 [lints.rust]
 missing_docs = "deny"
 

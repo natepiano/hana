@@ -138,6 +138,15 @@ fn calculate_target_margins(
 // Convergence algorithm
 // ============================================================================
 
+/// Pre-computed parameters for the fit binary search.
+struct FitParams {
+    rot:                  Quat,
+    aspect_ratio:         f32,
+    ortho_fixed_distance: Option<f32>,
+    is_ortho:             bool,
+    zoom_multiplier:      f32,
+}
+
 /// Calculates the optimal radius and centered focus to fit pre-extracted vertices in the camera
 /// view. The focus is adjusted so the projected mesh silhouette is centered in the viewport.
 ///
@@ -148,7 +157,6 @@ fn calculate_target_margins(
 ///
 /// Note: A lateral camera shift doesn't change point depths, so the centering is geometrically
 /// exact for the constraining margin check.
-#[allow(clippy::too_many_lines)]
 pub fn calculate_fit(
     points: &[Vec3],
     geometric_center: Vec3,
@@ -173,30 +181,62 @@ pub fn calculate_fit(
     let aspect_ratio = support::projection_aspect_ratio(projection, camera.logical_viewport_size())
         .ok_or(FitError::NoViewport)?;
 
-    // For ortho, the camera is always at a fixed distance from focus.
-    // OrbitCam sets this to `(near + far) / 2.0`.
     let ortho_fixed_distance = match projection {
         Projection::Orthographic(o) => Some((o.near + o.far) * 0.5),
         _ => None,
     };
 
-    let is_ortho = ortho_fixed_distance.is_some();
-    let zoom_multiplier = zoom_margin_multiplier(clamped_margin);
+    let params = FitParams {
+        rot: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
+        aspect_ratio,
+        ortho_fixed_distance,
+        is_ortho: ortho_fixed_distance.is_some(),
+        zoom_multiplier: zoom_margin_multiplier(clamped_margin),
+    };
 
-    let rot = Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0);
-
-    // Compute the object's bounding sphere radius from points for sensible search bounds.
-    // The search range is based purely on object size to ensure deterministic results
-    // regardless of the camera's current radius.
     let object_radius = points
         .iter()
         .map(|c| (*c - geometric_center).length())
         .fold(0.0_f32, f32::max);
 
-    // Binary search for the correct radius.
-    // For perspective: radius = camera distance (changes apparent size).
-    // For ortho: OrbitCam maps radius → `OrthographicProjection::scale`,
-    //   so searching over radius effectively searches over scale.
+    binary_search_for_fit(points, geometric_center, object_radius, projection, &params)
+}
+
+/// Determines which screen dimension constrains the fit and returns the current margin,
+/// target margin, and dimension label.
+fn find_constraining_margin(
+    bounds: &support::ScreenSpaceBounds,
+    target_margin_x: f32,
+    target_margin_y: f32,
+) -> (f32, f32, &'static str) {
+    let h_min = bounds.left_margin.min(bounds.right_margin);
+    let v_min = bounds.top_margin.min(bounds.bottom_margin);
+    let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
+    let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
+
+    if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
+        (h_min, target_margin_x, "H")
+    } else if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
+        (v_min, target_margin_y, "V")
+    } else if h_min < v_min {
+        (h_min, target_margin_x, "H")
+    } else {
+        (v_min, target_margin_y, "V")
+    }
+}
+
+/// Binary search for the camera radius that produces the target margin.
+///
+/// For perspective: radius = camera distance (changes apparent size).
+/// For ortho: `OrbitCam` maps radius → `OrthographicProjection::scale`,
+/// so searching over radius effectively searches over scale.
+fn binary_search_for_fit(
+    points: &[Vec3],
+    geometric_center: Vec3,
+    object_radius: f32,
+    projection: &Projection,
+    params: &FitParams,
+) -> Result<FitSolution, FitError> {
     let mut min_radius = object_radius * MIN_RADIUS_MULTIPLIER;
     let mut max_radius = object_radius * MAX_RADIUS_MULTIPLIER;
     let mut best_radius = object_radius * INITIAL_RADIUS_MULTIPLIER;
@@ -208,35 +248,29 @@ pub fn calculate_fit(
 
     for iteration in 0..MAX_ITERATIONS {
         let test_radius = (min_radius + max_radius) * 0.5;
-
-        // Build the projection to use for this iteration.
-        // For ortho, we need to compute what `area` would be at this test scale.
         let test_projection = build_test_projection(projection, test_radius);
 
-        // Step 1: find the centered focus using accurate depth-based centering
         let centered_focus = refine_focus_centering(
             points,
             geometric_center,
             test_radius,
-            rot,
+            params.rot,
             &test_projection,
-            aspect_ratio,
-            ortho_fixed_distance,
-            is_ortho,
+            params.aspect_ratio,
+            params.ortho_fixed_distance,
+            params.is_ortho,
         );
 
-        // Step 2: evaluate margins at the centered focus position.
-        // For ortho, the camera distance is fixed regardless of test_radius.
-        let cam_distance = ortho_fixed_distance.unwrap_or(test_radius);
-        let cam_pos = centered_focus + rot * Vec3::new(0.0, 0.0, cam_distance);
+        let cam_distance = params.ortho_fixed_distance.unwrap_or(test_radius);
+        let cam_pos = centered_focus + params.rot * Vec3::new(0.0, 0.0, cam_distance);
         let cam_global =
-            GlobalTransform::from(Transform::from_translation(cam_pos).with_rotation(rot));
+            GlobalTransform::from(Transform::from_translation(cam_pos).with_rotation(params.rot));
 
         let Some((bounds, _)) = support::ScreenSpaceBounds::from_points(
             points,
             &cam_global,
             &test_projection,
-            aspect_ratio,
+            params.aspect_ratio,
         ) else {
             warn!(
                 "Iteration {iteration}: Points behind camera at radius {test_radius:.1}, searching higher"
@@ -246,27 +280,10 @@ pub fn calculate_fit(
         };
         found_projectable_bounds = true;
 
-        let (target_margin_x, target_margin_y) = calculate_target_margins(&bounds, zoom_multiplier);
-
-        // Find constraining dimension (minimum margin).
-        // When a dimension has degenerate (near-zero) screen extent, force the
-        // other dimension to constrain — the degenerate dimension has no
-        // meaningful projection to fit against.
-        let h_min = bounds.left_margin.min(bounds.right_margin);
-        let v_min = bounds.top_margin.min(bounds.bottom_margin);
-        let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
-        let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
-
+        let (target_margin_x, target_margin_y) =
+            calculate_target_margins(&bounds, params.zoom_multiplier);
         let (current_margin, target_margin, dimension) =
-            if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
-                (h_min, target_margin_x, "H")
-            } else if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
-                (v_min, target_margin_y, "V")
-            } else if h_min < v_min {
-                (h_min, target_margin_x, "H")
-            } else {
-                (v_min, target_margin_y, "V")
-            };
+            find_constraining_margin(&bounds, target_margin_x, target_margin_y);
 
         debug!(
             "Iteration {iteration}: radius={test_radius:.1} | {dimension} margin={current_margin:.3} \
@@ -274,7 +291,6 @@ pub fn calculate_fit(
             bounds.left_margin, bounds.right_margin, bounds.top_margin, bounds.bottom_margin
         );
 
-        // Track the closest match to target margin
         let margin_error = (current_margin - target_margin).abs();
         if margin_error < best_error {
             best_error = margin_error;
@@ -353,7 +369,6 @@ fn build_test_projection(projection: &Projection, test_radius: f32) -> Projectio
 ///
 /// For orthographic, centering is depth-independent (`centering_depth` = 1.0), so the shift
 /// is a direct 1:1 world-unit correction.
-#[allow(clippy::too_many_arguments)]
 fn refine_focus_centering(
     points: &[Vec3],
     initial_focus: Vec3,

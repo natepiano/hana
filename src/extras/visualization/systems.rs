@@ -121,7 +121,6 @@ fn draw_silhouette(
 
 /// Draws margin lines from boundary edges to screen edges and updates margin labels.
 /// Returns the set of edges that had visible margins.
-#[allow(clippy::too_many_arguments)]
 fn draw_margin_lines_and_labels(
     commands: &mut Commands,
     gizmos: &mut Gizmos<FitTargetGizmo>,

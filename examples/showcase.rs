@@ -290,12 +290,43 @@ fn init_selection_gizmo(mut config_store: ResMut<GizmoConfigStore>) {
     config.render_layers = RenderLayers::layer(SELECTION_GIZMO_LAYER);
 }
 
-#[allow(clippy::too_many_lines)]
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let ground = spawn_scene_objects(&mut commands, &mut meshes, &mut materials);
+
+    // Camera (middle-click orbit, shift+middle pan, trackpad support)
+    let camera = commands
+        .spawn(OrbitCam {
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            yaw: Some(CAMERA_START_YAW),
+            pitch: Some(CAMERA_START_PITCH),
+            ..default()
+        })
+        .id();
+
+    spawn_ui(&mut commands, camera);
+
+    commands.insert_resource(SceneEntities {
+        camera,
+        scene_bounds: ground,
+    });
+}
+
+fn spawn_scene_objects(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) -> Entity {
     // Ground plane (clickable from above — deselects and zooms to scene bounds)
     let ground = commands
         .spawn((
@@ -388,23 +419,10 @@ fn setup(
         .observe(on_mesh_hover)
         .observe(on_mesh_unhover);
 
-    // Camera (middle-click orbit, shift+middle pan, trackpad support)
-    let camera = commands
-        .spawn(OrbitCam {
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
-            yaw: Some(CAMERA_START_YAW),
-            pitch: Some(CAMERA_START_PITCH),
-            ..default()
-        })
-        .id();
+    ground
+}
 
+fn spawn_ui(commands: &mut Commands, camera: Entity) {
     // Instructions
     commands.spawn((
         Text::new("Click a mesh to zoom-to-fit\nClick the ground to zoom back out\n\nPress:\n'Esc' pause / unpause\n'P' toggle projection\n'D' debug visualization\n'H' Home w/animate fit to scene\n'A' animate camera\n'F' look at hovered mesh\n'G' look at + zoom-to-fit hovered mesh\n'R' randomize easing\n'E' reset to 'CubicOut' easing\n'I' toggle interrupt behavior\n'Q' cycle conflict policy\n'W' toggle second window"),
@@ -459,6 +477,30 @@ fn setup(
         UiTargetCamera(camera),
     ));
 
+    spawn_event_log_ui(commands, camera);
+
+    // Paused overlay (centered, hidden until Esc)
+    commands.spawn((
+        Text::new("PAUSED"),
+        TextFont {
+            font_size: 48.0,
+            ..default()
+        },
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.4)),
+        TextLayout::new_with_justify(Justify::Center),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Percent(46.0),
+            width: Val::Percent(100.0),
+            ..default()
+        },
+        Visibility::Hidden,
+        PausedOverlay,
+        UiTargetCamera(camera),
+    ));
+}
+
+fn spawn_event_log_ui(commands: &mut Commands, camera: Entity) {
     // Event log scroll container (right edge, scrollable, hidden until enabled)
     commands.spawn((
         Node {
@@ -518,31 +560,6 @@ fn setup(
         EventLogHint,
         UiTargetCamera(camera),
     ));
-
-    // Paused overlay (centered, hidden until Esc)
-    commands.spawn((
-        Text::new("PAUSED"),
-        TextFont {
-            font_size: 48.0,
-            ..default()
-        },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.4)),
-        TextLayout::new_with_justify(Justify::Center),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Percent(46.0),
-            width: Val::Percent(100.0),
-            ..default()
-        },
-        Visibility::Hidden,
-        PausedOverlay,
-        UiTargetCamera(camera),
-    ));
-
-    commands.insert_resource(SceneEntities {
-        camera,
-        scene_bounds: ground,
-    });
 }
 
 fn initial_fit_to_scene(
@@ -1147,7 +1164,6 @@ fn animate_fit_to_scene(
 /// The fit is deferred one frame via `pending_fit` because `OrbitCam` needs to
 /// process the projection change (syncing radius ↔ orthographic scale) before the
 /// fit calculation can produce correct results.
-#[allow(clippy::too_many_arguments)]
 fn toggle_projection(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
@@ -1324,7 +1340,6 @@ fn toggle_animation_conflict_policy(
 // ============================================================================
 
 /// Enables the event log when the initial `AnimateToFit` animation completes.
-#[allow(clippy::type_complexity)]
 fn enable_log_on_initial_fit(
     _trigger: On<AnimationEnd>,
     mut commands: Commands,
@@ -1371,7 +1386,6 @@ fn enable_log_on_initial_fit(
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn toggle_event_log(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,

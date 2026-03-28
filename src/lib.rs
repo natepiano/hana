@@ -41,53 +41,53 @@ mod util;
 
 // Extras re-exports
 #[cfg(feature = "zoom_overlay")]
-pub use extras::animation::CameraMove;
+pub use extras::AnimateToFit;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::animation::CameraMoveList;
+pub use extras::AnimationBegin;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::components::AnimationConflictPolicy;
+pub use extras::AnimationCancelled;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::components::CameraInputInterruptBehavior;
+pub use extras::AnimationConflictPolicy;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::components::CurrentFitTarget;
+pub use extras::AnimationEnd;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::components::FitVisualization;
+pub use extras::AnimationRejected;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::AnimateToFit;
+pub use extras::AnimationSource;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::AnimationBegin;
+pub use extras::CameraInputInterruptBehavior;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::AnimationCancelled;
+pub use extras::CameraMove;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::AnimationEnd;
+pub use extras::CameraMoveBegin;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::AnimationRejected;
+pub use extras::CameraMoveEnd;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::AnimationSource;
+pub use extras::CameraMoveList;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::CameraMoveBegin;
+pub use extras::CurrentFitTarget;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::CameraMoveEnd;
+pub use extras::FitTargetVisualizationConfig;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::LookAt;
+pub use extras::FitVisualization;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::LookAtAndZoomToFit;
+pub use extras::LookAt;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::PlayAnimation;
+pub use extras::LookAtAndZoomToFit;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::SetFitTarget;
+pub use extras::PlayAnimation;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::ZoomBegin;
+pub use extras::SetFitTarget;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::ZoomCancelled;
+pub use extras::ZoomBegin;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::ZoomContext;
+pub use extras::ZoomCancelled;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::ZoomEnd;
+pub use extras::ZoomContext;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::events::ZoomToFit;
+pub use extras::ZoomEnd;
 #[cfg(feature = "zoom_overlay")]
-pub use extras::visualization::FitTargetVisualizationConfig;
+pub use extras::ZoomToFit;
 
 /// Bevy plugin that contains the systems for controlling `OrbitCam` components.
 /// # Example
@@ -407,6 +407,31 @@ impl Default for OrbitCam {
     }
 }
 
+impl OrbitCam {
+    fn clamp_yaw(&self, yaw: f32) -> f32 {
+        yaw.clamp_optional(self.yaw_lower_limit, self.yaw_upper_limit)
+    }
+
+    fn clamp_pitch(&self, pitch: f32) -> f32 {
+        pitch.clamp_optional(self.pitch_lower_limit, self.pitch_upper_limit)
+    }
+
+    fn clamp_zoom(&self, zoom: f32) -> f32 {
+        zoom.clamp_optional(Some(self.zoom_lower_limit), self.zoom_upper_limit)
+    }
+
+    fn clamp_focus(&self, focus: Vec3) -> Vec3 {
+        let Some(shape) = self.focus_bounds_shape else {
+            return focus;
+        };
+        let origin = self.focus_bounds_origin;
+        match shape {
+            FocusBoundsShape::Cuboid(shape) => shape.closest_point(focus - origin) + origin,
+            FocusBoundsShape::Sphere(shape) => shape.closest_point(focus - origin) + origin,
+        }
+    }
+}
+
 /// Tracks which `OrbitCam` is active (should handle input events).
 ///
 /// Also stores the window and viewport dimensions, which are used for scaling mouse motion.
@@ -494,7 +519,6 @@ impl TrackpadBehavior {
 
 /// Gather data about the active viewport, i.e. the viewport the user is interacting with.
 /// Enables multiple viewports/windows.
-#[allow(clippy::too_many_arguments)]
 fn active_viewport_data(
     mut active_cam: ResMut<ActiveCameraData>,
     mouse_input: Res<ButtonInput<MouseButton>>,
@@ -587,8 +611,275 @@ fn active_viewport_data(
     }
 }
 
+// ============================================================================
+// pan_orbit_camera helpers
+// ============================================================================
+
+/// Aggregated camera input for a single frame.
+struct CameraInput {
+    orbit:                Vec2,
+    pan:                  Vec2,
+    scroll_line:          f32,
+    scroll_pixel:         f32,
+    orbit_button_changed: bool,
+}
+
+/// Initializes `OrbitCam` from the camera's current transform, applying all limits.
+fn initialize_orbit_cam(
+    pan_orbit: &mut OrbitCam,
+    transform: &mut Transform,
+    projection: &mut Projection,
+) {
+    let (yaw, pitch, radius) = util::calculate_from_translation_and_focus(
+        transform.translation,
+        pan_orbit.focus,
+        pan_orbit.axis,
+    );
+    let &mut mut yaw = pan_orbit.yaw.get_or_insert(yaw);
+    let &mut mut pitch = pan_orbit.pitch.get_or_insert(pitch);
+    let &mut mut radius = pan_orbit.radius.get_or_insert(radius);
+    let mut focus = pan_orbit.focus;
+
+    yaw = pan_orbit.clamp_yaw(yaw);
+    pitch = pan_orbit.clamp_pitch(pitch);
+    radius = pan_orbit.clamp_zoom(radius);
+    focus = pan_orbit.clamp_focus(focus);
+
+    pan_orbit.yaw = Some(yaw);
+    pan_orbit.pitch = Some(pitch);
+    pan_orbit.radius = Some(radius);
+    pan_orbit.target_yaw = yaw;
+    pan_orbit.target_pitch = pitch;
+    pan_orbit.target_radius = radius;
+    pan_orbit.target_focus = focus;
+
+    util::update_orbit_transform(
+        yaw,
+        pitch,
+        radius,
+        focus,
+        transform,
+        projection,
+        pan_orbit.axis,
+    );
+
+    pan_orbit.initialized = true;
+}
+
+/// Collects mouse, keyboard, and touch input into a single `CameraInput`.
+fn collect_camera_input(
+    entity: Entity,
+    pan_orbit: &OrbitCam,
+    active_cam: &ActiveCameraData,
+    mouse_key_tracker: &MouseKeyTracker,
+    touch_tracker: &TouchTracker,
+) -> CameraInput {
+    let mut orbit = Vec2::ZERO;
+    let mut pan = Vec2::ZERO;
+    let mut scroll_line = 0.0;
+    let mut scroll_pixel = 0.0;
+    let mut orbit_button_changed = false;
+
+    // Only skip getting input if the camera is inactive/disabled — it might still
+    // be lerping towards target values when the user is not actively controlling it.
+    if pan_orbit.enabled && active_cam.entity == Some(entity) {
+        let zoom_direction = if pan_orbit.reversed_zoom { -1.0 } else { 1.0 };
+
+        orbit = mouse_key_tracker.orbit * pan_orbit.orbit_sensitivity;
+        pan = mouse_key_tracker.pan * pan_orbit.pan_sensitivity;
+        scroll_line = mouse_key_tracker.scroll_line * zoom_direction * pan_orbit.zoom_sensitivity;
+        scroll_pixel = mouse_key_tracker.scroll_pixel * zoom_direction * pan_orbit.zoom_sensitivity;
+        orbit_button_changed = mouse_key_tracker.orbit_button_changed;
+
+        if pan_orbit.touch_enabled {
+            let (touch_orbit, touch_pan, touch_zoom_pixel) = match pan_orbit.touch_controls {
+                TouchControls::OneFingerOrbit => match touch_tracker.get_touch_gestures() {
+                    TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
+                    TouchGestures::OneFinger(one_finger_gestures) => {
+                        (one_finger_gestures.motion, Vec2::ZERO, 0.0)
+                    },
+                    TouchGestures::TwoFinger(two_finger_gestures) => (
+                        Vec2::ZERO,
+                        two_finger_gestures.motion,
+                        two_finger_gestures.pinch * 0.015,
+                    ),
+                },
+                TouchControls::TwoFingerOrbit => match touch_tracker.get_touch_gestures() {
+                    TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
+                    TouchGestures::OneFinger(one_finger_gestures) => {
+                        (Vec2::ZERO, one_finger_gestures.motion, 0.0)
+                    },
+                    TouchGestures::TwoFinger(two_finger_gestures) => (
+                        two_finger_gestures.motion,
+                        Vec2::ZERO,
+                        two_finger_gestures.pinch * 0.015,
+                    ),
+                },
+            };
+
+            orbit += touch_orbit * pan_orbit.orbit_sensitivity;
+            pan += touch_pan * pan_orbit.pan_sensitivity;
+            scroll_pixel += touch_zoom_pixel * zoom_direction * pan_orbit.zoom_sensitivity;
+        }
+    }
+
+    CameraInput {
+        orbit,
+        pan,
+        scroll_line,
+        scroll_pixel,
+        orbit_button_changed,
+    }
+}
+
+/// Applies orbit input to target yaw/pitch. Returns `true` if the camera moved.
+fn apply_orbit_input(orbit: Vec2, pan_orbit: &mut OrbitCam, window_size: Option<Vec2>) -> bool {
+    if orbit.length_squared() > 0.0 {
+        // Use window size for rotation otherwise the sensitivity is far too high for small
+        // viewports
+        if let Some(win_size) = window_size {
+            let delta_x = {
+                let delta = orbit.x / win_size.x * PI * 2.0;
+                if pan_orbit.is_upside_down {
+                    -delta
+                } else {
+                    delta
+                }
+            };
+            let delta_y = orbit.y / win_size.y * PI;
+            pan_orbit.target_yaw -= delta_x;
+            pan_orbit.target_pitch += delta_y;
+            return true;
+        }
+    }
+    false
+}
+
+/// Applies pan input to target focus. Returns `true` if the camera moved.
+fn apply_pan_input(
+    mut pan: Vec2,
+    pan_orbit: &mut OrbitCam,
+    viewport_size: Option<Vec2>,
+    transform: &Transform,
+    projection: &Projection,
+) -> bool {
+    if pan.length_squared() > 0.0 {
+        // Make panning distance independent of resolution and FOV
+        if let Some(vp_size) = viewport_size {
+            let mut multiplier = 1.0;
+            match *projection {
+                Projection::Perspective(ref p) => {
+                    pan *= Vec2::new(p.fov * p.aspect_ratio, p.fov) / vp_size;
+                    // Make panning proportional to distance away from focus point
+                    if let Some(radius) = pan_orbit.radius {
+                        multiplier = radius;
+                    }
+                },
+                Projection::Orthographic(ref p) => {
+                    pan *= Vec2::new(p.area.width(), p.area.height()) / vp_size;
+                },
+                Projection::Custom(_) => todo!(),
+            }
+            // Translate by local axes
+            let right = transform.rotation * pan_orbit.axis[0] * -pan.x;
+            let up = transform.rotation * pan_orbit.axis[1] * pan.y;
+            let translation = (right + up) * multiplier;
+            pan_orbit.target_focus += translation;
+            return true;
+        }
+    }
+    false
+}
+
+/// Applies scroll/zoom input to target radius. Returns `true` if the camera moved.
+fn apply_scroll_input(scroll_line: f32, scroll_pixel: f32, pan_orbit: &mut OrbitCam) -> bool {
+    if (scroll_line + scroll_pixel).abs() > 0.0 {
+        let line_delta = -scroll_line * pan_orbit.target_radius * 0.2;
+        let pixel_delta = -scroll_pixel * pan_orbit.target_radius * 0.2;
+
+        pan_orbit.target_radius += line_delta + pixel_delta;
+
+        // Pixel-based scrolling is added directly to the current value (already smooth)
+        pan_orbit.radius = pan_orbit
+            .radius
+            .map(|value| pan_orbit.clamp_zoom(value + pixel_delta));
+
+        return true;
+    }
+    false
+}
+
+/// Interpolates current values toward targets and updates the camera transform.
+fn smooth_and_update_transform(
+    pan_orbit: &mut OrbitCam,
+    transform: &mut Transform,
+    projection: &mut Projection,
+    delta: f32,
+    has_moved: bool,
+) {
+    let (Some(yaw), Some(pitch), Some(radius)) = (pan_orbit.yaw, pan_orbit.pitch, pan_orbit.radius)
+    else {
+        return;
+    };
+
+    #[allow(clippy::float_cmp)]
+    if !has_moved
+        // For smoothed values, we must check whether current value is different from target
+        // value. If we only checked whether the values were non-zero this frame, then
+        // the camera would instantly stop moving as soon as you stopped moving it, instead
+        // of smoothly stopping
+        && pan_orbit.target_yaw == yaw
+        && pan_orbit.target_pitch == pitch
+        && pan_orbit.target_radius == radius
+        && pan_orbit.target_focus == pan_orbit.focus
+        && !pan_orbit.force_update
+    {
+        return;
+    }
+
+    let new_yaw =
+        util::lerp_and_snap_f32(yaw, pan_orbit.target_yaw, pan_orbit.orbit_smoothness, delta);
+    let new_pitch = util::lerp_and_snap_f32(
+        pitch,
+        pan_orbit.target_pitch,
+        pan_orbit.orbit_smoothness,
+        delta,
+    );
+    let new_radius = util::lerp_and_snap_f32(
+        radius,
+        pan_orbit.target_radius,
+        pan_orbit.zoom_smoothness,
+        delta,
+    );
+    let new_focus = util::lerp_and_snap_vec3(
+        pan_orbit.focus,
+        pan_orbit.target_focus,
+        pan_orbit.pan_smoothness,
+        delta,
+    );
+
+    util::update_orbit_transform(
+        new_yaw,
+        new_pitch,
+        new_radius,
+        new_focus,
+        transform,
+        projection,
+        pan_orbit.axis,
+    );
+
+    pan_orbit.yaw = Some(new_yaw);
+    pan_orbit.pitch = Some(new_pitch);
+    pan_orbit.radius = Some(new_radius);
+    pan_orbit.focus = new_focus;
+    pan_orbit.force_update = false;
+}
+
+// ============================================================================
+// Main camera system
+// ============================================================================
+
 /// Main system for processing input and converting to transformations
-#[allow(clippy::too_many_lines)]
 fn pan_orbit_camera(
     active_cam: Res<ActiveCameraData>,
     mouse_key_tracker: Res<MouseKeyTracker>,
@@ -598,219 +889,43 @@ fn pan_orbit_camera(
     time_virt: Res<Time<Virtual>>,
 ) {
     for (entity, mut pan_orbit, mut transform, mut projection) in &mut orbit_cameras {
-        // Closures that apply limits to the yaw, pitch, and zoom values
-        let apply_zoom_limits = {
-            let zoom_upper_limit = pan_orbit.zoom_upper_limit;
-            let zoom_lower_limit = pan_orbit.zoom_lower_limit;
-            move |zoom: f32| zoom.clamp_optional(Some(zoom_lower_limit), zoom_upper_limit)
-        };
-
-        let apply_yaw_limits = {
-            let yaw_upper_limit = pan_orbit.yaw_upper_limit;
-            let yaw_lower_limit = pan_orbit.yaw_lower_limit;
-            move |yaw: f32| yaw.clamp_optional(yaw_lower_limit, yaw_upper_limit)
-        };
-
-        let apply_pitch_limits = {
-            let pitch_upper_limit = pan_orbit.pitch_upper_limit;
-            let pitch_lower_limit = pan_orbit.pitch_lower_limit;
-            move |pitch: f32| pitch.clamp_optional(pitch_lower_limit, pitch_upper_limit)
-        };
-
-        let apply_focus_limits = {
-            let origin = pan_orbit.focus_bounds_origin;
-            let shape = pan_orbit.focus_bounds_shape;
-
-            move |focus: Vec3| {
-                let Some(shape) = shape else {
-                    return focus;
-                };
-
-                match shape {
-                    FocusBoundsShape::Cuboid(shape) => shape.closest_point(focus - origin) + origin,
-                    FocusBoundsShape::Sphere(shape) => shape.closest_point(focus - origin) + origin,
-                }
-            }
-        };
-
         if !pan_orbit.initialized {
-            // Calculate yaw, pitch, and radius from the camera's position. If user sets all
-            // these explicitly, this calculation is wasted, but that's okay since it will only run
-            // once on init.
-            let (yaw, pitch, radius) = util::calculate_from_translation_and_focus(
-                transform.translation,
-                pan_orbit.focus,
-                pan_orbit.axis,
-            );
-            let &mut mut yaw = pan_orbit.yaw.get_or_insert(yaw);
-            let &mut mut pitch = pan_orbit.pitch.get_or_insert(pitch);
-            let &mut mut radius = pan_orbit.radius.get_or_insert(radius);
-            let mut focus = pan_orbit.focus;
-
-            // Apply limits
-            yaw = apply_yaw_limits(yaw);
-            pitch = apply_pitch_limits(pitch);
-            radius = apply_zoom_limits(radius);
-            focus = apply_focus_limits(focus);
-
-            // Set initial values
-            pan_orbit.yaw = Some(yaw);
-            pan_orbit.pitch = Some(pitch);
-            pan_orbit.radius = Some(radius);
-            pan_orbit.target_yaw = yaw;
-            pan_orbit.target_pitch = pitch;
-            pan_orbit.target_radius = radius;
-            pan_orbit.target_focus = focus;
-
-            util::update_orbit_transform(
-                yaw,
-                pitch,
-                radius,
-                focus,
-                &mut transform,
-                &mut projection,
-                pan_orbit.axis,
-            );
-
-            pan_orbit.initialized = true;
+            initialize_orbit_cam(&mut pan_orbit, &mut transform, &mut projection);
         }
 
-        // 1 - Get Input
-
-        let mut orbit = Vec2::ZERO;
-        let mut pan = Vec2::ZERO;
-        let mut scroll_line = 0.0;
-        let mut scroll_pixel = 0.0;
-        let mut orbit_button_changed = false;
-
-        // The reason we only skip getting input if the camera is inactive/disabled is because
-        // it might still be moving (lerping towards target values) when the user is not
-        // actively controlling it.
-        if pan_orbit.enabled && active_cam.entity == Some(entity) {
-            let zoom_direction = if pan_orbit.reversed_zoom { -1.0 } else { 1.0 };
-
-            orbit = mouse_key_tracker.orbit * pan_orbit.orbit_sensitivity;
-            pan = mouse_key_tracker.pan * pan_orbit.pan_sensitivity;
-            scroll_line =
-                mouse_key_tracker.scroll_line * zoom_direction * pan_orbit.zoom_sensitivity;
-            scroll_pixel =
-                mouse_key_tracker.scroll_pixel * zoom_direction * pan_orbit.zoom_sensitivity;
-            orbit_button_changed = mouse_key_tracker.orbit_button_changed;
-
-            if pan_orbit.touch_enabled {
-                let (touch_orbit, touch_pan, touch_zoom_pixel) = match pan_orbit.touch_controls {
-                    TouchControls::OneFingerOrbit => match touch_tracker.get_touch_gestures() {
-                        TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
-                        TouchGestures::OneFinger(one_finger_gestures) => {
-                            (one_finger_gestures.motion, Vec2::ZERO, 0.0)
-                        },
-                        TouchGestures::TwoFinger(two_finger_gestures) => (
-                            Vec2::ZERO,
-                            two_finger_gestures.motion,
-                            two_finger_gestures.pinch * 0.015,
-                        ),
-                    },
-                    TouchControls::TwoFingerOrbit => match touch_tracker.get_touch_gestures() {
-                        TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
-                        TouchGestures::OneFinger(one_finger_gestures) => {
-                            (Vec2::ZERO, one_finger_gestures.motion, 0.0)
-                        },
-                        TouchGestures::TwoFinger(two_finger_gestures) => (
-                            two_finger_gestures.motion,
-                            Vec2::ZERO,
-                            two_finger_gestures.pinch * 0.015,
-                        ),
-                    },
-                };
-
-                orbit += touch_orbit * pan_orbit.orbit_sensitivity;
-                pan += touch_pan * pan_orbit.pan_sensitivity;
-                scroll_pixel += touch_zoom_pixel * zoom_direction * pan_orbit.zoom_sensitivity;
-            }
-        }
-
-        // 2 - Process input into target yaw/pitch, or focus, radius
+        let input = collect_camera_input(
+            entity,
+            &pan_orbit,
+            &active_cam,
+            &mouse_key_tracker,
+            &touch_tracker,
+        );
 
         // Only check for upside down when orbiting started or ended this frame,
         // so we don't reverse the yaw direction while the user is still dragging
-        if orbit_button_changed {
+        if input.orbit_button_changed {
             let world_up = pan_orbit.axis[1];
             pan_orbit.is_upside_down = transform.up().dot(world_up) < 0.0;
         }
 
-        let mut has_moved = false;
-        if orbit.length_squared() > 0.0 {
-            // Use window size for rotation otherwise the sensitivity
-            // is far too high for small viewports
-            if let Some(win_size) = active_cam.window_size {
-                let delta_x = {
-                    let delta = orbit.x / win_size.x * PI * 2.0;
-                    if pan_orbit.is_upside_down {
-                        -delta
-                    } else {
-                        delta
-                    }
-                };
-                let delta_y = orbit.y / win_size.y * PI;
-                pan_orbit.target_yaw -= delta_x;
-                pan_orbit.target_pitch += delta_y;
+        let mut has_moved = apply_orbit_input(input.orbit, &mut pan_orbit, active_cam.window_size);
+        has_moved |= apply_pan_input(
+            input.pan,
+            &mut pan_orbit,
+            active_cam.viewport_size,
+            &transform,
+            &projection,
+        );
+        has_moved |= apply_scroll_input(input.scroll_line, input.scroll_pixel, &mut pan_orbit);
 
-                has_moved = true;
-            }
-        }
-        if pan.length_squared() > 0.0 {
-            // Make panning distance independent of resolution and FOV,
-            if let Some(vp_size) = active_cam.viewport_size {
-                let mut multiplier = 1.0;
-                match *projection {
-                    Projection::Perspective(ref p) => {
-                        pan *= Vec2::new(p.fov * p.aspect_ratio, p.fov) / vp_size;
-                        // Make panning proportional to distance away from focus point
-                        if let Some(radius) = pan_orbit.radius {
-                            multiplier = radius;
-                        }
-                    },
-                    Projection::Orthographic(ref p) => {
-                        pan *= Vec2::new(p.area.width(), p.area.height()) / vp_size;
-                    },
-                    Projection::Custom(_) => todo!(),
-                }
-                // Translate by local axes
-                let right = transform.rotation * pan_orbit.axis[0] * -pan.x;
-                let up = transform.rotation * pan_orbit.axis[1] * pan.y;
-                let translation = (right + up) * multiplier;
-                pan_orbit.target_focus += translation;
-                has_moved = true;
-            }
-        }
-        if (scroll_line + scroll_pixel).abs() > 0.0 {
-            // Calculate the impact of scrolling on the reference value
-            let line_delta = -scroll_line * (pan_orbit.target_radius) * 0.2;
-            let pixel_delta = -scroll_pixel * (pan_orbit.target_radius) * 0.2;
-
-            // Update the target value
-            pan_orbit.target_radius += line_delta + pixel_delta;
-
-            // If it is pixel-based scrolling, add it directly to the current value
-            pan_orbit.radius = pan_orbit
-                .radius
-                .map(|value| apply_zoom_limits(value + pixel_delta));
-
-            has_moved = true;
-        }
-
-        // 3 - Apply constraints
-
-        pan_orbit.target_yaw = apply_yaw_limits(pan_orbit.target_yaw);
-        pan_orbit.target_pitch = apply_pitch_limits(pan_orbit.target_pitch);
-        pan_orbit.target_radius = apply_zoom_limits(pan_orbit.target_radius);
-        pan_orbit.target_focus = apply_focus_limits(pan_orbit.target_focus);
-
+        // Apply constraints
+        pan_orbit.target_yaw = pan_orbit.clamp_yaw(pan_orbit.target_yaw);
+        pan_orbit.target_pitch = pan_orbit.clamp_pitch(pan_orbit.target_pitch);
+        pan_orbit.target_radius = pan_orbit.clamp_zoom(pan_orbit.target_radius);
+        pan_orbit.target_focus = pan_orbit.clamp_focus(pan_orbit.target_focus);
         if !pan_orbit.allow_upside_down {
             pan_orbit.target_pitch = pan_orbit.target_pitch.clamp(-PI / 2.0, PI / 2.0);
         }
-
-        // 4 - Update the camera's transform based on current values
 
         let delta = if pan_orbit.use_real_time {
             time_real.delta_secs()
@@ -818,64 +933,12 @@ fn pan_orbit_camera(
             time_virt.delta_secs()
         };
 
-        if let (Some(yaw), Some(pitch), Some(radius)) =
-            (pan_orbit.yaw, pan_orbit.pitch, pan_orbit.radius)
-        {
-            #[allow(clippy::float_cmp)]
-            if has_moved
-                // For smoothed values, we must check whether current value is different from target
-                // value. If we only checked whether the values were non-zero this frame, then
-                // the camera would instantly stop moving as soon as you stopped moving it, instead
-                // of smoothly stopping
-                || pan_orbit.target_yaw != yaw
-                || pan_orbit.target_pitch != pitch
-                || pan_orbit.target_radius != radius
-                || pan_orbit.target_focus != pan_orbit.focus
-                || pan_orbit.force_update
-            {
-                // Interpolate towards the target values
-                let new_yaw = util::lerp_and_snap_f32(
-                    yaw,
-                    pan_orbit.target_yaw,
-                    pan_orbit.orbit_smoothness,
-                    delta,
-                );
-                let new_pitch = util::lerp_and_snap_f32(
-                    pitch,
-                    pan_orbit.target_pitch,
-                    pan_orbit.orbit_smoothness,
-                    delta,
-                );
-                let new_radius = util::lerp_and_snap_f32(
-                    radius,
-                    pan_orbit.target_radius,
-                    pan_orbit.zoom_smoothness,
-                    delta,
-                );
-                let new_focus = util::lerp_and_snap_vec3(
-                    pan_orbit.focus,
-                    pan_orbit.target_focus,
-                    pan_orbit.pan_smoothness,
-                    delta,
-                );
-
-                util::update_orbit_transform(
-                    new_yaw,
-                    new_pitch,
-                    new_radius,
-                    new_focus,
-                    &mut transform,
-                    &mut projection,
-                    pan_orbit.axis,
-                );
-
-                // Update the current values
-                pan_orbit.yaw = Some(new_yaw);
-                pan_orbit.pitch = Some(new_pitch);
-                pan_orbit.radius = Some(new_radius);
-                pan_orbit.focus = new_focus;
-                pan_orbit.force_update = false;
-            }
-        }
+        smooth_and_update_transform(
+            &mut pan_orbit,
+            &mut transform,
+            &mut projection,
+            delta,
+            has_moved,
+        );
     }
 }

@@ -97,7 +97,6 @@ fn stash_camera_state(
 /// Shared fit preparation used by both `ZoomToFit` and `AnimateToFit` observers.
 /// Extracts target mesh vertices and computes the fit solution for the requested
 /// camera orientation.
-#[allow(clippy::too_many_arguments)]
 fn prepare_fit_for_target(
     context: &str,
     target: Entity,
@@ -271,7 +270,6 @@ fn begin_zoom_if_needed(
 /// This is the single decision point for all trigger-time logic: conflict
 /// resolution, zoom lifecycle (`ZoomBegin` / `ZoomAnimationMarker`), and
 /// animation begin.
-#[allow(clippy::type_complexity)]
 pub(super) fn on_play_animation(
     start: On<PlayAnimation>,
     mut commands: Commands,
