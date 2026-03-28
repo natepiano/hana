@@ -21,6 +21,7 @@ use super::types::Direction;
 use super::types::LayoutTextStyle;
 use super::types::Padding;
 use super::types::Sizing;
+use super::types::Unit;
 
 /// A single element in the layout tree.
 ///
@@ -208,7 +209,7 @@ impl LayoutTree {
                 // If this text element carries an explicit unit (e.g., from
                 // `LayoutTextStyle::new(Mm(6.0))`), convert from that unit to
                 // points directly. Otherwise use the panel-wide font_scale.
-                let scale = config.unit().map(|u| u.to_points()).unwrap_or(font_scale);
+                let scale = config.unit().map_or(font_scale, Unit::to_points);
                 *config = config.scaled(scale);
             }
         }
