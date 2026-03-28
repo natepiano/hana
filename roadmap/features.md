@@ -112,3 +112,10 @@
 | 37 | Baseline offset        | MSDF quads have extra space below baseline — investigate when visually noticeable. |
 | 38 | Debug gizmos → overlay | Replace `ShowTextGizmos` with panel-rendered debug overlay.       |
 | 39 | Performance observability | Stabilize `DiegeticPerfStats`, decouple from internal system names, integrate with Bevy `DiagnosticsStore`. |
+
+## Phase 12 — Rich text and syntax highlighting
+
+| # | Feature                | Notes                                                              |
+|---|------------------------|--------------------------------------------------------------------|
+| 40 | Rich text spans       | Per-span styling (color, weight, slant) within a single `b.text()` call. Enables mixed formatting in one text element without multiple elements. |
+| 41 | Syntax highlighting   | `syntect` integration for code coloring. Parse code strings into colored spans, render via rich text. Per-glyph vertex colors already supported by the MSDF renderer. |
