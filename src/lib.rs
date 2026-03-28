@@ -105,11 +105,12 @@ pub use plugin::ShowTextGizmos;
 pub use plugin::SurfaceShadow;
 pub use plugin::Unit;
 pub use plugin::UnitConfig;
-// Render.
 pub use render::PanelTextChild;
 pub use render::PendingGlyphs;
 pub use render::WorldText;
 pub use render::WorldTextReady;
+// Render.
+pub use render::default_panel_material;
 // Text.
 pub use text::Font;
 pub use text::FontId;

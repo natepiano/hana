@@ -11,6 +11,7 @@ mod sdf_material;
 mod text_renderer;
 mod world_text;
 
+pub use constants::default_panel_material;
 pub use panel_geometry::PanelGeometryPlugin;
 pub use panel_rtt::PanelRttPlugin;
 pub use text_renderer::LineMetricsSnapshot;

@@ -160,14 +160,16 @@ fn build_panel_geometry(
             let element_mat = panel.tree.element_material(surface.element_idx);
             let corner_radius = panel.tree.element_corner_radius(surface.element_idx);
 
-            // Resolve the base StandardMaterial. If there's no fill color
-            // and no custom material, use transparent so border-only
-            // elements don't render a white fill.
+            // Fill color comes from .background() or the element's own
+            // .material() base_color — never from the panel-level material.
+            // Panel material provides PBR properties (roughness, metallic,
+            // unlit) but not fill color. Border-only elements with no
+            // background and no element material are always transparent.
             let effective_color = surface.fill_color.or_else(|| {
-                if element_mat.is_some() || panel.material.is_some() {
-                    None // let resolve_material use the material's base_color
+                if element_mat.is_some() {
+                    None // element has a custom material — use its base_color
                 } else {
-                    Some(Color::NONE) // no fill, no material → transparent
+                    Some(Color::NONE) // no fill, no element material → transparent
                 }
             });
             let mut base = resolve_material(element_mat, panel.material.as_ref(), effective_color);

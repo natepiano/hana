@@ -25,10 +25,11 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::RenderMode;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
+use bevy_diegetic::default_panel_material;
 use bevy_panorbit_camera::PanOrbitCamera;
 use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::FitVisualization;
+use bevy_panorbit_camera_ext::AnimateToFit;
 use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
 use bevy_panorbit_camera_ext::SetFitTarget;
 use bevy_panorbit_camera_ext::ZoomToFit;
@@ -55,6 +56,19 @@ const PANEL_WIDTH: f32 = CARD_WIDTH * 3.0 + CARD_GAP * 2.0; // total
 const PANEL_HEIGHT: f32 = CARD_HEIGHT; // same height
 const ZOOM_MARGIN: f32 = 0.02;
 const ZOOM_DURATION_MS: u64 = 600;
+/// Illuminance calibrated so a Lambertian surface facing the light
+/// produces output ≈ albedo at the default Bevy exposure (EV100 = 9.7).
+/// Formula: PI / (2^(-9.7) / 1.2) ≈ 3137.
+const SCENE_ILLUMINANCE: f32 = 3137.0;
+
+/// How much illuminance changes per frame while +/- is held.
+const ILLUMINANCE_STEP: f32 = 50.0;
+
+// ── Home camera position ────────────────────────────────────────────
+const HOME_FOCUS: Vec3 = Vec3::new(0.0, -0.02, 0.0);
+const HOME_RADIUS: f32 = 0.35;
+const HOME_YAW: f32 = 0.0;
+const HOME_PITCH: f32 = 0.0;
 
 /// Marker for the scene's directional light.
 #[derive(Component)]
@@ -64,23 +78,32 @@ struct SceneLight;
 #[derive(Component)]
 struct HudText;
 
-/// Current lighting/material preset.
+/// Current lighting/material preset and saved illuminance.
 #[derive(Resource, Clone, Copy)]
-struct LightingPreset(u8);
+struct LightingPreset {
+    index:             u8,
+    /// Illuminance to restore when switching back to lights-on.
+    saved_illuminance: f32,
+}
 
 impl Default for LightingPreset {
-    fn default() -> Self { Self(0) }
+    fn default() -> Self {
+        Self {
+            index:             0,
+            saved_illuminance: SCENE_ILLUMINANCE,
+        }
+    }
 }
 
 impl LightingPreset {
-    const fn is_unlit(self) -> bool { self.0 == 1 || self.0 == 3 }
-    const fn lights_on(self) -> bool { self.0 == 0 || self.0 == 1 }
+    const fn is_unlit(self) -> bool { self.index == 2 || self.index == 3 }
+    const fn lights_on(self) -> bool { self.index == 0 || self.index == 2 }
 
     const fn label(self) -> &'static str {
-        match self.0 {
+        match self.index {
             0 => "[1] Lit + Lights On",
-            1 => "[2] Unlit + Lights On",
-            2 => "[3] Lit + Lights Off",
+            1 => "[2] Lit + Lights Off",
+            2 => "[3] Unlit + Lights On",
             _ => "[4] Unlit + Lights Off",
         }
     }
@@ -107,8 +130,8 @@ fn main() {
             Update,
             (
                 zoom_to_panel,
-                toggle_fit_visualization,
                 cycle_lighting_preset,
+                adjust_illuminance,
                 home_camera,
             ),
         )
@@ -143,23 +166,6 @@ fn zoom_to_panel(
     );
 }
 
-fn toggle_fit_visualization(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<(Entity, Option<&FitVisualization>), With<PanOrbitCamera>>,
-    mut commands: Commands,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyD) {
-        return;
-    }
-    for (camera, has_viz) in &cameras {
-        if has_viz.is_some() {
-            commands.entity(camera).remove::<FitVisualization>();
-        } else {
-            commands.entity(camera).insert(FitVisualization);
-        }
-    }
-}
-
 /// Cycles through lighting presets with keys 1-4.
 fn cycle_lighting_preset(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -181,35 +187,41 @@ fn cycle_lighting_preset(
     };
 
     let Some(idx) = new else { return };
-    preset.0 = idx;
+
+    // Save current illuminance before switching away from lights-on.
+    if preset.lights_on() {
+        if let Some(light) = lights.iter().next() {
+            preset.saved_illuminance = light.illuminance;
+        }
+    }
+
+    preset.index = idx;
 
     let unlit = preset.is_unlit();
     let lights_visible = preset.lights_on();
 
     for mut panel in &mut panels {
-        let mat = panel.material.get_or_insert_with(StandardMaterial::default);
+        let mat = panel.material.get_or_insert_with(default_panel_material);
         mat.unlit = unlit;
         let text_mat = panel
             .text_material
-            .get_or_insert_with(StandardMaterial::default);
+            .get_or_insert_with(default_panel_material);
         text_mat.unlit = unlit;
     }
 
-    // Set illuminance to 0 instead of hiding the light entity.
-    // Hiding the entity can cause Bevy to skip rendering passes,
-    // which breaks unlit materials that still need the pass to run.
-    let default_illuminance = DirectionalLight::default().illuminance;
+    // Restore saved illuminance for lights-on, zero for lights-off.
     for mut light in &mut lights {
         light.illuminance = if lights_visible {
-            default_illuminance
+            preset.saved_illuminance
         } else {
             0.0
         };
     }
 
+    let current_lux = lights.iter().next().map_or(0.0, |l| l.illuminance);
     for mut text in &mut hud {
         **text = format!(
-            "{}1: Lit+On  {}2: Unlit+On  {}3: Lit+Off  {}4: Unlit+Off  [H] Home  [D] Fit Viz",
+            "{}1: Lit+On  {}2: Lit+Off  {}3: Unlit+On  {}4: Unlit+Off  [H] Home  [+/-] Light  [R] Reset  lux: {current_lux:.0}",
             if idx == 0 { ">" } else { " " },
             if idx == 1 { ">" } else { " " },
             if idx == 2 { ">" } else { " " },
@@ -218,7 +230,44 @@ fn cycle_lighting_preset(
     }
 }
 
-/// Resets the camera to the home position and zooms to fit.
+/// Animates the camera to the home viewing angle, framing the panel.
+/// Adjusts scene illuminance with +/- keys (continuous while held).
+/// [R] resets to the calibrated default.
+fn adjust_illuminance(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut lights: Query<&mut DirectionalLight, With<SceneLight>>,
+    mut hud: Query<&mut Text, With<HudText>>,
+    preset: Res<LightingPreset>,
+) {
+    let up = keyboard.pressed(KeyCode::Equal) || keyboard.pressed(KeyCode::NumpadAdd);
+    let down = keyboard.pressed(KeyCode::Minus) || keyboard.pressed(KeyCode::NumpadSubtract);
+    let reset = keyboard.just_pressed(KeyCode::KeyR);
+
+    if !up && !down && !reset {
+        return;
+    }
+
+    for mut light in &mut lights {
+        if reset {
+            light.illuminance = SCENE_ILLUMINANCE;
+        } else if up {
+            light.illuminance += ILLUMINANCE_STEP;
+        } else if down {
+            light.illuminance = (light.illuminance - ILLUMINANCE_STEP).max(0.0);
+        }
+    }
+
+    // Update HUD with current illuminance.
+    let current = lights.iter().next().map_or(0.0, |l| l.illuminance);
+    for mut text in &mut hud {
+        **text = format!(
+            "{}  [H] Home  [+/-] Light  [R] Reset  lux: {:.0}",
+            preset.label(),
+            current,
+        );
+    }
+}
+
 fn home_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     panels: Query<Entity, With<DiegeticPanel>>,
@@ -231,7 +280,9 @@ fn home_camera(
     let Ok(panel) = panels.single() else { return };
     let Ok(camera) = cameras.single() else { return };
     commands.trigger(
-        ZoomToFit::new(camera, panel)
+        AnimateToFit::new(camera, panel)
+            .yaw(HOME_YAW)
+            .pitch(HOME_PITCH)
             .margin(ZOOM_MARGIN)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
@@ -269,10 +320,14 @@ fn setup(mut commands: Commands) {
         .observe(on_panel_clicked);
 
     // ── Lighting ────────────────────────────────────────────────────
+    // Illuminance calibrated so PBR output ≈ albedo for a Lambertian
+    // surface facing the light (N·L=1). Higher values cause the
+    // tonemapper to compress and desaturate colors.
     commands.spawn((
         SceneLight,
         DirectionalLight {
             shadows_enabled: true,
+            illuminance: SCENE_ILLUMINANCE,
             ..default()
         },
         Transform::from_xyz(0.0, 0.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -281,7 +336,7 @@ fn setup(mut commands: Commands) {
     // ── HUD ─────────────────────────────────────────────────────────
     commands.spawn((
         HudText,
-        Text::new(">1: Lit+On   2: Unlit+On   3: Lit+Off   4: Unlit+Off  [H] Home  [D] Fit Viz"),
+        Text::new(">1: Lit+On   2: Lit+Off   3: Unlit+On   4: Unlit+Off  [H] Home  [+/-] Light  [R] Reset  lux: 3137"),
         TextFont {
             font_size: 14.0,
             ..default()
@@ -298,10 +353,10 @@ fn setup(mut commands: Commands) {
     // ── Camera ──────────────────────────────────────────────────────
     commands.spawn((
         PanOrbitCamera {
-            focus: Vec3::new(0.0, -0.02, 0.0),
-            radius: Some(0.35),
-            yaw: Some(0.0),
-            pitch: Some(0.0),
+            focus: HOME_FOCUS,
+            radius: Some(HOME_RADIUS),
+            yaw: Some(HOME_YAW),
+            pitch: Some(HOME_PITCH),
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
@@ -320,6 +375,7 @@ fn setup(mut commands: Commands) {
             near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
             ..default()
         }),
+        bevy::camera::Exposure::default(),
     ));
 }
 

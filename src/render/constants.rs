@@ -21,7 +21,7 @@ pub(super) const DEFAULT_REFLECTANCE: f32 = 0.02;
 
 /// Returns the library's default matte `StandardMaterial`.
 #[must_use]
-pub(super) fn default_panel_material() -> StandardMaterial {
+pub fn default_panel_material() -> StandardMaterial {
     StandardMaterial {
         perceptual_roughness: DEFAULT_ROUGHNESS,
         metallic: DEFAULT_METALLIC,
