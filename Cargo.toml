@@ -109,3 +109,6 @@ name = "dimensions"
 
 [[example]]
 name = "paper_sizes"
+
+[[example]]
+name = "screen_space"

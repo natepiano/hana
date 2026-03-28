@@ -615,6 +615,7 @@ pub enum TextAlign {
 /// Unit::Meters          // 1 unit = 1 meter (Bevy default)
 /// Unit::Millimeters     // 1 unit = 1mm
 /// Unit::Points          // 1 unit = 1 typographic point (1/72 inch)
+/// Unit::Pixels          // 1 unit = 1 logical pixel on screen
 /// Unit::Inches          // 1 unit = 1 inch
 /// Unit::Custom(0.01)    // 1 unit = 1 centimeter
 /// ```
@@ -626,6 +627,14 @@ pub enum Unit {
     Millimeters,
     /// 1 unit = 1 typographic point (1/72 inch ≈ 0.000353 m).
     Points,
+    /// 1 unit = 1 logical pixel on screen.
+    ///
+    /// In the layout engine, pixels map 1:1 with typographic points
+    /// (`to_points()` returns 1.0). The actual screen-pixel behavior
+    /// is provided by the camera system: [`ScreenSpace`](crate::ScreenSpace)
+    /// panels use an orthographic camera where 1 world unit = 1 pixel;
+    /// world-space panels can use per-frame `Transform` scaling.
+    Pixels,
     /// 1 unit = 1 inch (0.0254 m).
     Inches,
     /// 1 unit = the given number of meters.
@@ -648,7 +657,7 @@ impl Unit {
         match self {
             Self::Meters => 1.0,
             Self::Millimeters => 0.001,
-            Self::Points => 0.0254 / 72.0,
+            Self::Points | Self::Pixels => 0.0254 / 72.0,
             Self::Inches => 0.0254,
             Self::Custom(mpu) => {
                 if mpu < MIN_CUSTOM_MPU {

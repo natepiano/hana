@@ -6,6 +6,7 @@
 mod components;
 mod config;
 mod diagnostics;
+mod screen_space;
 mod systems;
 
 use bevy::asset::AssetLoadFailedEvent;
@@ -15,6 +16,7 @@ pub use components::DiegeticPanel;
 pub use components::DiegeticPanelBuilder;
 pub use components::DiegeticTextMeasurer;
 pub use components::HueOffset;
+pub use components::ScreenSpace;
 pub use config::AtlasConfig;
 pub use config::GlyphWorkerThreads;
 pub use config::In;
@@ -22,9 +24,13 @@ pub use config::Mm;
 pub use config::PanelSize;
 pub use config::PaperSize;
 pub use config::Pt;
+pub use config::Px;
 pub use config::RasterQuality;
 pub use config::UnitConfig;
 use diagnostics::install as install_perf_diagnostics;
+use screen_space::cleanup_screen_space_cameras;
+use screen_space::propagate_screen_space_render_layers;
+use screen_space::setup_screen_space_cameras;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 use systems::compute_panel_layouts;
@@ -338,8 +344,16 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .add_systems(
             Update,
             (
+                setup_screen_space_cameras.after(compute_panel_layouts),
                 render_layout_gizmos.after(compute_panel_layouts),
                 render_debug_gizmos.after(compute_panel_layouts),
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                propagate_screen_space_render_layers,
+                cleanup_screen_space_cameras,
             ),
         );
 
