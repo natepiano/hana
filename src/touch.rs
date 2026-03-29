@@ -132,7 +132,6 @@ impl TouchTracker {
 }
 
 /// Read touch input and save it in `TouchTracker` resource for easy consumption by the main system
-#[allow(clippy::unwrap_used)]
 pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTracker>) {
     let pressed: Vec<&Touch> = touches.iter().collect();
 
@@ -142,15 +141,12 @@ pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTrack
             touch_tracker.prev_pressed = (None, None);
         },
         1 => {
-            let touch: &Touch = pressed.first().unwrap();
             touch_tracker.prev_pressed = touch_tracker.curr_pressed;
-            touch_tracker.curr_pressed = (Some(*touch), None);
+            touch_tracker.curr_pressed = (Some(*pressed[0]), None);
         },
         2 => {
-            let touch1: &Touch = pressed.first().unwrap();
-            let touch2: &Touch = pressed.last().unwrap();
             touch_tracker.prev_pressed = touch_tracker.curr_pressed;
-            touch_tracker.curr_pressed = (Some(*touch1), Some(*touch2));
+            touch_tracker.curr_pressed = (Some(*pressed[0]), Some(*pressed[1]));
         },
         _ => {},
     }

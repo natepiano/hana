@@ -172,7 +172,10 @@ pub fn calculate_fit(
     } else {
         margin.clamp(MIN_MARGIN, MAX_MARGIN)
     };
-    #[allow(clippy::float_cmp)]
+    #[allow(
+        clippy::float_cmp,
+        reason = "clamp returns input unchanged when in bounds — bitwise identical"
+    )]
     if clamped_margin != margin {
         warn!(
             "calculate_fit: clamped margin from {margin} to {clamped_margin} (expected [{MIN_MARGIN}, {MAX_MARGIN}])"
@@ -419,7 +422,10 @@ fn refine_focus_centering(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(
+    clippy::expect_used,
+    reason = "expect is idiomatic for test assertions"
+)]
 mod tests {
     use super::*;
 

@@ -11,9 +11,8 @@ pub fn calculate_from_translation_and_focus(
     let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
     let comp_vec = *translation - *focus;
     let mut radius = comp_vec.length();
-    #[allow(clippy::float_cmp)]
-    if radius == 0.0 {
-        radius = 0.05; // Radius 0 causes problems
+    if radius < f32::EPSILON {
+        radius = 0.05;
     }
     let comp_vec = axis * comp_vec;
     let yaw = comp_vec.x.atan2(comp_vec.z);
@@ -77,7 +76,11 @@ pub fn lerp_and_snap_position(from: Position, to: Position, smoothness: f32, dt:
 }
 
 #[cfg(test)]
-#[allow(clippy::unreadable_literal, clippy::float_cmp)]
+#[allow(
+    clippy::unreadable_literal,
+    clippy::float_cmp,
+    reason = "test assertions verify deterministic bitwise-exact float results"
+)]
 mod calculate_from_translation_and_focus_tests {
     use std::f32::consts::PI;
 
@@ -182,7 +185,11 @@ mod calculate_from_translation_and_focus_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unreadable_literal, clippy::float_cmp)]
+#[allow(
+    clippy::unreadable_literal,
+    clippy::float_cmp,
+    reason = "test assertions verify deterministic bitwise-exact float results"
+)]
 mod approx_equal_tests {
     use super::*;
 
@@ -203,7 +210,11 @@ mod approx_equal_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unreadable_literal, clippy::float_cmp)]
+#[allow(
+    clippy::unreadable_literal,
+    clippy::float_cmp,
+    reason = "test assertions verify deterministic bitwise-exact float results"
+)]
 mod lerp_and_snap_f32_tests {
     use super::*;
 
@@ -233,7 +244,11 @@ mod lerp_and_snap_f32_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::unreadable_literal, clippy::float_cmp)]
+#[allow(
+    clippy::unreadable_literal,
+    clippy::float_cmp,
+    reason = "test assertions verify deterministic bitwise-exact float results"
+)]
 mod lerp_and_snap_position_tests {
     use super::*;
 

@@ -12,29 +12,28 @@ pub struct FitTargetGizmo;
 /// Removed when fit target visualization is disabled.
 #[derive(Component, Reflect, Debug, Default, Clone)]
 #[reflect(Component)]
-#[allow(clippy::struct_field_names)]
-pub struct FitTargetViewportMargins {
+pub struct FitTargetViewportMarginPcts {
     /// Left margin as a percentage of screen width.
-    pub left_pct:   f32,
+    pub left:   f32,
     /// Right margin as a percentage of screen width.
-    pub right_pct:  f32,
+    pub right:  f32,
     /// Top margin as a percentage of screen height.
-    pub top_pct:    f32,
+    pub top:    f32,
     /// Bottom margin as a percentage of screen height.
-    pub bottom_pct: f32,
+    pub bottom: f32,
 }
 
-impl FitTargetViewportMargins {
+impl FitTargetViewportMarginPcts {
     /// Constructs margin percentages from screen-space bounds, computing
     /// screen dimensions once rather than per-edge.
     pub fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
         let screen_width = 2.0 * bounds.half_extent_x;
         let screen_height = 2.0 * bounds.half_extent_y;
         Self {
-            left_pct:   (bounds.left_margin / screen_width) * 100.0,
-            right_pct:  (bounds.right_margin / screen_width) * 100.0,
-            top_pct:    (bounds.top_margin / screen_height) * 100.0,
-            bottom_pct: (bounds.bottom_margin / screen_height) * 100.0,
+            left:   (bounds.left_margin / screen_width) * 100.0,
+            right:  (bounds.right_margin / screen_width) * 100.0,
+            top:    (bounds.top_margin / screen_height) * 100.0,
+            bottom: (bounds.bottom_margin / screen_height) * 100.0,
         }
     }
 }

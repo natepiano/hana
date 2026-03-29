@@ -16,7 +16,7 @@ use super::labels::MarginLabelParams;
 use super::screen_space;
 use super::types::FitTargetGizmo;
 use super::types::FitTargetOverlayConfig;
-use super::types::FitTargetViewportMargins;
+use super::types::FitTargetViewportMarginPcts;
 
 /// Calculates the color for an edge based on balance state.
 const fn calculate_edge_color(
@@ -195,11 +195,6 @@ fn cleanup_stale_margin_labels(
 }
 
 /// Draws screen-aligned bounds for all cameras with `FitVisualization`.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::type_complexity
-)]
 pub fn draw_fit_target_bounds(
     mut commands: Commands,
     mut gizmos: Gizmos<FitTargetGizmo>,
@@ -222,87 +217,122 @@ pub fn draw_fit_target_bounds(
     mut bounds_label_query: Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
     for (camera, cam, cam_global, projection, current_target) in &camera_query {
-        let Some((vertices, _)) = support::extract_mesh_vertices(
-            current_target.0,
+        draw_bounds_for_camera(
+            &mut commands,
+            &mut gizmos,
+            &config,
+            camera,
+            cam,
+            cam_global,
+            projection,
+            current_target,
             &children_query,
             &mesh_query,
             &global_transform_query,
             &meshes,
-        ) else {
-            continue;
-        };
-
-        let cam_basis = CameraBasis::from_global_transform(cam_global);
-
-        let Some(aspect_ratio) =
-            support::projection_aspect_ratio(projection, cam.logical_viewport_size())
-        else {
-            continue;
-        };
-
-        let Some((bounds, depths)) =
-            ScreenSpaceBounds::from_points(&vertices, cam_global, projection, aspect_ratio)
-        else {
-            continue;
-        };
-
-        let avg_depth = depths.depth_sum / depths.point_count.to_f32();
-        let is_ortho = matches!(projection, Projection::Orthographic(_));
-        let viewport_size = cam.logical_viewport_size();
-
-        // Update margin percentages on camera entity for BRP inspection.
-        // `try_insert` silently skips if the entity was despawned this frame
-        // (e.g. closing a secondary window while visualization is active).
-        commands
-            .entity(camera)
-            .try_insert(FitTargetViewportMargins::from_bounds(&bounds));
-
-        // Bounding rectangle
-        let corners = create_screen_corners(&bounds, &cam_basis, avg_depth, is_ortho);
-        draw_rectangle(&mut gizmos, &corners, &config);
-
-        // Silhouette convex hull
-        draw_silhouette(
-            &mut gizmos,
-            &vertices,
-            &cam_basis,
-            avg_depth,
-            is_ortho,
-            config.silhouette_color,
-        );
-
-        // "Screen space bounds" label
-        if let Some(vp) = viewport_size {
-            let upper_left = screen_space::norm_to_viewport(
-                bounds.min_norm_x,
-                bounds.max_norm_y,
-                bounds.half_extent_x,
-                bounds.half_extent_y,
-                vp,
-            );
-            labels::update_or_create_bounds_label(
-                &mut commands,
-                &mut bounds_label_query,
-                camera,
-                labels::bounds_label_position(upper_left),
-            );
-        }
-
-        // Margin lines + labels
-        let visible_edges = draw_margin_lines_and_labels(
-            &mut commands,
-            &mut gizmos,
             &mut label_query,
-            camera,
-            &bounds,
-            &cam_basis,
-            avg_depth,
-            is_ortho,
-            &config,
-            viewport_size,
+            &mut bounds_label_query,
         );
-
-        // Remove stale margin labels for this camera
-        cleanup_stale_margin_labels(&mut commands, &label_query, camera, &visible_edges);
     }
+}
+
+/// Draws bounds visualization for a single camera/target pair.
+fn draw_bounds_for_camera(
+    commands: &mut Commands,
+    gizmos: &mut Gizmos<FitTargetGizmo>,
+    config: &FitTargetOverlayConfig,
+    camera: Entity,
+    cam: &Camera,
+    cam_global: &GlobalTransform,
+    projection: &Projection,
+    current_target: &CurrentFitTarget,
+    children_query: &Query<&Children>,
+    mesh_query: &Query<&Mesh3d>,
+    global_transform_query: &Query<&GlobalTransform>,
+    meshes: &Assets<Mesh>,
+    label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
+    bounds_label_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
+) {
+    let Some((vertices, _)) = support::extract_mesh_vertices(
+        current_target.0,
+        children_query,
+        mesh_query,
+        global_transform_query,
+        meshes,
+    ) else {
+        return;
+    };
+
+    let cam_basis = CameraBasis::from_global_transform(cam_global);
+
+    let Some(aspect_ratio) =
+        support::projection_aspect_ratio(projection, cam.logical_viewport_size())
+    else {
+        return;
+    };
+
+    let Some((bounds, depths)) =
+        ScreenSpaceBounds::from_points(&vertices, cam_global, projection, aspect_ratio)
+    else {
+        return;
+    };
+
+    let avg_depth = depths.depth_sum / depths.point_count.to_f32();
+    let is_ortho = matches!(projection, Projection::Orthographic(_));
+    let viewport_size = cam.logical_viewport_size();
+
+    // Update margin percentages on camera entity for BRP inspection.
+    // `try_insert` silently skips if the entity was despawned this frame
+    // (e.g. closing a secondary window while visualization is active).
+    commands
+        .entity(camera)
+        .try_insert(FitTargetViewportMarginPcts::from_bounds(&bounds));
+
+    // Bounding rectangle
+    let corners = create_screen_corners(&bounds, &cam_basis, avg_depth, is_ortho);
+    draw_rectangle(gizmos, &corners, config);
+
+    // Silhouette convex hull
+    draw_silhouette(
+        gizmos,
+        &vertices,
+        &cam_basis,
+        avg_depth,
+        is_ortho,
+        config.silhouette_color,
+    );
+
+    // "Screen space bounds" label
+    if let Some(vp) = viewport_size {
+        let upper_left = screen_space::norm_to_viewport(
+            bounds.min_norm_x,
+            bounds.max_norm_y,
+            bounds.half_extent_x,
+            bounds.half_extent_y,
+            vp,
+        );
+        labels::update_or_create_bounds_label(
+            commands,
+            bounds_label_query,
+            camera,
+            labels::bounds_label_position(upper_left),
+        );
+    }
+
+    // Margin lines + labels
+    let visible_edges = draw_margin_lines_and_labels(
+        commands,
+        gizmos,
+        label_query,
+        camera,
+        &bounds,
+        &cam_basis,
+        avg_depth,
+        is_ortho,
+        config,
+        viewport_size,
+    );
+
+    // Remove stale margin labels for this camera
+    cleanup_stale_margin_labels(commands, label_query, camera, &visible_edges);
 }

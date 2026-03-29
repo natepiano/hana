@@ -7,6 +7,7 @@
 use bevy::camera::RenderTarget;
 use bevy::camera::Viewport;
 use bevy::prelude::*;
+use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy::window::WindowResized;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -20,7 +21,10 @@ fn main() {
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, set_camera_viewports)
+        .add_systems(
+            Update,
+            (cleanup_cameras_on_window_close, set_camera_viewports),
+        )
         .run();
 }
 
@@ -97,15 +101,31 @@ fn setup(
 #[derive(Component)]
 struct MinimapCamera;
 
-#[allow(clippy::unwrap_used)]
+/// Despawns cameras whose render-target window is marked `ClosingWindow`.
+/// Prevents `camera_system` from panicking on a stale `RenderTarget`.
+fn cleanup_cameras_on_window_close(
+    mut commands: Commands,
+    closing: Query<Entity, With<ClosingWindow>>,
+    cameras: Query<(Entity, &RenderTarget)>,
+) {
+    for (cam_entity, target) in &cameras {
+        if let RenderTarget::Window(WindowRef::Entity(window)) = target
+            && closing.get(*window).is_ok()
+        {
+            commands.entity(cam_entity).despawn();
+        }
+    }
+}
+
 fn set_camera_viewports(
     windows: Query<&Window>,
     mut resize_events: MessageReader<WindowResized>,
-    mut right_camera: Query<&mut Camera, With<MinimapCamera>>,
+    mut right_camera: Single<&mut Camera, With<MinimapCamera>>,
 ) {
     for resize_event in resize_events.read() {
-        let window = windows.get(resize_event.window).unwrap();
-        let mut right_camera = right_camera.single_mut().unwrap();
+        let Ok(window) = windows.get(resize_event.window) else {
+            continue;
+        };
         let size = window.resolution.physical_width() / 5;
         right_camera.viewport = Some(Viewport {
             physical_position: UVec2::new(window.resolution.physical_width() - size, 0),

@@ -16,7 +16,7 @@ use labels::BoundsLabel;
 use labels::MarginLabel;
 pub use types::FitTargetGizmo;
 pub use types::FitTargetOverlayConfig;
-use types::FitTargetViewportMargins;
+use types::FitTargetViewportMarginPcts;
 
 use super::components::FitOverlay;
 
@@ -54,7 +54,7 @@ fn on_remove_fit_visualization(
     // (e.g. closing a secondary window triggers component removal during despawn).
     commands
         .entity(camera)
-        .try_remove::<FitTargetViewportMargins>();
+        .try_remove::<FitTargetViewportMarginPcts>();
 
     // Clean up labels belonging to this camera
     for (entity, label) in &label_query {

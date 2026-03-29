@@ -158,7 +158,10 @@ pub struct ScreenSpaceBounds {
 impl ScreenSpaceBounds {
     /// Projects world-space points to normalized screen space and computes margins.
     /// Returns `None` if any point is behind the camera (perspective only).
-    #[allow(clippy::similar_names)]
+    #[allow(
+        clippy::similar_names,
+        reason = "min/max pairs per axis follow a consistent naming pattern"
+    )]
     pub fn from_points(
         points: &[Vec3],
         cam_global: &GlobalTransform,

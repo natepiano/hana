@@ -34,6 +34,10 @@ use crate::touch::TouchTracker;
 use crate::traits::OptionalClamp;
 
 #[cfg(feature = "fit_overlay")]
+#[allow(
+    clippy::used_underscore_binding,
+    reason = "false positive on enum variant fields"
+)]
 mod animation;
 #[cfg(feature = "fit_overlay")]
 mod components;
@@ -571,14 +575,20 @@ fn active_viewport_data(
 
         if input_just_activated {
             has_input = true;
-            #[allow(unused_mut, unused_assignments)]
-            let mut should_get_input = true;
-            #[cfg(feature = "bevy_egui")]
-            {
-                if block_on_egui_query.contains(entity) {
-                    should_get_input = !egui_wants_focus.prev && !egui_wants_focus.curr;
+            let should_get_input = {
+                #[cfg(feature = "bevy_egui")]
+                {
+                    if block_on_egui_query.contains(entity) {
+                        !egui_wants_focus.prev && !egui_wants_focus.curr
+                    } else {
+                        true
+                    }
                 }
-            }
+                #[cfg(not(feature = "bevy_egui"))]
+                {
+                    true
+                }
+            };
             if should_get_input {
                 // First check if cursor is in the same window as this camera
                 if let RenderTarget::Window(win_ref) = target {
@@ -846,7 +856,10 @@ fn smooth_and_update_transform(
         return;
     };
 
-    #[allow(clippy::float_cmp)]
+    #[allow(
+        clippy::float_cmp,
+        reason = "lerp_and_snap produces bitwise-identical values on convergence"
+    )]
     if !has_moved
         // For smoothed values, we must check whether current value is different from target
         // value. If we only checked whether the values were non-zero this frame, then

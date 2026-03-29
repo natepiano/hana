@@ -49,7 +49,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut active_cam: ResMut<ActiveCameraData>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    primary_window: Single<&Window, With<PrimaryWindow>>,
 ) {
     let size = Extent3d {
         width: 512,
@@ -160,10 +160,6 @@ fn setup(
     // is added, otherwise ActiveCameraData will be overwritten.
     // Note: you probably want to update the `viewport_size` and `window_size` whenever they change,
     // I haven't done this here for simplicity.
-    #[allow(clippy::expect_used)]
-    let primary_window = windows
-        .single()
-        .expect("There is only ever one primary window");
     let viewport_size = Some(Vec2::new(size.width.to_f32(), size.height.to_f32()));
     active_cam.set_if_neq(ActiveCameraData {
         // Set the entity to the entity ID of the camera you want to control. In this case, it's
