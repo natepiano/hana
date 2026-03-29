@@ -131,7 +131,6 @@ const STATUS_LAYOUT_HEIGHT: f32 = 280.0;
 const STATUS_WORLD_HEIGHT: f32 = 1.8;
 const STATUS_FONT_SIZE: f32 = 18.0;
 const STATUS_TITLE_SIZE: f32 = 28.0;
-const STATUS_BACKGROUND: Color = Color::srgb(1.0, 1.0, 0.0);
 const STATUS_BORDER_COLOR: Color = Color::WHITE;
 
 // ── Unicode blocks ─────────────────────────────────────────────────

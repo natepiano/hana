@@ -645,7 +645,7 @@ fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
                     hud_separator(b);
 
                     b.text("LUX", label);
-                    b.text(&format!("{lux:.0}"), value);
+                    b.text(format!("{lux:.0}"), value);
                     hud_separator(b);
 
                     // Preset list.
@@ -658,7 +658,7 @@ fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
                             HUD_INACTIVE_COLOR
                         };
                         b.text(
-                            &format!("{marker}{}", i + 1),
+                            format!("{marker}{}", i + 1),
                             LayoutTextStyle::new(HUD_BODY_SIZE).with_color(color),
                         );
                     }
