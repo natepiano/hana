@@ -78,6 +78,9 @@ struct ElementSurface {
     border_color:  Option<Color>,
     /// Index of the first render command for this element (for Z ordering).
     command_index: usize,
+    /// Active clip rect in layout coordinates when this surface was
+    /// gathered. `None` means unclipped.
+    clip_rect:     Option<BoundingBox>,
 }
 
 /// Extracts render commands, gathers fill + border per element, and
@@ -157,7 +160,7 @@ fn build_panel_geometry(
         }
 
         // ── Spawn between-children dividers (simple quads) ──────────
-        for (cmd_index, bounds, color) in &gathered.dividers {
+        for (cmd_index, bounds, color, _clip) in &gathered.dividers {
             spawn_divider(
                 panel,
                 *cmd_index,
@@ -208,19 +211,28 @@ fn build_panel_geometry(
 
 struct GatheredCommands {
     surfaces: HashMap<usize, ElementSurface>,
-    dividers: Vec<(usize, BoundingBox, Color)>,
+    dividers: Vec<(usize, BoundingBox, Color, Option<BoundingBox>)>,
 }
 
 /// Gathers fill + border data per element from render commands.
+///
+/// Computes the active clip rect for each command via
+/// [`clip::compute_clip_rects`] and stores it on each surface and divider.
 fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
+    let clip_rects = super::clip::compute_clip_rects(commands);
     let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
-    let mut dividers: Vec<(usize, BoundingBox, Color)> = Vec::new();
+    let mut dividers: Vec<(usize, BoundingBox, Color, Option<BoundingBox>)> = Vec::new();
 
     for (cmd_index, cmd) in commands.iter().enumerate() {
+        let clip = clip_rects[cmd_index];
         match &cmd.kind {
             RenderCommandKind::Rectangle { color, source } => {
+                // Skip surfaces entirely outside their clip rect.
+                if clip.is_some_and(|c| cmd.bounds.intersect(&c).is_none()) {
+                    continue;
+                }
                 if *source == RectangleSource::BetweenChildrenBorder {
-                    dividers.push((cmd_index, cmd.bounds, *color));
+                    dividers.push((cmd_index, cmd.bounds, *color, clip));
                 } else {
                     surfaces
                         .entry(cmd.element_idx)
@@ -231,6 +243,7 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
                             border_widths: [0.0; 4],
                             border_color:  None,
                             command_index: cmd_index,
+                            clip_rect:     clip,
                         })
                         .fill_color = Some(*color);
                 }
@@ -245,6 +258,7 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
                         border_widths: [0.0; 4],
                         border_color:  None,
                         command_index: cmd_index,
+                        clip_rect:     clip,
                     });
                 surface.border_widths = [
                     border.top.value,
@@ -298,13 +312,31 @@ fn spawn_sdf_element(
     let world_radii = corner_radius.to_meters_array(layout_mpu);
     let world_borders = surface.border_widths.map(|w| w * pts_mpu);
 
+    let half_w = world_w * 0.5;
+    let half_h = world_h * 0.5;
+
+    // Convert layout-space clip rect to local quad coords (centered, Y-up).
+    let clip_rect = surface.clip_rect.map_or(
+        bevy::math::Vec4::new(-half_w, -half_h, half_w, half_h),
+        |cr| {
+            let (cx, cy) = surface.bounds.center();
+            let left = (cr.x - cx) * pts_mpu;
+            let right = (cr.x + cr.width - cx) * pts_mpu;
+            // Layout Y-down → local Y-up.
+            let top = -(cr.y - cy) * pts_mpu;
+            let bottom = -(cr.y + cr.height - cy) * pts_mpu;
+            bevy::math::Vec4::new(left, bottom.min(top), right, bottom.max(top))
+        },
+    );
+
     let sdf_mat = super::sdf_material::sdf_panel_material(
         base,
-        world_w * 0.5,
-        world_h * 0.5,
+        half_w,
+        half_h,
         world_radii,
         world_borders,
         surface.border_color,
+        clip_rect,
     );
 
     let world_rect = bounds_to_world_rect(&surface.bounds, pts_mpu, anchor_x, anchor_y);

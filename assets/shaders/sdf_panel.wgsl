@@ -45,6 +45,9 @@ struct SdfPanelUniform {
     border_widths: vec4<f32>,
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
+    /// Clip rect in local quad space: [left, bottom, right, top].
+    /// Fragments outside are discarded.
+    clip_rect:     vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> sdf: SdfPanelUniform;
@@ -105,6 +108,13 @@ fn aa_factor(uv: vec2<f32>) -> f32 {
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
     // Map UV (0..1) to local coordinates centered on the quad.
     let local = (in.uv - 0.5) * 2.0 * sdf.half_size;
+
+    // Clip to parent scissor rect.
+    if local.x < sdf.clip_rect.x || local.x > sdf.clip_rect.z
+        || local.y < sdf.clip_rect.y || local.y > sdf.clip_rect.w {
+        discard;
+    }
+
     let dist = sd_rounded_box(local, sdf.half_size, sdf.corner_radii);
 
     // Discard fragments outside the rounded shape.
@@ -123,6 +133,12 @@ fn fragment(
 ) -> FragmentOutput {
     // Map UV (0..1) to local coordinates centered on the quad.
     let local = (in.uv - 0.5) * 2.0 * sdf.half_size;
+
+    // Clip to parent scissor rect.
+    if local.x < sdf.clip_rect.x || local.x > sdf.clip_rect.z
+        || local.y < sdf.clip_rect.y || local.y > sdf.clip_rect.w {
+        discard;
+    }
 
     // Outer shape distance.
     let outer_dist = sd_rounded_box(local, sdf.half_size, sdf.corner_radii);

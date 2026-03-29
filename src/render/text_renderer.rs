@@ -384,6 +384,7 @@ fn reconcile_panel_text_children(
 
         // Collect text commands from layout result, preserving the
         // command index for Z-offset layering in Geometry mode.
+        let clip_rects = super::clip::compute_clip_rects(&result.commands);
         let text_commands: Vec<_> = result
             .commands
             .iter()
@@ -395,6 +396,7 @@ fn reconcile_panel_text_children(
                     text.clone(),
                     config.clone(),
                     cmd.bounds,
+                    clip_rects[cmd_index],
                 )),
                 _ => None,
             })
@@ -411,7 +413,7 @@ fn reconcile_panel_text_children(
         // Track which existing indices we visited so we can despawn extras.
         let mut visited_indices: Vec<usize> = Vec::new();
 
-        for (element_idx, cmd_index, text, config, bounds) in &text_commands {
+        for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
             let style = config.as_standalone();
             let ptc = PanelTextChild {
                 element_idx: *element_idx,
@@ -421,6 +423,7 @@ fn reconcile_panel_text_children(
                 scale_y,
                 anchor_x,
                 anchor_y,
+                clip_rect: *clip,
             };
 
             visited_indices.push(*element_idx);
@@ -484,13 +487,20 @@ fn reconcile_panel_image_children(
             .get_layer(panel_entity)
             .map_or(RenderLayers::layer(0), RenderLayers::layer);
 
-        // Collect image commands.
+        // Collect image commands, skipping those entirely outside their clip rect.
+        let clip_rects = super::clip::compute_clip_rects(&result.commands);
         let image_commands: Vec<_> = result
             .commands
             .iter()
-            .filter_map(|cmd| match &cmd.kind {
+            .enumerate()
+            .filter_map(|(cmd_index, cmd)| match &cmd.kind {
                 RenderCommandKind::Image { handle, tint } => {
-                    Some((cmd.element_idx, handle.clone(), *tint, cmd.bounds))
+                    let clip = clip_rects[cmd_index];
+                    if clip.is_some_and(|c| cmd.bounds.intersect(&c).is_none()) {
+                        None
+                    } else {
+                        Some((cmd.element_idx, handle.clone(), *tint, cmd.bounds))
+                    }
                 },
                 _ => None,
             })
@@ -630,6 +640,7 @@ fn shape_panel_text_children(
             ptc.scale_y,
             ptc.anchor_x,
             ptc.anchor_y,
+            ptc.clip_rect,
         );
 
         let all_ready = stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs;
@@ -1023,6 +1034,7 @@ fn shape_text_to_quads(
     scale_y: f32,
     anchor_x: f32,
     anchor_y: f32,
+    clip_rect: Option<BoundingBox>,
 ) -> (Vec<(u32, GlyphQuadData)>, TextBuildStats) {
     let mut stats = TextBuildStats {
         texts: 1,
@@ -1120,6 +1132,23 @@ fn shape_text_to_quads(
     }
 
     super::glyph_quad::clip_overlapping_quads(&mut quads);
+
+    // Apply parent clip rect — cull/trim glyphs outside the clip region.
+    if let Some(cr) = clip_rect {
+        let clip_local = [
+            cr.x.mul_add(scale_x, -anchor_x),
+            -(cr.y + cr.height).mul_add(scale_y, -anchor_y),
+            (cr.x + cr.width).mul_add(scale_x, -anchor_x),
+            -cr.y.mul_add(scale_y, -anchor_y),
+        ];
+        quads.retain_mut(|(_, quad)| {
+            super::glyph_quad::clip_quad_to_rect(quad, clip_local).is_some_and(|clipped| {
+                *quad = clipped;
+                true
+            })
+        });
+    }
+
     stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
     stats.emitted_quads = quads.len();
 

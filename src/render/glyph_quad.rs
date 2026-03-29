@@ -107,6 +107,63 @@ pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
     }
 }
 
+/// Clips a glyph quad to an axis-aligned clip rect in panel-local Y-up
+/// coordinates. Returns `None` if the quad is entirely outside the clip rect.
+///
+/// `clip` is `[left, bottom, right, top]` in the same Y-up space as the
+/// quad's position. UV coordinates are adjusted proportionally so MSDF
+/// sampling remains correct for the visible portion.
+#[must_use]
+pub(super) fn clip_quad_to_rect(quad: &GlyphQuadData, clip: [f32; 4]) -> Option<GlyphQuadData> {
+    let [clip_left, clip_bottom, clip_right, clip_top] = clip;
+    let [qx, qy, qz] = quad.position;
+    let [qw, qh] = quad.size;
+
+    let quad_left = qx;
+    let quad_right = qx + qw;
+    let quad_top = qy;
+    let quad_bottom = qy - qh;
+
+    // Entirely outside.
+    if quad_right <= clip_left
+        || quad_left >= clip_right
+        || quad_top <= clip_bottom
+        || quad_bottom >= clip_top
+    {
+        return None;
+    }
+
+    let new_left = quad_left.max(clip_left);
+    let new_right = quad_right.min(clip_right);
+    let new_top = quad_top.min(clip_top);
+    let new_bottom = quad_bottom.max(clip_bottom);
+
+    let new_w = new_right - new_left;
+    let new_h = new_top - new_bottom;
+
+    // Proportional UV adjustment.
+    let [u_min, v_min, u_max, v_max] = quad.uv_rect;
+    let u_span = u_max - u_min;
+    let v_span = v_max - v_min;
+
+    let left_fraction = (new_left - quad_left) / qw;
+    let right_fraction = (new_right - quad_left) / qw;
+    let top_fraction = (quad_top - new_top) / qh;
+    let bottom_fraction = (quad_top - new_bottom) / qh;
+
+    Some(GlyphQuadData {
+        position: [new_left, new_top, qz],
+        size:     [new_w, new_h],
+        uv_rect:  [
+            u_span.mul_add(left_fraction, u_min),
+            v_span.mul_add(top_fraction, v_min),
+            u_span.mul_add(right_fraction, u_min),
+            v_span.mul_add(bottom_fraction, v_min),
+        ],
+        color:    quad.color,
+    })
+}
+
 /// Builds a `Mesh` from a list of glyph quads.
 ///
 /// Each glyph produces 4 vertices (quad corners) and 6 indices (two triangles).

@@ -119,6 +119,8 @@ pub struct PanelTextChild {
     pub anchor_x:      f32,
     /// Anchor Y offset in world units.
     pub anchor_y:      f32,
+    /// Active clip rect in layout coordinates, or `None` if unclipped.
+    pub clip_rect:     Option<BoundingBox>,
 }
 
 /// Fired on a [`WorldText`] entity when all its glyphs are rasterized

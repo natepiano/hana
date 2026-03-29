@@ -1,5 +1,6 @@
 //! Rendering systems for diegetic UI panels and text.
 
+mod clip;
 mod constants;
 #[cfg(test)]
 mod glyph_mesh_tests;

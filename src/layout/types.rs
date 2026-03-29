@@ -527,6 +527,26 @@ impl BoundingBox {
     pub const fn center(&self) -> (f32, f32) {
         (self.x + self.width * 0.5, self.y + self.height * 0.5)
     }
+
+    /// Returns the intersection of two bounding boxes, or `None` if they
+    /// don't overlap. Both boxes use top-left origin coordinates.
+    #[must_use]
+    pub fn intersect(&self, other: &BoundingBox) -> Option<BoundingBox> {
+        let x0 = self.x.max(other.x);
+        let y0 = self.y.max(other.y);
+        let x1 = (self.x + self.width).min(other.x + other.width);
+        let y1 = (self.y + self.height).min(other.y + other.height);
+        if x1 > x0 && y1 > y0 {
+            Some(BoundingBox {
+                x:      x0,
+                y:      y0,
+                width:  x1 - x0,
+                height: y1 - y0,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 /// Controls how the layout engine breaks text across lines.
@@ -1803,5 +1823,67 @@ mod tests {
         let (x, y) = Anchor::BottomRight.offset(100.0, 50.0);
         assert!((x - 100.0).abs() < f32::EPSILON);
         assert!((y - 50.0).abs() < f32::EPSILON);
+    }
+
+    // ── BoundingBox::intersect ─────────────────────────────────────
+
+    fn bbox(x: f32, y: f32, width: f32, height: f32) -> BoundingBox {
+        BoundingBox {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn approx_eq(a: &BoundingBox, b: &BoundingBox) -> bool {
+        (a.x - b.x).abs() < f32::EPSILON
+            && (a.y - b.y).abs() < f32::EPSILON
+            && (a.width - b.width).abs() < f32::EPSILON
+            && (a.height - b.height).abs() < f32::EPSILON
+    }
+
+    #[test]
+    fn intersect_overlapping_boxes() {
+        let a = bbox(0.0, 0.0, 10.0, 10.0);
+        let b = bbox(5.0, 5.0, 10.0, 10.0);
+        let result = a.intersect(&b).expect("should overlap");
+        assert!(approx_eq(&result, &bbox(5.0, 5.0, 5.0, 5.0)));
+    }
+
+    #[test]
+    fn intersect_contained_box() {
+        let outer = bbox(0.0, 0.0, 100.0, 100.0);
+        let inner = bbox(10.0, 20.0, 30.0, 40.0);
+        let result = outer.intersect(&inner).expect("should overlap");
+        assert!(approx_eq(&result, &inner));
+    }
+
+    #[test]
+    fn intersect_disjoint_boxes() {
+        let a = bbox(0.0, 0.0, 10.0, 10.0);
+        let b = bbox(20.0, 20.0, 10.0, 10.0);
+        assert!(a.intersect(&b).is_none());
+    }
+
+    #[test]
+    fn intersect_touching_edges() {
+        let a = bbox(0.0, 0.0, 10.0, 10.0);
+        let b = bbox(10.0, 0.0, 10.0, 10.0);
+        assert!(a.intersect(&b).is_none());
+    }
+
+    #[test]
+    fn intersect_zero_size_box() {
+        let a = bbox(5.0, 5.0, 0.0, 0.0);
+        let b = bbox(0.0, 0.0, 10.0, 10.0);
+        assert!(a.intersect(&b).is_none());
+    }
+
+    #[test]
+    fn intersect_identical_boxes() {
+        let a = bbox(10.0, 20.0, 30.0, 40.0);
+        let result = a.intersect(&a).expect("should overlap");
+        assert!(approx_eq(&result, &a));
     }
 }

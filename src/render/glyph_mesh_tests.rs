@@ -183,3 +183,124 @@ fn clip_cross_line_prevents_negative_width() {
         quads[1].1.size[0]
     );
 }
+
+// ── clip_quad_to_rect tests ────────────────────────────────────────
+
+fn make_clip_quad(x: f32, y: f32, w: f32, h: f32) -> GlyphQuadData {
+    GlyphQuadData {
+        position: [x, y, 0.0],
+        size:     [w, h],
+        uv_rect:  [0.0, 0.0, 1.0, 1.0],
+        color:    [1.0, 1.0, 1.0, 1.0],
+    }
+}
+
+#[test]
+fn clip_quad_fully_inside() {
+    let quad = make_clip_quad(2.0, 8.0, 4.0, 4.0);
+    // Clip: left=0, bottom=0, right=10, top=10
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    let clipped = result.expect("should be inside");
+    assert!((clipped.position[0] - 2.0).abs() < f32::EPSILON);
+    assert!((clipped.size[0] - 4.0).abs() < f32::EPSILON);
+    assert!((clipped.uv_rect[0] - 0.0).abs() < f32::EPSILON);
+    assert!((clipped.uv_rect[2] - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn clip_quad_fully_outside() {
+    let quad = make_clip_quad(20.0, 30.0, 4.0, 4.0);
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    assert!(result.is_none());
+}
+
+#[test]
+fn clip_quad_left_edge() {
+    // Quad from x=-2 to x=2, top=5, bottom=1
+    let quad = make_clip_quad(-2.0, 5.0, 4.0, 4.0);
+    // Clip left at 0.0
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    let clipped = result.expect("should be partially visible");
+    assert!((clipped.position[0] - 0.0).abs() < f32::EPSILON);
+    assert!((clipped.size[0] - 2.0).abs() < f32::EPSILON);
+    // Left 50% clipped → u_min should be 0.5
+    assert!((clipped.uv_rect[0] - 0.5).abs() < f32::EPSILON);
+    assert!((clipped.uv_rect[2] - 1.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn clip_quad_right_edge() {
+    // Quad from x=8 to x=12, top=5, bottom=1
+    let quad = make_clip_quad(8.0, 5.0, 4.0, 4.0);
+    // Clip right at 10.0
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    let clipped = result.expect("should be partially visible");
+    assert!((clipped.size[0] - 2.0).abs() < f32::EPSILON);
+    // Right 50% clipped → u_max should be 0.5
+    assert!((clipped.uv_rect[2] - 0.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn clip_quad_top_edge() {
+    // Quad top=12, bottom=8 → clip top at 10
+    let quad = make_clip_quad(2.0, 12.0, 4.0, 4.0);
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    let clipped = result.expect("should be partially visible");
+    assert!((clipped.position[1] - 10.0).abs() < f32::EPSILON);
+    assert!((clipped.size[1] - 2.0).abs() < f32::EPSILON);
+    // Top 50% clipped → v_min should be 0.5
+    assert!((clipped.uv_rect[1] - 0.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn clip_quad_bottom_edge() {
+    // Quad top=2, bottom=-2 → clip bottom at 0
+    let quad = make_clip_quad(2.0, 2.0, 4.0, 4.0);
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    let clipped = result.expect("should be partially visible");
+    assert!((clipped.size[1] - 2.0).abs() < f32::EPSILON);
+    // Bottom 50% clipped → v_max should be 0.5
+    assert!((clipped.uv_rect[3] - 0.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn clip_quad_corner_two_edges() {
+    // Quad from (-2, 12) size (4, 4) → spans x[-2, 2] y[8, 12]
+    // Clip to [0, 0, 10, 10] → visible x[0, 2] y[8, 10]
+    let quad = make_clip_quad(-2.0, 12.0, 4.0, 4.0);
+    let result = glyph_quad::clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+    let clipped = result.expect("should be partially visible");
+    assert!((clipped.position[0] - 0.0).abs() < f32::EPSILON);
+    assert!((clipped.position[1] - 10.0).abs() < f32::EPSILON);
+    assert!((clipped.size[0] - 2.0).abs() < f32::EPSILON);
+    assert!((clipped.size[1] - 2.0).abs() < f32::EPSILON);
+    // u: left 50% clipped
+    assert!((clipped.uv_rect[0] - 0.5).abs() < f32::EPSILON);
+    // v: top 50% clipped
+    assert!((clipped.uv_rect[1] - 0.5).abs() < f32::EPSILON);
+}
+
+#[test]
+fn clip_quad_uv_proportionality() {
+    // Custom UV range [0.25, 0.1, 0.75, 0.9]
+    let quad = GlyphQuadData {
+        position: [0.0, 10.0, 0.0],
+        size:     [8.0, 8.0],
+        uv_rect:  [0.25, 0.1, 0.75, 0.9],
+        color:    [1.0; 4],
+    };
+    // Clip to [2, 4, 6, 8] → visible x[2, 6] y[4, 8]
+    // Left 25% clipped, right 25% clipped, top 25% clipped, bottom 25% clipped
+    let result = glyph_quad::clip_quad_to_rect(&quad, [2.0, 4.0, 6.0, 8.0]);
+    let clipped = result.expect("should be partially visible");
+    let u_span = 0.75 - 0.25;
+    let v_span = 0.9 - 0.1;
+    // u_min = 0.25 + 0.25 * u_span = 0.25 + 0.125 = 0.375
+    assert!((clipped.uv_rect[0] - (0.25 + 0.25 * u_span)).abs() < 1e-6);
+    // u_max = 0.25 + 0.75 * u_span = 0.25 + 0.375 = 0.625
+    assert!((clipped.uv_rect[2] - (0.25 + 0.75 * u_span)).abs() < 1e-6);
+    // v_min = 0.1 + 0.25 * v_span = 0.1 + 0.2 = 0.3
+    assert!((clipped.uv_rect[1] - (0.1 + 0.25 * v_span)).abs() < 1e-6);
+    // v_max = 0.1 + 0.75 * v_span = 0.1 + 0.6 = 0.7
+    assert!((clipped.uv_rect[3] - (0.1 + 0.75 * v_span)).abs() < 1e-6);
+}

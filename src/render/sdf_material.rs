@@ -31,6 +31,11 @@ pub(super) struct SdfPanelUniform {
     pub border_widths: bevy::math::Vec4,
     /// Border color in linear RGBA.
     pub border_color:  bevy::math::Vec4,
+    /// Clip rect in local quad space: `[left, bottom, right, top]`.
+    /// Fragments outside this rect are discarded. Defaults to the full
+    /// quad bounds (`[-half_w, -half_h, half_w, half_h]`) when no clip
+    /// is active.
+    pub clip_rect:     bevy::math::Vec4,
 }
 
 /// SDF panel extension for `StandardMaterial`.
@@ -66,6 +71,7 @@ pub(super) fn sdf_panel_material(
     corner_radii: [f32; 4],
     border_widths: [f32; 4],
     border_color: Option<Color>,
+    clip_rect: bevy::math::Vec4,
 ) -> SdfPanelMaterial {
     base.double_sided = true;
     base.cull_mode = None;
@@ -81,10 +87,11 @@ pub(super) fn sdf_panel_material(
         base,
         extension: SdfPanelExtension {
             uniforms: SdfPanelUniform {
-                half_size:     bevy::math::Vec2::new(half_width, half_height),
-                corner_radii:  bevy::math::Vec4::from_array(corner_radii),
+                half_size: bevy::math::Vec2::new(half_width, half_height),
+                corner_radii: bevy::math::Vec4::from_array(corner_radii),
                 border_widths: bevy::math::Vec4::from_array(border_widths),
-                border_color:  border_linear,
+                border_color: border_linear,
+                clip_rect,
             },
         },
     }

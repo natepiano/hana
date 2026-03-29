@@ -546,8 +546,9 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                             .direction(Direction::LeftToRight)
                             .child_gap(CHILD_GAP)
                             .width(Sizing::grow_min(0.0))
-                            .height(Sizing::grow_min(0.0)),
+                            .height(Sizing::fixed(12.0)),
                         |b| {
+                            // Overflow visible — text spills out of the box.
                             b.with(
                                 El::new()
                                     .background(BLUE_BG)
@@ -556,18 +557,22 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                                     .width(Sizing::grow_min(0.0))
                                     .height(Sizing::grow_min(0.0)),
                                 |b| {
-                                    b.text("A", body_style.clone());
+                                    b.text("Overflow visible", body_style.clone());
+                                    b.text("This text spills out", body_style.clone());
                                 },
                             );
+                            // Overflow clipped — text is hidden at the boundary.
                             b.with(
                                 El::new()
+                                    .clip()
                                     .background(GREEN_BG)
                                     .border(Border::all(Mm(0.3), GREEN_ACCENT))
                                     .padding(Padding::all(2.0))
                                     .width(Sizing::grow_min(0.0))
                                     .height(Sizing::grow_min(0.0)),
                                 |b| {
-                                    b.text("B", body_style.clone());
+                                    b.text("Overflow clipped", body_style.clone());
+                                    b.text("This text is hidden", body_style.clone());
                                 },
                             );
                         },
@@ -627,6 +632,7 @@ fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
                     .padding(Padding::new(8.0, HUD_PADDING, 8.0, HUD_PADDING))
                     .child_gap(HUD_GAP)
                     .child_align_y(AlignY::Center)
+                    .clip()
                     .background(HUD_BACKGROUND)
                     .border(Border::all(1.0, HUD_BORDER_DIM)),
                 |b| {
