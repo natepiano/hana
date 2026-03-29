@@ -22,11 +22,11 @@ use bevy_panorbit_camera::PanOrbitCameraPlugin;
 use bevy_panorbit_camera::TrackpadBehavior;
 use bevy_window_manager::WindowManagerPlugin;
 
-const PANEL_WIDTH: f32 = 440.0;
-const PANEL_HEIGHT: f32 = 260.0;
-const TITLE_SIZE: f32 = 18.0;
-const HEADER_SIZE: f32 = 13.0;
-const BODY_SIZE: f32 = 12.0;
+const PANEL_WIDTH: f32 = 480.0;
+const PANEL_HEIGHT: f32 = 310.0;
+const TITLE_SIZE: f32 = 22.0;
+const HEADER_SIZE: f32 = 16.0;
+const BODY_SIZE: f32 = 15.0;
 const PANEL_PADDING: f32 = 12.0;
 
 const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.08, 0.12, 0.85);

@@ -13,6 +13,7 @@ use bevy::asset::AssetLoadFailedEvent;
 use bevy::camera::Camera3d;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureUsages;
 use bevy::render::view::Msaa;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
@@ -70,12 +71,9 @@ use crate::text::MsdfAtlas;
 #[allow(clippy::type_complexity)]
 fn ensure_oit_on_cameras(
     panels: Query<&DiegeticPanel>,
-    cameras: Query<
-        (Entity, Option<&Msaa>),
-        (
-            With<Camera3d>,
-            Without<OrderIndependentTransparencySettings>,
-        ),
+    mut cameras: Query<
+        (Entity, &mut Camera3d, Option<&Msaa>),
+        Without<OrderIndependentTransparencySettings>,
     >,
     mut commands: Commands,
 ) {
@@ -84,11 +82,15 @@ fn ensure_oit_on_cameras(
         return;
     }
 
-    for (entity, msaa) in &cameras {
+    for (entity, mut camera_3d, msaa) in &mut cameras {
         // Disable MSAA if it's enabled — OIT panics with MSAA > 1.
         if msaa.is_some_and(|m| m.samples() > 1) {
             commands.entity(entity).insert(Msaa::Off);
         }
+        // Set depth texture usage BEFORE extraction — Bevy's built-in OIT
+        // hook only patches `Added<Camera3d>` and misses cameras that gain
+        // OIT later via deferred commands.
+        camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
         commands
             .entity(entity)
             .insert(OrderIndependentTransparencySettings::default());

@@ -10,6 +10,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
@@ -19,10 +20,10 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
-use bevy_diegetic::RenderMode;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
@@ -64,6 +65,27 @@ const SCENE_ILLUMINANCE: f32 = 3137.0;
 /// How much illuminance changes per frame while +/- is held.
 const ILLUMINANCE_STEP: f32 = 50.0;
 
+// ── HUD ────────────────────────────────────────────────────────────
+const HUD_WIDTH: f32 = 1100.0;
+const HUD_HEIGHT: f32 = 58.0;
+const HUD_PADDING: f32 = 14.0;
+const HUD_GAP: f32 = 16.0;
+const HUD_TITLE_SIZE: f32 = 20.0;
+const HUD_BODY_SIZE: f32 = 18.0;
+const HUD_HINT_SIZE: f32 = 15.0;
+
+const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
+const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
+const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
+const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
+const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
+const HUD_LABEL_COLOR: Color = Color::srgba(0.5, 0.55, 0.7, 0.8);
+const HUD_VALUE_COLOR: Color = Color::srgb(0.3, 0.9, 1.0);
+const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
+const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
+const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
+const HUD_HINT_COLOR: Color = Color::srgba(0.55, 0.6, 0.75, 0.8);
+
 // ── Home camera position ────────────────────────────────────────────
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, -0.02, 0.0);
 const HOME_RADIUS: f32 = 0.35;
@@ -74,9 +96,9 @@ const HOME_PITCH: f32 = 0.0;
 #[derive(Component)]
 struct SceneLight;
 
-/// Marker for the HUD text overlay.
+/// Marker for the screen-space HUD panel.
 #[derive(Component)]
-struct HudText;
+struct HudPanel;
 
 /// Current lighting/material preset and saved illuminance.
 #[derive(Resource, Clone, Copy)]
@@ -99,12 +121,12 @@ impl LightingPreset {
     const fn is_unlit(self) -> bool { self.index == 2 || self.index == 3 }
     const fn lights_on(self) -> bool { self.index == 0 || self.index == 2 }
 
-    const fn label(self) -> &'static str {
+    const fn description(self) -> &'static str {
         match self.index {
-            0 => "[1] Lit + Lights On",
-            1 => "[2] Lit + Lights Off",
-            2 => "[3] Unlit + Lights On",
-            _ => "[4] Unlit + Lights Off",
+            0 => "Lit + On",
+            1 => "Lit + Off",
+            2 => "Unlit + On",
+            _ => "Unlit + Off",
         }
     }
 }
@@ -133,6 +155,7 @@ fn main() {
                 cycle_lighting_preset,
                 adjust_illuminance,
                 home_camera,
+                update_hud,
             ),
         )
         .run();
@@ -140,7 +163,7 @@ fn main() {
 
 fn zoom_to_panel(
     children: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    panels: Query<Entity, With<DiegeticPanel>>,
+    panels: Query<Entity, (With<DiegeticPanel>, Without<HudPanel>)>,
     cameras: Query<Entity, With<PanOrbitCamera>>,
     mut done: Local<bool>,
     mut commands: Commands,
@@ -170,9 +193,8 @@ fn zoom_to_panel(
 fn cycle_lighting_preset(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut preset: ResMut<LightingPreset>,
-    mut panels: Query<&mut DiegeticPanel>,
+    mut panels: Query<&mut DiegeticPanel, Without<HudPanel>>,
     mut lights: Query<&mut DirectionalLight, With<SceneLight>>,
-    mut hud: Query<&mut Text, With<HudText>>,
 ) {
     let new = if keyboard.just_pressed(KeyCode::Digit1) {
         Some(0)
@@ -217,17 +239,6 @@ fn cycle_lighting_preset(
             0.0
         };
     }
-
-    let current_lux = lights.iter().next().map_or(0.0, |l| l.illuminance);
-    for mut text in &mut hud {
-        **text = format!(
-            "{}1: Lit+On  {}2: Lit+Off  {}3: Unlit+On  {}4: Unlit+Off  [H] Home  [+/-] Light  [R] Reset  lux: {current_lux:.0}",
-            if idx == 0 { ">" } else { " " },
-            if idx == 1 { ">" } else { " " },
-            if idx == 2 { ">" } else { " " },
-            if idx == 3 { ">" } else { " " },
-        );
-    }
 }
 
 /// Animates the camera to the home viewing angle, framing the panel.
@@ -236,8 +247,6 @@ fn cycle_lighting_preset(
 fn adjust_illuminance(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut lights: Query<&mut DirectionalLight, With<SceneLight>>,
-    mut hud: Query<&mut Text, With<HudText>>,
-    preset: Res<LightingPreset>,
 ) {
     let up = keyboard.pressed(KeyCode::Equal) || keyboard.pressed(KeyCode::NumpadAdd);
     let down = keyboard.pressed(KeyCode::Minus) || keyboard.pressed(KeyCode::NumpadSubtract);
@@ -256,21 +265,11 @@ fn adjust_illuminance(
             light.illuminance = (light.illuminance - ILLUMINANCE_STEP).max(0.0);
         }
     }
-
-    // Update HUD with current illuminance.
-    let current = lights.iter().next().map_or(0.0, |l| l.illuminance);
-    for mut text in &mut hud {
-        **text = format!(
-            "{}  [H] Home  [+/-] Light  [R] Reset  lux: {:.0}",
-            preset.label(),
-            current,
-        );
-    }
 }
 
 fn home_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
-    panels: Query<Entity, With<DiegeticPanel>>,
+    panels: Query<Entity, (With<DiegeticPanel>, Without<HudPanel>)>,
     cameras: Query<Entity, With<PanOrbitCamera>>,
     mut commands: Commands,
 ) {
@@ -301,7 +300,7 @@ fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     );
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, windows: Query<&Window>) {
     // ── Single panel containing three cards ──────────────────────────
     let tree = build_unified_panel();
     commands
@@ -312,7 +311,6 @@ fn setup(mut commands: Commands) {
                 height: PANEL_HEIGHT,
                 layout_unit: Some(Unit::Millimeters),
                 anchor: Anchor::TopCenter,
-                render_mode: RenderMode::Geometry,
                 ..default()
             },
             Transform::from_xyz(0.0, 0.0, 0.0),
@@ -334,21 +332,22 @@ fn setup(mut commands: Commands) {
     ));
 
     // ── HUD ─────────────────────────────────────────────────────────
-    commands.spawn((
-        HudText,
-        Text::new(">1: Lit+On   2: Lit+Off   3: Unlit+On   4: Unlit+Off  [H] Home  [+/-] Light  [R] Reset  lux: 3137"),
-        TextFont {
-            font_size: 14.0,
-            ..default()
-        },
-        TextColor(Color::srgba(0.8, 0.8, 0.8, 0.7)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(10.0),
-            left: Val::Px(10.0),
-            ..default()
-        },
-    ));
+    let unlit_material = StandardMaterial {
+        unlit: true,
+        ..default_panel_material()
+    };
+    let hud_width = windows.iter().next().map_or(HUD_WIDTH, Window::width);
+    let (mut hud_panel, screen_space) = DiegeticPanel::builder()
+        .size_px(hud_width, HUD_HEIGHT)
+        .anchor(Anchor::TopLeft)
+        .material(unlit_material.clone())
+        .text_material(unlit_material)
+        .layout(|b| {
+            build_hud_content(b, LightingPreset::default(), SCENE_ILLUMINANCE);
+        })
+        .build_screen_space();
+    hud_panel.tree = build_hud_tree(LightingPreset::default(), SCENE_ILLUMINANCE, hud_width);
+    commands.spawn((HudPanel, hud_panel, screen_space, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────
     commands.spawn((
@@ -596,4 +595,119 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
         },
     );
     builder.build()
+}
+
+// ── HUD builders ───────────────────────────────────────────────────
+
+fn build_hud_tree(preset: LightingPreset, lux: f32, width: f32) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(width, HUD_HEIGHT);
+    build_hud_content(&mut builder, preset, lux);
+    builder.build()
+}
+
+fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
+    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let label = LayoutTextStyle::new(HUD_BODY_SIZE).with_color(HUD_LABEL_COLOR);
+    let value = LayoutTextStyle::new(HUD_BODY_SIZE).with_color(HUD_VALUE_COLOR);
+    let hint = LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_HINT_COLOR);
+
+    // Outer frame — dark surround with bright accent border.
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(2.0))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(2.0, HUD_BORDER_ACCENT)),
+        |b| {
+            // Inner frame — single horizontal row.
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::LeftToRight)
+                    .padding(Padding::new(8.0, HUD_PADDING, 8.0, HUD_PADDING))
+                    .child_gap(HUD_GAP)
+                    .child_align_y(AlignY::Center)
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(1.0, HUD_BORDER_DIM)),
+                |b| {
+                    b.text("PANEL CONTROL", title);
+                    hud_separator(b);
+
+                    b.text("PRESET", label.clone());
+                    b.with(
+                        El::new().width(Sizing::fixed(180.0)).height(Sizing::FIT),
+                        |b| {
+                            b.text(preset.description(), value.clone());
+                        },
+                    );
+                    hud_separator(b);
+
+                    b.text("LUX", label);
+                    b.text(&format!("{lux:.0}"), value);
+                    hud_separator(b);
+
+                    // Preset list.
+                    for i in 0u8..4 {
+                        let active = preset.index == i;
+                        let marker = if active { "\u{25b8}" } else { " " };
+                        let color = if active {
+                            HUD_ACTIVE_COLOR
+                        } else {
+                            HUD_INACTIVE_COLOR
+                        };
+                        b.text(
+                            &format!("{marker}{}", i + 1),
+                            LayoutTextStyle::new(HUD_BODY_SIZE).with_color(color),
+                        );
+                    }
+                    hud_separator(b);
+
+                    b.text("H Home   R Reset   \u{00b1} Light", hint);
+                },
+            );
+        },
+    );
+}
+
+fn hud_separator(b: &mut LayoutBuilder) {
+    b.with(
+        El::new()
+            .width(Sizing::fixed(1.0))
+            .height(Sizing::GROW)
+            .background(HUD_DIVIDER_COLOR),
+        |_| {},
+    );
+}
+
+fn update_hud(
+    preset: Res<LightingPreset>,
+    lights: Query<&DirectionalLight, With<SceneLight>>,
+    windows: Query<&Window>,
+    mut huds: Query<(&mut Transform, &mut DiegeticPanel), With<HudPanel>>,
+    mut previous_state: Local<(u8, u32, u32)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let lux = lights.iter().next().map_or(0.0, |l| l.illuminance);
+    let win_width = window.width();
+    let half_width = win_width / 2.0;
+    let half_height = window.height() / 2.0;
+    let state = (preset.index, lux.to_bits(), win_width.to_bits());
+
+    for (mut transform, mut panel) in &mut huds {
+        transform.translation.x = -half_width;
+        transform.translation.y = half_height;
+
+        let width_changed = (panel.width - win_width).abs() > 1.0;
+        if width_changed {
+            panel.width = win_width;
+        }
+        if *previous_state != state || width_changed {
+            panel.tree = build_hud_tree(*preset, lux, panel.width);
+        }
+    }
+    *previous_state = state;
 }

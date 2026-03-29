@@ -65,7 +65,10 @@
 
 | # | Feature              | Notes                                                              |
 |---|----------------------|--------------------------------------------------------------------|
-| 13 | Corner radius       | Rounded rect shader. 4-corner independent radii.                   |
+| 13 | Corner radius       | Rounded rect shader. 4-corner independent radii. **Done.**        |
+| 13b | SDF fragment clipping | Walk parent hierarchy, pass clip bounds + corner radius to fragment shader. Prerequisite for scroll containers, widgets, and any content overflow. (Inspired by univis_ui `UClip`.) |
+| 13c | Fit-content roots   | Panel auto-sizes to content with optional min/max constraints. Eliminates manual width/height for simple panels. (Inspired by univis_ui `fit_content_world_3d`.) |
+| 13d | Chamfered corners   | `CornerStyle` enum: `Rounded` (existing) or `Cut` (diagonal chamfer). Small SDF shader delta. (Inspired by univis_ui `Shape::Cut`.) |
 | 14 | Image elements      | Image content in panel elements.                                   |
 | 15 | Typography overlay  | Feature-gated. `TypographyOverlay` component — font metric lines, per-glyph bounding boxes. In progress. |
 | 16 | Panel layout overlay | Feature-gated. `LayoutOverlay` component — sizing modes, padding, alignment, borders. Color-coded by sizing mode. |
@@ -74,13 +77,20 @@
 
 | # | Feature              | Notes                                                              |
 |---|----------------------|--------------------------------------------------------------------|
-| 17 | Scroll containers   | Scroll offset, content size tracking. Needed for overflow.         |
+| 17a | Flex wrap           | `FlexWrap` / `WrapReverse` on containers. Layout primitive needed before scroll containers — wrapping is the simpler overflow case. (Inspired by univis_ui `UFlexWrap`.) |
+| 17b | Extended alignment  | `space-between`, `space-around`, `space-evenly` for child distribution along main axis. Baseline alignment for cross-axis text alignment. (Inspired by univis_ui CSS-like alignment.) |
+| 17 | Scroll containers   | Scroll offset, content size tracking. Needed for overflow. Unblocked by SDF clipping (13b). |
 | 18 | Scroll in 3D        | Scroll containers driven by 3D raycasts, not mouse events.        |
 | 19 | Text alignment       | Per-text-element Left/Center/Right alignment.                     |
 | 20 | Floating elements    | Attach points, z-index, pointer capture.                          |
 | 21 | Pointer/hover state  | Track hovered element. In 3D this means raycasting.               |
+| 21b | Interaction states  | Auto-tint elements based on hover/press state. `InteractionColors` component for idle/hovered/pressed color transitions. (Inspired by univis_ui `UInteractionColors`.) |
 | 22 | Element IDs          | String IDs for debug, pointer targeting, scroll.                  |
 | 23 | Aspect ratio         | `aspect_ratio()` on elements.                                     |
+| 23b | Grid layout         | CSS Grid with tracks, auto-flow, and explicit cell placement. Major layout feature. (Inspired by univis_ui Grid display.) |
+| 23c | Stack layout        | Overlapping children with z-index ordering. (Inspired by univis_ui Stack display.) |
+| 23d | Masonry layout      | Pinterest-style columns where items fill vertical gaps. (Inspired by univis_ui Masonry display.) |
+| 23e | Radial layout       | Children arranged in a circle or arc. (Inspired by univis_ui Radial display.) |
 
 ## Phase 9 — Rich text & effects
 
@@ -108,6 +118,7 @@
 | # | Feature                | Notes                                                              |
 |---|------------------------|--------------------------------------------------------------------|
 | 35 | Custom element data   | Arbitrary data on render commands.                                 |
+| 35b | Root isolation       | Prevent z-fighting and interaction leaking between separate world-space UI trees. `RenderLayers` handles screen-space; world-space needs explicit depth management. (Inspired by univis_ui root capsules.) |
 | 36 | Per-side border colors | Currently uniform color only.                                     |
 | 37 | Baseline offset        | MSDF quads have extra space below baseline — investigate when visually noticeable. |
 | 38 | Debug gizmos → overlay | Replace `ShowTextGizmos` with panel-rendered debug overlay.       |
@@ -119,3 +130,30 @@
 |---|------------------------|--------------------------------------------------------------------|
 | 40 | Rich text spans       | Per-span styling (color, weight, slant) within a single `b.text()` call. Enables mixed formatting in one text element without multiple elements. |
 | 41 | Syntax highlighting   | `syntect` integration for code coloring. Parse code strings into colored spans, render via rich text. Per-glyph vertex colors already supported by the MSDF renderer. |
+
+## Phase 13 — Widget library
+
+Depends on: interaction states (#21, #21b), SDF clipping (#13b), scroll containers (#17).
+Inspired by univis_ui's built-in widget set.
+
+| # | Feature                | Notes                                                              |
+|---|------------------------|--------------------------------------------------------------------|
+| 42 | Button               | Clickable element with interaction state callbacks. Builds on #21. |
+| 43 | Toggle / Checkbox    | Boolean state control with visual indicator.                       |
+| 44 | Radio group          | Mutual-exclusion selection across a set of options.                |
+| 45 | Seekbar / Slider     | Continuous value input via drag. Needs pointer capture (#20).      |
+| 46 | Drag value           | Numeric input adjusted by dragging (Blender-style). Variant of #45. |
+| 47 | Select / Dropdown    | Pop-up option list. Needs clipping (#13b) and floating (#20).      |
+| 48 | Text input field     | Editable text with cursor, selection, and basic editing. Major feature. |
+| 49 | Progress bar         | Visual progress indicator. Simple — percentage fill of a container. |
+| 50 | Scroll view (widget) | Packaged scroll container with scrollbar chrome. Builds on #17.    |
+| 51 | Icon button          | Button with an image/icon instead of text. Builds on #14 and #42.  |
+| 52 | Badge / Pill         | Small status indicator label.                                      |
+| 53 | Menu                 | Hierarchical menu with submenus. Needs floating (#20) and clipping (#13b). |
+| 54 | Divider (widget)     | Formalize the existing layout-primitive divider as a reusable widget. |
+
+## Phase 14 — Distribution
+
+| # | Feature                | Notes                                                              |
+|---|------------------------|--------------------------------------------------------------------|
+| 55 | Publish to crates.io | Stabilize public API, add crate-level docs, publish.               |

@@ -1,10 +1,13 @@
 //! Systems for managing screen-space overlay cameras and render layer
 //! propagation for [`ScreenSpace`] panels.
 
+use bevy::camera::Camera3d;
+use bevy::camera::Camera3dDepthTextureUsage;
 use bevy::camera::ClearColorConfig;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureUsages;
 
 use super::components::ScreenSpace;
 
@@ -54,7 +57,12 @@ pub(super) fn setup_screen_space_cameras(
                 render_layers: layers.clone(),
                 camera_order:  order,
             },
-            Camera3d::default(),
+            Camera3d {
+                depth_texture_usages: Camera3dDepthTextureUsage(
+                    (TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING).bits(),
+                ),
+                ..default()
+            },
             Camera {
                 order,
                 clear_color: ClearColorConfig::None,

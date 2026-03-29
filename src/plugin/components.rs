@@ -22,11 +22,16 @@ use crate::layout::Unit;
 pub enum RenderMode {
     /// Render-to-texture: all content composited into an offscreen texture,
     /// displayed as a single textured quad. Fixed resolution, one draw call.
-    #[default]
+    ///
+    /// Text is rasterized to the intermediate texture and resampled on
+    /// display, which causes visible softness compared to [`Geometry`] mode.
+    /// Use only when a single draw call is required or when the panel is
+    /// viewed at a distance where per-glyph MSDF meshes are unnecessary.
     Texture,
     /// Direct 3D geometry: backgrounds, borders, and text rendered as
     /// separate meshes in the scene. Infinite resolution, multiple draw
     /// calls. Layer ordering uses `depth_bias` on the transparent sort key.
+    #[default]
     Geometry,
 }
 
@@ -96,7 +101,7 @@ pub struct DiegeticPanel {
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
     pub world_height:   Option<f32>,
-    /// How the panel renders its content. Defaults to [`RenderMode::Texture`].
+    /// How the panel renders its content. Defaults to [`RenderMode::Geometry`].
     pub render_mode:    RenderMode,
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via [`GlyphShadowMode`].
@@ -125,7 +130,7 @@ impl Default for DiegeticPanel {
             anchor:         Anchor::TopLeft,
             world_width:    None,
             world_height:   None,
-            render_mode:    RenderMode::Texture,
+            render_mode:    RenderMode::Geometry,
             surface_shadow: SurfaceShadow::Off,
             material:       None,
             text_material:  None,
@@ -232,7 +237,7 @@ impl DiegeticPanelBuilder {
         self
     }
 
-    /// Sets the rendering mode. Defaults to [`RenderMode::Texture`].
+    /// Sets the rendering mode. Defaults to [`RenderMode::Geometry`].
     #[must_use]
     pub const fn render_mode(mut self, mode: RenderMode) -> Self {
         self.render_mode = mode;
