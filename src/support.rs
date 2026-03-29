@@ -1,6 +1,7 @@
 //! Shared utility functions used across multiple modules.
 
 use bevy::prelude::*;
+use bevy_kana::Position;
 
 // ============================================================================
 // Camera basis
@@ -9,7 +10,7 @@ use bevy::prelude::*;
 /// Camera basis vectors extracted from a `GlobalTransform`.
 /// Bundles the position and orientation vectors that are frequently passed together.
 pub struct CameraBasis {
-    pub pos:     Vec3,
+    pub pos:     Position,
     pub right:   Vec3,
     pub up:      Vec3,
     pub forward: Vec3,
@@ -19,7 +20,7 @@ impl CameraBasis {
     pub fn from_global_transform(global: &GlobalTransform) -> Self {
         let rot = global.rotation();
         Self {
-            pos:     global.translation(),
+            pos:     Position(global.translation()),
             right:   rot * Vec3::X,
             up:      rot * Vec3::Y,
             forward: rot * Vec3::NEG_Z,
@@ -72,7 +73,7 @@ impl ProjectionParams {
 /// Returns `(norm_x, norm_y, depth)` or `None` if the point is behind the camera
 /// (perspective only — orthographic points are always valid).
 pub fn project_point(point: Vec3, cam: &CameraBasis, is_ortho: bool) -> Option<(f32, f32, f32)> {
-    let relative = point - cam.pos;
+    let relative = point - *cam.pos;
     let depth = relative.dot(cam.forward);
     if !is_ortho && depth <= MIN_VISIBLE_DEPTH {
         return None;

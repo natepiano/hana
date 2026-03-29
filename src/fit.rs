@@ -7,6 +7,7 @@
 use core::fmt;
 
 use bevy::prelude::*;
+use bevy_kana::Position;
 
 use super::support;
 
@@ -63,7 +64,7 @@ pub struct FitSolution {
     /// The optimal orbital radius.
     pub radius: f32,
     /// The centered focus point.
-    pub focus:  Vec3,
+    pub focus:  Position,
 }
 
 /// Explicit fit calculation failures.
@@ -240,7 +241,7 @@ fn binary_search_for_fit(
     let mut min_radius = object_radius * MIN_RADIUS_MULTIPLIER;
     let mut max_radius = object_radius * MAX_RADIUS_MULTIPLIER;
     let mut best_radius = object_radius * INITIAL_RADIUS_MULTIPLIER;
-    let mut best_focus = geometric_center;
+    let mut best_focus = Position(geometric_center);
     let mut best_error = f32::INFINITY;
     let mut found_projectable_bounds = false;
 
@@ -295,7 +296,7 @@ fn binary_search_for_fit(
         if margin_error < best_error {
             best_error = margin_error;
             best_radius = test_radius;
-            best_focus = centered_focus;
+            best_focus = Position(centered_focus);
         }
 
         if current_margin > target_margin {

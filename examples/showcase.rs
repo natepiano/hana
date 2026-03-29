@@ -1476,8 +1476,8 @@ fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLog>) {
 fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
         "CameraMoveBegin\n  translation={}\n  focus={}\n  duration={:.0}ms\n  easing={:?}",
-        fmt_vec3(event.camera_move.translation()),
-        fmt_vec3(event.camera_move.focus()),
+        fmt_vec3(*event.camera_move.translation()),
+        fmt_vec3(*event.camera_move.focus()),
         event.camera_move.duration_ms(),
         event.camera_move.easing(),
     ));
@@ -1505,8 +1505,8 @@ fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: ResMut<EventL
     log.push_red(format!(
         "AnimationCancelled\n  source={:?}\n  move_translation={}\n  move_focus={}",
         event.source,
-        fmt_vec3(event.camera_move.translation()),
-        fmt_vec3(event.camera_move.focus()),
+        fmt_vec3(*event.camera_move.translation()),
+        fmt_vec3(*event.camera_move.focus()),
     ));
 }
 

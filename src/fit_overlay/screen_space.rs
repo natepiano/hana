@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_kana::ScreenPosition;
 
 use super::super::fit::Edge;
 use super::super::support::CameraBasis;
@@ -94,7 +95,7 @@ pub fn normalized_to_world(
     } else {
         (norm_x * avg_depth, norm_y * avg_depth)
     };
-    cam.pos + cam.right * world_x + cam.up * world_y + cam.forward * avg_depth
+    *cam.pos + cam.right * world_x + cam.up * world_y + cam.forward * avg_depth
 }
 
 /// Returns the margin percentage for a given edge.
@@ -118,8 +119,8 @@ pub fn norm_to_viewport(
     half_extent_x: f32,
     half_extent_y: f32,
     viewport_size: Vec2,
-) -> Vec2 {
-    Vec2::new(
+) -> ScreenPosition {
+    ScreenPosition::new(
         (norm_x / half_extent_x + 1.0) * 0.5 * viewport_size.x,
         (1.0 - norm_y / half_extent_y) * 0.5 * viewport_size.y,
     )

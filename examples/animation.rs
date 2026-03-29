@@ -27,6 +27,7 @@ use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
+use bevy_lagrange::Position;
 use bevy_lagrange::TrackpadBehavior;
 
 const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
@@ -170,7 +171,7 @@ fn keyboard_input(
     // PlayAnimation — event-driven multi-step sequence
     if keys.just_pressed(KeyCode::Space) {
         stop_manual(&mut manual, &mut cam);
-        let focus = Vec3::new(0.0, 0.75, 0.0);
+        let focus = Position::new(0.0, 0.75, 0.0);
         let moves = [
             CameraMove::ToOrbit {
                 focus,
@@ -222,7 +223,7 @@ fn keyboard_input(
     if keys.just_pressed(KeyCode::KeyR) {
         stop_manual(&mut manual, &mut cam);
         let radius = START_POS.length();
-        cam.target_focus = Vec3::ZERO;
+        cam.target_focus = Position::default();
         cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);
         cam.target_pitch = f32::asin(START_POS.y / radius);
         cam.target_radius = radius;

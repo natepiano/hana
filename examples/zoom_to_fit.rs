@@ -23,6 +23,7 @@ use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::Position;
 use bevy_lagrange::SetFitTarget;
 use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::ZoomBegin;
@@ -143,7 +144,7 @@ fn keyboard_input(
         && let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera)
     {
         let radius = START_POS.length();
-        pan_orbit.target_focus = Vec3::ZERO;
+        pan_orbit.target_focus = Position::default();
         pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
         pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
         pan_orbit.target_radius = radius;

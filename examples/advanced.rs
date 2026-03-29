@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::Position;
 use bevy_lagrange::TouchControls;
 use bevy_lagrange::TrackpadBehavior;
 
@@ -55,7 +56,7 @@ fn setup(
         // we don't set transform on the camera.
         OrbitCam {
             // Set focal point (what the camera should look at)
-            focus: Vec3::new(0.0, 1.0, 0.0),
+            focus: Position::new(0.0, 1.0, 0.0),
             // Set the starting position, relative to focus (overrides camera's transform).
             yaw: Some(TAU / 8.0),
             pitch: Some(TAU / 8.0),

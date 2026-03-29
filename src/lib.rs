@@ -14,6 +14,9 @@ use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 #[cfg(feature = "bevy_egui")]
 use bevy_egui::EguiPreUpdateSet;
+pub use bevy_kana::Displacement;
+pub use bevy_kana::Position;
+pub use bevy_kana::ScreenPosition;
 use touch::touch_tracker;
 
 #[cfg(feature = "bevy_egui")]
@@ -197,8 +200,8 @@ pub struct OrbitCam {
     /// The point to orbit around, and what the camera looks at. Updated automatically.
     /// If you want to change the focus programmatically after initialization, set `target_focus`
     /// instead.
-    /// Defaults to `Vec3::ZERO`.
-    pub focus:                          Vec3,
+    /// Defaults to `Position::default()`.
+    pub focus:                          Position,
     /// The radius of the orbit, or the distance from the `focus` point.
     /// For orthographic projection, this is ignored, and the projection's `scale` is used instead.
     /// If set to `None`, it will be calculated from the camera's current position during
@@ -225,8 +228,8 @@ pub struct OrbitCam {
     /// The target focus point. The camera will smoothly transition to this value. Updated
     /// automatically, but you can also update it manually to control the camera independently of
     /// the mouse controls, e.g. with the keyboard.
-    /// Defaults to `Vec3::ZERO`.
-    pub target_focus:                   Vec3,
+    /// Defaults to `Position::default()`.
+    pub target_focus:                   Position,
     /// The target yaw value. The camera will smoothly transition to this value. Updated
     /// automatically, but you can also update it manually to control the camera independently of
     /// the mouse controls, e.g. with the keyboard.
@@ -259,8 +262,8 @@ pub struct OrbitCam {
     /// Defaults to `None`.
     pub pitch_lower_limit:              Option<f32>,
     /// The origin for a shape to restrict the cameras `focus` position.
-    /// Defaults to `Vec3::ZERO`.
-    pub focus_bounds_origin:            Vec3,
+    /// Defaults to `Position::default()`.
+    pub focus_bounds_origin:            Position,
     /// The shape (Sphere or Cuboid) that the `focus` is restricted by. Centered on the
     /// `focus_bounds_origin`.
     /// Defaults to `None`.
@@ -381,8 +384,8 @@ pub struct OrbitCam {
 impl Default for OrbitCam {
     fn default() -> Self {
         Self {
-            focus:                          Vec3::ZERO,
-            target_focus:                   Vec3::ZERO,
+            focus:                          Position::default(),
+            target_focus:                   Position::default(),
             radius:                         None,
             is_upside_down:                 false,
             allow_upside_down:              false,
@@ -416,7 +419,7 @@ impl Default for OrbitCam {
             yaw_lower_limit:                None,
             pitch_upper_limit:              None,
             pitch_lower_limit:              None,
-            focus_bounds_origin:            Vec3::ZERO,
+            focus_bounds_origin:            Position::default(),
             focus_bounds_shape:             None,
             zoom_upper_limit:               None,
             zoom_lower_limit:               0.05,
@@ -440,14 +443,15 @@ impl OrbitCam {
         zoom.clamp_optional(Some(self.zoom_lower_limit), self.zoom_upper_limit)
     }
 
-    fn clamp_focus(&self, focus: Vec3) -> Vec3 {
+    fn clamp_focus(&self, focus: Position) -> Position {
         let Some(shape) = self.focus_bounds_shape else {
             return focus;
         };
-        let origin = self.focus_bounds_origin;
+        let origin = *self.focus_bounds_origin;
+        let f = *focus;
         match shape {
-            FocusBoundsShape::Cuboid(shape) => shape.closest_point(focus - origin) + origin,
-            FocusBoundsShape::Sphere(shape) => shape.closest_point(focus - origin) + origin,
+            FocusBoundsShape::Cuboid(shape) => Position(shape.closest_point(f - origin) + origin),
+            FocusBoundsShape::Sphere(shape) => Position(shape.closest_point(f - origin) + origin),
         }
     }
 }
@@ -651,7 +655,7 @@ fn initialize_orbit_cam(
     projection: &mut Projection,
 ) {
     let (yaw, pitch, radius) = util::calculate_from_translation_and_focus(
-        transform.translation,
+        Position(transform.translation),
         pan_orbit.focus,
         pan_orbit.axis,
     );
@@ -871,7 +875,7 @@ fn smooth_and_update_transform(
         pan_orbit.zoom_smoothness,
         delta,
     );
-    let new_focus = util::lerp_and_snap_vec3(
+    let new_focus = util::lerp_and_snap_position(
         pan_orbit.focus,
         pan_orbit.target_focus,
         pan_orbit.pan_smoothness,

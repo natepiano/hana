@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::ui::UiTargetCamera;
+use bevy_kana::ScreenPosition;
 
 use super::super::fit::Edge;
 use super::super::support::ScreenSpaceBounds;
@@ -24,7 +25,7 @@ pub struct MarginLabelParams {
     pub edge:          Edge,
     pub text:          String,
     pub color:         Color,
-    pub screen_pos:    Vec2,
+    pub screen_pos:    ScreenPosition,
     pub viewport_size: Vec2,
 }
 
@@ -41,7 +42,7 @@ pub fn calculate_label_pixel_position(
     edge: Edge,
     bounds: &ScreenSpaceBounds,
     viewport_size: Vec2,
-) -> Vec2 {
+) -> ScreenPosition {
     let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
     let px = screen_space::norm_to_viewport(
         screen_x,
@@ -56,10 +57,10 @@ pub fn calculate_label_pixel_position(
     let above_line = px.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET;
 
     match edge {
-        Edge::Left => Vec2::new(LABEL_PIXEL_OFFSET, above_line),
-        Edge::Right => Vec2::new(viewport_size.x - LABEL_PIXEL_OFFSET, above_line),
-        Edge::Top => Vec2::new(px.x + LABEL_PIXEL_OFFSET, LABEL_PIXEL_OFFSET),
-        Edge::Bottom => Vec2::new(
+        Edge::Left => ScreenPosition::new(LABEL_PIXEL_OFFSET, above_line),
+        Edge::Right => ScreenPosition::new(viewport_size.x - LABEL_PIXEL_OFFSET, above_line),
+        Edge::Top => ScreenPosition::new(px.x + LABEL_PIXEL_OFFSET, LABEL_PIXEL_OFFSET),
+        Edge::Bottom => ScreenPosition::new(
             px.x + LABEL_PIXEL_OFFSET,
             viewport_size.y - LABEL_PIXEL_OFFSET,
         ),
@@ -67,15 +68,20 @@ pub fn calculate_label_pixel_position(
 }
 
 /// Returns the final viewport position for the "screen space bounds" label.
-pub fn bounds_label_position(upper_left: Vec2) -> Vec2 {
-    Vec2::new(
+pub fn bounds_label_position(upper_left: ScreenPosition) -> ScreenPosition {
+    ScreenPosition::new(
         upper_left.x + LABEL_PIXEL_OFFSET,
         upper_left.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET,
     )
 }
 
 /// Applies anchored placement for a margin label node based on edge semantics.
-fn apply_margin_label_anchor(node: &mut Node, edge: Edge, screen_pos: Vec2, viewport_size: Vec2) {
+fn apply_margin_label_anchor(
+    node: &mut Node,
+    edge: Edge,
+    screen_pos: ScreenPosition,
+    viewport_size: Vec2,
+) {
     match edge {
         Edge::Left | Edge::Top => {
             node.left = Val::Px(screen_pos.x);
@@ -99,7 +105,7 @@ fn apply_margin_label_anchor(node: &mut Node, edge: Edge, screen_pos: Vec2, view
 }
 
 /// Builds an anchored node for a new margin label.
-fn margin_label_node(edge: Edge, screen_pos: Vec2, viewport_size: Vec2) -> Node {
+fn margin_label_node(edge: Edge, screen_pos: ScreenPosition, viewport_size: Vec2) -> Node {
     let mut node = Node {
         position_type: PositionType::Absolute,
         ..default()
@@ -153,7 +159,7 @@ pub fn update_or_create_bounds_label(
     commands: &mut Commands,
     bounds_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
     camera: Entity,
-    screen_pos: Vec2,
+    screen_pos: ScreenPosition,
 ) {
     let mut found = false;
     for (_, label, mut node) in bounds_query.iter_mut() {

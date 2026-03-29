@@ -1,14 +1,15 @@
 use bevy::prelude::*;
+use bevy_kana::Position;
 
 const EPSILON: f32 = 0.001;
 
 pub fn calculate_from_translation_and_focus(
-    translation: Vec3,
-    focus: Vec3,
+    translation: Position,
+    focus: Position,
     axis: [Vec3; 3],
 ) -> (f32, f32, f32) {
     let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
-    let comp_vec = translation - focus;
+    let comp_vec = *translation - *focus;
     let mut radius = comp_vec.length();
     #[allow(clippy::float_cmp)]
     if radius == 0.0 {
@@ -25,7 +26,7 @@ pub fn update_orbit_transform(
     yaw: f32,
     pitch: f32,
     mut radius: f32,
-    focus: Vec3,
+    focus: Position,
     transform: &mut Transform,
     projection: &mut Projection,
     axis: [Vec3; 3],
@@ -51,7 +52,7 @@ pub fn update_orbit_transform(
     let yaw_rot = Quat::from_axis_angle(axis[1], yaw);
     let pitch_rot = Quat::from_axis_angle(axis[0], -pitch);
     new_transform.rotation *= yaw_rot * pitch_rot;
-    new_transform.translation += focus + new_transform.rotation * Vec3::new(0.0, 0.0, radius);
+    new_transform.translation += *focus + new_transform.rotation * Vec3::new(0.0, 0.0, radius);
     *transform = new_transform;
 }
 
@@ -66,13 +67,13 @@ pub fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
     new_value
 }
 
-pub fn lerp_and_snap_vec3(from: Vec3, to: Vec3, smoothness: f32, dt: f32) -> Vec3 {
+pub fn lerp_and_snap_position(from: Position, to: Position, smoothness: f32, dt: f32) -> Position {
     let t = smoothness.powi(7);
-    let mut new_value = from.lerp(to, 1.0 - t.powf(dt));
-    if smoothness < 1.0 && approx_equal((new_value - to).length(), 0.0) {
+    let mut new_value = (*from).lerp(*to, 1.0 - t.powf(dt));
+    if smoothness < 1.0 && approx_equal((new_value - *to).length(), 0.0) {
         new_value.x = to.x;
     }
-    new_value
+    Position(new_value)
 }
 
 #[cfg(test)]
@@ -88,8 +89,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn zero() {
-        let translation = Vec3::new(0.0, 0.0, 0.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(0.0, 0.0, 0.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert_eq!(yaw, 0.0);
         assert_eq!(pitch, 0.0);
@@ -98,8 +99,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn zero_z_up_axis() {
-        let translation = Vec3::new(0.0, 0.0, 0.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(0.0, 0.0, 0.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) =
             calculate_from_translation_and_focus(translation, focus, AXIS_Z_UP);
         assert_eq!(yaw, 0.0);
@@ -109,8 +110,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn in_front() {
-        let translation = Vec3::new(0.0, 0.0, 5.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(0.0, 0.0, 5.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert_eq!(yaw, 0.0);
         assert_eq!(pitch, 0.0);
@@ -119,9 +120,9 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn in_front_z_up_axis() {
-        let translation = Vec3::new(0.0, 5.0, 0.0);
+        let translation = Position::new(0.0, 5.0, 0.0);
         let axis = [Vec3::X, Vec3::Z, Vec3::Y];
-        let focus = Vec3::ZERO;
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, axis);
         assert_eq!(yaw, 0.0);
         assert_eq!(pitch, 0.0);
@@ -130,8 +131,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn to_the_side() {
-        let translation = Vec3::new(5.0, 0.0, 0.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(5.0, 0.0, 0.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert!(approx_eq!(f32, yaw, PI / 2.0));
         assert_eq!(pitch, 0.0);
@@ -140,8 +141,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn above() {
-        let translation = Vec3::new(0.0, 5.0, 0.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(0.0, 5.0, 0.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert_eq!(yaw, 0.0);
         assert!(approx_eq!(f32, pitch, PI / 2.0));
@@ -150,8 +151,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn above_z_as_up_axis() {
-        let translation = Vec3::new(0.0, 0.0, 5.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(0.0, 0.0, 5.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) =
             calculate_from_translation_and_focus(translation, focus, AXIS_Z_UP);
         assert_eq!(yaw, 0.0);
@@ -161,8 +162,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn arbitrary() {
-        let translation = Vec3::new(0.92563736, 3.864204, -1.0105048);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(0.92563736, 3.864204, -1.0105048);
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert!(approx_eq!(f32, yaw, 2.4));
         assert!(approx_eq!(f32, pitch, 1.23));
@@ -171,8 +172,8 @@ mod calculate_from_translation_and_focus_tests {
 
     #[test]
     fn negative_x() {
-        let translation = Vec3::new(-5.0, 5.0, 9.0);
-        let focus = Vec3::ZERO;
+        let translation = Position::new(-5.0, 5.0, 9.0);
+        let focus = Position::default();
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert!(approx_eq!(f32, yaw, -0.5070985));
         assert!(approx_eq!(f32, pitch, 0.45209613));
@@ -233,30 +234,30 @@ mod lerp_and_snap_f32_tests {
 
 #[cfg(test)]
 #[allow(clippy::unreadable_literal, clippy::float_cmp)]
-mod lerp_and_snap_vec3_tests {
+mod lerp_and_snap_position_tests {
     use super::*;
 
     #[test]
     fn lerps_when_output_outside_snap_threshold() {
-        let out = lerp_and_snap_vec3(Vec3::ZERO, Vec3::X, 0.5, 1.0);
+        let out = lerp_and_snap_position(Position::default(), Position(Vec3::X), 0.5, 1.0);
         // Due to the frame rate independence, this value is not easily predictable
-        assert_eq!(out, Vec3::new(0.9921875, 0.0, 0.0));
+        assert_eq!(out, Position::new(0.9921875, 0.0, 0.0));
     }
 
     #[test]
     fn snaps_to_target_when_inside_threshold() {
-        let out = lerp_and_snap_vec3(Vec3::X * 0.9991, Vec3::X, 0.5, 1.0);
-        assert_eq!(out, Vec3::X);
-        let out = lerp_and_snap_vec3(Vec3::X * 0.9991, Vec3::X, 0.1, 1.0);
-        assert_eq!(out, Vec3::X);
-        let out = lerp_and_snap_vec3(Vec3::X * 0.9991, Vec3::X, 0.9, 1.0);
-        assert_eq!(out, Vec3::X);
+        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 0.5, 1.0);
+        assert_eq!(out, Position(Vec3::X));
+        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 0.1, 1.0);
+        assert_eq!(out, Position(Vec3::X));
+        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 0.9, 1.0);
+        assert_eq!(out, Position(Vec3::X));
     }
 
     #[test]
     fn does_not_snap_if_smoothness_is_one() {
         // Smoothness of one results in the value not changing, so it doesn't make sense to snap
-        let out = lerp_and_snap_vec3(Vec3::X * 0.9991, Vec3::X, 1.0, 1.0);
-        assert_eq!(out, Vec3::X * 0.9991);
+        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 1.0, 1.0);
+        assert_eq!(out, Position(Vec3::X * 0.9991));
     }
 }

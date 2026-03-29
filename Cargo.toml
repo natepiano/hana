@@ -9,7 +9,7 @@ license     = "MIT OR Apache-2.0"
 name        = "bevy_lagrange"
 readme      = "README.md"
 repository  = "https://github.com/natepiano/bevy_lagrange"
-version     = "0.0.2-dev"
+version     = "0.0.3-dev"
 
 [lints.clippy]
 # Our strict lints
@@ -57,6 +57,7 @@ bevy = { version = "0.18", default-features = false, features = [
   "bevy_window",
 ] }
 bevy_egui = { version = "0.39", optional = true, default-features = false }
+bevy_kana = { version = "0.0.3", features = ["input"] }
 
 [dev-dependencies]
 bevy = { version = "0.18", default-features = false, features = ["3d"] }

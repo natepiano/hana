@@ -18,7 +18,9 @@ use super::events::CameraMoveBegin;
 use super::events::CameraMoveEnd;
 use super::events::ZoomCancelled;
 use super::events::ZoomEnd;
+use crate::Displacement;
 use crate::OrbitCam;
+use crate::Position;
 
 /// Individual camera movement with target position and duration.
 ///
@@ -31,9 +33,9 @@ pub enum CameraMove {
     /// The animation system decomposes this into orbital parameters internally.
     ToPosition {
         /// World-space camera position.
-        translation: Vec3,
+        translation: Position,
         /// World-space focus point the camera looks at.
-        focus:       Vec3,
+        focus:       Position,
         /// Duration of this movement step.
         duration:    Duration,
         /// Easing curve for the interpolation.
@@ -44,7 +46,7 @@ pub enum CameraMove {
     /// decomposition via `atan2` loses yaw information.
     ToOrbit {
         /// World-space focus point the camera orbits around.
-        focus:    Vec3,
+        focus:    Position,
         /// Target yaw in radians.
         yaw:      f32,
         /// Target pitch in radians.
@@ -81,7 +83,7 @@ impl CameraMove {
 
     /// Returns the focus point for this movement step.
     #[must_use]
-    pub const fn focus(&self) -> Vec3 {
+    pub const fn focus(&self) -> Position {
         match self {
             Self::ToPosition { focus, .. } | Self::ToOrbit { focus, .. } => *focus,
         }
@@ -90,7 +92,7 @@ impl CameraMove {
     /// Returns the world-space camera position for this move.
     /// For `ToOrbit`, computes the position from orbital parameters.
     #[must_use]
-    pub fn translation(&self) -> Vec3 {
+    pub fn translation(&self) -> Position {
         match self {
             Self::ToPosition { translation, .. } => *translation,
             Self::ToOrbit {
@@ -114,7 +116,9 @@ impl CameraMove {
         match self {
             Self::ToPosition {
                 translation, focus, ..
-            } => orbital_params_from_offset(*translation - *focus),
+            } => orbital_params_from_offset(Displacement(
+                translation.into_inner() - focus.into_inner(),
+            )),
             Self::ToOrbit {
                 yaw, pitch, radius, ..
             } => (*yaw, *pitch, *radius),
@@ -124,7 +128,7 @@ impl CameraMove {
 
 /// Decomposes an offset vector (camera position minus focus) into orbital parameters.
 /// Returns `(yaw, pitch, radius)`. May lose yaw information at ±PI/2 pitch due to `atan2`.
-pub fn orbital_params_from_offset(offset: Vec3) -> (f32, f32, f32) {
+pub fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32) {
     let radius = offset.length();
     let yaw = offset.x.atan2(offset.z);
     let horizontal_dist = offset.x.hypot(offset.z);
@@ -141,14 +145,14 @@ const EXTERNAL_INPUT_TOLERANCE: f32 = 1e-6;
 enum MoveState {
     InProgress {
         elapsed_ms:          f32,
-        start_focus:         Vec3,
+        start_focus:         Position,
         start_pitch:         f32,
         start_radius:        f32,
         start_yaw:           f32,
         /// Values written by the animation last frame — if the camera's current
         /// values differ, external input occurred and the animation may interrupt
         /// depending on `CameraInputInterruptBehavior`.
-        last_written_focus:  Vec3,
+        last_written_focus:  Position,
         last_written_yaw:    f32,
         last_written_pitch:  f32,
         last_written_radius: f32,

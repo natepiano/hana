@@ -32,11 +32,13 @@ use super::events::ZoomEnd;
 use super::events::ZoomToFit;
 use super::fit;
 use super::support;
+use crate::Displacement;
 use crate::OrbitCam;
+use crate::Position;
 
 /// Parameters for an instant orbital snap.
 struct SnapOrbit {
-    focus:  Vec3,
+    focus:  Position,
     yaw:    Option<f32>,
     pitch:  Option<f32>,
     radius: f32,
@@ -316,19 +318,16 @@ pub fn on_play_animation(
                     .get(entity)
                     .map_or(AnimationSource::PlayAnimation, |m| m.0);
                 if let Ok(queue) = move_list_query.get(entity) {
-                    let camera_move =
-                        queue
-                            .camera_moves
-                            .front()
-                            .cloned()
-                            .unwrap_or(CameraMove::ToOrbit {
-                                focus:    Vec3::ZERO,
-                                yaw:      0.0,
-                                pitch:    0.0,
-                                radius:   1.0,
-                                duration: Duration::ZERO,
-                                easing:   EaseFunction::Linear,
-                            });
+                    let camera_move = queue.camera_moves.front().cloned().unwrap_or_else(|| {
+                        CameraMove::ToOrbit {
+                            focus:    Position::default(),
+                            yaw:      0.0,
+                            pitch:    0.0,
+                            radius:   1.0,
+                            duration: Duration::ZERO,
+                            easing:   EaseFunction::Linear,
+                        }
+                    });
                     commands.trigger(AnimationCancelled {
                         camera: entity,
                         source: in_flight_source,
@@ -510,8 +509,8 @@ pub fn on_look_at(
             PlayAnimation::new(
                 camera,
                 [CameraMove::ToPosition {
-                    translation: cam_pos,
-                    focus: target_pos,
+                    translation: Position(cam_pos),
+                    focus: Position(target_pos),
                     duration,
                     easing,
                 }],
@@ -520,12 +519,13 @@ pub fn on_look_at(
         );
     } else {
         // Instant path: back-solve orbital params and snap
-        let (yaw, pitch, radius) = animation::orbital_params_from_offset(cam_pos - target_pos);
+        let (yaw, pitch, radius) =
+            animation::orbital_params_from_offset(Displacement(cam_pos - target_pos));
         snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
             SnapOrbit {
-                focus: target_pos,
+                focus: Position(target_pos),
                 yaw: Some(yaw),
                 pitch: Some(pitch),
                 radius,
@@ -572,7 +572,7 @@ pub fn on_look_at_and_zoom_to_fit(
     };
     let target_pos = target_gt.translation();
     let (preliminary_yaw, preliminary_pitch, _) =
-        animation::orbital_params_from_offset(cam_pos - target_pos);
+        animation::orbital_params_from_offset(Displacement(cam_pos - target_pos));
 
     let Some(fit) = prepare_fit_for_target(
         "LookAtAndZoomToFit",
@@ -592,7 +592,7 @@ pub fn on_look_at_and_zoom_to_fit(
 
     // Recompute yaw/pitch relative to the fit's focus (bounds center), which may
     // differ slightly from the raw `GlobalTransform` translation.
-    let (yaw, pitch, _) = animation::orbital_params_from_offset(cam_pos - fit.focus);
+    let (yaw, pitch, _) = animation::orbital_params_from_offset(Displacement(cam_pos - *fit.focus));
 
     if duration > Duration::ZERO {
         commands.trigger(

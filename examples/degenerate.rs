@@ -1,4 +1,4 @@
-//! Reproduces the ZoomToFit edge-on degenerate case.
+//! Reproduces the `ZoomToFit` edge-on degenerate case.
 //!
 //! Camera starts at pitch=0 looking straight ahead. Click the ground plane
 //! to trigger `ZoomToFit` — without the degenerate extent fix the radius
@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::Position;
 use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::ZoomToFit;
 
@@ -83,7 +84,7 @@ fn setup(
             pitch: Some(0.0),
             yaw: Some(0.0),
             radius: Some(5.0),
-            focus: Vec3::new(0.0, 1.0, 0.0),
+            focus: Position::new(0.0, 1.0, 0.0),
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_kana::ToF32;
 
 use super::super::components::CurrentFitTarget;
 use super::super::components::FitOverlay;
@@ -245,8 +246,7 @@ pub fn draw_fit_target_bounds(
             continue;
         };
 
-        #[allow(clippy::cast_precision_loss)]
-        let avg_depth = depths.depth_sum / depths.point_count as f32;
+        let avg_depth = depths.depth_sum / depths.point_count.to_f32();
         let is_ortho = matches!(projection, Projection::Orthographic(_));
         let viewport_size = cam.logical_viewport_size();
 
