@@ -71,11 +71,7 @@ impl ProjectionParams {
 ///
 /// Returns `(norm_x, norm_y, depth)` or `None` if the point is behind the camera
 /// (perspective only — orthographic points are always valid).
-pub fn project_point(
-    point: Vec3,
-    cam: &CameraBasis,
-    is_ortho: bool,
-) -> Option<(f32, f32, f32)> {
+pub fn project_point(point: Vec3, cam: &CameraBasis, is_ortho: bool) -> Option<(f32, f32, f32)> {
     let relative = point - cam.pos;
     let depth = relative.dot(cam.forward);
     if !is_ortho && depth <= MIN_VISIBLE_DEPTH {
