@@ -550,7 +550,7 @@ fn active_viewport_data(
     other_windows: Query<&Window, Without<PrimaryWindow>>,
     orbit_cameras: Query<(Entity, &Camera, &RenderTarget, &OrbitCam)>,
     #[cfg(feature = "bevy_egui")] egui_wants_focus: Res<EguiWantsFocus>,
-    #[cfg(feature = "bevy_egui")] block_on_egui_query: Query<&crate::egui::BlockOnEguiFocus>,
+    #[cfg(feature = "bevy_egui")] block_on_egui_query: Query<&BlockOnEguiFocus>,
 ) {
     let mut new_resource = ActiveCameraData::default();
     let mut max_cam_order = 0;

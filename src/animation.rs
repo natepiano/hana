@@ -124,7 +124,7 @@ impl CameraMove {
 
 /// Decomposes an offset vector (camera position minus focus) into orbital parameters.
 /// Returns `(yaw, pitch, radius)`. May lose yaw information at ±PI/2 pitch due to `atan2`.
-pub(super) fn orbital_params_from_offset(offset: Vec3) -> (f32, f32, f32) {
+pub fn orbital_params_from_offset(offset: Vec3) -> (f32, f32, f32) {
     let radius = offset.length();
     let yaw = offset.x.atan2(offset.z);
     let horizontal_dist = offset.x.hypot(offset.z);
@@ -480,7 +480,7 @@ fn handle_in_progress(
 /// When a `OrbitCam` has a `CameraMoveList`, interpolates toward the target over
 /// the specified duration with easing. When a move completes, automatically moves to the
 /// next. Removes the `CameraMoveList` component when all moves are complete.
-pub(super) fn process_camera_move_list(
+pub fn process_camera_move_list(
     mut commands: Commands,
     time: Res<Time>,
     mut camera_query: Query<(

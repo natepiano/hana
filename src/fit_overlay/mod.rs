@@ -21,7 +21,7 @@ use types::FitTargetViewportMargins;
 use super::components::FitOverlay;
 
 /// Plugin that enables fit target debug visualization.
-pub(super) struct ZoomOverlayPlugin;
+pub struct ZoomOverlayPlugin;
 
 impl Plugin for ZoomOverlayPlugin {
     fn build(&self, app: &mut App) {

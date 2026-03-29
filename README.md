@@ -2,7 +2,7 @@
 [![docs.rs](https://docs.rs/bevy_lagrange/badge.svg)](https://docs.rs/bevy_lagrange)
 [![Bevy tracking](https://img.shields.io/badge/Bevy%20tracking-released%20version-lightblue)](https://github.com/bevyengine/bevy/blob/main/docs/plugins_guidelines.md#main-branch-tracking)
 
-# bevy_lagrange
+# `bevy_lagrange`
 
 > **Work in progress.** This crate is in active development and not subject to
 > semver stability guarantees. APIs will change without notice between commits.

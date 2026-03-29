@@ -145,7 +145,7 @@ fn prepare_fit_for_target(
 /// with a [`ZoomContext`] so that `on_play_animation` handles all conflict
 /// resolution and zoom lifecycle events in one place.
 /// Requires target entity to have a `Mesh3d` (direct or on descendants).
-pub(super) fn on_zoom_to_fit(
+pub fn on_zoom_to_fit(
     zoom: On<ZoomToFit>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera)>,
@@ -270,7 +270,7 @@ fn begin_zoom_if_needed(
 /// This is the single decision point for all trigger-time logic: conflict
 /// resolution, zoom lifecycle (`ZoomBegin` / `ZoomAnimationMarker`), and
 /// animation begin.
-pub(super) fn on_play_animation(
+pub fn on_play_animation(
     start: On<PlayAnimation>,
     mut commands: Commands,
     mut camera_query: Query<(
@@ -377,7 +377,7 @@ pub(super) fn on_play_animation(
 
 /// Observer for direct `CameraMoveList` insertion (bypassing `PlayAnimation`).
 /// Reuses the same camera-state stashing behavior as the event-driven path.
-pub(super) fn on_camera_move_list_added(
+pub fn on_camera_move_list_added(
     add: On<Add, CameraMoveList>,
     mut commands: Commands,
     mut camera_query: Query<(
@@ -402,7 +402,7 @@ pub(super) fn on_camera_move_list_added(
 }
 
 /// Observer for `SetFitTarget` event - sets the target entity for fit debug overlay.
-pub(super) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Commands) {
+pub fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Commands) {
     commands
         .entity(set_target.camera)
         .insert(CurrentFitTarget(set_target.target));
@@ -410,7 +410,7 @@ pub(super) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Comm
 
 /// Observer for `AnimateToFit` event - animates the camera to a specific orientation
 /// while fitting a target entity in view.
-pub(super) fn on_animate_to_fit(
+pub fn on_animate_to_fit(
     event: On<AnimateToFit>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera)>,
@@ -482,7 +482,7 @@ pub(super) fn on_animate_to_fit(
 
 /// Observer for `LookAt` event — rotates the camera in place to look at a target entity.
 /// The camera stays at its current world position; only the orbit pivot re-anchors.
-pub(super) fn on_look_at(
+pub fn on_look_at(
     event: On<LookAt>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &GlobalTransform)>,
@@ -542,7 +542,7 @@ pub(super) fn on_look_at(
 /// Observer for `LookAtAndZoomToFit` event — rotates the camera in place to look at
 /// a target entity and adjusts the radius to frame it, all in one fluid motion.
 /// The yaw and pitch are back-solved from the camera's current world position.
-pub(super) fn on_look_at_and_zoom_to_fit(
+pub fn on_look_at_and_zoom_to_fit(
     event: On<LookAtAndZoomToFit>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera, &GlobalTransform)>,
@@ -631,7 +631,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 }
 
 /// Observer that restores camera runtime state when `CameraMoveList` is removed.
-pub(super) fn restore_camera_state(
+pub fn restore_camera_state(
     remove: On<Remove, CameraMoveList>,
     mut commands: Commands,
     mut query: Query<(&OrbitCamStash, &mut OrbitCam)>,
