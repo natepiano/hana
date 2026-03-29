@@ -22,9 +22,9 @@ pub use crate::egui::BlockOnEguiFocus;
 pub use crate::egui::EguiFocusIncludesHover;
 #[cfg(feature = "bevy_egui")]
 pub use crate::egui::EguiWantsFocus;
+use crate::input::MouseKeyTracker;
 use crate::input::button_zoom_just_pressed;
 use crate::input::mouse_key_tracker;
-use crate::input::MouseKeyTracker;
 pub use crate::touch::TouchControls;
 use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
