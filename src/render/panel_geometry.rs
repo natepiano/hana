@@ -10,6 +10,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
+use bevy_kana::ToF32;
 
 use super::constants;
 use super::panel_rtt::PanelRttRegistry;
@@ -35,6 +36,20 @@ struct PanelDividerMesh;
 /// Marker for the invisible full-panel interaction mesh (Geometry mode only).
 #[derive(Component)]
 struct PanelInteractionMesh;
+
+/// Whether the panel renders as 3D geometry (lit by PBR) or as an unlit texture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RenderStyle {
+    Geometry,
+    Texture,
+}
+
+/// Whether shadow casting is enabled or suppressed for panel meshes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShadowMode {
+    Enabled,
+    Suppressed,
+}
 
 /// Plugin that adds panel geometry rendering (backgrounds and borders).
 pub struct PanelGeometryPlugin;
@@ -67,7 +82,6 @@ struct ElementSurface {
 
 /// Extracts render commands, gathers fill + border per element, and
 /// spawns one SDF quad per element.
-#[allow(clippy::too_many_arguments)]
 fn build_panel_geometry(
     changed_panels: Query<
         (
@@ -95,8 +109,16 @@ fn build_panel_geometry(
 
         let pts_mpu = panel.points_to_world(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
-        let is_geometry = panel.render_mode == RenderMode::Geometry;
-        let suppress_shadow = panel.surface_shadow == SurfaceShadow::Off;
+        let render_style = if panel.render_mode == RenderMode::Geometry {
+            RenderStyle::Geometry
+        } else {
+            RenderStyle::Texture
+        };
+        let shadow_mode = if panel.surface_shadow == SurfaceShadow::Off {
+            ShadowMode::Suppressed
+        } else {
+            ShadowMode::Enabled
+        };
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let layer = rtt_registry
             .get_layer(panel_entity)
@@ -120,8 +142,8 @@ fn build_panel_geometry(
             spawn_sdf_element(
                 panel,
                 surface,
-                is_geometry,
-                suppress_shadow,
+                render_style,
+                shadow_mode,
                 pts_mpu,
                 layout_mpu,
                 anchor_x,
@@ -141,8 +163,8 @@ fn build_panel_geometry(
                 *cmd_index,
                 bounds,
                 *color,
-                is_geometry,
-                suppress_shadow,
+                render_style,
+                shadow_mode,
                 pts_mpu,
                 anchor_x,
                 anchor_y,
@@ -155,7 +177,7 @@ fn build_panel_geometry(
         }
 
         // ── Interaction mesh (Geometry mode only) ───────────────────
-        if is_geometry {
+        if render_style == RenderStyle::Geometry {
             let world_w = panel.world_width(&unit_config);
             let world_h = panel.world_height(&unit_config);
             let center_x = world_w.mul_add(0.5, -anchor_x);
@@ -239,12 +261,11 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
     GatheredCommands { surfaces, dividers }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_sdf_element(
     panel: &DiegeticPanel,
     surface: &ElementSurface,
-    is_geometry: bool,
-    suppress_shadow: bool,
+    render_style: RenderStyle,
+    shadow_mode: ShadowMode,
     pts_mpu: f32,
     layout_mpu: f32,
     anchor_x: f32,
@@ -268,7 +289,7 @@ fn spawn_sdf_element(
     });
     let mut base =
         constants::resolve_material(element_mat, panel.material.as_ref(), effective_color);
-    if !is_geometry {
+    if render_style == RenderStyle::Texture {
         base.unlit = true;
     }
 
@@ -288,11 +309,9 @@ fn spawn_sdf_element(
 
     let world_rect = bounds_to_world_rect(&surface.bounds, pts_mpu, anchor_x, anchor_y);
 
-    #[allow(clippy::cast_precision_loss)]
-    let z_offset = if is_geometry {
-        surface.command_index as f32 * constants::LAYER_Z_STEP
-    } else {
-        0.0
+    let z_offset = match render_style {
+        RenderStyle::Geometry => surface.command_index.to_f32() * constants::LAYER_Z_STEP,
+        RenderStyle::Texture => 0.0,
     };
 
     let mesh = meshes.add(Rectangle::new(world_w, world_h));
@@ -304,23 +323,25 @@ fn spawn_sdf_element(
         Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
         layer.clone(),
     );
-    if suppress_shadow {
-        commands
-            .entity(panel_entity)
-            .with_child((base_components, NotShadowCaster));
-    } else {
-        commands.entity(panel_entity).with_child(base_components);
+    match shadow_mode {
+        ShadowMode::Suppressed => {
+            commands
+                .entity(panel_entity)
+                .with_child((base_components, NotShadowCaster));
+        },
+        ShadowMode::Enabled => {
+            commands.entity(panel_entity).with_child(base_components);
+        },
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_divider(
     panel: &DiegeticPanel,
     cmd_index: usize,
     bounds: &BoundingBox,
     color: Color,
-    is_geometry: bool,
-    suppress_shadow: bool,
+    render_style: RenderStyle,
+    shadow_mode: ShadowMode,
     pts_mpu: f32,
     anchor_x: f32,
     anchor_y: f32,
@@ -336,17 +357,15 @@ fn spawn_divider(
     base.alpha_mode = AlphaMode::Blend;
     base.double_sided = true;
     base.cull_mode = None;
-    if !is_geometry {
+    if render_style == RenderStyle::Texture {
         base.unlit = true;
     }
 
     let world_rect = bounds_to_world_rect(bounds, pts_mpu, anchor_x, anchor_y);
 
-    #[allow(clippy::cast_precision_loss)]
-    let z_offset = if is_geometry {
-        cmd_index as f32 * constants::LAYER_Z_STEP
-    } else {
-        0.0
+    let z_offset = match render_style {
+        RenderStyle::Geometry => cmd_index.to_f32() * constants::LAYER_Z_STEP,
+        RenderStyle::Texture => 0.0,
     };
 
     let mesh = meshes.add(Rectangle::new(world_rect.width, world_rect.height));
@@ -358,12 +377,15 @@ fn spawn_divider(
         Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
         layer.clone(),
     );
-    if suppress_shadow {
-        commands
-            .entity(panel_entity)
-            .with_child((base_components, NotShadowCaster));
-    } else {
-        commands.entity(panel_entity).with_child(base_components);
+    match shadow_mode {
+        ShadowMode::Suppressed => {
+            commands
+                .entity(panel_entity)
+                .with_child((base_components, NotShadowCaster));
+        },
+        ShadowMode::Enabled => {
+            commands.entity(panel_entity).with_child(base_components);
+        },
     }
 }
 

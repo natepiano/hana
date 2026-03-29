@@ -30,11 +30,11 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_kana::ToF32;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 // ── Layout ───────────────────────────────────────────────────────────
@@ -82,8 +82,7 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -230,8 +229,7 @@ fn spawn_world_text_column(
     let row_step = (SIZE_MM + ROW_GAP + 2.0) * MM_TO_M;
 
     for (i, (label, style)) in WORLD_LABELS.iter().zip(world_styles.iter()).enumerate() {
-        #[allow(clippy::cast_precision_loss)]
-        let dy = first_row_dy - row_step * i as f32;
+        let dy = first_row_dy - row_step * i.to_f32();
 
         commands.entity(wt_title).with_child((
             WorldText::new(*label),
@@ -263,7 +261,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
     ));
 
     commands.spawn((
-        PanOrbitCamera {
+        OrbitCam {
             focus: Vec3::new(0.0, total_h / 2.0, 0.0),
             radius: Some(0.25),
             yaw: Some(0.0),
@@ -292,7 +290,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
 /// Fires a [`ZoomToFit`] on the backdrop so the camera frames everything.
 fn fit_camera_on_start(
     backdrop: Res<Backdrop>,
-    cameras: Query<Entity, With<PanOrbitCamera>>,
+    cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
     if let Ok(camera) = cameras.single() {

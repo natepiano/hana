@@ -34,11 +34,12 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::RasterQuality;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_kana::ToF32;
+use bevy_kana::ToU32;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 // ── Grid geometry ──────────────────────────────────────────────────
@@ -245,8 +246,7 @@ fn main() {
             DiegeticUiPlugin::with_atlas()
                 .quality(ATLAS_QUALITY)
                 .glyphs_per_page(GLYPHS_PER_PAGE),
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -280,10 +280,8 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Backdrop sized for max grid; panel grows dynamically.
-    #[allow(clippy::cast_precision_loss)]
-    let grid_w = COLUMN_WORLD_WIDTH * GRID_COLUMNS as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let grid_h = ROW_WORLD_HEIGHT * GRID_ROWS as f32;
+    let grid_w = COLUMN_WORLD_WIDTH * GRID_COLUMNS.to_f32();
+    let grid_h = ROW_WORLD_HEIGHT * GRID_ROWS.to_f32();
 
     // Tilted root — Star Wars crawl angle.
     let tilt_radians = TILT_DEGREES.to_radians();
@@ -369,7 +367,7 @@ fn setup(
                 brightness:                 300.0,
                 affects_lightmapped_meshes: false,
             },
-            PanOrbitCamera {
+            OrbitCam {
                 focus: Vec3::ZERO,
                 radius: Some(12.0),
                 yaw: Some(0.0),
@@ -412,12 +410,11 @@ const fn cell_world_height() -> f32 { ROW_WORLD_HEIGHT }
 
 /// World position for the center of cell `(row, col)` relative to the
 /// grid panel with [`Anchor::Center`].
-#[allow(clippy::cast_precision_loss)]
 fn cell_center_position(row: usize, col: usize, total_rows: usize, total_cols: usize) -> Vec3 {
     let cw = cell_world_width();
     let ch = cell_world_height();
-    let x = (total_cols as f32).mul_add(-0.5, col as f32 + 0.5) * cw;
-    let y = (total_rows as f32).mul_add(0.5, -(row as f32) - 0.5) * ch;
+    let x = total_cols.to_f32().mul_add(-0.5, col.to_f32() + 0.5) * cw;
+    let y = total_rows.to_f32().mul_add(0.5, -row.to_f32() - 0.5) * ch;
     Vec3::new(x, y, 0.0)
 }
 
@@ -448,12 +445,9 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
     let cols = GRID_COLUMNS.min(total_cells).max(1);
     let rows = total_cells.div_ceil(cols).max(1);
 
-    #[allow(clippy::cast_precision_loss)]
-    let layout_width = COLUMN_LAYOUT_WIDTH * cols as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let layout_height = ROW_LAYOUT_HEIGHT * rows as f32;
-    #[allow(clippy::cast_precision_loss)]
-    let world_height = ROW_WORLD_HEIGHT * rows as f32;
+    let layout_width = COLUMN_LAYOUT_WIDTH * cols.to_f32();
+    let layout_height = ROW_LAYOUT_HEIGHT * rows.to_f32();
+    let world_height = ROW_WORLD_HEIGHT * rows.to_f32();
 
     DiegeticPanel::builder()
         .size((layout_width, layout_height))
@@ -492,9 +486,8 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
 }
 
 /// Builds a single text cell with a header, glyph grid, and footer.
-#[allow(clippy::cast_precision_loss)]
 fn build_cell(b: &mut LayoutBuilder, data: Option<&PageCellData>, cols: usize) {
-    let cell_width = Sizing::percent(1.0 / cols as f32);
+    let cell_width = Sizing::percent(1.0 / cols.to_f32());
 
     let Some(data) = data else {
         b.with(El::new().width(cell_width).height(Sizing::GROW), |_| {});
@@ -692,7 +685,6 @@ fn commit_atlas_pages(
 
 /// Rebuilds the grid panel from committed snapshots (Ready) or shows
 /// a loading cell with all chars (Loading) to trigger rasterization.
-#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn display_committed_pages(
     atlas: Res<MsdfAtlas>,
     phase: Res<AtlasPhase>,
@@ -732,15 +724,10 @@ fn display_committed_pages(
         let shown = revealed.0.min(committed.0.len());
         for (i, page) in committed.0[..shown].iter().enumerate() {
             cells.push(PageCellData {
-                cell_index:                                             i,
-                chars:                                                  &page.chars,
-                glyph_color:                                            glyph_color_for(
-                    &page.chars,
-                ),
-                #[allow(clippy::cast_possible_truncation)]
-                atlas_image:                                            atlas
-                    .image_handle(i as u32)
-                    .cloned(),
+                cell_index:  i,
+                chars:       &page.chars,
+                glyph_color: glyph_color_for(&page.chars),
+                atlas_image: atlas.image_handle(i.to_u32()).cloned(),
             });
         }
     }
@@ -818,7 +805,6 @@ fn display_committed_pages(
 
 // ── Input ──────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 fn handle_input(
     atlas: Res<MsdfAtlas>,
     keys: Res<ButtonInput<KeyCode>>,

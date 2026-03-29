@@ -37,9 +37,11 @@ use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_kana::ToF32;
+use bevy_kana::ToUsize;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
 
 // ── Text / layout constants (meters) ─────────────────────────────────────────
 
@@ -66,7 +68,10 @@ const PANEL_PADDING: f32 = 0.06;
 /// How many columns per panel.
 const MAX_COLUMNS: usize = 8;
 /// Max layout width — exactly fits `MAX_COLUMNS` with gaps and padding (meters).
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "const context — trait methods cannot be called in const expressions"
+)]
 const MAX_LAYOUT_WIDTH: f32 =
     COLUMN_WIDTH * MAX_COLUMNS as f32 + COLUMN_GAP * (MAX_COLUMNS - 1) as f32 + PANEL_PADDING * 2.0;
 /// Ground plane size — same as panel width (layout is already in meters).
@@ -186,7 +191,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault))
         .add_plugins(DiegeticUiPlugin)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .init_resource::<StressControls>()
         .init_resource::<StressPerfStats>()
         .init_resource::<LastDisplayedStatus>()
@@ -248,7 +253,7 @@ fn setup(
             brightness: 1000.0,
             ..default()
         },
-        PanOrbitCamera {
+        OrbitCam {
             focus: Vec3::new(0.0, 1.0, GROUND_SIZE * 0.25),
             radius: Some(8.0),
             yaw: Some(0.0),
@@ -383,7 +388,6 @@ fn animate_row_count(mut state: ResMut<StressControls>) {
 /// so changing it does not trigger layout recomputation or text mesh rebuilds.
 /// The library's `sync_panel_hue_offset` system propagates it to the shared
 /// GPU material automatically.
-#[allow(clippy::cast_precision_loss)]
 fn advance_color_rotation(
     mut state: ResMut<StressControls>,
     panels: Query<Entity, With<StressPanel>>,
@@ -405,7 +409,6 @@ fn advance_color_rotation(
 
 // ── Status panel ─────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 fn update_status_panel(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
@@ -430,10 +433,8 @@ fn update_status_panel(
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
     let fps_str = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
-    #[allow(clippy::cast_possible_truncation)]
-    let fps_value = fps.unwrap_or(0.0) as f32;
-    #[allow(clippy::cast_possible_truncation)]
-    let frame_ms_value = frame_ms.unwrap_or(0.0) as f32;
+    let fps_value = fps.unwrap_or(0.0).to_f32();
+    let frame_ms_value = frame_ms.unwrap_or(0.0).to_f32();
     let ms_str = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
 
     history.push_back(PerfSnapshot {
@@ -506,8 +507,7 @@ fn rows_per_column(is_header_column: bool) -> usize {
     } else {
         LAYOUT_HEIGHT
     };
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let count = (available / ROW_HEIGHT) as usize;
+    let count = (available / ROW_HEIGHT).to_usize();
     count.max(1)
 }
 
@@ -606,7 +606,6 @@ fn update_panels(
 }
 
 /// Resizes and repositions the ground plane to cover all stacked panels.
-#[allow(clippy::cast_precision_loss)]
 fn resize_ground_plane(
     perf: Res<StressPerfStats>,
     mut ground: Query<(&mut Mesh3d, &mut Transform), With<GroundPlane>>,
@@ -620,7 +619,7 @@ fn resize_ground_plane(
 
     // Shallow plane: just deep enough to reach one STACK_DEPTH behind the
     // last panel so shadows land on the ground.
-    let depth = (perf.last_panel_count.max(1)) as f32 * STACK_DEPTH;
+    let depth = perf.last_panel_count.max(1).to_f32() * STACK_DEPTH;
     let width = GROUND_SIZE;
 
     for (mut mesh3d, mut transform) in &mut ground {
@@ -634,14 +633,13 @@ fn resize_ground_plane(
 
 /// Panel position — aligned with the ground plane's X axis.
 /// Panel left edge = plane left edge. Older panels pushed backward along Z.
-#[allow(clippy::cast_precision_loss)]
 fn panel_transform(
     panel_idx: usize,
     total: usize,
     _world_width: f32,
     world_height: f32,
 ) -> Transform {
-    let depth_from_front = (total - 1 - panel_idx) as f32;
+    let depth_from_front = (total - 1 - panel_idx).to_f32();
     // Front panel at z=0 (forward edge of ground plane), older panels push back.
     let z = GROUND_SIZE.mul_add(0.5, -(depth_from_front * STACK_DEPTH));
     // Panel top-left edge aligns with plane left edge.
@@ -715,10 +713,9 @@ fn build_panel_tree(
                             );
                         }
 
-                        #[allow(clippy::cast_precision_loss)]
                         for i in row_cursor..end {
                             let hue = if state.row_count > 0 {
-                                360.0 * (i as f32 / state.row_count as f32)
+                                360.0 * (i.to_f32() / state.row_count.to_f32())
                             } else {
                                 0.0
                             };

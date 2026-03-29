@@ -34,13 +34,12 @@ use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::CameraMove;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::PlayAnimation;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_lagrange::CameraMove;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::PlayAnimation;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const DISPLAY_SIZE: f32 = 0.48;
@@ -128,8 +127,7 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -188,7 +186,7 @@ fn setup(
         ))
         .observe(
             |trigger: On<TypographyOverlayReady>,
-             cameras: Query<Entity, With<PanOrbitCamera>>,
+             cameras: Query<Entity, With<OrbitCam>>,
              mut commands: Commands| {
                 info!("TypographyOverlayReady: {:?}", trigger.entity);
                 for camera in &cameras {
@@ -243,7 +241,7 @@ fn setup(
         .observe(on_panel_clicked);
 
     // Camera
-    commands.spawn((PanOrbitCamera {
+    commands.spawn((OrbitCam {
         focus: HOME_FOCUS,
         radius: Some(HOME_RADIUS),
         yaw: Some(HOME_YAW),
@@ -541,7 +539,7 @@ fn toggle_overlay(
 
 fn home_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<PanOrbitCamera>>,
+    cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyH) {

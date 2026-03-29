@@ -282,7 +282,6 @@ fn spawn_rect_gizmo(
 /// Renders layout visuals (backgrounds, borders, between-children
 /// dividers) as retained gizmos. This is the production rendering
 /// path for panel layout geometry — always active.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_layout_gizmos(
     changed_panels: Query<
         (
@@ -495,6 +494,9 @@ fn add_rect_to_gizmo(
 mod tests {
     use std::sync::Arc;
 
+    use bevy_kana::ToF32;
+    use bevy_kana::ToU32;
+
     use super::*;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -507,10 +509,8 @@ mod tests {
 
     fn monospace_measure() -> MeasureTextFn {
         Arc::new(|text: &str, measure: &TextMeasure| {
-            #[allow(clippy::cast_precision_loss)]
             let char_width = measure.size * 0.6;
-            #[allow(clippy::cast_precision_loss)]
-            let width = char_width * text.len() as f32;
+            let width = char_width * text.len().to_f32();
             TextDimensions {
                 width,
                 height: measure.size,
@@ -572,8 +572,7 @@ mod tests {
             f();
         }
         let elapsed = start.elapsed();
-        #[allow(clippy::cast_possible_truncation)]
-        let per_iter = elapsed / iterations as u32;
+        let per_iter = elapsed / iterations.to_u32();
         println!(
             "{label}: {per_iter:?} per iteration ({iterations} iterations, {elapsed:?} total)"
         );

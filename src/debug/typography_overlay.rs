@@ -46,6 +46,15 @@ use crate::text::FontId;
 use crate::text::FontMetrics;
 use crate::text::FontRegistry;
 
+/// Whether per-glyph bounding box annotations are visible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, bevy::prelude::Reflect)]
+pub enum GlyphMetricVisibility {
+    /// Glyph bounding boxes and origin dots are drawn.
+    Shown,
+    /// Glyph-level annotations are suppressed.
+    Hidden,
+}
+
 /// Attach to a [`WorldText`] entity to render typography metric annotations.
 /// Built into the library as a debug tool — only available when the
 /// `typography_overlay` feature is enabled.
@@ -69,7 +78,7 @@ pub struct TypographyOverlay {
     /// baseline, top, bottom).
     pub show_font_metrics:  bool,
     /// Show per-glyph bounding boxes as gizmo lines (from font bbox).
-    pub show_glyph_metrics: bool,
+    pub show_glyph_metrics: GlyphMetricVisibility,
     /// Show text labels on the metric lines.
     pub show_labels:        bool,
     /// Color for overlay lines and labels (includes alpha).
@@ -86,7 +95,7 @@ impl Default for TypographyOverlay {
     fn default() -> Self {
         Self {
             show_font_metrics:  true,
-            show_glyph_metrics: true,
+            show_glyph_metrics: GlyphMetricVisibility::Shown,
             show_labels:        true,
             color:              Color::from(WHITE),
             line_width:         DEFAULT_LINE_WIDTH,
@@ -144,7 +153,6 @@ pub fn on_overlay_removed(
 ///
 /// Spawns retained gizmo lines and [`WorldText`] labels as children of
 /// the overlay entity.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn build_typography_overlay(
     query: Query<(
         Entity,
@@ -239,7 +247,7 @@ pub fn build_typography_overlay(
             );
         }
 
-        if overlay.show_glyph_metrics {
+        if overlay.show_glyph_metrics == GlyphMetricVisibility::Shown {
             spawn_glyph_metric_gizmos(
                 &mut commands,
                 container_entity,
@@ -287,7 +295,6 @@ pub fn emit_typography_overlay_ready(
 }
 
 /// Spawns horizontal metric lines and dimension arrows for font-level metrics.
-#[allow(clippy::too_many_arguments)]
 fn spawn_font_metric_gizmos(
     commands: &mut Commands,
     entity: Entity,
@@ -361,7 +368,6 @@ fn spawn_font_metric_gizmos(
 }
 
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.
-#[allow(clippy::too_many_arguments)]
 fn spawn_glyph_metric_gizmos(
     commands: &mut Commands,
     entity: Entity,
@@ -428,7 +434,6 @@ fn spawn_glyph_metric_gizmos(
 }
 
 /// Spawns the "Bounding Box" callout label with shelf and riser lines.
-#[allow(clippy::too_many_arguments)]
 fn spawn_bounding_box_callout(
     commands: &mut Commands,
     entity: Entity,
@@ -513,7 +518,6 @@ fn spawn_bounding_box_callout(
 }
 
 /// Spawns origin dots, origin label, advancement end dot, and advancement arrow.
-#[allow(clippy::too_many_arguments)]
 fn spawn_origin_and_advancement(
     commands: &mut Commands,
     entity: Entity,
@@ -631,7 +635,6 @@ fn spawn_origin_and_advancement(
 }
 
 /// Spawns the horizontal advancement arrow with tick lines and label.
-#[allow(clippy::too_many_arguments)]
 fn spawn_advancement_arrow(
     commands: &mut Commands,
     entity: Entity,
@@ -900,7 +903,6 @@ fn build_metric_gizmos(
 ///
 /// Left-side labels sit outside their arrows (`CenterRight` anchor).
 /// Right-side labels sit outside their arrows (`CenterLeft` anchor).
-#[allow(clippy::too_many_arguments)]
 fn spawn_metric_labels(
     commands: &mut Commands,
     parent: Entity,
@@ -981,7 +983,6 @@ fn spawn_metric_labels(
 }
 
 /// Spawns Top/Bottom line-edge labels.
-#[allow(clippy::too_many_arguments)]
 fn spawn_line_edge_labels(
     commands: &mut Commands,
     parent: Entity,
@@ -1011,7 +1012,6 @@ fn spawn_line_edge_labels(
 }
 
 /// Spawns Ascent, Descent, Line Height, and optional "no line gap" labels.
-#[allow(clippy::too_many_arguments)]
 fn spawn_left_arrow_labels(
     commands: &mut Commands,
     parent: Entity,
@@ -1097,7 +1097,6 @@ fn spawn_left_arrow_labels(
 }
 
 /// Spawns x-Height and Cap Height labels on the right side.
-#[allow(clippy::too_many_arguments)]
 fn spawn_right_arrow_labels(
     commands: &mut Commands,
     parent: Entity,

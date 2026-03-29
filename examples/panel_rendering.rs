@@ -27,13 +27,12 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::AnimateToFit;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::SetFitTarget;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_lagrange::AnimateToFit;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::SetFitTarget;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 
 // ── Colors ──────────────────────────────────────────────────────────
 const DARK_BG: Color = Color::srgba(0.3, 0.3, 0.35, 1.0);
@@ -135,8 +134,7 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             MeshPickingPlugin,
             DiegeticUiPlugin,
@@ -164,7 +162,7 @@ fn main() {
 fn zoom_to_panel(
     children: Query<(Entity, &ChildOf), With<Mesh3d>>,
     panels: Query<Entity, (With<DiegeticPanel>, Without<HudPanel>)>,
-    cameras: Query<Entity, With<PanOrbitCamera>>,
+    cameras: Query<Entity, With<OrbitCam>>,
     mut done: Local<bool>,
     mut commands: Commands,
 ) {
@@ -270,7 +268,7 @@ fn adjust_illuminance(
 fn home_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     panels: Query<Entity, (With<DiegeticPanel>, Without<HudPanel>)>,
-    cameras: Query<Entity, With<PanOrbitCamera>>,
+    cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyH) {
@@ -351,7 +349,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
 
     // ── Camera ──────────────────────────────────────────────────────
     commands.spawn((
-        PanOrbitCamera {
+        OrbitCam {
             focus: HOME_FOCUS,
             radius: Some(HOME_RADIUS),
             yaw: Some(HOME_YAW),

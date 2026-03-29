@@ -31,11 +31,12 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_kana::ToF32;
+use bevy_kana::ToI32;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
@@ -111,8 +112,7 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -281,7 +281,7 @@ fn spawn_lights_and_camera(commands: &mut Commands, page_height: f32) {
 
     let mid_y = page_height / 2.0 + LIFT;
     commands.spawn((
-        PanOrbitCamera {
+        OrbitCam {
             focus: Vec3::new(0.0, mid_y, 0.0),
             radius: Some(0.5),
             yaw: Some(0.0),
@@ -316,7 +316,7 @@ fn ortho_to_persp_radius(r: f32) -> f32 { r / ((PERSPECTIVE_FOV / 2.0).tan() * 2
 /// P key: manual ortho/persp toggle.
 fn toggle_projection(
     keys: Res<ButtonInput<KeyCode>>,
-    mut cameras: Query<(&mut Projection, &mut PanOrbitCamera)>,
+    mut cameras: Query<(&mut Projection, &mut OrbitCam)>,
 ) {
     if !keys.just_pressed(KeyCode::KeyP) {
         return;
@@ -357,7 +357,7 @@ fn toggle_projection(
 /// Tightens near/far planes proportionally to camera radius.
 /// Keeps the near:far ratio constant regardless of zoom level,
 /// preventing depth clipping at close range.
-fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut PanOrbitCamera)>) {
+fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut OrbitCam)>) {
     for (mut proj, mut poc) in &mut cameras {
         if let Projection::Perspective(ref mut p) = *proj {
             let radius = poc.radius.unwrap_or(1.0);
@@ -378,7 +378,6 @@ fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut PanOrbitCamera)>) 
 
 // ── Ruler labels ─────────────────────────────────────────────────────
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn spawn_metric_labels(
     commands: &mut Commands,
     container: Entity,
@@ -394,9 +393,9 @@ fn spawn_metric_labels(
     let v_style = style.clone().with_anchor(Anchor::CenterRight);
     let h_style = style.with_anchor(Anchor::TopCenter);
 
-    let h_cm = (h / MM_TO_M / 10.0).floor() as i32;
+    let h_cm = (h / MM_TO_M / 10.0).floor().to_i32();
     for cm in 1..=h_cm {
-        let y = (cm as f32).mul_add(0.01, -half_h);
+        let y = cm.to_f32().mul_add(0.01, -half_h);
         commands.entity(container).with_child((
             WorldText(format!("{cm}")),
             v_style.clone(),
@@ -404,9 +403,9 @@ fn spawn_metric_labels(
         ));
     }
 
-    let w_cm = (w / MM_TO_M / 10.0).floor() as i32;
+    let w_cm = (w / MM_TO_M / 10.0).floor().to_i32();
     for cm in 1..=w_cm {
-        let x = (cm as f32).mul_add(0.01, -half_w);
+        let x = cm.to_f32().mul_add(0.01, -half_w);
         commands.entity(container).with_child((
             WorldText(format!("{cm}")),
             h_style.clone(),
@@ -415,7 +414,6 @@ fn spawn_metric_labels(
     }
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn spawn_inch_labels(
     commands: &mut Commands,
     container: Entity,
@@ -431,9 +429,9 @@ fn spawn_inch_labels(
     let v_style = style.clone().with_anchor(Anchor::CenterLeft);
     let h_style = style.with_anchor(Anchor::TopCenter);
 
-    let h_in = (h / IN_TO_M).floor() as i32;
+    let h_in = (h / IN_TO_M).floor().to_i32();
     for inch in 1..=h_in {
-        let y = (inch as f32).mul_add(IN_TO_M, -half_h);
+        let y = inch.to_f32().mul_add(IN_TO_M, -half_h);
         commands.entity(container).with_child((
             WorldText(format!("{inch}")),
             v_style.clone(),
@@ -441,9 +439,9 @@ fn spawn_inch_labels(
         ));
     }
 
-    let w_in = (w / IN_TO_M).floor() as i32;
+    let w_in = (w / IN_TO_M).floor().to_i32();
     for inch in 1..=w_in {
-        let x = (inch as f32).mul_add(IN_TO_M, -half_w);
+        let x = inch.to_f32().mul_add(IN_TO_M, -half_w);
         commands.entity(container).with_child((
             WorldText(format!("{inch}")),
             h_style.clone(),
@@ -813,7 +811,6 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
 
 // ── Ruler builders ───────────────────────────────────────────────────
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn build_metric_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
     let mut gizmo = GizmoAsset::default();
     let half_w = w / 2.0;
@@ -849,9 +846,9 @@ fn build_metric_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
     );
 
     // Vertical ticks (extend left from spine; first/last extend right to panel edge).
-    let h_mm = (h / MM_TO_M).round() as i32;
+    let h_mm = (h / MM_TO_M).round().to_i32();
     for mm in 0..=h_mm {
-        let y = (mm as f32).mul_add(MM_TO_M, bottom);
+        let y = mm.to_f32().mul_add(MM_TO_M, bottom);
         let len = mm_tick_len(mm);
         gizmo.line(
             Vec3::new(vx, y, RULER_Z),
@@ -868,9 +865,9 @@ fn build_metric_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
     }
 
     // Horizontal ticks (extend down from spine; first/last extend up to panel edge).
-    let w_mm = (w / MM_TO_M).round() as i32;
+    let w_mm = (w / MM_TO_M).round().to_i32();
     for mm in 0..=w_mm {
-        let x = (mm as f32).mul_add(MM_TO_M, left);
+        let x = mm.to_f32().mul_add(MM_TO_M, left);
         let len = mm_tick_len(mm);
         gizmo.line(
             Vec3::new(x, hy, RULER_Z),
@@ -889,7 +886,6 @@ fn build_metric_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
     gizmo
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn build_inch_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
     let mut gizmo = GizmoAsset::default();
     let half_w = w / 2.0;
@@ -926,9 +922,9 @@ fn build_inch_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
 
     // Vertical ticks (extend right from spine; first/last extend left to panel edge).
     let eighth_m = IN_TO_M / 8.0;
-    let h_eighths = (h / IN_TO_M * 8.0).round() as i32;
+    let h_eighths = (h / IN_TO_M * 8.0).round().to_i32();
     for eighth in 0..=h_eighths {
-        let y = (eighth as f32).mul_add(eighth_m, bottom);
+        let y = eighth.to_f32().mul_add(eighth_m, bottom);
         let len = inch_tick_len(eighth);
         gizmo.line(
             Vec3::new(vx, y, RULER_Z),
@@ -945,9 +941,9 @@ fn build_inch_ruler(w: f32, h: f32, color: Color) -> GizmoAsset {
     }
 
     // Horizontal ticks (extend down from spine; first/last extend up to panel edge).
-    let w_eighths = (w / IN_TO_M * 8.0).round() as i32;
+    let w_eighths = (w / IN_TO_M * 8.0).round().to_i32();
     for eighth in 0..=w_eighths {
-        let x = (eighth as f32).mul_add(eighth_m, left);
+        let x = eighth.to_f32().mul_add(eighth_m, left);
         let len = inch_tick_len(eighth);
         gizmo.line(
             Vec3::new(x, hy, RULER_Z),

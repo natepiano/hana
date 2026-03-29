@@ -8,6 +8,7 @@
 //! ([`ForLayout`] / [`ForStandalone`]) to enforce compile-time validity.
 //! Type aliases [`TextConfig`] and [`TextStyle`] provide ergonomic names.
 
+use std::hash::Hash;
 use std::marker::PhantomData;
 
 use bevy::color::Color;
@@ -1099,8 +1100,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     /// Uses exhaustive destructuring so that adding a new field to
     /// [`TextProps`] without updating this method is a compiler error.
     pub fn hash_layout(&self, hasher: &mut impl std::hash::Hasher) {
-        use std::hash::Hash;
-
         // Destructure exhaustively — compiler error if a field is added.
         let Self {
             font_id,

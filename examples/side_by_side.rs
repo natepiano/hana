@@ -52,9 +52,9 @@ use bevy_diegetic::TextDimensions;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
 use bevy_window_manager::WindowManagerPlugin;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
@@ -223,7 +223,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault))
         .add_plugins(DiegeticUiPlugin)
-        .add_plugins(PanOrbitCameraPlugin)
+        .add_plugins(LagrangePlugin)
         .add_plugins(WindowManagerPlugin)
         .init_gizmo_group::<ClayGizmoGroup>()
         .insert_resource(ShowTextGizmos(true))
@@ -253,7 +253,6 @@ fn main() {
 
 // ── Clay text measurement ────────────────────────────────────────────────────
 
-#[allow(clippy::type_complexity)]
 fn clay_measure_with_parley(
     text: &str,
     config: &clay_layout::text::TextConfig,
@@ -334,7 +333,7 @@ fn setup(
             rotation: Quat::from_xyzw(0.00, 0.0, 0.0, 1.0),
             ..default()
         },
-        PanOrbitCamera {
+        OrbitCam {
             focus: midpoint,
             trackpad_behavior: TrackpadBehavior::blender_default(),
             trackpad_sensitivity: 0.5,
@@ -426,7 +425,7 @@ fn cycle_panel_size(
 fn update_dynamic_rows(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
-    camera: Query<&PanOrbitCamera>,
+    camera: Query<&OrbitCam>,
     mut dynamic: ResMut<DynamicRows>,
 ) {
     if let Ok(cam) = camera.single() {
@@ -1020,7 +1019,6 @@ fn collect_clay_rects<'a>(mut layout: ClayLayoutScope<'a, 'a, (), ()>) -> Vec<Cl
 
 // ── Gizmo rendering ──────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 fn draw_rect_on_panel(
     gizmos: &mut Gizmos<impl GizmoConfigGroup>,
     panel_transform: &GlobalTransform,

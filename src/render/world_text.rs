@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy_kana::ToF32;
 
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
@@ -145,7 +146,6 @@ pub struct WorldTextReady {
 ///
 /// When all glyphs are ready, builds meshes and fires [`WorldTextReady`].
 /// When glyphs are still missing, adds/keeps [`PendingGlyphs`].
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(super) fn render_world_text(
     changed_texts: Query<
         Entity,
@@ -312,7 +312,6 @@ pub(super) fn emit_world_text_ready(
 /// Spawns visible mesh and optional shadow proxy entities for each atlas page
 /// of glyph quads under the given `entity`. Returns accumulated mesh build time
 /// in milliseconds.
-#[allow(clippy::too_many_arguments)]
 fn spawn_world_text_meshes(
     page_quads: &HashMap<u32, Vec<GlyphQuadData>>,
     entity: Entity,
@@ -348,10 +347,9 @@ fn spawn_world_text_meshes(
         if !is_invisible {
             let render_mode_u32 = style.render_mode() as u32;
 
-            #[allow(clippy::cast_possible_truncation)]
             let mat = super::msdf_material::msdf_text_material(
                 StandardMaterial::default(),
-                atlas.sdf_range() as f32,
+                atlas.sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
                 page_image.clone(),
@@ -387,10 +385,9 @@ fn spawn_world_text_meshes(
                 GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
             };
 
-            #[allow(clippy::cast_possible_truncation)]
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
                 StandardMaterial::default(),
-                atlas.sdf_range() as f32,
+                atlas.sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
                 page_image,
@@ -491,8 +488,7 @@ fn shape_world_text(
     //   quad_world = (glyph_pts * em_scale_pts) * scale_meters
     // where em_scale_pts = config.size() / canonical and scale includes
     // the 1/boost factor to convert back from points to the original unit.
-    #[allow(clippy::cast_precision_loss)]
-    let em_scale = config.size() / atlas.canonical_size() as f32;
+    let em_scale = config.size() / atlas.canonical_size().to_f32();
 
     // The boosted config is `ForLayout` (no anchor field). Convert to
     // standalone and restore the *original* style's anchor so the offset
@@ -534,10 +530,8 @@ fn shape_world_text(
             },
         };
 
-        #[allow(clippy::cast_precision_loss)]
-        let quad_w = metrics.pixel_width as f32 * em_scale;
-        #[allow(clippy::cast_precision_loss)]
-        let quad_h = metrics.pixel_height as f32 * em_scale;
+        let quad_w = metrics.pixel_width.to_f32() * em_scale;
+        let quad_h = metrics.pixel_height.to_f32() * em_scale;
 
         let quad_x = metrics.bearing_x.mul_add(boosted_size, sg.x) - anchor_x;
         let quad_y = -(metrics.bearing_y.mul_add(-boosted_size, sg.baseline - sg.y) - anchor_y);
@@ -619,7 +613,6 @@ fn ensure_all_glyphs_ready(
 
 /// Measures the total text extent and returns the `(anchor_x, anchor_y)` offset
 /// for the given anchor mode.
-#[allow(clippy::too_many_arguments)]
 fn measure_anchor_offset(
     glyphs: &[ShapedGlyph],
     style: &WorldTextStyle,
@@ -635,8 +628,7 @@ fn measure_anchor_offset(
             glyph_index: sg.glyph_id,
         };
         if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {
-            #[allow(clippy::cast_precision_loss)]
-            let right = (metrics.pixel_width as f32)
+            let right = (metrics.pixel_width.to_f32())
                 .mul_add(em_scale, metrics.bearing_x.mul_add(style.size(), sg.x));
             max_x = max_x.max(right);
         }
@@ -644,7 +636,6 @@ fn measure_anchor_offset(
     let mut baselines: Vec<f32> = glyphs.iter().map(|g| g.baseline).collect();
     baselines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
     let line_count = baselines.len().max(1);
-    #[allow(clippy::cast_precision_loss)]
     let natural_line_height = if style.line_height_raw() > 0.0 {
         style.line_height_raw()
     } else {
@@ -652,14 +643,12 @@ fn measure_anchor_offset(
             .font(FontId(style.font_id()))
             .map_or_else(|| style.size(), |f| f.metrics(style.size()).line_height)
     };
-    #[allow(clippy::cast_precision_loss)]
-    let max_y = natural_line_height * line_count as f32;
+    let max_y = natural_line_height * line_count.to_f32();
     style.anchor().offset(max_x, max_y)
 }
 
 /// Computes the ink bounding box for a single glyph, returned as `[x, y, w, h]`
 /// in world units, or `None` if the font face or glyph bbox is unavailable.
-#[allow(clippy::too_many_arguments)]
 fn ink_rect(
     font_data: &[u8],
     glyph_id: u16,

@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use bevy::prelude::Event;
 use bevy::prelude::Resource;
+use bevy_kana::ToU16;
 
 /// How a font was loaded into the registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,7 +184,6 @@ impl FontRegistry {
     ///     // Use id.0 with TextConfig::new(size).with_font(id.0)
     /// }
     /// ```
-    #[allow(clippy::cast_possible_truncation)]
     pub fn register_font(&mut self, name: &str, data: &[u8]) -> Option<FontId> {
         let font = Font::from_bytes(name, data)?;
 
@@ -201,7 +201,7 @@ impl FontRegistry {
         );
         drop(font_cx);
 
-        let id = FontId(self.fonts.len() as u16);
+        let id = FontId(self.fonts.len().to_u16());
         self.fonts.push(font);
         Some(id)
     }
@@ -210,12 +210,11 @@ impl FontRegistry {
     ///
     /// Returns `None` if no font with that name has been registered.
     #[must_use]
-    #[allow(clippy::cast_possible_truncation)]
     pub fn font_id_by_name(&self, name: &str) -> Option<FontId> {
         self.fonts
             .iter()
             .position(|f| f.name() == name)
-            .map(|i| FontId(i as u16))
+            .map(|i| FontId(i.to_u16()))
     }
 
     /// Returns the shared font context for use by the measurement closure.

@@ -32,11 +32,11 @@ use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_kana::ToF32;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const LAYOUT_W: f32 = 1.0;
@@ -63,8 +63,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             DiegeticUiPlugin,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -153,7 +152,7 @@ fn setup(
     ));
 
     // Camera.
-    commands.spawn((PanOrbitCamera {
+    commands.spawn((OrbitCam {
         focus: Vec3::new(0.0, panel_center_y, 0.0),
         radius: Some(3.5),
         yaw: Some(0.0),
@@ -183,7 +182,6 @@ fn setup(
     ));
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn build_panel() -> bevy_diegetic::LayoutTree {
     let mut builder = LayoutBuilder::new(LAYOUT_W, LAYOUT_H);
     builder.with(
@@ -197,7 +195,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
             .border(Border::all(0.008, Color::srgb_u8(80, 90, 100))),
         |b| {
             for i in 0..ROW_COUNT {
-                let hue = 360.0 * (i as f32 / ROW_COUNT as f32);
+                let hue = 360.0 * (i.to_f32() / ROW_COUNT.to_f32());
                 let color = Color::hsl(hue, 0.8, 0.6);
                 let config = LayoutTextStyle::new(FONT_SIZE).with_color(color);
                 b.with(

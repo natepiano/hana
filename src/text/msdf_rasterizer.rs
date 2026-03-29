@@ -1,5 +1,7 @@
 //! Single-glyph MSDF rasterization via `fdsm` + `ttf-parser`.
 
+use bevy_kana::ToU8;
+use bevy_kana::ToU32;
 use fdsm::bezier::scanline::FillRule;
 use fdsm::correct_error::ErrorCorrectionConfig;
 use fdsm::correct_error::correct_error_msdf;
@@ -80,10 +82,8 @@ pub(super) fn rasterize_glyph(
     let glyph_w = f64::from(bbox.x_max - bbox.x_min) * scale;
     let glyph_h = f64::from(bbox.y_max - bbox.y_min) * scale;
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let img_w = total_pad.mul_add(2.0, glyph_w).ceil() as u32;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let img_h = total_pad.mul_add(2.0, glyph_h).ceil() as u32;
+    let img_w = total_pad.mul_add(2.0, glyph_w).ceil().to_u32();
+    let img_h = total_pad.mul_add(2.0, glyph_h).ceil().to_u32();
 
     if img_w == 0 || img_h == 0 {
         return None;
@@ -127,13 +127,12 @@ pub(super) fn rasterize_glyph(
     }
 
     // Convert f32 [0.0, 1.0] to u8 [0, 255].
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let image = RgbImage::from_fn(img_w, img_h, |x, y| {
         let p = image_f32.get_pixel(x, y);
         image::Rgb([
-            (p[0].clamp(0.0, 1.0) * 255.0) as u8,
-            (p[1].clamp(0.0, 1.0) * 255.0) as u8,
-            (p[2].clamp(0.0, 1.0) * 255.0) as u8,
+            (p[0].clamp(0.0, 1.0) * 255.0).to_u8(),
+            (p[1].clamp(0.0, 1.0) * 255.0).to_u8(),
+            (p[2].clamp(0.0, 1.0) * 255.0).to_u8(),
         ])
     });
 

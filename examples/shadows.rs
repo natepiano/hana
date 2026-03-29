@@ -31,11 +31,11 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_kana::ToF32;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const ZOOM_MARGIN_ENTITY: f32 = 0.15;
@@ -71,8 +71,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             DiegeticUiPlugin,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -108,10 +107,9 @@ struct GridLayout {
 }
 
 impl GridLayout {
-    #[allow(clippy::cast_precision_loss)]
     fn new(num_rows: usize, num_cols: usize) -> Self {
-        let grid_width = (num_cols - 1) as f32 * COL_SPACING;
-        let grid_height = (num_rows - 1) as f32 * ROW_SPACING;
+        let grid_width = (num_cols - 1).to_f32() * COL_SPACING;
+        let grid_height = (num_rows - 1).to_f32() * ROW_SPACING;
         let grid_center_y = grid_height * 0.5 + 1.5;
         Self {
             grid_width,
@@ -205,7 +203,6 @@ fn spawn_ground_and_backdrop(
 }
 
 /// Spawns row headers (render mode) and column headers (shadow mode).
-#[allow(clippy::cast_precision_loss)]
 fn spawn_grid_headers(
     commands: &mut Commands,
     ground: Entity,
@@ -221,7 +218,9 @@ fn spawn_grid_headers(
     for (row, &render_mode) in render_modes.iter().enumerate() {
         let y = grid.grid_height.mul_add(
             -0.5,
-            ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y),
+            (grid.rows - 1 - row)
+                .to_f32()
+                .mul_add(ROW_SPACING, grid.grid_center_y),
         );
         spawn_label(
             commands,
@@ -237,7 +236,7 @@ fn spawn_grid_headers(
 
     // Column headers (shadow mode labels on top).
     for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-        let x = (col as f32).mul_add(COL_SPACING, -(grid.grid_width * 0.5));
+        let x = col.to_f32().mul_add(COL_SPACING, -(grid.grid_width * 0.5));
         let y = grid.grid_center_y + grid.grid_height.mul_add(0.5, 0.8);
         spawn_label(
             commands,
@@ -253,7 +252,6 @@ fn spawn_grid_headers(
 }
 
 /// Spawns one "A" glyph per `(GlyphRenderMode, GlyphShadowMode)` combination.
-#[allow(clippy::cast_precision_loss)]
 fn spawn_glyph_grid(
     commands: &mut Commands,
     ground: Entity,
@@ -263,10 +261,12 @@ fn spawn_glyph_grid(
 ) {
     for (row, &render_mode) in render_modes.iter().enumerate() {
         for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-            let x = (col as f32).mul_add(COL_SPACING, -(grid.grid_width * 0.5));
+            let x = col.to_f32().mul_add(COL_SPACING, -(grid.grid_width * 0.5));
             let y = grid.grid_height.mul_add(
                 -0.5,
-                ((grid.rows - 1 - row) as f32).mul_add(ROW_SPACING, grid.grid_center_y),
+                (grid.rows - 1 - row)
+                    .to_f32()
+                    .mul_add(ROW_SPACING, grid.grid_center_y),
             );
 
             let glyph = commands
@@ -309,7 +309,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
             brightness:                 200.0,
             affects_lightmapped_meshes: false,
         },
-        PanOrbitCamera {
+        OrbitCam {
             focus: Vec3::new(-0.766, 3.732, -1.97),
             radius: Some(12.7),
             yaw: Some(0.033),
@@ -399,7 +399,6 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
 }
 
 /// Spawns a label with a white drop shadow, click-to-zoom, parented to `parent`.
-#[allow(clippy::too_many_arguments)]
 fn spawn_label(
     commands: &mut Commands,
     parent: Entity,

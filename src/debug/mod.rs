@@ -5,6 +5,7 @@
 mod constants;
 mod typography_overlay;
 
+pub use typography_overlay::GlyphMetricVisibility;
 pub use typography_overlay::TypographyOverlay;
 pub use typography_overlay::TypographyOverlayReady;
 pub use typography_overlay::build_typography_overlay;

@@ -27,10 +27,9 @@ use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
 use bevy_window_manager::WindowManagerPlugin;
 
 /// World-space panel height. Width follows the window aspect ratio.
@@ -85,8 +84,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             DiegeticUiPlugin,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
         ))
@@ -161,7 +159,7 @@ fn setup(
         Transform::from_xyz(-1.5, 7.5, -6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((PanOrbitCamera {
+    commands.spawn((OrbitCam {
         focus: Vec3::new(0.067_647_74, 1.913_066_5, 2.400_296_7),
         radius: Some(4.385_594_4),
         yaw: Some(-0.004_848_164),
@@ -204,7 +202,6 @@ fn panel_transform(world_w: f32, world_h: f32) -> Transform {
     Transform::from_xyz(-world_w * 0.5, world_h + PANEL_GROUND_CLEARANCE, panel_z())
 }
 
-#[allow(clippy::type_complexity)]
 fn resize_panel(
     windows: Query<&Window, Changed<Window>>,
     mut panels: Query<
@@ -333,7 +330,6 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
 }
 
 /// Builds the 2x2 feature grid (LIGA|CALT over DLIG|KERN).
-#[allow(clippy::too_many_arguments)]
 fn build_feature_grid(
     b: &mut LayoutBuilder,
     serif_name: &str,
@@ -436,7 +432,6 @@ fn build_feature_grid(
 
 /// Builds a single feature column: header, font name, then pairs of
 /// on/off samples for each test string.
-#[allow(clippy::too_many_arguments)]
 fn build_feature_column(
     b: &mut LayoutBuilder,
     title: &str,

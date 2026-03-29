@@ -11,6 +11,10 @@ use std::time::Instant;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy_kana::ToF32;
+use bevy_kana::ToI32;
+use bevy_kana::ToU16;
+use bevy_kana::ToU32;
 
 use super::constants;
 use super::glyph_quad;
@@ -109,23 +113,22 @@ struct ShapedCacheKey {
 }
 
 impl ShapedCacheKey {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn new(text: &str, m: &TextMeasure) -> Self {
         let mut hasher = DefaultHasher::new();
         text.hash(&mut hasher);
         Self {
             text_hash:     hasher.finish(),
             font_id:       m.font_id,
-            size_q:        (m.size * 100.0) as u32,
-            weight_q:      (m.weight.0 * 10.0) as u32,
+            size_q:        (m.size * 100.0).to_u32(),
+            weight_q:      (m.weight.0 * 10.0).to_u32(),
             slant:         match m.slant {
                 Normal => 0,
                 Italic => 1,
                 Oblique => 2,
             },
-            lh_q:          (m.line_height * 100.0) as u32,
-            ls_q:          (m.letter_spacing * 100.0) as i32,
-            ws_q:          (m.word_spacing * 100.0) as i32,
+            lh_q:          (m.line_height * 100.0).to_u32(),
+            ls_q:          (m.letter_spacing * 100.0).to_i32(),
+            ws_q:          (m.word_spacing * 100.0).to_i32(),
             font_features: m.font_features,
         }
     }
@@ -358,7 +361,6 @@ pub(super) struct PanelTextQuads {
 /// 1. Collects all `RenderCommandKind::Text` commands.
 /// 2. Diffs against existing [`PanelTextChild`] children by `element_idx`.
 /// 3. Updates, spawns, or despawns children as needed.
-#[allow(clippy::too_many_arguments)]
 fn reconcile_panel_text_children(
     changed_panels: Query<
         (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
@@ -566,7 +568,6 @@ fn reconcile_panel_image_children(
 /// 1. Calls [`shape_text_to_quads`] using the [`PanelTextChild`] scale data.
 /// 2. If all glyphs are ready, stores results in [`PanelTextQuads`] and removes [`PendingGlyphs`].
 /// 3. If glyphs are still pending, inserts [`PendingGlyphs`].
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn shape_panel_text_children(
     changed_texts: Query<
         Entity,
@@ -658,7 +659,6 @@ fn shape_panel_text_children(
 /// 2. Groups quads by [`TextBatchKey`] (render mode, shadow mode, page index).
 /// 3. Despawns old [`DiegeticTextMesh`] / [`DiegeticShadowProxy`] children.
 /// 4. Spawns new batched mesh entities via [`spawn_batch_meshes`].
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn build_panel_batched_meshes(
     changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
     panel_children: Query<(&PanelTextQuads, &PanelTextChild, &ChildOf)>,
@@ -745,9 +745,8 @@ fn build_panel_batched_meshes(
 
         // Text Z offset: use the max command index so text renders
         // on top of all geometry at or below that index.
-        #[allow(clippy::cast_precision_loss)]
         let text_z = if is_geometry {
-            max_command_index as f32 * constants::LAYER_Z_STEP
+            max_command_index.to_f32() * constants::LAYER_Z_STEP
         } else {
             0.0
         };
@@ -771,7 +770,6 @@ fn build_panel_batched_meshes(
 
 /// Spawns visible mesh and optional shadow proxy entities for each batch
 /// of glyph quads under the given `panel_entity`.
-#[allow(clippy::too_many_arguments)]
 fn spawn_batch_meshes(
     batches: &HashMap<TextBatchKey, Vec<GlyphQuadData>>,
     panel_entity: Entity,
@@ -814,7 +812,6 @@ fn spawn_batch_meshes(
         if !is_invisible {
             let render_mode_u32 = key.render_mode as u32;
 
-            #[allow(clippy::cast_possible_truncation)]
             let material_handle =
                 if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
                     shared_mats
@@ -823,7 +820,7 @@ fn spawn_batch_meshes(
                         .or_insert_with(|| {
                             materials.add(super::msdf_material::msdf_text_material(
                                 text_base.clone(),
-                                atlas.sdf_range() as f32,
+                                atlas.sdf_range().to_f32(),
                                 atlas.width(),
                                 atlas.height(),
                                 page_image.clone(),
@@ -835,7 +832,7 @@ fn spawn_batch_meshes(
                 } else {
                     materials.add(super::msdf_material::msdf_text_material(
                         text_base.clone(),
-                        atlas.sdf_range() as f32,
+                        atlas.sdf_range().to_f32(),
                         atlas.width(),
                         atlas.height(),
                         page_image.clone(),
@@ -873,10 +870,9 @@ fn spawn_batch_meshes(
                 GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
             };
 
-            #[allow(clippy::cast_possible_truncation)]
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
                 text_base.clone(),
-                atlas.sdf_range() as f32,
+                atlas.sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
                 page_image,
@@ -980,9 +976,8 @@ pub(super) fn shape_text_cached(
             let mut advance_x = 0.0_f32;
             for cluster in glyph_run.clusters() {
                 for glyph in cluster.glyphs() {
-                    #[allow(clippy::cast_possible_truncation)]
                     glyphs.push(ShapedGlyph {
-                        glyph_id: glyph.id as u16,
+                        glyph_id: glyph.id.to_u16(),
                         x:        run.offset() + advance_x + glyph.x,
                         y:        glyph.y,
                         baseline: run.baseline(),
@@ -1016,7 +1011,6 @@ pub(super) fn shape_text_cached(
 ///
 /// Uses the [`ShapedTextCache`] to avoid redundant parley shaping. Quad
 /// construction from cached glyphs + atlas metrics is cheap arithmetic.
-#[allow(clippy::too_many_arguments)]
 fn shape_text_to_quads(
     text: &str,
     config: &LayoutTextStyle,
@@ -1074,8 +1068,7 @@ fn shape_text_to_quads(
     let linear: LinearRgba = config.color().into();
     let color_arr = [linear.red, linear.green, linear.blue, linear.alpha];
 
-    #[allow(clippy::cast_precision_loss)]
-    let em_scale = config.size() / atlas.canonical_size() as f32;
+    let em_scale = config.size() / atlas.canonical_size().to_f32();
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
     for sg in &shaped.glyphs {
@@ -1104,10 +1097,8 @@ fn shape_text_to_quads(
         let glyph_y = bounds.y + sg.baseline - sg.y;
 
         // Glyph quad size in layout units.
-        #[allow(clippy::cast_precision_loss)]
-        let quad_w = metrics.pixel_width as f32 * em_scale;
-        #[allow(clippy::cast_precision_loss)]
-        let quad_h = metrics.pixel_height as f32 * em_scale;
+        let quad_w = metrics.pixel_width.to_f32() * em_scale;
+        let quad_h = metrics.pixel_height.to_f32() * em_scale;
 
         // Quad top-left in layout coordinates.
         let quad_layout_x = metrics.bearing_x.mul_add(config.size(), glyph_x);

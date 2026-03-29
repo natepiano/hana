@@ -4,15 +4,12 @@
 //! bounding boxes match expectations. A simple monospace text measurement function
 //! is used throughout: each character is `font_size * 0.6` wide, one line tall.
 
-#![allow(
-    clippy::float_cmp,
-    clippy::needless_collect,
-    clippy::cast_precision_loss
-)]
+#![allow(clippy::float_cmp, clippy::needless_collect)]
 
 use std::sync::Arc;
 
 use bevy::color::Color;
+use bevy_kana::ToF32;
 
 use super::AlignX;
 use super::AlignY;
@@ -40,18 +37,16 @@ fn monospace_measure() -> MeasureTextFn {
         let mut line_count = 0_u32;
         for line in text.lines() {
             line_count += 1;
-            #[allow(clippy::cast_precision_loss)]
-            let width = line.chars().count() as f32 * char_width;
+            let width = line.chars().count().to_f32() * char_width;
             max_line_width = max_line_width.max(width);
         }
         if line_count == 0 {
             line_count = 1;
         }
         TextDimensions {
-            width:                                        max_line_width,
-            #[allow(clippy::cast_precision_loss)]
-            height:                                       measure.size * line_count as f32,
-            line_height:                                  measure.size,
+            width:       max_line_width,
+            height:      measure.size * line_count.to_f32(),
+            line_height: measure.size,
         }
     })
 }

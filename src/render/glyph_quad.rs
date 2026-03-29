@@ -22,6 +22,11 @@
 //! glyph pairs (like `g`/`r` in a monospace font), and atlas guttering
 //! alone doesn't prevent double-compositing from overlapping geometry.
 
+use bevy::mesh::Indices;
+use bevy::prelude::Mesh;
+use bevy::render::render_resource::PrimitiveTopology;
+use bevy_kana::ToU32;
+
 /// Per-glyph data used when building batched quad meshes.
 ///
 /// This struct is used on the CPU to build per-glyph quad vertices within
@@ -107,11 +112,7 @@ pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
 /// Each glyph produces 4 vertices (quad corners) and 6 indices (two triangles).
 /// UV coordinates map into the MSDF atlas texture.
 #[must_use]
-pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
-    use bevy::mesh::Indices;
-    use bevy::prelude::Mesh;
-    use bevy::render::render_resource::PrimitiveTopology;
-
+pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> Mesh {
     let vertex_count = quads.len() * 4;
     let index_count = quads.len() * 6;
 
@@ -126,8 +127,7 @@ pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> bevy::prelude::Mesh {
         let [qw, qh] = quad.size;
         let [u_min, v_min, u_max, v_max] = quad.uv_rect;
 
-        #[allow(clippy::cast_possible_truncation)]
-        let base = (idx * 4) as u32;
+        let base = (idx * 4).to_u32();
 
         // Quad vertices: TL, TR, BR, BL (Y-up coordinate system).
         positions.push([qx, qy, qz]); // TL

@@ -38,6 +38,8 @@ mod text;
 // Layout types.
 // Debug overlay.
 #[cfg(feature = "typography_overlay")]
+pub use debug::GlyphMetricVisibility;
+#[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlayReady;

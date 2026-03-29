@@ -17,9 +17,9 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
 use bevy_window_manager::WindowManagerPlugin;
 
 const PANEL_WIDTH: f32 = 480.0;
@@ -46,7 +46,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             DiegeticUiPlugin,
-            PanOrbitCameraPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
         ))
@@ -254,7 +254,7 @@ fn spawn_camera(commands: &mut Commands) {
             rotation:    Quat::from_xyzw(-0.1476, 0.4041, 0.0663, 0.9003),
             scale:       Vec3::ONE,
         },
-        PanOrbitCamera {
+        OrbitCam {
             trackpad_behavior: TrackpadBehavior::BlenderLike {
                 modifier_pan:  Some(KeyCode::ShiftLeft),
                 modifier_zoom: Some(KeyCode::ControlLeft),

@@ -14,11 +14,10 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const ZOOM_MARGIN_MESH: f32 = 0.15;
@@ -54,8 +53,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             DiegeticUiPlugin,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -310,7 +308,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
         Transform::from_xyz(-4.0, 8.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((PanOrbitCamera {
+    commands.spawn((OrbitCam {
         focus: Vec3::ZERO,
         radius: Some(11.33),
         yaw: Some(0.015),

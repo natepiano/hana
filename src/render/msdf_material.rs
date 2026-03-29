@@ -97,7 +97,10 @@ impl MaterialExtension for MsdfExtension {
 /// overridden for text rendering. All other PBR properties (roughness,
 /// metallic, reflectance, `base_color`, unlit) are preserved from the caller.
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "const fn — trait methods cannot be called in const context"
+)]
 pub(super) const fn msdf_text_material(
     mut base: StandardMaterial,
     sdf_range: f32,
@@ -133,7 +136,10 @@ pub(super) const fn msdf_text_material(
 /// - `alpha_mode: Mask(0.5)` so the shadow prepass runs the fragment shader
 /// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments
 #[must_use]
-#[allow(clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "const fn — trait methods cannot be called in const context"
+)]
 pub(super) const fn msdf_shadow_proxy_material(
     mut base: StandardMaterial,
     sdf_range: f32,

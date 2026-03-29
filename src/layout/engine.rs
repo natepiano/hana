@@ -9,6 +9,8 @@
 
 use std::sync::Arc;
 
+use bevy_kana::ToF32;
+
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
@@ -25,6 +27,13 @@ use super::types::Sizing;
 use super::types::TextDimensions;
 use super::types::TextMeasure;
 use super::types::TextWrap;
+
+/// Selects which layout axis a sizing or positioning operation targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Axis {
+    X,
+    Y,
+}
 
 /// Callback type for measuring text dimensions.
 ///
@@ -118,11 +127,11 @@ impl LayoutEngine {
         self.initialize_leaf_sizes(tree, &mut computed, font_scale);
 
         // Propagate Fit container sizes bottom-up from their children.
-        propagate_fit_sizes(tree, &mut computed, root, true);
-        propagate_fit_sizes(tree, &mut computed, root, false);
+        propagate_fit_sizes(tree, &mut computed, root, Axis::X);
+        propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
 
         // Phase 1: Size along X axis (BFS top-down).
-        size_along_axis(tree, &mut computed, root, true, viewport_width);
+        size_along_axis(tree, &mut computed, root, Axis::X, viewport_width);
 
         // Phase 2: Re-wrap text elements within their resolved widths.
         // This may change text heights (more lines), so we re-propagate Y
@@ -130,11 +139,11 @@ impl LayoutEngine {
         let (wrapped, text_sizes_changed) =
             rewrap_text_elements(tree, &mut computed, &self.measure_text, font_scale);
         if text_sizes_changed {
-            propagate_fit_sizes(tree, &mut computed, root, false);
+            propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
         }
 
         // Phase 3: Size along Y axis (BFS top-down) with wrap-corrected heights.
-        size_along_axis(tree, &mut computed, root, false, viewport_height);
+        size_along_axis(tree, &mut computed, root, Axis::Y, viewport_height);
 
         // Phase 4: Position elements and generate render commands (DFS).
         let commands = position_and_render(
@@ -414,8 +423,7 @@ fn rewrap_text_elements(
             }
 
             // Update height from the wrapped line count.
-            #[allow(clippy::cast_precision_loss)]
-            let new_height = result.line_height * result.lines.len() as f32;
+            let new_height = result.line_height * result.lines.len().to_f32();
             computed[index].height =
                 new_height.clamp(element.height.min_size(), element.height.max_size());
 
@@ -476,11 +484,11 @@ fn propagate_fit_sizes(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     index: usize,
-    x_axis: bool,
+    axis: Axis,
 ) -> f32 {
     let element = &tree.elements[index];
     let children = tree.children_of(index);
-    let sizing = get_sizing(element, x_axis);
+    let sizing = get_sizing(element, axis);
 
     // Leaf node: set `minDimensions` from the element's content.
     //
@@ -490,26 +498,27 @@ fn propagate_fit_sizes(
     // We use the measured height for Y and the sizing floor for X (since we
     // don't yet track per-word minimum width).
     if children.is_empty() {
-        let current_size = get_size(computed[index], x_axis);
-        let leaf_min = if !x_axis && matches!(element.content, ElementContent::Text { .. }) {
+        let current_size = get_size(computed[index], axis);
+        let leaf_min = if axis == Axis::Y && matches!(element.content, ElementContent::Text { .. })
+        {
             // Text min height = measured height (matches Clay line 2003).
             current_size.clamp(sizing.min_size(), sizing.max_size())
         } else {
             0.0_f32.clamp(sizing.min_size(), sizing.max_size())
         };
-        set_min_size(&mut computed[index], x_axis, leaf_min);
+        set_min_size(&mut computed[index], axis, leaf_min);
         return current_size;
     }
 
-    let is_along = is_layout_axis(element.direction, x_axis);
+    let is_along = is_layout_axis(element.direction, axis);
 
     // Recurse into children first (post-order), accumulating sizes inline
     // to avoid per-call Vec allocation.
     let mut content_acc: f32 = 0.0;
     let mut min_acc: f32 = 0.0;
     for &child_idx in children {
-        let child_size = propagate_fit_sizes(tree, computed, child_idx, x_axis);
-        let child_min = get_min_size(computed[child_idx], x_axis);
+        let child_size = propagate_fit_sizes(tree, computed, child_idx, axis);
+        let child_min = get_min_size(computed[child_idx], axis);
         if is_along {
             content_acc += child_size;
             min_acc += child_min;
@@ -522,20 +531,17 @@ fn propagate_fit_sizes(
     // Fixed elements already have their size — but still compute minDimensions.
     if let Sizing::Fixed(size) = sizing {
         let min = 0.0_f32.clamp(sizing.min_size(), sizing.max_size());
-        set_min_size(&mut computed[index], x_axis, min);
+        set_min_size(&mut computed[index], axis, min);
         return size.value;
     }
 
-    let padding = if x_axis {
-        element.padding.horizontal()
-    } else {
-        element.padding.vertical()
+    let padding = match axis {
+        Axis::X => element.padding.horizontal(),
+        Axis::Y => element.padding.vertical(),
     };
 
     let gap_total = if is_along && children.len() > 1 {
-        #[allow(clippy::cast_precision_loss)]
-        let gap = element.child_gap.value * (children.len() - 1) as f32;
-        gap
+        element.child_gap.value * (children.len() - 1).to_f32()
     } else {
         0.0
     };
@@ -545,12 +551,12 @@ fn propagate_fit_sizes(
 
     // Clamp minDimensions to [sizing.min, sizing.max] — matches Clay.
     let clamped_min = min_from_children.clamp(sizing.min_size(), sizing.max_size());
-    set_min_size(&mut computed[index], x_axis, clamped_min);
+    set_min_size(&mut computed[index], axis, clamped_min);
 
     // Fit elements: set their computed size now.
     if sizing.is_fit() {
         let clamped = content_size.clamp(sizing.min_size(), sizing.max_size());
-        set_size(&mut computed[index], x_axis, clamped);
+        set_size(&mut computed[index], axis, clamped);
         return clamped;
     }
 
@@ -560,7 +566,7 @@ fn propagate_fit_sizes(
     // elements start at 0, masking overflow and preventing compression from triggering.
     if sizing.is_grow() {
         let clamped = content_size.clamp(sizing.min_size(), sizing.max_size());
-        set_size(&mut computed[index], x_axis, clamped);
+        set_size(&mut computed[index], axis, clamped);
         return clamped;
     }
 
@@ -571,26 +577,26 @@ fn propagate_fit_sizes(
 
 /// BFS sizing pass along one axis.
 ///
-/// When `x_axis` is true, sizes widths; otherwise sizes heights.
+/// When `axis` is `Axis::X`, sizes widths; when `Axis::Y`, sizes heights.
 fn size_along_axis(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     root: usize,
-    x_axis: bool,
+    axis: Axis,
     viewport_size: f32,
 ) {
     // Set root size if it hasn't been set.
     let root_element = &tree.elements[root];
-    let root_size = get_size(computed[root], x_axis);
+    let root_size = get_size(computed[root], axis);
     if root_size <= 0.0 {
-        let new_size = match get_sizing(root_element, x_axis) {
+        let new_size = match get_sizing(root_element, axis) {
             Sizing::Grow { min, max } | Sizing::Fit { min, max } => {
                 viewport_size.clamp(min.value, max.value)
             },
             Sizing::Fixed(size) => size.value,
             Sizing::Percent(frac) => viewport_size * frac,
         };
-        set_size(&mut computed[root], x_axis, new_size);
+        set_size(&mut computed[root], axis, new_size);
     }
 
     // Top-down traversal using a stack (parents always processed before children).
@@ -604,19 +610,16 @@ fn size_along_axis(
         }
 
         let parent_element = &tree.elements[parent_idx];
-        let parent_size = get_size(computed[parent_idx], x_axis);
-        let is_along = is_layout_axis(parent_element.direction, x_axis);
+        let parent_size = get_size(computed[parent_idx], axis);
+        let is_along = is_layout_axis(parent_element.direction, axis);
 
-        let padding = if x_axis {
-            parent_element.padding.horizontal()
-        } else {
-            parent_element.padding.vertical()
+        let padding = match axis {
+            Axis::X => parent_element.padding.horizontal(),
+            Axis::Y => parent_element.padding.vertical(),
         };
 
         let gap_total = if is_along && children.len() > 1 {
-            #[allow(clippy::cast_precision_loss)]
-            let gap = parent_element.child_gap.value * (children.len() - 1) as f32;
-            gap
+            parent_element.child_gap.value * (children.len() - 1).to_f32()
         } else {
             0.0
         };
@@ -624,10 +627,10 @@ fn size_along_axis(
         // Resolve Percent children first.
         let available_for_percent = parent_size - padding - gap_total;
         for &child_idx in children {
-            let child_sizing = get_sizing(&tree.elements[child_idx], x_axis);
+            let child_sizing = get_sizing(&tree.elements[child_idx], axis);
             if let Sizing::Percent(frac) = child_sizing {
                 let size = (available_for_percent * frac).max(0.0);
-                set_size(&mut computed[child_idx], x_axis, size);
+                set_size(&mut computed[child_idx], axis, size);
             }
         }
 
@@ -637,13 +640,13 @@ fn size_along_axis(
                 computed,
                 parent_idx,
                 children,
-                x_axis,
+                axis,
                 parent_size,
                 padding,
                 gap_total,
             );
         } else {
-            size_children_cross_axis(tree, computed, children, x_axis, parent_size, padding);
+            size_children_cross_axis(tree, computed, children, axis, parent_size, padding);
         }
 
         // Enqueue children (reverse order so first child is popped first from stack).
@@ -656,13 +659,12 @@ fn size_along_axis(
 }
 
 /// Size children that are laid out ALONG the parent's layout axis.
-#[allow(clippy::too_many_arguments)]
 fn size_children_along_axis(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     parent_idx: usize,
     children: &[usize],
-    x_axis: bool,
+    axis: Axis,
     parent_size: f32,
     padding: f32,
     gap_total: f32,
@@ -673,8 +675,8 @@ fn size_children_along_axis(
     let mut content_size: f32 = 0.0;
     let mut grow_count = 0_u32;
     for &child_idx in children {
-        let child_sizing = get_sizing(&tree.elements[child_idx], x_axis);
-        let child_size = get_size(computed[child_idx], x_axis);
+        let child_sizing = get_sizing(&tree.elements[child_idx], axis);
+        let child_size = get_size(computed[child_idx], axis);
         content_size += child_size;
         if child_sizing.is_grow() {
             grow_count += 1;
@@ -686,24 +688,24 @@ fn size_children_along_axis(
 
     // Overflow compression: largest-first heuristic.
     if to_distribute < 0.0 && !parent_element.clip {
-        compress_children(tree, computed, children, x_axis, &mut to_distribute);
+        compress_children(tree, computed, children, axis, &mut to_distribute);
     }
 
     // Growth expansion: smallest-first heuristic.
     if to_distribute > 0.0 && grow_count > 0 {
-        expand_children(tree, computed, children, x_axis, &mut to_distribute);
+        expand_children(tree, computed, children, axis, &mut to_distribute);
     }
 }
 
 /// Size children that are laid out ACROSS (perpendicular to) the parent's layout axis.
 ///
-/// Applies `MAX(minDimensions, MIN(childSize, maxSize))` — Clay's cross-axis rule
+/// Applies `MAX(minDimensions, MIN(childSize, maxSize))` -- Clay's cross-axis rule
 /// that prevents children from shrinking below their propagated content minimum.
 fn size_children_cross_axis(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     children: &[usize],
-    x_axis: bool,
+    axis: Axis,
     parent_size: f32,
     padding: f32,
 ) {
@@ -711,9 +713,9 @@ fn size_children_cross_axis(
 
     for &child_idx in children {
         let child_element = &tree.elements[child_idx];
-        let child_sizing = get_sizing(child_element, x_axis);
-        let current = get_size(computed[child_idx], x_axis);
-        let min_dim = get_min_size(computed[child_idx], x_axis);
+        let child_sizing = get_sizing(child_element, axis);
+        let current = get_size(computed[child_idx], axis);
+        let min_dim = get_min_size(computed[child_idx], axis);
 
         let new_size = match child_sizing {
             Sizing::Grow { min, max } => max_size.clamp(min.value, max.value),
@@ -731,7 +733,7 @@ fn size_children_cross_axis(
 
         // Apply minDimensions floor: MAX(minDimensions, MIN(childSize, maxSize)).
         let floored = new_size.max(min_dim);
-        set_size(&mut computed[child_idx], x_axis, floored);
+        set_size(&mut computed[child_idx], axis, floored);
     }
 }
 
@@ -846,8 +848,7 @@ fn emit_text_commands(
     if let Some(wrap_result) = wrapped {
         // Wrapped text: emit one command per line.
         for (line_idx, line) in wrap_result.lines.iter().enumerate() {
-            #[allow(clippy::cast_precision_loss)]
-            let line_y = wrap_result.line_height.mul_add(line_idx as f32, bounds.y);
+            let line_y = wrap_result.line_height.mul_add(line_idx.to_f32(), bounds.y);
             commands.push(RenderCommand {
                 bounds:      BoundingBox {
                     x:      bounds.x,
@@ -907,9 +908,7 @@ fn push_children_to_stack(
     }
 
     let gap_total = if children.len() > 1 {
-        #[allow(clippy::cast_precision_loss)]
-        let g = parent_el.child_gap.value * (children.len() - 1) as f32;
-        g
+        parent_el.child_gap.value * (children.len() - 1).to_f32()
     } else {
         0.0
     };
@@ -979,7 +978,6 @@ fn push_children_to_stack(
 ///
 /// Elements whose bounding box lies entirely outside the viewport are
 /// omitted from the command list (viewport culling).
-#[allow(clippy::too_many_arguments)]
 fn position_and_render(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
@@ -1134,7 +1132,7 @@ fn compress_children(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     children: &[usize],
-    x_axis: bool,
+    axis: Axis,
     to_distribute: &mut f32,
 ) {
     loop {
@@ -1149,11 +1147,11 @@ fn compress_children(
         let mut at_largest_count = 0_u32;
 
         for &idx in children {
-            if !get_sizing(&tree.elements[idx], x_axis).is_resizable() {
+            if !get_sizing(&tree.elements[idx], axis).is_resizable() {
                 continue;
             }
-            let size = get_size(computed[idx], x_axis);
-            let min = get_min_size(computed[idx], x_axis);
+            let size = get_size(computed[idx], axis);
+            let min = get_min_size(computed[idx], axis);
             if size <= min + LAYOUT_EPSILON {
                 continue;
             }
@@ -1172,8 +1170,7 @@ fn compress_children(
             break;
         }
 
-        #[allow(clippy::cast_precision_loss)]
-        let count = at_largest_count as f32;
+        let count = at_largest_count.to_f32();
         let delta_even = (-*to_distribute) / count;
 
         // If all at same size (no second largest), just distribute evenly.
@@ -1191,17 +1188,17 @@ fn compress_children(
         // Apply shrink to resizable children at the largest size.
         let mut total_shrink = 0.0_f32;
         for &idx in children {
-            if !get_sizing(&tree.elements[idx], x_axis).is_resizable() {
+            if !get_sizing(&tree.elements[idx], axis).is_resizable() {
                 continue;
             }
-            let current = get_size(computed[idx], x_axis);
+            let current = get_size(computed[idx], axis);
             if (current - largest).abs() > LAYOUT_EPSILON {
                 continue;
             }
-            let min = get_min_size(computed[idx], x_axis);
+            let min = get_min_size(computed[idx], axis);
             let new_size = (current - shrink_per_child).max(min);
             let actual_shrink = current - new_size;
-            set_size(&mut computed[idx], x_axis, new_size);
+            set_size(&mut computed[idx], axis, new_size);
             *to_distribute += actual_shrink;
             total_shrink += actual_shrink;
         }
@@ -1219,7 +1216,7 @@ fn expand_children(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     children: &[usize],
-    x_axis: bool,
+    axis: Axis,
     to_distribute: &mut f32,
 ) {
     loop {
@@ -1234,11 +1231,11 @@ fn expand_children(
         let mut at_smallest_count = 0_u32;
 
         for &idx in children {
-            if !get_sizing(&tree.elements[idx], x_axis).is_grow() {
+            if !get_sizing(&tree.elements[idx], axis).is_grow() {
                 continue;
             }
-            let size = get_size(computed[idx], x_axis);
-            let max = get_sizing(&tree.elements[idx], x_axis).max_size();
+            let size = get_size(computed[idx], axis);
+            let max = get_sizing(&tree.elements[idx], axis).max_size();
             if size >= max - LAYOUT_EPSILON {
                 continue;
             }
@@ -1257,8 +1254,7 @@ fn expand_children(
             break;
         }
 
-        #[allow(clippy::cast_precision_loss)]
-        let count = at_smallest_count as f32;
+        let count = at_smallest_count.to_f32();
         let delta_even = *to_distribute / count;
 
         // If all at same size (no second smallest), just distribute evenly.
@@ -1276,17 +1272,17 @@ fn expand_children(
         // Apply growth to growable children at the smallest size.
         let mut total_grow = 0.0_f32;
         for &idx in children {
-            if !get_sizing(&tree.elements[idx], x_axis).is_grow() {
+            if !get_sizing(&tree.elements[idx], axis).is_grow() {
                 continue;
             }
-            let current = get_size(computed[idx], x_axis);
+            let current = get_size(computed[idx], axis);
             if (current - smallest).abs() > LAYOUT_EPSILON {
                 continue;
             }
-            let max = get_sizing(&tree.elements[idx], x_axis).max_size();
+            let max = get_sizing(&tree.elements[idx], axis).max_size();
             let new_size = (current + grow_per_child).min(max);
             let actual_grow = new_size - current;
-            set_size(&mut computed[idx], x_axis, new_size);
+            set_size(&mut computed[idx], axis, new_size);
             *to_distribute -= actual_grow;
             total_grow += actual_grow;
         }
@@ -1300,54 +1296,49 @@ fn expand_children(
 // ── Axis helpers ──────────────────────────────────────────────────────────────
 
 /// Returns the sizing rule for the given element along the specified axis.
-const fn get_sizing(element: &Element, x_axis: bool) -> Sizing {
-    if x_axis {
-        element.width
-    } else {
-        element.height
+const fn get_sizing(element: &Element, axis: Axis) -> Sizing {
+    match axis {
+        Axis::X => element.width,
+        Axis::Y => element.height,
     }
 }
 
 /// Returns the computed size for the given element along the specified axis.
-const fn get_size(computed: ComputedLayout, x_axis: bool) -> f32 {
-    if x_axis {
-        computed.width
-    } else {
-        computed.height
+const fn get_size(computed: ComputedLayout, axis: Axis) -> f32 {
+    match axis {
+        Axis::X => computed.width,
+        Axis::Y => computed.height,
     }
 }
 
 /// Sets the computed size for the given element along the specified axis.
-const fn set_size(computed: &mut ComputedLayout, x_axis: bool, value: f32) {
-    if x_axis {
-        computed.width = value;
-    } else {
-        computed.height = value;
+const fn set_size(computed: &mut ComputedLayout, axis: Axis, value: f32) {
+    match axis {
+        Axis::X => computed.width = value,
+        Axis::Y => computed.height = value,
     }
 }
 
 /// Returns the propagated minimum content size along the specified axis.
-const fn get_min_size(computed: ComputedLayout, x_axis: bool) -> f32 {
-    if x_axis {
-        computed.min_width
-    } else {
-        computed.min_height
+const fn get_min_size(computed: ComputedLayout, axis: Axis) -> f32 {
+    match axis {
+        Axis::X => computed.min_width,
+        Axis::Y => computed.min_height,
     }
 }
 
 /// Sets the propagated minimum content size along the specified axis.
-const fn set_min_size(computed: &mut ComputedLayout, x_axis: bool, value: f32) {
-    if x_axis {
-        computed.min_width = value;
-    } else {
-        computed.min_height = value;
+const fn set_min_size(computed: &mut ComputedLayout, axis: Axis, value: f32) {
+    match axis {
+        Axis::X => computed.min_width = value,
+        Axis::Y => computed.min_height = value,
     }
 }
 
 /// Returns `true` if `direction` lays out children along the given axis.
-const fn is_layout_axis(direction: Direction, x_axis: bool) -> bool {
-    match direction {
-        Direction::LeftToRight => x_axis,
-        Direction::TopToBottom => !x_axis,
+const fn is_layout_axis(direction: Direction, axis: Axis) -> bool {
+    match (direction, axis) {
+        (Direction::LeftToRight, Axis::X) | (Direction::TopToBottom, Axis::Y) => true,
+        (Direction::LeftToRight, Axis::Y) | (Direction::TopToBottom, Axis::X) => false,
     }
 }

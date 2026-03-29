@@ -3,6 +3,8 @@
 use bevy::color::Color;
 use bevy::math::Vec3;
 use bevy::prelude::GizmoAsset;
+use bevy_kana::ToF32;
+use bevy_kana::ToUsize;
 
 /// Draws a double-headed dimension arrow between two points.
 ///
@@ -67,11 +69,9 @@ pub fn draw_dashed_line(
     }
     let dir = delta / total_len;
     let stride = dash_len + gap_len;
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let count = (total_len / stride).ceil() as usize;
+    let count = (total_len / stride).ceil().to_usize();
     for i in 0..count {
-        #[allow(clippy::cast_precision_loss)]
-        let t = i as f32 * stride;
+        let t = i.to_f32() * stride;
         let dash_end = (t + dash_len).min(total_len);
         gizmo.line(start + dir * t, start + dir * dash_end, color);
     }

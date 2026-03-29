@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use bevy_kana::ToF32;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -48,18 +49,16 @@ fn monospace_measure() -> MeasureTextFn {
         let mut line_count = 0_u32;
         for line in text.lines() {
             line_count += 1;
-            #[allow(clippy::cast_precision_loss)]
-            let width = line.chars().count() as f32 * char_width;
+            let width = line.chars().count().to_f32() * char_width;
             max_line_width = max_line_width.max(width);
         }
         if line_count == 0 {
             line_count = 1;
         }
         TextDimensions {
-            width:                                        max_line_width,
-            #[allow(clippy::cast_precision_loss)]
-            height:                                       measure.size * line_count as f32,
-            line_height:                                  measure.size,
+            width:       max_line_width,
+            height:      measure.size * line_count.to_f32(),
+            line_height: measure.size,
         }
     })
 }
@@ -81,17 +80,15 @@ fn clay_monospace_measure(
     let mut line_count = 0_u32;
     for line in text.lines() {
         line_count += 1;
-        #[allow(clippy::cast_precision_loss)]
-        let width = line.chars().count() as f32 * char_width;
+        let width = line.chars().count().to_f32() * char_width;
         max_line_width = max_line_width.max(width);
     }
     if line_count == 0 {
         line_count = 1;
     }
     Dimensions {
-        width:                                        max_line_width,
-        #[allow(clippy::cast_precision_loss)]
-        height:                                       line_height * line_count as f32,
+        width:  max_line_width,
+        height: line_height * line_count.to_f32(),
     }
 }
 

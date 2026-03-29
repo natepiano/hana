@@ -30,11 +30,11 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_panorbit_camera::PanOrbitCamera;
-use bevy_panorbit_camera::PanOrbitCameraPlugin;
-use bevy_panorbit_camera::TrackpadBehavior;
-use bevy_panorbit_camera_ext::PanOrbitCameraExtPlugin;
-use bevy_panorbit_camera_ext::ZoomToFit;
+use bevy_kana::ToF32;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const ZOOM_MARGIN_TEXT: f32 = 0.3;
@@ -80,8 +80,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             DiegeticUiPlugin,
-            PanOrbitCameraPlugin,
-            PanOrbitCameraExtPlugin,
+            LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,
             MeshPickingPlugin,
@@ -152,7 +151,7 @@ fn setup(
             brightness:                 300.0,
             affects_lightmapped_meshes: false,
         },
-        PanOrbitCamera {
+        OrbitCam {
             focus: Vec3::new(0.0, 2.0, 0.0),
             radius: Some(5.0),
             yaw: Some(0.0),
@@ -208,7 +207,6 @@ fn build_status_panel(text: &str) -> LayoutTree {
 }
 
 /// Observer: fires when a font is successfully registered.
-#[allow(clippy::cast_precision_loss)]
 fn on_font_registered(
     trigger: On<FontRegistered>,
     mut font_count: ResMut<FontCount>,
@@ -218,7 +216,7 @@ fn on_font_registered(
     let idx = font_count.0;
     font_count.0 += 1;
 
-    let y = (idx as f32).mul_add(LINE_SPACING, 1.5);
+    let y = idx.to_f32().mul_add(LINE_SPACING, 1.5);
 
     // Spawn a WorldText label in this font.
     let label = format!(

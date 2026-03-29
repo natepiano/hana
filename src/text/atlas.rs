@@ -19,6 +19,10 @@ use bevy::render::render_resource::TextureDimension;
 use bevy::render::render_resource::TextureFormat;
 use bevy::tasks::TaskPool;
 use bevy::tasks::TaskPoolBuilder;
+use bevy_kana::ToF32;
+use bevy_kana::ToI32;
+use bevy_kana::ToU32;
+use bevy_kana::ToUsize;
 use etagere::AtlasAllocator;
 use etagere::size2;
 
@@ -152,12 +156,11 @@ struct AtlasPage {
 }
 
 impl AtlasPage {
-    #[allow(clippy::cast_possible_wrap)]
     fn new(width: u32, height: u32) -> Self {
-        let pixel_count = (width * height * BYTES_PER_PIXEL) as usize;
+        let pixel_count = (width * height * BYTES_PER_PIXEL).to_usize();
         Self {
             pixels:       vec![0; pixel_count],
-            allocator:    AtlasAllocator::new(size2(width as i32, height as i32)),
+            allocator:    AtlasAllocator::new(size2(width.to_i32(), height.to_i32())),
             image_handle: None,
             dirty:        false,
         }
@@ -537,10 +540,7 @@ impl MsdfAtlas {
         }
         stats.pages_added = self.pages.len().saturating_sub(pages_before);
         if stats.completed > 0 {
-            #[allow(clippy::cast_precision_loss)]
-            {
-                stats.avg_raster_ms = total_raster_ms / stats.completed as f32;
-            }
+            stats.avg_raster_ms = total_raster_ms / stats.completed.to_f32();
         }
         stats.worker_threads = workers.len();
         stats
@@ -647,14 +647,13 @@ impl MsdfAtlas {
         let u_max = (x0 + bitmap.width) as f32 / atlas_w;
         let v_max = (y0 + bitmap.height) as f32 / atlas_h;
 
-        #[allow(clippy::cast_possible_truncation)]
         let metrics = GlyphMetrics {
             uv_rect:      [u_min, v_min, u_max, v_max],
-            bearing_x:    bitmap.bearing_x as f32,
-            bearing_y:    bitmap.bearing_y as f32,
+            bearing_x:    bitmap.bearing_x.to_f32(),
+            bearing_y:    bitmap.bearing_y.to_f32(),
             pixel_width:  bitmap.width,
             pixel_height: bitmap.height,
-            page_index:   page_index as u32,
+            page_index:   page_index.to_u32(),
         };
 
         self.glyphs.insert(key, metrics);
@@ -665,7 +664,6 @@ impl MsdfAtlas {
     /// Replicates the border texels of a bitmap region into the surrounding
     /// gutter. This ensures linear filtering at the edge samples the same
     /// values as the edge itself, preventing bleed from adjacent atlas entries.
-    #[allow(clippy::cast_sign_loss)]
     fn replicate_gutter(
         pixels: &mut [u8],
         atlas_width: u32,
@@ -678,8 +676,8 @@ impl MsdfAtlas {
         // Helper to copy a texel from (sx, sy) to (dx, dy) in the page.
         let w = atlas_width;
         let copy_texel = |pixels: &mut [u8], sx: u32, sy: u32, dx: u32, dy: u32| {
-            let src = ((sy * w + sx) * BYTES_PER_PIXEL) as usize;
-            let dst = ((dy * w + dx) * BYTES_PER_PIXEL) as usize;
+            let src = ((sy * w + sx) * BYTES_PER_PIXEL).to_usize();
+            let dst = ((dy * w + dx) * BYTES_PER_PIXEL).to_usize();
             pixels[dst] = pixels[src];
             pixels[dst + 1] = pixels[src + 1];
             pixels[dst + 2] = pixels[src + 2];

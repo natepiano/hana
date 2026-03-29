@@ -1,8 +1,11 @@
 [package]
+categories  = ["game-development", "gui"]
 description = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
 edition     = "2024"
+keywords    = ["bevy", "ui", "diegetic", "layout"]
 license     = "MIT OR Apache-2.0"
 name        = "bevy_diegetic"
+repository  = "https://github.com/natepiano/bevy_diegetic"
 version     = "0.0.1"
 
 [lints.clippy]
@@ -18,10 +21,11 @@ nursery  = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 
 # Allow specific lints that conflict with Bevy patterns
-cargo_common_metadata   = "allow"
 multiple_crate_versions = "allow"
 needless_pass_by_value  = "allow"
 option_if_let_else      = "allow"
+too_many_arguments      = "allow"
+type_complexity         = "allow"
 wildcard_imports        = "allow"
 
 [lints.rust]
@@ -32,6 +36,7 @@ default            = ["typography_overlay"]
 typography_overlay = []
 
 [dependencies]
+bevy_kana = "0.0.3"
 bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_asset",
   "bevy_core_pipeline",
@@ -57,8 +62,7 @@ ttf-parser = "0.25"
 bevy                     = { version = "0.18.1", features = ["default_font"] }
 bevy-inspector-egui      = "0.36.0"
 bevy_brp_extras          = "0.19.0"
-bevy_panorbit_camera     = "0.34.0"
-bevy_panorbit_camera_ext = { git = "https://github.com/natepiano/bevy_panorbit_camera_ext" }
+bevy_lagrange            = { version = "0.0.1", features = ["fit_overlay"] }
 bevy_window_manager      = "0.19.0"
 clay-layout              = { path = "./clay-layout" }
 criterion                = { version = "0.8.2", features = ["html_reports"] }

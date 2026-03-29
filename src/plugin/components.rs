@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy_kana::ToF32;
 
 use super::config::PanelSize;
 use super::config::UnitConfig;
@@ -613,8 +614,7 @@ impl Default for DiegeticTextMeasurer {
         Self {
             measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
                 let char_width = measure.size * 0.6;
-                #[allow(clippy::cast_precision_loss)]
-                let width = char_width * text.len() as f32;
+                let width = char_width * text.len().to_f32();
                 TextDimensions {
                     width,
                     height: measure.size,

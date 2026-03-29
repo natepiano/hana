@@ -118,7 +118,6 @@ impl Plugin for PanelRttPlugin {
 /// 3. Spawns a display quad showing the texture to the main camera
 ///
 /// Only runs for panels that don't already have RTT children.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn setup_panel_rtt(
     panels: Query<
         (

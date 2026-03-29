@@ -43,9 +43,6 @@ use systems::compute_panel_layouts;
 use systems::render_debug_gizmos;
 use systems::render_layout_gizmos;
 
-use crate::layout::ForLayout;
-use crate::layout::ForStandalone;
-use crate::layout::TextProps;
 pub use crate::layout::Unit;
 use crate::render::PanelGeometryPlugin;
 use crate::render::PanelRttPlugin;
@@ -68,7 +65,6 @@ use crate::text::MsdfAtlas;
 /// Only activates when at least one panel uses [`RenderMode::Geometry`],
 /// since OIT is unnecessary for texture-only panels and requires depth
 /// textures with `TEXTURE_BINDING` usage that the default setup lacks.
-#[allow(clippy::type_complexity)]
 fn ensure_oit_on_cameras(
     panels: Query<&DiegeticPanel>,
     mut cameras: Query<
@@ -374,10 +370,6 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .init_asset_loader::<FontLoader>()
         .add_plugins(LayoutPlugin)
         .init_resource::<ShowTextGizmos>()
-        .register_type::<TextProps<ForLayout>>()
-        .register_type::<TextProps<ForStandalone>>()
-        .register_type::<Unit>()
-        .register_type::<UnitConfig>()
         .add_plugins(TextRenderPlugin)
         .add_plugins(PanelGeometryPlugin)
         .add_plugins(PanelRttPlugin)
