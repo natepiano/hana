@@ -18,8 +18,10 @@ use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::time::Virtual;
 use bevy::ui::UiTargetCamera;
+use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_kana::ToUsize;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationCancelled;
@@ -727,13 +729,17 @@ fn cleanup_second_window(
     mut commands: Commands,
     second: Option<Res<SecondWindowEntities>>,
     windows: Query<(), With<Window>>,
+    closing: Query<(), With<ClosingWindow>>,
     mut log: ResMut<EventLog>,
 ) {
     let Some(sw) = second else {
         return;
     };
-    // If the window entity no longer has a `Window` component, it was closed by the user
-    if windows.get(sw.window).is_err() {
+    // Detect both already-despawned windows (is_err) and windows marked for close this
+    // frame (`ClosingWindow`). Catching `ClosingWindow` ensures the camera is despawned
+    // in the same command flush as the window, preventing `camera_system` from hitting a
+    // stale `RenderTarget`.
+    if windows.get(sw.window).is_err() || closing.get(sw.window).is_ok() {
         commands.entity(sw.camera).despawn();
         commands.remove_resource::<SecondWindowEntities>();
         log.push("Window 2: closed".into());
@@ -1125,8 +1131,7 @@ fn randomize_easing(
     mut log: ResMut<EventLog>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let index = (time.elapsed_secs() * 1000.0) as usize % ALL_EASINGS.len();
+        let index = (time.elapsed_secs() * 1000.0).to_usize() % ALL_EASINGS.len();
         easing.0 = ALL_EASINGS[index];
         log.push(format!("Easing: {:#?}", easing.0));
     }

@@ -19,6 +19,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::render::render_resource::TextureUsages;
 use bevy::window::PrimaryWindow;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_kana::ToF32;
 use bevy_lagrange::ActiveCameraData;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -163,8 +164,7 @@ fn setup(
     let primary_window = windows
         .single()
         .expect("There is only ever one primary window");
-    #[allow(clippy::cast_precision_loss)]
-    let viewport_size = Some(Vec2::new(size.width as f32, size.height as f32));
+    let viewport_size = Some(Vec2::new(size.width.to_f32(), size.height.to_f32()));
     active_cam.set_if_neq(ActiveCameraData {
         // Set the entity to the entity ID of the camera you want to control. In this case, it's
         // the inner (first pass) cube that is rendered to the texture/image.
