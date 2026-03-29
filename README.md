@@ -2,131 +2,158 @@
 [![docs.rs](https://docs.rs/bevy_lagrange/badge.svg)](https://docs.rs/bevy_lagrange)
 [![Bevy tracking](https://img.shields.io/badge/Bevy%20tracking-released%20version-lightblue)](https://github.com/bevyengine/bevy/blob/main/docs/plugins_guidelines.md#main-branch-tracking)
 
-<div style="text-align: center">
-  <h1>Bevy Pan/Orbit Camera</h1>
-</div>
+# bevy_lagrange
+
+> **Work in progress.** This crate is in active development and not subject to
+> semver stability guarantees. APIs will change without notice between commits.
+> Do not depend on this in production code yet.
+
+A camera controller for [Bevy](https://bevyengine.org) that combines smooth orbit controls with event-driven camera operations — zoom-to-fit, queued animations, and a debug overlay for fit targets.
 
 ![A screen recording showing camera movement](https://user-images.githubusercontent.com/7709415/230715348-eb19d9a8-4826-4a73-a039-02cacdcb3dc9.gif "Demo of bevy_lagrange")
 
-## Summary
+## Features
 
-Bevy Pan/Orbit Camera provides orbit camera controls for Bevy Engine, designed with simplicity and flexibility in mind.
-Use it to quickly prototype, experiment, for model viewers, and more!
+- Smooth orbit, pan, and zoom with configurable limits
+- Zoom-to-fit, look-at, and queued camera animations with easing
+- Event-driven control with full lifecycle events for sequencing
+- Orthographic and perspective projection, multi-viewport, render-to-texture
+- Touch, trackpad, and `bevy_egui` support
+- Debug overlay for fit targets (optional `fit_overlay` feature)
 
-## Features:
+## Quick Start
 
-- Smoothed orbiting, panning, and zooming
-- Works with orthographic camera projection in addition to perspective
-- Customisable controls, sensitivity, and more
-- Touch support
-- Works with multiple viewports and/or windows
-- Easy to control manually, e.g. for keyboard control or animation
-- Can control cameras that render to a texture
-- Zoom-to-fit, camera animations, and debug overlay (optional `fit_overlay` feature)
+Add the plugin and spawn a camera:
+
+```rust ignore
+use bevy::prelude::*;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_plugins(LagrangePlugin)
+        .add_systems(Startup, setup)
+        .run();
+}
+
+fn setup(mut commands: Commands) {
+    commands.spawn((
+        Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
+        OrbitCam::default(),
+    ));
+}
+```
+
+`OrbitCam` automatically requires `Camera3d`. Out of the box you get orbit, pan, and zoom with smoothing.
 
 ## Controls
 
 Default mouse controls:
 
-- Left Mouse - Orbit
-- Right Mouse - Pan
-- Scroll Wheel - Zoom
+| Input | Action |
+|-------|--------|
+| Left Mouse | Orbit |
+| Right Mouse | Pan |
+| Scroll Wheel | Zoom |
 
 Default touch controls:
 
-- One finger - Orbit
-- Two fingers - Pan
-- Pinch - Zoom
+| Input | Action |
+|-------|--------|
+| One finger | Orbit |
+| Two fingers | Pan |
+| Pinch | Zoom |
 
-## Quick Start
+All controls are configurable via `OrbitCam` fields — buttons, modifiers, sensitivity, smoothness, and limits.
 
-Add the plugin:
+## Event-Driven Camera Control
 
-```rust ignore
-.add_plugins(LagrangePlugin)
+Enable the `fit_overlay` feature:
+
+```toml
+bevy_lagrange = { version = "...", features = ["fit_overlay"] }
 ```
 
-Add `OrbitCam` (this will automatically add a `Camera3d` but you can add it manually if necessary):
+### Zoom-to-fit
+
+Frame a target entity in the camera view:
 
 ```rust ignore
-commands.spawn((
-    Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-    OrbitCam::default(),
-));
+commands.trigger(
+    ZoomToFit::new(camera, target)
+        .margin(0.15)
+        .duration(Duration::from_millis(800))
+        .easing(EaseFunction::CubicOut),
+);
 ```
 
-This will set up a camera with good defaults.
+### Look at
 
-Check out the [advanced example](https://github.com/natepiano/bevy_lagrange/tree/master/examples/advanced.rs) to see
-all the possible configuration options.
+Rotate the camera in place to face a target:
+
+```rust ignore
+commands.trigger(
+    LookAt::new(camera, target)
+        .duration(Duration::from_millis(600)),
+);
+```
+
+### Animate to a specific orientation
+
+Animate to a chosen yaw/pitch while framing the target:
+
+```rust ignore
+commands.trigger(
+    AnimateToFit::new(camera, target)
+        .yaw(PI / 4.0)
+        .pitch(PI / 6.0)
+        .duration(Duration::from_millis(1200)),
+);
+```
+
+### Queued animations
+
+Chain multiple movements into a sequence:
+
+```rust ignore
+commands.trigger(PlayAnimation::new(camera, [
+    CameraMove::ToOrbit {
+        focus: Vec3::ZERO,
+        yaw: 0.0,
+        pitch: 0.5,
+        radius: 5.0,
+        duration: Duration::from_millis(800),
+        easing: EaseFunction::CubicOut,
+    },
+]));
+```
+
+All operations support instant (`Duration::ZERO`) and animated paths with full lifecycle events for sequencing.
 
 ## Cargo Features
 
-- `bevy_egui` (optional): Makes `OrbitCam` ignore any input that `egui` uses, thus preventing moving the camera
-  when interacting with egui windows
-- `fit_overlay` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug overlay of fit targets with gizmos and screen-space labels
-
-## Extras
-
-Enable the `fit_overlay` feature for zoom-to-fit, queued camera animations, event-driven camera control, and debug overlay:
-
-```toml
-bevy_lagrange = { version = "0.0.1", features = ["fit_overlay"] }
-```
-
-Trigger a zoom-to-fit:
-
-```rust ignore
-commands.entity(camera).trigger(ZoomToFit {
-    target,
-    margin: 0.15,
-    ..default()
-});
-```
-
-Queue camera animations:
-
-```rust ignore
-commands.entity(camera).trigger(PlayAnimation {
-    moves: vec![CameraMove::ToOrbit { .. }],
-    ..default()
-});
-```
-
-Look at a target:
-
-```rust ignore
-commands.entity(camera).trigger(LookAt { target, duration, easing });
-```
-
-See the `extras_*` examples for more.
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `fit_overlay` | no | Zoom-to-fit, camera animations, event-driven control, and debug overlay |
+| `bevy_egui` | no | Prevents camera movement when interacting with egui windows |
 
 ## Version Compatibility
 
-| bevy | `bevy_lagrange` |
+| Bevy | `bevy_lagrange` |
 |------|-----------------|
-| 0.18 | 0.0.1        |
-
-## Alternatives
-
-If you're looking for a lighter-weight orbit camera, check out [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera) by [Plonq](https://github.com/Plonq), which this crate is based on.
+| 0.18 | 0.0.1           |
 
 ## Credits
 
-- [Plonq](https://github.com/Plonq): For graciously allowing this project to build on [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera)
-- [Bevy Cheat Book](https://bevy-cheatbook.github.io): For providing an example that I started from
-- [babylon.js](https://www.babylonjs.com): I referenced their arc rotate camera for some of this
-- [bevy_pancam](https://github.com/johanhelsing/bevy_pancam): For the egui feature idea
+- [Plonq](https://github.com/Plonq) — `bevy_lagrange` builds on [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera), with permission
 
 ## License
 
 All code in this repository is dual-licensed under either:
 
-* MIT License ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
-* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)
-  or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
 
 at your option.
-This means you can select the license you prefer!
-This dual-licensing approach is the de-facto standard in the Rust ecosystem and there
-are [very good reasons](https://github.com/bevyengine/bevy/issues/2373) to include both.

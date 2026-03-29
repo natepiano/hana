@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pan, orbit, and zoom camera controls with smoothing, customizable sensitivity, and configurable key/mouse bindings
 - Orthographic and perspective projection support
 - Touch controls (one finger orbit, two finger pan, pinch zoom)
+- Trackpad support with optional Blender-style orbit/pan/zoom mode
 - Multi-viewport and multi-window support
 - Render-to-texture camera support
 - Optional `bevy_egui` feature to ignore input consumed by egui
-- Optional `fit_overlay` feature: zoom-to-fit, queued camera animations, event-driven camera control (`LookAt`, `ZoomToFit`, `AnimateToFit`, `PlayAnimation`), and debug overlay of fit targets with gizmos and screen-space labels
+- Optional `fit_overlay` feature: zoom-to-fit, queued camera animations, event-driven camera control (`ZoomToFit`, `LookAt`, `LookAtAndZoomToFit`, `AnimateToFit`, `PlayAnimation`), animation lifecycle events, conflict resolution, and debug overlay with gizmos and screen-space labels
