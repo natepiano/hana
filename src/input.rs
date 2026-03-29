@@ -9,6 +9,15 @@ use crate::ButtonZoomAxis;
 use crate::OrbitCam;
 use crate::TrackpadBehavior;
 
+/// Conversion factor from mouse drag delta to scroll-equivalent zoom input.
+const BUTTON_ZOOM_SCALE: f32 = 0.03;
+
+/// Conversion factor from pixel scroll events to zoom input.
+const PIXEL_SCROLL_SCALE: f32 = 0.005;
+
+/// Amplification factor for trackpad pinch gestures.
+const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
+
 #[derive(Resource, Default, Debug)]
 pub struct MouseKeyTracker {
     pub orbit:                Vec2,
@@ -65,7 +74,7 @@ pub fn mouse_key_tracker(
         if pan_orbit.reversed_button_zoom {
             delta *= -1.0;
         }
-        delta * 0.03
+        delta * BUTTON_ZOOM_SCALE
     } else {
         0.0
     };
@@ -122,7 +131,7 @@ fn process_scroll_events(
                     },
                     MouseScrollUnit::Pixel => {
                         if is_zoom_modifier_pressed {
-                            result.scroll_pixel += event.y * 0.005;
+                            result.scroll_pixel += event.y * PIXEL_SCROLL_SCALE;
                         } else if is_pan_modifier_pressed {
                             result.trackpad_pan +=
                                 Vec2::new(event.x, event.y) * pan_orbit.trackpad_sensitivity;
@@ -196,7 +205,7 @@ fn process_pinch_events(
     if no_modifiers_pressed {
         pinch_events
             .read()
-            .map(|event| event.0 * 10.0 * pan_orbit.trackpad_sensitivity)
+            .map(|event| event.0 * PINCH_GESTURE_AMPLIFICATION * pan_orbit.trackpad_sensitivity)
             .sum()
     } else {
         0.0

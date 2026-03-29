@@ -33,6 +33,9 @@ use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
 use crate::traits::OptionalClamp;
 
+/// Conversion factor from two-finger touch pinch to zoom input.
+const TOUCH_PINCH_SCALE: f32 = 0.015;
+
 #[cfg(feature = "fit_overlay")]
 #[allow(
     clippy::used_underscore_binding,
@@ -735,7 +738,7 @@ fn collect_camera_input(
                     TouchGestures::TwoFinger(two_finger_gestures) => (
                         Vec2::ZERO,
                         two_finger_gestures.motion,
-                        two_finger_gestures.pinch * 0.015,
+                        two_finger_gestures.pinch * TOUCH_PINCH_SCALE,
                     ),
                 },
                 TouchControls::TwoFingerOrbit => match touch_tracker.get_touch_gestures() {
@@ -746,7 +749,7 @@ fn collect_camera_input(
                     TouchGestures::TwoFinger(two_finger_gestures) => (
                         two_finger_gestures.motion,
                         Vec2::ZERO,
-                        two_finger_gestures.pinch * 0.015,
+                        two_finger_gestures.pinch * TOUCH_PINCH_SCALE,
                     ),
                 },
             };

@@ -15,12 +15,14 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::Position;
 use bevy_lagrange::TouchControls;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(WindowManagerPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_camera_controls_system)
         .run();

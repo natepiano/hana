@@ -14,12 +14,15 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_window_manager::ManagedWindow;
+use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(WindowManagerPlugin)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -84,10 +87,15 @@ fn setup(
 
     // --- Second OS window ---
     let second_window = commands
-        .spawn(Window {
-            title: "Second window".to_owned(),
-            ..default()
-        })
+        .spawn((
+            Window {
+                title: "Second window".to_owned(),
+                ..default()
+            },
+            ManagedWindow {
+                window_name: "second_window".into(),
+            },
+        ))
         .id();
 
     commands.spawn((

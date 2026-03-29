@@ -29,6 +29,7 @@ use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
+use bevy_window_manager::WindowManagerPlugin;
 
 const START_POS: Vec3 = Vec3::new(0.0, 1.5, 3.0);
 
@@ -40,6 +41,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(WindowManagerPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (keyboard_input, toggle_debug_overlay))
         .add_observer(on_zoom_begin)

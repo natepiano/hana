@@ -5,12 +5,14 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(WindowManagerPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, (pause_game_system, cube_rotator_system))
         .run();

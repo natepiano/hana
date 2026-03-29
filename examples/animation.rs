@@ -29,6 +29,7 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::Position;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_window_manager::WindowManagerPlugin;
 
 const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
 const INSTRUCTIONS_FONT_SIZE: f32 = 18.0;
@@ -44,6 +45,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(WindowManagerPlugin)
         .init_resource::<ManualAnimationActive>()
         .add_systems(Startup, setup)
         .add_systems(Update, (keyboard_input, manual_animate).chain())

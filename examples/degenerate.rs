@@ -14,6 +14,7 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::Position;
 use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::ZoomToFit;
+use bevy_window_manager::WindowManagerPlugin;
 
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
@@ -29,6 +30,7 @@ fn main() {
             LagrangePlugin,
             BrpExtrasPlugin::default(),
             MeshPickingPlugin,
+            WindowManagerPlugin,
         ))
         .add_systems(Startup, setup)
         .run();

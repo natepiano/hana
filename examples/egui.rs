@@ -16,6 +16,7 @@ use bevy_lagrange::BlockOnEguiFocus;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
     let mut app = App::new();
@@ -23,6 +24,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
+        .add_plugins(WindowManagerPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_blocking)
         .add_systems(EguiPrimaryContextPass, ui_system);
