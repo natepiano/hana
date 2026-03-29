@@ -6,12 +6,12 @@ use super::super::support::CameraBasis;
 use super::super::support::ScreenSpaceBounds;
 
 /// Returns true if horizontal margins are balanced.
-pub fn is_horizontally_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
+pub(super) fn is_horizontally_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
     (bounds.left_margin - bounds.right_margin).abs() < tolerance
 }
 
 /// Returns true if vertical margins are balanced.
-pub fn is_vertically_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
+pub(super) fn is_vertically_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
     (bounds.top_margin - bounds.bottom_margin).abs() < tolerance
 }
 
@@ -42,7 +42,7 @@ const fn clamped_center_x(bounds: &ScreenSpaceBounds, left_edge: f32, right_edge
 }
 
 /// Returns the center of a boundary edge in normalized space.
-pub fn boundary_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> Option<(f32, f32)> {
+pub(super) fn boundary_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> Option<(f32, f32)> {
     let (left_edge, right_edge, top_edge, bottom_edge) = screen_edges_normalized(bounds);
 
     match edge {
@@ -67,7 +67,7 @@ pub fn boundary_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> Option<(f
 }
 
 /// Returns the center of a screen edge in normalized space.
-pub fn screen_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> (f32, f32) {
+pub(super) fn screen_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> (f32, f32) {
     let (left_edge, right_edge, top_edge, bottom_edge) = screen_edges_normalized(bounds);
 
     match edge {
@@ -83,7 +83,7 @@ pub fn screen_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> (f32, f32) 
 /// For perspective, reverses the perspective divide by multiplying by `avg_depth`.
 /// For orthographic, coordinates are already in world units — `avg_depth` is only
 /// used for the forward component to position the gizmo plane.
-pub fn normalized_to_world(
+pub(super) fn normalized_to_world(
     norm_x: f32,
     norm_y: f32,
     cam: &CameraBasis,
@@ -100,7 +100,7 @@ pub fn normalized_to_world(
 
 /// Returns the margin percentage for a given edge.
 /// Percentage represents how much of the screen width/height is margin.
-pub fn margin_percentage(bounds: &ScreenSpaceBounds, edge: Edge) -> f32 {
+pub(super) fn margin_percentage(bounds: &ScreenSpaceBounds, edge: Edge) -> f32 {
     let screen_width = 2.0 * bounds.half_extent_x;
     let screen_height = 2.0 * bounds.half_extent_y;
 
@@ -113,7 +113,7 @@ pub fn margin_percentage(bounds: &ScreenSpaceBounds, edge: Edge) -> f32 {
 }
 
 /// Converts a normalized screen-space coordinate to viewport pixels.
-pub fn norm_to_viewport(
+pub(super) fn norm_to_viewport(
     norm_x: f32,
     norm_y: f32,
     half_extent_x: f32,

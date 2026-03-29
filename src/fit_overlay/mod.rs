@@ -14,14 +14,14 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use labels::BoundsLabel;
 use labels::MarginLabel;
-pub use types::FitTargetGizmo;
+use types::FitTargetGizmo;
 pub use types::FitTargetOverlayConfig;
 use types::FitTargetViewportMarginPcts;
 
 use super::components::FitOverlay;
 
 /// Plugin that enables fit target debug visualization.
-pub struct ZoomOverlayPlugin;
+pub(super) struct ZoomOverlayPlugin;
 
 impl Plugin for ZoomOverlayPlugin {
     fn build(&self, app: &mut App) {

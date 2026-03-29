@@ -19,15 +19,15 @@ const PIXEL_SCROLL_SCALE: f32 = 0.005;
 const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
 
 #[derive(Resource, Default, Debug)]
-pub struct MouseKeyTracker {
-    pub orbit:                Vec2,
-    pub pan:                  Vec2,
-    pub scroll_line:          f32,
-    pub scroll_pixel:         f32,
-    pub orbit_button_changed: bool,
+pub(super) struct MouseKeyTracker {
+    pub(super) orbit:                Vec2,
+    pub(super) pan:                  Vec2,
+    pub(super) scroll_line:          f32,
+    pub(super) scroll_pixel:         f32,
+    pub(super) orbit_button_changed: bool,
 }
 
-pub fn mouse_key_tracker(
+pub(super) fn mouse_key_tracker(
     mut camera_movement: ResMut<MouseKeyTracker>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     key_input: Res<ButtonInput<KeyCode>>,
@@ -151,7 +151,7 @@ fn process_scroll_events(
                 .iter()
                 .map(|event| match event.unit {
                     MouseScrollUnit::Line => (event.y, 0.0),
-                    MouseScrollUnit::Pixel => (0.0, event.y * 0.005),
+                    MouseScrollUnit::Pixel => (0.0, event.y * PIXEL_SCROLL_SCALE),
                 })
                 .fold((0.0, 0.0), |acc, item| (acc.0 + item.0, acc.1 + item.1));
 
@@ -212,7 +212,7 @@ fn process_pinch_events(
     }
 }
 
-pub fn orbit_pressed(
+pub(super) fn orbit_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
@@ -228,7 +228,7 @@ pub fn orbit_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub fn orbit_just_pressed(
+pub(super) fn orbit_just_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
@@ -244,7 +244,7 @@ pub fn orbit_just_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub fn orbit_just_released(
+pub(super) fn orbit_just_released(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
@@ -260,7 +260,7 @@ pub fn orbit_just_released(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub fn pan_pressed(
+pub(super) fn pan_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
@@ -276,7 +276,7 @@ pub fn pan_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub fn pan_just_pressed(
+pub(super) fn pan_just_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
@@ -292,7 +292,7 @@ pub fn pan_just_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub fn button_zoom_pressed(
+pub(super) fn button_zoom_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
 ) -> bool {
@@ -301,7 +301,7 @@ pub fn button_zoom_pressed(
         .is_some_and(|btn| mouse_input.pressed(btn))
 }
 
-pub fn button_zoom_just_pressed(
+pub(super) fn button_zoom_just_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
 ) -> bool {

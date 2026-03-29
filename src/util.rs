@@ -3,7 +3,7 @@ use bevy_kana::Position;
 
 const EPSILON: f32 = 0.001;
 
-pub fn calculate_from_translation_and_focus(
+pub(super) fn calculate_from_translation_and_focus(
     translation: Position,
     focus: Position,
     axis: [Vec3; 3],
@@ -21,7 +21,7 @@ pub fn calculate_from_translation_and_focus(
 }
 
 /// Update `transform` based on yaw, pitch, and the camera's focus and radius
-pub fn update_orbit_transform(
+pub(super) fn update_orbit_transform(
     yaw: f32,
     pitch: f32,
     mut radius: f32,
@@ -55,9 +55,9 @@ pub fn update_orbit_transform(
     *transform = new_transform;
 }
 
-pub fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
+pub(super) fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
 
-pub fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
+pub(super) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
     let t = smoothness.powi(7);
     let mut new_value = from.lerp(to, 1.0 - t.powf(dt));
     if smoothness < 1.0 && approx_equal(new_value, to) {
@@ -66,7 +66,12 @@ pub fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
     new_value
 }
 
-pub fn lerp_and_snap_position(from: Position, to: Position, smoothness: f32, dt: f32) -> Position {
+pub(super) fn lerp_and_snap_position(
+    from: Position,
+    to: Position,
+    smoothness: f32,
+    dt: f32,
+) -> Position {
     let t = smoothness.powi(7);
     let mut new_value = (*from).lerp(*to, 1.0 - t.powf(dt));
     if smoothness < 1.0 && approx_equal((new_value - *to).length(), 0.0) {

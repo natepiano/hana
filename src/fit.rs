@@ -16,30 +16,30 @@ use super::support;
 // ============================================================================
 
 /// Maximum binary search iterations.
-pub const MAX_ITERATIONS: usize = 200;
+pub(super) const MAX_ITERATIONS: usize = 200;
 /// Convergence tolerance (0.1% of search range).
-pub const TOLERANCE: f32 = 0.001;
+pub(super) const TOLERANCE: f32 = 0.001;
 /// Maximum centering iterations per candidate radius.
-pub const CENTERING_MAX_ITERATIONS: usize = 10;
+pub(super) const CENTERING_MAX_ITERATIONS: usize = 10;
 /// Normalized screen-space center offset tolerance.
-pub const CENTERING_TOLERANCE: f32 = 0.0001;
+pub(super) const CENTERING_TOLERANCE: f32 = 0.0001;
 /// Minimum allowed margin value.
-pub const MIN_MARGIN: f32 = 0.0;
+pub(super) const MIN_MARGIN: f32 = 0.0;
 /// Maximum allowed margin value.
-pub const MAX_MARGIN: f32 = 0.9999;
+pub(super) const MAX_MARGIN: f32 = 0.9999;
 /// Minimum search radius as a fraction of the object radius (0.1x).
-pub const MIN_RADIUS_MULTIPLIER: f32 = 0.1;
+pub(super) const MIN_RADIUS_MULTIPLIER: f32 = 0.1;
 /// Maximum search radius as a multiple of the object radius (100x).
-pub const MAX_RADIUS_MULTIPLIER: f32 = 100.0;
+pub(super) const MAX_RADIUS_MULTIPLIER: f32 = 100.0;
 /// Initial best-guess radius as a multiple of the object radius (2x).
-pub const INITIAL_RADIUS_MULTIPLIER: f32 = 2.0;
+pub(super) const INITIAL_RADIUS_MULTIPLIER: f32 = 2.0;
 /// Minimum screen-space extent before treating a dimension as degenerate (edge-on).
 /// Below this threshold the dimension is ignored for fit purposes.
-pub const DEGENERATE_EXTENT_THRESHOLD: f32 = 1e-6;
+pub(super) const DEGENERATE_EXTENT_THRESHOLD: f32 = 1e-6;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
 /// For example, a margin of 0.08 returns 1.087 (8% margin).
-pub const fn zoom_margin_multiplier(margin: f32) -> f32 { 1.0 / (1.0 - margin) }
+pub(super) const fn zoom_margin_multiplier(margin: f32) -> f32 { 1.0 / (1.0 - margin) }
 
 // ============================================================================
 // Types
@@ -47,7 +47,7 @@ pub const fn zoom_margin_multiplier(margin: f32) -> f32 { 1.0 / (1.0 - margin) }
 
 /// Screen edge identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum Edge {
+pub(super) enum Edge {
     /// Left screen edge.
     Left,
     /// Right screen edge.
@@ -60,16 +60,16 @@ pub enum Edge {
 
 /// Successful fit output: camera orbit radius and centered focus point.
 #[derive(Debug, Clone, Copy)]
-pub struct FitSolution {
+pub(super) struct FitSolution {
     /// The optimal orbital radius.
-    pub radius: f32,
+    pub(super) radius: f32,
     /// The centered focus point.
-    pub focus:  Position,
+    pub(super) focus:  Position,
 }
 
 /// Explicit fit calculation failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FitError {
+pub(super) enum FitError {
     /// Camera viewport size/aspect ratio is unavailable.
     NoViewport,
     /// All candidate fits projected points behind the camera.
@@ -158,7 +158,7 @@ struct FitParams {
 ///
 /// Note: A lateral camera shift doesn't change point depths, so the centering is geometrically
 /// exact for the constraining margin check.
-pub fn calculate_fit(
+pub(super) fn calculate_fit(
     points: &[Vec3],
     geometric_center: Vec3,
     yaw: f32,

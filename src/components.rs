@@ -74,7 +74,7 @@ pub struct CurrentFitTarget(
 /// When `AnimationEnd` fires on an entity with this marker, `ZoomEnd` is triggered and the
 /// marker is removed. Wraps the [`ZoomContext`] that originated the zoom.
 #[derive(Component, Clone)]
-pub struct ZoomAnimationMarker(pub ZoomContext);
+pub(super) struct ZoomAnimationMarker(pub(super) ZoomContext);
 
 /// Tracks which trigger source started the current animation.
 ///
@@ -82,7 +82,7 @@ pub struct ZoomAnimationMarker(pub ZoomContext);
 /// [`ZoomToFit`](crate::ZoomToFit), or [`AnimateToFit`](crate::AnimateToFit). Inserted alongside
 /// [`CameraMoveList`](crate::CameraMoveList) and removed when the animation ends or is cancelled.
 #[derive(Component)]
-pub struct AnimationSourceMarker(pub AnimationSource);
+pub(super) struct AnimationSourceMarker(pub(super) AnimationSource);
 
 /// Component that stores camera runtime state values during animations.
 ///
@@ -91,11 +91,11 @@ pub struct AnimationSourceMarker(pub AnimationSource);
 /// [`CameraInputInterruptBehavior`], camera input may also be temporarily disabled.
 /// Original values are stored here and restored when the animation completes.
 #[derive(Component, Debug, Clone, Copy, Default)]
-pub struct OrbitCamStash {
-    pub zoom:    f32,
-    pub pan:     f32,
-    pub orbit:   f32,
-    pub enabled: bool,
+pub(super) struct OrbitCamStash {
+    pub(super) zoom:    f32,
+    pub(super) pan:     f32,
+    pub(super) orbit:   f32,
+    pub(super) enabled: bool,
 }
 
 /// Enables fit target debug overlay on a camera entity.

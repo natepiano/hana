@@ -195,7 +195,7 @@ fn cleanup_stale_margin_labels(
 }
 
 /// Draws screen-aligned bounds for all cameras with `FitVisualization`.
-pub fn draw_fit_target_bounds(
+pub(super) fn draw_fit_target_bounds(
     mut commands: Commands,
     mut gizmos: Gizmos<FitTargetGizmo>,
     config: Res<FitTargetOverlayConfig>,

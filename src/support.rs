@@ -9,15 +9,15 @@ use bevy_kana::Position;
 
 /// Camera basis vectors extracted from a `GlobalTransform`.
 /// Bundles the position and orientation vectors that are frequently passed together.
-pub struct CameraBasis {
-    pub pos:     Position,
-    pub right:   Vec3,
-    pub up:      Vec3,
-    pub forward: Vec3,
+pub(super) struct CameraBasis {
+    pub(super) pos:     Position,
+    pub(super) right:   Vec3,
+    pub(super) up:      Vec3,
+    pub(super) forward: Vec3,
 }
 
 impl CameraBasis {
-    pub fn from_global_transform(global: &GlobalTransform) -> Self {
+    pub(super) fn from_global_transform(global: &GlobalTransform) -> Self {
         let rot = global.rotation();
         Self {
             pos:     Position(global.translation()),
@@ -34,23 +34,23 @@ impl CameraBasis {
 
 /// Minimum depth for a point to be considered in front of the camera.
 /// Points at or below this depth are treated as behind the camera in perspective projection.
-pub const MIN_VISIBLE_DEPTH: f32 = 0.1;
+pub(super) const MIN_VISIBLE_DEPTH: f32 = 0.1;
 
 /// Projection-derived parameters for screen-space normalization.
 /// Consolidates the extraction of half extents and projection type from a `Projection`.
-pub struct ProjectionParams {
+pub(super) struct ProjectionParams {
     /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
-    pub half_extent_x: f32,
+    pub(super) half_extent_x: f32,
     /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
-    pub half_extent_y: f32,
+    pub(super) half_extent_y: f32,
     /// Whether this uses orthographic projection
-    pub is_ortho:      bool,
+    pub(super) is_ortho:      bool,
 }
 
 impl ProjectionParams {
     /// Extracts projection parameters from a `Projection` and viewport aspect ratio.
     /// Returns `None` for unsupported projection variants.
-    pub fn from_projection(projection: &Projection, viewport_aspect: f32) -> Option<Self> {
+    pub(super) fn from_projection(projection: &Projection, viewport_aspect: f32) -> Option<Self> {
         let is_ortho = matches!(projection, Projection::Orthographic(_));
         let (half_extent_x, half_extent_y) = match projection {
             Projection::Perspective(p) => {
@@ -72,7 +72,11 @@ impl ProjectionParams {
 ///
 /// Returns `(norm_x, norm_y, depth)` or `None` if the point is behind the camera
 /// (perspective only — orthographic points are always valid).
-pub fn project_point(point: Vec3, cam: &CameraBasis, is_ortho: bool) -> Option<(f32, f32, f32)> {
+pub(super) fn project_point(
+    point: Vec3,
+    cam: &CameraBasis,
+    is_ortho: bool,
+) -> Option<(f32, f32, f32)> {
     let relative = point - *cam.pos;
     let depth = relative.dot(cam.forward);
     if !is_ortho && depth <= MIN_VISIBLE_DEPTH {
@@ -93,7 +97,7 @@ pub fn project_point(point: Vec3, cam: &CameraBasis, is_ortho: bool) -> Option<(
 ///
 /// Returns `None` for orthographic projections with zero-height area or unknown
 /// projection variants.
-pub fn projection_aspect_ratio(
+pub(super) fn projection_aspect_ratio(
     projection: &Projection,
     viewport_size: Option<Vec2>,
 ) -> Option<f32> {
@@ -118,41 +122,41 @@ pub fn projection_aspect_ratio(
 /// Used by the fit algorithm for perspective-correct centering (harmonic mean)
 /// and by `fit_overlay` for average depth (gizmo placement).
 #[derive(Debug, Clone)]
-pub struct PointDepths {
-    pub min_x_depth: f32,
-    pub max_x_depth: f32,
-    pub min_y_depth: f32,
-    pub max_y_depth: f32,
+pub(super) struct PointDepths {
+    pub(super) min_x_depth: f32,
+    pub(super) max_x_depth: f32,
+    pub(super) min_y_depth: f32,
+    pub(super) max_y_depth: f32,
     #[cfg(feature = "fit_overlay")]
-    pub depth_sum:   f32,
+    pub(super) depth_sum:   f32,
     #[cfg(feature = "fit_overlay")]
-    pub point_count: usize,
+    pub(super) point_count: usize,
 }
 
 /// Screen-space bounds of a set of projected points, with margin distances
 /// from each screen edge.
 #[derive(Debug, Clone)]
-pub struct ScreenSpaceBounds {
+pub(super) struct ScreenSpaceBounds {
     /// Distance from left edge (positive = inside, negative = outside)
-    pub left_margin:   f32,
+    pub(super) left_margin:   f32,
     /// Distance from right edge (positive = inside, negative = outside)
-    pub right_margin:  f32,
+    pub(super) right_margin:  f32,
     /// Distance from top edge (positive = inside, negative = outside)
-    pub top_margin:    f32,
+    pub(super) top_margin:    f32,
     /// Distance from bottom edge (positive = inside, negative = outside)
-    pub bottom_margin: f32,
+    pub(super) bottom_margin: f32,
     /// Minimum normalized x coordinate in screen space
-    pub min_norm_x:    f32,
+    pub(super) min_norm_x:    f32,
     /// Maximum normalized x coordinate in screen space
-    pub max_norm_x:    f32,
+    pub(super) max_norm_x:    f32,
     /// Minimum normalized y coordinate in screen space
-    pub min_norm_y:    f32,
+    pub(super) min_norm_y:    f32,
     /// Maximum normalized y coordinate in screen space
-    pub max_norm_y:    f32,
+    pub(super) max_norm_y:    f32,
     /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
-    pub half_extent_x: f32,
+    pub(super) half_extent_x: f32,
     /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
-    pub half_extent_y: f32,
+    pub(super) half_extent_y: f32,
 }
 
 impl ScreenSpaceBounds {
@@ -162,7 +166,7 @@ impl ScreenSpaceBounds {
         clippy::similar_names,
         reason = "min/max pairs per axis follow a consistent naming pattern"
     )]
-    pub fn from_points(
+    pub(super) fn from_points(
         points: &[Vec3],
         cam_global: &GlobalTransform,
         projection: &Projection,
@@ -246,7 +250,7 @@ impl ScreenSpaceBounds {
     }
 
     /// Returns the center of the bounds in normalized screen space.
-    pub const fn center(&self) -> (f32, f32) {
+    pub(super) const fn center(&self) -> (f32, f32) {
         let center_x = (self.min_norm_x + self.max_norm_x) * 0.5;
         let center_y = (self.min_norm_y + self.max_norm_y) * 0.5;
         (center_x, center_y)
@@ -260,7 +264,7 @@ impl ScreenSpaceBounds {
 /// Extracts world-space vertex positions from all meshes on an entity and its descendants.
 /// Returns `(vertices, geometric_center)` where `geometric_center` is the root entity's
 /// `GlobalTransform` translation.
-pub fn extract_mesh_vertices(
+pub(super) fn extract_mesh_vertices(
     entity: Entity,
     children_query: &Query<&Children>,
     mesh_query: &Query<&Mesh3d>,
