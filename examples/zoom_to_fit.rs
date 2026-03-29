@@ -4,7 +4,7 @@
 //!   Space — `ZoomToFit` the cube (frames without changing look direction)
 //!   L     — `LookAt` the cube (rotates camera in place)
 //!   K     — `LookAtAndZoomToFit` the cube (rotates + frames)
-//!   D     — Toggle debug visualization
+//!   D     — Toggle debug overlay
 //!   R     — Reset camera to starting position
 //!
 //! Compare K vs Space: both frame the target, but `LookAtAndZoomToFit` also
@@ -18,7 +18,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
-use bevy_lagrange::FitVisualization;
+use bevy_lagrange::FitOverlay;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
@@ -40,7 +40,7 @@ fn main() {
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
         .add_systems(Startup, setup)
-        .add_systems(Update, (keyboard_input, toggle_debug_visualization))
+        .add_systems(Update, (keyboard_input, toggle_debug_overlay))
         .add_observer(on_zoom_begin)
         .add_observer(on_zoom_end)
         .add_observer(on_animation_begin)
@@ -97,7 +97,7 @@ fn setup(
         "Space - ZoomToFit (frames without rotating)\n\
          L - LookAt (rotates camera only)\n\
          K - LookAtAndZoomToFit (rotates + frames)\n\
-         D - Toggle debug visualization\n\
+         D - Toggle debug overlay\n\
          R - Reset camera",
     ));
 }
@@ -178,10 +178,10 @@ fn on_animation_end(trigger: On<AnimationEnd>) {
     }
 }
 
-fn toggle_debug_visualization(
+fn toggle_debug_overlay(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    camera_query: Query<(Entity, Option<&FitVisualization>), With<OrbitCam>>,
+    camera_query: Query<(Entity, Option<&FitOverlay>), With<OrbitCam>>,
     target_query: Query<Entity, With<Target>>,
 ) {
     if !keys.just_pressed(KeyCode::KeyD) {
@@ -192,12 +192,12 @@ fn toggle_debug_visualization(
     };
     for (camera, viz) in &camera_query {
         if viz.is_some() {
-            commands.entity(camera).remove::<FitVisualization>();
-            info!("Debug visualization OFF");
+            commands.entity(camera).remove::<FitOverlay>();
+            info!("Debug overlay OFF");
         } else {
             commands.trigger(SetFitTarget::new(camera, target));
-            commands.entity(camera).insert(FitVisualization);
-            info!("Debug visualization ON");
+            commands.entity(camera).insert(FitOverlay);
+            info!("Debug overlay ON");
         }
     }
 }

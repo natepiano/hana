@@ -119,16 +119,16 @@ pub(super) fn projection_aspect_ratio(
 
 /// Depths of the extreme projected points, tracked during the projection loop.
 /// Used by the fit algorithm for perspective-correct centering (harmonic mean)
-/// and by visualization for average depth (gizmo placement).
+/// and by fit_overlay for average depth (gizmo placement).
 #[derive(Debug, Clone)]
 pub(super) struct PointDepths {
     pub min_x_depth: f32,
     pub max_x_depth: f32,
     pub min_y_depth: f32,
     pub max_y_depth: f32,
-    #[cfg(feature = "zoom_overlay")]
+    #[cfg(feature = "fit_overlay")]
     pub depth_sum:   f32,
-    #[cfg(feature = "zoom_overlay")]
+    #[cfg(feature = "fit_overlay")]
     pub point_count: usize,
 }
 
@@ -184,13 +184,13 @@ impl ScreenSpaceBounds {
         let mut max_x_depth = 0.0_f32;
         let mut min_y_depth = 0.0_f32;
         let mut max_y_depth = 0.0_f32;
-        #[cfg(feature = "zoom_overlay")]
+        #[cfg(feature = "fit_overlay")]
         let mut depth_sum = 0.0_f32;
 
         for point in points {
             let (norm_x, norm_y, depth) = project_point(*point, &cam, is_ortho)?;
 
-            #[cfg(feature = "zoom_overlay")]
+            #[cfg(feature = "fit_overlay")]
             {
                 depth_sum += depth;
             }
@@ -236,9 +236,9 @@ impl ScreenSpaceBounds {
             max_x_depth,
             min_y_depth,
             max_y_depth,
-            #[cfg(feature = "zoom_overlay")]
+            #[cfg(feature = "fit_overlay")]
             depth_sum,
-            #[cfg(feature = "zoom_overlay")]
+            #[cfg(feature = "fit_overlay")]
             point_count: points.len(),
         };
 

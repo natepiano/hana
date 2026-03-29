@@ -38,7 +38,7 @@ pub fn update_orbit_transform(
         //   ((self as f64 + other as f64) / 2.0) as f32
         // This produces a subtly different camera distance than plain f32 arithmetic.
         // That tiny difference shifts the projected screen-space bounds just enough
-        // to flip the fit visualization balance check (tolerance: 0.001) — causing
+        // to flip the fit overlay balance check (tolerance: 0.001) — causing
         // all margin labels to show green/balanced when they should show red/unbalanced.
         #[expect(
             clippy::manual_midpoint,

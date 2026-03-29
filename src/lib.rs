@@ -22,72 +22,83 @@ pub use crate::egui::BlockOnEguiFocus;
 pub use crate::egui::EguiFocusIncludesHover;
 #[cfg(feature = "bevy_egui")]
 pub use crate::egui::EguiWantsFocus;
-use crate::input::MouseKeyTracker;
 use crate::input::button_zoom_just_pressed;
 use crate::input::mouse_key_tracker;
+use crate::input::MouseKeyTracker;
 pub use crate::touch::TouchControls;
 use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
 use crate::traits::OptionalClamp;
 
+#[cfg(feature = "fit_overlay")]
+mod animation;
+#[cfg(feature = "fit_overlay")]
+mod components;
 #[cfg(feature = "bevy_egui")]
 mod egui;
-#[cfg(feature = "zoom_overlay")]
-mod extras;
+#[cfg(feature = "fit_overlay")]
+mod events;
+#[cfg(feature = "fit_overlay")]
+mod fit;
+#[cfg(feature = "fit_overlay")]
+mod fit_overlay;
 mod input;
+#[cfg(feature = "fit_overlay")]
+mod observers;
+#[cfg(feature = "fit_overlay")]
+mod support;
 mod touch;
 mod traits;
 mod util;
 
-// Extras re-exports
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimateToFit;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimationBegin;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimationCancelled;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimationConflictPolicy;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimationEnd;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimationRejected;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::AnimationSource;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::CameraInputInterruptBehavior;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::CameraMove;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::CameraMoveBegin;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::CameraMoveEnd;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::CameraMoveList;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::CurrentFitTarget;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::FitTargetVisualizationConfig;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::FitVisualization;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::LookAt;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::LookAtAndZoomToFit;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::PlayAnimation;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::SetFitTarget;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::ZoomBegin;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::ZoomCancelled;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::ZoomContext;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::ZoomEnd;
-#[cfg(feature = "zoom_overlay")]
-pub use extras::ZoomToFit;
+#[cfg(feature = "fit_overlay")]
+pub use animation::CameraMove;
+#[cfg(feature = "fit_overlay")]
+pub use animation::CameraMoveList;
+#[cfg(feature = "fit_overlay")]
+pub use components::AnimationConflictPolicy;
+#[cfg(feature = "fit_overlay")]
+pub use components::CameraInputInterruptBehavior;
+#[cfg(feature = "fit_overlay")]
+pub use components::CurrentFitTarget;
+#[cfg(feature = "fit_overlay")]
+pub use components::FitOverlay;
+#[cfg(feature = "fit_overlay")]
+pub use events::AnimateToFit;
+#[cfg(feature = "fit_overlay")]
+pub use events::AnimationBegin;
+#[cfg(feature = "fit_overlay")]
+pub use events::AnimationCancelled;
+#[cfg(feature = "fit_overlay")]
+pub use events::AnimationEnd;
+#[cfg(feature = "fit_overlay")]
+pub use events::AnimationRejected;
+#[cfg(feature = "fit_overlay")]
+pub use events::AnimationSource;
+#[cfg(feature = "fit_overlay")]
+pub use events::CameraMoveBegin;
+#[cfg(feature = "fit_overlay")]
+pub use events::CameraMoveEnd;
+#[cfg(feature = "fit_overlay")]
+pub use events::LookAt;
+#[cfg(feature = "fit_overlay")]
+pub use events::LookAtAndZoomToFit;
+#[cfg(feature = "fit_overlay")]
+pub use events::PlayAnimation;
+#[cfg(feature = "fit_overlay")]
+pub use events::SetFitTarget;
+#[cfg(feature = "fit_overlay")]
+pub use events::ZoomBegin;
+#[cfg(feature = "fit_overlay")]
+pub use events::ZoomCancelled;
+#[cfg(feature = "fit_overlay")]
+pub use events::ZoomContext;
+#[cfg(feature = "fit_overlay")]
+pub use events::ZoomEnd;
+#[cfg(feature = "fit_overlay")]
+pub use events::ZoomToFit;
+#[cfg(feature = "fit_overlay")]
+pub use fit_overlay::FitTargetOverlayConfig;
 
 /// Bevy plugin that contains the systems for controlling `OrbitCam` components.
 /// # Example
@@ -117,7 +128,7 @@ impl Plugin for LagrangePlugin {
                         mouse_key_tracker,
                         touch_tracker,
                     ),
-                    pan_orbit_camera,
+                    orbit_cam,
                 )
                     .chain()
                     .in_set(OrbitCamSystemSet)
@@ -137,9 +148,18 @@ impl Plugin for LagrangePlugin {
                 );
         }
 
-        #[cfg(feature = "zoom_overlay")]
+        #[cfg(feature = "fit_overlay")]
         {
-            extras::build_extras(app);
+            app.add_observer(observers::on_camera_move_list_added)
+                .add_observer(observers::restore_camera_state)
+                .add_observer(observers::on_zoom_to_fit)
+                .add_observer(observers::on_play_animation)
+                .add_observer(observers::on_set_fit_target)
+                .add_observer(observers::on_animate_to_fit)
+                .add_observer(observers::on_look_at)
+                .add_observer(observers::on_look_at_and_zoom_to_fit)
+                .add_systems(Update, animation::process_camera_move_list);
+            app.add_plugins(fit_overlay::ZoomOverlayPlugin);
         }
     }
 }
@@ -880,7 +900,7 @@ fn smooth_and_update_transform(
 // ============================================================================
 
 /// Main system for processing input and converting to transformations
-fn pan_orbit_camera(
+fn orbit_cam(
     active_cam: Res<ActiveCameraData>,
     mouse_key_tracker: Res<MouseKeyTracker>,
     touch_tracker: Res<TouchTracker>,

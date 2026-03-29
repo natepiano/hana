@@ -42,7 +42,7 @@ impl FitTargetViewportMargins {
 /// Configuration for fit target visualization colors and appearance.
 #[derive(Resource, Reflect, Debug, Clone)]
 #[reflect(Resource)]
-pub struct FitTargetVisualizationConfig {
+pub struct FitTargetOverlayConfig {
     /// Color for the screen-aligned bounding rectangle.
     pub rectangle_color:  Color,
     /// Color for the silhouette convex hull.
@@ -55,7 +55,7 @@ pub struct FitTargetVisualizationConfig {
     pub line_width:       f32,
 }
 
-impl Default for FitTargetVisualizationConfig {
+impl Default for FitTargetOverlayConfig {
     fn default() -> Self {
         Self {
             rectangle_color:  Color::srgb(1.0, 1.0, 0.0), // Yellow

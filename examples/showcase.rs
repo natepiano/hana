@@ -4,7 +4,7 @@
 //! - Click the ground to deselect and zoom out to the full scene
 //! - Drag a mesh to rotate it
 //! - Selected meshes show a gizmo outline
-//! - Press 'D' to toggle debug visualization of zoom-to-fit bounds
+//! - Press 'D' to toggle debug overlay of zoom-to-fit bounds
 
 use std::f32::consts::PI;
 use std::time::Duration;
@@ -31,7 +31,7 @@ use bevy_lagrange::CameraInputInterruptBehavior;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
-use bevy_lagrange::FitVisualization;
+use bevy_lagrange::FitOverlay;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
@@ -253,7 +253,7 @@ fn main() {
                 scroll_event_log,
                 (
                     toggle_second_window,
-                    toggle_debug_visualization,
+                    toggle_debug_overlay,
                     toggle_projection,
                     randomize_easing,
                     animate_camera,
@@ -425,7 +425,7 @@ fn spawn_scene_objects(
 fn spawn_ui(commands: &mut Commands, camera: Entity) {
     // Instructions
     commands.spawn((
-        Text::new("Click a mesh to zoom-to-fit\nClick the ground to zoom back out\n\nPress:\n'Esc' pause / unpause\n'P' toggle projection\n'D' debug visualization\n'H' Home w/animate fit to scene\n'A' animate camera\n'F' look at hovered mesh\n'G' look at + zoom-to-fit hovered mesh\n'R' randomize easing\n'E' reset to 'CubicOut' easing\n'I' toggle interrupt behavior\n'Q' cycle conflict policy\n'W' toggle second window"),
+        Text::new("Click a mesh to zoom-to-fit\nClick the ground to zoom back out\n\nPress:\n'Esc' pause / unpause\n'P' toggle projection\n'D' debug overlay\n'H' Home w/animate fit to scene\n'A' animate camera\n'F' look at hovered mesh\n'G' look at + zoom-to-fit hovered mesh\n'R' randomize easing\n'E' reset to 'CubicOut' easing\n'I' toggle interrupt behavior\n'Q' cycle conflict policy\n'W' toggle second window"),
         TextFont {
             font_size: UI_FONT_SIZE,
             ..default()
@@ -1007,13 +1007,13 @@ type GizmoLayerQuery<'w, 's> = Query<
     's,
     (
         Entity,
-        Option<&'static FitVisualization>,
+        Option<&'static FitOverlay>,
         Option<&'static RenderLayers>,
     ),
     With<OrbitCam>,
 >;
 
-/// Cameras with `FitVisualization` lose the selection gizmo layer so the outline
+/// Cameras with `FitOverlay` lose the selection gizmo layer so the outline
 /// doesn't compete with the debug overlay. Cameras without it get the layer back.
 fn sync_selection_gizmo_layers(mut commands: Commands, camera_query: GizmoLayerQuery) {
     let with_selection = RenderLayers::from_layers(&[0, SELECTION_GIZMO_LAYER]);
@@ -1035,12 +1035,12 @@ fn sync_selection_gizmo_layers(mut commands: Commands, camera_query: GizmoLayerQ
 // Keyboard actions
 // ============================================================================
 
-fn toggle_debug_visualization(
+fn toggle_debug_overlay(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
     second: Option<Res<SecondWindowEntities>>,
-    viz_query: Query<(), With<FitVisualization>>,
+    viz_query: Query<(), With<FitOverlay>>,
     windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyD) {
@@ -1049,9 +1049,9 @@ fn toggle_debug_visualization(
 
     let cam = focused_camera(&scene, second.as_deref(), &windows);
     if viz_query.get(cam).is_ok() {
-        commands.entity(cam).remove::<FitVisualization>();
+        commands.entity(cam).remove::<FitOverlay>();
     } else {
-        commands.entity(cam).insert(FitVisualization);
+        commands.entity(cam).insert(FitOverlay);
     }
 }
 

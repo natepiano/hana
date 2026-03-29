@@ -61,7 +61,7 @@ pub enum AnimationConflictPolicy {
 
 /// Marks the entity that the camera is currently fitted to.
 ///
-/// Persists after fit completes to enable persistent visualization.
+/// Persists after fit completes to enable persistent debug overlay.
 #[derive(Component, Reflect, Debug)]
 #[reflect(Component)]
 pub struct CurrentFitTarget(
@@ -98,11 +98,11 @@ pub(super) struct OrbitCamStash {
     pub enabled: bool,
 }
 
-/// Enables fit target debug visualization on a camera entity.
+/// Enables fit target debug overlay on a camera entity.
 ///
-/// Insert this component to enable visualization, remove it to disable.
+/// Insert this component to enable overlay, remove it to disable.
 /// The presence or absence of the component is the toggle — no boolean field needed.
-#[cfg(feature = "zoom_overlay")]
+#[cfg(feature = "fit_overlay")]
 #[derive(Component, Reflect, Default)]
 #[reflect(Component, Default)]
-pub struct FitVisualization;
+pub struct FitOverlay;

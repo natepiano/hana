@@ -22,7 +22,7 @@ Use it to quickly prototype, experiment, for model viewers, and more!
 - Works with multiple viewports and/or windows
 - Easy to control manually, e.g. for keyboard control or animation
 - Can control cameras that render to a texture
-- Zoom-to-fit, camera animations, and debug visualization (optional `zoom_overlay` feature)
+- Zoom-to-fit, camera animations, and debug overlay (optional `fit_overlay` feature)
 
 ## Controls
 
@@ -64,14 +64,14 @@ all the possible configuration options.
 
 - `bevy_egui` (optional): Makes `OrbitCam` ignore any input that `egui` uses, thus preventing moving the camera
   when interacting with egui windows
-- `zoom_overlay` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization of fit targets with gizmos and screen-space labels
+- `fit_overlay` (optional): Zoom-to-fit, queued camera animations, event-driven camera control, and debug overlay of fit targets with gizmos and screen-space labels
 
 ## Extras
 
-Enable the `zoom_overlay` feature for zoom-to-fit, queued camera animations, event-driven camera control, and debug visualization:
+Enable the `fit_overlay` feature for zoom-to-fit, queued camera animations, event-driven camera control, and debug overlay:
 
 ```toml
-bevy_lagrange = { version = "0.0.1", features = ["zoom_overlay"] }
+bevy_lagrange = { version = "0.0.1", features = ["fit_overlay"] }
 ```
 
 Trigger a zoom-to-fit:

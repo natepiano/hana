@@ -1,4 +1,4 @@
-//! Visualization system for fit target debugging.
+//! Debug overlay system for fit target debugging.
 //!
 //! Provides screen-aligned boundary box and silhouette polygon visualization for the current
 //! camera fit target. Uses Bevy's `GizmoConfigGroup` pattern (similar to `Avian3D`'s
@@ -15,34 +15,34 @@ use bevy::prelude::*;
 use labels::BoundsLabel;
 use labels::MarginLabel;
 pub use types::FitTargetGizmo;
+pub use types::FitTargetOverlayConfig;
 use types::FitTargetViewportMargins;
-pub use types::FitTargetVisualizationConfig;
 
-use super::components::FitVisualization;
+use super::components::FitOverlay;
 
 /// Plugin that enables fit target debug visualization.
-pub(super) struct VisualizationPlugin;
+pub(super) struct ZoomOverlayPlugin;
 
-impl Plugin for VisualizationPlugin {
+impl Plugin for ZoomOverlayPlugin {
     fn build(&self, app: &mut App) {
         if app.is_plugin_added::<bevy::gizmos::GizmoPlugin>() {
             app.init_gizmo_group::<FitTargetGizmo>();
         }
 
-        app.init_resource::<FitTargetVisualizationConfig>()
+        app.init_resource::<FitTargetOverlayConfig>()
             .add_observer(on_remove_fit_visualization)
             .add_systems(
                 Update,
                 (sync_gizmo_render_layers, systems::draw_fit_target_bounds)
                     .chain()
-                    .run_if(any_with_component::<FitVisualization>),
+                    .run_if(any_with_component::<FitOverlay>),
             );
     }
 }
 
 /// Observer that cleans up visualization state when `FitVisualization` is removed from a camera.
 fn on_remove_fit_visualization(
-    trigger: On<Remove, FitVisualization>,
+    trigger: On<Remove, FitOverlay>,
     mut commands: Commands,
     label_query: Query<(Entity, &MarginLabel)>,
     bounds_label_query: Query<(Entity, &BoundsLabel)>,
@@ -72,8 +72,8 @@ fn on_remove_fit_visualization(
 /// Syncs the gizmo render layers and line width with visualization-enabled cameras.
 fn sync_gizmo_render_layers(
     mut config_store: ResMut<GizmoConfigStore>,
-    viz_config: Res<FitTargetVisualizationConfig>,
-    camera_query: Query<Option<&RenderLayers>, With<FitVisualization>>,
+    viz_config: Res<FitTargetOverlayConfig>,
+    camera_query: Query<Option<&RenderLayers>, With<FitOverlay>>,
 ) {
     let (gizmo_config, _) = config_store.config_mut::<FitTargetGizmo>();
     gizmo_config.line.width = viz_config.line_width;

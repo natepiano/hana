@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use super::super::components::CurrentFitTarget;
-use super::super::components::FitVisualization;
+use super::super::components::FitOverlay;
 use super::super::fit;
 use super::super::fit::Edge;
 use super::super::support;
@@ -14,15 +14,15 @@ use super::labels::MarginLabel;
 use super::labels::MarginLabelParams;
 use super::screen_space;
 use super::types::FitTargetGizmo;
+use super::types::FitTargetOverlayConfig;
 use super::types::FitTargetViewportMargins;
-use super::types::FitTargetVisualizationConfig;
 
 /// Calculates the color for an edge based on balance state.
 const fn calculate_edge_color(
     edge: Edge,
     h_balanced: bool,
     v_balanced: bool,
-    config: &FitTargetVisualizationConfig,
+    config: &FitTargetOverlayConfig,
 ) -> Color {
     match edge {
         Edge::Left | Edge::Right => {
@@ -85,7 +85,7 @@ fn create_screen_corners(
 fn draw_rectangle(
     gizmos: &mut Gizmos<FitTargetGizmo>,
     corners: &[Vec3; 4],
-    config: &FitTargetVisualizationConfig,
+    config: &FitTargetOverlayConfig,
 ) {
     for i in 0..4 {
         let next = (i + 1) % 4;
@@ -130,7 +130,7 @@ fn draw_margin_lines_and_labels(
     cam_basis: &CameraBasis,
     avg_depth: f32,
     is_ortho: bool,
-    config: &FitTargetVisualizationConfig,
+    config: &FitTargetOverlayConfig,
     viewport_size: Option<Vec2>,
 ) -> Vec<Edge> {
     let h_balanced = screen_space::is_horizontally_balanced(bounds, fit::TOLERANCE);
@@ -202,7 +202,7 @@ fn cleanup_stale_margin_labels(
 pub fn draw_fit_target_bounds(
     mut commands: Commands,
     mut gizmos: Gizmos<FitTargetGizmo>,
-    config: Res<FitTargetVisualizationConfig>,
+    config: Res<FitTargetOverlayConfig>,
     camera_query: Query<
         (
             Entity,
@@ -211,7 +211,7 @@ pub fn draw_fit_target_bounds(
             &Projection,
             &CurrentFitTarget,
         ),
-        With<FitVisualization>,
+        With<FitOverlay>,
     >,
     mesh_query: Query<&Mesh3d>,
     children_query: Query<&Children>,

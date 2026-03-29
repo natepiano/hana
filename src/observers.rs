@@ -401,7 +401,7 @@ pub(super) fn on_camera_move_list_added(
     );
 }
 
-/// Observer for `SetFitTarget` event - sets the target entity for fit visualization.
+/// Observer for `SetFitTarget` event - sets the target entity for fit debug overlay.
 pub(super) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Commands) {
     commands
         .entity(set_target.camera)
