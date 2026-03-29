@@ -46,23 +46,23 @@ struct SnapOrbit {
 /// caller-provided lifecycle events via `emit_events`.
 fn snap_to_orbit(
     commands: &mut Commands,
-    panorbit: &mut OrbitCam,
+    orbit_cam: &mut OrbitCam,
     snap: SnapOrbit,
     emit_events: impl FnOnce(&mut Commands),
 ) {
-    panorbit.focus = snap.focus;
-    panorbit.radius = Some(snap.radius);
-    panorbit.target_focus = snap.focus;
-    panorbit.target_radius = snap.radius;
+    orbit_cam.focus = snap.focus;
+    orbit_cam.radius = Some(snap.radius);
+    orbit_cam.target_focus = snap.focus;
+    orbit_cam.target_radius = snap.radius;
     if let Some(yaw) = snap.yaw {
-        panorbit.yaw = Some(yaw);
-        panorbit.target_yaw = yaw;
+        orbit_cam.yaw = Some(yaw);
+        orbit_cam.target_yaw = yaw;
     }
     if let Some(pitch) = snap.pitch {
-        panorbit.pitch = Some(pitch);
-        panorbit.target_pitch = pitch;
+        orbit_cam.pitch = Some(pitch);
+        orbit_cam.target_pitch = pitch;
     }
-    panorbit.force_update = true;
+    orbit_cam.force_update = true;
 
     emit_events(commands);
 }
@@ -160,24 +160,24 @@ pub fn on_zoom_to_fit(
     let duration = zoom.duration;
     let easing = zoom.easing;
 
-    let Ok((mut panorbit, projection, cam)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, projection, cam)) = camera_query.get_mut(camera) else {
         return;
     };
 
     debug!(
         "ZoomToFit: yaw={:.3} pitch={:.3} current_focus={:.1?} current_radius={:.1} duration_ms={:.0}",
-        panorbit.target_yaw,
-        panorbit.target_pitch,
-        panorbit.target_focus,
-        panorbit.target_radius,
+        orbit_cam.target_yaw,
+        orbit_cam.target_pitch,
+        orbit_cam.target_focus,
+        orbit_cam.target_radius,
         duration.as_secs_f32() * 1000.0,
     );
 
     let Some(fit) = prepare_fit_for_target(
         "ZoomToFit",
         target,
-        panorbit.target_yaw,
-        panorbit.target_pitch,
+        orbit_cam.target_yaw,
+        orbit_cam.target_pitch,
         margin,
         projection,
         cam,
@@ -194,8 +194,8 @@ pub fn on_zoom_to_fit(
         // gimbal lock from atan2 decomposition at extreme pitch angles.
         let camera_moves = VecDeque::from([CameraMove::ToOrbit {
             focus: fit.focus,
-            yaw: panorbit.target_yaw,
-            pitch: panorbit.target_pitch,
+            yaw: orbit_cam.target_yaw,
+            pitch: orbit_cam.target_pitch,
             radius: fit.radius,
             duration,
             easing,
@@ -215,7 +215,7 @@ pub fn on_zoom_to_fit(
         // Instant path: snap directly to target — no `PlayAnimation` involved.
         snap_to_orbit(
             &mut commands,
-            &mut panorbit,
+            &mut orbit_cam,
             SnapOrbit {
                 focus:  fit.focus,
                 yaw:    None,
@@ -427,7 +427,7 @@ pub fn on_animate_to_fit(
     let duration = event.duration;
     let easing = event.easing;
 
-    let Ok((mut panorbit, projection, cam)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, projection, cam)) = camera_query.get_mut(camera) else {
         return;
     };
 
@@ -462,7 +462,7 @@ pub fn on_animate_to_fit(
     } else {
         snap_to_orbit(
             &mut commands,
-            &mut panorbit,
+            &mut orbit_cam,
             SnapOrbit {
                 focus:  fit.focus,
                 yaw:    Some(yaw),
@@ -493,7 +493,7 @@ pub fn on_look_at(
     let duration = event.duration;
     let easing = event.easing;
 
-    let Ok((mut panorbit, cam_transform)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, cam_transform)) = camera_query.get_mut(camera) else {
         return;
     };
 
@@ -523,7 +523,7 @@ pub fn on_look_at(
         let (yaw, pitch, radius) = animation::orbital_params_from_offset(cam_pos - target_pos);
         snap_to_orbit(
             &mut commands,
-            &mut panorbit,
+            &mut orbit_cam,
             SnapOrbit {
                 focus: target_pos,
                 yaw: Some(yaw),
@@ -557,7 +557,7 @@ pub fn on_look_at_and_zoom_to_fit(
     let duration = event.duration;
     let easing = event.easing;
 
-    let Ok((mut panorbit, projection, cam, cam_transform)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, projection, cam, cam_transform)) = camera_query.get_mut(camera) else {
         return;
     };
 
@@ -612,7 +612,7 @@ pub fn on_look_at_and_zoom_to_fit(
     } else {
         snap_to_orbit(
             &mut commands,
-            &mut panorbit,
+            &mut orbit_cam,
             SnapOrbit {
                 focus:  fit.focus,
                 yaw:    Some(yaw),

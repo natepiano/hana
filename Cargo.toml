@@ -84,3 +84,6 @@ required-features = ["fit_overlay"]
 [[example]]
 name              = "animation"
 required-features = ["fit_overlay"]
+
+[[example]]
+name              = "degenerate"

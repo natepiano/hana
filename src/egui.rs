@@ -21,13 +21,6 @@ pub struct EguiWantsFocus {
 
 /// When true, just hovering over an egui panel/window will prevent `OrbitCam`
 /// from reacting to input events.
-///
-/// This is an optional, and hopefully temporary,
-/// workaround to this issue: <https://github.com/Plonq/bevy_panorbit_camera/issues/75>.
-/// Note that this will prevent `OrbitCam` using reacting to input whenever the cursor
-/// is over an egui area, even if you're in the middle of dragging to rotate, so only use
-/// this if you use egui Panels (as opposed to Windows). If you use Windows exclusively
-/// then no workaround is required.
 #[derive(Resource, PartialEq, Eq, Default)]
 pub struct EguiFocusIncludesHover(pub bool);
 
