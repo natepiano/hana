@@ -546,33 +546,37 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
                             .direction(Direction::LeftToRight)
                             .child_gap(CHILD_GAP)
                             .width(Sizing::grow_min(0.0))
-                            .height(Sizing::fixed(12.0)),
+                            .height(Sizing::grow_min(0.0)),
                         |b| {
-                            // Overflow visible — text spills out of the box.
+                            // Overflow visible — second line spills past the box.
                             b.with(
                                 El::new()
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(1.0)
                                     .background(BLUE_BG)
                                     .border(Border::all(Mm(0.3), BLUE_ACCENT))
                                     .padding(Padding::all(2.0))
                                     .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::grow_min(0.0)),
+                                    .height(Sizing::fixed(8.0)),
                                 |b| {
-                                    b.text("Overflow visible", body_style.clone());
-                                    b.text("This text spills out", body_style.clone());
+                                    b.text("No clip", body_style.clone());
+                                    b.text("Spills out", body_style.clone());
                                 },
                             );
-                            // Overflow clipped — text is hidden at the boundary.
+                            // Overflow clipped — second line hidden at the boundary.
                             b.with(
                                 El::new()
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(1.0)
                                     .clip()
                                     .background(GREEN_BG)
                                     .border(Border::all(Mm(0.3), GREEN_ACCENT))
                                     .padding(Padding::all(2.0))
                                     .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::grow_min(0.0)),
+                                    .height(Sizing::fixed(8.0)),
                                 |b| {
-                                    b.text("Overflow clipped", body_style.clone());
-                                    b.text("This text is hidden", body_style.clone());
+                                    b.text("Clipped", body_style.clone());
+                                    b.text("Hidden", body_style.clone());
                                 },
                             );
                         },

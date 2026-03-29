@@ -800,10 +800,22 @@ fn emit_down_traversal_commands(
 
     // Emit scissor start if clipping (always emit — scissor regions
     // must be balanced even when the parent is off-screen).
+    // Clip to the border's inner edge — content can fill up to (but
+    // not into) the border. Padding is inside this region.
     if element.clip {
+        let bt = element.border.as_ref().map_or(0.0, |b| b.top.value);
+        let br = element.border.as_ref().map_or(0.0, |b| b.right.value);
+        let bb = element.border.as_ref().map_or(0.0, |b| b.bottom.value);
+        let bl = element.border.as_ref().map_or(0.0, |b| b.left.value);
+        let clip_bounds = BoundingBox {
+            x:      bounds.x + bl,
+            y:      bounds.y + bt,
+            width:  (bounds.width - bl - br).max(0.0),
+            height: (bounds.height - bt - bb).max(0.0),
+        };
         commands.push(RenderCommand {
-            bounds,
-            kind: RenderCommandKind::ScissorStart,
+            bounds:      clip_bounds,
+            kind:        RenderCommandKind::ScissorStart,
             element_idx: index,
         });
     }

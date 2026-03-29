@@ -47,7 +47,9 @@ struct SdfPanelUniform {
     border_color:  vec4<f32>,
     /// Clip rect in local quad space: [left, bottom, right, top].
     /// Fragments outside are discarded.
-    clip_rect:     vec4<f32>,
+    clip_rect:         vec4<f32>,
+    /// Depth offset for OIT fragment ordering (reverse-Z: positive = closer).
+    oit_depth_offset:  f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> sdf: SdfPanelUniform;
@@ -94,11 +96,11 @@ fn inner_corner_radii() -> vec4<f32> {
     );
 }
 
-/// Pixel-width anti-aliasing factor from screen-space derivatives.
-fn aa_factor(uv: vec2<f32>) -> f32 {
-    let dx = dpdx(uv);
-    let dy = dpdy(uv);
-    return length(vec2(length(dx), length(dy)));
+/// Anti-aliasing half-width from the screen-space rate of change of a
+/// distance field value. Using `fwidth(dist)` directly accounts for
+/// perspective foreshortening at extreme viewing angles.
+fn aa_width(dist: f32) -> f32 {
+    return fwidth(dist) * 0.75;
 }
 
 // ── Prepass ─────────────────────────────────────────────────────────
@@ -143,12 +145,11 @@ fn fragment(
     // Outer shape distance.
     let outer_dist = sd_rounded_box(local, sdf.half_size, sdf.corner_radii);
 
-    // Anti-aliasing width in local units.
-    let pixel_size = aa_factor(local);
-    let aa = 1.5 * pixel_size;
+    // Per-distance AA width from screen-space derivatives of the SDF.
+    let outer_aa = aa_width(outer_dist);
 
     // Outer shape alpha — smooth falloff at the edge.
-    let outer_alpha = 1.0 - smoothstep(-aa, aa, outer_dist);
+    let outer_alpha = 1.0 - smoothstep(-outer_aa, outer_aa, outer_dist);
 
     // Discard fully outside fragments.
     if outer_alpha < 0.001 {
@@ -168,7 +169,8 @@ fn fragment(
     let inner_dist = sd_rounded_box(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
 
     // Inner fill alpha.
-    let inner_alpha = 1.0 - smoothstep(-aa, aa, inner_dist);
+    let inner_aa = aa_width(inner_dist);
+    let inner_alpha = 1.0 - smoothstep(-inner_aa, inner_aa, inner_dist);
 
     // Border alpha: between outer and inner edges.
     let border_alpha = outer_alpha * (1.0 - inner_alpha);
@@ -213,10 +215,15 @@ fn fragment(
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 
     // OIT support for transparent fragments.
+    // Offset position.z so coplanar layers get distinct depths in the
+    // OIT linked list. Pipeline depth_bias does NOT affect in.position.z,
+    // so we apply the offset here before oit_draw stores the fragment.
 #ifdef OIT_ENABLED
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
-        oit_draw(in.position, out.color);
+        var oit_pos = in.position;
+        oit_pos.z += sdf.oit_depth_offset;
+        oit_draw(oit_pos, out.color);
         discard;
     }
 #endif

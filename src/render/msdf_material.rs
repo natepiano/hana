@@ -24,15 +24,20 @@ use bevy::shader::ShaderRef;
 /// `double_sided`, etc.) for full PBR control.
 pub(super) type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
 
+/// Default clip rect for unclipped text: effectively infinite panel-local
+/// bounds so the shader clip test becomes a no-op.
+pub(super) const UNCLIPPED_TEXT_CLIP_RECT: bevy::math::Vec4 =
+    bevy::math::Vec4::new(-1e6, -1e6, 1e6, 1e6);
+
 /// Uniform data for the MSDF extension shader.
 #[derive(Clone, Debug, ShaderType)]
 pub(super) struct MsdfTextUniform {
     /// SDF range in atlas pixels.
-    pub sdf_range:       f32,
+    pub sdf_range:        f32,
     /// Atlas texture width in pixels.
-    pub atlas_width:     f32,
+    pub atlas_width:      f32,
     /// Atlas texture height in pixels.
-    pub atlas_height:    f32,
+    pub atlas_height:     f32,
     /// Hue rotation applied to every vertex color, in radians (0.0 = none).
     ///
     /// Rotates the hue of all vertex colors in the mesh by this angle using
@@ -55,13 +60,18 @@ pub(super) struct MsdfTextUniform {
     /// Has no effect on text using the material's base `color` uniform
     /// (white vertex colors). Only affects text with per-vertex colors set
     /// via [`TextConfig::with_color`](crate::TextConfig::with_color).
-    pub hue_offset:      f32,
+    pub hue_offset:       f32,
     /// Glyph render mode (maps to [`GlyphRenderMode`](crate::GlyphRenderMode)):
     /// 0 = Text, 1 = `PunchOut`, 2 = `SolidQuad`.
-    pub render_mode:     u32,
+    pub render_mode:      u32,
     /// Whether this material is a shadow proxy (invisible in main pass,
     /// contributes to the shadow prepass). 0 = visible, 1 = shadow-only.
-    pub is_shadow_proxy: u32,
+    pub is_shadow_proxy:  u32,
+    /// Clip rect in panel-local Y-up space: [left, bottom, right, top].
+    /// Fragments outside are discarded. Defaults to large bounds (no clip).
+    pub clip_rect:        bevy::math::Vec4,
+    /// Depth offset added to `position.z` before OIT fragment storage.
+    pub oit_depth_offset: f32,
 }
 
 /// MSDF atlas extension for `StandardMaterial`.
@@ -109,6 +119,8 @@ pub(super) const fn msdf_text_material(
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
+    clip_rect: bevy::math::Vec4,
+    oit_depth_offset: f32,
 ) -> MsdfTextMaterial {
     base.alpha_mode = AlphaMode::Blend;
     base.double_sided = true;
@@ -124,6 +136,8 @@ pub(super) const fn msdf_text_material(
                 hue_offset,
                 render_mode,
                 is_shadow_proxy: 0,
+                clip_rect,
+                oit_depth_offset,
             },
             atlas_texture,
         },
@@ -148,6 +162,8 @@ pub(super) const fn msdf_shadow_proxy_material(
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
+    clip_rect: bevy::math::Vec4,
+    oit_depth_offset: f32,
 ) -> MsdfTextMaterial {
     base.alpha_mode = AlphaMode::Mask(0.5);
     base.double_sided = true;
@@ -163,6 +179,8 @@ pub(super) const fn msdf_shadow_proxy_material(
                 hue_offset,
                 render_mode,
                 is_shadow_proxy: 1,
+                clip_rect,
+                oit_depth_offset,
             },
             atlas_texture,
         },

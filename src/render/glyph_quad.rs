@@ -176,6 +176,7 @@ pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> Mesh {
     let mut positions = Vec::with_capacity(vertex_count);
     let mut normals = Vec::with_capacity(vertex_count);
     let mut uvs = Vec::with_capacity(vertex_count);
+    let mut panel_local_positions = Vec::with_capacity(vertex_count);
     let mut colors = Vec::with_capacity(vertex_count);
     let mut indices = Vec::with_capacity(index_count);
 
@@ -204,6 +205,12 @@ pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> Mesh {
         uvs.push([u_max, v_max]); // BR
         uvs.push([u_min, v_max]); // BL
 
+        // Panel-local XY for shader-side clipping.
+        panel_local_positions.push([qx, qy]); // TL
+        panel_local_positions.push([qx + qw, qy]); // TR
+        panel_local_positions.push([qx + qw, qy - qh]); // BR
+        panel_local_positions.push([qx, qy - qh]); // BL
+
         // Per-glyph vertex color.
         colors.push(quad.color);
         colors.push(quad.color);
@@ -227,6 +234,7 @@ pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, panel_local_positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh

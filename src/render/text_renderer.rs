@@ -51,8 +51,11 @@ use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
 use crate::text::MsdfAtlas;
 
-/// Z offset for text layer (above rectangles, below borders).
-const TEXT_Z_OFFSET: f32 = 0.001;
+/// Fixed panel-local Z for text and image meshes.
+///
+/// Layering is handled by `StandardMaterial::depth_bias`, so panel-local
+/// geometry stays coplanar.
+const TEXT_Z_OFFSET: f32 = 0.0;
 
 // ── Shaped text cache ────────────────────────────────────────────────────────
 
@@ -206,14 +209,71 @@ struct TextBatchKey {
     render_mode: GlyphRenderMode,
     shadow_mode: GlyphShadowMode,
     page_index:  u32,
+    clip_rect:   [u32; 4],
+}
+
+/// Key for shared zero-hue MSDF text materials.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct SharedMsdfMaterialKey {
+    page_index:      u32,
+    clip_rect:       [u32; 4],
+    depth_bias_bits: u32,
 }
 
 /// Cached default material handles shared across panels without a
-/// [`HueOffset`] component. Keyed by atlas page index — each page
-/// has its own texture and needs its own material.
+/// [`HueOffset`] component. Keyed by atlas page index, clip rect, and
+/// depth bias so each shared material keeps the correct ordering state.
 #[derive(Resource, Default)]
 struct SharedMsdfMaterials {
-    handles: HashMap<u32, Handle<MsdfTextMaterial>>,
+    handles: HashMap<SharedMsdfMaterialKey, Handle<MsdfTextMaterial>>,
+}
+
+#[must_use]
+fn panel_clip_rect_local(
+    clip_rect: Option<BoundingBox>,
+    scale_x: f32,
+    scale_y: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+) -> bevy::math::Vec4 {
+    clip_rect.map_or(super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
+        bevy::math::Vec4::new(
+            clip.x.mul_add(scale_x, -anchor_x),
+            anchor_y - (clip.y + clip.height) * scale_y,
+            (clip.x + clip.width).mul_add(scale_x, -anchor_x),
+            anchor_y - clip.y * scale_y,
+        )
+    })
+}
+
+#[must_use]
+fn clip_rect_bits(clip_rect: bevy::math::Vec4) -> [u32; 4] {
+    [
+        clip_rect.x.to_bits(),
+        clip_rect.y.to_bits(),
+        clip_rect.z.to_bits(),
+        clip_rect.w.to_bits(),
+    ]
+}
+
+#[must_use]
+fn clip_rect_from_bits(bits: [u32; 4]) -> bevy::math::Vec4 {
+    bevy::math::Vec4::new(
+        f32::from_bits(bits[0]),
+        f32::from_bits(bits[1]),
+        f32::from_bits(bits[2]),
+        f32::from_bits(bits[3]),
+    )
+}
+
+#[must_use]
+const fn glyph_render_mode_uniform(render_mode: GlyphRenderMode) -> u32 {
+    match render_mode {
+        GlyphRenderMode::Invisible => 0,
+        GlyphRenderMode::Text => 1,
+        GlyphRenderMode::PunchOut => 2,
+        GlyphRenderMode::SolidQuad => 3,
+    }
 }
 
 /// Timing and queue diagnostics gathered while building text quads.
@@ -486,6 +546,7 @@ fn reconcile_panel_image_children(
         let layer = rtt_registry
             .get_layer(panel_entity)
             .map_or(RenderLayers::layer(0), RenderLayers::layer);
+        let is_geometry = panel.render_mode == RenderMode::Geometry;
 
         // Collect image commands, skipping those entirely outside their clip rect.
         let clip_rects = super::clip::compute_clip_rects(&result.commands);
@@ -499,7 +560,13 @@ fn reconcile_panel_image_children(
                     if clip.is_some_and(|c| cmd.bounds.intersect(&c).is_none()) {
                         None
                     } else {
-                        Some((cmd.element_idx, handle.clone(), *tint, cmd.bounds))
+                        Some((
+                            cmd_index,
+                            cmd.element_idx,
+                            handle.clone(),
+                            *tint,
+                            cmd.bounds,
+                        ))
                     }
                 },
                 _ => None,
@@ -516,7 +583,7 @@ fn reconcile_panel_image_children(
 
         let mut visited_indices: Vec<usize> = Vec::new();
 
-        for (element_idx, handle, tint, bounds) in &image_commands {
+        for (cmd_index, element_idx, handle, tint, bounds) in &image_commands {
             visited_indices.push(*element_idx);
 
             // Convert layout bounds to world-space dimensions.
@@ -533,6 +600,11 @@ fn reconcile_panel_image_children(
                 double_sided: true,
                 cull_mode: None,
                 alpha_mode: AlphaMode::Blend,
+                depth_bias: if is_geometry {
+                    cmd_index.to_f32() * constants::LAYER_DEPTH_BIAS
+                } else {
+                    0.0
+                },
                 ..default()
             });
 
@@ -708,7 +780,7 @@ fn build_panel_batched_meshes(
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
 
         // Collect all quads from this panel's `PanelTextChild` children
-        // and track the maximum command index for Z-offset layering.
+        // and track the maximum command index for layer ordering.
         let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
         let mut max_command_index: usize = 0;
         for (ptq, ptc, child_of) in &panel_children {
@@ -716,11 +788,20 @@ fn build_panel_batched_meshes(
                 continue;
             }
             max_command_index = max_command_index.max(ptc.command_index);
+            let clip_rect = panel_clip_rect_local(
+                ptc.clip_rect,
+                ptc.scale_x,
+                ptc.scale_y,
+                ptc.anchor_x,
+                ptc.anchor_y,
+            );
+            let clip_rect = clip_rect_bits(clip_rect);
             for (page_index, quad) in &ptq.quads {
                 let key = TextBatchKey {
                     render_mode: ptq.render_mode,
                     shadow_mode: ptq.shadow_mode,
-                    page_index:  *page_index,
+                    page_index: *page_index,
+                    clip_rect,
                 };
                 batches.entry(key).or_default().push(*quad);
             }
@@ -754,10 +835,15 @@ fn build_panel_batched_meshes(
             text_base.unlit = true;
         }
 
-        // Text Z offset: use the max command index so text renders
-        // on top of all geometry at or below that index.
-        let text_z = if is_geometry {
-            max_command_index.to_f32() * constants::LAYER_Z_STEP
+        // Text depth bias renders above all geometry at or below the
+        // last command index in the batch.
+        let text_depth_bias = if is_geometry {
+            max_command_index.saturating_add(1).to_f32() * constants::LAYER_DEPTH_BIAS
+        } else {
+            0.0
+        };
+        let text_oit_offset = if is_geometry {
+            max_command_index.saturating_add(1).to_f32() * constants::OIT_DEPTH_STEP
         } else {
             0.0
         };
@@ -773,7 +859,8 @@ fn build_panel_batched_meshes(
             &content_layer,
             &scene_layer,
             &text_base,
-            text_z,
+            text_depth_bias,
+            text_oit_offset,
             &mut commands,
         );
     }
@@ -792,7 +879,8 @@ fn spawn_batch_meshes(
     content_layer: &RenderLayers,
     scene_layer: &RenderLayers,
     text_base: &StandardMaterial,
-    text_z: f32,
+    text_depth_bias: f32,
+    text_oit_offset: f32,
     commands: &mut Commands,
 ) {
     for (key, quads) in batches {
@@ -821,38 +909,50 @@ fn spawn_batch_meshes(
             is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None;
 
         if !is_invisible {
-            let render_mode_u32 = key.render_mode as u32;
+            let render_mode_u32 = glyph_render_mode_uniform(key.render_mode);
+            let clip_rect = clip_rect_from_bits(key.clip_rect);
+            let mut batch_base = text_base.clone();
+            batch_base.depth_bias = text_depth_bias;
 
             let material_handle =
                 if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
+                    let shared_base = batch_base.clone();
                     shared_mats
                         .handles
-                        .entry(key.page_index)
+                        .entry(SharedMsdfMaterialKey {
+                            page_index:      key.page_index,
+                            clip_rect:       key.clip_rect,
+                            depth_bias_bits: text_depth_bias.to_bits(),
+                        })
                         .or_insert_with(|| {
                             materials.add(super::msdf_material::msdf_text_material(
-                                text_base.clone(),
+                                shared_base.clone(),
                                 atlas.sdf_range().to_f32(),
                                 atlas.width(),
                                 atlas.height(),
                                 page_image.clone(),
                                 0.0,
-                                GlyphRenderMode::Text as u32,
+                                glyph_render_mode_uniform(GlyphRenderMode::Text),
+                                clip_rect,
+                                text_oit_offset,
                             ))
                         })
                         .clone()
                 } else {
                     materials.add(super::msdf_material::msdf_text_material(
-                        text_base.clone(),
+                        batch_base.clone(),
                         atlas.sdf_range().to_f32(),
                         atlas.width(),
                         atlas.height(),
                         page_image.clone(),
                         hue,
                         render_mode_u32,
+                        clip_rect,
+                        text_oit_offset,
                     ))
                 };
 
-            let text_transform = Transform::from_xyz(0.0, 0.0, text_z);
+            let text_transform = Transform::from_xyz(0.0, 0.0, 0.0);
 
             if suppress_shadow {
                 commands.entity(panel_entity).with_child((
@@ -876,26 +976,33 @@ fn spawn_batch_meshes(
 
         if needs_proxy {
             let shadow_render_mode = match key.shadow_mode {
-                GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
-                GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
-                GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
+                GlyphShadowMode::SolidQuad => glyph_render_mode_uniform(GlyphRenderMode::SolidQuad),
+                GlyphShadowMode::PunchOut => glyph_render_mode_uniform(GlyphRenderMode::PunchOut),
+                GlyphShadowMode::None | GlyphShadowMode::Text => {
+                    glyph_render_mode_uniform(GlyphRenderMode::Text)
+                },
             };
+            let clip_rect = clip_rect_from_bits(key.clip_rect);
+            let mut proxy_base = text_base.clone();
+            proxy_base.depth_bias = text_depth_bias;
 
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
-                text_base.clone(),
+                proxy_base,
                 atlas.sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
                 page_image,
                 hue,
                 shadow_render_mode,
+                clip_rect,
+                text_oit_offset,
             ));
 
             commands.entity(panel_entity).with_child((
                 DiegeticShadowProxy,
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(proxy_material),
-                Transform::from_xyz(0.0, 0.0, text_z),
+                Transform::from_xyz(0.0, 0.0, 0.0),
                 scene_layer.clone(),
             ));
         }
@@ -1133,19 +1240,13 @@ fn shape_text_to_quads(
 
     super::glyph_quad::clip_overlapping_quads(&mut quads);
 
-    // Apply parent clip rect — cull/trim glyphs outside the clip region.
+    // Cull glyphs entirely outside the clip region, but leave partially
+    // visible quads intact for shader-side clipping. Trimming CPU-side UVs
+    // causes MSDF atlas bleed at clipped edges.
     if let Some(cr) = clip_rect {
-        let clip_local = [
-            cr.x.mul_add(scale_x, -anchor_x),
-            -(cr.y + cr.height).mul_add(scale_y, -anchor_y),
-            (cr.x + cr.width).mul_add(scale_x, -anchor_x),
-            -cr.y.mul_add(scale_y, -anchor_y),
-        ];
-        quads.retain_mut(|(_, quad)| {
-            super::glyph_quad::clip_quad_to_rect(quad, clip_local).is_some_and(|clipped| {
-                *quad = clipped;
-                true
-            })
+        let clip_local = panel_clip_rect_local(Some(cr), scale_x, scale_y, anchor_x, anchor_y);
+        quads.retain(|(_, quad)| {
+            super::glyph_quad::clip_quad_to_rect(quad, clip_local.to_array()).is_some()
         });
     }
 
@@ -1217,6 +1318,8 @@ mod tests {
             atlas_image.clone(),
             0.0,
             0,
+            super::super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+            0.0,
         ));
 
         // Simulate the decision logic from extract_text_meshes.
@@ -1232,6 +1335,8 @@ mod tests {
                     atlas_image.clone(),
                     hue,
                     0,
+                    super::super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                    0.0,
                 ))
             }
         };

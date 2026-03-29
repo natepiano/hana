@@ -76,7 +76,7 @@ struct ElementSurface {
     border_widths: [f32; 4],
     /// Border color.
     border_color:  Option<Color>,
-    /// Index of the first render command for this element (for Z ordering).
+    /// Index of the first render command for this element (for layer ordering).
     command_index: usize,
     /// Active clip rect in layout coordinates when this surface was
     /// gathered. `None` means unclipped.
@@ -192,6 +192,7 @@ fn build_panel_geometry(
                 unlit: true,
                 double_sided: true,
                 cull_mode: None,
+                depth_bias: -constants::LAYER_DEPTH_BIAS,
                 ..default()
             });
             commands.entity(panel_entity).with_child((
@@ -200,7 +201,7 @@ fn build_panel_geometry(
                 NotShadowCaster,
                 Mesh3d(meshes.add(Rectangle::new(world_w, world_h))),
                 MeshMaterial3d(interact_mat),
-                Transform::from_xyz(center_x, center_y, -constants::LAYER_Z_STEP),
+                Transform::from_xyz(center_x, center_y, 0.0),
                 layer,
             ));
         }
@@ -305,6 +306,8 @@ fn spawn_sdf_element(
         constants::resolve_material(element_mat, panel.material.as_ref(), effective_color);
     if render_style == RenderStyle::Texture {
         base.unlit = true;
+    } else {
+        base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
     }
 
     let world_w = surface.bounds.width * pts_mpu;
@@ -329,6 +332,7 @@ fn spawn_sdf_element(
         },
     );
 
+    let oit_depth_offset = surface.command_index.to_f32() * constants::OIT_DEPTH_STEP;
     let sdf_mat = super::sdf_material::sdf_panel_material(
         base,
         half_w,
@@ -337,14 +341,10 @@ fn spawn_sdf_element(
         world_borders,
         surface.border_color,
         clip_rect,
+        oit_depth_offset,
     );
 
     let world_rect = bounds_to_world_rect(&surface.bounds, pts_mpu, anchor_x, anchor_y);
-
-    let z_offset = match render_style {
-        RenderStyle::Geometry => surface.command_index.to_f32() * constants::LAYER_Z_STEP,
-        RenderStyle::Texture => 0.0,
-    };
 
     let mesh = meshes.add(Rectangle::new(world_w, world_h));
     let mat_handle = sdf_materials.add(sdf_mat);
@@ -352,7 +352,7 @@ fn spawn_sdf_element(
         PanelSdfMesh,
         Mesh3d(mesh),
         MeshMaterial3d(mat_handle),
-        Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
+        Transform::from_xyz(world_rect.center_x, world_rect.center_y, 0.0),
         layer.clone(),
     );
     match shadow_mode {
@@ -391,14 +391,11 @@ fn spawn_divider(
     base.cull_mode = None;
     if render_style == RenderStyle::Texture {
         base.unlit = true;
+    } else {
+        base.depth_bias = cmd_index.to_f32() * constants::LAYER_DEPTH_BIAS;
     }
 
     let world_rect = bounds_to_world_rect(bounds, pts_mpu, anchor_x, anchor_y);
-
-    let z_offset = match render_style {
-        RenderStyle::Geometry => cmd_index.to_f32() * constants::LAYER_Z_STEP,
-        RenderStyle::Texture => 0.0,
-    };
 
     let mesh = meshes.add(Rectangle::new(world_rect.width, world_rect.height));
     let mat_handle = materials.add(base);
@@ -406,7 +403,7 @@ fn spawn_divider(
         PanelDividerMesh,
         Mesh3d(mesh),
         MeshMaterial3d(mat_handle),
-        Transform::from_xyz(world_rect.center_x, world_rect.center_y, z_offset),
+        Transform::from_xyz(world_rect.center_x, world_rect.center_y, 0.0),
         layer.clone(),
     );
     match shadow_mode {

@@ -56,6 +56,15 @@ fn mesh_single_quad_has_uvs() {
         .attribute(Mesh::ATTRIBUTE_UV_0)
         .map_or(0, |attr| attr.len());
     assert_eq!(uv_count, 4, "expected 4 UV entries for 1 quad");
+
+    #[allow(clippy::redundant_closure_for_method_calls)]
+    let clip_uv_count = mesh
+        .attribute(Mesh::ATTRIBUTE_UV_1)
+        .map_or(0, |attr| attr.len());
+    assert_eq!(
+        clip_uv_count, 4,
+        "expected 4 panel-local UV_1 entries for 1 quad"
+    );
 }
 
 #[test]

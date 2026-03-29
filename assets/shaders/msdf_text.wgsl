@@ -55,6 +55,8 @@ struct MsdfTextUniform {
     hue_offset: f32,
     render_mode: u32,
     is_shadow_proxy: u32,
+    clip_rect: vec4<f32>,
+    oit_depth_offset: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> msdf: MsdfTextUniform;
@@ -117,6 +119,12 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) {
+    // Clip to parent scissor rect (panel-local Y-up coordinates).
+    if in.uv_b.x < msdf.clip_rect.x || in.uv_b.x > msdf.clip_rect.z ||
+       in.uv_b.y < msdf.clip_rect.y || in.uv_b.y > msdf.clip_rect.w {
+        discard;
+    }
+
     // Only shadow proxies need MSDF decode in the prepass. Non-proxy
     // meshes pass through without texture sampling — the full quad
     // writes depth, producing a rectangular shadow (SolidQuad behavior).
@@ -136,6 +144,12 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
+    // Clip to parent scissor rect (panel-local Y-up coordinates).
+    if in.uv_b.x < msdf.clip_rect.x || in.uv_b.x > msdf.clip_rect.z ||
+       in.uv_b.y < msdf.clip_rect.y || in.uv_b.y > msdf.clip_rect.w {
+        discard;
+    }
+
     // Shadow proxy: invisible in the main pass.
     if msdf.is_shadow_proxy == 1u {
         discard;
@@ -175,12 +189,15 @@ fn fragment(
     }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 
-    // OIT: transparent fragments go through the OIT linked-list resolve
-    // pass instead of standard alpha blending.
+    // OIT: offset position.z so coplanar layers get distinct depths in
+    // the OIT linked list. Pipeline depth_bias does NOT affect
+    // in.position.z, so we apply the offset here.
 #ifdef OIT_ENABLED
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
-        oit_draw(in.position, out.color);
+        var oit_pos = in.position;
+        oit_pos.z += msdf.oit_depth_offset;
+        oit_draw(oit_pos, out.color);
         discard;
     }
 #endif

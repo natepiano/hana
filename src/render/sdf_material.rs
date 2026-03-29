@@ -24,18 +24,23 @@ pub(super) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelEx
 #[derive(Clone, Debug, ShaderType)]
 pub(super) struct SdfPanelUniform {
     /// Half-size of the element in world units (width/2, height/2).
-    pub half_size:     bevy::math::Vec2,
+    pub half_size:        bevy::math::Vec2,
     /// Per-corner radii in world units: [TL, TR, BR, BL].
-    pub corner_radii:  bevy::math::Vec4,
+    pub corner_radii:     bevy::math::Vec4,
     /// Border widths in world units: [top, right, bottom, left].
-    pub border_widths: bevy::math::Vec4,
+    pub border_widths:    bevy::math::Vec4,
     /// Border color in linear RGBA.
-    pub border_color:  bevy::math::Vec4,
+    pub border_color:     bevy::math::Vec4,
     /// Clip rect in local quad space: `[left, bottom, right, top]`.
     /// Fragments outside this rect are discarded. Defaults to the full
     /// quad bounds (`[-half_w, -half_h, half_w, half_h]`) when no clip
     /// is active.
-    pub clip_rect:     bevy::math::Vec4,
+    pub clip_rect:        bevy::math::Vec4,
+    /// Depth offset added to `position.z` before OIT fragment storage.
+    /// Separates coplanar layers in the OIT linked list so the resolve
+    /// pass composites them in the correct painter's order.
+    /// Higher values = closer to camera (reverse-Z).
+    pub oit_depth_offset: f32,
 }
 
 /// SDF panel extension for `StandardMaterial`.
@@ -72,6 +77,7 @@ pub(super) fn sdf_panel_material(
     border_widths: [f32; 4],
     border_color: Option<Color>,
     clip_rect: bevy::math::Vec4,
+    oit_depth_offset: f32,
 ) -> SdfPanelMaterial {
     base.double_sided = true;
     base.cull_mode = None;
@@ -92,6 +98,7 @@ pub(super) fn sdf_panel_material(
                 border_widths: bevy::math::Vec4::from_array(border_widths),
                 border_color: border_linear,
                 clip_rect,
+                oit_depth_offset,
             },
         },
     }

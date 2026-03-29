@@ -357,6 +357,8 @@ fn spawn_world_text_meshes(
                 page_image.clone(),
                 0.0,
                 render_mode_u32,
+                super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                0.0,
             );
 
             let material_handle = materials.add(mat);
@@ -395,6 +397,8 @@ fn spawn_world_text_meshes(
                 page_image,
                 0.0,
                 shadow_render_mode,
+                super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                0.0,
             ));
 
             commands.entity(entity).with_child((

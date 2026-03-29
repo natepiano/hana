@@ -3,11 +3,21 @@
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
-/// Per-command Z offset for Geometry mode layer ordering.
-/// Each render command is offset slightly toward the camera so that
-/// later commands (children, borders) render on top of earlier ones
-/// (parent backgrounds). 10 micrometers per layer.
-pub(super) const LAYER_Z_STEP: f32 = 0.00001;
+/// Per-command depth bias for Geometry mode sort ordering.
+///
+/// Bevy packs this through `i32` into `DepthBiasState.constant`.
+/// Controls the `Transparent3d` sort key so back-to-front submission
+/// order matches the painter's order. Also wins the depth test for
+/// coplanar fragments.
+pub(super) const LAYER_DEPTH_BIAS: f32 = 1.0;
+
+/// Per-command OIT depth offset for coplanar fragment ordering.
+///
+/// Added to `position.z` in the fragment shader before `oit_draw`
+/// stores the fragment. Pipeline `depth_bias` does NOT affect
+/// `in.position.z`, so we apply this offset manually.
+/// Reverse-Z: positive = closer to camera = composited in front.
+pub(super) const OIT_DEPTH_STEP: f32 = 0.0001;
 
 /// Default roughness for panel surfaces. Matte paper-like appearance.
 pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
