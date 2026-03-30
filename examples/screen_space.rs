@@ -260,8 +260,6 @@ fn spawn_camera(commands: &mut Commands) {
             },
             ..default()
         },
-        Msaa::Off,
-        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 }
 

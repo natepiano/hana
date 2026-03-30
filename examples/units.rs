@@ -304,8 +304,6 @@ fn spawn_lights_and_camera(commands: &mut Commands, page_height: f32) {
             near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
             ..default()
         }),
-        Msaa::Off,
-        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 }
 

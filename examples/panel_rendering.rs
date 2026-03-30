@@ -388,10 +388,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
 /// Toggles TAA on/off with the `T` key.
 fn toggle_taa(
     keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<
-        (Entity, Has<bevy::anti_alias::taa::TemporalAntiAliasing>),
-        With<OrbitCam>,
-    >,
+    cameras: Query<(Entity, Has<bevy::anti_alias::taa::TemporalAntiAliasing>), With<OrbitCam>>,
     mut taa_enabled: ResMut<TaaEnabled>,
     mut commands: Commands,
 ) {

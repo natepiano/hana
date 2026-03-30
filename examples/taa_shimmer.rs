@@ -284,10 +284,7 @@ fn hud_separator(b: &mut LayoutBuilder) {
 
 fn toggle_taa(
     keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<
-        (Entity, Has<bevy::anti_alias::taa::TemporalAntiAliasing>),
-        With<OrbitCam>,
-    >,
+    cameras: Query<(Entity, Has<bevy::anti_alias::taa::TemporalAntiAliasing>), With<OrbitCam>>,
     mut taa_enabled: ResMut<TaaEnabled>,
     mut commands: Commands,
 ) {

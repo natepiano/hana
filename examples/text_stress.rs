@@ -262,8 +262,6 @@ fn setup(
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
-        Msaa::Off,
-        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 
     // Status panel (combined FPS + row/panel counts) — top-right area.
