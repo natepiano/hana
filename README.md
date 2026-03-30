@@ -31,17 +31,62 @@ App::new()
     .run();
 ```
 
-## Examples
+## Anti-Aliasing
 
-```sh
-cargo run --example world_text
-cargo run --example text_panel
-cargo run --example font_loading
-cargo run --example font_features
-cargo run --example typography --features typography_overlay
+bevy_diegetic uses Order Independent Transparency (OIT) for correct layering
+of coplanar panel elements. This has implications for anti-aliasing.
+
+### ⛔ MSAA must be disabled
+
+> **⚠️ CRITICAL: You must set `Msaa::Off` on any camera that renders diegetic
+> panels. Bevy will panic if MSAA > 1 is active alongside OIT.**
+
+Bevy's default camera includes `Msaa::Sample4`. If you use Geometry mode
+panels (the default), the library enables OIT on your camera — and MSAA + OIT
+causes an immediate panic.
+
+```rust
+commands.spawn((
+    Camera3d::default(),
+    Msaa::Off, // Required — OIT panics with MSAA > 1
+    // ...
+));
 ```
 
-See the `examples/` directory for the full list.
+MSAA would not help regardless — it only smooths geometric triangle edges,
+not the shader-computed SDF and MSDF boundaries that define panel corners,
+borders, and text.
+
+### TAA is optional but recommended
+
+The SDF and MSDF shaders use `fwidth`-based anti-aliasing that produces
+clean edges without any post-process AA. Panels look good with no AA at all.
+
+That said, Temporal Anti-Aliasing smooths everything — geometric edges, SDF
+panel boundaries, MSDF text edges, and specular aliasing — with minimal GPU
+cost. It works correctly with OIT and provides a visible improvement at
+extreme viewing angles.
+
+```rust
+commands.spawn((
+    Camera3d::default(),
+    Msaa::Off,
+    bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+    // ...
+));
+```
+
+| | MSAA | TAA |
+|---|---|---|
+| SDF panel edges | No effect | Smoothed |
+| MSDF text edges | No effect | Smoothed |
+| OIT compatible | **No (panics)** | Yes |
+| GPU cost | High (2-8x framebuffer) | Low (history buffer + resolve) |
+| Tradeoff | — | Slight ghosting on fast camera motion |
+
+All examples include TAA and `Msaa::Off`. The `panel_rendering` example lets
+you toggle TAA with the `T` key — zoom into a panel edge at an angle to see
+the difference.
 
 ## Bevy compatibility
 
