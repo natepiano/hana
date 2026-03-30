@@ -984,7 +984,7 @@ fn spawn_batch_meshes(
             };
             let clip_rect = clip_rect_from_bits(key.clip_rect);
             let mut proxy_base = text_base.clone();
-            proxy_base.depth_bias = text_depth_bias;
+            proxy_base.depth_bias = text_depth_bias - constants::LAYER_DEPTH_BIAS;
 
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
                 proxy_base,

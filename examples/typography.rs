@@ -241,22 +241,25 @@ fn setup(
         .observe(on_panel_clicked);
 
     // Camera
-    commands.spawn((OrbitCam {
-        focus: HOME_FOCUS,
-        radius: Some(HOME_RADIUS),
-        yaw: Some(HOME_YAW),
-        pitch: Some(HOME_PITCH),
-        button_orbit: MouseButton::Middle,
-        button_pan: MouseButton::Middle,
-        modifier_pan: Some(KeyCode::ShiftLeft),
-        trackpad_behavior: TrackpadBehavior::BlenderLike {
-            modifier_pan:  Some(KeyCode::ShiftLeft),
-            modifier_zoom: Some(KeyCode::ControlLeft),
+    commands.spawn((
+        OrbitCam {
+            focus: HOME_FOCUS,
+            radius: Some(HOME_RADIUS),
+            yaw: Some(HOME_YAW),
+            pitch: Some(HOME_PITCH),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_sensitivity: 0.5,
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
         },
-        trackpad_sensitivity: 0.5,
-        trackpad_pinch_to_zoom_enabled: true,
-        ..default()
-    },));
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+    ));
 }
 
 fn spawn_lights(commands: &mut Commands) {

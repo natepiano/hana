@@ -358,7 +358,7 @@ fn spawn_world_text_meshes(
                 0.0,
                 render_mode_u32,
                 super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
-                0.0,
+                super::constants::OIT_DEPTH_STEP,
             );
 
             let material_handle = materials.add(mat);
@@ -389,8 +389,10 @@ fn spawn_world_text_meshes(
                 GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
             };
 
+            let mut proxy_base = StandardMaterial::default();
+            proxy_base.depth_bias = -super::constants::LAYER_DEPTH_BIAS;
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
-                StandardMaterial::default(),
+                proxy_base,
                 atlas.sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),

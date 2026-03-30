@@ -248,7 +248,6 @@ fn column(b: &mut LayoutBuilder, title: &str, rows: &[(&str, &str, Color)]) {
 
 fn spawn_camera(commands: &mut Commands) {
     commands.spawn((
-        Camera3d::default(),
         Transform {
             translation: Vec3::new(3.27, 2.24, 3.29),
             rotation:    Quat::from_xyzw(-0.1476, 0.4041, 0.0663, 0.9003),
@@ -261,6 +260,7 @@ fn spawn_camera(commands: &mut Commands) {
             },
             ..default()
         },
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 }
 

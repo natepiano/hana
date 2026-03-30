@@ -308,22 +308,25 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
         Transform::from_xyz(-4.0, 8.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((OrbitCam {
-        focus: Vec3::ZERO,
-        radius: Some(11.33),
-        yaw: Some(0.015),
-        pitch: Some(0.667),
-        button_orbit: MouseButton::Middle,
-        button_pan: MouseButton::Middle,
-        modifier_pan: Some(KeyCode::ShiftLeft),
-        trackpad_behavior: TrackpadBehavior::BlenderLike {
-            modifier_pan:  Some(KeyCode::ShiftLeft),
-            modifier_zoom: Some(KeyCode::ControlLeft),
+    commands.spawn((
+        OrbitCam {
+            focus: Vec3::ZERO,
+            radius: Some(11.33),
+            yaw: Some(0.015),
+            pitch: Some(0.667),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_sensitivity: 0.5,
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
         },
-        trackpad_sensitivity: 0.5,
-        trackpad_pinch_to_zoom_enabled: true,
-        ..default()
-    },));
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+    ));
 }
 
 fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {

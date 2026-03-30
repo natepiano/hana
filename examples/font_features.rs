@@ -159,21 +159,24 @@ fn setup(
         Transform::from_xyz(-1.5, 7.5, -6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((OrbitCam {
-        focus: Vec3::new(0.067_647_74, 1.913_066_5, 2.400_296_7),
-        radius: Some(4.385_594_4),
-        yaw: Some(-0.004_848_164),
-        pitch: Some(0.026_128_9),
-        button_orbit: MouseButton::Middle,
-        button_pan: MouseButton::Middle,
-        modifier_pan: Some(KeyCode::ShiftLeft),
-        trackpad_behavior: TrackpadBehavior::BlenderLike {
-            modifier_pan:  Some(KeyCode::ShiftLeft),
-            modifier_zoom: Some(KeyCode::ControlLeft),
+    commands.spawn((
+        OrbitCam {
+            focus: Vec3::new(0.067_647_74, 1.913_066_5, 2.400_296_7),
+            radius: Some(4.385_594_4),
+            yaw: Some(-0.004_848_164),
+            pitch: Some(0.026_128_9),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            trackpad_behavior: TrackpadBehavior::BlenderLike {
+                modifier_pan:  Some(KeyCode::ShiftLeft),
+                modifier_zoom: Some(KeyCode::ControlLeft),
+            },
+            trackpad_pinch_to_zoom_enabled: true,
+            ..default()
         },
-        trackpad_pinch_to_zoom_enabled: true,
-        ..default()
-    },));
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+    ));
 }
 
 /// Returns layout dimensions in points, matching the window aspect ratio.

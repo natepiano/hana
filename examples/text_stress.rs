@@ -247,7 +247,6 @@ fn setup(
 
     // Camera.
     commands.spawn((
-        Camera3d::default(),
         AmbientLight {
             color: Color::WHITE,
             brightness: 1000.0,
@@ -263,6 +262,7 @@ fn setup(
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 
     // Status panel (combined FPS + row/panel counts) — top-right area.

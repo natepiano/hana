@@ -327,7 +327,6 @@ fn setup(
     // Camera.
     let midpoint = Vec3::ZERO;
     commands.spawn((
-        Camera3d::default(),
         Transform {
             translation: Vec3::new(0.00, 0.15, 2.7),
             rotation: Quat::from_xyzw(0.00, 0.0, 0.0, 1.0),
@@ -340,6 +339,7 @@ fn setup(
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 
     // Panel entities.

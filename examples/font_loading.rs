@@ -167,6 +167,7 @@ fn setup(
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 
     // Status panel.

@@ -140,6 +140,7 @@ fn main() {
             DiegeticUiPlugin,
         ))
         .init_resource::<LightingPreset>()
+        .init_resource::<TaaEnabled>()
         .insert_resource(bevy::light::GlobalAmbientLight {
             color:                      Color::BLACK,
             brightness:                 0.0,
@@ -153,6 +154,7 @@ fn main() {
                 cycle_lighting_preset,
                 adjust_illuminance,
                 home_camera,
+                toggle_taa,
                 update_hud,
             ),
         )
@@ -341,10 +343,15 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         .material(unlit_material.clone())
         .text_material(unlit_material)
         .layout(|b| {
-            build_hud_content(b, LightingPreset::default(), SCENE_ILLUMINANCE);
+            build_hud_content(b, LightingPreset::default(), SCENE_ILLUMINANCE, true);
         })
         .build_screen_space();
-    hud_panel.tree = build_hud_tree(LightingPreset::default(), SCENE_ILLUMINANCE, hud_width);
+    hud_panel.tree = build_hud_tree(
+        LightingPreset::default(),
+        SCENE_ILLUMINANCE,
+        hud_width,
+        true,
+    );
     commands.spawn((HudPanel, hud_panel, screen_space, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────
@@ -373,7 +380,44 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
             ..default()
         }),
         bevy::camera::Exposure::default(),
+        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
+}
+
+/// Toggles TAA on/off with the `T` key.
+fn toggle_taa(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    cameras: Query<
+        (Entity, Has<bevy::anti_alias::taa::TemporalAntiAliasing>),
+        (With<Camera3d>, Without<HudPanel>),
+    >,
+    mut taa_enabled: ResMut<TaaEnabled>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyT) {
+        return;
+    }
+    for (entity, has_taa) in &cameras {
+        if has_taa {
+            commands
+                .entity(entity)
+                .remove::<bevy::anti_alias::taa::TemporalAntiAliasing>();
+            taa_enabled.0 = false;
+        } else {
+            commands
+                .entity(entity)
+                .insert(bevy::anti_alias::taa::TemporalAntiAliasing::default());
+            taa_enabled.0 = true;
+        }
+    }
+}
+
+/// Whether TAA is currently enabled on the scene camera.
+#[derive(Resource)]
+struct TaaEnabled(bool);
+
+impl Default for TaaEnabled {
+    fn default() -> Self { Self(true) }
 }
 
 // ── Panel builders ──────────────────────────────────────────────────
@@ -606,13 +650,13 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
 
 // ── HUD builders ───────────────────────────────────────────────────
 
-fn build_hud_tree(preset: LightingPreset, lux: f32, width: f32) -> LayoutTree {
+fn build_hud_tree(preset: LightingPreset, lux: f32, width: f32, taa: bool) -> LayoutTree {
     let mut builder = LayoutBuilder::new(width, HUD_HEIGHT);
-    build_hud_content(&mut builder, preset, lux);
+    build_hud_content(&mut builder, preset, lux, taa);
     builder.build()
 }
 
-fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
+fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32, taa: bool) {
     let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
     let label = LayoutTextStyle::new(HUD_BODY_SIZE).with_color(HUD_LABEL_COLOR);
     let value = LayoutTextStyle::new(HUD_BODY_SIZE).with_color(HUD_VALUE_COLOR);
@@ -640,16 +684,11 @@ fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
                     .background(HUD_BACKGROUND)
                     .border(Border::all(1.0, HUD_BORDER_DIM)),
                 |b| {
-                    b.text("PANEL CONTROL", title);
+                    b.text("CONTROL", title);
                     hud_separator(b);
 
                     b.text("PRESET", label.clone());
-                    b.with(
-                        El::new().width(Sizing::fixed(180.0)).height(Sizing::FIT),
-                        |b| {
-                            b.text(preset.description(), value.clone());
-                        },
-                    );
+                    b.text(preset.description(), value.clone());
                     hud_separator(b);
 
                     b.text("LUX", label);
@@ -672,7 +711,19 @@ fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32) {
                     }
                     hud_separator(b);
 
-                    b.text("H Home   R Reset   \u{00b1} Light", hint);
+                    b.text("H Home   R Reset   \u{00b1} Light   T TAA", hint);
+                    hud_separator(b);
+
+                    let taa_label = if taa { "TAA On" } else { "TAA Off" };
+                    let taa_color = if taa {
+                        HUD_ACTIVE_COLOR
+                    } else {
+                        HUD_INACTIVE_COLOR
+                    };
+                    b.text(
+                        taa_label,
+                        LayoutTextStyle::new(HUD_BODY_SIZE).with_color(taa_color),
+                    );
                 },
             );
         },
@@ -691,10 +742,11 @@ fn hud_separator(b: &mut LayoutBuilder) {
 
 fn update_hud(
     preset: Res<LightingPreset>,
+    taa: Res<TaaEnabled>,
     lights: Query<&DirectionalLight, With<SceneLight>>,
     windows: Query<&Window>,
     mut huds: Query<(&mut Transform, &mut DiegeticPanel), With<HudPanel>>,
-    mut previous_state: Local<(u8, u32, u32)>,
+    mut previous_state: Local<(u8, u32, u32, bool)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -703,7 +755,7 @@ fn update_hud(
     let win_width = window.width();
     let half_width = win_width / 2.0;
     let half_height = window.height() / 2.0;
-    let state = (preset.index, lux.to_bits(), win_width.to_bits());
+    let state = (preset.index, lux.to_bits(), win_width.to_bits(), taa.0);
 
     for (mut transform, mut panel) in &mut huds {
         transform.translation.x = -half_width;
@@ -714,7 +766,7 @@ fn update_hud(
             panel.width = win_width;
         }
         if *previous_state != state || width_changed {
-            panel.tree = build_hud_tree(*preset, lux, panel.width);
+            panel.tree = build_hud_tree(*preset, lux, panel.width, taa.0);
         }
     }
     *previous_state = state;

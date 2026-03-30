@@ -74,6 +74,7 @@ pub(super) fn setup_screen_space_cameras(
                 ..OrthographicProjection::default_3d()
             }),
             Transform::from_xyz(0.0, 0.0, 1000.0).looking_at(Vec3::ZERO, Vec3::Y),
+            bevy::anti_alias::taa::TemporalAntiAliasing::default(),
             layers.clone(),
         ));
 
