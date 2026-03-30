@@ -156,6 +156,7 @@ fn setup(
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
+        Msaa::Off,
         bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 }

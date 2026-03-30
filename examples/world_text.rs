@@ -325,6 +325,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
             trackpad_pinch_to_zoom_enabled: true,
             ..default()
         },
+        Msaa::Off,
         bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 }

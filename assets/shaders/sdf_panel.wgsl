@@ -173,7 +173,15 @@ fn fragment(
     let inner_alpha = 1.0 - smoothstep(-inner_aa, inner_aa, inner_dist);
 
     // Border alpha: between outer and inner edges.
-    let border_alpha = outer_alpha * (1.0 - inner_alpha);
+    // When the border is thinner than ~1 screen pixel, fade it out
+    // gracefully to avoid sub-pixel flickering under TAA jitter.
+    let min_border_world = min(
+        min(sdf.border_widths.x, sdf.border_widths.y),
+        min(sdf.border_widths.z, sdf.border_widths.w),
+    );
+    let pixel_coverage = min_border_world / max(fwidth(outer_dist), 0.0001);
+    let border_fade = saturate(pixel_coverage);
+    let border_alpha = outer_alpha * (1.0 - inner_alpha) * border_fade;
 
     // Standard PBR input from the base StandardMaterial.
     var pbr_input = pbr_input_from_standard_material(in, is_front);

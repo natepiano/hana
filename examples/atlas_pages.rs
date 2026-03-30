@@ -383,6 +383,7 @@ fn setup(
                 trackpad_pinch_to_zoom_enabled: true,
                 ..default()
             },
+            Msaa::Off,
             bevy::anti_alias::taa::TemporalAntiAliasing::default(),
         ))
         .id();
@@ -909,7 +910,7 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
                     .padding(Padding::all(8.0))
                     .direction(Direction::TopToBottom)
                     .child_gap(4.0)
-                    .border(Border::all(0.25, STATUS_BORDER_COLOR)),
+                    .border(Border::all(1.0, STATUS_BORDER_COLOR)),
                 |b| {
                     b.text("atlas", title_style);
 

@@ -380,6 +380,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
             ..default()
         }),
         bevy::camera::Exposure::default(),
+        Msaa::Off,
         bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     ));
 }
