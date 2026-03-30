@@ -29,10 +29,6 @@ use crate::plugin::UnitConfig;
 #[derive(Component)]
 struct PanelSdfMesh;
 
-/// Marker for between-children divider mesh entities.
-#[derive(Component)]
-struct PanelDividerMesh;
-
 /// Marker for the invisible full-panel interaction mesh (Geometry mode only).
 #[derive(Component)]
 struct PanelInteractionMesh;
@@ -96,7 +92,6 @@ fn build_panel_geometry(
         Changed<ComputedDiegeticPanel>,
     >,
     old_sdf: Query<(Entity, &ChildOf), With<PanelSdfMesh>>,
-    old_dividers: Query<(Entity, &ChildOf), With<PanelDividerMesh>>,
     old_interaction: Query<(Entity, &ChildOf), With<PanelInteractionMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
@@ -129,7 +124,6 @@ fn build_panel_geometry(
 
         // ── Despawn old geometry ────────────────────────────────────
         despawn_children_of(&old_sdf, panel_entity, &mut commands);
-        despawn_children_of(&old_dividers, panel_entity, &mut commands);
         despawn_children_of(&old_interaction, panel_entity, &mut commands);
 
         // ── Gather fill + border per element ────────────────────────
@@ -159,21 +153,29 @@ fn build_panel_geometry(
             );
         }
 
-        // ── Spawn between-children dividers (simple quads) ──────────
-        for (cmd_index, bounds, color, _clip) in &gathered.dividers {
-            spawn_divider(
-                panel,
-                *cmd_index,
+        // ── Spawn between-children dividers as SDF elements ─────────
+        for &(cmd_index, bounds, color, clip) in &gathered.dividers {
+            let divider_surface = ElementSurface {
+                element_idx: usize::MAX,
                 bounds,
-                *color,
+                fill_color: Some(color),
+                border_widths: [0.0; 4],
+                border_color: None,
+                command_index: cmd_index,
+                clip_rect: clip,
+            };
+            spawn_sdf_element(
+                panel,
+                &divider_surface,
                 render_style,
                 shadow_mode,
                 pts_mpu,
+                layout_mpu,
                 anchor_x,
                 anchor_y,
                 &layer,
                 &mut meshes,
-                &mut standard_materials,
+                &mut sdf_materials,
                 &mut commands,
                 panel_entity,
             );
@@ -367,57 +369,6 @@ fn spawn_sdf_element(
     }
 }
 
-fn spawn_divider(
-    panel: &DiegeticPanel,
-    cmd_index: usize,
-    bounds: &BoundingBox,
-    color: Color,
-    render_style: RenderStyle,
-    shadow_mode: ShadowMode,
-    pts_mpu: f32,
-    anchor_x: f32,
-    anchor_y: f32,
-    layer: &RenderLayers,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    commands: &mut Commands,
-    panel_entity: Entity,
-) {
-    let element_mat_option: Option<&StandardMaterial> = None;
-    let mut base =
-        constants::resolve_material(element_mat_option, panel.material.as_ref(), Some(color));
-    base.alpha_mode = AlphaMode::Blend;
-    base.double_sided = true;
-    base.cull_mode = None;
-    if render_style == RenderStyle::Texture {
-        base.unlit = true;
-    } else {
-        base.depth_bias = cmd_index.to_f32() * constants::LAYER_DEPTH_BIAS;
-    }
-
-    let world_rect = bounds_to_world_rect(bounds, pts_mpu, anchor_x, anchor_y);
-
-    let mesh = meshes.add(Rectangle::new(world_rect.width, world_rect.height));
-    let mat_handle = materials.add(base);
-    let base_components = (
-        PanelDividerMesh,
-        Mesh3d(mesh),
-        MeshMaterial3d(mat_handle),
-        Transform::from_xyz(world_rect.center_x, world_rect.center_y, 0.0),
-        layer.clone(),
-    );
-    match shadow_mode {
-        ShadowMode::Suppressed => {
-            commands
-                .entity(panel_entity)
-                .with_child((base_components, NotShadowCaster));
-        },
-        ShadowMode::Enabled => {
-            commands.entity(panel_entity).with_child(base_components);
-        },
-    }
-}
-
 fn despawn_children_of<C: Component>(
     query: &Query<(Entity, &ChildOf), With<C>>,
     parent: Entity,
@@ -433,8 +384,6 @@ fn despawn_children_of<C: Component>(
 struct WorldRect {
     center_x: f32,
     center_y: f32,
-    width:    f32,
-    height:   f32,
 }
 
 fn bounds_to_world_rect(
@@ -451,7 +400,5 @@ fn bounds_to_world_rect(
     WorldRect {
         center_x: width.mul_add(0.5, left),
         center_y: height.mul_add(-0.5, top),
-        width,
-        height,
     }
 }

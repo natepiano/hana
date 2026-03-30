@@ -75,7 +75,6 @@ pub(super) fn setup_screen_space_cameras(
             }),
             Transform::from_xyz(0.0, 0.0, 1000.0).looking_at(Vec3::ZERO, Vec3::Y),
             bevy::render::view::Msaa::Off,
-            bevy::anti_alias::taa::TemporalAntiAliasing::default(),
             layers.clone(),
         ));
 

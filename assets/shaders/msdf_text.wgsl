@@ -24,9 +24,7 @@
 }
 
 #ifdef PREPASS_PIPELINE
-#import bevy_pbr::{
-    prepass_io::VertexOutput,
-}
+#import bevy_pbr::prepass_io::VertexOutput
 #else
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},

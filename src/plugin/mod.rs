@@ -34,6 +34,7 @@ pub use config::Px;
 pub use config::RasterQuality;
 pub use config::UnitConfig;
 use diagnostics::install as install_perf_diagnostics;
+use screen_space::ScreenSpaceCamera;
 use screen_space::cleanup_screen_space_cameras;
 use screen_space::propagate_screen_space_render_layers;
 use screen_space::setup_screen_space_cameras;
@@ -69,7 +70,10 @@ fn ensure_oit_on_cameras(
     panels: Query<&DiegeticPanel>,
     mut cameras: Query<
         (Entity, &mut Camera3d, Option<&Msaa>),
-        Without<OrderIndependentTransparencySettings>,
+        (
+            Without<OrderIndependentTransparencySettings>,
+            Without<ScreenSpaceCamera>,
+        ),
     >,
     mut commands: Commands,
 ) {

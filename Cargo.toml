@@ -123,3 +123,6 @@ name = "paper_sizes"
 
 [[example]]
 name = "screen_space"
+
+[[example]]
+name = "taa_shimmer"

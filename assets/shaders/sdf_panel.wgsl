@@ -145,11 +145,11 @@ fn fragment(
     // Outer shape distance.
     let outer_dist = sd_rounded_box(local, sdf.half_size, sdf.corner_radii);
 
-    // Per-distance AA width from screen-space derivatives of the SDF.
-    let outer_aa = aa_width(outer_dist);
+    // Base AA width from screen-space derivatives of the SDF.
+    let base_aa = aa_width(outer_dist);
 
     // Outer shape alpha — smooth falloff at the edge.
-    let outer_alpha = 1.0 - smoothstep(-outer_aa, outer_aa, outer_dist);
+    let outer_alpha = 1.0 - smoothstep(-base_aa, base_aa, outer_dist);
 
     // Discard fully outside fragments.
     if outer_alpha < 0.001 {
@@ -172,37 +172,65 @@ fn fragment(
     let inner_aa = aa_width(inner_dist);
     let inner_alpha = 1.0 - smoothstep(-inner_aa, inner_aa, inner_dist);
 
-    // Border alpha: between outer and inner edges.
-    // When the border is thinner than ~1 screen pixel, fade it out
-    // gracefully to avoid sub-pixel flickering under TAA jitter.
-    let min_border_world = min(
-        min(sdf.border_widths.x, sdf.border_widths.y),
-        min(sdf.border_widths.z, sdf.border_widths.w),
-    );
-    let pixel_coverage = min_border_world / max(fwidth(outer_dist), 0.0001);
-    let border_fade = saturate(pixel_coverage);
-    let border_alpha = outer_alpha * (1.0 - inner_alpha) * border_fade;
-
     // Standard PBR input from the base StandardMaterial.
     var pbr_input = pbr_input_from_standard_material(in, is_front);
+    let fill = pbr_input.material.base_color;
+    let border = sdf.border_color;
+    let has_fill = fill.a > 0.001;
 
-    // Composite: fill color from base_color, border color from uniform.
+    // ── Border alpha ───────────────────────────────────────────────
+    // Classic ring formula: works for thick borders and filled elements.
+    let classic_border_alpha = outer_alpha * (1.0 - inner_alpha);
+
+    // Stroke-centerline formula: treats the border as a stroke centered
+    // between the outer and inner SDFs. Guarantees alpha=1 at the stroke
+    // center, giving TAA a stable opaque pixel to lock onto. Used for
+    // thin border-only elements where the classic formula has no solid core.
+    let stroke_center = 0.5 * (outer_dist + inner_dist);
+    let stroke_half_width = max(0.5 * (inner_dist - outer_dist), 0.0);
+    let stroke_aa = max(fwidth(stroke_center), 0.0001);
+    let stroke_shape = 1.0 - smoothstep(
+        stroke_half_width - stroke_aa,
+        stroke_half_width + stroke_aa,
+        abs(stroke_center),
+    );
+    // Sub-pixel coverage fade: prevent persistent hairlines when zoomed out.
+    let border_screen = (2.0 * stroke_half_width) / stroke_aa;
+    let coverage = smoothstep(0.0, 1.0, border_screen);
+    let thin_stroke_alpha = stroke_shape * coverage;
+
+    // Blend between classic and stroke formulas based on whether the
+    // border is thick enough for the classic formula to have a solid core.
+    var border_alpha = classic_border_alpha;
+    if !has_fill && has_border {
+        let thin_border_mix = 1.0 - smoothstep(0.75, 1.5, stroke_half_width / stroke_aa);
+        border_alpha = mix(classic_border_alpha, thin_stroke_alpha, thin_border_mix);
+    }
+
+    // ── Compositing ────────────────────────────────────────────────
     var final_color: vec4<f32>;
     if has_border {
-        // Mix fill and border.
-        let fill = pbr_input.material.base_color;
-        let border = sdf.border_color;
-
-        // Fill inside, border on the edge, transparent outside.
-        final_color = vec4<f32>(
-            mix(fill.rgb, border.rgb, border_alpha / max(outer_alpha, 0.001)),
-            outer_alpha * mix(fill.a, border.a, border_alpha / max(outer_alpha, 0.001)),
-        );
+        if has_fill {
+            // Filled element with border: mix fill and border via outer_alpha.
+            let border_mix = clamp(border_alpha / max(outer_alpha, 0.001), 0.0, 1.0);
+            final_color = vec4<f32>(
+                mix(fill.rgb, border.rgb, border_mix),
+                outer_alpha * mix(fill.a, border.a, border_mix),
+            );
+        } else {
+            // Border-only: composite border color directly with border_alpha.
+            // Do not gate through outer_alpha — the stroke path can produce
+            // border_alpha > outer_alpha at the shape boundary.
+            final_color = vec4<f32>(
+                border.rgb,
+                border.a * border_alpha,
+            );
+        }
     } else {
-        // Fill only.
+        // Fill only, no border.
         final_color = vec4<f32>(
-            pbr_input.material.base_color.rgb,
-            pbr_input.material.base_color.a * outer_alpha,
+            fill.rgb,
+            fill.a * outer_alpha,
         );
     }
 

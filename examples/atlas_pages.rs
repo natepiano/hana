@@ -132,7 +132,7 @@ const STATUS_LAYOUT_HEIGHT: f32 = 280.0;
 const STATUS_WORLD_HEIGHT: f32 = 1.8;
 const STATUS_FONT_SIZE: f32 = 18.0;
 const STATUS_TITLE_SIZE: f32 = 28.0;
-const STATUS_BORDER_COLOR: Color = Color::WHITE;
+const STATUS_BORDER_COLOR: Color = Color::srgba(0.5, 0.5, 0.6, 0.7);
 
 // ── Unicode blocks ─────────────────────────────────────────────────
 
@@ -384,7 +384,7 @@ fn setup(
                 ..default()
             },
             Msaa::Off,
-            bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+            // bevy::anti_alias::taa::TemporalAntiAliasing::default(),
         ))
         .id();
 
@@ -463,7 +463,7 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
                     .height(Sizing::GROW)
                     .padding(Padding::all(GRID_INTERIOR_PADDING))
                     .direction(Direction::TopToBottom)
-                    .border(Border::all(0.5, Color::WHITE)),
+                    .border(Border::all(1.0, Color::WHITE)),
                 |b| {
                     for row in 0..rows {
                         b.with(
@@ -471,7 +471,11 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
                                 .width(Sizing::GROW)
                                 .height(Sizing::GROW)
                                 .direction(Direction::LeftToRight)
-                                .border(Border::new().color(Color::WHITE).between_children(0.5)),
+                                .border(
+                                    Border::new()
+                                        .color(Color::srgba(1.0, 1.0, 1.0, 0.99))
+                                        .between_children(1.0),
+                                ),
                             |b| {
                                 let start = row * cols;
                                 let end = (start + cols).min(total_cells);
@@ -918,7 +922,7 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
                         El::new()
                             .width(Sizing::GROW)
                             .height(Sizing::fixed(1.5))
-                            .background(Color::srgb(0.45, 0.45, 0.5)),
+                            .background(Color::srgba(0.45, 0.45, 0.5, 0.7)),
                         |_| {},
                     );
 

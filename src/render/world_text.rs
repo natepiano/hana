@@ -349,8 +349,12 @@ fn spawn_world_text_meshes(
         if !is_invisible {
             let render_mode_u32 = style.render_mode() as u32;
 
+            let visible_base = StandardMaterial {
+                depth_bias: super::constants::LAYER_DEPTH_BIAS,
+                ..Default::default()
+            };
             let mat = super::msdf_material::msdf_text_material(
-                StandardMaterial::default(),
+                visible_base,
                 atlas.sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
