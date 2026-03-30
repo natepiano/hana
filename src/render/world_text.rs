@@ -389,8 +389,10 @@ fn spawn_world_text_meshes(
                 GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
             };
 
-            let mut proxy_base = StandardMaterial::default();
-            proxy_base.depth_bias = -super::constants::LAYER_DEPTH_BIAS;
+            let proxy_base = StandardMaterial {
+                depth_bias: -super::constants::LAYER_DEPTH_BIAS,
+                ..Default::default()
+            };
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
                 proxy_base,
                 atlas.sdf_range().to_f32(),

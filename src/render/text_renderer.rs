@@ -239,9 +239,9 @@ fn panel_clip_rect_local(
     clip_rect.map_or(super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
         bevy::math::Vec4::new(
             clip.x.mul_add(scale_x, -anchor_x),
-            anchor_y - (clip.y + clip.height) * scale_y,
+            (clip.y + clip.height).mul_add(-scale_y, anchor_y),
             (clip.x + clip.width).mul_add(scale_x, -anchor_x),
-            anchor_y - clip.y * scale_y,
+            clip.y.mul_add(-scale_y, anchor_y),
         )
     })
 }
@@ -257,7 +257,7 @@ fn clip_rect_bits(clip_rect: bevy::math::Vec4) -> [u32; 4] {
 }
 
 #[must_use]
-fn clip_rect_from_bits(bits: [u32; 4]) -> bevy::math::Vec4 {
+const fn clip_rect_from_bits(bits: [u32; 4]) -> bevy::math::Vec4 {
     bevy::math::Vec4::new(
         f32::from_bits(bits[0]),
         f32::from_bits(bits[1]),
@@ -975,38 +975,69 @@ fn spawn_batch_meshes(
         }
 
         if needs_proxy {
-            let shadow_render_mode = match key.shadow_mode {
-                GlyphShadowMode::SolidQuad => glyph_render_mode_uniform(GlyphRenderMode::SolidQuad),
-                GlyphShadowMode::PunchOut => glyph_render_mode_uniform(GlyphRenderMode::PunchOut),
-                GlyphShadowMode::None | GlyphShadowMode::Text => {
-                    glyph_render_mode_uniform(GlyphRenderMode::Text)
-                },
-            };
-            let clip_rect = clip_rect_from_bits(key.clip_rect);
-            let mut proxy_base = text_base.clone();
-            proxy_base.depth_bias = text_depth_bias - constants::LAYER_DEPTH_BIAS;
-
-            let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
-                proxy_base,
-                atlas.sdf_range().to_f32(),
-                atlas.width(),
-                atlas.height(),
+            spawn_shadow_proxy(
+                key,
+                mesh_handle,
                 page_image,
+                panel_entity,
                 hue,
-                shadow_render_mode,
-                clip_rect,
+                atlas,
+                text_base,
+                text_depth_bias,
                 text_oit_offset,
-            ));
-
-            commands.entity(panel_entity).with_child((
-                DiegeticShadowProxy,
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(proxy_material),
-                Transform::from_xyz(0.0, 0.0, 0.0),
-                scene_layer.clone(),
-            ));
+                scene_layer,
+                materials,
+                commands,
+            );
         }
     }
+}
+
+/// Spawns a shadow-proxy entity for a single glyph batch.
+fn spawn_shadow_proxy(
+    key: &TextBatchKey,
+    mesh_handle: Handle<Mesh>,
+    page_image: Handle<Image>,
+    panel_entity: Entity,
+    hue: f32,
+    atlas: &MsdfAtlas,
+    text_base: &StandardMaterial,
+    text_depth_bias: f32,
+    text_oit_offset: f32,
+    scene_layer: &RenderLayers,
+    materials: &mut Assets<MsdfTextMaterial>,
+    commands: &mut Commands,
+) {
+    let shadow_render_mode = match key.shadow_mode {
+        GlyphShadowMode::SolidQuad => glyph_render_mode_uniform(GlyphRenderMode::SolidQuad),
+        GlyphShadowMode::PunchOut => glyph_render_mode_uniform(GlyphRenderMode::PunchOut),
+        GlyphShadowMode::None | GlyphShadowMode::Text => {
+            glyph_render_mode_uniform(GlyphRenderMode::Text)
+        },
+    };
+    let clip_rect = clip_rect_from_bits(key.clip_rect);
+    let mut proxy_base = text_base.clone();
+    proxy_base.depth_bias = text_depth_bias - constants::LAYER_DEPTH_BIAS;
+
+    let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
+        proxy_base,
+        atlas.sdf_range().to_f32(),
+        atlas.width(),
+        atlas.height(),
+        page_image,
+        hue,
+        shadow_render_mode,
+        clip_rect,
+        text_oit_offset,
+    ));
+
+    commands.entity(panel_entity).with_child((
+        DiegeticShadowProxy,
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(proxy_material),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        scene_layer.clone(),
+    ));
 }
 
 /// Shapes text via parley, using the cache when possible.

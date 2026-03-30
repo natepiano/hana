@@ -1,4 +1,12 @@
 //! Unit tests for glyph mesh construction.
+#![allow(
+    clippy::expect_used,
+    reason = "tests use expect for clearer failure messages"
+)]
+#![allow(
+    clippy::suboptimal_flops,
+    reason = "test assertions are clearer with literal arithmetic"
+)]
 
 use bevy::prelude::Mesh;
 

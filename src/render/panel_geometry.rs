@@ -319,8 +319,8 @@ fn spawn_sdf_element(
     let half_h = world_h * 0.5;
 
     // Convert layout-space clip rect to local quad coords (centered, Y-up).
-    let clip_rect = surface.clip_rect.map_or(
-        bevy::math::Vec4::new(-half_w, -half_h, half_w, half_h),
+    let clip_rect = surface.clip_rect.map_or_else(
+        || bevy::math::Vec4::new(-half_w, -half_h, half_w, half_h),
         |cr| {
             let (cx, cy) = surface.bounds.center();
             let left = (cr.x - cx) * pts_mpu;

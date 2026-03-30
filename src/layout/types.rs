@@ -531,13 +531,13 @@ impl BoundingBox {
     /// Returns the intersection of two bounding boxes, or `None` if they
     /// don't overlap. Both boxes use top-left origin coordinates.
     #[must_use]
-    pub fn intersect(&self, other: &BoundingBox) -> Option<BoundingBox> {
+    pub fn intersect(&self, other: &Self) -> Option<Self> {
         let x0 = self.x.max(other.x);
         let y0 = self.y.max(other.y);
         let x1 = (self.x + self.width).min(other.x + other.width);
         let y1 = (self.y + self.height).min(other.y + other.height);
         if x1 > x0 && y1 > y0 {
-            Some(BoundingBox {
+            Some(Self {
                 x:      x0,
                 y:      y0,
                 width:  x1 - x0,
@@ -1770,6 +1770,10 @@ const _: () = assert!(GlyphRenderMode::PunchOut as u32 == 2);
 const _: () = assert!(GlyphRenderMode::SolidQuad as u32 == 3);
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests use expect for clearer failure messages"
+)]
 mod tests {
     use super::*;
 

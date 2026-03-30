@@ -42,6 +42,10 @@ pub(super) fn compute_clip_rects(commands: &[RenderCommand]) -> Vec<Option<Bound
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "tests use unwrap for clearer failure messages"
+)]
 mod tests {
     use bevy::color::Color;
 
