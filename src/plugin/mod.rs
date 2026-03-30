@@ -59,13 +59,41 @@ use crate::text::FontRegistry;
 use crate::text::FontSource;
 use crate::text::MsdfAtlas;
 
-/// Ensures all `Camera3d` entities have OIT enabled for correct
-/// transparent panel rendering. Disables MSAA on cameras where OIT is
-/// added (OIT requires MSAA off).
+/// Ensures scene `Camera3d` entities have OIT enabled for correct
+/// transparent panel rendering.
 ///
-/// Only activates when at least one panel uses [`RenderMode::Geometry`],
-/// since OIT is unnecessary for texture-only panels and requires depth
-/// textures with `TEXTURE_BINDING` usage that the default setup lacks.
+/// # Why OIT is needed
+///
+/// In Geometry mode, each panel element (background, border, text) is a
+/// separate transparent mesh. When multiple transparent fragments overlap
+/// at a pixel, standard alpha blending composites them in submission
+/// order — which can be wrong when the camera moves (distance-based sort
+/// flips). OIT stores ALL transparent fragments in a linked list and
+/// resolves them by actual depth, producing correct compositing
+/// regardless of camera angle.
+///
+/// # Relationship with `depth_bias` and `oit_depth_offset`
+///
+/// `depth_bias` on `StandardMaterial` controls the `Transparent3d` sort
+/// key (submission order) and wins the GPU depth test for coplanar
+/// fragments. `oit_depth_offset` (a custom uniform added to `position.z`
+/// before `oit_draw`) separates coplanar layers in the OIT linked list
+/// so the resolve pass composites them in the correct painter's order.
+/// Pipeline `depth_bias` does NOT affect `in.position.z` seen by
+/// `oit_draw`, so the manual offset is required.
+///
+/// All three mechanisms are complementary:
+/// - `depth_bias` → sort order + depth test
+/// - `oit_depth_offset` → OIT fragment ordering for coplanar layers
+/// - OIT → correct alpha compositing for overlapping transparents
+///
+/// # Constraints
+///
+/// - OIT requires `Msaa::Off` — this system disables MSAA if present.
+/// - Only activates when at least one panel uses [`RenderMode::Geometry`], since OIT is unnecessary
+///   for texture-only panels.
+/// - Screen-space overlay cameras are excluded via [`Without<ScreenSpaceCamera>`] — they don't need
+///   OIT and adding it corrupts the shared OIT buffer.
 fn ensure_oit_on_cameras(
     panels: Query<&DiegeticPanel>,
     mut cameras: Query<
