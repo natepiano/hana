@@ -13,9 +13,10 @@ version     = "0.0.3-dev"
 
 [lints.clippy]
 # Our strict lints
-expect_used = "deny"
-panic       = "deny"
-unwrap_used = "deny"
+allow_attributes_without_reason = "deny"
+expect_used                     = "deny"
+panic                           = "deny"
+unwrap_used                     = "deny"
 
 # Enable lint groups as errors (with lower priority so allows can override)
 all      = { level = "deny", priority = -1 }
@@ -26,6 +27,7 @@ pedantic = { level = "deny", priority = -1 }
 # Allow specific lints that conflict with common patterns
 multiple_crate_versions = "allow"
 needless_pass_by_value  = "allow"
+redundant_pub_crate     = "allow" # cargo mend is the visibility authority, not clippy
 
 # Bevy-specific allows
 option_if_let_else = "allow" # False positives with Bevy reflect macros
@@ -41,7 +43,6 @@ bevy_egui = ["dep:bevy_egui"]
 fit_overlay = [
   "bevy/bevy_asset",
   "bevy/bevy_gizmos",
-  "bevy/bevy_log",
   "bevy/bevy_mesh",
   "bevy/bevy_pbr",
   "bevy/bevy_picking",
@@ -54,6 +55,7 @@ fit_overlay = [
 bevy = { version = "0.18", default-features = false, features = [
   "bevy_camera",
   "bevy_core_pipeline",
+  "bevy_log",
   "bevy_window",
 ] }
 bevy_egui = { version = "0.39", optional = true, default-features = false }
@@ -67,7 +69,7 @@ bevy_egui = { version = "0.39", default-features = false, features = [
   "render",
 ] }
 bevy_lagrange = { path = ".", features = ["bevy_egui", "fit_overlay"] }
-bevy_window_manager = "0.19.0"
+bevy_window_manager = "0.20.2"
 float-cmp = "0.10.0"
 
 [[example]]
@@ -83,8 +85,8 @@ name              = "zoom_to_fit"
 required-features = ["fit_overlay"]
 
 [[example]]
-name              = "animation"
-required-features = ["fit_overlay"]
+name = "animation"
 
 [[example]]
-name              = "degenerate"
+name = "degenerate_angle_test"
+path = "examples/degenerate_angle_test.rs"

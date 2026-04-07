@@ -1,4 +1,4 @@
-pub(super) trait OptionalClamp {
+pub(crate) trait OptionalClamp {
     type N: PartialOrd;
 
     /// Clamp a value between two other values. The other values are optional. If both

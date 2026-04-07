@@ -9,10 +9,11 @@ use std::time::Duration;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Position;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
@@ -86,16 +87,17 @@ fn setup(
             pitch: Some(0.0),
             yaw: Some(0.0),
             radius: Some(5.0),
-            focus: Position::new(0.0, 1.0, 0.0),
+            focus: Vec3::new(0.0, 1.0, 0.0),
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_sensitivity: 0.5,
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior:    TrackpadBehavior::blender_default(),
+                    sensitivity: 0.5,
+                }),
+                ..default()
+            }),
             ..default()
         },
         Transform::from_xyz(0.0, 1.0, 5.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),

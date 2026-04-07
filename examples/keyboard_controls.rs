@@ -8,9 +8,11 @@
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::ForceUpdate;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
@@ -52,52 +54,51 @@ fn setup(
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
         OrbitCam {
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput::blender_default()),
+                ..default()
+            }),
             ..default()
         },
     ));
 }
 
 fn keyboard_controls(
-    // If you set `OrbitCam::use_real_time` to `true`, you may want to use `Res<Time<Real>>`
-    // here too, so you can control the camera while virtual time is paused.
+    // If you set `OrbitCam::time_source` to `TimeSource::Real`, you may want to use
+    // `Res<Time<Real>>` here too, so you can control the camera while virtual time is paused.
     time: Res<Time>,
     key_input: Res<ButtonInput<KeyCode>>,
-    mut pan_orbit_query: Query<(&mut OrbitCam, &mut Transform)>,
+    mut orbit_cam_query: Query<(&mut OrbitCam, &mut Transform)>,
 ) {
-    for (mut pan_orbit, mut transform) in &mut pan_orbit_query {
+    for (mut orbit_cam, mut transform) in &mut orbit_cam_query {
         if key_input.pressed(KeyCode::ControlLeft) {
             // Jump focus point 1m using Ctrl+Shift + Arrows
             if key_input.pressed(KeyCode::ShiftLeft) {
                 if key_input.just_pressed(KeyCode::ArrowRight) {
-                    pan_orbit.target_focus += Vec3::X;
+                    orbit_cam.target_focus += Vec3::X;
                 }
                 if key_input.just_pressed(KeyCode::ArrowLeft) {
-                    pan_orbit.target_focus -= Vec3::X;
+                    orbit_cam.target_focus -= Vec3::X;
                 }
                 if key_input.just_pressed(KeyCode::ArrowUp) {
-                    pan_orbit.target_focus += Vec3::Y;
+                    orbit_cam.target_focus += Vec3::Y;
                 }
                 if key_input.just_pressed(KeyCode::ArrowDown) {
-                    pan_orbit.target_focus -= Vec3::Y;
+                    orbit_cam.target_focus -= Vec3::Y;
                 }
             } else {
                 // Jump by 45 degrees using Left Ctrl + Arrows
                 if key_input.just_pressed(KeyCode::ArrowRight) {
-                    pan_orbit.target_yaw += 45f32.to_radians();
+                    orbit_cam.target_yaw += 45f32.to_radians();
                 }
                 if key_input.just_pressed(KeyCode::ArrowLeft) {
-                    pan_orbit.target_yaw -= 45f32.to_radians();
+                    orbit_cam.target_yaw -= 45f32.to_radians();
                 }
                 if key_input.just_pressed(KeyCode::ArrowUp) {
-                    pan_orbit.target_pitch += 45f32.to_radians();
+                    orbit_cam.target_pitch += 45f32.to_radians();
                 }
                 if key_input.just_pressed(KeyCode::ArrowDown) {
-                    pan_orbit.target_pitch -= 45f32.to_radians();
+                    orbit_cam.target_pitch -= 45f32.to_radians();
                 }
             }
         }
@@ -117,33 +118,33 @@ fn keyboard_controls(
                 delta_translation += transform.rotation * Vec3::NEG_Y * time.delta_secs();
             }
             transform.translation += delta_translation;
-            pan_orbit.target_focus += delta_translation;
+            orbit_cam.target_focus += delta_translation;
         }
         // Smooth rotation using arrow keys without modifier
         else {
             if key_input.pressed(KeyCode::ArrowRight) {
-                pan_orbit.target_yaw += 50f32.to_radians() * time.delta_secs();
+                orbit_cam.target_yaw += 50f32.to_radians() * time.delta_secs();
             }
             if key_input.pressed(KeyCode::ArrowLeft) {
-                pan_orbit.target_yaw -= 50f32.to_radians() * time.delta_secs();
+                orbit_cam.target_yaw -= 50f32.to_radians() * time.delta_secs();
             }
             if key_input.pressed(KeyCode::ArrowUp) {
-                pan_orbit.target_pitch += 50f32.to_radians() * time.delta_secs();
+                orbit_cam.target_pitch += 50f32.to_radians() * time.delta_secs();
             }
             if key_input.pressed(KeyCode::ArrowDown) {
-                pan_orbit.target_pitch -= 50f32.to_radians() * time.delta_secs();
+                orbit_cam.target_pitch -= 50f32.to_radians() * time.delta_secs();
             }
 
             // Zoom with Z and X
             if key_input.pressed(KeyCode::KeyZ) {
-                pan_orbit.target_radius -= 5.0 * time.delta_secs();
+                orbit_cam.target_radius -= 5.0 * time.delta_secs();
             }
             if key_input.pressed(KeyCode::KeyX) {
-                pan_orbit.target_radius += 5.0 * time.delta_secs();
+                orbit_cam.target_radius += 5.0 * time.delta_secs();
             }
         }
 
         // Force camera to update its transform
-        pan_orbit.force_update = true;
+        orbit_cam.force_update = ForceUpdate::Pending;
     }
 }

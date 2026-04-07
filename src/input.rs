@@ -8,26 +8,21 @@ use crate::ActiveCameraData;
 use crate::ButtonZoomAxis;
 use crate::OrbitCam;
 use crate::TrackpadBehavior;
-
-/// Conversion factor from mouse drag delta to scroll-equivalent zoom input.
-const BUTTON_ZOOM_SCALE: f32 = 0.03;
-
-/// Conversion factor from pixel scroll events to zoom input.
-const PIXEL_SCROLL_SCALE: f32 = 0.005;
-
-/// Amplification factor for trackpad pinch gestures.
-const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
+use crate::ZoomDirection;
+use crate::constants::BUTTON_ZOOM_SCALE;
+use crate::constants::PINCH_GESTURE_AMPLIFICATION;
+use crate::constants::PIXEL_SCROLL_SCALE;
 
 #[derive(Resource, Default, Debug)]
-pub(super) struct MouseKeyTracker {
-    pub(super) orbit:                Vec2,
-    pub(super) pan:                  Vec2,
-    pub(super) scroll_line:          f32,
-    pub(super) scroll_pixel:         f32,
-    pub(super) orbit_button_changed: bool,
+pub(crate) struct MouseKeyTracker {
+    pub orbit:                Vec2,
+    pub pan:                  Vec2,
+    pub scroll_line:          f32,
+    pub scroll_pixel:         f32,
+    pub orbit_button_changed: bool,
 }
 
-pub(super) fn mouse_key_tracker(
+pub(crate) fn mouse_key_tracker(
     mut camera_movement: ResMut<MouseKeyTracker>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     key_input: Res<ButtonInput<KeyCode>>,
@@ -51,10 +46,8 @@ pub(super) fn mouse_key_tracker(
     // Collect scroll events
     let scroll_events_vec: Vec<MouseWheel> = scroll_events.read().copied().collect();
 
-    // scroll processing needs to account for mouse and trackpad
-    // and when it's the trackpad, if we're in BlenderLike mode, we get back trackpad_orbit and
-    // trackpad_pan these two values are set to zero if we're in backwards compatible
-    // DefaultZoom mode
+    // Scroll processing needs to account for mouse and trackpad. In `BlenderLike` mode, pixel
+    // scrolling may produce orbit or pan instead of zoom.
     let scroll_result = process_scroll_events(&scroll_events_vec, pan_orbit, &key_input);
     // Initialize orbit and pan with trackpad contributions
     let mut orbit = scroll_result.trackpad_orbit;
@@ -71,7 +64,9 @@ pub(super) fn mouse_key_tracker(
             ButtonZoomAxis::Y => -mouse_delta.y,
             ButtonZoomAxis::XY => mouse_delta.x + -mouse_delta.y,
         };
-        if pan_orbit.reversed_button_zoom {
+        if let Some(input_control) = pan_orbit.input_control
+            && input_control.zoom == ZoomDirection::Reversed
+        {
             delta *= -1.0;
         }
         delta * BUTTON_ZOOM_SCALE
@@ -106,13 +101,20 @@ struct ScrollProcessingResult {
     scroll_pixel:   f32,
 }
 
-/// mimic how blender _doesn't_ handle pinch gestures when modifiers are pressed
+/// Mimic how Blender ignores pinch gestures while trackpad modifiers are pressed.
 fn process_scroll_events(
     scroll_events: &[MouseWheel],
     pan_orbit: &OrbitCam,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> ScrollProcessingResult {
-    match pan_orbit.trackpad_behavior {
+    let Some(input_control) = pan_orbit.input_control else {
+        return ScrollProcessingResult::default();
+    };
+    let Some(trackpad_input) = input_control.trackpad else {
+        return ScrollProcessingResult::default();
+    };
+
+    match trackpad_input.behavior {
         TrackpadBehavior::BlenderLike {
             modifier_pan,
             modifier_zoom,
@@ -134,10 +136,10 @@ fn process_scroll_events(
                             result.scroll_pixel += event.y * PIXEL_SCROLL_SCALE;
                         } else if is_pan_modifier_pressed {
                             result.trackpad_pan +=
-                                Vec2::new(event.x, event.y) * pan_orbit.trackpad_sensitivity;
+                                Vec2::new(event.x, event.y) * trackpad_input.sensitivity;
                         } else {
                             result.trackpad_orbit +=
-                                Vec2::new(event.x, event.y) * pan_orbit.trackpad_sensitivity;
+                                Vec2::new(event.x, event.y) * trackpad_input.sensitivity;
                         }
                     },
                 }
@@ -145,8 +147,8 @@ fn process_scroll_events(
 
             result
         },
-        TrackpadBehavior::Default => {
-            // Default behavior: all scroll events contribute to zoom
+        TrackpadBehavior::ZoomOnly => {
+            // Zoom-only behavior: all scroll events contribute to zoom.
             let (scroll_line, scroll_pixel) = scroll_events
                 .iter()
                 .map(|event| match event.unit {
@@ -155,7 +157,6 @@ fn process_scroll_events(
                 })
                 .fold((0.0, 0.0), |acc, item| (acc.0 + item.0, acc.1 + item.1));
 
-            // DefaultZoom behavior - no trackpad involved
             ScrollProcessingResult {
                 trackpad_orbit: Vec2::ZERO,
                 trackpad_pan: Vec2::ZERO,
@@ -171,12 +172,15 @@ fn process_pinch_events(
     pan_orbit: &OrbitCam,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> f32 {
-    if !pan_orbit.trackpad_pinch_to_zoom_enabled {
+    let Some(input_control) = pan_orbit.input_control else {
         return 0.0;
-    }
+    };
+    let Some(trackpad_input) = input_control.trackpad else {
+        return 0.0;
+    };
 
     // Check if no modifiers are pressed (including BlenderLike modifiers if applicable)
-    let no_modifiers_pressed = match pan_orbit.trackpad_behavior {
+    let no_modifiers_pressed = match trackpad_input.behavior {
         TrackpadBehavior::BlenderLike {
             modifier_pan,
             modifier_zoom,
@@ -191,7 +195,7 @@ fn process_pinch_events(
                 && modifier_pan.is_none_or(|modifier| !key_input.pressed(modifier))
                 && modifier_zoom.is_none_or(|modifier| !key_input.pressed(modifier))
         },
-        TrackpadBehavior::Default => {
+        TrackpadBehavior::ZoomOnly => {
             // Just check regular modifiers
             pan_orbit
                 .modifier_orbit
@@ -205,18 +209,22 @@ fn process_pinch_events(
     if no_modifiers_pressed {
         pinch_events
             .read()
-            .map(|event| event.0 * PINCH_GESTURE_AMPLIFICATION * pan_orbit.trackpad_sensitivity)
+            .map(|event| event.0 * PINCH_GESTURE_AMPLIFICATION * trackpad_input.sensitivity)
             .sum()
     } else {
         0.0
     }
 }
 
-pub(super) fn orbit_pressed(
+pub(crate) fn orbit_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     let is_pressed = pan_orbit
         .modifier_orbit
         .is_none_or(|modifier| key_input.pressed(modifier))
@@ -228,11 +236,15 @@ pub(super) fn orbit_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub(super) fn orbit_just_pressed(
+pub(crate) fn orbit_just_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     let just_pressed = pan_orbit
         .modifier_orbit
         .is_none_or(|modifier| key_input.pressed(modifier))
@@ -244,11 +256,15 @@ pub(super) fn orbit_just_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub(super) fn orbit_just_released(
+pub(crate) fn orbit_just_released(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     let just_released = pan_orbit
         .modifier_orbit
         .is_none_or(|modifier| key_input.pressed(modifier))
@@ -260,11 +276,15 @@ pub(super) fn orbit_just_released(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub(super) fn pan_pressed(
+pub(crate) fn pan_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     let is_pressed = pan_orbit
         .modifier_pan
         .is_none_or(|modifier| key_input.pressed(modifier))
@@ -276,11 +296,15 @@ pub(super) fn pan_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub(super) fn pan_just_pressed(
+pub(crate) fn pan_just_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
     key_input: &Res<ButtonInput<KeyCode>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     let just_pressed = pan_orbit
         .modifier_pan
         .is_none_or(|modifier| key_input.pressed(modifier))
@@ -292,19 +316,27 @@ pub(super) fn pan_just_pressed(
             .is_none_or(|modifier| !key_input.pressed(modifier))
 }
 
-pub(super) fn button_zoom_pressed(
+pub(crate) fn button_zoom_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     pan_orbit
         .button_zoom
         .is_some_and(|btn| mouse_input.pressed(btn))
 }
 
-pub(super) fn button_zoom_just_pressed(
+pub(crate) fn button_zoom_just_pressed(
     pan_orbit: &OrbitCam,
     mouse_input: &Res<ButtonInput<MouseButton>>,
 ) -> bool {
+    if pan_orbit.input_control.is_none() {
+        return false;
+    }
+
     pan_orbit
         .button_zoom
         .is_some_and(|btn| mouse_input.just_pressed(btn))

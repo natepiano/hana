@@ -1,13 +1,6 @@
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
-use super::super::components::CurrentFitTarget;
-use super::super::components::FitOverlay;
-use super::super::fit;
-use super::super::fit::Edge;
-use super::super::support;
-use super::super::support::CameraBasis;
-use super::super::support::ScreenSpaceBounds;
 use super::convex_hull;
 use super::labels;
 use super::labels::BoundsLabel;
@@ -17,6 +10,13 @@ use super::screen_space;
 use super::types::FitTargetGizmo;
 use super::types::FitTargetOverlayConfig;
 use super::types::FitTargetViewportMarginPcts;
+use crate::components::CurrentFitTarget;
+use crate::components::FitOverlay;
+use crate::constants::TOLERANCE;
+use crate::fit::Edge;
+use crate::support;
+use crate::support::CameraBasis;
+use crate::support::ScreenSpaceBounds;
 
 /// Calculates the color for an edge based on balance state.
 const fn calculate_edge_color(
@@ -134,8 +134,8 @@ fn draw_margin_lines_and_labels(
     config: &FitTargetOverlayConfig,
     viewport_size: Option<Vec2>,
 ) -> Vec<Edge> {
-    let h_balanced = screen_space::is_horizontally_balanced(bounds, fit::TOLERANCE);
-    let v_balanced = screen_space::is_vertically_balanced(bounds, fit::TOLERANCE);
+    let h_balanced = screen_space::is_horizontally_balanced(bounds, TOLERANCE);
+    let v_balanced = screen_space::is_vertically_balanced(bounds, TOLERANCE);
 
     let mut visible_edges: Vec<Edge> = Vec::new();
 
@@ -195,7 +195,7 @@ fn cleanup_stale_margin_labels(
 }
 
 /// Draws screen-aligned bounds for all cameras with `FitVisualization`.
-pub(super) fn draw_fit_target_bounds(
+pub fn draw_fit_target_bounds(
     mut commands: Commands,
     mut gizmos: Gizmos<FitTargetGizmo>,
     config: Res<FitTargetOverlayConfig>,

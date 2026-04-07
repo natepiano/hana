@@ -10,11 +10,13 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Position;
-use bevy_lagrange::TouchControls;
-use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TouchInput;
+use bevy_lagrange::TrackpadInput;
+use bevy_lagrange::UpsideDownPolicy;
+use bevy_lagrange::ZoomDirection;
 use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
@@ -58,7 +60,7 @@ fn setup(
         // we don't set transform on the camera.
         OrbitCam {
             // Set focal point (what the camera should look at)
-            focus: Position::new(0.0, 1.0, 0.0),
+            focus: Vec3::new(0.0, 1.0, 0.0),
             // Set the starting position, relative to focus (overrides camera's transform).
             yaw: Some(TAU / 8.0),
             pitch: Some(TAU / 8.0),
@@ -75,7 +77,7 @@ fn setup(
             pan_sensitivity: 0.5,
             zoom_sensitivity: 0.5,
             // Allow the camera to go upside down
-            allow_upside_down: true,
+            upside_down_policy: UpsideDownPolicy::Allow,
             // Change the controls (these match Blender)
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
@@ -84,17 +86,13 @@ fn setup(
             button_zoom: Some(MouseButton::Right),
             // Optionally configure button zoom to use left-right mouse movement
             // button_zoom_axis: ButtonZoomAxis::X,
-            // Optionally reverse the button-based zoom independently to `reversed_zoom`
-            // button_zoom_reverse: true,
-            // Reverse the zoom direction
-            reversed_zoom: true,
-            // Use alternate touch controls
-            touch_controls: TouchControls::TwoFingerOrbit,
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                // Use alternate touch controls
+                touch:    Some(TouchInput::TwoFingerOrbit),
+                trackpad: Some(TrackpadInput::blender_default()),
+                // Reverse the zoom direction
+                zoom:     ZoomDirection::Reversed,
+            }),
             ..default()
         },
     ));
@@ -104,11 +102,19 @@ fn setup(
 // Press 'T' to toggle the camera controls.
 fn toggle_camera_controls_system(
     key_input: Res<ButtonInput<KeyCode>>,
-    mut pan_orbit_query: Query<&mut OrbitCam>,
+    mut saved_input_control: Local<Option<InputControl>>,
+    mut orbit_cam_query: Query<&mut OrbitCam>,
 ) {
     if key_input.just_pressed(KeyCode::KeyT) {
-        for mut pan_orbit in &mut pan_orbit_query {
-            pan_orbit.enabled = !pan_orbit.enabled;
+        for mut orbit_cam in &mut orbit_cam_query {
+            if let Some(input_control) = orbit_cam.input_control {
+                *saved_input_control = Some(input_control);
+                orbit_cam.input_control = None;
+            } else {
+                orbit_cam.input_control = saved_input_control
+                    .take()
+                    .or_else(|| Some(InputControl::default()));
+            }
         }
     }
 }

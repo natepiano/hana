@@ -6,7 +6,7 @@ use bevy::prelude::*;
 /// being changed (e.g. pinch to zoom), there is just a set if different schemes rather than
 /// full customization.
 #[derive(Reflect, Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub enum TouchControls {
+pub enum TouchInput {
     /// Touch controls where single finger orbits:
     ///  - One finger move: orbit
     ///  - Two finger move: pan
@@ -22,7 +22,7 @@ pub enum TouchControls {
 
 /// Holds information about current mobile gestures
 #[derive(Debug, Clone)]
-pub(super) enum TouchGestures {
+pub(crate) enum TouchGestures {
     /// No mobile gestures
     None,
     /// One finger mobile gestures
@@ -33,40 +33,40 @@ pub(super) enum TouchGestures {
 
 /// Holds information pertaining to one finger gestures
 #[derive(Debug, Clone, Copy)]
-pub(super) struct OneFingerGestures {
+pub(crate) struct OneFingerGestures {
     /// The delta movement of the mobile
-    pub(super) motion: Vec2,
+    pub motion: Vec2,
 }
 
 /// Holds information pertaining to two finger gestures
 #[derive(Debug, Clone, Copy)]
-pub(super) struct TwoFingerGestures {
+pub(crate) struct TwoFingerGestures {
     /// The delta movement of both touches.
     /// Uses the midpoint between the touches to calculate movement. Thus, if the midpoint doesn't
     /// move then this will be zero (or close to zero), like when pinching.
-    pub(super) motion:   Vec2,
+    pub motion:   Vec2,
     /// The delta distance between both touches.
     /// Use this to implement pinch gestures.
-    pub(super) pinch:    f32,
+    pub pinch:    f32,
     /// The delta angle of the two touches.
     /// Positive values correspond to rotating clockwise.
     #[allow(
         dead_code,
         reason = "computed but not yet wired — planned for touch-based camera roll"
     )]
-    pub(super) rotation: f32,
+    pub rotation: f32,
 }
 
 /// Stores current and previous frame mobile data, and provides a method to get mobile gestures
 #[derive(Resource, Default, Debug)]
-pub(super) struct TouchTracker {
+pub(crate) struct TouchTracker {
     curr_pressed: (Option<Touch>, Option<Touch>),
     prev_pressed: (Option<Touch>, Option<Touch>),
 }
 
 impl TouchTracker {
     /// Calculate and return mobile gesture data for this frame
-    pub(super) fn get_touch_gestures(&self) -> TouchGestures {
+    pub(crate) fn get_touch_gestures(&self) -> TouchGestures {
         // The below matches only match when the previous and current frames have the same number
         // of touches. This means that when the number of touches changes, there's one frame
         // where this will return `TouchGestures::None`. From my testing, this does not result
@@ -132,7 +132,7 @@ impl TouchTracker {
 }
 
 /// Read touch input and save it in `TouchTracker` resource for easy consumption by the main system
-pub(super) fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTracker>) {
+pub(crate) fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTracker>) {
     let pressed: Vec<&Touch> = touches.iter().collect();
 
     match pressed.len() {

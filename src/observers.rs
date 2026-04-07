@@ -5,7 +5,10 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
+use bevy_kana::Displacement;
+use bevy_kana::Position;
 
+use super::ForceUpdate;
 use super::animation;
 use super::animation::CameraMove;
 use super::animation::CameraMoveList;
@@ -32,9 +35,7 @@ use super::events::ZoomEnd;
 use super::events::ZoomToFit;
 use super::fit;
 use super::support;
-use crate::Displacement;
 use crate::OrbitCam;
-use crate::Position;
 
 /// Parameters for an instant orbital snap.
 struct SnapOrbit {
@@ -52,9 +53,9 @@ fn snap_to_orbit(
     snap: SnapOrbit,
     emit_events: impl FnOnce(&mut Commands),
 ) {
-    orbit_cam.focus = snap.focus;
+    orbit_cam.focus = *snap.focus;
     orbit_cam.radius = Some(snap.radius);
-    orbit_cam.target_focus = snap.focus;
+    orbit_cam.target_focus = *snap.focus;
     orbit_cam.target_radius = snap.radius;
     if let Some(yaw) = snap.yaw {
         orbit_cam.yaw = Some(yaw);
@@ -64,7 +65,7 @@ fn snap_to_orbit(
         orbit_cam.pitch = Some(pitch);
         orbit_cam.target_pitch = pitch;
     }
-    orbit_cam.force_update = true;
+    orbit_cam.force_update = ForceUpdate::Pending;
 
     emit_events(commands);
 }
@@ -82,7 +83,7 @@ fn stash_camera_state(
             zoom:    camera.zoom_smoothness,
             pan:     camera.pan_smoothness,
             orbit:   camera.orbit_smoothness,
-            enabled: camera.enabled,
+            control: camera.input_control,
         };
         commands.entity(entity).insert(stash);
     }
@@ -92,7 +93,7 @@ fn stash_camera_state(
     camera.orbit_smoothness = 0.0;
 
     if interrupt_behavior == CameraInputInterruptBehavior::Ignore {
-        camera.enabled = false;
+        camera.input_control = None;
     }
 }
 
@@ -147,7 +148,7 @@ fn prepare_fit_for_target(
 /// with a [`ZoomContext`] so that `on_play_animation` handles all conflict
 /// resolution and zoom lifecycle events in one place.
 /// Requires target entity to have a `Mesh3d` (direct or on descendants).
-pub(super) fn on_zoom_to_fit(
+pub(crate) fn on_zoom_to_fit(
     zoom: On<ZoomToFit>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera)>,
@@ -195,7 +196,7 @@ pub(super) fn on_zoom_to_fit(
         // Animated path: use `ToOrbit` to pass orbital params directly, avoiding
         // gimbal lock from atan2 decomposition at extreme pitch angles.
         let camera_moves = VecDeque::from([CameraMove::ToOrbit {
-            focus: fit.focus,
+            focus: *fit.focus,
             yaw: orbit_cam.target_yaw,
             pitch: orbit_cam.target_pitch,
             radius: fit.radius,
@@ -272,7 +273,7 @@ fn begin_zoom_if_needed(
 /// This is the single decision point for all trigger-time logic: conflict
 /// resolution, zoom lifecycle (`ZoomBegin` / `ZoomAnimationMarker`), and
 /// animation begin.
-pub(super) fn on_play_animation(
+pub(crate) fn on_play_animation(
     start: On<PlayAnimation>,
     mut commands: Commands,
     mut camera_query: Query<(
@@ -318,16 +319,19 @@ pub(super) fn on_play_animation(
                     .get(entity)
                     .map_or(AnimationSource::PlayAnimation, |m| m.0);
                 if let Ok(queue) = move_list_query.get(entity) {
-                    let camera_move = queue.camera_moves.front().cloned().unwrap_or_else(|| {
-                        CameraMove::ToOrbit {
-                            focus:    Position::default(),
-                            yaw:      0.0,
-                            pitch:    0.0,
-                            radius:   1.0,
-                            duration: Duration::ZERO,
-                            easing:   EaseFunction::Linear,
-                        }
-                    });
+                    let camera_move =
+                        queue
+                            .camera_moves
+                            .front()
+                            .cloned()
+                            .unwrap_or(CameraMove::ToOrbit {
+                                focus:    Vec3::ZERO,
+                                yaw:      0.0,
+                                pitch:    0.0,
+                                radius:   1.0,
+                                duration: Duration::ZERO,
+                                easing:   EaseFunction::Linear,
+                            });
                     commands.trigger(AnimationCancelled {
                         camera: entity,
                         source: in_flight_source,
@@ -376,7 +380,7 @@ pub(super) fn on_play_animation(
 
 /// Observer for direct `CameraMoveList` insertion (bypassing `PlayAnimation`).
 /// Reuses the same camera-state stashing behavior as the event-driven path.
-pub(super) fn on_camera_move_list_added(
+pub(crate) fn on_camera_move_list_added(
     add: On<Add, CameraMoveList>,
     mut commands: Commands,
     mut camera_query: Query<(
@@ -401,7 +405,7 @@ pub(super) fn on_camera_move_list_added(
 }
 
 /// Observer for `SetFitTarget` event - sets the target entity for fit debug overlay.
-pub(super) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Commands) {
+pub(crate) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Commands) {
     commands
         .entity(set_target.camera)
         .insert(CurrentFitTarget(set_target.target));
@@ -409,7 +413,7 @@ pub(super) fn on_set_fit_target(set_target: On<SetFitTarget>, mut commands: Comm
 
 /// Observer for `AnimateToFit` event - animates the camera to a specific orientation
 /// while fitting a target entity in view.
-pub(super) fn on_animate_to_fit(
+pub(crate) fn on_animate_to_fit(
     event: On<AnimateToFit>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera)>,
@@ -448,7 +452,7 @@ pub(super) fn on_animate_to_fit(
 
     if duration > Duration::ZERO {
         let camera_moves = VecDeque::from([CameraMove::ToOrbit {
-            focus: fit.focus,
+            focus: *fit.focus,
             yaw,
             pitch,
             radius: fit.radius,
@@ -481,7 +485,7 @@ pub(super) fn on_animate_to_fit(
 
 /// Observer for `LookAt` event — rotates the camera in place to look at a target entity.
 /// The camera stays at its current world position; only the orbit pivot re-anchors.
-pub(super) fn on_look_at(
+pub(crate) fn on_look_at(
     event: On<LookAt>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &GlobalTransform)>,
@@ -509,8 +513,8 @@ pub(super) fn on_look_at(
             PlayAnimation::new(
                 camera,
                 [CameraMove::ToPosition {
-                    translation: Position(cam_pos),
-                    focus: Position(target_pos),
+                    translation: cam_pos,
+                    focus: target_pos,
                     duration,
                     easing,
                 }],
@@ -542,7 +546,7 @@ pub(super) fn on_look_at(
 /// Observer for `LookAtAndZoomToFit` event — rotates the camera in place to look at
 /// a target entity and adjusts the radius to frame it, all in one fluid motion.
 /// The yaw and pitch are back-solved from the camera's current world position.
-pub(super) fn on_look_at_and_zoom_to_fit(
+pub(crate) fn on_look_at_and_zoom_to_fit(
     event: On<LookAtAndZoomToFit>,
     mut commands: Commands,
     mut camera_query: Query<(&mut OrbitCam, &Projection, &Camera, &GlobalTransform)>,
@@ -599,7 +603,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
             PlayAnimation::new(
                 camera,
                 [CameraMove::ToOrbit {
-                    focus: fit.focus,
+                    focus: *fit.focus,
                     yaw,
                     pitch,
                     radius: fit.radius,
@@ -631,7 +635,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 }
 
 /// Observer that restores camera runtime state when `CameraMoveList` is removed.
-pub(super) fn restore_camera_state(
+pub(crate) fn restore_camera_state(
     remove: On<Remove, CameraMoveList>,
     mut commands: Commands,
     mut query: Query<(&OrbitCamStash, &mut OrbitCam)>,
@@ -645,7 +649,7 @@ pub(super) fn restore_camera_state(
     camera.zoom_smoothness = stash.zoom;
     camera.pan_smoothness = stash.pan;
     camera.orbit_smoothness = stash.orbit;
-    camera.enabled = stash.enabled;
+    camera.input_control = stash.control;
 
     commands.entity(entity).remove::<OrbitCamStash>();
 }

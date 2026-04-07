@@ -4,6 +4,7 @@
 //! camera fit target. Uses Bevy's `GizmoConfigGroup` pattern (similar to `Avian3D`'s
 //! `PhysicsGizmos`).
 
+mod constants;
 mod convex_hull;
 mod labels;
 mod screen_space;
@@ -21,7 +22,7 @@ use types::FitTargetViewportMarginPcts;
 use super::components::FitOverlay;
 
 /// Plugin that enables fit target debug visualization.
-pub(super) struct ZoomOverlayPlugin;
+pub struct ZoomOverlayPlugin;
 
 impl Plugin for ZoomOverlayPlugin {
     fn build(&self, app: &mut App) {

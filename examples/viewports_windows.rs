@@ -11,9 +11,10 @@ use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy::window::WindowResized;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::ManagedWindow;
 use bevy_window_manager::WindowManagerPlugin;
 
@@ -33,11 +34,10 @@ fn main() {
 
 fn pan_orbit_default() -> OrbitCam {
     OrbitCam {
-        trackpad_behavior: TrackpadBehavior::BlenderLike {
-            modifier_pan:  Some(KeyCode::ShiftLeft),
-            modifier_zoom: Some(KeyCode::ControlLeft),
-        },
-        trackpad_pinch_to_zoom_enabled: true,
+        input_control: Some(InputControl {
+            trackpad: Some(TrackpadInput::blender_default()),
+            ..default()
+        }),
         ..default()
     }
 }
@@ -93,7 +93,7 @@ fn setup(
                 ..default()
             },
             ManagedWindow {
-                window_name: "second_window".into(),
+                name: "second_window".into(),
             },
         ))
         .id();

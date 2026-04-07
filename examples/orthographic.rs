@@ -3,10 +3,12 @@
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::ForceUpdate;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamSystemSet;
-use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
@@ -56,11 +58,10 @@ fn setup(
             ..OrthographicProjection::default_3d()
         }),
         OrbitCam {
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput::blender_default()),
+                ..default()
+            }),
             ..default()
         },
     ));
@@ -76,6 +77,6 @@ fn switch_projection(
             return;
         };
         std::mem::swap(&mut *next_projection, &mut *projection);
-        camera.force_update = true;
+        camera.force_update = ForceUpdate::Pending;
     }
 }

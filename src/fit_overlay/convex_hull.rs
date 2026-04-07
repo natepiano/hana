@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use super::super::support;
-use super::super::support::CameraBasis;
+use crate::support;
+use crate::support::CameraBasis;
 
 /// 2D cross product for three points (for convex hull turn detection).
 fn cross_2d(o: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -10,7 +10,7 @@ fn cross_2d(o: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
 
 /// Andrew's monotone chain algorithm for 2D convex hull.
 /// Returns hull vertices in counter-clockwise order.
-pub(super) fn convex_hull_2d(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
+pub fn convex_hull_2d(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
     let mut sorted: Vec<(f32, f32)> = points.to_vec();
     sorted.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
     sorted.dedup();
@@ -47,7 +47,7 @@ pub(super) fn convex_hull_2d(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
 /// Projects world-space vertices to 2D normalized screen space.
 ///
 /// For perspective, divides by depth. For orthographic, uses raw camera-space coordinates.
-pub(super) fn project_vertices_to_2d(
+pub fn project_vertices_to_2d(
     vertices: &[Vec3],
     cam: &CameraBasis,
     is_ortho: bool,

@@ -4,10 +4,11 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::ForceUpdate;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Position;
-use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 fn main() {
@@ -61,11 +62,10 @@ fn setup(
             // immediately snaps to that location. If you want the 'follow' to be smoothed,
             // leave this at default or set it to something between 0 and 1.
             pan_smoothness: 0.0,
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput::blender_default()),
+                ..default()
+            }),
             ..default()
         },
     ));
@@ -87,14 +87,14 @@ fn animate_cube(
 }
 
 /// Set the camera's focus to the cube's position
-fn cam_follow(mut pan_orbit_q: Query<&mut OrbitCam>, cube_q: Query<&Transform, With<Cube>>) {
-    if let Ok(mut pan_orbit) = pan_orbit_q.single_mut()
+fn cam_follow(mut orbit_cam_query: Query<&mut OrbitCam>, cube_q: Query<&Transform, With<Cube>>) {
+    if let Ok(mut orbit_cam) = orbit_cam_query.single_mut()
         && let Ok(cube_tfm) = cube_q.single()
     {
-        pan_orbit.target_focus = Position(cube_tfm.translation);
+        orbit_cam.target_focus = cube_tfm.translation;
         // Whenever changing properties manually like this, it's necessary to force
         // OrbitCam to update this frame (by default it only updates when there are
         // input events).
-        pan_orbit.force_update = true;
+        orbit_cam.force_update = ForceUpdate::Pending;
     }
 }

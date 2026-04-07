@@ -1,18 +1,22 @@
 use bevy::prelude::*;
 use bevy_kana::Position;
 
-const EPSILON: f32 = 0.001;
+use crate::constants::EPSILON;
+use crate::constants::MIN_ORBIT_RADIUS;
+use crate::constants::SMOOTHNESS_EXPONENT;
 
-pub(super) fn calculate_from_translation_and_focus(
-    translation: Position,
-    focus: Position,
+pub(crate) fn calculate_from_translation_and_focus(
+    translation: impl Into<Position>,
+    focus: impl Into<Position>,
     axis: [Vec3; 3],
 ) -> (f32, f32, f32) {
+    let translation = translation.into();
+    let focus = focus.into();
     let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
     let comp_vec = *translation - *focus;
     let mut radius = comp_vec.length();
     if radius < f32::EPSILON {
-        radius = 0.05;
+        radius = MIN_ORBIT_RADIUS;
     }
     let comp_vec = axis * comp_vec;
     let yaw = comp_vec.x.atan2(comp_vec.z);
@@ -21,15 +25,16 @@ pub(super) fn calculate_from_translation_and_focus(
 }
 
 /// Update `transform` based on yaw, pitch, and the camera's focus and radius
-pub(super) fn update_orbit_transform(
+pub(crate) fn update_orbit_transform(
     yaw: f32,
     pitch: f32,
     mut radius: f32,
-    focus: Position,
+    focus: impl Into<Position>,
     transform: &mut Transform,
     projection: &mut Projection,
     axis: [Vec3; 3],
 ) {
+    let focus = focus.into();
     let mut new_transform = Transform::IDENTITY;
     if let Projection::Orthographic(ref mut p) = *projection {
         p.scale = radius;
@@ -55,10 +60,10 @@ pub(super) fn update_orbit_transform(
     *transform = new_transform;
 }
 
-pub(super) fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
+pub(crate) fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
 
-pub(super) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
-    let t = smoothness.powi(7);
+pub(crate) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
+    let t = smoothness.powi(SMOOTHNESS_EXPONENT);
     let mut new_value = from.lerp(to, 1.0 - t.powf(dt));
     if smoothness < 1.0 && approx_equal(new_value, to) {
         new_value = to;
@@ -66,13 +71,15 @@ pub(super) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) ->
     new_value
 }
 
-pub(super) fn lerp_and_snap_position(
-    from: Position,
-    to: Position,
+pub(crate) fn lerp_and_snap_position(
+    from: impl Into<Position>,
+    to: impl Into<Position>,
     smoothness: f32,
     dt: f32,
 ) -> Position {
-    let t = smoothness.powi(7);
+    let from = from.into();
+    let to = to.into();
+    let t = smoothness.powi(SMOOTHNESS_EXPONENT);
     let mut new_value = (*from).lerp(*to, 1.0 - t.powf(dt));
     if smoothness < 1.0 && approx_equal((new_value - *to).length(), 0.0) {
         new_value.x = to.x;
@@ -102,7 +109,7 @@ mod calculate_from_translation_and_focus_tests {
         let (yaw, pitch, radius) = calculate_from_translation_and_focus(translation, focus, AXIS);
         assert_eq!(yaw, 0.0);
         assert_eq!(pitch, 0.0);
-        assert_eq!(radius, 0.05);
+        assert_eq!(radius, MIN_ORBIT_RADIUS);
     }
 
     #[test]
@@ -113,7 +120,7 @@ mod calculate_from_translation_and_focus_tests {
             calculate_from_translation_and_focus(translation, focus, AXIS_Z_UP);
         assert_eq!(yaw, 0.0);
         assert_eq!(pitch, 0.0);
-        assert_eq!(radius, 0.05);
+        assert_eq!(radius, MIN_ORBIT_RADIUS);
     }
 
     #[test]

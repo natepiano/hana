@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use super::InputControl;
 use super::events::AnimationSource;
 use super::events::ZoomContext;
 
@@ -74,7 +75,7 @@ pub struct CurrentFitTarget(
 /// When `AnimationEnd` fires on an entity with this marker, `ZoomEnd` is triggered and the
 /// marker is removed. Wraps the [`ZoomContext`] that originated the zoom.
 #[derive(Component, Clone)]
-pub(super) struct ZoomAnimationMarker(pub(super) ZoomContext);
+pub(crate) struct ZoomAnimationMarker(pub ZoomContext);
 
 /// Tracks which trigger source started the current animation.
 ///
@@ -82,7 +83,7 @@ pub(super) struct ZoomAnimationMarker(pub(super) ZoomContext);
 /// [`ZoomToFit`](crate::ZoomToFit), or [`AnimateToFit`](crate::AnimateToFit). Inserted alongside
 /// [`CameraMoveList`](crate::CameraMoveList) and removed when the animation ends or is cancelled.
 #[derive(Component)]
-pub(super) struct AnimationSourceMarker(pub(super) AnimationSource);
+pub(crate) struct AnimationSourceMarker(pub AnimationSource);
 
 /// Component that stores camera runtime state values during animations.
 ///
@@ -91,11 +92,11 @@ pub(super) struct AnimationSourceMarker(pub(super) AnimationSource);
 /// [`CameraInputInterruptBehavior`], camera input may also be temporarily disabled.
 /// Original values are stored here and restored when the animation completes.
 #[derive(Component, Debug, Clone, Copy, Default)]
-pub(super) struct OrbitCamStash {
-    pub(super) zoom:    f32,
-    pub(super) pan:     f32,
-    pub(super) orbit:   f32,
-    pub(super) enabled: bool,
+pub(crate) struct OrbitCamStash {
+    pub zoom:    f32,
+    pub pan:     f32,
+    pub orbit:   f32,
+    pub control: Option<InputControl>,
 }
 
 /// Enables fit target debug overlay on a camera entity.

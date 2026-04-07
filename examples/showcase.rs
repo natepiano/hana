@@ -34,12 +34,14 @@ use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::FitOverlay;
+use bevy_lagrange::ForceUpdate;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
-use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomCancelled;
 use bevy_lagrange::ZoomEnd;
@@ -305,11 +307,10 @@ fn setup(
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput::blender_default()),
+                ..default()
+            }),
             yaw: Some(CAMERA_START_YAW),
             pitch: Some(CAMERA_START_PITCH),
             ..default()
@@ -644,7 +645,7 @@ fn toggle_second_window(
                 ..default()
             },
             ManagedWindow {
-                window_name: "window_2".into(),
+                name: "window_2".into(),
             },
         ))
         .id();
@@ -1226,7 +1227,7 @@ fn toggle_projection(
             },
             Projection::Custom(_) => {},
         }
-        camera.force_update = true;
+        camera.force_update = ForceUpdate::Pending;
     }
     if logged {
         *pending_fit = true;
@@ -1481,8 +1482,8 @@ fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLog>) {
 fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
         "CameraMoveBegin\n  translation={}\n  focus={}\n  duration={:.0}ms\n  easing={:?}",
-        fmt_vec3(*event.camera_move.translation()),
-        fmt_vec3(*event.camera_move.focus()),
+        fmt_vec3(event.camera_move.translation()),
+        fmt_vec3(event.camera_move.focus()),
         event.camera_move.duration_ms(),
         event.camera_move.easing(),
     ));
@@ -1510,8 +1511,8 @@ fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: ResMut<EventL
     log.push_red(format!(
         "AnimationCancelled\n  source={:?}\n  move_translation={}\n  move_focus={}",
         event.source,
-        fmt_vec3(*event.camera_move.translation()),
-        fmt_vec3(*event.camera_move.focus()),
+        fmt_vec3(event.camera_move.translation()),
+        fmt_vec3(event.camera_move.focus()),
     ));
 }
 

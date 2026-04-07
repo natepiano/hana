@@ -19,10 +19,16 @@ pub struct EguiWantsFocus {
     pub curr: bool,
 }
 
-/// When true, just hovering over an egui panel/window will prevent `OrbitCam`
+/// Controls whether merely hovering over an egui panel/window prevents `OrbitCam`
 /// from reacting to input events.
-#[derive(Resource, PartialEq, Eq, Default)]
-pub struct EguiFocusIncludesHover(pub bool);
+#[derive(Resource, PartialEq, Eq, Default, Clone, Copy, Debug, Reflect)]
+pub enum EguiFocusIncludesHover {
+    /// Only clicks inside egui panels prevent camera input.
+    #[default]
+    ClickOnly,
+    /// Hovering over an egui panel also prevents camera input.
+    IncludeHover,
+}
 
 /// Blocks an `OrbitCam` from receiving input when egui has focus.
 ///
@@ -33,7 +39,7 @@ pub struct EguiFocusIncludesHover(pub bool);
 #[reflect(Component)]
 pub struct BlockOnEguiFocus;
 
-pub(super) fn check_egui_wants_focus(
+pub fn check_egui_wants_focus(
     mut contexts: Query<&mut EguiContext>,
     mut wants_focus: ResMut<EguiWantsFocus>,
     include_hover: Res<EguiFocusIncludesHover>,
@@ -45,7 +51,7 @@ pub(super) fn check_egui_wants_focus(
         let context = context.get_mut();
         let mut context_wants_focus =
             context.wants_pointer_input() || context.wants_keyboard_input();
-        if include_hover.0 {
+        if *include_hover == EguiFocusIncludesHover::IncludeHover {
             context_wants_focus |= context.is_pointer_over_area();
         }
         new_wants_focus |= context_wants_focus;

@@ -1,32 +1,32 @@
 use bevy::prelude::*;
 
-use super::super::support::ScreenSpaceBounds;
+use crate::support::ScreenSpaceBounds;
 
 /// Gizmo config group for fit target visualization (screen-aligned overlay).
 /// Toggle by inserting/removing the `FitVisualization` component on the camera entity.
 #[derive(Default, Reflect, GizmoConfigGroup)]
-pub(super) struct FitTargetGizmo;
+pub struct FitTargetGizmo;
 
 /// Current screen-space margin percentages for the fit target.
 /// Updated every frame by the visualization system.
 /// Removed when fit target visualization is disabled.
 #[derive(Component, Reflect, Debug, Default, Clone)]
 #[reflect(Component)]
-pub(super) struct FitTargetViewportMarginPcts {
+pub struct FitTargetViewportMarginPcts {
     /// Left margin as a percentage of screen width.
-    pub(super) left:   f32,
+    pub left:   f32,
     /// Right margin as a percentage of screen width.
-    pub(super) right:  f32,
+    pub right:  f32,
     /// Top margin as a percentage of screen height.
-    pub(super) top:    f32,
+    pub top:    f32,
     /// Bottom margin as a percentage of screen height.
-    pub(super) bottom: f32,
+    pub bottom: f32,
 }
 
 impl FitTargetViewportMarginPcts {
     /// Constructs margin percentages from screen-space bounds, computing
     /// screen dimensions once rather than per-edge.
-    pub(super) fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
+    pub fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
         let screen_width = 2.0 * bounds.half_extent_x;
         let screen_height = 2.0 * bounds.half_extent_y;
         Self {

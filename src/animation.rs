@@ -7,6 +7,8 @@ use std::time::Duration;
 use bevy::math::curve::Curve;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
+use bevy_kana::Displacement;
+use bevy_kana::Position;
 
 use super::components::AnimationSourceMarker;
 use super::components::CameraInputInterruptBehavior;
@@ -18,9 +20,8 @@ use super::events::CameraMoveBegin;
 use super::events::CameraMoveEnd;
 use super::events::ZoomCancelled;
 use super::events::ZoomEnd;
-use crate::Displacement;
+use crate::ForceUpdate;
 use crate::OrbitCam;
-use crate::Position;
 
 /// Individual camera movement with target position and duration.
 ///
@@ -33,9 +34,9 @@ pub enum CameraMove {
     /// The animation system decomposes this into orbital parameters internally.
     ToPosition {
         /// World-space camera position.
-        translation: Position,
+        translation: Vec3,
         /// World-space focus point the camera looks at.
-        focus:       Position,
+        focus:       Vec3,
         /// Duration of this movement step.
         duration:    Duration,
         /// Easing curve for the interpolation.
@@ -46,7 +47,7 @@ pub enum CameraMove {
     /// decomposition via `atan2` loses yaw information.
     ToOrbit {
         /// World-space focus point the camera orbits around.
-        focus:    Position,
+        focus:    Vec3,
         /// Target yaw in radians.
         yaw:      f32,
         /// Target pitch in radians.
@@ -83,7 +84,7 @@ impl CameraMove {
 
     /// Returns the focus point for this movement step.
     #[must_use]
-    pub const fn focus(&self) -> Position {
+    pub const fn focus(&self) -> Vec3 {
         match self {
             Self::ToPosition { focus, .. } | Self::ToOrbit { focus, .. } => *focus,
         }
@@ -92,7 +93,7 @@ impl CameraMove {
     /// Returns the world-space camera position for this move.
     /// For `ToOrbit`, computes the position from orbital parameters.
     #[must_use]
-    pub fn translation(&self) -> Position {
+    pub fn translation(&self) -> Vec3 {
         match self {
             Self::ToPosition { translation, .. } => *translation,
             Self::ToOrbit {
@@ -116,9 +117,7 @@ impl CameraMove {
         match self {
             Self::ToPosition {
                 translation, focus, ..
-            } => orbital_params_from_offset(Displacement(
-                translation.into_inner() - focus.into_inner(),
-            )),
+            } => orbital_params_from_offset(Displacement(*translation - *focus)),
             Self::ToOrbit {
                 yaw, pitch, radius, ..
             } => (*yaw, *pitch, *radius),
@@ -128,7 +127,7 @@ impl CameraMove {
 
 /// Decomposes an offset vector (camera position minus focus) into orbital parameters.
 /// Returns `(yaw, pitch, radius)`. May lose yaw information at ±PI/2 pitch due to `atan2`.
-pub(super) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32) {
+pub(crate) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32) {
     let radius = offset.length();
     let yaw = offset.x.atan2(offset.z);
     let horizontal_dist = offset.x.hypot(offset.z);
@@ -136,9 +135,7 @@ pub(super) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32
     (yaw, pitch, radius)
 }
 
-/// Tolerance for detecting external camera input during animations.
-/// Values within this threshold are considered unchanged (accounts for floating point noise).
-const EXTERNAL_INPUT_TOLERANCE: f32 = 1e-6;
+use crate::constants::EXTERNAL_INPUT_TOLERANCE;
 
 /// State tracking for the current camera movement
 #[derive(Clone, Reflect, Default, Debug)]
@@ -315,7 +312,7 @@ fn handle_camera_input_interrupt(
                 pan_orbit.target_yaw = yaw;
                 pan_orbit.target_pitch = pitch;
                 pan_orbit.target_radius = radius;
-                pan_orbit.force_update = true;
+                pan_orbit.force_update = ForceUpdate::Pending;
             }
             // Fire normal end events
             commands
@@ -360,7 +357,7 @@ fn handle_ready_state(
         pan_orbit.target_radius = target_radius;
         pan_orbit.target_yaw = target_yaw;
         pan_orbit.target_pitch = target_pitch;
-        pan_orbit.force_update = true;
+        pan_orbit.force_update = ForceUpdate::Pending;
 
         commands.trigger(CameraMoveEnd {
             camera:      entity,
@@ -373,11 +370,11 @@ fn handle_ready_state(
     // Transition to `InProgress` with captured starting orbital parameters
     queue.state = MoveState::InProgress {
         elapsed_ms:          0.0,
-        start_focus:         pan_orbit.target_focus,
+        start_focus:         Position(pan_orbit.target_focus),
         start_radius:        pan_orbit.target_radius,
         start_yaw:           pan_orbit.target_yaw,
         start_pitch:         pan_orbit.target_pitch,
-        last_written_focus:  pan_orbit.target_focus,
+        last_written_focus:  Position(pan_orbit.target_focus),
         last_written_yaw:    pan_orbit.target_yaw,
         last_written_pitch:  pan_orbit.target_pitch,
         last_written_radius: pan_orbit.target_radius,
@@ -456,14 +453,14 @@ fn handle_in_progress(
     let pitch_diff = pitch_target - *start_pitch;
 
     // `ToPosition` and `ToOrbit` are both normalized to orbital params above
-    pan_orbit.target_focus = start_focus.lerp(current_move.focus(), t_interp);
+    pan_orbit.target_focus = Vec3::lerp(**start_focus, current_move.focus(), t_interp);
     pan_orbit.target_radius = (canonical_radius - *start_radius).mul_add(t_interp, *start_radius);
     pan_orbit.target_yaw = yaw_diff.mul_add(t_interp, *start_yaw);
     pan_orbit.target_pitch = pitch_diff.mul_add(t_interp, *start_pitch);
-    pan_orbit.force_update = true;
+    pan_orbit.force_update = ForceUpdate::Pending;
 
     // Save what we wrote so we can detect external changes next frame
-    *last_written_focus = pan_orbit.target_focus;
+    *last_written_focus = Position(pan_orbit.target_focus);
     *last_written_yaw = pan_orbit.target_yaw;
     *last_written_pitch = pan_orbit.target_pitch;
     *last_written_radius = pan_orbit.target_radius;
@@ -484,7 +481,7 @@ fn handle_in_progress(
 /// When a `OrbitCam` has a `CameraMoveList`, interpolates toward the target over
 /// the specified duration with easing. When a move completes, automatically moves to the
 /// next. Removes the `CameraMoveList` component when all moves are complete.
-pub(super) fn process_camera_move_list(
+pub(crate) fn process_camera_move_list(
     mut commands: Commands,
     time: Res<Time>,
     mut camera_query: Query<(
