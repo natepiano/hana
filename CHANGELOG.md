@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Prevent panic when closing a second window
+- Idle camera no longer triggers Bevy change detection every frame — `&mut Transform` is now only passed when the camera actually moves
 
 ## [0.0.1] - 2026-03-28
 

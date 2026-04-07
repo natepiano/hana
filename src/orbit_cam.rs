@@ -612,30 +612,11 @@ fn smooth_and_update_transform(
     transform: &mut Transform,
     projection: &mut Projection,
     delta: f32,
-    has_moved: bool,
 ) {
     let (Some(yaw), Some(pitch), Some(radius)) = (pan_orbit.yaw, pan_orbit.pitch, pan_orbit.radius)
     else {
         return;
     };
-
-    #[allow(
-        clippy::float_cmp,
-        reason = "lerp_and_snap produces bitwise-identical values on convergence"
-    )]
-    if !has_moved
-        // For smoothed values, we must check whether current value is different from target
-        // value. If we only checked whether the values were non-zero this frame, then
-        // the camera would instantly stop moving as soon as you stopped moving it, instead
-        // of smoothly stopping
-        && pan_orbit.target_yaw == yaw
-        && pan_orbit.target_pitch == pitch
-        && pan_orbit.target_radius == radius
-        && pan_orbit.target_focus == pan_orbit.focus
-        && pan_orbit.force_update == ForceUpdate::Idle
-    {
-        return;
-    }
 
     let new_yaw =
         util::lerp_and_snap_f32(yaw, pan_orbit.target_yaw, pan_orbit.orbit_smoothness, delta);
@@ -748,12 +729,34 @@ pub(super) fn orbit_cam(
             TimeSource::Virtual => time_virt.delta_secs(),
         };
 
-        smooth_and_update_transform(
-            &mut pan_orbit,
-            &mut transform,
-            &mut projection,
-            delta,
-            has_moved,
-        );
+        // Only pass `&mut transform` when something actually changed.
+        // Passing it unconditionally triggers Bevy's `DerefMut` change detection,
+        // marking `Transform` (and therefore `GlobalTransform`) as changed every
+        // frame — even when the camera is idle.
+        let (Some(yaw), Some(pitch), Some(radius)) =
+            (pan_orbit.yaw, pan_orbit.pitch, pan_orbit.radius)
+        else {
+            continue;
+        };
+
+        #[allow(
+            clippy::float_cmp,
+            reason = "lerp_and_snap produces bitwise-identical values on convergence"
+        )]
+        let needs_update = has_moved
+            || pan_orbit.force_update != ForceUpdate::Idle
+            || pan_orbit.target_yaw != yaw
+            || pan_orbit.target_pitch != pitch
+            || pan_orbit.target_radius != radius
+            || pan_orbit.target_focus != pan_orbit.focus;
+
+        if needs_update {
+            smooth_and_update_transform(
+                &mut pan_orbit,
+                &mut transform,
+                &mut projection,
+                delta,
+            );
+        }
     }
 }
