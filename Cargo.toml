@@ -10,9 +10,10 @@ version     = "0.0.1"
 
 [lints.clippy]
 # Our strict lints
-expect_used = "deny"
-panic       = "deny"
-unwrap_used = "deny"
+allow_attributes_without_reason = "deny"
+expect_used                     = "deny"
+panic                           = "deny"
+unwrap_used                     = "deny"
 
 # Enable lint groups as errors (with lower priority so allows can override)
 all      = { level = "deny", priority = -1 }
@@ -64,7 +65,7 @@ bevy                = { version = "0.18.1", features = ["default_font"] }
 bevy-inspector-egui = "0.36.0"
 bevy_brp_extras     = "0.19.0"
 bevy_lagrange       = { version = "0.0.1", features = ["fit_overlay"] }
-bevy_window_manager = "0.19.0"
+bevy_window_manager = "0.20.2"
 clay-layout         = { path = "./clay-layout" }
 criterion           = { version = "0.8.2", features = ["html_reports"] }
 image               = { version = "0.25", features = ["png"] }
