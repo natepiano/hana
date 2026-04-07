@@ -141,7 +141,7 @@ All operations support instant (`Duration::ZERO`) and animated paths with full l
 
 ## Version Compatibility
 
-| bevy_lagrange | Bevy |
+| `bevy_lagrange` | Bevy |
 |---------------|------|
 | 0.0.2         | 0.18 |
 

@@ -751,12 +751,7 @@ pub(super) fn orbit_cam(
             || pan_orbit.target_focus != pan_orbit.focus;
 
         if needs_update {
-            smooth_and_update_transform(
-                &mut pan_orbit,
-                &mut transform,
-                &mut projection,
-                delta,
-            );
+            smooth_and_update_transform(&mut pan_orbit, &mut transform, &mut projection, delta);
         }
     }
 }
