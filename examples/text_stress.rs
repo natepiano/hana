@@ -39,9 +39,11 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 
 // ── Text / layout constants (meters) ─────────────────────────────────────────
 
@@ -256,9 +258,13 @@ fn setup(
             radius: Some(8.0),
             yaw: Some(0.0),
             pitch: Some(0.35),
-            trackpad_behavior: TrackpadBehavior::blender_default(),
-            trackpad_sensitivity: 0.5,
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior:    TrackpadBehavior::blender_default(),
+                    sensitivity: 0.5,
+                }),
+                ..default()
+            }),
             ..default()
         },
     ));

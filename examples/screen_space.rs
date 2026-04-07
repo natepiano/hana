@@ -17,9 +17,11 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 const PANEL_WIDTH: f32 = 480.0;
@@ -254,10 +256,16 @@ fn spawn_camera(commands: &mut Commands) {
             scale:       Vec3::ONE,
         },
         OrbitCam {
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior: TrackpadBehavior::BlenderLike {
+                        modifier_pan:  Some(KeyCode::ShiftLeft),
+                        modifier_zoom: Some(KeyCode::ControlLeft),
+                    },
+                    ..default()
+                }),
+                ..default()
+            }),
             ..default()
         },
     ));

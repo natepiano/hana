@@ -64,7 +64,7 @@ ttf-parser = "0.25"
 bevy                = { version = "0.18.1", features = ["default_font"] }
 bevy-inspector-egui = "0.36.0"
 bevy_brp_extras     = "0.19.0"
-bevy_lagrange       = { version = "0.0.1", features = ["fit_overlay"] }
+bevy_lagrange       = { version = "0.0.2", features = ["fit_overlay"] }
 bevy_window_manager = "0.20.2"
 clay-layout         = { path = "./clay-layout" }
 criterion           = { version = "0.8.2", features = ["html_reports"] }

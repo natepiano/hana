@@ -33,9 +33,12 @@ use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
+use bevy_lagrange::ForceUpdate;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
@@ -294,12 +297,16 @@ fn spawn_lights_and_camera(commands: &mut Commands, page_height: f32) {
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-            trackpad_sensitivity: 1.0,
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior:    TrackpadBehavior::BlenderLike {
+                        modifier_pan:  Some(KeyCode::ShiftLeft),
+                        modifier_zoom: Some(KeyCode::ControlLeft),
+                    },
+                    sensitivity: 1.0,
+                }),
+                ..default()
+            }),
             zoom_sensitivity: 1.0,
             zoom_lower_limit: 0.000_000_1,
             ..default()
@@ -355,7 +362,7 @@ fn toggle_projection(
             },
             Projection::Custom(_) => {},
         }
-        poc.force_update = true;
+        poc.force_update = ForceUpdate::Pending;
     }
 }
 
@@ -375,7 +382,7 @@ fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut OrbitCam)>) {
                 p.near = new_near;
                 p.far = new_far;
                 p.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -new_near);
-                poc.force_update = true;
+                poc.force_update = ForceUpdate::Pending;
             }
         }
     }

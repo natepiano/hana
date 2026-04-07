@@ -32,9 +32,11 @@ use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
+use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
@@ -317,13 +319,16 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
-            trackpad_behavior: TrackpadBehavior::BlenderLike {
-                modifier_pan:  Some(KeyCode::ShiftLeft),
-                modifier_zoom: Some(KeyCode::ControlLeft),
-            },
-
-            trackpad_sensitivity: 0.5,
-            trackpad_pinch_to_zoom_enabled: true,
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior:    TrackpadBehavior::BlenderLike {
+                        modifier_pan:  Some(KeyCode::ShiftLeft),
+                        modifier_zoom: Some(KeyCode::ControlLeft),
+                    },
+                    sensitivity: 0.5,
+                }),
+                ..default()
+            }),
             ..default()
         },
     ));
