@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 use bevy::tasks::available_parallelism;
+use bevy_kana::ToF32;
+use bevy_kana::ToU32;
 
 use crate::layout::Dimension;
 use crate::layout::Unit;
@@ -208,11 +210,6 @@ impl AtlasConfig {
     /// varies by font — narrow characters pack tighter than wide ones.
     /// Pages that fill beyond this estimate simply overflow to a new page.
     #[must_use]
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
     pub fn page_size(&self) -> u32 {
         let canonical = self.canonical_size();
         // Average glyph bitmap dimension — most glyphs use ~75% of the
@@ -220,12 +217,12 @@ impl AtlasConfig {
         // (which would over-allocate) but still safe because `etagere`
         // overflows to a new page if a glyph doesn't fit.
         let total_pad = 2 + 4; // DEFAULT_GLYPH_PADDING + DEFAULT_SDF_RANGE
-        let avg_glyph = (canonical as f32 * 0.75) as u32 + 2 * total_pad;
+        let avg_glyph = (canonical.to_f32() * 0.75).to_u32() + 2 * total_pad;
         let glyphs = f32::from(self.clamped_glyphs_per_page());
         // Shelf packing is ~80% efficient.
-        let area = glyphs * (avg_glyph as f32) * (avg_glyph as f32) / 0.80;
+        let area = glyphs * avg_glyph.to_f32() * avg_glyph.to_f32() / 0.80;
         // Round up to next multiple of 4 for GPU texture row alignment.
-        let side = area.sqrt().ceil() as u32;
+        let side = area.sqrt().ceil().to_u32();
         (side + 3) & !3
     }
 

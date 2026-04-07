@@ -12,13 +12,14 @@
 #![allow(
     clippy::panic,
     clippy::unwrap_used,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
+    reason = "tests use panic/unwrap for clearer failure messages"
 )]
 
 use std::fmt::Write;
 
+use bevy_kana::ToF64;
+use bevy_kana::ToU8;
+use bevy_kana::ToUsize;
 use msdfgen::Bitmap;
 use msdfgen::FontExt;
 use msdfgen::MsdfGeneratorConfig;
@@ -71,7 +72,7 @@ fn fill_fraction_rgb(data: &[u8], width: u32, height: u32) -> f64 {
     }
 
     let mut inside = 0_u64;
-    for i in 0..(width * height) as usize {
+    for i in 0..(width * height).to_usize() {
         let red = data[i * 3];
         let green = data[i * 3 + 1];
         let blue = data[i * 3 + 2];
@@ -81,7 +82,7 @@ fn fill_fraction_rgb(data: &[u8], width: u32, height: u32) -> f64 {
         }
     }
 
-    inside as f64 / total
+    inside.to_f64() / total
 }
 
 fn median_of_three(a: u8, b: u8, c: u8) -> u8 {
@@ -90,7 +91,7 @@ fn median_of_three(a: u8, b: u8, c: u8) -> u8 {
     arr[1]
 }
 
-fn float_to_byte(v: f32) -> u8 { (v * 255.0).round().clamp(0.0, 255.0) as u8 }
+fn float_to_byte(v: f32) -> u8 { (v * 255.0).round().clamp(0.0, 255.0).to_u8() }
 
 /// Generate MSDF with fdsm. Returns fill fraction.
 fn fdsm_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
@@ -116,7 +117,7 @@ fn msdfgen_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
 
     let width = bitmap.width();
     let height = bitmap.height();
-    let mut pixels = Vec::with_capacity((width * height * 3) as usize);
+    let mut pixels = Vec::with_capacity((width * height * 3).to_usize());
     for y in 0..height {
         for x in 0..width {
             let px = bitmap.pixel(x, y);

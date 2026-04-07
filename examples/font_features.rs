@@ -222,7 +222,10 @@ fn resize_panel(
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
-        #[allow(clippy::float_cmp)]
+        #[allow(
+            clippy::float_cmp,
+            reason = "exact comparison detects whether dimensions changed from values this code assigned"
+        )]
         if panel.width == layout_w && panel.height == layout_h {
             continue;
         }

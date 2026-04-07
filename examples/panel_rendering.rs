@@ -423,7 +423,6 @@ impl Default for TaaEnabled {
 /// Single panel with three cards laid out side by side.
 /// No panel-level background — the cards' own backgrounds make them
 /// appear as three separate panels within one RTT texture.
-#[allow(clippy::too_many_lines)]
 fn build_unified_panel() -> bevy_diegetic::LayoutTree {
     let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
     let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
@@ -436,214 +435,233 @@ fn build_unified_panel() -> bevy_diegetic::LayoutTree {
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
-            // ── Card 1: Backgrounds ─────────────────────────────
+            build_card_backgrounds(b, &title_style, &body_style);
+            build_card_borders(b, &title_style, &body_style);
+            build_card_combined(b, &title_style, &body_style);
+        },
+    );
+    builder.build()
+}
+
+fn build_card_backgrounds(
+    b: &mut LayoutBuilder,
+    title_style: &LayoutTextStyle,
+    body_style: &LayoutTextStyle,
+) {
+    b.with(
+        El::new()
+            .direction(Direction::TopToBottom)
+            .padding(Padding::all(CARD_PAD))
+            .child_gap(CHILD_GAP)
+            .background(DARK_BG)
+            .corner_radius(CornerRadius::all(Mm(3.0)))
+            .width(Sizing::grow_min(0.0))
+            .height(Sizing::grow_min(0.0)),
+        |b| {
+            b.text("Backgrounds", title_style.clone());
+            b.text("Nested elements with fills", body_style.clone());
+
             b.with(
                 El::new()
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(CARD_PAD))
+                    .direction(Direction::LeftToRight)
                     .child_gap(CHILD_GAP)
-                    .background(DARK_BG)
-                    .corner_radius(CornerRadius::all(Mm(3.0)))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
-                    b.text("Backgrounds", title_style.clone());
-                    b.text("Nested elements with fills", body_style.clone());
-
                     b.with(
                         El::new()
-                            .direction(Direction::LeftToRight)
-                            .child_gap(CHILD_GAP)
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::grow_min(0.0)),
-                        |b| {
-                            b.with(
-                                El::new()
-                                    .background(RED_ACCENT)
-                                    .corner_radius(CornerRadius::all(Mm(1.5)))
-                                    .padding(Padding::all(3.0))
-                                    .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::grow_min(0.0)),
-                                |b| {
-                                    b.text("Red", body_style.clone());
-                                },
-                            );
-                            b.with(
-                                El::new()
-                                    .background(BLUE_ACCENT)
-                                    .corner_radius(CornerRadius::all(Mm(1.5)))
-                                    .padding(Padding::all(3.0))
-                                    .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::grow_min(0.0)),
-                                |b| {
-                                    b.text("Blue", body_style.clone());
-                                },
-                            );
-                            b.with(
-                                El::new()
-                                    .background(GREEN_ACCENT)
-                                    .corner_radius(CornerRadius::all(Mm(1.5)))
-                                    .padding(Padding::all(3.0))
-                                    .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::grow_min(0.0)),
-                                |b| {
-                                    b.text("Green", body_style.clone());
-                                },
-                            );
-                        },
-                    );
-
-                    b.with(
-                        El::new()
-                            .background(BLUE_BG)
+                            .background(RED_ACCENT)
+                            .corner_radius(CornerRadius::all(Mm(1.5)))
                             .padding(Padding::all(3.0))
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::grow_min(0.0)),
                         |b| {
-                            b.text("Nested background", body_style.clone());
+                            b.text("Red", body_style.clone());
+                        },
+                    );
+                    b.with(
+                        El::new()
+                            .background(BLUE_ACCENT)
+                            .corner_radius(CornerRadius::all(Mm(1.5)))
+                            .padding(Padding::all(3.0))
+                            .width(Sizing::grow_min(0.0))
+                            .height(Sizing::grow_min(0.0)),
+                        |b| {
+                            b.text("Blue", body_style.clone());
+                        },
+                    );
+                    b.with(
+                        El::new()
+                            .background(GREEN_ACCENT)
+                            .corner_radius(CornerRadius::all(Mm(1.5)))
+                            .padding(Padding::all(3.0))
+                            .width(Sizing::grow_min(0.0))
+                            .height(Sizing::grow_min(0.0)),
+                        |b| {
+                            b.text("Green", body_style.clone());
                         },
                     );
                 },
             );
 
-            // ── Card 2: Borders ─────────────────────────────────
             b.with(
                 El::new()
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(CARD_PAD))
-                    .child_gap(CHILD_GAP)
-                    .border(Border::all(Mm(0.5), BORDER_COLOR))
+                    .background(BLUE_BG)
+                    .padding(Padding::all(3.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
-                    b.text("Borders", title_style.clone());
-
-                    b.with(
-                        El::new()
-                            .border(Border::all(Mm(0.3), BLUE_ACCENT))
-                            .padding(Padding::all(2.0))
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::fit_min(0.0)),
-                        |b| {
-                            b.text("Thin blue border", body_style.clone());
-                        },
-                    );
-
-                    b.with(
-                        El::new()
-                            .border(Border::all(Mm(1.0), RED_ACCENT))
-                            .padding(Padding::all(2.0))
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::fit_min(0.0)),
-                        |b| {
-                            b.text("Thick red border", body_style.clone());
-                        },
-                    );
-
-                    b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_gap(CHILD_GAP)
-                            .border(Border::all(Mm(0.3), BORDER_COLOR).between_children(Mm(0.3)))
-                            .padding(Padding::all(2.0))
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::grow_min(0.0)),
-                        |b| {
-                            b.text("Row A", body_style.clone());
-                            b.text("Row B", body_style.clone());
-                            b.text("Row C", body_style.clone());
-                        },
-                    );
-                },
-            );
-
-            // ── Card 3: Combined ────────────────────────────────
-            b.with(
-                El::new()
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(CARD_PAD))
-                    .child_gap(CHILD_GAP)
-                    .background(DARK_BG)
-                    .border(Border::all(Mm(0.5), BLUE_ACCENT))
-                    .corner_radius(CornerRadius::all(Mm(3.0)))
-                    .width(Sizing::grow_min(0.0))
-                    .height(Sizing::grow_min(0.0)),
-                |b| {
-                    b.text("Combined", title_style.clone());
-
-                    b.with(
-                        El::new()
-                            .background(GREEN_BG)
-                            .border(Border::all(Mm(0.3), GREEN_ACCENT))
-                            .padding(Padding::all(3.0))
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::fit_min(0.0)),
-                        |b| {
-                            b.text("Card with bg + border", body_style.clone());
-                        },
-                    );
-
-                    b.with(
-                        El::new()
-                            .direction(Direction::LeftToRight)
-                            .child_gap(CHILD_GAP)
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::grow_min(0.0)),
-                        |b| {
-                            // Overflow visible — second line spills past the box.
-                            b.with(
-                                El::new()
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(1.0)
-                                    .background(BLUE_BG)
-                                    .border(Border::all(Mm(0.3), BLUE_ACCENT))
-                                    .padding(Padding::all(2.0))
-                                    .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::fixed(8.0)),
-                                |b| {
-                                    b.text("No clip", body_style.clone());
-                                    b.text("Spills out", body_style.clone());
-                                },
-                            );
-                            // Overflow clipped — second line hidden at the boundary.
-                            b.with(
-                                El::new()
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(1.0)
-                                    .clip()
-                                    .background(GREEN_BG)
-                                    .border(Border::all(Mm(0.3), GREEN_ACCENT))
-                                    .padding(Padding::all(2.0))
-                                    .width(Sizing::grow_min(0.0))
-                                    .height(Sizing::fixed(8.0)),
-                                |b| {
-                                    b.text("Clipped", body_style.clone());
-                                    b.text("Hidden", body_style.clone());
-                                },
-                            );
-                        },
-                    );
-
-                    b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_gap(1.5)
-                            .background(BLUE_BG)
-                            .border(Border::all(Mm(0.3), DIVIDER_COLOR).between_children(Mm(0.2)))
-                            .padding(Padding::all(2.0))
-                            .width(Sizing::grow_min(0.0))
-                            .height(Sizing::grow_min(0.0)),
-                        |b| {
-                            b.text("Item 1", body_style.clone());
-                            b.text("Item 2", body_style.clone());
-                            b.text("Item 3", body_style.clone());
-                        },
-                    );
+                    b.text("Nested background", body_style.clone());
                 },
             );
         },
     );
-    builder.build()
+}
+
+fn build_card_borders(
+    b: &mut LayoutBuilder,
+    title_style: &LayoutTextStyle,
+    body_style: &LayoutTextStyle,
+) {
+    b.with(
+        El::new()
+            .direction(Direction::TopToBottom)
+            .padding(Padding::all(CARD_PAD))
+            .child_gap(CHILD_GAP)
+            .border(Border::all(Mm(0.5), BORDER_COLOR))
+            .width(Sizing::grow_min(0.0))
+            .height(Sizing::grow_min(0.0)),
+        |b| {
+            b.text("Borders", title_style.clone());
+
+            b.with(
+                El::new()
+                    .border(Border::all(Mm(0.3), BLUE_ACCENT))
+                    .padding(Padding::all(2.0))
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::fit_min(0.0)),
+                |b| {
+                    b.text("Thin blue border", body_style.clone());
+                },
+            );
+
+            b.with(
+                El::new()
+                    .border(Border::all(Mm(1.0), RED_ACCENT))
+                    .padding(Padding::all(2.0))
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::fit_min(0.0)),
+                |b| {
+                    b.text("Thick red border", body_style.clone());
+                },
+            );
+
+            b.with(
+                El::new()
+                    .direction(Direction::TopToBottom)
+                    .child_gap(CHILD_GAP)
+                    .border(Border::all(Mm(0.3), BORDER_COLOR).between_children(Mm(0.3)))
+                    .padding(Padding::all(2.0))
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::grow_min(0.0)),
+                |b| {
+                    b.text("Row A", body_style.clone());
+                    b.text("Row B", body_style.clone());
+                    b.text("Row C", body_style.clone());
+                },
+            );
+        },
+    );
+}
+
+fn build_card_combined(
+    b: &mut LayoutBuilder,
+    title_style: &LayoutTextStyle,
+    body_style: &LayoutTextStyle,
+) {
+    b.with(
+        El::new()
+            .direction(Direction::TopToBottom)
+            .padding(Padding::all(CARD_PAD))
+            .child_gap(CHILD_GAP)
+            .background(DARK_BG)
+            .border(Border::all(Mm(0.5), BLUE_ACCENT))
+            .corner_radius(CornerRadius::all(Mm(3.0)))
+            .width(Sizing::grow_min(0.0))
+            .height(Sizing::grow_min(0.0)),
+        |b| {
+            b.text("Combined", title_style.clone());
+
+            b.with(
+                El::new()
+                    .background(GREEN_BG)
+                    .border(Border::all(Mm(0.3), GREEN_ACCENT))
+                    .padding(Padding::all(3.0))
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::fit_min(0.0)),
+                |b| {
+                    b.text("Card with bg + border", body_style.clone());
+                },
+            );
+
+            b.with(
+                El::new()
+                    .direction(Direction::LeftToRight)
+                    .child_gap(CHILD_GAP)
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::grow_min(0.0)),
+                |b| {
+                    // Overflow visible — second line spills past the box.
+                    b.with(
+                        El::new()
+                            .direction(Direction::TopToBottom)
+                            .child_gap(1.0)
+                            .background(BLUE_BG)
+                            .border(Border::all(Mm(0.3), BLUE_ACCENT))
+                            .padding(Padding::all(2.0))
+                            .width(Sizing::grow_min(0.0))
+                            .height(Sizing::fixed(8.0)),
+                        |b| {
+                            b.text("No clip", body_style.clone());
+                            b.text("Spills out", body_style.clone());
+                        },
+                    );
+                    // Overflow clipped — second line hidden at the boundary.
+                    b.with(
+                        El::new()
+                            .direction(Direction::TopToBottom)
+                            .child_gap(1.0)
+                            .clip()
+                            .background(GREEN_BG)
+                            .border(Border::all(Mm(0.3), GREEN_ACCENT))
+                            .padding(Padding::all(2.0))
+                            .width(Sizing::grow_min(0.0))
+                            .height(Sizing::fixed(8.0)),
+                        |b| {
+                            b.text("Clipped", body_style.clone());
+                            b.text("Hidden", body_style.clone());
+                        },
+                    );
+                },
+            );
+
+            b.with(
+                El::new()
+                    .direction(Direction::TopToBottom)
+                    .child_gap(1.5)
+                    .background(BLUE_BG)
+                    .border(Border::all(Mm(0.3), DIVIDER_COLOR).between_children(Mm(0.2)))
+                    .padding(Padding::all(2.0))
+                    .width(Sizing::grow_min(0.0))
+                    .height(Sizing::grow_min(0.0)),
+                |b| {
+                    b.text("Item 1", body_style.clone());
+                    b.text("Item 2", body_style.clone());
+                    b.text("Item 3", body_style.clone());
+                },
+            );
+        },
+    );
 }
 
 // ── HUD builders ───────────────────────────────────────────────────

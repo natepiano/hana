@@ -3,6 +3,11 @@
 //! Verifies that real font measurement via parley produces reasonable dimensions
 //! from the embedded `JetBrains Mono` font.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "tests use unwrap for clearer failure messages"
+)]
+
 use super::FontRegistry;
 use super::create_parley_measurer;
 use crate::LayoutTextStyle;
@@ -10,7 +15,7 @@ use crate::MeasureTextFn;
 use crate::TextMeasure;
 
 fn measurer() -> (FontRegistry, MeasureTextFn) {
-    let registry = FontRegistry::new();
+    let registry = FontRegistry::new().unwrap();
     let measure_fn = create_parley_measurer(registry.font_context(), registry.family_names());
     (registry, measure_fn)
 }

@@ -370,7 +370,10 @@ impl Plugin for DiegeticUiPluginConfigured {
 fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option<UnitConfig>) {
     install_perf_diagnostics(app);
     // Initialize font registry and wire up parley-backed text measurement.
-    let registry = FontRegistry::new();
+    let Some(registry) = FontRegistry::new() else {
+        warn!("bevy_diegetic: embedded font failed to parse — plugin disabled");
+        return;
+    };
     let measurer = DiegeticTextMeasurer {
         measure_fn: text::create_parley_measurer(registry.font_context(), registry.family_names()),
     };

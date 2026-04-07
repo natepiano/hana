@@ -326,8 +326,7 @@ impl MsdfAtlas {
 
     /// Returns the SDF range used for glyph generation.
     #[must_use]
-    #[allow(clippy::unused_self)]
-    pub const fn sdf_range(&self) -> f64 { DEFAULT_SDF_RANGE }
+    pub const fn sdf_range() -> f64 { DEFAULT_SDF_RANGE }
 
     /// Returns the GPU image handle for a specific atlas page.
     ///
@@ -570,16 +569,11 @@ impl MsdfAtlas {
     /// into the interior, replicates border texels into the gutter, and
     /// computes UV coordinates inset by half a texel so linear filtering
     /// samples texel centers rather than edges.
-    #[allow(
-        clippy::cast_possible_wrap,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
     fn insert_bitmap(&mut self, key: GlyphKey, bitmap: &MsdfBitmap) -> Option<GlyphMetrics> {
         let g = ATLAS_GUTTER;
         let padded_w = bitmap.width + 2 * g;
         let padded_h = bitmap.height + 2 * g;
-        let alloc_size = size2(padded_w as i32, padded_h as i32);
+        let alloc_size = size2(padded_w.to_i32(), padded_h.to_i32());
 
         // Try each existing page.
         let mut page_idx = None;
@@ -602,8 +596,8 @@ impl MsdfAtlas {
 
         let page = &mut self.pages[page_index];
         let rect = alloc.rectangle;
-        let alloc_x = rect.min.x as u32;
-        let alloc_y = rect.min.y as u32;
+        let alloc_x = rect.min.x.to_u32();
+        let alloc_y = rect.min.y.to_u32();
 
         // Interior origin (where the actual bitmap goes, inside the gutter).
         let x0 = alloc_x + g;
@@ -612,10 +606,10 @@ impl MsdfAtlas {
         // Copy RGB bitmap data into RGBA page pixels (interior).
         for row in 0..bitmap.height {
             for col in 0..bitmap.width {
-                let src_idx = ((row * bitmap.width + col) * 3) as usize;
+                let src_idx = ((row * bitmap.width + col) * 3).to_usize();
                 let dst_x = x0 + col;
                 let dst_y = y0 + row;
-                let dst_idx = ((dst_y * self.width + dst_x) * BYTES_PER_PIXEL) as usize;
+                let dst_idx = ((dst_y * self.width + dst_x) * BYTES_PER_PIXEL).to_usize();
 
                 page.pixels[dst_idx] = bitmap.data[src_idx];
                 page.pixels[dst_idx + 1] = bitmap.data[src_idx + 1];
@@ -640,12 +634,12 @@ impl MsdfAtlas {
         // (replicated border texels) handles edge sampling — no half-texel
         // inset needed. Insetting would stretch the MSDF across the quad
         // and push the visible contour beyond the font metrics.
-        let atlas_w = self.width as f32;
-        let atlas_h = self.height as f32;
-        let u_min = x0 as f32 / atlas_w;
-        let v_min = y0 as f32 / atlas_h;
-        let u_max = (x0 + bitmap.width) as f32 / atlas_w;
-        let v_max = (y0 + bitmap.height) as f32 / atlas_h;
+        let atlas_w = self.width.to_f32();
+        let atlas_h = self.height.to_f32();
+        let u_min = x0.to_f32() / atlas_w;
+        let v_min = y0.to_f32() / atlas_h;
+        let u_max = (x0 + bitmap.width).to_f32() / atlas_w;
+        let v_max = (y0 + bitmap.height).to_f32() / atlas_h;
 
         let metrics = GlyphMetrics {
             uv_rect:      [u_min, v_min, u_max, v_max],

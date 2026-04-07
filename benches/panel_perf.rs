@@ -1,4 +1,7 @@
-#![allow(clippy::cast_precision_loss, clippy::expect_used)]
+#![allow(
+    clippy::expect_used,
+    reason = "benchmarks expect on just-spawned entities where None is a test bug"
+)]
 
 //! Benchmark for `DiegeticPanel` layout performance at various sizes.
 //!
@@ -33,6 +36,7 @@ use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use bevy_diegetic::Unit;
 use bevy_diegetic::UnitConfig;
+use bevy_kana::ToF32;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
@@ -51,7 +55,7 @@ fn monospace_measurer() -> DiegeticTextMeasurer {
             let mut line_count = 0_u32;
             for line in text.lines() {
                 line_count += 1;
-                let width = line.chars().count() as f32 * char_width;
+                let width = line.chars().count().to_f32() * char_width;
                 max_line_width = max_line_width.max(width);
             }
             if line_count == 0 {
@@ -59,7 +63,7 @@ fn monospace_measurer() -> DiegeticTextMeasurer {
             }
             TextDimensions {
                 width:       max_line_width,
-                height:      measure.size * line_count as f32,
+                height:      measure.size * line_count.to_f32(),
                 line_height: measure.size,
             }
         }),

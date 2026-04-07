@@ -128,27 +128,26 @@ fn main() {
         .run();
 }
 
-#[allow(clippy::similar_names)]
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
 ) {
-    let a4_w_m = A4_W * MM_TO_M;
-    let a4_h_m = A4_H * MM_TO_M;
-    let card_w_m = CARD_W * IN_TO_M;
-    let card_h_m = CARD_H * IN_TO_M;
+    let a4_width_m = A4_W * MM_TO_M;
+    let a4_height_m = A4_H * MM_TO_M;
+    let card_width_m = CARD_W * IN_TO_M;
+    let card_height_m = CARD_H * IN_TO_M;
 
-    let total_w = a4_w_m + GAP + card_w_m;
+    let total_w = a4_width_m + GAP + card_width_m;
     let group_left = -total_w / 2.0;
 
-    let a4_x = group_left + a4_w_m / 2.0;
-    let a4_y = a4_h_m / 2.0 + LIFT;
+    let a4_x = group_left + a4_width_m / 2.0;
+    let a4_y = a4_height_m / 2.0 + LIFT;
 
-    let a4_top = a4_y + a4_h_m / 2.0;
-    let card_x = group_left + a4_w_m + GAP + card_w_m / 2.0;
-    let card_y = a4_top - card_h_m / 2.0;
+    let a4_top = a4_y + a4_height_m / 2.0;
+    let card_x = group_left + a4_width_m + GAP + card_width_m / 2.0;
+    let card_y = a4_top - card_height_m / 2.0;
 
     let ruler_color = Color::srgba(0.55, 0.55, 0.55, 0.7);
     let label_style = WorldTextStyle::new(LABEL_SIZE)
@@ -176,9 +175,9 @@ fn setup(
         &mut commands,
         &mut gizmo_assets,
         a4_entity,
-        build_metric_ruler(a4_w_m, a4_h_m, ruler_color),
+        build_metric_ruler(a4_width_m, a4_height_m, ruler_color),
         |cmd, container| {
-            spawn_metric_labels(cmd, container, a4_w_m, a4_h_m, label_style.clone());
+            spawn_metric_labels(cmd, container, a4_width_m, a4_height_m, label_style.clone());
         },
     );
 
@@ -203,20 +202,20 @@ fn setup(
         &mut commands,
         &mut gizmo_assets,
         card_entity,
-        build_inch_ruler(card_w_m, card_h_m, ruler_color),
+        build_inch_ruler(card_width_m, card_height_m, ruler_color),
         |cmd, container| {
-            spawn_inch_labels(cmd, container, card_w_m, card_h_m, label_style);
+            spawn_inch_labels(cmd, container, card_width_m, card_height_m, label_style);
         },
     );
 
     // ── Controls panel ───────────────────────────────────────────────
-    let card_left = card_x - card_w_m / 2.0;
-    let card_bottom = card_y - card_h_m / 2.0;
+    let card_left = card_x - card_width_m / 2.0;
+    let card_bottom = card_y - card_height_m / 2.0;
     let ruler_bottom = card_bottom - RULER_GAP - INCH_TICK;
-    let ctrl_w_m = CTRL_W * MM_TO_M;
-    let ctrl_h_m = CTRL_H * MM_TO_M;
-    let ctrl_x = card_left + ctrl_w_m / 2.0;
-    let ctrl_y = ruler_bottom - GAP - ctrl_h_m / 2.0;
+    let ctrl_width_m = CTRL_W * MM_TO_M;
+    let ctrl_height_m = CTRL_H * MM_TO_M;
+    let ctrl_x = card_left + ctrl_width_m / 2.0;
+    let ctrl_y = ruler_bottom - GAP - ctrl_height_m / 2.0;
 
     commands
         .spawn((
@@ -233,10 +232,16 @@ fn setup(
         .observe(on_panel_clicked);
 
     // ── Ground plane ─────────────────────────────────────────────────
-    spawn_ground_plane(&mut commands, &mut meshes, &mut materials, total_w, a4_h_m);
+    spawn_ground_plane(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        total_w,
+        a4_height_m,
+    );
 
     // ── Light + camera ───────────────────────────────────────────────
-    spawn_lights_and_camera(&mut commands, a4_h_m);
+    spawn_lights_and_camera(&mut commands, a4_height_m);
 }
 
 fn spawn_ground_plane(
@@ -473,7 +478,6 @@ fn toggle_debug_outlines(
     }
 }
 
-#[allow(clippy::similar_names)]
 fn toggle_rulers(
     keys: Res<ButtonInput<KeyCode>>,
     mut rulers_visible: ResMut<RulersVisible>,
@@ -499,10 +503,10 @@ fn toggle_rulers(
     }
 
     // Respawn rulers.
-    let a4_w_m = A4_W * MM_TO_M;
-    let a4_h_m = A4_H * MM_TO_M;
-    let card_w_m = CARD_W * IN_TO_M;
-    let card_h_m = CARD_H * IN_TO_M;
+    let a4_width_m = A4_W * MM_TO_M;
+    let a4_height_m = A4_H * MM_TO_M;
+    let card_width_m = CARD_W * IN_TO_M;
+    let card_height_m = CARD_H * IN_TO_M;
     let ruler_color = Color::srgba(0.55, 0.55, 0.55, 0.7);
     let label_style = WorldTextStyle::new(LABEL_SIZE)
         .with_unit(Unit::Points)
@@ -513,9 +517,9 @@ fn toggle_rulers(
             &mut commands,
             &mut gizmo_assets,
             a4_entity,
-            build_metric_ruler(a4_w_m, a4_h_m, ruler_color),
+            build_metric_ruler(a4_width_m, a4_height_m, ruler_color),
             |cmd, container| {
-                spawn_metric_labels(cmd, container, a4_w_m, a4_h_m, label_style.clone());
+                spawn_metric_labels(cmd, container, a4_width_m, a4_height_m, label_style.clone());
             },
         );
     }
@@ -525,9 +529,15 @@ fn toggle_rulers(
             &mut commands,
             &mut gizmo_assets,
             card_entity,
-            build_inch_ruler(card_w_m, card_h_m, ruler_color),
+            build_inch_ruler(card_width_m, card_height_m, ruler_color),
             |cmd, container| {
-                spawn_inch_labels(cmd, container, card_w_m, card_h_m, label_style.clone());
+                spawn_inch_labels(
+                    cmd,
+                    container,
+                    card_width_m,
+                    card_height_m,
+                    label_style.clone(),
+                );
             },
         );
     }

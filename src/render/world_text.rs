@@ -355,7 +355,7 @@ fn spawn_world_text_meshes(
             };
             let mat = super::msdf_material::msdf_text_material(
                 visible_base,
-                atlas.sdf_range().to_f32(),
+                MsdfAtlas::sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
                 page_image.clone(),
@@ -399,7 +399,7 @@ fn spawn_world_text_meshes(
             };
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
                 proxy_base,
-                atlas.sdf_range().to_f32(),
+                MsdfAtlas::sdf_range().to_f32(),
                 atlas.width(),
                 atlas.height(),
                 page_image,

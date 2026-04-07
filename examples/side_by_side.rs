@@ -22,9 +22,6 @@
 //! cargo run --example side_by_side
 //! ```
 
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::needless_borrow)]
-
 use std::sync::Arc;
 
 use bevy::color::Color;
@@ -791,7 +788,7 @@ fn compute_clay_layout(
     let mut layout = clay.begin::<(), ()>();
 
     layout.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(fixed!(layout_size))
             .height(fixed!(layout_height))
@@ -802,7 +799,7 @@ fn compute_clay_layout(
         |clay| {
             // Inset frame.
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(grow!())
@@ -830,7 +827,7 @@ fn compute_clay_layout(
 /// Builds the clay header container with title and subtitle.
 fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
     clay.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(grow!())
             .height(grow!(FONT_SIZE, HEADER_HEIGHT))
@@ -843,7 +840,7 @@ fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
             .background_color((52, 98, 90).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .height(fit!())
@@ -852,7 +849,7 @@ fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
                 |clay| {
                     // Title slot.
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(fit!())
                             .height(grow!())
@@ -869,7 +866,7 @@ fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
                     );
                     // Grow spacer.
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .height(fixed!(1.0))
@@ -878,7 +875,7 @@ fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
                     );
                     // Subtitle slot.
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(fit!())
                             .height(grow!())
@@ -906,7 +903,7 @@ fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
 /// Builds the clay accent divider bar.
 fn build_clay_divider<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
     clay.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(grow!())
             .height(fixed!(DIVIDER_HEIGHT))
@@ -919,7 +916,7 @@ fn build_clay_divider<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
 /// Builds the clay body section containing key-value rows and wrap text.
 fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(String, String)]) {
     clay.with(
-        &Declaration::new()
+        Declaration::new()
             .layout()
             .width(grow!())
             .height(grow!())
@@ -927,7 +924,7 @@ fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(Stri
             .background_color((22, 28, 34).into()),
         |clay| {
             clay.with(
-                &Declaration::new()
+                Declaration::new()
                     .layout()
                     .width(grow!())
                     .padding(clay_layout::layout::Padding::all(5))
@@ -937,7 +934,7 @@ fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(Stri
                 |clay| {
                     for (label, value) in rows {
                         clay.with(
-                            &Declaration::new()
+                            Declaration::new()
                                 .layout()
                                 .width(grow!())
                                 .height(fit!())
@@ -952,7 +949,7 @@ fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(Stri
                                         .end(),
                                 );
                                 clay.with(
-                                    &Declaration::new()
+                                    Declaration::new()
                                         .layout()
                                         .width(grow!())
                                         .height(fixed!(1.0))
@@ -972,7 +969,7 @@ fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(Stri
 
                     // Spacer.
                     clay.with(
-                        &Declaration::new()
+                        Declaration::new()
                             .layout()
                             .width(grow!())
                             .height(fixed!(4.0))

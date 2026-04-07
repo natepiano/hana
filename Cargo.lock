@@ -872,7 +872,7 @@ dependencies = [
  "bevy",
  "bevy-inspector-egui",
  "bevy_brp_extras",
- "bevy_kana",
+ "bevy_kana 0.0.5",
  "bevy_lagrange",
  "bevy_window_manager",
  "bitflags 2.11.0",
@@ -1246,6 +1246,15 @@ name = "bevy_kana"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30e3ee689bf79e2740e4edcee886c7296b756ae748c7a9213cf787e6b4f941c0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "bevy_kana"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d61d0697743cb2bb7c083e7394878babecc4b949b68caf5d9ab54d7026010d5"
 dependencies = [
  "bevy",
 ]
@@ -1935,7 +1944,7 @@ checksum = "f0ed2b8f6acbc5424928d48b7e8564dd9c752add26284c17652cf5025419118f"
 dependencies = [
  "bevy",
  "bevy_diagnostic",
- "bevy_kana",
+ "bevy_kana 0.0.3",
  "dirs",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",

@@ -1,7 +1,7 @@
-#![allow(clippy::float_cmp)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::expect_used)]
+#![allow(
+    clippy::expect_used,
+    reason = "benchmarks expect on just-spawned entities where None is a test bug"
+)]
 
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout performance on
 //! identical panel layouts.
@@ -48,6 +48,7 @@ use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use bevy_diegetic::Unit;
 use bevy_diegetic::UnitConfig;
+use bevy_kana::ToF32;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -77,7 +78,7 @@ fn monospace_measurer() -> DiegeticTextMeasurer {
             let mut line_count = 0_u32;
             for line in text.lines() {
                 line_count += 1;
-                let width = line.chars().count() as f32 * char_width;
+                let width = line.chars().count().to_f32() * char_width;
                 max_line_width = max_line_width.max(width);
             }
             if line_count == 0 {
@@ -85,7 +86,7 @@ fn monospace_measurer() -> DiegeticTextMeasurer {
             }
             TextDimensions {
                 width:       max_line_width,
-                height:      measure.size * line_count as f32,
+                height:      measure.size * line_count.to_f32(),
                 line_height: measure.size,
             }
         }),
@@ -108,7 +109,7 @@ fn clay_monospace_measure(
     let mut line_count = 0_u32;
     for line in text.lines() {
         line_count += 1;
-        let width = line.chars().count() as f32 * char_width;
+        let width = line.chars().count().to_f32() * char_width;
         max_line_width = max_line_width.max(width);
     }
     if line_count == 0 {
@@ -116,7 +117,7 @@ fn clay_monospace_measure(
     }
     Dimensions {
         width:  max_line_width,
-        height: line_height * line_count as f32,
+        height: line_height * line_count.to_f32(),
     }
 }
 

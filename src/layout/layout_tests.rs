@@ -4,7 +4,14 @@
 //! bounding boxes match expectations. A simple monospace text measurement function
 //! is used throughout: each character is `font_size * 0.6` wide, one line tall.
 
-#![allow(clippy::float_cmp, clippy::needless_collect)]
+#![allow(
+    clippy::float_cmp,
+    reason = "tests compare exact expected layout values"
+)]
+#![allow(
+    clippy::needless_collect,
+    reason = "tests collect into named variables for readable assertions and index access"
+)]
 
 use std::sync::Arc;
 

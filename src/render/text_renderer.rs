@@ -927,7 +927,7 @@ fn spawn_batch_meshes(
                         .or_insert_with(|| {
                             materials.add(super::msdf_material::msdf_text_material(
                                 shared_base.clone(),
-                                atlas.sdf_range().to_f32(),
+                                MsdfAtlas::sdf_range().to_f32(),
                                 atlas.width(),
                                 atlas.height(),
                                 page_image.clone(),
@@ -941,7 +941,7 @@ fn spawn_batch_meshes(
                 } else {
                     materials.add(super::msdf_material::msdf_text_material(
                         batch_base.clone(),
-                        atlas.sdf_range().to_f32(),
+                        MsdfAtlas::sdf_range().to_f32(),
                         atlas.width(),
                         atlas.height(),
                         page_image.clone(),
@@ -1021,7 +1021,7 @@ fn spawn_shadow_proxy(
 
     let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
         proxy_base,
-        atlas.sdf_range().to_f32(),
+        MsdfAtlas::sdf_range().to_f32(),
         atlas.width(),
         atlas.height(),
         page_image,

@@ -59,18 +59,17 @@ fn mesh_single_quad_has_uvs() {
     let mesh = glyph_quad::build_glyph_mesh(&quads);
 
     // Should have UV attribute with 4 vertices.
-    #[allow(clippy::redundant_closure_for_method_calls)]
-    let uv_count = mesh
+    let uv = mesh
         .attribute(Mesh::ATTRIBUTE_UV_0)
-        .map_or(0, |attr| attr.len());
-    assert_eq!(uv_count, 4, "expected 4 UV entries for 1 quad");
+        .expect("mesh should have UV_0");
+    assert_eq!(uv.len(), 4, "expected 4 UV entries for 1 quad");
 
-    #[allow(clippy::redundant_closure_for_method_calls)]
-    let clip_uv_count = mesh
+    let clip_uv = mesh
         .attribute(Mesh::ATTRIBUTE_UV_1)
-        .map_or(0, |attr| attr.len());
+        .expect("mesh should have UV_1");
     assert_eq!(
-        clip_uv_count, 4,
+        clip_uv.len(),
+        4,
         "expected 4 panel-local UV_1 entries for 1 quad"
     );
 }

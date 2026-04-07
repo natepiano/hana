@@ -6,9 +6,11 @@
 #![allow(
     clippy::panic,
     clippy::unwrap_used,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    reason = "tests use panic/unwrap for clearer failure messages"
 )]
+
+use bevy_kana::ToU16;
+use bevy_kana::ToUsize;
 
 use super::atlas::GlyphKey;
 use super::atlas::MsdfAtlas;
@@ -37,7 +39,7 @@ fn rasterize_letter_a_produces_nonzero_bitmap() {
     assert!(bitmap.width > 0, "width should be positive");
     assert!(bitmap.height > 0, "height should be positive");
     assert!(
-        bitmap.data.len() == (bitmap.width * bitmap.height * 3) as usize,
+        bitmap.data.len() == (bitmap.width * bitmap.height * 3).to_usize(),
         "data length should match w*h*3"
     );
 }
@@ -312,8 +314,8 @@ fn parley_colon_glyph_ids_match_cmap() {
     assert_eq!(glyph_ids.len(), 4, "expected 4 glyphs for 'A::B'");
 
     // Check that the colon glyph IDs from parley match the cmap lookup.
-    let parley_colon_1 = glyph_ids[1].0 as u16;
-    let parley_colon_2 = glyph_ids[2].0 as u16;
+    let parley_colon_1 = glyph_ids[1].0.to_u16();
+    let parley_colon_2 = glyph_ids[2].0.to_u16();
     println!("parley colon glyph IDs: {parley_colon_1}, {parley_colon_2}");
     println!("cmap colon glyph ID: {cmap_colon}");
 
@@ -325,7 +327,7 @@ fn parley_colon_glyph_ids_match_cmap() {
 
     // Check if the substituted glyph IDs can be rasterized.
     for &(gid, adv) in &glyph_ids {
-        let gid16 = gid as u16;
+        let gid16 = gid.to_u16();
         let result = msdf_rasterizer::rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
         let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(gid16));
         let has_shape =
@@ -427,7 +429,7 @@ fn eb_garamond_shape_and_rasterize() {
                 let glyph_run = run.run();
                 for cluster in glyph_run.clusters() {
                     for glyph in cluster.glyphs() {
-                        let gid = glyph.id as u16;
+                        let gid = glyph.id.to_u16();
                         print!("  glyph {gid}: ");
                         let start = std::time::Instant::now();
                         let result = msdf_rasterizer::rasterize_glyph(EB_GARAMOND, gid, 32, 4.0, 2);
@@ -596,7 +598,7 @@ fn atlas_overflows_to_second_page() {
         };
         if let Some(m) = atlas.get(key) {
             assert!(
-                (m.page_index as usize) < atlas.page_count(),
+                m.page_index.to_usize() < atlas.page_count(),
                 "glyph '{c}' page_index {} >= page_count {}",
                 m.page_index,
                 atlas.page_count()
@@ -631,7 +633,7 @@ fn atlas_iter_glyphs_reports_page_distribution() {
     let mut iter_count = 0_usize;
 
     for (_, metrics) in atlas.iter_glyphs() {
-        let page = metrics.page_index as usize;
+        let page = metrics.page_index.to_usize();
         assert!(
             page < atlas.page_count(),
             "iter_glyphs returned page {page} >= page_count {}",

@@ -159,12 +159,11 @@ struct StatusPanel;
 struct ControlsPanel;
 
 #[derive(Resource, Default)]
-#[allow(clippy::struct_field_names)]
 struct StressPerfStats {
-    last_panel_update_ms: f32,
-    last_tree_build_ms:   f32,
-    last_tree_builds:     usize,
-    last_panel_count:     usize,
+    panel_update_ms: f32,
+    tree_build_ms:   f32,
+    tree_builds:     usize,
+    panel_count:     usize,
 }
 
 #[derive(Clone, Copy)]
@@ -440,8 +439,8 @@ fn update_status_panel(
         timestamp: time.elapsed_secs(),
         fps:       fps_value,
         frame_ms:  frame_ms_value,
-        update_ms: stress_perf.last_panel_update_ms,
-        tree_ms:   stress_perf.last_tree_build_ms,
+        update_ms: stress_perf.panel_update_ms,
+        tree_ms:   stress_perf.tree_build_ms,
         layout_ms: diegetic_perf.last_compute_ms,
         text_ms:   diegetic_perf.last_text_extract_ms,
     });
@@ -471,14 +470,14 @@ fn update_status_panel(
 
     let new_text = format!(
         "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms\npanels: {}  rows: {}",
-        stress_perf.last_panel_count,
+        stress_perf.panel_count,
         state.row_count,
         tag_now = "now",
         tag_max = "5s max",
         fps = fps_str,
         frame = ms_str,
-        upd = format!("{:.1}", stress_perf.last_panel_update_ms),
-        tree = format!("{:.1}", stress_perf.last_tree_build_ms),
+        upd = format!("{:.1}", stress_perf.panel_update_ms),
+        tree = format!("{:.1}", stress_perf.tree_build_ms),
         layout = format!("{:.1}", diegetic_perf.last_compute_ms),
         text_ms = format!("{:.1}", diegetic_perf.last_text_extract_ms),
         max_fps = format!("{:.0}", max_fps),
@@ -598,10 +597,10 @@ fn update_panels(
         }
     }
 
-    perf.last_panel_update_ms = update_start.elapsed().as_secs_f32() * 1000.0;
-    perf.last_tree_build_ms = tree_build_ms;
-    perf.last_tree_builds = tree_builds;
-    perf.last_panel_count = needed;
+    perf.panel_update_ms = update_start.elapsed().as_secs_f32() * 1000.0;
+    perf.tree_build_ms = tree_build_ms;
+    perf.tree_builds = tree_builds;
+    perf.panel_count = needed;
 }
 
 /// Resizes and repositions the ground plane to cover all stacked panels.
@@ -611,14 +610,14 @@ fn resize_ground_plane(
     mut meshes: ResMut<Assets<Mesh>>,
     mut last_panel_count: Local<usize>,
 ) {
-    if perf.last_panel_count == *last_panel_count {
+    if perf.panel_count == *last_panel_count {
         return;
     }
-    *last_panel_count = perf.last_panel_count;
+    *last_panel_count = perf.panel_count;
 
     // Shallow plane: just deep enough to reach one STACK_DEPTH behind the
     // last panel so shadows land on the ground.
-    let depth = perf.last_panel_count.max(1).to_f32() * STACK_DEPTH;
+    let depth = perf.panel_count.max(1).to_f32() * STACK_DEPTH;
     let width = GROUND_SIZE;
 
     for (mut mesh3d, mut transform) in &mut ground {

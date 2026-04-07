@@ -122,13 +122,11 @@ pub struct FontRegistry {
 impl FontRegistry {
     /// Creates a new registry with the embedded default font.
     ///
-    /// # Panics
-    ///
-    /// Panics if the embedded `JetBrains Mono` font fails to parse. This is
-    /// infallible in practice because the font binary is compiled into the
-    /// library and is known to be valid.
+    /// Returns `None` if the embedded `JetBrains Mono` font fails to parse.
+    /// This is infallible in practice because the font binary is compiled into
+    /// the library and is known to be valid.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new() -> Option<Self> {
         let mut font_cx = FontContext::default();
 
         font_cx.collection.register_fonts(
@@ -139,18 +137,12 @@ impl FontRegistry {
             }),
         );
 
-        // Pre-parse the embedded font's metrics. This is infallible for our
-        // known-good embedded font, but we handle the Option for robustness.
-        // SAFETY: The embedded JetBrains Mono font is a known-good static asset
-        // compiled into the binary. Parsing failure would indicate a build error.
-        #[allow(clippy::expect_used)]
-        let embedded_font = Font::from_bytes(DEFAULT_FAMILY, EMBEDDED_FONT)
-            .expect("embedded JetBrains Mono font should parse successfully");
+        let embedded_font = Font::from_bytes(DEFAULT_FAMILY, EMBEDDED_FONT)?;
 
-        Self {
+        Some(Self {
             font_cx: Arc::new(Mutex::new(font_cx)),
             fonts:   vec![embedded_font],
-        }
+        })
     }
 
     /// Returns the [`Font`] for a given [`FontId`].
@@ -226,8 +218,4 @@ impl FontRegistry {
     pub fn family_names(&self) -> Vec<String> {
         self.fonts.iter().map(|f| (*f.name()).to_string()).collect()
     }
-}
-
-impl Default for FontRegistry {
-    fn default() -> Self { Self::new() }
 }

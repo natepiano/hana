@@ -15,6 +15,8 @@ use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
+use bevy_kana::ToF32;
+use bevy_kana::ToU32;
 
 use super::constants;
 use crate::plugin::ComputedDiegeticPanel;
@@ -163,24 +165,15 @@ pub(super) fn setup_panel_rtt(
         let world_h = panel.world_height(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
-        // Compute texture dimensions. Casts are safe: values are clamped
-        // to [64, 4096] which fits in u32 without precision loss.
-        #[allow(
-            clippy::cast_precision_loss,
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss
-        )]
+        // Compute texture dimensions. Values are clamped to [64, 4096].
         let tex_w = (world_w * DEFAULT_TEXELS_PER_METER)
             .round()
-            .clamp(MIN_TEXTURE_SIZE as f32, MAX_TEXTURE_SIZE as f32) as u32;
-        #[allow(
-            clippy::cast_precision_loss,
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss
-        )]
+            .clamp(MIN_TEXTURE_SIZE.to_f32(), MAX_TEXTURE_SIZE.to_f32())
+            .to_u32();
         let tex_h = (world_h * DEFAULT_TEXELS_PER_METER)
             .round()
-            .clamp(MIN_TEXTURE_SIZE as f32, MAX_TEXTURE_SIZE as f32) as u32;
+            .clamp(MIN_TEXTURE_SIZE.to_f32(), MAX_TEXTURE_SIZE.to_f32())
+            .to_u32();
 
         // Create render target texture.
         let image = Image::new_target_texture(
