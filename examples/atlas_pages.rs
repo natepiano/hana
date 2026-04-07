@@ -344,22 +344,7 @@ fn setup(
     // Mark dirty so the display system builds the loading view.
     commands.insert_resource(DisplayDirty(true));
 
-    // Lighting — shadows on primary, fill from behind.
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: true,
-            illuminance: 5000.0,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 5.0, -8.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
+    spawn_lights(&mut commands);
 
     // Camera.
     let camera = commands
@@ -405,6 +390,25 @@ fn setup(
             remaining: CHARACTER_BATCHES.len(),
         }),
         Transform::from_xyz(-6.0, 4.0, 2.0),
+    ));
+}
+
+fn spawn_lights(commands: &mut Commands) {
+    // Shadows on primary, fill from behind.
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            illuminance: 5000.0,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 5.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 5.0, -8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
