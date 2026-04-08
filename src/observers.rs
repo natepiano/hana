@@ -97,22 +97,29 @@ fn stash_camera_state(
     }
 }
 
+/// Parameters for a fit calculation request.
+struct FitRequest<'a> {
+    context:    &'a str,
+    target:     Entity,
+    yaw:        f32,
+    pitch:      f32,
+    margin:     f32,
+    projection: &'a Projection,
+    camera:     &'a Camera,
+}
+
 /// Shared fit preparation used by both `ZoomToFit` and `AnimateToFit` observers.
 /// Extracts target mesh vertices and computes the fit solution for the requested
 /// camera orientation.
 fn prepare_fit_for_target(
-    context: &str,
-    target: Entity,
-    yaw: f32,
-    pitch: f32,
-    margin: f32,
-    projection: &Projection,
-    camera: &Camera,
+    req: &FitRequest,
     mesh_query: &Query<&Mesh3d>,
     children_query: &Query<&Children>,
     global_transform_query: &Query<&GlobalTransform>,
     meshes: &Assets<Mesh>,
 ) -> Option<fit::FitSolution> {
+    let context = req.context;
+    let target = req.target;
     let Some((vertices, geometric_center)) = support::extract_mesh_vertices(
         target,
         children_query,
@@ -127,11 +134,11 @@ fn prepare_fit_for_target(
     let Ok(fit) = fit::calculate_fit(
         &vertices,
         geometric_center,
-        yaw,
-        pitch,
-        margin,
-        projection,
-        camera,
+        req.yaw,
+        req.pitch,
+        req.margin,
+        req.projection,
+        req.camera,
     )
     .inspect_err(|error| {
         warn!("{context}: Failed to calculate fit for entity {target:?}: {error}");
@@ -177,13 +184,15 @@ pub(crate) fn on_zoom_to_fit(
     );
 
     let Some(fit) = prepare_fit_for_target(
-        "ZoomToFit",
-        target,
-        orbit_cam.target_yaw,
-        orbit_cam.target_pitch,
-        margin,
-        projection,
-        cam,
+        &FitRequest {
+            context: "ZoomToFit",
+            target,
+            yaw: orbit_cam.target_yaw,
+            pitch: orbit_cam.target_pitch,
+            margin,
+            projection,
+            camera: cam,
+        },
         &mesh_query,
         &children_query,
         &global_transform_query,
@@ -435,13 +444,15 @@ pub(crate) fn on_animate_to_fit(
     };
 
     let Some(fit) = prepare_fit_for_target(
-        "AnimateToFit",
-        target,
-        yaw,
-        pitch,
-        margin,
-        projection,
-        cam,
+        &FitRequest {
+            context: "AnimateToFit",
+            target,
+            yaw,
+            pitch,
+            margin,
+            projection,
+            camera: cam,
+        },
         &mesh_query,
         &children_query,
         &global_transform_query,
@@ -579,13 +590,15 @@ pub(crate) fn on_look_at_and_zoom_to_fit(
         animation::orbital_params_from_offset(Displacement(cam_pos - target_pos));
 
     let Some(fit) = prepare_fit_for_target(
-        "LookAtAndZoomToFit",
-        target,
-        preliminary_yaw,
-        preliminary_pitch,
-        margin,
-        projection,
-        cam,
+        &FitRequest {
+            context: "LookAtAndZoomToFit",
+            target,
+            yaw: preliminary_yaw,
+            pitch: preliminary_pitch,
+            margin,
+            projection,
+            camera: cam,
+        },
         &mesh_query,
         &children_query,
         &global_transform_query,

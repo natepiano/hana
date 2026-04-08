@@ -23,11 +23,21 @@ pub struct ActiveCameraData {
     /// setting this to actual dimensions of the window that you want to control the camera from,
     /// and changing `OrbitCam::orbit_sensitivity` to adjust the sensitivity if required.
     pub window_size:   Option<Vec2>,
-    /// Indicates to `LagrangePlugin` that it should not update/overwrite this resource.
-    /// If you are manually updating this resource you should set this to `true`.
-    /// Note that setting this to `true` will effectively break multiple viewport/window support
-    /// unless you manually reimplement it.
-    pub manual:        bool,
+    /// Controls whether `LagrangePlugin` auto-detects the active camera from cursor position.
+    /// Set to `CameraInputDetection::Manual` when you populate this resource yourself
+    /// (e.g. render-to-texture scenarios where there is no on-screen viewport to hit-test).
+    /// Note that `Manual` disables multi-viewport/window support unless you reimplement it.
+    pub detection:     CameraInputDetection,
+}
+
+/// Whether the plugin auto-detects which camera should receive input.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub enum CameraInputDetection {
+    /// The plugin hit-tests cursor position against viewport rects each frame.
+    #[default]
+    Automatic,
+    /// The user populates `ActiveCameraData` directly; the detection system is skipped.
+    Manual,
 }
 
 /// The shape to restrict the camera's focus inside.

@@ -17,9 +17,10 @@ use super::input::MouseKeyTracker;
 use super::touch::TouchGestures;
 use super::touch::TouchInput;
 use super::touch::TouchTracker;
-use super::traits::OptionalClamp;
+use super::traits;
 use super::types::ActiveCameraData;
 use super::types::ButtonZoomAxis;
+use super::types::CameraInputDetection;
 use super::types::FocusBoundsShape;
 use super::types::ForceUpdate;
 use super::types::InitializationState;
@@ -270,16 +271,16 @@ impl Default for OrbitCam {
 }
 
 impl OrbitCam {
-    fn clamp_yaw(&self, yaw: f32) -> f32 {
-        yaw.clamp_optional(self.yaw_lower_limit, self.yaw_upper_limit)
+    const fn clamp_yaw(&self, yaw: f32) -> f32 {
+        traits::clamp_optional(yaw, self.yaw_lower_limit, self.yaw_upper_limit)
     }
 
-    fn clamp_pitch(&self, pitch: f32) -> f32 {
-        pitch.clamp_optional(self.pitch_lower_limit, self.pitch_upper_limit)
+    const fn clamp_pitch(&self, pitch: f32) -> f32 {
+        traits::clamp_optional(pitch, self.pitch_lower_limit, self.pitch_upper_limit)
     }
 
-    fn clamp_zoom(&self, zoom: f32) -> f32 {
-        zoom.clamp_optional(Some(self.zoom_lower_limit), self.zoom_upper_limit)
+    const fn clamp_zoom(&self, zoom: f32) -> f32 {
+        traits::clamp_optional(zoom, Some(self.zoom_lower_limit), self.zoom_upper_limit)
     }
 
     fn clamp_focus(&self, focus: Vec3) -> Vec3 {
@@ -383,7 +384,7 @@ pub(crate) fn active_viewport_data(
                                     entity:        Some(entity),
                                     viewport_size: camera.logical_viewport_size(),
                                     window_size:   Some(Vec2::new(window.width(), window.height())),
-                                    manual:        false,
+                                    detection:     CameraInputDetection::Automatic,
                                 };
                                 max_cam_order = camera.order;
                             }

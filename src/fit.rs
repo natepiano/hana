@@ -9,17 +9,17 @@ use core::fmt;
 use bevy::prelude::*;
 use bevy_kana::Position;
 
+use super::constants::CENTERING_MAX_ITERATIONS;
+use super::constants::CENTERING_TOLERANCE;
+use super::constants::DEGENERATE_EXTENT_THRESHOLD;
+use super::constants::INITIAL_RADIUS_MULTIPLIER;
+use super::constants::MAX_ITERATIONS;
+use super::constants::MAX_MARGIN;
+use super::constants::MAX_RADIUS_MULTIPLIER;
+use super::constants::MIN_MARGIN;
+use super::constants::MIN_RADIUS_MULTIPLIER;
+use super::constants::TOLERANCE;
 use super::support;
-use crate::constants::CENTERING_MAX_ITERATIONS;
-use crate::constants::CENTERING_TOLERANCE;
-use crate::constants::DEGENERATE_EXTENT_THRESHOLD;
-use crate::constants::INITIAL_RADIUS_MULTIPLIER;
-use crate::constants::MAX_ITERATIONS;
-use crate::constants::MAX_MARGIN;
-use crate::constants::MAX_RADIUS_MULTIPLIER;
-use crate::constants::MIN_MARGIN;
-use crate::constants::MIN_RADIUS_MULTIPLIER;
-use crate::constants::TOLERANCE;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
 /// For example, a margin of 0.08 returns 1.087 (8% margin).
@@ -242,11 +242,8 @@ fn binary_search_for_fit(
             points,
             geometric_center,
             test_radius,
-            params.rot,
             &test_projection,
-            params.aspect_ratio,
-            params.ortho_fixed_distance,
-            params.is_ortho,
+            params,
         );
 
         let cam_distance = params.ortho_fixed_distance.unwrap_or(test_radius);
@@ -361,12 +358,13 @@ fn refine_focus_centering(
     points: &[Vec3],
     initial_focus: Vec3,
     radius: f32,
-    rot: Quat,
     projection: &Projection,
-    aspect_ratio: f32,
-    ortho_fixed_distance: Option<f32>,
-    is_ortho: bool,
+    params: &FitParams,
 ) -> Vec3 {
+    let rot = params.rot;
+    let aspect_ratio = params.aspect_ratio;
+    let ortho_fixed_distance = params.ortho_fixed_distance;
+    let is_ortho = params.is_ortho;
     let cam_right = rot * Vec3::X;
     let cam_up = rot * Vec3::Y;
 

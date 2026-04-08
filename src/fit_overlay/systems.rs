@@ -221,11 +221,13 @@ pub fn draw_fit_target_bounds(
             &mut commands,
             &mut gizmos,
             &config,
-            camera,
-            cam,
-            cam_global,
-            projection,
-            current_target,
+            &BoundsCamera {
+                entity: camera,
+                cam,
+                cam_global,
+                projection,
+                current_target,
+            },
             &children_query,
             &mesh_query,
             &global_transform_query,
@@ -236,16 +238,21 @@ pub fn draw_fit_target_bounds(
     }
 }
 
+/// Camera data for bounds visualization.
+struct BoundsCamera<'a> {
+    entity:         Entity,
+    cam:            &'a Camera,
+    cam_global:     &'a GlobalTransform,
+    projection:     &'a Projection,
+    current_target: &'a CurrentFitTarget,
+}
+
 /// Draws bounds visualization for a single camera/target pair.
 fn draw_bounds_for_camera(
     commands: &mut Commands,
     gizmos: &mut Gizmos<FitTargetGizmo>,
     config: &FitTargetOverlayConfig,
-    camera: Entity,
-    cam: &Camera,
-    cam_global: &GlobalTransform,
-    projection: &Projection,
-    current_target: &CurrentFitTarget,
+    cam_data: &BoundsCamera,
     children_query: &Query<&Children>,
     mesh_query: &Query<&Mesh3d>,
     global_transform_query: &Query<&GlobalTransform>,
@@ -253,6 +260,11 @@ fn draw_bounds_for_camera(
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     bounds_label_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
+    let camera = cam_data.entity;
+    let cam = cam_data.cam;
+    let cam_global = cam_data.cam_global;
+    let projection = cam_data.projection;
+    let current_target = cam_data.current_target;
     let Some((vertices, _)) = support::extract_mesh_vertices(
         current_target.0,
         children_query,

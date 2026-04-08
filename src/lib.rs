@@ -73,6 +73,7 @@ pub use orbit_cam::OrbitCamSystemSet;
 pub use touch::TouchInput;
 pub use types::ActiveCameraData;
 pub use types::ButtonZoomAxis;
+pub use types::CameraInputDetection;
 pub use types::FocusBoundsShape;
 pub use types::ForceUpdate;
 pub use types::InitializationState;
@@ -106,8 +107,11 @@ impl Plugin for LagrangePlugin {
                 PostUpdate,
                 (
                     (
-                        orbit_cam::active_viewport_data
-                            .run_if(|active_cam: Res<ActiveCameraData>| !active_cam.manual),
+                        orbit_cam::active_viewport_data.run_if(
+                            |active_cam: Res<ActiveCameraData>| {
+                                active_cam.detection == CameraInputDetection::Automatic
+                            },
+                        ),
                         input::mouse_key_tracker,
                         touch::touch_tracker,
                     ),

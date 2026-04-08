@@ -4,14 +4,14 @@ use bevy::input::mouse::MouseScrollUnit;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
-use crate::ActiveCameraData;
-use crate::ButtonZoomAxis;
-use crate::OrbitCam;
-use crate::TrackpadBehavior;
-use crate::ZoomDirection;
-use crate::constants::BUTTON_ZOOM_SCALE;
-use crate::constants::PINCH_GESTURE_AMPLIFICATION;
-use crate::constants::PIXEL_SCROLL_SCALE;
+use super::ActiveCameraData;
+use super::ButtonZoomAxis;
+use super::OrbitCam;
+use super::TrackpadBehavior;
+use super::ZoomDirection;
+use super::constants::BUTTON_ZOOM_SCALE;
+use super::constants::PINCH_GESTURE_AMPLIFICATION;
+use super::constants::PIXEL_SCROLL_SCALE;
 
 #[derive(Resource, Default, Debug)]
 pub(crate) struct MouseKeyTracker {

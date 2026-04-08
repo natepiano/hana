@@ -21,6 +21,7 @@ use bevy::window::PrimaryWindow;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_kana::ToF32;
 use bevy_lagrange::ActiveCameraData;
+use bevy_lagrange::CameraInputDetection;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -172,8 +173,8 @@ fn setup(
         // size to match the size of the window that you are interacting with.
         viewport_size,
         window_size: Some(Vec2::new(primary_window.width(), primary_window.height())),
-        // Setting manual to true ensures OrbitCamPlugin will not overwrite this resource
-        manual: true,
+        // Manual detection: the plugin won't auto-detect the active camera from cursor position
+        detection: CameraInputDetection::Manual,
     });
 }
 

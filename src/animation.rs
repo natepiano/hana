@@ -10,9 +10,12 @@ use bevy::prelude::*;
 use bevy_kana::Displacement;
 use bevy_kana::Position;
 
+use super::ForceUpdate;
+use super::OrbitCam;
 use super::components::AnimationSourceMarker;
 use super::components::CameraInputInterruptBehavior;
 use super::components::ZoomAnimationMarker;
+use super::constants::EXTERNAL_INPUT_TOLERANCE;
 use super::events::AnimationCancelled;
 use super::events::AnimationEnd;
 use super::events::AnimationSource;
@@ -20,8 +23,6 @@ use super::events::CameraMoveBegin;
 use super::events::CameraMoveEnd;
 use super::events::ZoomCancelled;
 use super::events::ZoomEnd;
-use crate::ForceUpdate;
-use crate::OrbitCam;
 
 /// Individual camera movement with target position and duration.
 ///
@@ -134,8 +135,6 @@ pub(crate) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32
     let pitch = offset.y.atan2(horizontal_dist);
     (yaw, pitch, radius)
 }
-
-use crate::constants::EXTERNAL_INPUT_TOLERANCE;
 
 /// State tracking for the current camera movement
 #[derive(Clone, Reflect, Default, Debug)]
