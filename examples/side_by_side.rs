@@ -225,7 +225,7 @@ fn main() {
         .add_plugins(LagrangePlugin)
         .add_plugins(WindowManagerPlugin)
         .init_gizmo_group::<ClayGizmoGroup>()
-        .insert_resource(ShowTextGizmos(true))
+        .insert_resource(ShowTextGizmos::Shown)
         .init_resource::<ClayLayoutResult>()
         .init_resource::<DynamicRows>()
         .init_resource::<PanelSizing>()
@@ -1058,7 +1058,11 @@ fn toggle_text_debug(
 ) {
     if keyboard.just_pressed(KeyCode::KeyD) {
         debug.0 = !debug.0;
-        show_text.0 = debug.0;
+        *show_text = if debug.0 {
+            ShowTextGizmos::Shown
+        } else {
+            ShowTextGizmos::Hidden
+        };
     }
 }
 

@@ -3,6 +3,7 @@
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
+// Layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
 ///
 /// Bevy packs this through `i32` into `DepthBiasState.constant`.
@@ -19,15 +20,16 @@ pub(super) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Reverse-Z: positive = closer to camera = composited in front.
 pub(super) const OIT_DEPTH_STEP: f32 = 0.0001;
 
-/// Default roughness for panel surfaces. Matte paper-like appearance.
-pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
-
+// Material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).
 pub(super) const DEFAULT_METALLIC: f32 = 0.0;
 
 /// Default reflectance for panel surfaces. Very low specular to avoid
 /// washing out colors under bright lights.
 pub(super) const DEFAULT_REFLECTANCE: f32 = 0.02;
+
+/// Default roughness for panel surfaces. Matte paper-like appearance.
+pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
 
 /// Returns the library's default matte `StandardMaterial`.
 #[must_use]

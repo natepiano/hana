@@ -105,7 +105,7 @@ fn build_panel_geometry(
             continue;
         };
 
-        let pts_mpu = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
         let render_style = if panel.render_mode == RenderMode::Geometry {
             RenderStyle::Geometry
@@ -141,7 +141,7 @@ fn build_panel_geometry(
                 surface,
                 render_style,
                 shadow_mode,
-                pts_mpu,
+                points_to_world,
                 layout_mpu,
                 anchor_x,
                 anchor_y,
@@ -169,7 +169,7 @@ fn build_panel_geometry(
                 &divider_surface,
                 render_style,
                 shadow_mode,
-                pts_mpu,
+                points_to_world,
                 layout_mpu,
                 anchor_x,
                 anchor_y,
@@ -283,7 +283,7 @@ fn spawn_sdf_element(
     surface: &ElementSurface,
     render_style: RenderStyle,
     shadow_mode: ShadowMode,
-    pts_mpu: f32,
+    points_to_world: f32,
     layout_mpu: f32,
     anchor_x: f32,
     anchor_y: f32,
@@ -312,10 +312,10 @@ fn spawn_sdf_element(
         base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
     }
 
-    let world_w = surface.bounds.width * pts_mpu;
-    let world_h = surface.bounds.height * pts_mpu;
+    let world_w = surface.bounds.width * points_to_world;
+    let world_h = surface.bounds.height * points_to_world;
     let world_radii = corner_radius.to_meters_array(layout_mpu);
-    let world_borders = surface.border_widths.map(|w| w * pts_mpu);
+    let world_borders = surface.border_widths.map(|w| w * points_to_world);
 
     let half_w = world_w * 0.5;
     let half_h = world_h * 0.5;
@@ -325,11 +325,11 @@ fn spawn_sdf_element(
         || bevy::math::Vec4::new(-half_w, -half_h, half_w, half_h),
         |cr| {
             let (cx, cy) = surface.bounds.center();
-            let left = (cr.x - cx) * pts_mpu;
-            let right = (cr.x + cr.width - cx) * pts_mpu;
+            let left = (cr.x - cx) * points_to_world;
+            let right = (cr.x + cr.width - cx) * points_to_world;
             // Layout Y-down → local Y-up.
-            let top = -(cr.y - cy) * pts_mpu;
-            let bottom = -(cr.y + cr.height - cy) * pts_mpu;
+            let top = -(cr.y - cy) * points_to_world;
+            let bottom = -(cr.y + cr.height - cy) * points_to_world;
             bevy::math::Vec4::new(left, bottom.min(top), right, bottom.max(top))
         },
     );
@@ -346,7 +346,7 @@ fn spawn_sdf_element(
         oit_depth_offset,
     );
 
-    let world_rect = bounds_to_world_rect(&surface.bounds, pts_mpu, anchor_x, anchor_y);
+    let world_rect = bounds_to_world_rect(&surface.bounds, points_to_world, anchor_x, anchor_y);
 
     let mesh = meshes.add(Rectangle::new(world_w, world_h));
     let mat_handle = sdf_materials.add(sdf_mat);
@@ -388,14 +388,14 @@ struct WorldRect {
 
 fn bounds_to_world_rect(
     bounds: &BoundingBox,
-    pts_mpu: f32,
+    points_to_world: f32,
     anchor_x: f32,
     anchor_y: f32,
 ) -> WorldRect {
-    let width = bounds.width * pts_mpu;
-    let height = bounds.height * pts_mpu;
-    let left = bounds.x.mul_add(pts_mpu, -anchor_x);
-    let top = -(bounds.y.mul_add(pts_mpu, -anchor_y));
+    let width = bounds.width * points_to_world;
+    let height = bounds.height * points_to_world;
+    let left = bounds.x.mul_add(points_to_world, -anchor_x);
+    let top = -(bounds.y.mul_add(points_to_world, -anchor_y));
 
     WorldRect {
         center_x: width.mul_add(0.5, left),

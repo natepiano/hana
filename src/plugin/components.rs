@@ -382,18 +382,18 @@ impl DiegeticPanel {
     /// - Neither: physical size from layout units.
     #[must_use]
     pub fn world_width(&self, config: &UnitConfig) -> f32 {
-        let phys_w = self.physical_width(config);
-        let phys_h = self.physical_height(config);
+        let physical_width = self.physical_width(config);
+        let physical_height = self.physical_height(config);
         match (self.world_width, self.world_height) {
-            (Some(ww), _) => ww,
-            (None, Some(wh)) => {
-                if phys_h > 0.0 {
-                    phys_w * (wh / phys_h)
+            (Some(target_width), _) => target_width,
+            (None, Some(target_height)) => {
+                if physical_height > 0.0 {
+                    physical_width * (target_height / physical_height)
                 } else {
-                    phys_w
+                    physical_width
                 }
             },
-            (None, None) => phys_w,
+            (None, None) => physical_width,
         }
     }
 
@@ -405,18 +405,18 @@ impl DiegeticPanel {
     /// - Neither: physical size from layout units.
     #[must_use]
     pub fn world_height(&self, config: &UnitConfig) -> f32 {
-        let phys_w = self.physical_width(config);
-        let phys_h = self.physical_height(config);
+        let physical_width = self.physical_width(config);
+        let physical_height = self.physical_height(config);
         match (self.world_width, self.world_height) {
-            (_, Some(wh)) => wh,
-            (Some(ww), None) => {
-                if phys_w > 0.0 {
-                    phys_h * (ww / phys_w)
+            (_, Some(target_height)) => target_height,
+            (Some(target_width), None) => {
+                if physical_width > 0.0 {
+                    physical_height * (target_width / physical_width)
                 } else {
-                    phys_h
+                    physical_height
                 }
             },
-            (None, None) => phys_h,
+            (None, None) => physical_height,
         }
     }
 

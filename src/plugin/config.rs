@@ -1,7 +1,7 @@
 //! Atlas configuration types for the diegetic UI plugin.
 
 use bevy::prelude::*;
-use bevy::tasks::available_parallelism;
+use bevy::tasks;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
@@ -91,7 +91,7 @@ pub enum GlyphWorkerThreads {
     #[default]
     Auto,
     /// Request an explicit worker count. Values are clamped to the safe
-    /// range `1..=available_parallelism()`, with a warning.
+    /// range `1..=tasks::available_parallelism()`, with a warning.
     Fixed(usize),
 }
 
@@ -99,7 +99,7 @@ impl GlyphWorkerThreads {
     /// Resolves this policy to a concrete worker count for the current machine.
     #[must_use]
     pub fn resolve(self) -> usize {
-        let available = available_parallelism().max(1);
+        let available = tasks::available_parallelism().max(1);
         match self {
             Self::Auto => DEFAULT_AUTO_GLYPH_WORKER_THREADS.min(available),
             Self::Fixed(count) => count.clamp(1, available),
@@ -250,7 +250,7 @@ impl AtlasConfig {
             );
         }
         if let GlyphWorkerThreads::Fixed(count) = self.glyph_worker_threads {
-            let available = available_parallelism().max(1);
+            let available = tasks::available_parallelism().max(1);
             if !(1..=available).contains(&count) {
                 warn!(
                     "AtlasConfig: glyph_worker_threads {} clamped to 1–{} range",
@@ -680,7 +680,7 @@ mod tests {
     fn glyph_worker_threads_auto_resolves_to_at_most_six() {
         let resolved = GlyphWorkerThreads::Auto.resolve();
         assert!(resolved >= 1);
-        assert!(resolved <= available_parallelism().max(1));
+        assert!(resolved <= tasks::available_parallelism().max(1));
         assert!(resolved <= DEFAULT_AUTO_GLYPH_WORKER_THREADS);
     }
 
@@ -689,7 +689,7 @@ mod tests {
         assert_eq!(GlyphWorkerThreads::Fixed(0).resolve(), 1);
         assert_eq!(
             GlyphWorkerThreads::Fixed(usize::MAX).resolve(),
-            available_parallelism().max(1)
+            tasks::available_parallelism().max(1)
         );
     }
 

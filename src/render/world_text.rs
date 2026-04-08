@@ -7,6 +7,7 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::constants;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
@@ -350,7 +351,7 @@ fn spawn_world_text_meshes(
             let render_mode_u32 = style.render_mode() as u32;
 
             let visible_base = StandardMaterial {
-                depth_bias: super::constants::LAYER_DEPTH_BIAS,
+                depth_bias: constants::LAYER_DEPTH_BIAS,
                 ..Default::default()
             };
             let mat = super::msdf_material::msdf_text_material(
@@ -362,7 +363,7 @@ fn spawn_world_text_meshes(
                 0.0,
                 render_mode_u32,
                 super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
-                super::constants::OIT_DEPTH_STEP,
+                constants::OIT_DEPTH_STEP,
             );
 
             let material_handle = materials.add(mat);
@@ -394,7 +395,7 @@ fn spawn_world_text_meshes(
             };
 
             let proxy_base = StandardMaterial {
-                depth_bias: -super::constants::LAYER_DEPTH_BIAS,
+                depth_bias: -constants::LAYER_DEPTH_BIAS,
                 ..Default::default()
             };
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
@@ -468,8 +469,12 @@ fn shape_world_text(
     // rounds baselines to integers, which destroys metrics when the font
     // size is below 1.0 (e.g., 0.10 meters). We shape at the equivalent
     // point size and scale the output back down.
-    let pts_mpu = Unit::Points.meters_per_unit();
-    let boost = if pts_mpu > 0.0 { 1.0 / pts_mpu } else { 1.0 };
+    let points_to_world = Unit::Points.meters_per_unit();
+    let boost = if points_to_world > 0.0 {
+        1.0 / points_to_world
+    } else {
+        1.0
+    };
     let config = style.as_layout_config().scaled(boost);
 
     let mut stats = TextBuildStats {
@@ -519,7 +524,7 @@ fn shape_world_text(
     // Constant across all glyphs — hoist above the loop so they remain
     // in scope for the `first_advance` calculation below.
     let boosted_size = config.size();
-    let world_scale = scale * pts_mpu; // points → world meters
+    let world_scale = scale * points_to_world; // points → world meters
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
     let mut glyph_rects = Vec::with_capacity(shaped.glyphs.len());
@@ -587,8 +592,8 @@ fn shape_world_text(
     // units for downstream consumers (typography overlay).
     ShapedWorldText {
         quads,
-        anchor_x: anchor_x * pts_mpu,
-        anchor_y: anchor_y * pts_mpu,
+        anchor_x: anchor_x * points_to_world,
+        anchor_y: anchor_y * points_to_world,
         glyph_rects,
         first_advance,
         stats,

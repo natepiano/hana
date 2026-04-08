@@ -15,7 +15,7 @@ use bevy_kana::ToUsize;
 use super::atlas::GlyphKey;
 use super::atlas::MsdfAtlas;
 use super::msdf_rasterizer;
-use crate::layout::FontSlant::Normal;
+use crate::layout::FontSlant;
 
 /// Embedded font data for tests.
 const FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
@@ -495,7 +495,7 @@ fn eb_garamond_measure_timing() {
         font_id:        0,
         size:           36.0,
         weight:         crate::layout::FontWeight::NORMAL,
-        slant:          Normal,
+        slant:          FontSlant::Normal,
         line_height:    0.0,
         letter_spacing: 0.0,
         word_spacing:   0.0,

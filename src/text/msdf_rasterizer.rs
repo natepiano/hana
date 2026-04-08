@@ -3,10 +3,10 @@
 use bevy_kana::ToU8;
 use bevy_kana::ToU32;
 use fdsm::bezier::scanline::FillRule;
+use fdsm::correct_error;
 use fdsm::correct_error::ErrorCorrectionConfig;
-use fdsm::correct_error::correct_error_msdf;
-use fdsm::generate::generate_msdf;
-use fdsm::render::correct_sign_msdf;
+use fdsm::generate;
+use fdsm::render;
 use fdsm::shape::Shape;
 use fdsm::transform::Transform;
 use image::Rgb32FImage;
@@ -119,11 +119,17 @@ pub(super) fn rasterize_glyph(
     // where false edges in the multi-channel distance field produce
     // visible spikes.
     let mut image_f32 = Rgb32FImage::new(img_w, img_h);
-    generate_msdf(&prepared, sdf_range, &mut image_f32);
-    correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
+    generate::generate_msdf(&prepared, sdf_range, &mut image_f32);
+    render::correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
     {
         let ec_config = ErrorCorrectionConfig::default();
-        correct_error_msdf(&mut image_f32, &colored, &prepared, sdf_range, &ec_config);
+        correct_error::correct_error_msdf(
+            &mut image_f32,
+            &colored,
+            &prepared,
+            sdf_range,
+            &ec_config,
+        );
     }
 
     // Convert f32 [0.0, 1.0] to u8 [0, 255].

@@ -5,13 +5,19 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Instant;
 
+use bevy::asset::AssetLoadFailedEvent;
+use bevy::camera::Camera3d;
+use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureUsages;
+use bevy::render::view::Msaa;
 
 use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
 use super::components::RenderMode;
 use super::components::ScreenSpace;
+use super::screen_space::ScreenSpaceCamera;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
@@ -19,6 +25,152 @@ use crate::layout::MeasureTextFn;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextMeasure;
 use crate::render::ShapedTextCache;
+use crate::text::Font;
+use crate::text::FontId;
+use crate::text::FontLoadFailed;
+use crate::text::FontRegistered;
+use crate::text::FontRegistry;
+use crate::text::FontSource;
+use crate::text::MsdfAtlas;
+
+/// Gizmo group for diegetic panel debug wireframes.
+///
+/// Enable or disable via Bevy's [`GizmoConfigStore`].
+///
+/// **Note:** This API is provisional. Once panels render real geometry
+/// (Phase 4), debug visualization will likely move to a per-panel debug
+/// mode rather than a separate gizmo group.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct DiegeticPanelGizmoGroup;
+
+/// Ensures scene `Camera3d` entities have OIT enabled for correct
+/// transparent panel rendering.
+///
+/// # Why OIT is needed
+///
+/// In Geometry mode, each panel element (background, border, text) is a
+/// separate transparent mesh. When multiple transparent fragments overlap
+/// at a pixel, standard alpha blending composites them in submission
+/// order — which can be wrong when the camera moves (distance-based sort
+/// flips). OIT stores ALL transparent fragments in a linked list and
+/// resolves them by actual depth, producing correct compositing
+/// regardless of camera angle.
+///
+/// # Relationship with `depth_bias` and `oit_depth_offset`
+///
+/// `depth_bias` on `StandardMaterial` controls the `Transparent3d` sort
+/// key (submission order) and wins the GPU depth test for coplanar
+/// fragments. `oit_depth_offset` (a custom uniform added to `position.z`
+/// before `oit_draw`) separates coplanar layers in the OIT linked list
+/// so the resolve pass composites them in the correct painter's order.
+/// Pipeline `depth_bias` does NOT affect `in.position.z` seen by
+/// `oit_draw`, so the manual offset is required.
+///
+/// All three mechanisms are complementary:
+/// - `depth_bias` → sort order + depth test
+/// - `oit_depth_offset` → OIT fragment ordering for coplanar layers
+/// - OIT → correct alpha compositing for overlapping transparents
+///
+/// # Constraints
+///
+/// - OIT requires `Msaa::Off` — this system disables MSAA if present.
+/// - Only activates when at least one panel uses [`RenderMode::Geometry`], since OIT is unnecessary
+///   for texture-only panels.
+/// - Screen-space overlay cameras are excluded via [`Without<ScreenSpaceCamera>`] — they don't need
+///   OIT and adding it corrupts the shared OIT buffer.
+pub(super) fn ensure_oit_on_cameras(
+    panels: Query<&DiegeticPanel>,
+    mut cameras: Query<
+        (Entity, &mut Camera3d, Option<&Msaa>),
+        (
+            Without<OrderIndependentTransparencySettings>,
+            Without<ScreenSpaceCamera>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    let needs_oit = panels.iter().any(|p| p.render_mode == RenderMode::Geometry);
+    if !needs_oit {
+        return;
+    }
+
+    for (entity, mut camera_3d, msaa) in &mut cameras {
+        // Disable MSAA if it's enabled — OIT panics with MSAA > 1.
+        if msaa.is_some_and(|m| m.samples() > 1) {
+            commands.entity(entity).insert(Msaa::Off);
+        }
+        // Set depth texture usage BEFORE extraction — Bevy's built-in OIT
+        // hook only patches `Added<Camera3d>` and misses cameras that gain
+        // OIT later via deferred commands.
+        camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
+        commands
+            .entity(entity)
+            .insert(OrderIndependentTransparencySettings::default());
+    }
+}
+
+/// Enables perspective-scaled line widths on panel debug gizmos.
+pub(super) fn configure_panel_gizmos(mut config_store: ResMut<bevy::prelude::GizmoConfigStore>) {
+    let (config, _) = config_store.config_mut::<DiegeticPanelGizmoGroup>();
+    config.line.perspective = true;
+}
+
+/// Creates the empty GPU `Image` for the MSDF atlas at startup and
+/// fires [`FontRegistered`] for the embedded default font.
+pub(super) fn init_atlas_and_embedded_font(
+    mut atlas: ResMut<MsdfAtlas>,
+    mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
+) {
+    atlas.upload_to_gpu(&mut images);
+    // Fire FontRegistered for the embedded font so observers see it.
+    commands.trigger(FontRegistered {
+        id:     FontId::MONOSPACE,
+        name:   "JetBrains Mono".to_string(),
+        source: FontSource::Embedded,
+    });
+}
+
+/// Watches for newly loaded [`Font`] assets and registers them with
+/// [`FontRegistry`]. Fires [`FontRegistered`] for each successful
+/// registration.
+pub(super) fn consume_loaded_fonts(
+    mut events: MessageReader<AssetEvent<Font>>,
+    font_assets: Res<Assets<Font>>,
+    mut registry: ResMut<FontRegistry>,
+    mut commands: Commands,
+) {
+    for event in events.read() {
+        if let AssetEvent::Added { id } = event
+            && let Some(font) = font_assets.get(*id)
+        {
+            // Skip if already registered (e.g., embedded font).
+            if registry.font_id_by_name(font.name()).is_some() {
+                continue;
+            }
+            if let Some(font_id) = registry.register_font(font.name(), font.data()) {
+                commands.trigger(FontRegistered {
+                    id:     font_id,
+                    name:   (*font.name()).to_string(),
+                    source: FontSource::Loaded,
+                });
+            }
+        }
+    }
+}
+
+/// Watches for failed [`Font`] asset loads and fires [`FontLoadFailed`].
+pub(super) fn watch_font_failures(
+    mut failures: MessageReader<AssetLoadFailedEvent<Font>>,
+    mut commands: Commands,
+) {
+    for event in failures.read() {
+        commands.trigger(FontLoadFailed {
+            path:  event.path.to_string(),
+            error: event.error.to_string(),
+        });
+    }
+}
 
 /// Lightweight timing data for diegetic UI systems.
 ///
@@ -196,7 +348,13 @@ pub(super) fn compute_panel_layouts(
 /// Controls whether debug gizmos (text bounding boxes, element outlines)
 /// are drawn. Toggle at runtime to debug layout measurement and positioning.
 #[derive(Resource, Default)]
-pub struct ShowTextGizmos(pub bool);
+pub enum ShowTextGizmos {
+    /// Debug gizmos are not drawn (default).
+    #[default]
+    Hidden,
+    /// Debug gizmos are drawn.
+    Shown,
+}
 
 /// Marker on gizmo entities spawned by the layout gizmo renderer.
 #[derive(Component)]
@@ -230,13 +388,13 @@ enum GizmoChildMarker {
 
 /// Parameters for spawning a gizmo rectangle on a panel.
 struct GizmoRect<'a> {
-    bounds:     &'a BoundingBox,
-    pts_mpu:    f32,
-    anchor_x:   f32,
-    anchor_y:   f32,
-    color:      Color,
-    line_width: f32,
-    marker:     GizmoChildMarker,
+    bounds:          &'a BoundingBox,
+    points_to_world: f32,
+    anchor_x:        f32,
+    anchor_y:        f32,
+    color:           Color,
+    line_width:      f32,
+    marker:          GizmoChildMarker,
 }
 
 /// Spawns a gizmo rectangle child on `panel_entity`.
@@ -250,7 +408,7 @@ fn spawn_rect_gizmo(
     add_rect_to_gizmo(
         &mut asset,
         rect.bounds,
-        rect.pts_mpu,
+        rect.points_to_world,
         rect.anchor_x,
         rect.anchor_y,
         rect.color,
@@ -302,7 +460,7 @@ pub(super) fn render_layout_gizmos(
         return;
     }
 
-    let ppm = pixels_per_meter(&cameras);
+    let screen_pixels_per_meter = pixels_per_meter(&cameras);
 
     for (panel_entity, panel, computed, is_screen_space) in &changed_panels {
         // Geometry mode renders real meshes — gizmos are redundant.
@@ -314,7 +472,7 @@ pub(super) fn render_layout_gizmos(
             continue;
         };
 
-        let pts_mpu = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world(&unit_config);
         for (entity, child_of) in &existing_gizmos {
             if child_of.parent() == panel_entity {
                 commands.entity(entity).despawn();
@@ -335,14 +493,15 @@ pub(super) fn render_layout_gizmos(
             match &cmd.kind {
                 RenderCommandKind::Rectangle { color, .. } => {
                     let border = border_by_idx.get(&cmd.element_idx);
-                    let (il, ir, it, ib) = border.map_or((0.0, 0.0, 0.0, 0.0), |b| {
-                        (b.left.value, b.right.value, b.top.value, b.bottom.value)
-                    });
+                    let (inset_left, inset_right, inset_top, inset_bottom) = border
+                        .map_or((0.0, 0.0, 0.0, 0.0), |b| {
+                            (b.left.value, b.right.value, b.top.value, b.bottom.value)
+                        });
                     let inset_bounds = BoundingBox {
-                        x:      cmd.bounds.x + il,
-                        y:      cmd.bounds.y + it,
-                        width:  (cmd.bounds.width - il - ir).max(0.0),
-                        height: (cmd.bounds.height - it - ib).max(0.0),
+                        x:      cmd.bounds.x + inset_left,
+                        y:      cmd.bounds.y + inset_top,
+                        width:  (cmd.bounds.width - inset_left - inset_right).max(0.0),
+                        height: (cmd.bounds.height - inset_top - inset_bottom).max(0.0),
                     };
                     spawn_rect_gizmo(
                         &mut commands,
@@ -350,7 +509,7 @@ pub(super) fn render_layout_gizmos(
                         &mut gizmo_assets,
                         &GizmoRect {
                             bounds: &inset_bounds,
-                            pts_mpu,
+                            points_to_world,
                             anchor_x,
                             anchor_y,
                             color: *color,
@@ -360,20 +519,20 @@ pub(super) fn render_layout_gizmos(
                     );
                 },
                 RenderCommandKind::Border { border } => {
-                    let hl = border.left.value * 0.5;
-                    let hr = border.right.value * 0.5;
-                    let ht = border.top.value * 0.5;
-                    let hb = border.bottom.value * 0.5;
+                    let half_left = border.left.value * 0.5;
+                    let half_right = border.right.value * 0.5;
+                    let half_top = border.top.value * 0.5;
+                    let half_bottom = border.bottom.value * 0.5;
                     let has_sides = border.left.value > 0.0
                         || border.right.value > 0.0
                         || border.top.value > 0.0
                         || border.bottom.value > 0.0;
                     if has_sides {
                         let inset_bounds = BoundingBox {
-                            x:      cmd.bounds.x + hl,
-                            y:      cmd.bounds.y + ht,
-                            width:  (cmd.bounds.width - hl - hr).max(0.0),
-                            height: (cmd.bounds.height - ht - hb).max(0.0),
+                            x:      cmd.bounds.x + half_left,
+                            y:      cmd.bounds.y + half_top,
+                            width:  (cmd.bounds.width - half_left - half_right).max(0.0),
+                            height: (cmd.bounds.height - half_top - half_bottom).max(0.0),
                         };
                         let avg_border_pts = (border.left.value
                             + border.right.value
@@ -386,7 +545,7 @@ pub(super) fn render_layout_gizmos(
                         let border_px = if is_screen_space {
                             avg_border_pts.max(1.0)
                         } else {
-                            (avg_border_pts * pts_mpu * ppm).max(1.0)
+                            (avg_border_pts * points_to_world * screen_pixels_per_meter).max(1.0)
                         };
                         spawn_rect_gizmo(
                             &mut commands,
@@ -394,7 +553,7 @@ pub(super) fn render_layout_gizmos(
                             &mut gizmo_assets,
                             &GizmoRect {
                                 bounds: &inset_bounds,
-                                pts_mpu,
+                                points_to_world,
                                 anchor_x,
                                 anchor_y,
                                 color: border.color,
@@ -426,7 +585,7 @@ pub(super) fn render_debug_gizmos(
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut commands: Commands,
 ) {
-    if !show_text.0 || changed_panels.is_empty() {
+    if !matches!(*show_text, ShowTextGizmos::Shown) || changed_panels.is_empty() {
         return;
     }
 
@@ -435,7 +594,7 @@ pub(super) fn render_debug_gizmos(
             continue;
         };
 
-        let pts_mpu = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world(&unit_config);
         for (entity, child_of) in &existing_gizmos {
             if child_of.parent() == panel_entity {
                 commands.entity(entity).despawn();
@@ -452,7 +611,7 @@ pub(super) fn render_debug_gizmos(
                     &mut gizmo_assets,
                     &GizmoRect {
                         bounds: &cmd.bounds,
-                        pts_mpu,
+                        points_to_world,
                         anchor_x,
                         anchor_y,
                         color: Color::srgba(0.9, 0.9, 0.2, 0.2),
@@ -498,11 +657,14 @@ mod tests {
     use bevy_kana::ToU32;
 
     use super::*;
+    use crate::layout::Border;
+    use crate::layout::Direction;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutEngine;
     use crate::layout::LayoutTextStyle;
     use crate::layout::LayoutTree;
+    use crate::layout::Padding;
     use crate::layout::Sizing;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
@@ -520,10 +682,6 @@ mod tests {
     }
 
     // ── Performance timing tests (run with --run-ignored all) ────────
-
-    use crate::layout::Border;
-    use crate::layout::Direction;
-    use crate::layout::Padding;
 
     const PERF_FONT_SIZE: f32 = 7.0;
     const PERF_LAYOUT_WIDTH: f32 = 800.0;

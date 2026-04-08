@@ -27,9 +27,7 @@ use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
 use crate::layout::BoundingBox;
 use crate::layout::FontFeatures;
-use crate::layout::FontSlant::Italic;
-use crate::layout::FontSlant::Normal;
-use crate::layout::FontSlant::Oblique;
+use crate::layout::FontSlant;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
@@ -125,9 +123,9 @@ impl ShapedCacheKey {
             size_q:        (m.size * 100.0).to_u32(),
             weight_q:      (m.weight.0 * 10.0).to_u32(),
             slant:         match m.slant {
-                Normal => 0,
-                Italic => 1,
-                Oblique => 2,
+                FontSlant::Normal => 0,
+                FontSlant::Italic => 1,
+                FontSlant::Oblique => 2,
             },
             lh_q:          (m.line_height * 100.0).to_u32(),
             ls_q:          (m.letter_spacing * 100.0).to_i32(),
@@ -437,9 +435,9 @@ fn reconcile_panel_text_children(
 
         // Layout output is in points. Convert to world meters
         // (incorporates world_width/world_height scaling).
-        let pts_mpu = panel.points_to_world(&unit_config);
-        let scale_x = pts_mpu;
-        let scale_y = pts_mpu;
+        let points_to_world = panel.points_to_world(&unit_config);
+        let scale_x = points_to_world;
+        let scale_y = points_to_world;
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
         // Collect text commands from layout result, preserving the
@@ -541,7 +539,7 @@ fn reconcile_panel_image_children(
             continue;
         };
 
-        let pts_mpu = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
         let layer = rtt_registry
             .get_layer(panel_entity)
@@ -587,10 +585,10 @@ fn reconcile_panel_image_children(
             visited_indices.push(*element_idx);
 
             // Convert layout bounds to world-space dimensions.
-            let world_w = bounds.width * pts_mpu;
-            let world_h = bounds.height * pts_mpu;
-            let world_x = bounds.x.mul_add(pts_mpu, world_w * 0.5) - anchor_x;
-            let world_y = -(bounds.y.mul_add(pts_mpu, world_h * 0.5) - anchor_y);
+            let world_w = bounds.width * points_to_world;
+            let world_h = bounds.height * points_to_world;
+            let world_x = bounds.x.mul_add(points_to_world, world_w * 0.5) - anchor_x;
+            let world_y = -(bounds.y.mul_add(points_to_world, world_h * 0.5) - anchor_y);
 
             let mesh_handle = meshes.add(Rectangle::new(world_w, world_h));
             let material_handle = materials.add(StandardMaterial {
@@ -1328,6 +1326,7 @@ fn sync_panel_hue_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::msdf_material;
 
     /// Verifies that the material sharing decision produces the expected
     /// handle identity: zero hue → shared handle, non-zero hue → unique handle.
@@ -1341,7 +1340,7 @@ mod tests {
 
         // Create the shared default material (hue_offset = 0).
         let base = StandardMaterial::default();
-        let shared_handle = materials.add(super::super::msdf_material::msdf_text_material(
+        let shared_handle = materials.add(msdf_material::msdf_text_material(
             base.clone(),
             4.0,
             256,
@@ -1349,7 +1348,7 @@ mod tests {
             atlas_image.clone(),
             0.0,
             0,
-            super::super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+            msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
             0.0,
         ));
 
@@ -1358,7 +1357,7 @@ mod tests {
             if hue.abs() < f32::EPSILON {
                 shared_handle.clone()
             } else {
-                materials.add(super::super::msdf_material::msdf_text_material(
+                materials.add(msdf_material::msdf_text_material(
                     base.clone(),
                     4.0,
                     256,
@@ -1366,7 +1365,7 @@ mod tests {
                     atlas_image.clone(),
                     hue,
                     0,
-                    super::super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                    msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
                     0.0,
                 ))
             }

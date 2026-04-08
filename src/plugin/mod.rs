@@ -9,12 +9,7 @@ mod diagnostics;
 mod screen_space;
 mod systems;
 
-use bevy::asset::AssetLoadFailedEvent;
-use bevy::camera::Camera3d;
-use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureUsages;
-use bevy::render::view::Msaa;
 pub use components::ComputedDiegeticPanel;
 pub use components::DiegeticPanel;
 pub use components::DiegeticPanelBuilder;
@@ -33,16 +28,9 @@ pub use config::Pt;
 pub use config::Px;
 pub use config::RasterQuality;
 pub use config::UnitConfig;
-use diagnostics::install as install_perf_diagnostics;
-use screen_space::ScreenSpaceCamera;
-use screen_space::cleanup_screen_space_cameras;
-use screen_space::propagate_screen_space_render_layers;
-use screen_space::setup_screen_space_cameras;
+pub use systems::DiegeticPanelGizmoGroup;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
-use systems::compute_panel_layouts;
-use systems::render_debug_gizmos;
-use systems::render_layout_gizmos;
 
 pub use crate::layout::Unit;
 use crate::render::PanelGeometryPlugin;
@@ -51,152 +39,9 @@ use crate::render::ShapedTextCache;
 use crate::render::TextRenderPlugin;
 use crate::text;
 use crate::text::Font;
-use crate::text::FontId;
-use crate::text::FontLoadFailed;
 use crate::text::FontLoader;
-use crate::text::FontRegistered;
 use crate::text::FontRegistry;
-use crate::text::FontSource;
 use crate::text::MsdfAtlas;
-
-/// Ensures scene `Camera3d` entities have OIT enabled for correct
-/// transparent panel rendering.
-///
-/// # Why OIT is needed
-///
-/// In Geometry mode, each panel element (background, border, text) is a
-/// separate transparent mesh. When multiple transparent fragments overlap
-/// at a pixel, standard alpha blending composites them in submission
-/// order — which can be wrong when the camera moves (distance-based sort
-/// flips). OIT stores ALL transparent fragments in a linked list and
-/// resolves them by actual depth, producing correct compositing
-/// regardless of camera angle.
-///
-/// # Relationship with `depth_bias` and `oit_depth_offset`
-///
-/// `depth_bias` on `StandardMaterial` controls the `Transparent3d` sort
-/// key (submission order) and wins the GPU depth test for coplanar
-/// fragments. `oit_depth_offset` (a custom uniform added to `position.z`
-/// before `oit_draw`) separates coplanar layers in the OIT linked list
-/// so the resolve pass composites them in the correct painter's order.
-/// Pipeline `depth_bias` does NOT affect `in.position.z` seen by
-/// `oit_draw`, so the manual offset is required.
-///
-/// All three mechanisms are complementary:
-/// - `depth_bias` → sort order + depth test
-/// - `oit_depth_offset` → OIT fragment ordering for coplanar layers
-/// - OIT → correct alpha compositing for overlapping transparents
-///
-/// # Constraints
-///
-/// - OIT requires `Msaa::Off` — this system disables MSAA if present.
-/// - Only activates when at least one panel uses [`RenderMode::Geometry`], since OIT is unnecessary
-///   for texture-only panels.
-/// - Screen-space overlay cameras are excluded via [`Without<ScreenSpaceCamera>`] — they don't need
-///   OIT and adding it corrupts the shared OIT buffer.
-fn ensure_oit_on_cameras(
-    panels: Query<&DiegeticPanel>,
-    mut cameras: Query<
-        (Entity, &mut Camera3d, Option<&Msaa>),
-        (
-            Without<OrderIndependentTransparencySettings>,
-            Without<ScreenSpaceCamera>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    let needs_oit = panels.iter().any(|p| p.render_mode == RenderMode::Geometry);
-    if !needs_oit {
-        return;
-    }
-
-    for (entity, mut camera_3d, msaa) in &mut cameras {
-        // Disable MSAA if it's enabled — OIT panics with MSAA > 1.
-        if msaa.is_some_and(|m| m.samples() > 1) {
-            commands.entity(entity).insert(Msaa::Off);
-        }
-        // Set depth texture usage BEFORE extraction — Bevy's built-in OIT
-        // hook only patches `Added<Camera3d>` and misses cameras that gain
-        // OIT later via deferred commands.
-        camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
-        commands
-            .entity(entity)
-            .insert(OrderIndependentTransparencySettings::default());
-    }
-}
-
-/// Enables perspective-scaled line widths on panel debug gizmos.
-fn configure_panel_gizmos(mut config_store: ResMut<bevy::prelude::GizmoConfigStore>) {
-    let (config, _) = config_store.config_mut::<DiegeticPanelGizmoGroup>();
-    config.line.perspective = true;
-}
-
-/// Creates the empty GPU `Image` for the MSDF atlas at startup and
-/// fires [`FontRegistered`] for the embedded default font.
-fn init_atlas_and_embedded_font(
-    mut atlas: ResMut<MsdfAtlas>,
-    mut images: ResMut<Assets<Image>>,
-    mut commands: Commands,
-) {
-    atlas.upload_to_gpu(&mut images);
-    // Fire FontRegistered for the embedded font so observers see it.
-    commands.trigger(FontRegistered {
-        id:     FontId::MONOSPACE,
-        name:   "JetBrains Mono".to_string(),
-        source: FontSource::Embedded,
-    });
-}
-
-/// Watches for newly loaded [`Font`] assets and registers them with
-/// [`FontRegistry`]. Fires [`FontRegistered`] for each successful
-/// registration.
-fn consume_loaded_fonts(
-    mut events: MessageReader<AssetEvent<Font>>,
-    font_assets: Res<Assets<Font>>,
-    mut registry: ResMut<FontRegistry>,
-    mut commands: Commands,
-) {
-    for event in events.read() {
-        if let AssetEvent::Added { id } = event
-            && let Some(font) = font_assets.get(*id)
-        {
-            // Skip if already registered (e.g., embedded font).
-            if registry.font_id_by_name(font.name()).is_some() {
-                continue;
-            }
-            if let Some(font_id) = registry.register_font(font.name(), font.data()) {
-                commands.trigger(FontRegistered {
-                    id:     font_id,
-                    name:   (*font.name()).to_string(),
-                    source: FontSource::Loaded,
-                });
-            }
-        }
-    }
-}
-
-/// Watches for failed [`Font`] asset loads and fires [`FontLoadFailed`].
-fn watch_font_failures(
-    mut failures: MessageReader<AssetLoadFailedEvent<Font>>,
-    mut commands: Commands,
-) {
-    for event in failures.read() {
-        commands.trigger(FontLoadFailed {
-            path:  event.path.to_string(),
-            error: event.error.to_string(),
-        });
-    }
-}
-
-/// Gizmo group for diegetic panel debug wireframes.
-///
-/// Enable or disable via Bevy's [`GizmoConfigStore`].
-///
-/// **Note:** This API is provisional. Once panels render real geometry
-/// (Phase 4), debug visualization will likely move to a per-panel debug
-/// mode rather than a separate gizmo group.
-#[derive(Default, Reflect, GizmoConfigGroup)]
-pub struct DiegeticPanelGizmoGroup;
 
 /// Layout-only plugin for diegetic UI panels.
 ///
@@ -210,10 +55,10 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<Self>() {
-            install_perf_diagnostics(app);
+            diagnostics::install(app);
             app.init_resource::<ShapedTextCache>()
                 .init_resource::<DiegeticPerfStats>()
-                .add_systems(Update, compute_panel_layouts);
+                .add_systems(Update, systems::compute_panel_layouts);
         }
     }
 }
@@ -368,7 +213,7 @@ impl Plugin for DiegeticUiPluginConfigured {
 /// Shared plugin build logic for both [`DiegeticUiPlugin`] and
 /// [`DiegeticUiPluginConfigured`].
 fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option<UnitConfig>) {
-    install_perf_diagnostics(app);
+    diagnostics::install(app);
     // Initialize font registry and wire up parley-backed text measurement.
     let Some(registry) = FontRegistry::new() else {
         warn!("bevy_diegetic: embedded font failed to parse — plugin disabled");
@@ -411,23 +256,29 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .init_gizmo_group::<DiegeticPanelGizmoGroup>()
         .add_systems(
             Startup,
-            (init_atlas_and_embedded_font, configure_panel_gizmos),
+            (
+                systems::init_atlas_and_embedded_font,
+                systems::configure_panel_gizmos,
+            ),
         )
-        .add_systems(PostUpdate, (consume_loaded_fonts, watch_font_failures))
+        .add_systems(
+            PostUpdate,
+            (systems::consume_loaded_fonts, systems::watch_font_failures),
+        )
         .add_systems(
             Update,
             (
-                ensure_oit_on_cameras,
-                setup_screen_space_cameras.after(compute_panel_layouts),
-                render_layout_gizmos.after(compute_panel_layouts),
-                render_debug_gizmos.after(compute_panel_layouts),
+                systems::ensure_oit_on_cameras,
+                screen_space::setup_screen_space_cameras.after(systems::compute_panel_layouts),
+                systems::render_layout_gizmos.after(systems::compute_panel_layouts),
+                systems::render_debug_gizmos.after(systems::compute_panel_layouts),
             ),
         )
         .add_systems(
             PostUpdate,
             (
-                propagate_screen_space_render_layers,
-                cleanup_screen_space_cameras,
+                screen_space::propagate_screen_space_render_layers,
+                screen_space::cleanup_screen_space_cameras,
             ),
         );
 
