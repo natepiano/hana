@@ -1,3 +1,4 @@
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
@@ -194,6 +195,51 @@ fn cleanup_stale_margin_labels(
     }
 }
 
+/// Observer that cleans up visualization state when `FitVisualization` is removed from a camera.
+pub(super) fn on_remove_fit_visualization(
+    trigger: On<Remove, FitOverlay>,
+    mut commands: Commands,
+    label_query: Query<(Entity, &MarginLabel)>,
+    bounds_label_query: Query<(Entity, &BoundsLabel)>,
+) {
+    let camera = trigger.entity;
+
+    // Clean up viewport margins from the camera entity.
+    // `try_remove` silently skips if the entity was despawned this frame
+    // (e.g. closing a secondary window triggers component removal during despawn).
+    commands
+        .entity(camera)
+        .try_remove::<FitTargetViewportMarginPcts>();
+
+    // Clean up labels belonging to this camera
+    for (entity, label) in &label_query {
+        if label.camera == camera {
+            commands.entity(entity).despawn();
+        }
+    }
+    for (entity, label) in &bounds_label_query {
+        if label.camera == camera {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Syncs the gizmo render layers and line width with visualization-enabled cameras.
+pub(super) fn sync_gizmo_render_layers(
+    mut config_store: ResMut<GizmoConfigStore>,
+    viz_config: Res<FitTargetOverlayConfig>,
+    camera_query: Query<Option<&RenderLayers>, With<FitOverlay>>,
+) {
+    let (gizmo_config, _) = config_store.config_mut::<FitTargetGizmo>();
+    gizmo_config.line.width = viz_config.line_width;
+    gizmo_config.depth_bias = -1.0;
+
+    // Apply render layers from the first visualization-enabled camera
+    if let Some(Some(layers)) = camera_query.iter().next() {
+        gizmo_config.render_layers = layers.clone();
+    }
+}
+
 /// Draws screen-aligned bounds for all cameras with `FitVisualization`.
 pub fn draw_fit_target_bounds(
     mut commands: Commands,
@@ -216,22 +262,28 @@ pub fn draw_fit_target_bounds(
     mut label_query: Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     mut bounds_label_query: Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
-    for (camera, cam, cam_global, projection, current_target) in &camera_query {
+    for (camera, camera_component, cam_global, projection, current_target) in &camera_query {
+        let Some((vertices, _)) = support::extract_mesh_vertices(
+            current_target.0,
+            &children_query,
+            &mesh_query,
+            &global_transform_query,
+            &meshes,
+        ) else {
+            continue;
+        };
+
         draw_bounds_for_camera(
             &mut commands,
             &mut gizmos,
             &config,
             &BoundsCamera {
                 entity: camera,
-                cam,
+                camera_component,
                 cam_global,
                 projection,
-                current_target,
             },
-            &children_query,
-            &mesh_query,
-            &global_transform_query,
-            &meshes,
+            &vertices,
             &mut label_query,
             &mut bounds_label_query,
         );
@@ -240,11 +292,10 @@ pub fn draw_fit_target_bounds(
 
 /// Camera data for bounds visualization.
 struct BoundsCamera<'a> {
-    entity:         Entity,
-    cam:            &'a Camera,
-    cam_global:     &'a GlobalTransform,
-    projection:     &'a Projection,
-    current_target: &'a CurrentFitTarget,
+    entity:           Entity,
+    camera_component: &'a Camera,
+    cam_global:       &'a GlobalTransform,
+    projection:       &'a Projection,
 }
 
 /// Draws bounds visualization for a single camera/target pair.
@@ -253,45 +304,32 @@ fn draw_bounds_for_camera(
     gizmos: &mut Gizmos<FitTargetGizmo>,
     config: &FitTargetOverlayConfig,
     cam_data: &BoundsCamera,
-    children_query: &Query<&Children>,
-    mesh_query: &Query<&Mesh3d>,
-    global_transform_query: &Query<&GlobalTransform>,
-    meshes: &Assets<Mesh>,
+    vertices: &[Vec3],
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     bounds_label_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
     let camera = cam_data.entity;
-    let cam = cam_data.cam;
+    let camera_component = cam_data.camera_component;
     let cam_global = cam_data.cam_global;
     let projection = cam_data.projection;
-    let current_target = cam_data.current_target;
-    let Some((vertices, _)) = support::extract_mesh_vertices(
-        current_target.0,
-        children_query,
-        mesh_query,
-        global_transform_query,
-        meshes,
-    ) else {
-        return;
-    };
 
     let cam_basis = CameraBasis::from_global_transform(cam_global);
 
     let Some(aspect_ratio) =
-        support::projection_aspect_ratio(projection, cam.logical_viewport_size())
+        support::projection_aspect_ratio(projection, camera_component.logical_viewport_size())
     else {
         return;
     };
 
     let Some((bounds, depths)) =
-        ScreenSpaceBounds::from_points(&vertices, cam_global, projection, aspect_ratio)
+        ScreenSpaceBounds::from_points(vertices, cam_global, projection, aspect_ratio)
     else {
         return;
     };
 
     let avg_depth = depths.depth_sum / depths.point_count.to_f32();
     let is_ortho = matches!(projection, Projection::Orthographic(_));
-    let viewport_size = cam.logical_viewport_size();
+    let viewport_size = camera_component.logical_viewport_size();
 
     // Update margin percentages on camera entity for BRP inspection.
     // `try_insert` silently skips if the entity was despawned this frame
@@ -307,7 +345,7 @@ fn draw_bounds_for_camera(
     // Silhouette convex hull
     draw_silhouette(
         gizmos,
-        &vertices,
+        vertices,
         &cam_basis,
         avg_depth,
         is_ortho,

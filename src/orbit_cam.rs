@@ -12,6 +12,10 @@ use bevy::window::WindowRef;
 
 use super::constants::SCROLL_ZOOM_FACTOR;
 use super::constants::TOUCH_PINCH_SCALE;
+#[cfg(feature = "bevy_egui")]
+use super::egui::BlockOnEguiFocus;
+#[cfg(feature = "bevy_egui")]
+use super::egui::EguiWantsFocus;
 use super::input;
 use super::input::MouseKeyTracker;
 use super::touch::TouchGestures;
@@ -29,10 +33,6 @@ use super::types::TimeSource;
 use super::types::UpsideDownPolicy;
 use super::types::ZoomDirection;
 use super::util;
-#[cfg(feature = "bevy_egui")]
-use crate::egui::BlockOnEguiFocus;
-#[cfg(feature = "bevy_egui")]
-use crate::egui::EguiWantsFocus;
 
 /// Base system set to allow ordering of `OrbitCam`
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]

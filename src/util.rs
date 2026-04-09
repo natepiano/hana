@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_kana::Position;
 
-use crate::constants::EPSILON;
-use crate::constants::MIN_ORBIT_RADIUS;
-use crate::constants::SMOOTHNESS_EXPONENT;
+use super::constants::EPSILON;
+use super::constants::MIN_ORBIT_RADIUS;
+use super::constants::SMOOTHNESS_EXPONENT;
 
 pub(crate) fn calculate_from_translation_and_focus(
     translation: impl Into<Position>,

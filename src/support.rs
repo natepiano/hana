@@ -3,6 +3,8 @@
 use bevy::prelude::*;
 use bevy_kana::Position;
 
+use super::constants::MIN_VISIBLE_DEPTH;
+
 // ============================================================================
 // Camera basis
 // ============================================================================
@@ -10,20 +12,20 @@ use bevy_kana::Position;
 /// Camera basis vectors extracted from a `GlobalTransform`.
 /// Bundles the position and orientation vectors that are frequently passed together.
 pub(crate) struct CameraBasis {
-    pub pos:     Position,
-    pub right:   Vec3,
-    pub up:      Vec3,
-    pub forward: Vec3,
+    pub position: Position,
+    pub right:    Vec3,
+    pub up:       Vec3,
+    pub forward:  Vec3,
 }
 
 impl CameraBasis {
     pub(crate) fn from_global_transform(global: &GlobalTransform) -> Self {
         let rot = global.rotation();
         Self {
-            pos:     Position(global.translation()),
-            right:   rot * Vec3::X,
-            up:      rot * Vec3::Y,
-            forward: rot * Vec3::NEG_Z,
+            position: Position(global.translation()),
+            right:    rot * Vec3::X,
+            up:       rot * Vec3::Y,
+            forward:  rot * Vec3::NEG_Z,
         }
     }
 }
@@ -31,8 +33,6 @@ impl CameraBasis {
 // ============================================================================
 // Projection utilities
 // ============================================================================
-
-use crate::constants::MIN_VISIBLE_DEPTH;
 
 /// Projection-derived parameters for screen-space normalization.
 /// Consolidates the extraction of half extents and projection type from a `Projection`.
@@ -75,7 +75,7 @@ pub(crate) fn project_point(
     cam: &CameraBasis,
     is_ortho: bool,
 ) -> Option<(f32, f32, f32)> {
-    let relative = point - *cam.pos;
+    let relative = point - *cam.position;
     let depth = relative.dot(cam.forward);
     if !is_ortho && depth <= MIN_VISIBLE_DEPTH {
         return None;

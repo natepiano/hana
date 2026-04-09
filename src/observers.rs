@@ -170,7 +170,7 @@ pub(crate) fn on_zoom_to_fit(
     let duration = zoom.duration;
     let easing = zoom.easing;
 
-    let Ok((mut orbit_cam, projection, cam)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, projection, camera_component)) = camera_query.get_mut(camera) else {
         return;
     };
 
@@ -191,7 +191,7 @@ pub(crate) fn on_zoom_to_fit(
             pitch: orbit_cam.target_pitch,
             margin,
             projection,
-            camera: cam,
+            camera: camera_component,
         },
         &mesh_query,
         &children_query,
@@ -439,7 +439,7 @@ pub(crate) fn on_animate_to_fit(
     let duration = event.duration;
     let easing = event.easing;
 
-    let Ok((mut orbit_cam, projection, cam)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, projection, camera_component)) = camera_query.get_mut(camera) else {
         return;
     };
 
@@ -451,7 +451,7 @@ pub(crate) fn on_animate_to_fit(
             pitch,
             margin,
             projection,
-            camera: cam,
+            camera: camera_component,
         },
         &mesh_query,
         &children_query,
@@ -572,7 +572,9 @@ pub(crate) fn on_look_at_and_zoom_to_fit(
     let duration = event.duration;
     let easing = event.easing;
 
-    let Ok((mut orbit_cam, projection, cam, cam_transform)) = camera_query.get_mut(camera) else {
+    let Ok((mut orbit_cam, projection, camera_component, cam_transform)) =
+        camera_query.get_mut(camera)
+    else {
         return;
     };
 
@@ -597,7 +599,7 @@ pub(crate) fn on_look_at_and_zoom_to_fit(
             pitch: preliminary_pitch,
             margin,
             projection,
-            camera: cam,
+            camera: camera_component,
         },
         &mesh_query,
         &children_query,

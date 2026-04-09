@@ -95,7 +95,7 @@ pub fn normalized_to_world(
     } else {
         (norm_x * avg_depth, norm_y * avg_depth)
     };
-    *cam.pos + cam.right * world_x + cam.up * world_y + cam.forward * avg_depth
+    *cam.position + cam.right * world_x + cam.up * world_y + cam.forward * avg_depth
 }
 
 /// Returns the margin percentage for a given edge.
