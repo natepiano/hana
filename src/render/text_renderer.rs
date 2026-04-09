@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
+use bevy::math::Vec4;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
@@ -101,16 +102,16 @@ pub struct ShapedTextRun {
 /// Cache key: hash of the text string + the full `TextMeasure` identity.
 #[derive(Clone, Eq, PartialEq, Hash)]
 struct ShapedCacheKey {
-    text_hash:     u64,
-    font_id:       u16,
+    text_hash:                u64,
+    font_id:                  u16,
     /// Size quantized to avoid floating-point hash issues (size * 100 as u32).
-    size_q:        u32,
-    weight_q:      u32,
-    slant:         u8,
-    lh_q:          u32,
-    ls_q:          i32,
-    ws_q:          i32,
-    font_features: FontFeatures,
+    size_quantized:           u32,
+    weight_quantized:         u32,
+    slant:                    u8,
+    line_height_quantized:    u32,
+    letter_spacing_quantized: i32,
+    word_spacing_quantized:   i32,
+    font_features:            FontFeatures,
 }
 
 impl ShapedCacheKey {
@@ -118,19 +119,19 @@ impl ShapedCacheKey {
         let mut hasher = DefaultHasher::new();
         text.hash(&mut hasher);
         Self {
-            text_hash:     hasher.finish(),
-            font_id:       m.font_id,
-            size_q:        (m.size * 100.0).to_u32(),
-            weight_q:      (m.weight.0 * 10.0).to_u32(),
-            slant:         match m.slant {
+            text_hash:                hasher.finish(),
+            font_id:                  m.font_id,
+            size_quantized:           (m.size * 100.0).to_u32(),
+            weight_quantized:         (m.weight.0 * 10.0).to_u32(),
+            slant:                    match m.slant {
                 FontSlant::Normal => 0,
                 FontSlant::Italic => 1,
                 FontSlant::Oblique => 2,
             },
-            lh_q:          (m.line_height * 100.0).to_u32(),
-            ls_q:          (m.letter_spacing * 100.0).to_i32(),
-            ws_q:          (m.word_spacing * 100.0).to_i32(),
-            font_features: m.font_features,
+            line_height_quantized:    (m.line_height * 100.0).to_u32(),
+            letter_spacing_quantized: (m.letter_spacing * 100.0).to_i32(),
+            word_spacing_quantized:   (m.word_spacing * 100.0).to_i32(),
+            font_features:            m.font_features,
         }
     }
 }
@@ -233,9 +234,9 @@ fn panel_clip_rect_local(
     scale_y: f32,
     anchor_x: f32,
     anchor_y: f32,
-) -> bevy::math::Vec4 {
+) -> Vec4 {
     clip_rect.map_or(super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
-        bevy::math::Vec4::new(
+        Vec4::new(
             clip.x.mul_add(scale_x, -anchor_x),
             (clip.y + clip.height).mul_add(-scale_y, anchor_y),
             (clip.x + clip.width).mul_add(scale_x, -anchor_x),
@@ -245,7 +246,7 @@ fn panel_clip_rect_local(
 }
 
 #[must_use]
-fn clip_rect_bits(clip_rect: bevy::math::Vec4) -> [u32; 4] {
+fn clip_rect_bits(clip_rect: Vec4) -> [u32; 4] {
     [
         clip_rect.x.to_bits(),
         clip_rect.y.to_bits(),
@@ -255,8 +256,8 @@ fn clip_rect_bits(clip_rect: bevy::math::Vec4) -> [u32; 4] {
 }
 
 #[must_use]
-const fn clip_rect_from_bits(bits: [u32; 4]) -> bevy::math::Vec4 {
-    bevy::math::Vec4::new(
+const fn clip_rect_from_bits(bits: [u32; 4]) -> Vec4 {
+    Vec4::new(
         f32::from_bits(bits[0]),
         f32::from_bits(bits[1]),
         f32::from_bits(bits[2]),

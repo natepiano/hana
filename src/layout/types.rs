@@ -474,11 +474,11 @@ impl Padding {
 
     /// Total horizontal padding (left + right) in resolved units.
     #[must_use]
-    pub fn horizontal(&self) -> f32 { self.left.value + self.right.value }
+    pub const fn horizontal(&self) -> f32 { self.left.value + self.right.value }
 
     /// Total vertical padding (top + bottom) in resolved units.
     #[must_use]
-    pub fn vertical(&self) -> f32 { self.top.value + self.bottom.value }
+    pub const fn vertical(&self) -> f32 { self.top.value + self.bottom.value }
 
     /// Resolves all dimensions to points and returns a copy with plain values.
     ///
@@ -692,7 +692,7 @@ impl Unit {
 
     /// Returns the multiplier to convert a value in this unit to typographic points.
     #[must_use]
-    pub fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
+    pub const fn to_points(self) -> f32 { self.meters_per_unit() / Self::Points.meters_per_unit() }
 }
 
 /// A dimension with an optional unit.

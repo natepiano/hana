@@ -68,3 +68,10 @@ pub(super) const THICK_LINE_WIDTH: f32 = 2.5;
 
 /// Line width for metric lines, bounding boxes, and callout backgrounds.
 pub(super) const THIN_LINE_WIDTH: f32 = 1.0;
+
+// Z-layer offsets
+/// Z offset for callout elements (bounding boxes, origin dots, advancement arrows).
+pub(super) const CALLOUT_Z_OFFSET: f32 = 0.002;
+
+/// Z offset for metric lines and vertical dimension arrows.
+pub(super) const METRIC_LINE_Z_OFFSET: f32 = 0.001;

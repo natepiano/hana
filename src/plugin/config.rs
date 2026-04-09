@@ -328,7 +328,9 @@ impl UnitConfig {
     /// Multiply a font size (in `self.font` units) by this value to get
     /// the equivalent size in `self.layout` units.
     #[must_use]
-    pub fn font_scale(&self) -> f32 { self.font.meters_per_unit() / self.layout.meters_per_unit() }
+    pub const fn font_scale(&self) -> f32 {
+        self.font.meters_per_unit() / self.layout.meters_per_unit()
+    }
 }
 
 // ── Dimensional newtypes ─────────────────────────────────────────────────────

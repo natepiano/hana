@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use super::constants::ARROW_GAP_RATIO;
 use super::constants::ARROW_SPACING_RATIO;
 use super::constants::ARROWHEAD_RATIO;
+use super::constants::CALLOUT_Z_OFFSET;
 use super::constants::DEFAULT_LINE_WIDTH;
 use super::constants::DOT_RADIUS_RATIO;
 use super::constants::LABEL_ADVANCEMENT;
@@ -30,6 +31,7 @@ use super::constants::LABEL_ORIGIN;
 use super::constants::LABEL_SIZE_RATIO;
 use super::constants::LABEL_TOP;
 use super::constants::LABEL_X_HEIGHT;
+use super::constants::METRIC_LINE_Z_OFFSET;
 use super::constants::THICK_LINE_WIDTH;
 use super::constants::THIN_LINE_WIDTH;
 use crate::callouts;
@@ -447,7 +449,7 @@ fn spawn_bounding_box_callout(
     gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let label_size = font_size * LABEL_SIZE_RATIO;
-    let z = 0.002;
+    let z = CALLOUT_Z_OFFSET;
 
     let Some(last) = computed.glyph_rects.last() else {
         return;
@@ -534,7 +536,7 @@ fn spawn_origin_and_advancement(
 ) {
     let callout_color = Color::srgb(0.9, 0.2, 0.2);
     let label_size = font_size * LABEL_SIZE_RATIO;
-    let z = 0.002;
+    let z = CALLOUT_Z_OFFSET;
     let dot_radius = dot_radius(font_size, scale);
 
     let first = &computed.glyph_rects[0];
@@ -720,10 +722,10 @@ fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]], color: Color) -> GizmoAsset {
     let mut gizmo = GizmoAsset::default();
 
     for &[x, y, w, h] in glyph_rects {
-        let tl = Vec3::new(x, y, 0.002);
-        let tr = Vec3::new(x + w, y, 0.002);
-        let br = Vec3::new(x + w, y - h, 0.002);
-        let bl = Vec3::new(x, y - h, 0.002);
+        let tl = Vec3::new(x, y, CALLOUT_Z_OFFSET);
+        let tr = Vec3::new(x + w, y, CALLOUT_Z_OFFSET);
+        let br = Vec3::new(x + w, y - h, CALLOUT_Z_OFFSET);
+        let bl = Vec3::new(x, y - h, CALLOUT_Z_OFFSET);
 
         gizmo.line(tl, tr, color);
         gizmo.line(tr, br, color);
@@ -787,7 +789,7 @@ fn build_metric_gizmos(
     let mut lines_gizmo = GizmoAsset::default();
     let mut arrows_gizmo = GizmoAsset::default();
     let color = overlay.color;
-    let z = 0.001;
+    let z = METRIC_LINE_Z_OFFSET;
     let head = arrowhead_size(font_size, scale);
     let gap = arrow_gap(font_size, scale);
 
@@ -918,7 +920,7 @@ fn spawn_metric_labels(
 ) {
     let label_size = font_size * LABEL_SIZE_RATIO;
     let color = overlay.color;
-    let z = 0.001;
+    let z = METRIC_LINE_Z_OFFSET;
     let gap = label_gap(font_size, scale);
 
     let baseline_y = line_metrics.baseline;

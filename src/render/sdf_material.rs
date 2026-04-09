@@ -8,9 +8,12 @@
 use bevy::asset::Asset;
 use bevy::color::Color;
 use bevy::color::LinearRgba;
+use bevy::math::Vec2;
+use bevy::math::Vec4;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
 use bevy::pbr::StandardMaterial;
+use bevy::prelude::AlphaMode;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
@@ -24,18 +27,18 @@ pub(super) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelEx
 #[derive(Clone, Debug, ShaderType)]
 pub(super) struct SdfPanelUniform {
     /// Half-size of the element in world units (width/2, height/2).
-    pub half_size:        bevy::math::Vec2,
+    pub half_size:        Vec2,
     /// Per-corner radii in world units: [TL, TR, BR, BL].
-    pub corner_radii:     bevy::math::Vec4,
+    pub corner_radii:     Vec4,
     /// Border widths in world units: [top, right, bottom, left].
-    pub border_widths:    bevy::math::Vec4,
+    pub border_widths:    Vec4,
     /// Border color in linear RGBA.
-    pub border_color:     bevy::math::Vec4,
+    pub border_color:     Vec4,
     /// Clip rect in local quad space: `[left, bottom, right, top]`.
     /// Fragments outside this rect are discarded. Defaults to the full
     /// quad bounds (`[-half_w, -half_h, half_w, half_h]`) when no clip
     /// is active.
-    pub clip_rect:        bevy::math::Vec4,
+    pub clip_rect:        Vec4,
     /// Depth offset added to `position.z` before OIT fragment storage.
     /// Separates coplanar layers in the OIT linked list so the resolve
     /// pass composites them in the correct painter's order.
@@ -76,26 +79,26 @@ pub(super) fn sdf_panel_material(
     corner_radii: [f32; 4],
     border_widths: [f32; 4],
     border_color: Option<Color>,
-    clip_rect: bevy::math::Vec4,
+    clip_rect: Vec4,
     oit_depth_offset: f32,
 ) -> SdfPanelMaterial {
     base.double_sided = true;
     base.cull_mode = None;
     // SDF provides its own per-fragment alpha — always use Blend.
-    base.alpha_mode = bevy::prelude::AlphaMode::Blend;
+    base.alpha_mode = AlphaMode::Blend;
 
-    let border_linear: bevy::math::Vec4 = border_color.map_or(bevy::math::Vec4::ZERO, |c| {
+    let border_linear: Vec4 = border_color.map_or(Vec4::ZERO, |c| {
         let l: LinearRgba = c.into();
-        bevy::math::Vec4::new(l.red, l.green, l.blue, l.alpha)
+        Vec4::new(l.red, l.green, l.blue, l.alpha)
     });
 
     ExtendedMaterial {
         base,
         extension: SdfPanelExtension {
             uniforms: SdfPanelUniform {
-                half_size: bevy::math::Vec2::new(half_width, half_height),
-                corner_radii: bevy::math::Vec4::from_array(corner_radii),
-                border_widths: bevy::math::Vec4::from_array(border_widths),
+                half_size: Vec2::new(half_width, half_height),
+                corner_radii: Vec4::from_array(corner_radii),
+                border_widths: Vec4::from_array(border_widths),
                 border_color: border_linear,
                 clip_rect,
                 oit_depth_offset,

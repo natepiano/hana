@@ -6,6 +6,7 @@
 
 use bevy::asset::Asset;
 use bevy::image::Image;
+use bevy::math::Vec4;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
 use bevy::pbr::StandardMaterial;
@@ -26,8 +27,7 @@ pub(super) type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtens
 
 /// Default clip rect for unclipped text: effectively infinite panel-local
 /// bounds so the shader clip test becomes a no-op.
-pub(super) const UNCLIPPED_TEXT_CLIP_RECT: bevy::math::Vec4 =
-    bevy::math::Vec4::new(-1e6, -1e6, 1e6, 1e6);
+pub(super) const UNCLIPPED_TEXT_CLIP_RECT: Vec4 = Vec4::new(-1e6, -1e6, 1e6, 1e6);
 
 /// Uniform data for the MSDF extension shader.
 #[derive(Clone, Debug, ShaderType)]
@@ -69,7 +69,7 @@ pub(super) struct MsdfTextUniform {
     pub is_shadow_proxy:  u32,
     /// Clip rect in panel-local Y-up space: [left, bottom, right, top].
     /// Fragments outside are discarded. Defaults to large bounds (no clip).
-    pub clip_rect:        bevy::math::Vec4,
+    pub clip_rect:        Vec4,
     /// Depth offset added to `position.z` before OIT fragment storage.
     pub oit_depth_offset: f32,
 }
@@ -119,7 +119,7 @@ pub(super) const fn msdf_text_material(
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
-    clip_rect: bevy::math::Vec4,
+    clip_rect: Vec4,
     oit_depth_offset: f32,
 ) -> MsdfTextMaterial {
     base.alpha_mode = AlphaMode::Blend;
@@ -162,7 +162,7 @@ pub(super) const fn msdf_shadow_proxy_material(
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
-    clip_rect: bevy::math::Vec4,
+    clip_rect: Vec4,
     oit_depth_offset: f32,
 ) -> MsdfTextMaterial {
     base.alpha_mode = AlphaMode::Mask(0.5);
