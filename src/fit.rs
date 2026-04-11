@@ -391,10 +391,8 @@ fn refine_focus_centering(
             (1.0, 1.0)
         } else {
             (
-                2.0 * depths.min_x_depth * depths.max_x_depth
-                    / (depths.min_x_depth + depths.max_x_depth),
-                2.0 * depths.min_y_depth * depths.max_y_depth
-                    / (depths.min_y_depth + depths.max_y_depth),
+                2.0 * depths.min_x * depths.max_x / (depths.min_x + depths.max_x),
+                2.0 * depths.min_y * depths.max_y / (depths.min_y + depths.max_y),
             )
         };
 

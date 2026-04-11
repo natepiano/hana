@@ -241,7 +241,7 @@ pub(super) fn sync_gizmo_render_layers(
 }
 
 /// Draws screen-aligned bounds for all cameras with `FitVisualization`.
-pub fn draw_fit_target_bounds(
+pub(super) fn draw_fit_target_bounds(
     mut commands: Commands,
     mut gizmos: Gizmos<FitTargetGizmo>,
     config: Res<FitTargetOverlayConfig>,
@@ -327,7 +327,7 @@ fn draw_bounds_for_camera(
         return;
     };
 
-    let avg_depth = depths.depth_sum / depths.point_count.to_f32();
+    let avg_depth = depths.sum / depths.count.to_f32();
     let is_ortho = matches!(projection, Projection::Orthographic(_));
     let viewport_size = camera_component.logical_viewport_size();
 

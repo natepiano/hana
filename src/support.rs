@@ -121,14 +121,14 @@ pub(crate) fn projection_aspect_ratio(
 /// and by `fit_overlay` for average depth (gizmo placement).
 #[derive(Debug, Clone)]
 pub(crate) struct PointDepths {
-    pub min_x_depth: f32,
-    pub max_x_depth: f32,
-    pub min_y_depth: f32,
-    pub max_y_depth: f32,
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_y: f32,
+    pub max_y: f32,
     #[cfg(feature = "fit_overlay")]
-    pub depth_sum:   f32,
+    pub sum:   f32,
     #[cfg(feature = "fit_overlay")]
-    pub point_count: usize,
+    pub count: usize,
 }
 
 /// Screen-space bounds of a set of projected points, with margin distances
@@ -182,36 +182,36 @@ impl ScreenSpaceBounds {
         let mut max_norm_x = f32::NEG_INFINITY;
         let mut min_norm_y = f32::INFINITY;
         let mut max_norm_y = f32::NEG_INFINITY;
-        let mut min_x_depth = 0.0_f32;
-        let mut max_x_depth = 0.0_f32;
-        let mut min_y_depth = 0.0_f32;
-        let mut max_y_depth = 0.0_f32;
+        let mut min_x = 0.0_f32;
+        let mut max_x = 0.0_f32;
+        let mut min_y = 0.0_f32;
+        let mut max_y = 0.0_f32;
         #[cfg(feature = "fit_overlay")]
-        let mut depth_sum = 0.0_f32;
+        let mut sum = 0.0_f32;
 
         for point in points {
             let (norm_x, norm_y, depth) = project_point(*point, &cam, is_ortho)?;
 
             #[cfg(feature = "fit_overlay")]
             {
-                depth_sum += depth;
+                sum += depth;
             }
 
             if norm_x < min_norm_x {
                 min_norm_x = norm_x;
-                min_x_depth = depth;
+                min_x = depth;
             }
             if norm_x > max_norm_x {
                 max_norm_x = norm_x;
-                max_x_depth = depth;
+                max_x = depth;
             }
             if norm_y < min_norm_y {
                 min_norm_y = norm_y;
-                min_y_depth = depth;
+                min_y = depth;
             }
             if norm_y > max_norm_y {
                 max_norm_y = norm_y;
-                max_y_depth = depth;
+                max_y = depth;
             }
         }
 
@@ -234,14 +234,14 @@ impl ScreenSpaceBounds {
         };
 
         let depths = PointDepths {
-            min_x_depth,
-            max_x_depth,
-            min_y_depth,
-            max_y_depth,
+            min_x,
+            max_x,
+            min_y,
+            max_y,
             #[cfg(feature = "fit_overlay")]
-            depth_sum,
+            sum,
             #[cfg(feature = "fit_overlay")]
-            point_count: points.len(),
+            count: points.len(),
         };
 
         Some((bounds, depths))

@@ -40,7 +40,7 @@ pub struct OrbitCamSystemSet;
 
 /// Internal per-camera state used to keep orbit direction stable during a drag.
 #[derive(Component, Default, Copy, Clone, Debug, PartialEq, Eq)]
-pub(super) struct OrbitDragState {
+pub(crate) struct OrbitDragState {
     orientation: CameraOrientation,
 }
 
@@ -662,7 +662,7 @@ fn smooth_and_update_transform(
 // ============================================================================
 
 /// Main system for processing input and converting to transformations
-pub(super) fn orbit_cam(
+pub(crate) fn orbit_cam(
     active_cam: Res<ActiveCameraData>,
     mouse_key_tracker: Res<MouseKeyTracker>,
     touch_tracker: Res<TouchTracker>,

@@ -39,7 +39,7 @@ pub enum EguiFocusIncludesHover {
 #[reflect(Component)]
 pub struct BlockOnEguiFocus;
 
-pub fn check_egui_wants_focus(
+pub(crate) fn check_egui_wants_focus(
     mut contexts: Query<&mut EguiContext>,
     mut wants_focus: ResMut<EguiWantsFocus>,
     include_hover: Res<EguiFocusIncludesHover>,

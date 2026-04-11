@@ -11,31 +11,31 @@ use crate::support::ScreenSpaceBounds;
 /// Component marking margin percentage labels, scoped to a specific camera entity.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-pub struct MarginLabel {
-    pub edge:   Edge,
-    pub camera: Entity,
+pub(super) struct MarginLabel {
+    pub(super) edge:   Edge,
+    pub(super) camera: Entity,
 }
 
 /// Parameters for creating or updating a margin label.
-pub struct MarginLabelParams {
-    pub camera:        Entity,
-    pub edge:          Edge,
-    pub text:          String,
-    pub color:         Color,
-    pub screen_pos:    ScreenPosition,
-    pub viewport_size: Vec2,
+pub(super) struct MarginLabelParams {
+    pub(super) camera:        Entity,
+    pub(super) edge:          Edge,
+    pub(super) text:          String,
+    pub(super) color:         Color,
+    pub(super) screen_pos:    ScreenPosition,
+    pub(super) viewport_size: Vec2,
 }
 
 /// Component marking the "screen space bounds" label, scoped to a specific camera entity.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-pub struct BoundsLabel {
-    pub camera: Entity,
+pub(super) struct BoundsLabel {
+    pub(super) camera: Entity,
 }
 
 /// Calculates the viewport pixel position for a margin label, offset by a fixed
 /// number of pixels from the screen-edge endpoint of the margin line.
-pub fn calculate_label_pixel_position(
+pub(super) fn calculate_label_pixel_position(
     edge: Edge,
     bounds: &ScreenSpaceBounds,
     viewport_size: Vec2,
@@ -65,7 +65,7 @@ pub fn calculate_label_pixel_position(
 }
 
 /// Returns the final viewport position for the "screen space bounds" label.
-pub fn bounds_label_position(upper_left: ScreenPosition) -> ScreenPosition {
+pub(super) fn bounds_label_position(upper_left: ScreenPosition) -> ScreenPosition {
     ScreenPosition::new(
         upper_left.x + LABEL_PIXEL_OFFSET,
         upper_left.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET,
@@ -112,7 +112,7 @@ fn margin_label_node(edge: Edge, screen_pos: ScreenPosition, viewport_size: Vec2
 }
 
 /// Updates an existing margin label or creates a new one.
-pub fn update_or_create_margin_label(
+pub(super) fn update_or_create_margin_label(
     commands: &mut Commands,
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     params: MarginLabelParams,
@@ -152,7 +152,7 @@ pub fn update_or_create_margin_label(
 }
 
 /// Updates an existing bounds label position or creates a new one.
-pub fn update_or_create_bounds_label(
+pub(super) fn update_or_create_bounds_label(
     commands: &mut Commands,
     bounds_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
     camera: Entity,

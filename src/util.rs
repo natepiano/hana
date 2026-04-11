@@ -60,7 +60,7 @@ pub(crate) fn update_orbit_transform(
     *transform = new_transform;
 }
 
-pub(crate) fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
+pub(crate) const fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
 
 pub(crate) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
     let t = smoothness.powi(SMOOTHNESS_EXPONENT);

@@ -5,7 +5,7 @@ use crate::support::ScreenSpaceBounds;
 /// Gizmo config group for fit target visualization (screen-aligned overlay).
 /// Toggle by inserting/removing the `FitVisualization` component on the camera entity.
 #[derive(Default, Reflect, GizmoConfigGroup)]
-pub struct FitTargetGizmo;
+pub(super) struct FitTargetGizmo;
 
 /// Current screen-space margin percentages for the fit target.
 /// Updated every frame by the visualization system.

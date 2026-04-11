@@ -16,6 +16,7 @@ version     = "0.0.3-dev"
 allow_attributes_without_reason = "deny"
 expect_used                     = "deny"
 panic                           = "deny"
+unreachable                     = "deny"
 unwrap_used                     = "deny"
 
 # Enable lint groups as errors (with lower priority so allows can override)
