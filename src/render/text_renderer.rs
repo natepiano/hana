@@ -26,6 +26,7 @@ use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
+use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::FontFeatures;
 use crate::layout::FontSlant;
@@ -349,14 +350,14 @@ fn poll_atlas_glyphs(
 ) {
     let poll_start = Instant::now();
     let poll_stats = atlas.poll_async_glyphs_stats();
-    let poll_ms = poll_start.elapsed().as_secs_f32() * 1000.0;
+    let poll_ms = poll_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     let dirty_pages = atlas.dirty_page_count();
     let mut sync_ms = 0.0;
 
     if poll_stats.inserted > 0 || poll_stats.invisible > 0 {
         let sync_start = Instant::now();
         atlas.sync_to_gpu(&mut images);
-        sync_ms = sync_start.elapsed().as_secs_f32() * 1000.0;
+        sync_ms = sync_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
         // Invalidate all shared materials so they get recreated with
         // updated atlas textures on the next `build_panel_batched_meshes` run.
         shared_mats.handles.clear();
@@ -1179,7 +1180,7 @@ fn shape_text_to_quads(
     };
     let shape_start = Instant::now();
     let shaped = shape_text_cached(text, config, font_registry, shaping_cx, cache);
-    stats.shape_ms = shape_start.elapsed().as_secs_f32() * 1000.0;
+    stats.shape_ms = shape_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     stats.glyphs = shaped.glyphs.len();
 
     let font_data = font_registry
@@ -1209,7 +1210,7 @@ fn shape_text_to_quads(
             }
         }
         if !all_ready {
-            stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+            stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
             return (Vec::new(), stats);
         }
     }
@@ -1280,7 +1281,7 @@ fn shape_text_to_quads(
         });
     }
 
-    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     stats.emitted_quads = quads.len();
 
     (quads, stats)

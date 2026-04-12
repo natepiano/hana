@@ -8,6 +8,7 @@ use bevy_kana::ToF32;
 
 use super::config::PanelSize;
 use super::config::UnitConfig;
+use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutBuilder;
@@ -613,7 +614,7 @@ impl Default for DiegeticTextMeasurer {
     fn default() -> Self {
         Self {
             measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
-                let char_width = measure.size * 0.6;
+                let char_width = measure.size * MONOSPACE_WIDTH_RATIO;
                 let width = char_width * text.len().to_f32();
                 TextDimensions {
                     width,

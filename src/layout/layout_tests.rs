@@ -2,7 +2,7 @@
 //!
 //! Each test constructs a layout tree, runs the engine, and verifies the computed
 //! bounding boxes match expectations. A simple monospace text measurement function
-//! is used throughout: each character is `font_size * 0.6` wide, one line tall.
+//! is used throughout: each character is `font_size * MONOSPACE_WIDTH_RATIO` wide, one line tall.
 
 #![allow(
     clippy::float_cmp,
@@ -34,12 +34,13 @@ use super::Sizing;
 use super::TextDimensions;
 use super::TextMeasure;
 use super::TextWrap;
+use crate::constants::MONOSPACE_WIDTH_RATIO;
 
 const VIEWPORT: f32 = 200.0;
 
 fn monospace_measure() -> MeasureTextFn {
     Arc::new(|text: &str, measure: &TextMeasure| {
-        let char_width = measure.size * 0.6;
+        let char_width = measure.size * MONOSPACE_WIDTH_RATIO;
         let mut max_line_width: f32 = 0.0;
         let mut line_count = 0_u32;
         for line in text.lines() {

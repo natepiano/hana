@@ -14,6 +14,21 @@ const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
 /// Maximum canonical rasterization size in pixels.
 const MAX_CUSTOM_RASTER_SIZE: u32 = 256;
 
+/// Glyph padding used during MSDF rasterization (mirrors
+/// `msdf_rasterizer::DEFAULT_GLYPH_PADDING`).
+const GLYPH_PADDING: u32 = 2;
+
+/// SDF distance range used during MSDF rasterization (mirrors
+/// `msdf_rasterizer::DEFAULT_SDF_RANGE`).
+const SDF_RANGE: u32 = 4;
+
+/// Average glyph coverage ratio — most glyphs use roughly this fraction of
+/// the canonical size.
+const AVERAGE_GLYPH_COVERAGE: f32 = 0.75;
+
+/// Estimated packing efficiency for a shelf-based atlas allocator.
+const SHELF_PACKING_EFFICIENCY: f32 = 0.80;
+
 /// Minimum glyphs per atlas page.
 const MIN_GLYPHS_PER_PAGE: u16 = 10;
 
@@ -216,11 +231,10 @@ impl AtlasConfig {
         // canonical size plus padding. This is tighter than worst-case
         // (which would over-allocate) but still safe because `etagere`
         // overflows to a new page if a glyph doesn't fit.
-        let total_pad = 2 + 4; // DEFAULT_GLYPH_PADDING + DEFAULT_SDF_RANGE
-        let avg_glyph = (canonical.to_f32() * 0.75).to_u32() + 2 * total_pad;
+        let total_pad = GLYPH_PADDING + SDF_RANGE;
+        let avg_glyph = (canonical.to_f32() * AVERAGE_GLYPH_COVERAGE).to_u32() + 2 * total_pad;
         let glyphs = f32::from(self.clamped_glyphs_per_page());
-        // Shelf packing is ~80% efficient.
-        let area = glyphs * avg_glyph.to_f32() * avg_glyph.to_f32() / 0.80;
+        let area = glyphs * avg_glyph.to_f32() * avg_glyph.to_f32() / SHELF_PACKING_EFFICIENCY;
         // Round up to next multiple of 4 for GPU texture row alignment.
         let side = area.sqrt().ceil().to_u32();
         (side + 3) & !3

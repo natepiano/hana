@@ -78,11 +78,11 @@ pub enum GlyphMetricVisibility {
 pub struct TypographyOverlay {
     /// Show font-level metric lines (ascent, descent, cap height, x-height,
     /// baseline, top, bottom).
-    pub show_font_metrics:  bool,
+    pub show_font_metrics:  GlyphMetricVisibility,
     /// Show per-glyph bounding boxes as gizmo lines (from font bbox).
     pub show_glyph_metrics: GlyphMetricVisibility,
     /// Show text labels on the metric lines.
-    pub show_labels:        bool,
+    pub show_labels:        GlyphMetricVisibility,
     /// Color for overlay lines and labels (includes alpha).
     pub color:              Color,
     /// Gizmo line width in pixels.
@@ -96,9 +96,9 @@ pub struct TypographyOverlay {
 impl Default for TypographyOverlay {
     fn default() -> Self {
         Self {
-            show_font_metrics:  true,
+            show_font_metrics:  GlyphMetricVisibility::Shown,
             show_glyph_metrics: GlyphMetricVisibility::Shown,
-            show_labels:        true,
+            show_labels:        GlyphMetricVisibility::Shown,
             color:              Color::from(WHITE),
             line_width:         DEFAULT_LINE_WIDTH,
             label_size:         6.0,
@@ -233,7 +233,7 @@ pub fn build_typography_overlay(
             continue;
         };
 
-        if overlay.show_font_metrics {
+        if overlay.show_font_metrics == GlyphMetricVisibility::Shown {
             spawn_font_metric_gizmos(
                 &mut commands,
                 container_entity,
@@ -352,7 +352,7 @@ fn spawn_font_metric_gizmos(
         Transform::IDENTITY,
     ));
 
-    if overlay.show_labels {
+    if overlay.show_labels == GlyphMetricVisibility::Shown {
         spawn_metric_labels(
             commands,
             entity,
@@ -401,7 +401,7 @@ fn spawn_glyph_metric_gizmos(
     ));
 
     // "Bounding Box" callout from the first glyph's bbox.
-    if !computed.glyph_rects.is_empty() && overlay.show_labels {
+    if !computed.glyph_rects.is_empty() && overlay.show_labels == GlyphMetricVisibility::Shown {
         spawn_bounding_box_callout(
             commands,
             entity,
@@ -417,7 +417,7 @@ fn spawn_glyph_metric_gizmos(
     }
 
     // Origin dots + Advancement arrow below the first glyph.
-    if !computed.glyph_rects.is_empty() && overlay.show_labels {
+    if !computed.glyph_rects.is_empty() && overlay.show_labels == GlyphMetricVisibility::Shown {
         spawn_origin_and_advancement(
             commands,
             entity,

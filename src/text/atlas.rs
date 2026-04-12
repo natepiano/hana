@@ -34,6 +34,7 @@ use super::msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
 use super::msdf_rasterizer::DEFAULT_GLYPH_PADDING;
 use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
 use super::msdf_rasterizer::MsdfBitmap;
+use crate::constants::MILLISECONDS_PER_SECOND;
 
 /// Default atlas page texture size in pixels.
 const DEFAULT_ATLAS_SIZE: u32 = 1024;
@@ -442,7 +443,7 @@ impl MsdfAtlas {
                     DEFAULT_SDF_RANGE,
                     DEFAULT_GLYPH_PADDING,
                 );
-                let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+                let elapsed_ms = start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
                 let worker = format!("{:?}", std::thread::current().id());
                 let _ = tx.send(RasterizedGlyph {
                     key,

@@ -18,6 +18,7 @@ use super::components::DiegeticTextMeasurer;
 use super::components::RenderMode;
 use super::components::ScreenSpace;
 use super::screen_space::ScreenSpaceCamera;
+use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
@@ -335,7 +336,7 @@ pub(super) fn compute_panel_layouts(
         computed.set_result(result);
     }
 
-    let compute_ms = start.elapsed().as_secs_f32() * 1000.0;
+    let compute_ms = start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     let h = hits.load(std::sync::atomic::Ordering::Relaxed);
     let m = misses.load(std::sync::atomic::Ordering::Relaxed);
     bevy::log::warn!(
@@ -657,6 +658,7 @@ mod tests {
     use bevy_kana::ToU32;
 
     use super::*;
+    use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::Border;
     use crate::layout::Direction;
     use crate::layout::El;
@@ -671,7 +673,7 @@ mod tests {
 
     fn monospace_measure() -> MeasureTextFn {
         Arc::new(|text: &str, measure: &TextMeasure| {
-            let char_width = measure.size * 0.6;
+            let char_width = measure.size * MONOSPACE_WIDTH_RATIO;
             let width = char_width * text.len().to_f32();
             TextDimensions {
                 width,

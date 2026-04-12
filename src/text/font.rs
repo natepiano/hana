@@ -159,15 +159,14 @@ impl Font {
 
         let raw_italic_angle = face.italic_angle();
 
-        let (raw_underline_position, raw_underline_thickness) = match face.underline_metrics() {
-            Some(m) => (Some(m.position.abs()), Some(m.thickness)),
-            None => (None, None),
-        };
+        let (raw_underline_position, raw_underline_thickness) =
+            face.underline_metrics().map_or((None, None), |m| {
+                (Some(m.position.abs()), Some(m.thickness))
+            });
 
-        let (raw_strikeout_position, raw_strikeout_thickness) = match face.strikeout_metrics() {
-            Some(m) => (Some(m.position), Some(m.thickness)),
-            None => (None, None),
-        };
+        let (raw_strikeout_position, raw_strikeout_thickness) = face
+            .strikeout_metrics()
+            .map_or((None, None), |m| (Some(m.position), Some(m.thickness)));
 
         Some(Self {
             name: (*name).to_string(),

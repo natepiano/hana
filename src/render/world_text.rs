@@ -16,6 +16,7 @@ use super::text_renderer::ShapedGlyph;
 use super::text_renderer::ShapedTextCache;
 use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
+use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
@@ -282,7 +283,7 @@ pub(super) fn render_world_text(
         }
     }
 
-    let total_ms = total_start.elapsed().as_secs_f32() * 1000.0;
+    let total_ms = total_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     if total_ms > 5.0 || text_stats.queued_glyphs > 0 || text_stats.pending_glyphs > 0 {
         bevy::log::debug!(
             "render_world_text: total={total_ms:.1}ms texts={text_count} shape={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={}",
@@ -417,7 +418,7 @@ fn spawn_world_text_meshes(
                 Transform::IDENTITY,
             ));
         }
-        mesh_ms += mesh_start.elapsed().as_secs_f32() * 1000.0;
+        mesh_ms += mesh_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     }
     mesh_ms
 }
@@ -483,7 +484,7 @@ fn shape_world_text(
     };
     let shape_start = Instant::now();
     let shaped = text_renderer::shape_text_cached(text, &config, font_registry, shaping_cx, cache);
-    stats.shape_ms = shape_start.elapsed().as_secs_f32() * 1000.0;
+    stats.shape_ms = shape_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     stats.glyphs = shaped.glyphs.len();
 
     let font_data = font_registry
@@ -494,7 +495,7 @@ fn shape_world_text(
     if style.loading_policy() == GlyphLoadingPolicy::WhenReady
         && !ensure_all_glyphs_ready(&shaped.glyphs, style, atlas, font_data, &mut stats)
     {
-        stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+        stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
         return ShapedWorldText::empty(stats);
     }
 
@@ -585,7 +586,7 @@ fn shape_world_text(
         glyph_advance(font_data, sg.glyph_id, boosted_size, world_scale)
     });
 
-    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * 1000.0;
+    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     stats.emitted_quads = quads.len();
 
     // Anchor values are in boosted (points) space. Scale back to original
