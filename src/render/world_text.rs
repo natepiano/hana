@@ -418,7 +418,10 @@ fn spawn_world_text_meshes(
                 Transform::IDENTITY,
             ));
         }
-        mesh_ms = mesh_start.elapsed().as_secs_f32().mul_add(MILLISECONDS_PER_SECOND, mesh_ms);
+        mesh_ms = mesh_start
+            .elapsed()
+            .as_secs_f32()
+            .mul_add(MILLISECONDS_PER_SECOND, mesh_ms);
     }
     mesh_ms
 }
