@@ -419,7 +419,7 @@ fn rotate_anchor_demo(
     };
 
     let speed = 1.5;
-    *angle += time.delta_secs() * speed;
+    *angle = time.delta_secs().mul_add(speed, *angle);
     let current_angle = *angle;
     let axis = state.axis;
 

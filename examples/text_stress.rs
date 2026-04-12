@@ -562,7 +562,10 @@ fn update_panels(
     for idx in *last_panel_count..needed {
         let tree_start = Instant::now();
         let tree = build_panel_tree(&state, idx, rpp, &words);
-        tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
+        tree_build_ms = tree_start
+            .elapsed()
+            .as_secs_f32()
+            .mul_add(1000.0, tree_build_ms);
         tree_builds += 1;
         commands.spawn((
             StressPanel(idx),
@@ -590,7 +593,10 @@ fn update_panels(
                 // Active panel — content changed, rebuild tree.
                 let tree_start = Instant::now();
                 panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
-                tree_build_ms += tree_start.elapsed().as_secs_f32() * 1000.0;
+                tree_build_ms = tree_start
+                    .elapsed()
+                    .as_secs_f32()
+                    .mul_add(1000.0, tree_build_ms);
                 tree_builds += 1;
             } else if panel_count_changed {
                 // Panel count changed — rebuild frozen panels once to
