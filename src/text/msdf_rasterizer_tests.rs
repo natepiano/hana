@@ -434,7 +434,7 @@ fn eb_garamond_shape_and_rasterize() {
                         let start = std::time::Instant::now();
                         let result = msdf_rasterizer::rasterize_glyph(EB_GARAMOND, gid, 32, 4.0, 2);
                         let elapsed = start.elapsed();
-                        println!("rasterize={}, {:?}", result.is_some(), elapsed,);
+                        println!("rasterize={}, {:?}", result.is_some(), elapsed);
                         assert!(
                             elapsed.as_secs() < 10,
                             "glyph {gid} in \"{text}\" took too long: {elapsed:?}"

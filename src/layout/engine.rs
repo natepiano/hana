@@ -1005,10 +1005,7 @@ fn position_and_render(
     let mut stack: Vec<(usize, f32, f32, bool)> = Vec::with_capacity(tree.len());
     stack.push((root, 0.0, 0.0, false));
 
-    loop {
-        let Some(&mut (index, x, y, ref mut visited)) = stack.last_mut() else {
-            break;
-        };
+    while let Some(&mut (index, x, y, ref mut visited)) = stack.last_mut() {
         let element = &tree.elements[index];
         let bounds = BoundingBox {
             x,
