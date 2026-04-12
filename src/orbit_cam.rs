@@ -315,7 +315,7 @@ pub(crate) fn active_viewport_data(
     #[cfg(feature = "bevy_egui")] block_on_egui_query: Query<&BlockOnEguiFocus>,
 ) {
     let mut new_resource = ActiveCameraData::default();
-    let mut max_cam_order = 0;
+    let mut max_camera_order = 0;
 
     let mut has_input = false;
     for (entity, camera, target, pan_orbit) in &orbit_cameras {
@@ -343,52 +343,47 @@ pub(crate) fn active_viewport_data(
                     true
                 }
             };
-            if should_get_input {
-                // First check if cursor is in the same window as this camera
-                if let RenderTarget::Window(win_ref) = target {
-                    let Some(window) = (match win_ref {
-                        WindowRef::Primary => primary_windows.single().ok(),
-                        WindowRef::Entity(entity) => other_windows.get(*entity).ok(),
-                    }) else {
-                        // Window does not exist - maybe it was closed and the camera not cleaned up
-                        continue;
-                    };
+            if should_get_input && let RenderTarget::Window(win_ref) = target {
+                let Some(window) = (match win_ref {
+                    WindowRef::Primary => primary_windows.single().ok(),
+                    WindowRef::Entity(entity) => other_windows.get(*entity).ok(),
+                }) else {
+                    // Window does not exist - maybe it was closed and the camera not cleaned up
+                    continue;
+                };
 
-                    // Is the cursor/touch in this window?
-                    // Note: there's a bug in winit that causes `window.cursor_position()` to
-                    // return a `Some` value even if the cursor is not in this window, in very
-                    // specific cases.
-                    // See: https://github.com/natepiano/bevy_lagrange/issues/22
-                    if let Some(input_position) = window.cursor_position().or_else(|| {
-                        touches
-                            .iter_just_pressed()
-                            .collect::<Vec<_>>()
-                            .first()
-                            .map(|touch| touch.position())
-                    }) {
-                        // Now check if cursor is within this camera's viewport
-                        if let Some(Rect { min, max }) = camera.logical_viewport_rect() {
-                            // Window coordinates have Y starting at the bottom, so we need to
-                            // reverse the y component before comparing
-                            // with the viewport rect
-                            let cursor_in_vp = input_position.x > min.x
-                                && input_position.x < max.x
-                                && input_position.y > min.y
-                                && input_position.y < max.y;
+                // Is the cursor/touch in this window?
+                // Note: there's a bug in winit that causes `window.cursor_position()` to
+                // return a `Some` value even if the cursor is not in this window, in very
+                // specific cases.
+                // See: https://github.com/natepiano/bevy_lagrange/issues/22
+                if let Some(input_position) = window.cursor_position().or_else(|| {
+                    touches
+                        .iter_just_pressed()
+                        .collect::<Vec<_>>()
+                        .first()
+                        .map(|touch| touch.position())
+                }) && let Some(Rect { min, max }) = camera.logical_viewport_rect()
+                {
+                    // Window coordinates have Y starting at the bottom, so we need to
+                    // reverse the y component before comparing
+                    // with the viewport rect
+                    let cursor_in_vp = input_position.x > min.x
+                        && input_position.x < max.x
+                        && input_position.y > min.y
+                        && input_position.y < max.y;
 
-                            // Only set if camera order is higher. This may overwrite a previous
-                            // value in the case the viewport is
-                            // overlapping another viewport.
-                            if cursor_in_vp && camera.order >= max_cam_order {
-                                new_resource = ActiveCameraData {
-                                    entity:        Some(entity),
-                                    viewport_size: camera.logical_viewport_size(),
-                                    window_size:   Some(Vec2::new(window.width(), window.height())),
-                                    detection:     CameraInputDetection::Automatic,
-                                };
-                                max_cam_order = camera.order;
-                            }
-                        }
+                    // Only set if camera order is higher. This may overwrite a previous
+                    // value in the case the viewport is
+                    // overlapping another viewport.
+                    if cursor_in_vp && camera.order >= max_camera_order {
+                        new_resource = ActiveCameraData {
+                            entity:        Some(entity),
+                            viewport_size: camera.logical_viewport_size(),
+                            window_size:   Some(Vec2::new(window.width(), window.height())),
+                            detection:     CameraInputDetection::Automatic,
+                        };
+                        max_camera_order = camera.order;
                     }
                 }
             }

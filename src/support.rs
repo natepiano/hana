@@ -72,16 +72,16 @@ impl ProjectionParams {
 /// (perspective only — orthographic points are always valid).
 pub(crate) fn project_point(
     point: Vec3,
-    cam: &CameraBasis,
+    camera: &CameraBasis,
     is_ortho: bool,
 ) -> Option<(f32, f32, f32)> {
-    let relative = point - *cam.position;
-    let depth = relative.dot(cam.forward);
+    let relative = point - *camera.position;
+    let depth = relative.dot(camera.forward);
     if !is_ortho && depth <= MIN_VISIBLE_DEPTH {
         return None;
     }
-    let x = relative.dot(cam.right);
-    let y = relative.dot(cam.up);
+    let x = relative.dot(camera.right);
+    let y = relative.dot(camera.up);
     let (norm_x, norm_y) = if is_ortho {
         (x, y)
     } else {
@@ -166,7 +166,7 @@ impl ScreenSpaceBounds {
     )]
     pub(crate) fn from_points(
         points: &[Vec3],
-        cam_global: &GlobalTransform,
+        camera_global: &GlobalTransform,
         projection: &Projection,
         viewport_aspect: f32,
     ) -> Option<(Self, PointDepths)> {
@@ -176,7 +176,7 @@ impl ScreenSpaceBounds {
             is_ortho,
         } = ProjectionParams::from_projection(projection, viewport_aspect)?;
 
-        let cam = CameraBasis::from_global_transform(cam_global);
+        let camera_basis = CameraBasis::from_global_transform(camera_global);
 
         let mut min_norm_x = f32::INFINITY;
         let mut max_norm_x = f32::NEG_INFINITY;
@@ -190,7 +190,7 @@ impl ScreenSpaceBounds {
         let mut sum = 0.0_f32;
 
         for point in points {
-            let (norm_x, norm_y, depth) = project_point(*point, &cam, is_ortho)?;
+            let (norm_x, norm_y, depth) = project_point(*point, &camera_basis, is_ortho)?;
 
             #[cfg(feature = "fit_overlay")]
             {

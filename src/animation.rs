@@ -267,18 +267,27 @@ fn handle_empty_queue(
     }
 }
 
+/// Animation state needed to resolve an input interrupt.
+struct InterruptContext<'a> {
+    queue:              &'a CameraMoveList,
+    interrupt_behavior: CameraInputInterruptBehavior,
+    source:             AnimationSource,
+    current_move:       &'a CameraMove,
+    zoom_marker:        Option<&'a ZoomAnimationMarker>,
+}
+
 /// Handles external camera input according to `CameraInputInterruptBehavior`.
 /// Returns the concrete handling outcome for this frame.
 fn handle_camera_input_interrupt(
     commands: &mut Commands,
     entity: Entity,
     pan_orbit: &mut OrbitCam,
-    queue: &CameraMoveList,
-    interrupt_behavior: CameraInputInterruptBehavior,
-    source: AnimationSource,
-    current_move: &CameraMove,
-    zoom_marker: Option<&ZoomAnimationMarker>,
+    ctx: &InterruptContext,
 ) -> CameraInputInterruptBehavior {
+    let interrupt_behavior = ctx.interrupt_behavior;
+    let source = ctx.source;
+    let current_move = ctx.current_move;
+    let zoom_marker = ctx.zoom_marker;
     match interrupt_behavior {
         CameraInputInterruptBehavior::Ignore => CameraInputInterruptBehavior::Ignore,
         CameraInputInterruptBehavior::Cancel => {
@@ -305,7 +314,7 @@ fn handle_camera_input_interrupt(
         },
         CameraInputInterruptBehavior::Complete => {
             // Jump to the final position of the entire queue
-            if let Some(final_move) = queue.camera_moves.back() {
+            if let Some(final_move) = ctx.queue.camera_moves.back() {
                 let (yaw, pitch, radius) = final_move.orbital_params();
                 pan_orbit.target_focus = final_move.focus();
                 pan_orbit.target_yaw = yaw;
@@ -507,11 +516,13 @@ pub(crate) fn process_camera_move_list(
                 &mut commands,
                 entity,
                 &mut pan_orbit,
-                &queue,
-                *interrupt_behavior,
-                source,
-                &current_move,
-                zoom_marker,
+                &InterruptContext {
+                    queue: &queue,
+                    interrupt_behavior: *interrupt_behavior,
+                    source,
+                    current_move: &current_move,
+                    zoom_marker,
+                },
             );
             match outcome {
                 CameraInputInterruptBehavior::Ignore => {},

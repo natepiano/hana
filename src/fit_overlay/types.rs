@@ -26,7 +26,7 @@ pub struct FitTargetViewportMarginPcts {
 impl FitTargetViewportMarginPcts {
     /// Constructs margin percentages from screen-space bounds, computing
     /// screen dimensions once rather than per-edge.
-    pub fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
+    pub const fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
         let screen_width = 2.0 * bounds.half_extent_x;
         let screen_height = 2.0 * bounds.half_extent_y;
         Self {

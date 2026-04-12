@@ -246,14 +246,15 @@ fn binary_search_for_fit(
             params,
         );
 
-        let cam_distance = params.ortho_fixed_distance.unwrap_or(test_radius);
-        let cam_pos = centered_focus + params.rot * Vec3::new(0.0, 0.0, cam_distance);
-        let cam_global =
-            GlobalTransform::from(Transform::from_translation(cam_pos).with_rotation(params.rot));
+        let camera_distance = params.ortho_fixed_distance.unwrap_or(test_radius);
+        let camera_pos = centered_focus + params.rot * Vec3::new(0.0, 0.0, camera_distance);
+        let camera_global = GlobalTransform::from(
+            Transform::from_translation(camera_pos).with_rotation(params.rot),
+        );
 
         let Some((bounds, _)) = support::ScreenSpaceBounds::from_points(
             points,
-            &cam_global,
+            &camera_global,
             &test_projection,
             params.aspect_ratio,
         ) else {
@@ -365,19 +366,22 @@ fn refine_focus_centering(
     let aspect_ratio = params.aspect_ratio;
     let ortho_fixed_distance = params.ortho_fixed_distance;
     let is_ortho = params.is_ortho;
-    let cam_right = rot * Vec3::X;
-    let cam_up = rot * Vec3::Y;
+    let camera_right = rot * Vec3::X;
+    let camera_up = rot * Vec3::Y;
 
-    let cam_distance = ortho_fixed_distance.unwrap_or(radius);
+    let camera_distance = ortho_fixed_distance.unwrap_or(radius);
 
     let mut focus = initial_focus;
     for _ in 0..CENTERING_MAX_ITERATIONS {
-        let cam_pos = focus + rot * Vec3::new(0.0, 0.0, cam_distance);
-        let cam_global =
-            GlobalTransform::from(Transform::from_translation(cam_pos).with_rotation(rot));
-        let Some((bounds, depths)) =
-            support::ScreenSpaceBounds::from_points(points, &cam_global, projection, aspect_ratio)
-        else {
+        let camera_pos = focus + rot * Vec3::new(0.0, 0.0, camera_distance);
+        let camera_global =
+            GlobalTransform::from(Transform::from_translation(camera_pos).with_rotation(rot));
+        let Some((bounds, depths)) = support::ScreenSpaceBounds::from_points(
+            points,
+            &camera_global,
+            projection,
+            aspect_ratio,
+        ) else {
             break;
         };
         let (cx, cy) = bounds.center();
@@ -396,7 +400,7 @@ fn refine_focus_centering(
             )
         };
 
-        focus += cam_right * cx * centering_depth_x + cam_up * cy * centering_depth_y;
+        focus += camera_right * cx * centering_depth_x + camera_up * cy * centering_depth_y;
     }
     focus
 }

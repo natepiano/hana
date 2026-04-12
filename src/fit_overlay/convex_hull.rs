@@ -49,13 +49,13 @@ pub(super) fn convex_hull_2d(points: &[(f32, f32)]) -> Vec<(f32, f32)> {
 /// For perspective, divides by depth. For orthographic, uses raw camera-space coordinates.
 pub(super) fn project_vertices_to_2d(
     vertices: &[Vec3],
-    cam: &CameraBasis,
+    camera: &CameraBasis,
     is_ortho: bool,
 ) -> Vec<(f32, f32)> {
     vertices
         .iter()
         .filter_map(|v| {
-            let (norm_x, norm_y, _) = support::project_point(*v, cam, is_ortho)?;
+            let (norm_x, norm_y, _) = support::project_point(*v, camera, is_ortho)?;
             Some((norm_x, norm_y))
         })
         .collect()

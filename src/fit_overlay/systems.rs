@@ -47,7 +47,7 @@ const fn calculate_edge_color(
 /// Creates the 4 corners of the screen-aligned boundary rectangle in world space.
 fn create_screen_corners(
     bounds: &ScreenSpaceBounds,
-    cam: &CameraBasis,
+    camera: &CameraBasis,
     avg_depth: f32,
     is_ortho: bool,
 ) -> [Vec3; 4] {
@@ -55,28 +55,28 @@ fn create_screen_corners(
         screen_space::normalized_to_world(
             bounds.min_norm_x,
             bounds.min_norm_y,
-            cam,
+            camera,
             avg_depth,
             is_ortho,
         ),
         screen_space::normalized_to_world(
             bounds.max_norm_x,
             bounds.min_norm_y,
-            cam,
+            camera,
             avg_depth,
             is_ortho,
         ),
         screen_space::normalized_to_world(
             bounds.max_norm_x,
             bounds.max_norm_y,
-            cam,
+            camera,
             avg_depth,
             is_ortho,
         ),
         screen_space::normalized_to_world(
             bounds.min_norm_x,
             bounds.max_norm_y,
-            cam,
+            camera,
             avg_depth,
             is_ortho,
         ),
@@ -99,12 +99,12 @@ fn draw_rectangle(
 fn draw_silhouette(
     gizmos: &mut Gizmos<FitTargetGizmo>,
     vertices: &[Vec3],
-    cam: &CameraBasis,
+    camera: &CameraBasis,
     avg_depth: f32,
     is_ortho: bool,
     color: Color,
 ) {
-    let projected = convex_hull::project_vertices_to_2d(vertices, cam, is_ortho);
+    let projected = convex_hull::project_vertices_to_2d(vertices, camera, is_ortho);
     let hull = convex_hull::convex_hull_2d(&projected);
 
     if hull.len() < 2 {
@@ -114,11 +114,26 @@ fn draw_silhouette(
     for i in 0..hull.len() {
         let next = (i + 1) % hull.len();
         let start =
-            screen_space::normalized_to_world(hull[i].0, hull[i].1, cam, avg_depth, is_ortho);
-        let end =
-            screen_space::normalized_to_world(hull[next].0, hull[next].1, cam, avg_depth, is_ortho);
+            screen_space::normalized_to_world(hull[i].0, hull[i].1, camera, avg_depth, is_ortho);
+        let end = screen_space::normalized_to_world(
+            hull[next].0,
+            hull[next].1,
+            camera,
+            avg_depth,
+            is_ortho,
+        );
         gizmos.line(start, end, color);
     }
+}
+
+/// Camera-derived drawing parameters shared across margin/bounds rendering.
+struct DrawContext<'a> {
+    camera:        Entity,
+    bounds:        &'a ScreenSpaceBounds,
+    camera_basis:  &'a CameraBasis,
+    avg_depth:     f32,
+    is_ortho:      bool,
+    viewport_size: Option<Vec2>,
 }
 
 /// Draws margin lines from boundary edges to screen edges and updates margin labels.
@@ -127,14 +142,15 @@ fn draw_margin_lines_and_labels(
     commands: &mut Commands,
     gizmos: &mut Gizmos<FitTargetGizmo>,
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
-    camera: Entity,
-    bounds: &ScreenSpaceBounds,
-    cam_basis: &CameraBasis,
-    avg_depth: f32,
-    is_ortho: bool,
+    ctx: &DrawContext,
     config: &FitTargetOverlayConfig,
-    viewport_size: Option<Vec2>,
 ) -> Vec<Edge> {
+    let camera = ctx.camera;
+    let bounds = ctx.bounds;
+    let camera_basis = ctx.camera_basis;
+    let avg_depth = ctx.avg_depth;
+    let is_ortho = ctx.is_ortho;
+    let viewport_size = ctx.viewport_size;
     let h_balanced = screen_space::is_horizontally_balanced(bounds, TOLERANCE);
     let v_balanced = screen_space::is_vertically_balanced(bounds, TOLERANCE);
 
@@ -149,10 +165,19 @@ fn draw_margin_lines_and_labels(
 
         let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
         let boundary_pos = screen_space::normalized_to_world(
-            boundary_x, boundary_y, cam_basis, avg_depth, is_ortho,
+            boundary_x,
+            boundary_y,
+            camera_basis,
+            avg_depth,
+            is_ortho,
         );
-        let screen_pos =
-            screen_space::normalized_to_world(screen_x, screen_y, cam_basis, avg_depth, is_ortho);
+        let screen_pos = screen_space::normalized_to_world(
+            screen_x,
+            screen_y,
+            camera_basis,
+            avg_depth,
+            is_ortho,
+        );
 
         let color = calculate_edge_color(edge, h_balanced, v_balanced, config);
         gizmos.line(boundary_pos, screen_pos, color);
@@ -262,7 +287,7 @@ pub(super) fn draw_fit_target_bounds(
     mut label_query: Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     mut bounds_label_query: Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
-    for (camera, camera_component, cam_global, projection, current_target) in &camera_query {
+    for (camera, camera_component, camera_global, projection, current_target) in &camera_query {
         let Some((vertices, _)) = support::extract_mesh_vertices(
             current_target.0,
             &children_query,
@@ -280,7 +305,7 @@ pub(super) fn draw_fit_target_bounds(
             &BoundsCamera {
                 entity: camera,
                 camera_component,
-                cam_global,
+                camera_global,
                 projection,
             },
             &vertices,
@@ -294,7 +319,7 @@ pub(super) fn draw_fit_target_bounds(
 struct BoundsCamera<'a> {
     entity:           Entity,
     camera_component: &'a Camera,
-    cam_global:       &'a GlobalTransform,
+    camera_global:    &'a GlobalTransform,
     projection:       &'a Projection,
 }
 
@@ -303,17 +328,17 @@ fn draw_bounds_for_camera(
     commands: &mut Commands,
     gizmos: &mut Gizmos<FitTargetGizmo>,
     config: &FitTargetOverlayConfig,
-    cam_data: &BoundsCamera,
+    camera_data: &BoundsCamera,
     vertices: &[Vec3],
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     bounds_label_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
-    let camera = cam_data.entity;
-    let camera_component = cam_data.camera_component;
-    let cam_global = cam_data.cam_global;
-    let projection = cam_data.projection;
+    let camera = camera_data.entity;
+    let camera_component = camera_data.camera_component;
+    let camera_global = camera_data.camera_global;
+    let projection = camera_data.projection;
 
-    let cam_basis = CameraBasis::from_global_transform(cam_global);
+    let camera_basis = CameraBasis::from_global_transform(camera_global);
 
     let Some(aspect_ratio) =
         support::projection_aspect_ratio(projection, camera_component.logical_viewport_size())
@@ -322,7 +347,7 @@ fn draw_bounds_for_camera(
     };
 
     let Some((bounds, depths)) =
-        ScreenSpaceBounds::from_points(vertices, cam_global, projection, aspect_ratio)
+        ScreenSpaceBounds::from_points(vertices, camera_global, projection, aspect_ratio)
     else {
         return;
     };
@@ -339,14 +364,14 @@ fn draw_bounds_for_camera(
         .try_insert(FitTargetViewportMarginPcts::from_bounds(&bounds));
 
     // Bounding rectangle
-    let corners = create_screen_corners(&bounds, &cam_basis, avg_depth, is_ortho);
+    let corners = create_screen_corners(&bounds, &camera_basis, avg_depth, is_ortho);
     draw_rectangle(gizmos, &corners, config);
 
     // Silhouette convex hull
     draw_silhouette(
         gizmos,
         vertices,
-        &cam_basis,
+        &camera_basis,
         avg_depth,
         is_ortho,
         config.silhouette_color,
@@ -370,18 +395,16 @@ fn draw_bounds_for_camera(
     }
 
     // Margin lines + labels
-    let visible_edges = draw_margin_lines_and_labels(
-        commands,
-        gizmos,
-        label_query,
+    let draw_ctx = DrawContext {
         camera,
-        &bounds,
-        &cam_basis,
+        bounds: &bounds,
+        camera_basis: &camera_basis,
         avg_depth,
         is_ortho,
-        config,
         viewport_size,
-    );
+    };
+    let visible_edges =
+        draw_margin_lines_and_labels(commands, gizmos, label_query, &draw_ctx, config);
 
     // Remove stale margin labels for this camera
     cleanup_stale_margin_labels(commands, label_query, camera, &visible_edges);

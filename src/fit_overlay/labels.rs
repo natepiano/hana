@@ -117,23 +117,20 @@ pub(super) fn update_or_create_margin_label(
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
     params: MarginLabelParams,
 ) {
-    let mut found = false;
-    for (_, label, mut label_text, mut node, mut text_color) in label_query {
-        if label.camera == params.camera && label.edge == params.edge {
-            (**label_text).clone_from(&params.text);
-            text_color.0 = params.color;
-            apply_margin_label_anchor(
-                &mut node,
-                params.edge,
-                params.screen_pos,
-                params.viewport_size,
-            );
-            found = true;
-            break;
-        }
-    }
+    let existing = label_query
+        .iter_mut()
+        .find(|(_, label, _, _, _)| label.camera == params.camera && label.edge == params.edge);
 
-    if !found {
+    if let Some((_, _, mut label_text, mut node, mut text_color)) = existing {
+        (**label_text).clone_from(&params.text);
+        text_color.0 = params.color;
+        apply_margin_label_anchor(
+            &mut node,
+            params.edge,
+            params.screen_pos,
+            params.viewport_size,
+        );
+    } else {
         commands.spawn((
             Text::new(params.text),
             TextFont {
@@ -158,17 +155,14 @@ pub(super) fn update_or_create_bounds_label(
     camera: Entity,
     screen_pos: ScreenPosition,
 ) {
-    let mut found = false;
-    for (_, label, mut node) in bounds_query.iter_mut() {
-        if label.camera == camera {
-            node.left = Val::Px(screen_pos.x);
-            node.top = Val::Px(screen_pos.y);
-            found = true;
-            break;
-        }
-    }
+    let existing = bounds_query
+        .iter_mut()
+        .find(|(_, label, _)| label.camera == camera);
 
-    if !found {
+    if let Some((_, _, mut node)) = existing {
+        node.left = Val::Px(screen_pos.x);
+        node.top = Val::Px(screen_pos.y);
+    } else {
         commands.spawn((
             Text::new("screen space bounds"),
             TextFont {

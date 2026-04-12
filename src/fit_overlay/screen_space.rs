@@ -86,7 +86,7 @@ pub(super) const fn screen_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -
 pub(super) fn normalized_to_world(
     norm_x: f32,
     norm_y: f32,
-    cam: &CameraBasis,
+    camera: &CameraBasis,
     avg_depth: f32,
     is_ortho: bool,
 ) -> Vec3 {
@@ -95,7 +95,7 @@ pub(super) fn normalized_to_world(
     } else {
         (norm_x * avg_depth, norm_y * avg_depth)
     };
-    *cam.position + cam.right * world_x + cam.up * world_y + cam.forward * avg_depth
+    *camera.position + camera.right * world_x + camera.up * world_y + camera.forward * avg_depth
 }
 
 /// Returns the margin percentage for a given edge.
