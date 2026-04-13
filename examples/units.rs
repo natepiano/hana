@@ -230,37 +230,18 @@ fn setup(
         Transform::from_xyz(card_x, a4_top + title_gap, 0.0),
     ));
 
-    // ── A4 metric ruler (panel-based) ──────────────────────────────
-    let a4_ruler_x = a4_x - a4_width_m / 2.0 - RULER_GAP;
-    let a4_ruler_top = a4_y + a4_height_m / 2.0;
-    commands.spawn((
-        PanelRuler,
-        DiegeticPanel {
-            tree: build_metric_panel_ruler(A4_H.to_i32(), ruler_color),
-            width: PANEL_RULER_WIDTH,
-            height: A4_H,
-            layout_unit: Some(Unit::Millimeters),
-            anchor: Anchor::TopRight,
-            ..default()
-        },
-        Transform::from_xyz(a4_ruler_x, a4_ruler_top, 0.0),
-    ));
-
-    // ── A4 horizontal ruler ───────────────────────────────────────────
-    let a4_hruler_x = a4_x - a4_width_m / 2.0;
-    let a4_hruler_y = a4_y - a4_height_m / 2.0 - RULER_GAP;
-    commands.spawn((
-        PanelRuler,
-        DiegeticPanel {
-            tree: build_metric_horizontal_ruler(A4_W.to_i32(), ruler_color),
-            width: A4_W,
-            height: PANEL_RULER_WIDTH,
-            layout_unit: Some(Unit::Millimeters),
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
-        Transform::from_xyz(a4_hruler_x, a4_hruler_y, 0.0),
-    ));
+    spawn_rulers(
+        &mut commands,
+        ruler_color,
+        a4_x,
+        a4_y,
+        a4_width_m,
+        a4_height_m,
+        card_x,
+        card_y,
+        card_width_m,
+        card_height_m,
+    );
 
     // ── Business card ────────────────────────────────────────────────
     commands
@@ -278,42 +259,6 @@ fn setup(
             Transform::from_xyz(card_x, card_y, 0.0),
         ))
         .observe(on_panel_clicked);
-
-    // ── Card imperial ruler (panel-based) ─────────────────────────
-    let card_ruler_x = card_x + card_width_m / 2.0 + RULER_GAP;
-    let card_eighths = (CARD_H * 8.0).round().to_i32();
-    let card_ruler_extra = 0.5; // extra height above card for top label
-    let card_ruler_height = CARD_H + card_ruler_extra;
-    let card_ruler_top = card_y + card_height_m / 2.0 + card_ruler_extra * IN_TO_M;
-    commands.spawn((
-        PanelRuler,
-        DiegeticPanel {
-            tree: build_imperial_panel_ruler(card_eighths, card_ruler_height, ruler_color),
-            width: PANEL_RULER_INCH_WIDTH,
-            height: card_ruler_height,
-            layout_unit: Some(Unit::Inches),
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
-        Transform::from_xyz(card_ruler_x, card_ruler_top, 0.0),
-    ));
-
-    // ── Card horizontal ruler ─────────────────────────────────────────
-    let card_hruler_x = card_x - card_width_m / 2.0;
-    let card_hruler_y = card_y - card_height_m / 2.0 - RULER_GAP;
-    let card_w_eighths = (CARD_W * 8.0).round().to_i32();
-    commands.spawn((
-        PanelRuler,
-        DiegeticPanel {
-            tree: build_imperial_horizontal_ruler(card_w_eighths, ruler_color),
-            width: CARD_W,
-            height: PANEL_RULER_INCH_WIDTH,
-            layout_unit: Some(Unit::Inches),
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
-        Transform::from_xyz(card_hruler_x, card_hruler_y, 0.0),
-    ));
 
     // ── Controls HUD ────────────────────────────────────────────────
     let unlit_material = bevy_diegetic::default_panel_material();
@@ -348,6 +293,87 @@ fn setup(
 
     // ── Light + camera ───────────────────────────────────────────────
     spawn_lights_and_camera(&mut commands, a4_height_m);
+}
+
+fn spawn_rulers(
+    commands: &mut Commands,
+    ruler_color: Color,
+    a4_x: f32,
+    a4_y: f32,
+    a4_width_m: f32,
+    a4_height_m: f32,
+    card_x: f32,
+    card_y: f32,
+    card_width_m: f32,
+    card_height_m: f32,
+) {
+    // A4 vertical ruler (left side).
+    let a4_ruler_x = a4_x - a4_width_m / 2.0 - RULER_GAP;
+    let a4_ruler_top = a4_y + a4_height_m / 2.0;
+    commands.spawn((
+        PanelRuler,
+        DiegeticPanel {
+            tree: build_metric_panel_ruler(A4_H.to_i32(), ruler_color),
+            width: PANEL_RULER_WIDTH,
+            height: A4_H,
+            layout_unit: Some(Unit::Millimeters),
+            anchor: Anchor::TopRight,
+            ..default()
+        },
+        Transform::from_xyz(a4_ruler_x, a4_ruler_top, 0.0),
+    ));
+
+    // A4 horizontal ruler (bottom).
+    let a4_bottom_ruler_x = a4_x - a4_width_m / 2.0;
+    let a4_bottom_ruler_y = a4_y - a4_height_m / 2.0 - RULER_GAP;
+    commands.spawn((
+        PanelRuler,
+        DiegeticPanel {
+            tree: build_metric_horizontal_ruler(A4_W.to_i32(), ruler_color),
+            width: A4_W,
+            height: PANEL_RULER_WIDTH,
+            layout_unit: Some(Unit::Millimeters),
+            anchor: Anchor::TopLeft,
+            ..default()
+        },
+        Transform::from_xyz(a4_bottom_ruler_x, a4_bottom_ruler_y, 0.0),
+    ));
+
+    // Card vertical ruler (right side).
+    let card_ruler_x = card_x + card_width_m / 2.0 + RULER_GAP;
+    let card_eighths = (CARD_H * 8.0).round().to_i32();
+    let card_ruler_extra = 0.5;
+    let card_ruler_height = CARD_H + card_ruler_extra;
+    let card_ruler_top = card_y + card_height_m / 2.0 + card_ruler_extra * IN_TO_M;
+    commands.spawn((
+        PanelRuler,
+        DiegeticPanel {
+            tree: build_imperial_panel_ruler(card_eighths, card_ruler_height, ruler_color),
+            width: PANEL_RULER_INCH_WIDTH,
+            height: card_ruler_height,
+            layout_unit: Some(Unit::Inches),
+            anchor: Anchor::TopLeft,
+            ..default()
+        },
+        Transform::from_xyz(card_ruler_x, card_ruler_top, 0.0),
+    ));
+
+    // Card horizontal ruler (bottom).
+    let card_bottom_ruler_x = card_x - card_width_m / 2.0;
+    let card_bottom_ruler_y = card_y - card_height_m / 2.0 - RULER_GAP;
+    let card_w_eighths = (CARD_W * 8.0).round().to_i32();
+    commands.spawn((
+        PanelRuler,
+        DiegeticPanel {
+            tree: build_imperial_horizontal_ruler(card_w_eighths, ruler_color),
+            width: CARD_W,
+            height: PANEL_RULER_INCH_WIDTH,
+            layout_unit: Some(Unit::Inches),
+            anchor: Anchor::TopLeft,
+            ..default()
+        },
+        Transform::from_xyz(card_bottom_ruler_x, card_bottom_ruler_y, 0.0),
+    ));
 }
 
 fn spawn_ground_plane(
@@ -538,12 +564,97 @@ fn toggle_rulers(
 
 // ── Panel rulers ────────────────────────────────────────────────────
 
+/// Builds vertical tick rows for a ruler. Each slot has a bottom tick, and
+/// the topmost slot also gets a tick at the upper edge.
+fn build_vertical_ticks(
+    b: &mut LayoutBuilder,
+    count: i32,
+    slot_height: f32,
+    align: AlignX,
+    ruler_color: Color,
+    tick_size_fn: fn(i32) -> (f32, f32),
+) {
+    for idx in (0..count).rev() {
+        let (tick_width, tick_line) = tick_size_fn(idx);
+        let is_top = idx == count - 1;
+        b.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::fixed(slot_height))
+                .direction(Direction::TopToBottom)
+                .child_align_x(align),
+            |b| {
+                if is_top {
+                    let (tw, tl) = tick_size_fn(count);
+                    b.with(
+                        El::new()
+                            .width(Sizing::fixed(tw))
+                            .height(Sizing::fixed(tl))
+                            .background(ruler_color),
+                        |_| {},
+                    );
+                }
+                b.with(El::new().height(Sizing::GROW), |_| {});
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(tick_width))
+                        .height(Sizing::fixed(tick_line))
+                        .background(ruler_color),
+                    |_| {},
+                );
+            },
+        );
+    }
+}
+
+/// Builds horizontal tick columns for a ruler. Each slot has a left tick, and
+/// the rightmost slot also gets a tick at the right edge.
+fn build_horizontal_ticks(
+    b: &mut LayoutBuilder,
+    count: i32,
+    slot_width: f32,
+    ruler_color: Color,
+    tick_size_fn: fn(i32) -> (f32, f32),
+) {
+    for idx in 0..count {
+        let (tick_height, tick_line) = tick_size_fn(idx);
+        let is_last = idx == count - 1;
+        b.with(
+            El::new()
+                .width(Sizing::fixed(slot_width))
+                .height(Sizing::GROW)
+                .direction(Direction::LeftToRight)
+                .child_align_y(AlignY::Top),
+            |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(tick_line))
+                        .height(Sizing::fixed(tick_height))
+                        .background(ruler_color),
+                    |_| {},
+                );
+                if is_last {
+                    b.with(El::new().width(Sizing::GROW), |_| {});
+                    let (tw, tl) = tick_size_fn(count);
+                    b.with(
+                        El::new()
+                            .width(Sizing::fixed(tl))
+                            .height(Sizing::fixed(tw))
+                            .background(ruler_color),
+                        |_| {},
+                    );
+                }
+            },
+        );
+    }
+}
+
 fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
     let mut builder = LayoutBuilder::new(PANEL_RULER_WIDTH, height_mm.to_f32());
     let label_style = LayoutTextStyle::new(8.0).with_color(ruler_color);
     let last_cm = height_mm / 10;
     // Top spacer: distance from top of ruler to center of topmost cm block.
-    let top_spacer = height_mm.to_f32() - last_cm.to_f32() * 10.0 - 5.0;
+    let top_spacer = last_cm.to_f32().mul_add(-10.0, height_mm.to_f32()) - 5.0;
 
     builder.with(
         El::new()
@@ -578,7 +689,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                                 .child_align_x(AlignX::Right)
                                 .child_align_y(AlignY::Center),
                             |b| {
-                                b.text(&format!("{cm}"), label_style.clone());
+                                b.text(format!("{cm}"), label_style.clone());
                             },
                         );
                     }
@@ -598,8 +709,6 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                     .direction(Direction::LeftToRight)
                     .child_align_x(AlignX::Right),
                 |b| {
-                    // Tick column: background elements that butt against
-                    // the spine but do not overlap it.
                     b.with(
                         El::new()
                             .width(Sizing::GROW)
@@ -607,43 +716,16 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                             .direction(Direction::TopToBottom)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            for mm in (0..height_mm).rev() {
-                                let (tick_width, tick_line) = mm_tick_size(mm);
-                                let is_top = mm == height_mm - 1;
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::fixed(1.0))
-                                        .direction(Direction::TopToBottom)
-                                        .child_align_x(AlignX::Right),
-                                    |b| {
-                                        // Top tick at the upper edge of the ruler.
-                                        if is_top {
-                                            let (tw, tl) = mm_tick_size(height_mm);
-                                            b.with(
-                                                El::new()
-                                                    .width(Sizing::fixed(tw))
-                                                    .height(Sizing::fixed(tl))
-                                                    .background(ruler_color),
-                                                |_| {},
-                                            );
-                                        }
-                                        // Spacer pushes bottom tick down.
-                                        b.with(El::new().height(Sizing::GROW), |_| {});
-                                        // Bottom tick at mm position.
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::fixed(tick_width))
-                                                .height(Sizing::fixed(tick_line))
-                                                .background(ruler_color),
-                                            |_| {},
-                                        );
-                                    },
-                                );
-                            }
+                            build_vertical_ticks(
+                                b,
+                                height_mm,
+                                1.0,
+                                AlignX::Right,
+                                ruler_color,
+                                mm_tick_size,
+                            );
                         },
                     );
-                    // Spine: a narrow column with background.
                     b.with(
                         El::new()
                             .width(Sizing::fixed(PANEL_RULER_SPINE))
@@ -707,7 +789,6 @@ fn build_imperial_panel_ruler(
                             .background(ruler_color),
                         |_| {},
                     );
-                    // Tick column.
                     b.with(
                         El::new()
                             .width(Sizing::GROW)
@@ -715,37 +796,14 @@ fn build_imperial_panel_ruler(
                             .direction(Direction::TopToBottom)
                             .child_align_x(AlignX::Left),
                         |b| {
-                            for eighth in (0..height_eighths).rev() {
-                                let (tick_width, tick_line) = eighth_tick_size(eighth);
-                                let is_top = eighth == height_eighths - 1;
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::fixed(eighth_h))
-                                        .direction(Direction::TopToBottom)
-                                        .child_align_x(AlignX::Left),
-                                    |b| {
-                                        if is_top {
-                                            let (tw, tl) = eighth_tick_size(height_eighths);
-                                            b.with(
-                                                El::new()
-                                                    .width(Sizing::fixed(tw))
-                                                    .height(Sizing::fixed(tl))
-                                                    .background(ruler_color),
-                                                |_| {},
-                                            );
-                                        }
-                                        b.with(El::new().height(Sizing::GROW), |_| {});
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::fixed(tick_width))
-                                                .height(Sizing::fixed(tick_line))
-                                                .background(ruler_color),
-                                            |_| {},
-                                        );
-                                    },
-                                );
-                            }
+                            build_vertical_ticks(
+                                b,
+                                height_eighths,
+                                eighth_h,
+                                AlignX::Left,
+                                ruler_color,
+                                eighth_tick_size,
+                            );
                         },
                     );
                 },
@@ -776,7 +834,7 @@ fn build_imperial_panel_ruler(
                                 .child_align_x(AlignX::Left)
                                 .child_align_y(AlignY::Center),
                             |b| {
-                                b.text(&format!("{inch}"), label_style.clone());
+                                b.text(format!("{inch}"), label_style.clone());
                             },
                         );
                     }
@@ -811,7 +869,9 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
     // Labels go at cm 1..last_label_cm, each centered in a 10mm block.
     // Skip the cm at the exact edge (it's just a tick, no room for a label).
     let last_label_cm = (width_mm - 5) / 10;
-    let right_spacer = width_mm.to_f32() - 5.0 - last_label_cm.to_f32() * 10.0;
+    let right_spacer = last_label_cm
+        .to_f32()
+        .mul_add(-10.0, width_mm.to_f32() - 5.0);
 
     builder.with(
         El::new()
@@ -834,7 +894,6 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                             .background(ruler_color),
                         |_| {},
                     );
-                    // Tick row.
                     b.with(
                         El::new()
                             .width(Sizing::GROW)
@@ -842,37 +901,7 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                             .direction(Direction::LeftToRight)
                             .child_align_y(AlignY::Top),
                         |b| {
-                            for mm in 0..width_mm {
-                                let (tick_height, tick_line) = mm_tick_size(mm);
-                                let is_last = mm == width_mm - 1;
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::fixed(1.0))
-                                        .height(Sizing::GROW)
-                                        .direction(Direction::LeftToRight)
-                                        .child_align_y(AlignY::Top),
-                                    |b| {
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::fixed(tick_line))
-                                                .height(Sizing::fixed(tick_height))
-                                                .background(ruler_color),
-                                            |_| {},
-                                        );
-                                        if is_last {
-                                            b.with(El::new().width(Sizing::GROW), |_| {});
-                                            let (tw, tl) = mm_tick_size(width_mm);
-                                            b.with(
-                                                El::new()
-                                                    .width(Sizing::fixed(tl))
-                                                    .height(Sizing::fixed(tw))
-                                                    .background(ruler_color),
-                                                |_| {},
-                                            );
-                                        }
-                                    },
-                                );
-                            }
+                            build_horizontal_ticks(b, width_mm, 1.0, ruler_color, mm_tick_size);
                         },
                     );
                 },
@@ -903,7 +932,7 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                                         .direction(Direction::TopToBottom)
                                         .child_align_x(AlignX::Center),
                                     |b| {
-                                        b.text(&format!("{cm}"), label_style.clone());
+                                        b.text(format!("{cm}"), label_style.clone());
                                     },
                                 );
                             },
@@ -965,37 +994,13 @@ fn build_imperial_horizontal_ruler(width_eighths: i32, ruler_color: Color) -> La
                             .direction(Direction::LeftToRight)
                             .child_align_y(AlignY::Top),
                         |b| {
-                            for eighth in 0..width_eighths {
-                                let (tick_height, tick_line) = eighth_tick_size(eighth);
-                                let is_last = eighth == width_eighths - 1;
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::fixed(eighth_w))
-                                        .height(Sizing::GROW)
-                                        .direction(Direction::LeftToRight)
-                                        .child_align_y(AlignY::Top),
-                                    |b| {
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::fixed(tick_line))
-                                                .height(Sizing::fixed(tick_height))
-                                                .background(ruler_color),
-                                            |_| {},
-                                        );
-                                        if is_last {
-                                            b.with(El::new().width(Sizing::GROW), |_| {});
-                                            let (tw, tl) = eighth_tick_size(width_eighths);
-                                            b.with(
-                                                El::new()
-                                                    .width(Sizing::fixed(tl))
-                                                    .height(Sizing::fixed(tw))
-                                                    .background(ruler_color),
-                                                |_| {},
-                                            );
-                                        }
-                                    },
-                                );
-                            }
+                            build_horizontal_ticks(
+                                b,
+                                width_eighths,
+                                eighth_w,
+                                ruler_color,
+                                eighth_tick_size,
+                            );
                         },
                     );
                 },
@@ -1025,7 +1030,7 @@ fn build_imperial_horizontal_ruler(width_eighths: i32, ruler_color: Color) -> La
                                         .direction(Direction::TopToBottom)
                                         .child_align_x(AlignX::Center),
                                     |b| {
-                                        b.text(&format!("{inch}"), label_style.clone());
+                                        b.text(format!("{inch}"), label_style.clone());
                                     },
                                 );
                             },
@@ -1189,8 +1194,12 @@ fn build_card(debug: bool) -> bevy_diegetic::LayoutTree {
     builder.build()
 }
 
-fn build_controls_tree(width: f32, debug: bool, rulers: bool, perspective: bool) -> LayoutTree {
-    let mut builder = LayoutBuilder::new(width, HUD_HEIGHT);
+fn build_controls_tree(debug: bool, rulers: bool, perspective: bool) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(HUD_HEIGHT)),
+    );
     build_controls_content(&mut builder, debug, rulers, perspective);
     builder.build()
 }
@@ -1294,27 +1303,24 @@ fn hud_separator(b: &mut LayoutBuilder) {
 }
 
 fn update_controls_hud(
-    windows: Query<&Window>,
     mut huds: Query<&mut DiegeticPanel, With<ControlsPanel>>,
     debug: Res<DebugOutlines>,
     rulers: Res<RulersVisible>,
     cameras: Query<&Projection>,
-    mut previous_state: Local<(u32, bool, bool, bool)>,
+    mut previous_state: Local<(bool, bool, bool)>,
 ) {
-    let win_width = windows.iter().next().map_or(0.0, Window::width);
-
     let perspective = cameras
         .iter()
         .any(|p| matches!(p, Projection::Perspective(_)));
 
-    let state = (win_width.to_bits(), debug.0, rulers.0, perspective);
+    let state = (debug.0, rulers.0, perspective);
     if *previous_state == state {
         return;
     }
     *previous_state = state;
 
     for mut panel in &mut huds {
-        panel.tree = build_controls_tree(win_width, debug.0, rulers.0, perspective);
+        panel.tree = build_controls_tree(debug.0, rulers.0, perspective);
     }
 }
 

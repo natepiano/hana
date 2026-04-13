@@ -603,19 +603,26 @@ fn size_along_axis(
     axis: Axis,
     viewport_size: f32,
 ) {
-    // Set root size if it hasn't been set.
+    // Set root size from the viewport.
+    // - Fixed roots keep their declared size (already set by initialize_leaf_sizes).
+    // - Grow/Fit roots fill the viewport — this is re-applied unconditionally because
+    //   propagate_fit_sizes may have set them to their content size, but the root should match the
+    //   viewport, not its content.
     let root_element = &tree.elements[root];
-    let root_size = get_size(computed[root], axis);
-    if root_size <= 0.0 {
-        let new_size = match get_sizing(root_element, axis) {
-            Sizing::Grow { min, max } | Sizing::Fit { min, max } => {
+    let new_root_size = match get_sizing(root_element, axis) {
+        Sizing::Grow { min, max } => viewport_size.clamp(min.value, max.value),
+        Sizing::Fit { min, max } => {
+            let content = get_size(computed[root], axis);
+            if content > 0.0 {
+                content.clamp(min.value, max.value)
+            } else {
                 viewport_size.clamp(min.value, max.value)
-            },
-            Sizing::Fixed(size) => size.value,
-            Sizing::Percent(frac) => viewport_size * frac,
-        };
-        set_size(&mut computed[root], axis, new_size);
-    }
+            }
+        },
+        Sizing::Fixed(size) => size.value,
+        Sizing::Percent(frac) => viewport_size * frac,
+    };
+    set_size(&mut computed[root], axis, new_root_size);
 
     // Top-down traversal using a stack (parents always processed before children).
     let mut queue = Vec::with_capacity(tree.len());

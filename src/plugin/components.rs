@@ -347,6 +347,15 @@ impl DiegeticPanelBuilder {
     /// equals 1.0 (1 layout point = 1 world unit = 1 screen pixel under
     /// the orthographic overlay camera).
     ///
+    /// When [`ScreenDimension::Percent`] is used for width or height,
+    /// the layout tree's root element is automatically set to
+    /// `Sizing::GROW` on that axis. This means the plugin can resize
+    /// the panel by updating `panel.width`/`panel.height` and the
+    /// layout engine reflows children without a tree rebuild. If you
+    /// rebuild the tree for state changes, use
+    /// [`LayoutBuilder::with_root`] with a `Sizing::GROW` root so
+    /// the rebuilt tree also reflows correctly on resize.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -371,6 +380,16 @@ impl DiegeticPanelBuilder {
         //  so points_to_world = world_height / viewport_pts_h = height / height = 1.0)
         if self.world_height.is_none() && self.world_width.is_none() {
             self.world_height = Some(self.height);
+        }
+        // For percent-sized axes, set the root element to GROW so that
+        // changing panel.width/height reflows without a tree rebuild.
+        if let Some(ref mut tree) = self.tree {
+            if matches!(screen_space.width, Some(ScreenDimension::Percent(_))) {
+                tree.set_root_grow_width();
+            }
+            if matches!(screen_space.height, Some(ScreenDimension::Percent(_))) {
+                tree.set_root_grow_height();
+            }
         }
         (self.build(), screen_space)
     }
@@ -532,24 +551,27 @@ pub enum ScreenDimension {
     Fixed(f32),
     /// Fraction of the window along this axis (0.0–1.0).
     /// `Percent(1.0)` fills the full window width or height.
+    ///
+    /// When used with [`DiegeticPanelBuilder::build_screen_space`], the
+    /// layout tree's root element is automatically set to `Sizing::GROW`
+    /// on the percent-sized axis. This allows the layout engine to reflow
+    /// children when `panel.width`/`panel.height` changes — no tree
+    /// rebuild is needed for pure resize.
     Percent(f32),
 }
 
 /// Where a screen-space panel is placed within the window.
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
 pub enum ScreenPosition {
     /// Pin to the window edge/corner that matches the panel's [`Anchor`].
     /// `Anchor::TopLeft` pins to the window's top-left corner,
     /// `Anchor::Center` pins to the window's center, etc.
+    #[default]
     Screen,
     /// Place at an explicit pixel position (top-left origin, y-down).
     /// The panel's [`Anchor`] determines which point of the panel sits
     /// at this position.
     At(Vec2),
-}
-
-impl Default for ScreenPosition {
-    fn default() -> Self { Self::Screen }
 }
 
 /// Marks a panel for screen-space rendering with an orthographic overlay camera.

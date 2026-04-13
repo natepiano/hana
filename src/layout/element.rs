@@ -175,6 +175,30 @@ impl LayoutTree {
     /// Sets the root element index.
     pub(super) const fn set_root(&mut self, index: usize) { self.root = Some(index); }
 
+    /// Changes the root element's width sizing to `GROW`.
+    ///
+    /// Used by `build_screen_space()` when the panel width is
+    /// window-relative (`Percent`) so that changing `panel.width`
+    /// triggers correct reflow without a tree rebuild.
+    pub(crate) fn set_root_grow_width(&mut self) {
+        if let Some(root) = self.root
+            && let Some(element) = self.elements.get_mut(root)
+        {
+            element.width = Sizing::GROW;
+        }
+    }
+
+    /// Changes the root element's height sizing to `GROW`.
+    ///
+    /// See [`set_root_grow_width`](Self::set_root_grow_width) for rationale.
+    pub(crate) fn set_root_grow_height(&mut self) {
+        if let Some(root) = self.root
+            && let Some(element) = self.elements.get_mut(root)
+        {
+            element.height = Sizing::GROW;
+        }
+    }
+
     /// Returns an iterator over child indices of the given element.
     #[must_use]
     pub(super) fn children_of(&self, index: usize) -> &[usize] {
