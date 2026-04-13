@@ -26,8 +26,12 @@ pub(super) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelEx
 /// Uniform data for the SDF panel extension shader.
 #[derive(Clone, Debug, ShaderType)]
 pub(super) struct SdfPanelUniform {
-    /// Half-size of the element in world units (width/2, height/2).
+    /// Half-size of the SDF shape in world units (width/2, height/2).
     pub half_size:        Vec2,
+    /// Half-size of the mesh quad in world units. Larger than `half_size`
+    /// by the AA padding so the exterior anti-aliasing ramp has fragments
+    /// to render on.
+    pub mesh_half_size:   Vec2,
     /// Per-corner radii in world units: [TL, TR, BR, BL].
     pub corner_radii:     Vec4,
     /// Border widths in world units: [top, right, bottom, left].
@@ -76,6 +80,8 @@ pub(super) fn sdf_panel_material(
     mut base: StandardMaterial,
     half_width: f32,
     half_height: f32,
+    mesh_half_width: f32,
+    mesh_half_height: f32,
     corner_radii: [f32; 4],
     border_widths: [f32; 4],
     border_color: Option<Color>,
@@ -97,6 +103,7 @@ pub(super) fn sdf_panel_material(
         extension: SdfPanelExtension {
             uniforms: SdfPanelUniform {
                 half_size: Vec2::new(half_width, half_height),
+                mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
                 corner_radii: Vec4::from_array(corner_radii),
                 border_widths: Vec4::from_array(border_widths),
                 border_color: border_linear,

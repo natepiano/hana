@@ -320,9 +320,15 @@ fn spawn_sdf_element(
     let half_w = world_w * 0.5;
     let half_h = world_h * 0.5;
 
+    // Mesh is slightly larger than the SDF shape so the exterior
+    // anti-aliasing ramp has fragments to render on.
+    let pad = constants::SDF_AA_PADDING;
+    let mesh_half_w = half_w + pad;
+    let mesh_half_h = half_h + pad;
+
     // Convert layout-space clip rect to local quad coords (centered, Y-up).
     let clip_rect = surface.clip_rect.map_or_else(
-        || bevy::math::Vec4::new(-half_w, -half_h, half_w, half_h),
+        || bevy::math::Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
         |cr| {
             let (cx, cy) = surface.bounds.center();
             let left = (cr.x - cx) * points_to_world;
@@ -339,6 +345,8 @@ fn spawn_sdf_element(
         base,
         half_w,
         half_h,
+        mesh_half_w,
+        mesh_half_h,
         world_radii,
         world_borders,
         surface.border_color,
@@ -348,7 +356,7 @@ fn spawn_sdf_element(
 
     let world_rect = bounds_to_world_rect(&surface.bounds, points_to_world, anchor_x, anchor_y);
 
-    let mesh = meshes.add(Rectangle::new(world_w, world_h));
+    let mesh = meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
     let mat_handle = sdf_materials.add(sdf_mat);
     let base_components = (
         PanelSdfMesh,

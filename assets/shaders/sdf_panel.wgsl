@@ -37,10 +37,12 @@
 #endif
 
 struct SdfPanelUniform {
-    /// Half-size of the element in world units (width/2, height/2).
-    half_size:     vec2<f32>,
+    /// Half-size of the SDF shape in world units (width/2, height/2).
+    half_size:      vec2<f32>,
+    /// Half-size of the mesh quad (includes AA padding beyond shape).
+    mesh_half_size: vec2<f32>,
     /// Per-corner radii in world units: [TL, TR, BR, BL].
-    corner_radii:  vec4<f32>,
+    corner_radii:   vec4<f32>,
     /// Border widths in world units: [top, right, bottom, left].
     border_widths: vec4<f32>,
     /// Border color in linear RGBA.
@@ -109,7 +111,7 @@ fn aa_width(dist: f32) -> f32 {
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
     // Map UV (0..1) to local coordinates centered on the quad.
-    let local = (in.uv - 0.5) * 2.0 * sdf.half_size;
+    let local = (in.uv - 0.5) * 2.0 * sdf.mesh_half_size;
 
     // Clip to parent scissor rect.
     if local.x < sdf.clip_rect.x || local.x > sdf.clip_rect.z
@@ -134,7 +136,7 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
     // Map UV (0..1) to local coordinates centered on the quad.
-    let local = (in.uv - 0.5) * 2.0 * sdf.half_size;
+    let local = (in.uv - 0.5) * 2.0 * sdf.mesh_half_size;
 
     // Clip to parent scissor rect.
     if local.x < sdf.clip_rect.x || local.x > sdf.clip_rect.z
@@ -142,14 +144,36 @@ fn fragment(
         discard;
     }
 
-    // Outer shape distance.
-    let outer_dist = sd_rounded_box(local, sdf.half_size, sdf.corner_radii);
+    // ── Sub-pixel coverage ───────────────────────────────────────────
+    // When the element is thinner than a pixel in either axis, inflate
+    // the SDF shape to 1 pixel minimum and scale alpha proportionally.
+    // A 0.3px line renders as a 1px line at 30% alpha — always visible,
+    // always consistent, physically correct when zoomed in.
+    let pixel_size = vec2<f32>(fwidth(local.x), fwidth(local.y));
+    let min_half = pixel_size * 0.5;
+    var effective_half_size = sdf.half_size;
+    var coverage_scale = 1.0;
+    if sdf.half_size.x < min_half.x && sdf.half_size.x > 0.0 {
+        coverage_scale *= sdf.half_size.x / min_half.x;
+        effective_half_size.x = min_half.x;
+    }
+    if sdf.half_size.y < min_half.y && sdf.half_size.y > 0.0 {
+        coverage_scale *= sdf.half_size.y / min_half.y;
+        effective_half_size.y = min_half.y;
+    }
+
+    // Outer shape distance (using potentially inflated half-size).
+    let outer_dist = sd_rounded_box(local, effective_half_size, sdf.corner_radii);
 
     // Base AA width from screen-space derivatives of the SDF.
     let base_aa = aa_width(outer_dist);
 
-    // Outer shape alpha — smooth falloff at the edge.
-    let outer_alpha = 1.0 - smoothstep(-base_aa, base_aa, outer_dist);
+    // Outer shape alpha — exterior-only falloff with doubled ramp width.
+    // Interior pixels (dist ≤ 0) are fully opaque so adjacent quads
+    // sharing an edge don't double-blend and produce visible seams.
+    // The 2× ramp compensates for the one-sided shift, preserving the
+    // same visual AA band width as a centered smoothstep.
+    let outer_alpha = (1.0 - smoothstep(0.0, 2.0 * base_aa, outer_dist)) * coverage_scale;
 
     // Discard fully outside fragments.
     if outer_alpha < 0.001 {

@@ -12,6 +12,11 @@ use bevy::prelude::*;
 /// coplanar fragments.
 pub(super) const LAYER_DEPTH_BIAS: f32 = 1.0;
 
+/// World-space padding added to each SDF quad mesh beyond the shape boundary.
+/// Gives the exterior anti-aliasing ramp room to render — without this, the
+/// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
+pub(super) const SDF_AA_PADDING: f32 = 0.001;
+
 /// Per-command OIT depth offset for coplanar fragment ordering.
 ///
 /// Added to `position.z` in the fragment shader before `oit_draw`
