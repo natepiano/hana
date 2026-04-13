@@ -73,7 +73,7 @@ impl CameraMove {
 
     /// Returns the duration in milliseconds.
     #[must_use]
-    pub fn duration_ms(&self) -> f32 { self.duration().as_secs_f32() * 1000.0 }
+    pub const fn duration_ms(&self) -> f32 { self.duration().as_secs_f32() * 1000.0 }
 
     /// Returns the easing function for this movement step.
     #[must_use]

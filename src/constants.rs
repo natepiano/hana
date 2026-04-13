@@ -34,6 +34,18 @@ pub(crate) const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
 /// Scale factor for converting pixel-based scroll events to zoom input.
 pub(crate) const PIXEL_SCROLL_SCALE: f32 = 0.005;
 
+// Orbit defaults
+/// Default smoothing factor for orbit motion.
+pub(crate) const DEFAULT_ORBIT_SMOOTHNESS: f32 = 0.1;
+/// Default smoothing factor for pan motion.
+pub(crate) const DEFAULT_PAN_SMOOTHNESS: f32 = 0.02;
+/// Default orbital radius.
+pub(crate) const DEFAULT_TARGET_RADIUS: f32 = 1.0;
+/// Default lower limit on zoom (radius or orthographic scale).
+pub(crate) const DEFAULT_ZOOM_LOWER_LIMIT: f32 = 0.05;
+/// Default smoothing factor for zoom motion.
+pub(crate) const DEFAULT_ZOOM_SMOOTHNESS: f32 = 0.1;
+
 // Orbit constants
 /// Approximate-equality threshold for floating-point convergence checks.
 pub(crate) const EPSILON: f32 = 0.001;

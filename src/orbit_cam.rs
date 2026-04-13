@@ -10,6 +10,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 
+use super::constants::DEFAULT_ORBIT_SMOOTHNESS;
+use super::constants::DEFAULT_PAN_SMOOTHNESS;
+use super::constants::DEFAULT_TARGET_RADIUS;
+use super::constants::DEFAULT_ZOOM_LOWER_LIMIT;
+use super::constants::DEFAULT_ZOOM_SMOOTHNESS;
 use super::constants::SCROLL_ZOOM_FACTOR;
 use super::constants::TOUCH_PINCH_SCALE;
 #[cfg(feature = "bevy_egui")]
@@ -144,16 +149,16 @@ pub struct OrbitCam {
     /// The origin for a shape to restrict the cameras `focus` position.
     /// Defaults to `Vec3::ZERO`.
     pub focus_bounds_origin: Vec3,
-    /// The shape (Sphere or Cuboid) that the `focus` is restricted by. Centered on the
+    /// The shape (`Sphere` or `Cuboid`) that the `focus` is restricted by. Centered on the
     /// `focus_bounds_origin`.
     /// Defaults to `None`.
     pub focus_bounds_shape:  Option<FocusBoundsShape>,
     /// Upper limit on the zoom. This applies to `radius`, in the case of using a perspective
-    /// camera, or the projection's scale in the case of using an orthographic camera.
+    /// camera, or the projection's `scale` in the case of using an orthographic camera.
     /// Defaults to `None`.
     pub zoom_upper_limit:    Option<f32>,
     /// Lower limit on the zoom. This applies to `radius`, in the case of using a perspective
-    /// camera, or the projection's scale in the case of using an orthographic camera.
+    /// camera, or the projection's `scale` in the case of using an orthographic camera.
     /// Should always be >0 otherwise you'll get stuck at 0.
     /// Defaults to `0.05`.
     pub zoom_lower_limit:    f32,
@@ -237,11 +242,11 @@ impl Default for OrbitCam {
             radius:              None,
             upside_down_policy:  UpsideDownPolicy::Prevent,
             orbit_sensitivity:   1.0,
-            orbit_smoothness:    0.1,
+            orbit_smoothness:    DEFAULT_ORBIT_SMOOTHNESS,
             pan_sensitivity:     1.0,
-            pan_smoothness:      0.02,
+            pan_smoothness:      DEFAULT_PAN_SMOOTHNESS,
             zoom_sensitivity:    1.0,
-            zoom_smoothness:     0.1,
+            zoom_smoothness:     DEFAULT_ZOOM_SMOOTHNESS,
             button_orbit:        MouseButton::Left,
             button_pan:          MouseButton::Right,
             button_zoom:         None,
@@ -253,7 +258,7 @@ impl Default for OrbitCam {
             pitch:               None,
             target_yaw:          0.0,
             target_pitch:        0.0,
-            target_radius:       1.0,
+            target_radius:       DEFAULT_TARGET_RADIUS,
             initialization:      InitializationState::Pending,
             yaw_upper_limit:     None,
             yaw_lower_limit:     None,
@@ -262,7 +267,7 @@ impl Default for OrbitCam {
             focus_bounds_origin: Vec3::ZERO,
             focus_bounds_shape:  None,
             zoom_upper_limit:    None,
-            zoom_lower_limit:    0.05,
+            zoom_lower_limit:    DEFAULT_ZOOM_LOWER_LIMIT,
             force_update:        ForceUpdate::Idle,
             axis:                [Vec3::X, Vec3::Y, Vec3::Z],
             time_source:         TimeSource::Virtual,

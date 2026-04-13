@@ -9,6 +9,7 @@ use bevy_kana::Displacement;
 use bevy_kana::Position;
 
 use super::ForceUpdate;
+use super::OrbitCam;
 use super::animation;
 use super::animation::CameraMove;
 use super::animation::CameraMoveList;
@@ -35,7 +36,6 @@ use super::events::ZoomEnd;
 use super::events::ZoomToFit;
 use super::fit;
 use super::support;
-use crate::OrbitCam;
 
 /// Parameters for an instant orbital snap.
 struct SnapOrbit {
