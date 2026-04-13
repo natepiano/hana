@@ -31,6 +31,8 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::Unit;
+use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
 use bevy_lagrange::CameraMove;
@@ -54,8 +56,6 @@ const CARD_H: f32 = 2.0; // inches
 const CARD_NAME_SIZE: f32 = 15.0; // pt
 const CARD_TITLE_SIZE: f32 = 13.0; // pt
 const CARD_DETAIL_SIZE: f32 = 11.0; // pt
-const CARD_FOOTER_LABEL_SIZE: f32 = 10.0; // pt
-const CARD_FOOTER_DIM_SIZE: f32 = 6.0; // pt
 
 // ── HUD ─────────────────────────────────────────────────────────────
 const HUD_HEIGHT: f32 = 48.0;
@@ -211,6 +211,24 @@ fn setup(
             Transform::from_xyz(a4_x, a4_y, 0.0),
         ))
         .observe(on_panel_clicked);
+
+    // ── Panel titles ────────────────────────────────────────────────
+    let title_style = WorldTextStyle::new(18.0)
+        .with_unit(Unit::Points)
+        .with_color(Color::WHITE)
+        .with_anchor(Anchor::BottomCenter);
+    let title_gap = 0.008;
+
+    commands.spawn((
+        WorldText::new("A4 Paper — 210 × 297 mm"),
+        title_style.clone(),
+        Transform::from_xyz(a4_x, a4_top + title_gap, 0.0),
+    ));
+    commands.spawn((
+        WorldText::new("US Business Card — 3½ × 2 in"),
+        title_style,
+        Transform::from_xyz(card_x, a4_top + title_gap, 0.0),
+    ));
 
     // ── A4 metric ruler (panel-based) ──────────────────────────────
     let a4_ruler_x = a4_x - a4_width_m / 2.0 - RULER_GAP;
@@ -1068,12 +1086,6 @@ fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
         |b| {
             debug_text(
                 b,
-                "A4 Paper — 210 × 297 mm",
-                LayoutTextStyle::new(24.0).with_color(A4_TEXT_COLOR),
-                db,
-            );
-            debug_text(
-                b,
                 "layout: Millimeters  |  fonts: Points",
                 LayoutTextStyle::new(16.0).with_color(A4_DIM_COLOR),
                 db,
@@ -1162,25 +1174,11 @@ fn build_card(debug: bool) -> bevy_diegetic::LayoutTree {
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
 
             // Footer
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::LeftToRight),
-                |b| {
-                    debug_text(
-                        b,
-                        "layout: Inches  |  fonts: Points",
-                        LayoutTextStyle::new(CARD_FOOTER_LABEL_SIZE).with_color(CARD_DIM_COLOR),
-                        db,
-                    );
-                    b.with(El::new().width(Sizing::GROW), |_| {});
-                    debug_text(
-                        b,
-                        "3½ × 2 in",
-                        LayoutTextStyle::new(CARD_FOOTER_DIM_SIZE).with_color(CARD_DIM_COLOR),
-                        db,
-                    );
-                },
+            debug_text(
+                b,
+                "layout: Inches  |  fonts: Points",
+                LayoutTextStyle::new(8.0).with_color(CARD_DIM_COLOR),
+                db,
             );
         },
     );
