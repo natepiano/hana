@@ -1717,6 +1717,14 @@ impl Border {
         self
     }
 
+    /// Total horizontal border width (left + right) in resolved units.
+    #[must_use]
+    pub const fn horizontal(&self) -> f32 { self.left.value + self.right.value }
+
+    /// Total vertical border width (top + bottom) in resolved units.
+    #[must_use]
+    pub const fn vertical(&self) -> f32 { self.top.value + self.bottom.value }
+
     /// Sets the width of lines drawn between children.
     #[must_use]
     pub fn between_children(mut self, width: impl Into<Dimension>) -> Self {

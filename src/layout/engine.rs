@@ -35,6 +35,22 @@ enum Axis {
     Y,
 }
 
+/// Returns the total border inset for `element` along `axis`.
+fn border_inset(element: &Element, axis: Axis) -> f32 {
+    element.border.as_ref().map_or(0.0, |b| match axis {
+        Axis::X => b.horizontal(),
+        Axis::Y => b.vertical(),
+    })
+}
+
+/// Returns the leading border width (left for X, top for Y).
+fn border_leading(element: &Element, axis: Axis) -> f32 {
+    element.border.as_ref().map_or(0.0, |b| match axis {
+        Axis::X => b.left.value,
+        Axis::Y => b.top.value,
+    })
+}
+
 /// Callback type for measuring text dimensions.
 ///
 /// Given a text string and its measurement properties, returns the measured
@@ -539,6 +555,7 @@ fn propagate_fit_sizes(
         Axis::X => element.padding.horizontal(),
         Axis::Y => element.padding.vertical(),
     };
+    let border = border_inset(element, axis);
 
     let gap_total = if is_along && children.len() > 1 {
         element.child_gap.value * (children.len() - 1).to_f32()
@@ -546,8 +563,9 @@ fn propagate_fit_sizes(
         0.0
     };
 
-    let content_size = content_acc + padding + if is_along { gap_total } else { 0.0 };
-    let min_from_children = min_acc + padding + if is_along { gap_total } else { 0.0 };
+    let chrome = padding + border;
+    let content_size = content_acc + chrome + if is_along { gap_total } else { 0.0 };
+    let min_from_children = min_acc + chrome + if is_along { gap_total } else { 0.0 };
 
     // Clamp minDimensions to [sizing.min, sizing.max] — matches Clay.
     let clamped_min = min_from_children.clamp(sizing.min_size(), sizing.max_size());
@@ -617,6 +635,8 @@ fn size_along_axis(
             Axis::X => parent_element.padding.horizontal(),
             Axis::Y => parent_element.padding.vertical(),
         };
+        let border = border_inset(parent_element, axis);
+        let chrome = padding + border;
 
         let gap_total = if is_along && children.len() > 1 {
             parent_element.child_gap.value * (children.len() - 1).to_f32()
@@ -625,7 +645,7 @@ fn size_along_axis(
         };
 
         // Resolve Percent children first.
-        let available_for_percent = parent_size - padding - gap_total;
+        let available_for_percent = parent_size - chrome - gap_total;
         for &child_idx in children {
             let child_sizing = get_sizing(&tree.elements[child_idx], axis);
             if let Sizing::Percent(frac) = child_sizing {
@@ -643,10 +663,11 @@ fn size_along_axis(
                 axis,
                 parent_size,
                 padding,
+                border,
                 gap_total,
             );
         } else {
-            size_children_cross_axis(tree, computed, children, axis, parent_size, padding);
+            size_children_cross_axis(tree, computed, children, axis, parent_size, padding, border);
         }
 
         // Enqueue children (reverse order so first child is popped first from stack).
@@ -667,6 +688,7 @@ fn size_children_along_axis(
     axis: Axis,
     parent_size: f32,
     padding: f32,
+    border: f32,
     gap_total: f32,
 ) {
     let parent_element = &tree.elements[parent_idx];
@@ -683,7 +705,7 @@ fn size_children_along_axis(
         }
     }
 
-    let available = parent_size - padding - gap_total;
+    let available = parent_size - padding - border - gap_total;
     let mut to_distribute = available - content_size;
 
     // Overflow compression: largest-first heuristic.
@@ -708,8 +730,9 @@ fn size_children_cross_axis(
     axis: Axis,
     parent_size: f32,
     padding: f32,
+    border: f32,
 ) {
-    let max_size = parent_size - padding;
+    let max_size = parent_size - padding - border;
 
     for &child_idx in children {
         let child_element = &tree.elements[child_idx];
@@ -925,10 +948,15 @@ fn push_children_to_stack(
         0.0
     };
 
+    let border_x = border_inset(parent_el, Axis::X);
+    let border_y = border_inset(parent_el, Axis::Y);
+    let border_left = border_leading(parent_el, Axis::X);
+    let border_top = border_leading(parent_el, Axis::Y);
+
     let main_available = if is_horizontal {
-        parent_w - parent_el.padding.horizontal()
+        parent_w - parent_el.padding.horizontal() - border_x
     } else {
-        parent_h - parent_el.padding.vertical()
+        parent_h - parent_el.padding.vertical() - border_y
     };
 
     let extra_main = (main_available - children_main_size - gap_total).max(0.0);
@@ -958,26 +986,26 @@ fn push_children_to_stack(
         reverse_cursor -= child_main;
 
         let (cx, cy) = if is_horizontal {
-            let cross_available = parent_h - parent_el.padding.vertical();
+            let cross_available = parent_h - parent_el.padding.vertical() - border_y;
             let cross_offset = match parent_el.child_align_y {
                 AlignY::Top => 0.0,
                 AlignY::Center => (cross_available - child_h).max(0.0) * 0.5,
                 AlignY::Bottom => (cross_available - child_h).max(0.0),
             };
             (
-                x + parent_el.padding.left.value + reverse_cursor,
-                y + parent_el.padding.top.value + cross_offset,
+                x + parent_el.padding.left.value + border_left + reverse_cursor,
+                y + parent_el.padding.top.value + border_top + cross_offset,
             )
         } else {
-            let cross_available = parent_w - parent_el.padding.horizontal();
+            let cross_available = parent_w - parent_el.padding.horizontal() - border_x;
             let cross_offset = match parent_el.child_align_x {
                 AlignX::Left => 0.0,
                 AlignX::Center => (cross_available - child_w).max(0.0) * 0.5,
                 AlignX::Right => (cross_available - child_w).max(0.0),
             };
             (
-                x + parent_el.padding.left.value + cross_offset,
-                y + parent_el.padding.top.value + reverse_cursor,
+                x + parent_el.padding.left.value + border_left + cross_offset,
+                y + parent_el.padding.top.value + border_top + reverse_cursor,
             )
         };
 
