@@ -322,17 +322,20 @@ fn setup(
         ..unlit_material
     };
     let hud_width = windows.iter().next().map_or(800.0, Window::width);
-    let (mut hud_panel, screen_space) = DiegeticPanel::builder()
-        .size_px(hud_width, HUD_HEIGHT)
-        .anchor(Anchor::TopLeft)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .layout(|b| {
-            build_controls_content(b, false, true, true);
-        })
-        .build_screen_space();
-    hud_panel.tree = build_controls_tree(hud_width, false, true, true);
-    commands.spawn((ControlsPanel, hud_panel, screen_space, Transform::default()));
+    commands.spawn((
+        ControlsPanel,
+        DiegeticPanel::builder()
+            .size_px(hud_width, HUD_HEIGHT)
+            .anchor(Anchor::TopLeft)
+            .material(unlit.clone())
+            .text_material(unlit)
+            .width_percent(1.0)
+            .layout(|b| {
+                build_controls_content(b, false, true, true);
+            })
+            .build_screen_space(),
+        Transform::default(),
+    ));
 
     // ── Ground plane ─────────────────────────────────────────────────
     spawn_ground_plane(
@@ -1292,36 +1295,27 @@ fn hud_separator(b: &mut LayoutBuilder) {
 
 fn update_controls_hud(
     windows: Query<&Window>,
-    mut huds: Query<(&mut Transform, &mut DiegeticPanel), With<ControlsPanel>>,
+    mut huds: Query<&mut DiegeticPanel, With<ControlsPanel>>,
     debug: Res<DebugOutlines>,
     rulers: Res<RulersVisible>,
     cameras: Query<&Projection>,
     mut previous_state: Local<(u32, bool, bool, bool)>,
 ) {
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let win_width = window.width();
-    let half_width = win_width / 2.0;
-    let half_height = window.height() / 2.0;
-    let width_bits = win_width.to_bits();
+    let win_width = windows.iter().next().map_or(0.0, Window::width);
 
     let perspective = cameras
         .iter()
         .any(|p| matches!(p, Projection::Perspective(_)));
 
-    let state = (width_bits, debug.0, rulers.0, perspective);
-
-    for (mut transform, mut panel) in &mut huds {
-        transform.translation.x = -half_width;
-        transform.translation.y = half_height;
-
-        if *previous_state != state {
-            panel.width = win_width;
-            panel.tree = build_controls_tree(win_width, debug.0, rulers.0, perspective);
-        }
+    let state = (win_width.to_bits(), debug.0, rulers.0, perspective);
+    if *previous_state == state {
+        return;
     }
     *previous_state = state;
+
+    for mut panel in &mut huds {
+        panel.tree = build_controls_tree(win_width, debug.0, rulers.0, perspective);
+    }
 }
 
 // ── Home camera ─────────────────────────────────────────────────────

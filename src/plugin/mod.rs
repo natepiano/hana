@@ -16,6 +16,8 @@ pub use components::DiegeticPanelBuilder;
 pub use components::DiegeticTextMeasurer;
 pub use components::HueOffset;
 pub use components::RenderMode;
+pub use components::ScreenDimension;
+pub use components::ScreenPosition;
 pub use components::ScreenSpace;
 pub use components::SurfaceShadow;
 pub use config::AtlasConfig;
@@ -269,6 +271,7 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
             Update,
             (
                 systems::ensure_oit_on_cameras,
+                screen_space::position_screen_space_panels.before(systems::compute_panel_layouts),
                 screen_space::setup_screen_space_cameras.after(systems::compute_panel_layouts),
                 systems::render_layout_gizmos.after(systems::compute_panel_layouts),
                 systems::render_debug_gizmos.after(systems::compute_panel_layouts),

@@ -105,6 +105,8 @@ pub use plugin::Pt;
 pub use plugin::Px;
 pub use plugin::RasterQuality;
 pub use plugin::RenderMode;
+pub use plugin::ScreenDimension;
+pub use plugin::ScreenPosition;
 pub use plugin::ScreenSpace;
 pub use plugin::ShowTextGizmos;
 pub use plugin::SurfaceShadow;

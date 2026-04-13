@@ -298,6 +298,47 @@ impl DiegeticPanelBuilder {
         self
     }
 
+    /// Places the panel at an explicit pixel position (top-left origin, y-down).
+    /// The panel's [`Anchor`] determines which point sits at this position.
+    #[must_use]
+    pub fn screen_position(mut self, x: f32, y: f32) -> Self {
+        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
+        ss.position = ScreenPosition::At(Vec2::new(x, y));
+        self
+    }
+
+    /// Panel width fills a fraction of the window (0.0–1.0).
+    #[must_use]
+    pub fn width_percent(mut self, fraction: f32) -> Self {
+        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
+        ss.width = Some(ScreenDimension::Percent(fraction));
+        self
+    }
+
+    /// Panel height fills a fraction of the window (0.0–1.0).
+    #[must_use]
+    pub fn height_percent(mut self, fraction: f32) -> Self {
+        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
+        ss.height = Some(ScreenDimension::Percent(fraction));
+        self
+    }
+
+    /// Panel width is a fixed pixel value, managed by the plugin.
+    #[must_use]
+    pub fn width_px(mut self, pixels: f32) -> Self {
+        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
+        ss.width = Some(ScreenDimension::Fixed(pixels));
+        self
+    }
+
+    /// Panel height is a fixed pixel value, managed by the plugin.
+    #[must_use]
+    pub fn height_px(mut self, pixels: f32) -> Self {
+        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
+        ss.height = Some(ScreenDimension::Fixed(pixels));
+        self
+    }
+
     /// Consumes the builder and returns a `(DiegeticPanel, ScreenSpace)` tuple.
     ///
     /// The tuple is a valid Bevy bundle — pass it directly to
@@ -483,6 +524,40 @@ impl DiegeticPanel {
 ///
 /// # Render layer
 ///
+/// How a screen-space panel derives its size along one axis from the window.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub enum ScreenDimension {
+    /// Explicit pixel size. The panel's width/height is set to this value
+    /// regardless of window size.
+    Fixed(f32),
+    /// Fraction of the window along this axis (0.0–1.0).
+    /// `Percent(1.0)` fills the full window width or height.
+    Percent(f32),
+}
+
+/// Where a screen-space panel is placed within the window.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub enum ScreenPosition {
+    /// Pin to the window edge/corner that matches the panel's [`Anchor`].
+    /// `Anchor::TopLeft` pins to the window's top-left corner,
+    /// `Anchor::Center` pins to the window's center, etc.
+    Screen,
+    /// Place at an explicit pixel position (top-left origin, y-down).
+    /// The panel's [`Anchor`] determines which point of the panel sits
+    /// at this position.
+    At(Vec2),
+}
+
+impl Default for ScreenPosition {
+    fn default() -> Self { Self::Screen }
+}
+
+/// Marks a panel for screen-space rendering with an orthographic overlay camera.
+///
+/// The plugin automatically positions and (optionally) sizes the panel each
+/// frame based on window dimensions, the panel's [`Anchor`], and the fields
+/// below. No per-example update system is needed for positioning or resize.
+///
 /// `render_layer` isolates the panel from the scene camera. The default
 /// (`31`) uses the highest standard Bevy render layer to minimize
 /// collisions with user-defined layers.
@@ -495,6 +570,15 @@ pub struct ScreenSpace {
     /// Render layers for isolation from the scene camera.
     /// Default: `RenderLayers::layer(31)`.
     pub render_layers: RenderLayers,
+    /// Where to place the panel within the window.
+    /// Default: [`ScreenPosition::Screen`] (pin to the panel's anchor corner).
+    pub position:      ScreenPosition,
+    /// How to derive panel width from the window.
+    /// `None` means the panel keeps whatever width was set at spawn time.
+    pub width:         Option<ScreenDimension>,
+    /// How to derive panel height from the window.
+    /// `None` means the panel keeps its spawn-time height.
+    pub height:        Option<ScreenDimension>,
 }
 
 /// Default camera order for [`ScreenSpace`] overlay cameras.
@@ -508,6 +592,9 @@ impl Default for ScreenSpace {
         Self {
             camera_order:  DEFAULT_SCREEN_SPACE_CAMERA_ORDER,
             render_layers: RenderLayers::layer(DEFAULT_SCREEN_SPACE_RENDER_LAYER),
+            position:      ScreenPosition::default(),
+            width:         None,
+            height:        None,
         }
     }
 }

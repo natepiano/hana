@@ -9,7 +9,66 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 
+use super::components::DiegeticPanel;
+use super::components::ScreenDimension;
+use super::components::ScreenPosition;
 use super::components::ScreenSpace;
+
+/// Positions and sizes [`ScreenSpace`] panels relative to the window.
+///
+/// Runs before `compute_panel_layouts` so that any dimension changes
+/// trigger layout recomputation via Bevy change detection.
+pub(super) fn position_screen_space_panels(
+    windows: Query<&Window>,
+    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &ScreenSpace)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let win_w = window.width();
+    let win_h = window.height();
+    if win_w <= 0.0 || win_h <= 0.0 {
+        return;
+    }
+    let half_w = win_w / 2.0;
+    let half_h = win_h / 2.0;
+
+    for (mut transform, mut panel, screen_space) in &mut panels {
+        // ── Sizing ──────────────────────────────────────────────
+        if let Some(dim) = screen_space.width {
+            let new_w = match dim {
+                ScreenDimension::Fixed(px) => px,
+                ScreenDimension::Percent(frac) => win_w * frac,
+            };
+            if (panel.width - new_w).abs() > 0.01 {
+                panel.width = new_w;
+            }
+        }
+        if let Some(dim) = screen_space.height {
+            let new_h = match dim {
+                ScreenDimension::Fixed(px) => px,
+                ScreenDimension::Percent(frac) => win_h * frac,
+            };
+            if (panel.height - new_h).abs() > 0.01 {
+                panel.height = new_h;
+            }
+        }
+
+        // ── Positioning ─────────────────────────────────────────
+        let (screen_x, screen_y) = match screen_space.position {
+            ScreenPosition::Screen => {
+                let (fx, fy) = panel.anchor.offset_fraction();
+                (fx * win_w, fy * win_h)
+            },
+            ScreenPosition::At(pos) => (pos.x, pos.y),
+        };
+
+        // Convert screen coords (top-left origin, y-down) to camera
+        // coords (center origin, y-up).
+        transform.translation.x = screen_x - half_w;
+        transform.translation.y = half_h - screen_y;
+    }
+}
 
 /// Marker on overlay cameras spawned by the screen-space system.
 #[derive(Component)]
