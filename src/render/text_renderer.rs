@@ -1075,8 +1075,8 @@ pub(super) fn shape_text_cached(
 
     let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
     builder.push_default(parley::style::StyleProperty::FontSize(config.size()));
-    builder.push_default(parley::style::StyleProperty::FontStack(
-        parley::style::FontStack::Single(parley::style::FontFamily::Named(family_name.into())),
+    builder.push_default(parley::style::StyleProperty::FontFamily(
+        parley::style::FontFamily::named(family_name),
     ));
     if config.line_height_raw() > 0.0 {
         builder.push_default(parley::style::StyleProperty::LineHeight(
@@ -1090,13 +1090,13 @@ pub(super) fn shape_text_cached(
         let parley_features: Vec<parley::style::FontFeature> = font_features
             .to_parley_settings()
             .into_iter()
-            .map(|(tag, value)| parley::swash::Setting {
-                tag: parley::swash::tag_from_bytes(&tag),
+            .map(|(tag, value)| parley::FontFeature {
+                tag: parley::setting::Tag::from_bytes(tag),
                 value,
             })
             .collect();
         builder.push_default(parley::style::StyleProperty::FontFeatures(
-            parley::style::FontSettings::List(std::borrow::Cow::Owned(parley_features)),
+            parley::style::FontFeatures::List(std::borrow::Cow::Owned(parley_features)),
         ));
     }
 
@@ -1244,7 +1244,7 @@ fn shape_text_to_quads(
 
         // Glyph position in layout coordinates (Y-down).
         let glyph_x = bounds.x + sg.x;
-        let glyph_y = bounds.y + sg.baseline - sg.y;
+        let glyph_y = bounds.y + sg.baseline + sg.y;
 
         // Glyph quad size in layout units.
         let quad_w = metrics.pixel_width.to_f32() * em_scale;

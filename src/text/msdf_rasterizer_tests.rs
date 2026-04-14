@@ -281,8 +281,8 @@ fn parley_colon_glyph_ids_match_cmap() {
     let text = "A::B";
     let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, true);
     builder.push_default(parley::style::StyleProperty::FontSize(16.0));
-    builder.push_default(parley::style::StyleProperty::FontStack(
-        parley::style::FontStack::Single(parley::style::FontFamily::Named("JetBrains Mono".into())),
+    builder.push_default(parley::style::StyleProperty::FontFamily(
+        parley::style::FontFamily::named("JetBrains Mono"),
     ));
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
@@ -410,10 +410,8 @@ fn eb_garamond_shape_and_rasterize() {
 
         let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, true);
         builder.push_default(parley::style::StyleProperty::FontSize(36.0));
-        builder.push_default(parley::style::StyleProperty::FontStack(
-            parley::style::FontStack::Single(parley::style::FontFamily::Named(
-                "EB Garamond".into(),
-            )),
+        builder.push_default(parley::style::StyleProperty::FontFamily(
+            parley::style::FontFamily::named("EB Garamond"),
         ));
         builder.build_into(&mut layout, text);
         layout.break_all_lines(None);

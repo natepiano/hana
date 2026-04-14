@@ -557,7 +557,7 @@ fn shape_world_text(
         let quad_h = metrics.pixel_height.to_f32() * em_scale;
 
         let quad_x = metrics.bearing_x.mul_add(boosted_size, sg.x) - anchor_x;
-        let quad_y = -(metrics.bearing_y.mul_add(-boosted_size, sg.baseline - sg.y) - anchor_y);
+        let quad_y = -(metrics.bearing_y.mul_add(-boosted_size, sg.baseline + sg.y) - anchor_y);
 
         quads.push((
             metrics.page_index,
@@ -574,7 +574,7 @@ fn shape_world_text(
             sg.glyph_id,
             boosted_size,
             sg.x,
-            sg.baseline - sg.y,
+            sg.baseline + sg.y,
             anchor_x,
             anchor_y,
             world_scale,

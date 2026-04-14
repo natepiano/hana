@@ -8,7 +8,6 @@ use parley::FontContext;
 use parley::Layout;
 use parley::LayoutContext;
 use parley::style::FontFamily;
-use parley::style::FontStack;
 use parley::style::FontStyle;
 use parley::style::FontWeight;
 use parley::style::LineHeight;
@@ -45,9 +44,7 @@ pub fn create_parley_measurer(
 
         let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
         builder.push_default(StyleProperty::FontSize(measure.size));
-        builder.push_default(StyleProperty::FontStack(FontStack::Single(
-            FontFamily::Named(family_name.into()),
-        )));
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named(family_name)));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(measure.weight.0)));
 
         let font_style = match measure.slant {
@@ -76,13 +73,13 @@ pub fn create_parley_measurer(
             let parley_features: Vec<parley::style::FontFeature> = font_features
                 .to_parley_settings()
                 .into_iter()
-                .map(|(tag, value)| parley::swash::Setting {
-                    tag: parley::swash::tag_from_bytes(&tag),
+                .map(|(tag, value)| parley::FontFeature {
+                    tag: parley::setting::Tag::from_bytes(tag),
                     value,
                 })
                 .collect();
             builder.push_default(StyleProperty::FontFeatures(
-                parley::style::FontSettings::List(std::borrow::Cow::Owned(parley_features)),
+                parley::style::FontFeatures::List(std::borrow::Cow::Owned(parley_features)),
             ));
         }
 
