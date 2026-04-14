@@ -20,6 +20,7 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -56,6 +57,7 @@ const CARD_H: f32 = 2.0; // inches
 const CARD_NAME_SIZE: f32 = 15.0; // pt
 const CARD_TITLE_SIZE: f32 = 13.0; // pt
 const CARD_DETAIL_SIZE: f32 = 11.0; // pt
+const CARD_FOOTER_SIZE: f32 = 11.0; // pt
 
 // ── HUD ─────────────────────────────────────────────────────────────
 const HUD_HEIGHT: f32 = 48.0;
@@ -71,6 +73,18 @@ const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
 const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
 const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
 const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
+
+// ── Camera help panel ──────────────────────────────────────────────
+const CAM_HELP_WIDTH: f32 = 280.0;
+const CAM_HELP_HEIGHT: f32 = 160.0;
+const CAM_HELP_LABEL_SIZE: f32 = 11.0;
+const CAM_HELP_HEADER_SIZE: f32 = 13.0;
+const CAM_HELP_TITLE_SIZE: f32 = 16.0;
+const CAM_HELP_RADIUS: f32 = 15.0;
+const CAM_HELP_FRAME_PAD: f32 = 2.0;
+const CAM_HELP_BORDER: f32 = 2.0;
+const CAM_HELP_INSET: f32 = CAM_HELP_FRAME_PAD + CAM_HELP_BORDER;
+const CAM_HELP_INNER_RADIUS: f32 = CAM_HELP_RADIUS - CAM_HELP_INSET;
 
 // ── Conversion ───────────────────────────────────────────────────────
 const MM_TO_M: f32 = 0.001;
@@ -119,7 +133,7 @@ const ZOOM_MARGIN: f32 = 0.08;
 const A4_DIM_COLOR: Color = Color::srgba(0.0, 0.0, 0.1, 1.0);
 const A4_TEXT_COLOR: Color = Color::BLACK;
 const CARD_DIM_COLOR: Color = Color::WHITE;
-const CARD_TEXT_COLOR: Color = Color::WHITE;
+const CARD_TEXT_COLOR: Color = Color::srgb(1.0, 1.0, 0.85);
 const DEBUG_OUTLINE_IN: f32 = 0.024;
 const DEBUG_OUTLINE_MM: f32 = 0.6;
 
@@ -282,6 +296,22 @@ fn setup(
         Transform::default(),
     ));
 
+    // ── Camera help panel ─────────────────────────────────────────────
+    let cam_unlit = StandardMaterial {
+        unlit: true,
+        ..bevy_diegetic::default_panel_material()
+    };
+    commands.spawn((
+        DiegeticPanel::builder()
+            .size_px(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
+            .anchor(Anchor::BottomRight)
+            .material(cam_unlit.clone())
+            .text_material(cam_unlit)
+            .layout(build_camera_help)
+            .build_screen_space(),
+        Transform::default(),
+    ));
+
     // ── Ground plane ─────────────────────────────────────────────────
     spawn_ground_plane(
         &mut commands,
@@ -413,7 +443,7 @@ fn spawn_lights_and_camera(commands: &mut Commands, page_height: f32) {
     ));
     commands.spawn((
         DirectionalLight {
-            illuminance: 3_000.0,
+            illuminance: 500.0,
             shadows_enabled: false,
             ..default()
         },
@@ -1056,32 +1086,32 @@ fn build_imperial_horizontal_ruler(width_eighths: i32, ruler_color: Color) -> La
 
 const DEBUG_BORDER_COLOR: Color = Color::srgba(1.0, 0.2, 0.2, 0.8);
 
-fn debug_border(debug: bool, width: f32) -> Option<Border> {
-    if debug {
-        Some(Border::all(width, DEBUG_BORDER_COLOR))
+fn debug_border(debug: bool, width: f32) -> Border {
+    let color = if debug {
+        DEBUG_BORDER_COLOR
     } else {
-        None
-    }
+        Color::NONE
+    };
+    Border::all(width, color)
 }
 
 fn debug_text(
     b: &mut bevy_diegetic::LayoutBuilder,
     text: &str,
     style: LayoutTextStyle,
-    db: Option<Border>,
+    db: Border,
 ) {
-    if let Some(border) = db {
-        b.with(El::new().border(border), |b| {
-            b.text(text, style);
-        });
-    } else {
+    b.with(El::new().width(Sizing::GROW).border(db), |b| {
         b.text(text, style);
-    }
+    });
 }
 
 fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
     let mut builder = LayoutBuilder::new(A4_W, A4_H);
     let db = debug_border(debug, DEBUG_OUTLINE_MM);
+
+    let heading = LayoutTextStyle::new(18.0).with_color(A4_TEXT_COLOR);
+    let body = LayoutTextStyle::new(12.0).with_color(A4_TEXT_COLOR);
 
     builder.with(
         El::new()
@@ -1089,50 +1119,193 @@ fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
             .height(Sizing::GROW)
             .padding(Padding::all(15.0))
             .direction(Direction::TopToBottom)
-            .child_gap(2.0)
+            .child_gap(4.0)
             .background(Color::WHITE),
         |b| {
-            debug_text(
-                b,
-                "layout: Millimeters  |  fonts: Points",
-                LayoutTextStyle::new(16.0).with_color(A4_DIM_COLOR),
-                db,
+            // ── Font samples (single row) ───────────────────────
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(6.0)
+                    .child_align_y(AlignY::Bottom)
+                    .border(db),
+                |b| {
+                    debug_text(
+                        b,
+                        "72pt",
+                        LayoutTextStyle::new(72.0).with_color(A4_TEXT_COLOR),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "36pt",
+                        LayoutTextStyle::new(36.0).with_color(A4_TEXT_COLOR),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "24pt",
+                        LayoutTextStyle::new(24.0).with_color(A4_TEXT_COLOR),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "18pt",
+                        LayoutTextStyle::new(18.0).with_color(A4_TEXT_COLOR),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "12pt",
+                        LayoutTextStyle::new(12.0).with_color(A4_TEXT_COLOR),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "9pt",
+                        LayoutTextStyle::new(9.0).with_color(A4_TEXT_COLOR),
+                        db,
+                    );
+                },
             );
-            debug_text(
-                b,
-                "72pt",
-                LayoutTextStyle::new(72.0).with_color(A4_TEXT_COLOR),
-                db,
+
+            // ── Divider ─────────────────────────────────────────
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(0.3))
+                    .background(A4_DIM_COLOR),
+                |_| {},
             );
-            debug_text(
-                b,
-                "36pt",
-                LayoutTextStyle::new(36.0).with_color(A4_TEXT_COLOR),
-                db,
+
+            // ── Two-column article ──────────────────────────────
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(8.0)
+                    .border(db),
+                |b| {
+                    // Column 1
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .direction(Direction::TopToBottom)
+                            .child_gap(4.0)
+                            .border(db),
+                        |b| {
+                            debug_text(b, "Real Units, Real Sizes", heading.clone(), db);
+                            debug_text(
+                                b,
+                                "This page is 210 by 297 millimeters \u{2014} an A4 sheet \
+                                 at true physical scale, in a world where one unit equals \
+                                 one meter. The business card beside it is 3.5 by 2 inches. \
+                                 Neither required manual conversion. Each panel declares its \
+                                 own layout unit, and the system handles the rest.",
+                                body.clone(),
+                                db,
+                            );
+                            debug_text(
+                                b,
+                                "Font sizes are in typographic points. Padding and spacing \
+                                 follow the panel\u{2019}s layout unit. Mix freely: Mm(6.0) \
+                                 for a margin, Pt(18.0) for a heading, In(0.5) for a \
+                                 gutter. The convenience types carry their unit through the \
+                                 layout engine \u{2014} no math required.",
+                                body.clone(),
+                                db,
+                            );
+                            debug_text(
+                                b,
+                                "By default, a panel\u{2019}s dimensions map directly to \
+                                 meters. A 210mm-wide panel occupies 0.21 meters in the \
+                                 scene. But that is just the default.",
+                                body.clone(),
+                                db,
+                            );
+                        },
+                    );
+
+                    // Column divider
+                    b.with(
+                        El::new()
+                            .width(Sizing::fixed(0.3))
+                            .height(Sizing::GROW)
+                            .background(A4_DIM_COLOR),
+                        |_| {},
+                    );
+
+                    // Column 2
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .direction(Direction::TopToBottom)
+                            .child_gap(4.0)
+                            .border(db),
+                        |b| {
+                            debug_text(b, "Any Scale You Need", heading.clone(), db);
+                            debug_text(
+                                b,
+                                "Set world_height on any panel and it scales uniformly to \
+                                 fit. A museum placard at 0.3 meters. A highway billboard \
+                                 at 12 meters. A planetary-scale announcement at 50,000 \
+                                 meters \u{2014} zoom out far enough and there it is. Text \
+                                 stays sharp at any distance because glyphs are rendered as \
+                                 signed distance fields, not rasterized bitmaps \u{2014} \
+                                 the GPU evaluates the distance function per fragment, so \
+                                 edges remain crisp regardless of scale.",
+                                body.clone(),
+                                db,
+                            );
+                            debug_text(
+                                b,
+                                "The global UnitConfig resource sets defaults for every \
+                                 panel: layout in meters, fonts in points. Override \
+                                 per-panel with layout_unit and font_unit, or per-element \
+                                 with types like Mm(10.0) and Pt(24.0) inline. The system \
+                                 converts at layout time so the engine always works in a \
+                                 consistent coordinate space internally.",
+                                body.clone(),
+                                db,
+                            );
+                            debug_text(
+                                b,
+                                "Custom(0.01) defines a centimeter. Custom(9.461e15) \
+                                 defines a light-year. The unit system does not care about \
+                                 scale \u{2014} it only needs to know the ratio to meters.",
+                                body.clone(),
+                                db,
+                            );
+                        },
+                    );
+                },
             );
-            debug_text(
-                b,
-                "24pt",
-                LayoutTextStyle::new(24.0).with_color(A4_TEXT_COLOR),
-                db,
+
+            // ── Divider ─────────────────────────────────────────
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(0.3))
+                    .background(A4_DIM_COLOR),
+                |_| {},
             );
-            debug_text(
-                b,
-                "18pt",
-                LayoutTextStyle::new(18.0).with_color(A4_TEXT_COLOR),
-                db,
-            );
-            debug_text(
-                b,
-                "12pt",
-                LayoutTextStyle::new(12.0).with_color(A4_TEXT_COLOR),
-                db,
-            );
-            debug_text(
-                b,
-                "9pt",
-                LayoutTextStyle::new(9.0).with_color(A4_TEXT_COLOR),
-                db,
+
+            // ── Footer ──────────────────────────────────────────
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .child_align_x(AlignX::Center)
+                    .border(db),
+                |b| {
+                    b.with(El::new().border(db), |b| {
+                        b.text(
+                            "layout: Millimeters  |  fonts: Points",
+                            LayoutTextStyle::new(14.0).with_color(A4_DIM_COLOR),
+                        );
+                    });
+                },
             );
         },
     );
@@ -1185,7 +1358,7 @@ fn build_card(debug: bool) -> bevy_diegetic::LayoutTree {
             debug_text(
                 b,
                 "layout: Inches  |  fonts: Points",
-                LayoutTextStyle::new(8.0).with_color(CARD_DIM_COLOR),
+                LayoutTextStyle::new(CARD_FOOTER_SIZE).with_color(CARD_DIM_COLOR),
                 db,
             );
         },
@@ -1285,6 +1458,96 @@ fn build_controls_content(b: &mut LayoutBuilder, debug: bool, rulers: bool, pers
                     b.text(
                         "H Home",
                         LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn build_camera_help(b: &mut LayoutBuilder) {
+    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
+    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
+
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(CAM_HELP_FRAME_PAD))
+            .corner_radius(CornerRadius::new(
+                CAM_HELP_RADIUS,
+                0.0,
+                CAM_HELP_RADIUS,
+                0.0,
+            ))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .padding(Padding::all(10.0))
+                    .child_gap(6.0)
+                    .corner_radius(CornerRadius::new(
+                        CAM_HELP_INNER_RADIUS,
+                        0.0,
+                        CAM_HELP_INNER_RADIUS,
+                        0.0,
+                    ))
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(1.0, HUD_BORDER_DIM)),
+                |b| {
+                    b.text("CAMERA", title);
+
+                    // Two columns: Mouse | Trackpad
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(12.0),
+                        |b| {
+                            // Mouse column
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(4.0),
+                                |b| {
+                                    b.text("Mouse", header.clone());
+                                    b.text("MMB drag \u{2192} Orbit", label.clone());
+                                    b.text("Shift+MMB \u{2192} Pan", label.clone());
+                                    b.text("Scroll \u{2192} Zoom", label.clone());
+                                },
+                            );
+
+                            // Divider
+                            b.with(
+                                El::new()
+                                    .width(Sizing::fixed(1.0))
+                                    .height(Sizing::GROW)
+                                    .background(HUD_DIVIDER_COLOR),
+                                |_| {},
+                            );
+
+                            // Trackpad column
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(4.0),
+                                |b| {
+                                    b.text("Trackpad", header.clone());
+                                    b.text("Scroll \u{2192} Orbit", label.clone());
+                                    b.text("Shift+Scroll \u{2192} Pan", label.clone());
+                                    b.text("Ctrl+Scroll \u{2192} Zoom", label.clone());
+                                    b.text("Pinch \u{2192} Zoom", label.clone());
+                                },
+                            );
+                        },
                     );
                 },
             );

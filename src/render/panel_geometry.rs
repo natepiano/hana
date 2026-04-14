@@ -130,11 +130,6 @@ fn build_panel_geometry(
         let gathered = gather_surfaces(&result.commands);
 
         // ── Spawn SDF quads ─────────────────────────────────────────
-        let layout_mpu = panel
-            .layout_unit
-            .map_or(unit_config.layout, |u| u)
-            .meters_per_unit();
-
         for surface in gathered.surfaces.values() {
             spawn_sdf_element(
                 panel,
@@ -142,7 +137,6 @@ fn build_panel_geometry(
                 render_style,
                 shadow_mode,
                 points_to_world,
-                layout_mpu,
                 anchor_x,
                 anchor_y,
                 &layer,
@@ -170,7 +164,6 @@ fn build_panel_geometry(
                 render_style,
                 shadow_mode,
                 points_to_world,
-                layout_mpu,
                 anchor_x,
                 anchor_y,
                 &layer,
@@ -284,7 +277,6 @@ fn spawn_sdf_element(
     render_style: RenderStyle,
     shadow_mode: ShadowMode,
     points_to_world: f32,
-    layout_mpu: f32,
     anchor_x: f32,
     anchor_y: f32,
     layer: &RenderLayers,
@@ -314,7 +306,7 @@ fn spawn_sdf_element(
 
     let world_w = surface.bounds.width * points_to_world;
     let world_h = surface.bounds.height * points_to_world;
-    let world_radii = corner_radius.to_meters_array(layout_mpu);
+    let world_radii = corner_radius.to_array().map(|r| r * points_to_world);
     let world_borders = surface.border_widths.map(|w| w * points_to_world);
 
     let half_w = world_w * 0.5;

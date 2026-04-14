@@ -264,15 +264,6 @@ pub(super) fn compute_panel_layouts(
         return;
     }
 
-    bevy::log::warn!(
-        "compute_panel_layouts: {} panels changed (is_added: {:?})",
-        changed_entities.len(),
-        panels
-            .iter()
-            .filter(|(_, r)| r.is_changed())
-            .map(|(_, r)| r.is_added())
-            .collect::<Vec<_>>()
-    );
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
@@ -280,22 +271,15 @@ pub(super) fn compute_panel_layouts(
     let cache_ref = Arc::new(Mutex::new(cache.clone()));
     let parley_fn = Arc::clone(&measurer.measure_fn);
 
-    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let misses = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let hits_clone = Arc::clone(&hits);
-    let misses_clone = Arc::clone(&misses);
-
     let cached_measure: MeasureTextFn = Arc::new(move |text: &str, measure: &TextMeasure| {
         // Check cache first.
         {
             let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(dims) = cache_guard.get_measurement(text, measure) {
-                hits_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return dims;
             }
         }
         // Cache miss — measure via parley and write back to cache.
-        misses_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dims = parley_fn(text, measure);
         {
             let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
@@ -337,11 +321,6 @@ pub(super) fn compute_panel_layouts(
     }
 
     let compute_ms = start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    let h = hits.load(std::sync::atomic::Ordering::Relaxed);
-    let m = misses.load(std::sync::atomic::Ordering::Relaxed);
-    bevy::log::warn!(
-        "compute_panel_layouts: {compute_ms:.1}ms, {panel_count} panels, {h} cache hits, {m} cache misses"
-    );
     perf.last_compute_ms = compute_ms;
     perf.last_compute_panels = panel_count;
 }

@@ -94,6 +94,10 @@ pub(super) fn setup_screen_space_cameras(
     existing_cameras: Query<&ScreenSpaceCamera>,
     mut commands: Commands,
 ) {
+    // Track pairs spawned this frame so panels added in the same frame
+    // share one camera instead of each spawning their own.
+    let mut spawned_this_frame: Vec<(isize, RenderLayers)> = Vec::new();
+
     for (panel_entity, screen_space) in &added_panels {
         let layers = &screen_space.render_layers;
         let order = screen_space.camera_order;
@@ -101,14 +105,20 @@ pub(super) fn setup_screen_space_cameras(
         // Add render layers to the panel entity.
         commands.entity(panel_entity).insert(layers.clone());
 
-        // Check if a camera for this (order, layers) pair already exists.
+        // Check if a camera for this (order, layers) pair already exists
+        // — either from a previous frame or spawned earlier this frame.
         let camera_exists = existing_cameras
             .iter()
-            .any(|cam| cam.render_layers == *layers && cam.camera_order == order);
+            .any(|cam| cam.render_layers == *layers && cam.camera_order == order)
+            || spawned_this_frame
+                .iter()
+                .any(|(o, l)| *o == order && *l == *layers);
 
         if camera_exists {
             continue;
         }
+
+        spawned_this_frame.push((order, layers.clone()));
 
         // Spawn overlay camera — orthographic, 1 unit = 1 pixel.
         commands.spawn((
