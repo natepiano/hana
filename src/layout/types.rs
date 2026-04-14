@@ -640,9 +640,10 @@ pub enum TextAlign {
 /// Unit::Inches          // 1 unit = 1 inch
 /// Unit::Custom(0.01)    // 1 unit = 1 centimeter
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
 pub enum Unit {
     /// 1 unit = 1 meter. Bevy's default world-space convention.
+    #[default]
     Meters,
     /// 1 unit = 1 millimeter (0.001 m).
     Millimeters,

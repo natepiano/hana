@@ -6,7 +6,9 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::config::InvalidSize;
 use super::config::PanelSize;
+use super::config::Px;
 use super::config::UnitConfig;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::Anchor;
@@ -84,12 +86,15 @@ pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
     pub tree:           LayoutTree,
-    /// Panel width in layout units.
+    /// Panel width in layout units. Prefer [`set_size`](Self::set_size) for
+    /// mutation to keep dimensions and unit in sync.
     pub width:          f32,
-    /// Panel height in layout units.
+    /// Panel height in layout units. Prefer [`set_size`](Self::set_size) for
+    /// mutation to keep dimensions and unit in sync.
     pub height:         f32,
-    /// Unit for `width`/`height`. `None` inherits from [`UnitConfig::layout`].
-    pub layout_unit:    Option<Unit>,
+    /// Unit for `width`/`height`. Set automatically by
+    /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
+    pub layout_unit:    Unit,
     /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
     pub font_unit:      Option<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
@@ -127,7 +132,7 @@ impl Default for DiegeticPanel {
             tree:           LayoutTree::default(),
             width:          0.0,
             height:         0.0,
-            layout_unit:    None,
+            layout_unit:    Unit::Meters,
             font_unit:      None,
             anchor:         Anchor::TopLeft,
             world_width:    None,
@@ -144,6 +149,25 @@ impl DiegeticPanel {
     /// Returns a builder for ergonomic panel construction.
     #[must_use]
     pub fn builder() -> DiegeticPanelBuilder { DiegeticPanelBuilder::default() }
+
+    /// Atomically updates the panel's width, height, and layout unit.
+    ///
+    /// Returns `Err(InvalidSize)` if either dimension is zero or negative.
+    /// This is the preferred way to resize a panel at runtime (e.g. for
+    /// animation) because it keeps dimensions and unit in sync.
+    pub fn set_size(&mut self, size: impl PanelSize) -> Result<(), InvalidSize> {
+        let (w, h, unit) = size.dimensions();
+        if w <= 0.0 || h <= 0.0 {
+            return Err(InvalidSize {
+                width:  w,
+                height: h,
+            });
+        }
+        self.width = w;
+        self.height = h;
+        self.layout_unit = unit;
+        Ok(())
+    }
 }
 
 /// Builder for [`DiegeticPanel`].
@@ -152,23 +176,26 @@ impl DiegeticPanel {
 /// `LayoutBuilder`, once for the panel). The `.layout()` closure receives
 /// a pre-sized `LayoutBuilder`.
 ///
+/// Call `.size()` before `.layout()` — the layout closure uses the
+/// dimensions set by `.size()`.
+///
 /// # Example
 ///
 /// ```ignore
 /// DiegeticPanel::builder()
 ///     .size(PaperSize::A4)
-///     .layout_unit(Unit::Millimeters)
 ///     .world_height(0.5)
 ///     .layout(|b| {
 ///         b.with(El::new()..., |b| { ... });
 ///     })
 ///     .build()
+///     .expect("valid panel dimensions")
 /// ```
 #[derive(Default)]
 pub struct DiegeticPanelBuilder {
     width:          f32,
     height:         f32,
-    layout_unit:    Option<Unit>,
+    layout_unit:    Unit,
     font_unit:      Option<Unit>,
     anchor:         Option<Anchor>,
     world_width:    Option<f32>,
@@ -182,13 +209,16 @@ pub struct DiegeticPanelBuilder {
 }
 
 impl DiegeticPanelBuilder {
-    /// Sets the panel dimensions. Accepts [`PaperSize`], or a tuple of
-    /// values convertible to `f32` (e.g., `(Pt(612.0), Pt(792.0))`).
+    /// Sets the panel dimensions and layout unit atomically.
+    ///
+    /// Accepts [`PaperSize`], same-unit tuples like `(Mm(210.0), Mm(297.0))`,
+    /// or bare `(f32, f32)` which defaults to [`Unit::Meters`].
     #[must_use]
     pub fn size(mut self, size: impl PanelSize) -> Self {
-        let (w, h) = size.dimensions();
+        let (w, h, unit) = size.dimensions();
         self.width = w;
         self.height = h;
+        self.layout_unit = unit;
         self
     }
 
@@ -199,13 +229,6 @@ impl DiegeticPanelBuilder {
         let mut builder = LayoutBuilder::new(self.width, self.height);
         f(&mut builder);
         self.tree = Some(builder.build());
-        self
-    }
-
-    /// Overrides the layout unit (default inherits from [`UnitConfig::layout`]).
-    #[must_use]
-    pub const fn layout_unit(mut self, unit: Unit) -> Self {
-        self.layout_unit = Some(unit);
         self
     }
 
@@ -273,19 +296,13 @@ impl DiegeticPanelBuilder {
         self
     }
 
-    /// Sets the panel dimensions in logical pixels and uses [`Unit::Points`]
-    /// as the layout unit (1 pt ≈ 1 px in the layout engine).
+    /// Shorthand for `.size((Px(width), Px(height)))`.
     ///
     /// For [`ScreenSpace`] panels, these map 1:1 to on-screen pixels.
     /// For world-space panels, the system can resolve pixel dimensions
     /// per-frame using the active camera's projection.
     #[must_use]
-    pub const fn size_px(mut self, width: f32, height: f32) -> Self {
-        self.width = width;
-        self.height = height;
-        self.layout_unit = Some(Unit::Pixels);
-        self
-    }
+    pub fn size_px(self, width: f32, height: f32) -> Self { self.size((Px(width), Px(height))) }
 
     /// Stores a custom [`ScreenSpace`] configuration for use with
     /// [`build_screen_space`](Self::build_screen_space).
@@ -371,10 +388,6 @@ impl DiegeticPanelBuilder {
     #[must_use]
     pub fn build_screen_space(mut self) -> (DiegeticPanel, ScreenSpace) {
         let screen_space = self.screen_space.take().unwrap_or_default();
-        // Ensure layout unit is pixel-compatible.
-        if self.layout_unit.is_none() {
-            self.layout_unit = Some(Unit::Pixels);
-        }
         // Set world_height = height so points_to_world = 1.0.
         // (viewport_pts_h = height * to_points() = height * 1.0 = height,
         //  so points_to_world = world_height / viewport_pts_h = height / height = 1.0)
@@ -391,12 +404,25 @@ impl DiegeticPanelBuilder {
                 tree.set_root_grow_height();
             }
         }
-        (self.build(), screen_space)
+        (self.build_internal(), screen_space)
     }
 
     /// Consumes the builder and returns a [`DiegeticPanel`] component.
-    #[must_use]
-    pub fn build(self) -> DiegeticPanel {
+    ///
+    /// Returns `Err(InvalidSize)` if width or height is zero or negative.
+    pub fn build(self) -> Result<DiegeticPanel, InvalidSize> {
+        if self.width <= 0.0 || self.height <= 0.0 {
+            return Err(InvalidSize {
+                width:  self.width,
+                height: self.height,
+            });
+        }
+        Ok(self.build_internal())
+    }
+
+    /// Internal build that skips validation (used by `build_screen_space`
+    /// where dimensions may be zero before the first frame sizes them).
+    fn build_internal(self) -> DiegeticPanel {
         DiegeticPanel {
             tree:           self.tree.unwrap_or_default(),
             width:          self.width,
@@ -415,10 +441,8 @@ impl DiegeticPanelBuilder {
 }
 
 impl DiegeticPanel {
-    /// Resolves the layout unit, falling back to the global [`UnitConfig`].
-    fn resolved_layout_unit(&self, config: &UnitConfig) -> Unit {
-        self.layout_unit.unwrap_or(config.layout)
-    }
+    /// Returns the layout unit.
+    fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit { self.layout_unit }
 
     /// Resolves the font unit, falling back to the global [`UnitConfig`].
     fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {

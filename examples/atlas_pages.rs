@@ -31,9 +31,9 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::MsdfAtlas;
 use bevy_diegetic::Padding;
+use bevy_diegetic::Pt;
 use bevy_diegetic::RasterQuality;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 use bevy_lagrange::InputControl;
@@ -460,8 +460,7 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
     let world_height = ROW_WORLD_HEIGHT * rows.to_f32();
 
     DiegeticPanel::builder()
-        .size((layout_width, layout_height))
-        .layout_unit(Unit::Points)
+        .size((Pt(layout_width), Pt(layout_height)))
         .world_height(world_height)
         .anchor(Anchor::Center)
         .layout(|b| {
@@ -497,6 +496,7 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
             );
         })
         .build()
+        .expect("valid panel dimensions")
 }
 
 /// Builds a single text cell with a header, glyph grid, and footer.
@@ -910,8 +910,7 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
         .with_shadow_mode(GlyphShadowMode::None);
 
     DiegeticPanel::builder()
-        .size((STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT))
-        .layout_unit(Unit::Points)
+        .size((Pt(STATUS_LAYOUT_WIDTH), Pt(STATUS_LAYOUT_HEIGHT)))
         .world_height(STATUS_WORLD_HEIGHT)
         .anchor(Anchor::TopLeft)
         .layout(|b| {
@@ -940,6 +939,7 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
             );
         })
         .build()
+        .expect("valid panel dimensions")
 }
 
 fn build_status_rows(

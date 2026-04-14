@@ -199,7 +199,7 @@ fn setup(
             tree: build_panel(),
             width: PANEL_W,
             height: PANEL_H,
-            layout_unit: Some(Unit::Points),
+            layout_unit: Unit::Points,
             world_width: Some(WORLD_WIDTH),
             anchor: Anchor::TopCenter,
             ..default()

@@ -25,8 +25,8 @@ use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
+use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::Unit;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -135,14 +135,14 @@ fn setup(
     commands.spawn((
         ShowcasePanel,
         DiegeticPanel::builder()
-            .size((layout_w, layout_h))
-            .layout_unit(Unit::Points)
+            .size((Pt(layout_w), Pt(layout_h)))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {
                 build_panel_content(b, noto_id.0);
             })
-            .build(),
+            .build()
+            .expect("valid panel dimensions"),
         panel_transform(world_w, world_h),
     ));
 
@@ -237,14 +237,14 @@ fn resize_panel(
             continue;
         }
         let new = DiegeticPanel::builder()
-            .size((layout_w, layout_h))
-            .layout_unit(Unit::Points)
+            .size((Pt(layout_w), Pt(layout_h)))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {
                 build_panel_content(b, noto_id.0);
             })
-            .build();
+            .build()
+            .expect("valid panel dimensions");
         *panel = new;
         *transform = panel_transform(world_w, world_h);
     }
@@ -273,14 +273,14 @@ fn on_font_registered(
     let (layout_w, layout_h) = layout_dimensions(window);
     for mut panel in &mut panels {
         let new = DiegeticPanel::builder()
-            .size((layout_w, layout_h))
-            .layout_unit(Unit::Points)
+            .size((Pt(layout_w), Pt(layout_h)))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {
                 build_panel_content(b, noto_id.0);
             })
-            .build();
+            .build()
+            .expect("valid panel dimensions");
         *panel = new;
     }
 }

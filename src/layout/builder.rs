@@ -43,6 +43,8 @@ use super::types::Direction;
 use super::types::LayoutTextStyle;
 use super::types::Padding;
 use super::types::Sizing;
+use crate::PanelSize;
+use crate::Px;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -71,6 +73,8 @@ impl El {
 
     /// Sets the width sizing rule.
     ///
+    /// Can be overridden by a subsequent `.size()` call (last wins).
+    ///
     /// Common patterns: [`Sizing::GROW`], [`Sizing::FIT`], [`Sizing::fixed`], [`Sizing::percent`].
     pub const fn width(mut self, sizing: Sizing) -> Self {
         self.width = sizing;
@@ -79,11 +83,35 @@ impl El {
 
     /// Sets the height sizing rule.
     ///
+    /// Can be overridden by a subsequent `.size()` call (last wins).
+    ///
     /// Common patterns: [`Sizing::GROW`], [`Sizing::FIT`], [`Sizing::fixed`], [`Sizing::percent`].
     pub const fn height(mut self, sizing: Sizing) -> Self {
         self.height = sizing;
         self
     }
+
+    /// Sets both width and height to [`Sizing::fixed`] from a [`PanelSize`].
+    ///
+    /// Accepts [`PaperSize`](crate::PaperSize), same-unit tuples like
+    /// `(Mm(100.0), Mm(50.0))`, or bare `(f32, f32)` (meters).
+    ///
+    /// Can be overridden by subsequent `.width()` or `.height()` calls
+    /// (last wins).
+    pub fn size(self, size: impl PanelSize) -> Self {
+        let (w, h, unit) = size.dimensions();
+        self.width(Sizing::fixed(Dimension {
+            value: w,
+            unit:  Some(unit),
+        }))
+        .height(Sizing::fixed(Dimension {
+            value: h,
+            unit:  Some(unit),
+        }))
+    }
+
+    /// Shorthand for `.size((Px(width), Px(height)))`.
+    pub fn size_px(self, width: f32, height: f32) -> Self { self.size((Px(width), Px(height))) }
 
     /// Sets padding on all sides.
     pub const fn padding(mut self, padding: Padding) -> Self {

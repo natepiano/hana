@@ -106,7 +106,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
             ),
             width: PANEL_WIDTH,
             height: PANEL_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            layout_unit: Unit::Millimeters,
             anchor: Anchor::TopCenter,
             ..default()
         },
@@ -124,7 +124,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
             ),
             width: PANEL_WIDTH,
             height: PANEL_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            layout_unit: Unit::Millimeters,
             anchor: Anchor::TopCenter,
             ..default()
         },

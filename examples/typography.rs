@@ -220,7 +220,7 @@ fn setup(
                 tree: build_controls_panel(),
                 width: CONTROLS_LAYOUT_W,
                 height: CONTROLS_LAYOUT_H,
-                layout_unit: Some(Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W)),
+                layout_unit: Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W),
                 ..default()
             },
             Transform::from_xyz(-1.2, 1.5, 0.5),
@@ -235,7 +235,7 @@ fn setup(
                 tree: build_fonts_panel(&registry),
                 width: CONTROLS_LAYOUT_W,
                 height: CONTROLS_LAYOUT_H,
-                layout_unit: Some(Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W)),
+                layout_unit: Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W),
                 ..default()
             },
             Transform::from_xyz(1.2, 1.5, 0.5),

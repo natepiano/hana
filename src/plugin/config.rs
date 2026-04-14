@@ -417,6 +417,41 @@ impl From<Px> for Dimension {
     }
 }
 
+// ── HasUnit trait ────────────────────────────────────────────────────────────
+
+/// Trait for types that carry a compile-time unit association.
+///
+/// Implemented by the dimensional newtypes ([`Mm`], [`In`], [`Pt`], [`Px`]).
+/// Used by the generic [`PanelSize`] implementation for same-unit tuples:
+/// `impl<U: HasUnit> PanelSize for (U, U)`.
+pub trait HasUnit {
+    /// The [`Unit`] this type represents.
+    const UNIT: Unit;
+
+    /// Returns the raw numeric value.
+    fn value(self) -> f32;
+}
+
+impl HasUnit for Mm {
+    const UNIT: Unit = Unit::Millimeters;
+    fn value(self) -> f32 { self.0 }
+}
+
+impl HasUnit for In {
+    const UNIT: Unit = Unit::Inches;
+    fn value(self) -> f32 { self.0 }
+}
+
+impl HasUnit for Pt {
+    const UNIT: Unit = Unit::Points;
+    fn value(self) -> f32 { self.0 }
+}
+
+impl HasUnit for Px {
+    const UNIT: Unit = Unit::Pixels;
+    fn value(self) -> f32 { self.0 }
+}
+
 // ── Paper sizes ──────────────────────────────────────────────────────────────
 
 /// Standard paper and card sizes.
@@ -563,21 +598,92 @@ impl PaperSize {
         }
     }
 
+    /// The natural unit for this paper size.
+    ///
+    /// ISO and metric sizes return [`Unit::Millimeters`].
+    /// North American, card, photo, and poster sizes return [`Unit::Inches`].
+    #[must_use]
+    pub const fn native_unit(self) -> Unit {
+        match self {
+            // ISO series — metric
+            Self::A0
+            | Self::A1
+            | Self::A2
+            | Self::A3
+            | Self::A4
+            | Self::A5
+            | Self::A6
+            | Self::A7
+            | Self::A8
+            | Self::B0
+            | Self::B1
+            | Self::B2
+            | Self::B3
+            | Self::B4
+            | Self::B5 => Unit::Millimeters,
+
+            // North American, cards, photos, posters — imperial
+            Self::USLetter
+            | Self::USLegal
+            | Self::USLedger
+            | Self::USExecutive
+            | Self::BusinessCard
+            | Self::IndexCard3x5
+            | Self::IndexCard4x6
+            | Self::IndexCard5x8
+            | Self::Photo4x6
+            | Self::Photo5x7
+            | Self::Photo8x10
+            | Self::Poster18x24
+            | Self::Poster24x36 => Unit::Inches,
+        }
+    }
+
+    /// Width in the given unit.
+    ///
+    /// Conversions involve floating-point arithmetic and may accumulate
+    /// rounding error. For maximum precision, use [`width_mm`](Self::width_mm)
+    /// directly for millimeter values.
+    #[must_use]
+    pub fn width_as<U: HasUnit>(&self) -> f32 {
+        self.width_mm() * Unit::Millimeters.meters_per_unit() / U::UNIT.meters_per_unit()
+    }
+
+    /// Height in the given unit.
+    ///
+    /// Conversions involve floating-point arithmetic and may accumulate
+    /// rounding error. For maximum precision, use [`height_mm`](Self::height_mm)
+    /// directly for millimeter values.
+    #[must_use]
+    pub fn height_as<U: HasUnit>(&self) -> f32 {
+        self.height_mm() * Unit::Millimeters.meters_per_unit() / U::UNIT.meters_per_unit()
+    }
+
     /// Width in meters.
+    #[deprecated(
+        since = "0.1.0",
+        note = "use `width_as::<Mm>()` or the native unit accessor"
+    )]
     #[must_use]
     pub const fn width(self) -> f32 { self.width_mm() * 0.001 }
 
     /// Height in meters.
+    #[deprecated(
+        since = "0.1.0",
+        note = "use `height_as::<Mm>()` or the native unit accessor"
+    )]
     #[must_use]
     pub const fn height(self) -> f32 { self.height_mm() * 0.001 }
 
     /// Width in the given unit.
+    #[deprecated(since = "0.1.0", note = "use `width_as::<U>()` instead")]
     #[must_use]
     pub fn width_in(self, unit: Unit) -> f32 {
         self.width_mm() * Unit::Millimeters.meters_per_unit() / unit.meters_per_unit()
     }
 
     /// Height in the given unit.
+    #[deprecated(since = "0.1.0", note = "use `height_as::<U>()` instead")]
     #[must_use]
     pub fn height_in(self, unit: Unit) -> f32 {
         self.height_mm() * Unit::Millimeters.meters_per_unit() / unit.meters_per_unit()
@@ -618,22 +724,70 @@ impl PaperSize {
 
 // ── PanelSize trait ──────────────────────────────────────────────────────────
 
-/// Trait for types that can provide panel dimensions in meters.
+/// Trait for types that can provide panel dimensions with their unit.
 ///
-/// Implemented by [`PaperSize`] and tuples of values convertible to `f32`
-/// (e.g., `(Pt(612.0), Pt(792.0))` or `(Mm(210.0), Mm(297.0))`).
+/// Returns `(width, height, unit)` where width and height are in the
+/// returned unit's coordinate space.
+///
+/// Implemented by:
+/// - [`PaperSize`] — standard paper/card sizes in their natural unit
+/// - Same-unit tuples like `(Mm(210.0), Mm(297.0))` — compiler rejects mixed units
+/// - Bare `(f32, f32)` — defaults to [`Unit::Meters`]
 pub trait PanelSize {
-    /// Returns `(width, height)` in meters.
-    fn dimensions(self) -> (f32, f32);
+    /// Returns `(width, height, unit)`.
+    fn dimensions(self) -> (f32, f32, Unit);
 }
 
 impl PanelSize for PaperSize {
-    fn dimensions(self) -> (f32, f32) { (self.width(), self.height()) }
+    fn dimensions(self) -> (f32, f32, Unit) {
+        let unit = self.native_unit();
+        match unit {
+            Unit::Millimeters => (self.width_mm(), self.height_mm(), unit),
+            Unit::Inches => {
+                let w = self.width_mm() * Unit::Millimeters.meters_per_unit()
+                    / Unit::Inches.meters_per_unit();
+                let h = self.height_mm() * Unit::Millimeters.meters_per_unit()
+                    / Unit::Inches.meters_per_unit();
+                (w, h, unit)
+            },
+            _ => (self.width_mm(), self.height_mm(), Unit::Millimeters),
+        }
+    }
 }
 
-impl<W: Into<f32>, H: Into<f32>> PanelSize for (W, H) {
-    fn dimensions(self) -> (f32, f32) { (self.0.into(), self.1.into()) }
+/// Same-unit tuples: `(Mm(210.0), Mm(297.0))`, `(In(8.5), In(11.0))`, etc.
+/// Mixed-unit tuples like `(Mm(210.0), In(11.0))` are a compile error.
+impl<U: HasUnit> PanelSize for (U, U) {
+    fn dimensions(self) -> (f32, f32, Unit) { (self.0.value(), self.1.value(), U::UNIT) }
 }
+
+/// Bare `(f32, f32)` tuples default to [`Unit::Meters`] (Bevy's world space).
+impl PanelSize for (f32, f32) {
+    fn dimensions(self) -> (f32, f32, Unit) { (self.0, self.1, Unit::Meters) }
+}
+
+// ── Error types ──────────────────────────────────────────────────────────────
+
+/// Error returned when panel dimensions are zero or negative.
+#[derive(Debug)]
+pub struct InvalidSize {
+    /// The invalid width value.
+    pub width:  f32,
+    /// The invalid height value.
+    pub height: f32,
+}
+
+impl core::fmt::Display for InvalidSize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "panel dimensions must be positive, got {}×{}",
+            self.width, self.height
+        )
+    }
+}
+
+impl core::error::Error for InvalidSize {}
 
 #[cfg(test)]
 mod tests {

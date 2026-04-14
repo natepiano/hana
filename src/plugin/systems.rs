@@ -297,7 +297,7 @@ pub(super) fn compute_panel_layouts(
         };
         panel_count += 1;
 
-        let layout_unit = panel_ref.layout_unit.unwrap_or(unit_config.layout);
+        let layout_unit = panel_ref.layout_unit;
         let font_unit = panel_ref.font_unit.unwrap_or(unit_config.font);
         let layout_to_pts = layout_unit.to_points();
         let font_to_pts = font_unit.to_points();

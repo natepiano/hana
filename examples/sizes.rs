@@ -182,7 +182,7 @@ fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: 
             tree: build_demo_panel(),
             width: PANEL_WIDTH,
             height: PANEL_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            layout_unit: Unit::Millimeters,
             anchor: Anchor::TopLeft,
             ..default()
         },
@@ -193,7 +193,7 @@ fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: 
             tree: build_commentary(),
             width: NOTE_WIDTH,
             height: NOTE_HEIGHT,
-            layout_unit: Some(Unit::Millimeters),
+            layout_unit: Unit::Millimeters,
             anchor: Anchor::TopLeft,
             ..default()
         },
