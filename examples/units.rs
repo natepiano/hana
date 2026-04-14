@@ -29,6 +29,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PaperSize;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::Unit;
@@ -48,8 +49,9 @@ use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
-const A4_W: f32 = 210.0; // mm
-const A4_H: f32 = 297.0; // mm
+const A4: PaperSize = PaperSize::A4;
+const A4_W: f32 = A4.width_mm();
+const A4_H: f32 = A4.height_mm();
 
 // ── US business card dimensions ──────────────────────────────────────
 const CARD_W: f32 = 3.5; // inches
@@ -274,7 +276,22 @@ fn setup(
         ))
         .observe(on_panel_clicked);
 
-    // ── Controls HUD ────────────────────────────────────────────────
+    spawn_hud_panels(&mut commands, &windows);
+
+    // ── Ground plane ─────────────────────────────────────────────────
+    spawn_ground_plane(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        total_w,
+        a4_height_m,
+    );
+
+    // ── Light + camera ───────────────────────────────────────────────
+    spawn_lights_and_camera(&mut commands, a4_height_m);
+}
+
+fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
     let unlit_material = bevy_diegetic::default_panel_material();
     let unlit = StandardMaterial {
         unlit: true,
@@ -296,7 +313,6 @@ fn setup(
         Transform::default(),
     ));
 
-    // ── Camera help panel ─────────────────────────────────────────────
     let cam_unlit = StandardMaterial {
         unlit: true,
         ..bevy_diegetic::default_panel_material()
@@ -311,18 +327,6 @@ fn setup(
             .build_screen_space(),
         Transform::default(),
     ));
-
-    // ── Ground plane ─────────────────────────────────────────────────
-    spawn_ground_plane(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        total_w,
-        a4_height_m,
-    );
-
-    // ── Light + camera ───────────────────────────────────────────────
-    spawn_lights_and_camera(&mut commands, a4_height_m);
 }
 
 fn spawn_rulers(
@@ -1115,60 +1119,14 @@ fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
 
     builder.with(
         El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
+            .width(Sizing::fixed(A4_W))
+            .height(Sizing::fixed(A4_H))
             .padding(Padding::all(15.0))
             .direction(Direction::TopToBottom)
             .child_gap(4.0)
             .background(Color::WHITE),
         |b| {
-            // ── Font samples (single row) ───────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(6.0)
-                    .child_align_y(AlignY::Bottom)
-                    .border(db),
-                |b| {
-                    debug_text(
-                        b,
-                        "72pt",
-                        LayoutTextStyle::new(72.0).with_color(A4_TEXT_COLOR),
-                        db,
-                    );
-                    debug_text(
-                        b,
-                        "36pt",
-                        LayoutTextStyle::new(36.0).with_color(A4_TEXT_COLOR),
-                        db,
-                    );
-                    debug_text(
-                        b,
-                        "24pt",
-                        LayoutTextStyle::new(24.0).with_color(A4_TEXT_COLOR),
-                        db,
-                    );
-                    debug_text(
-                        b,
-                        "18pt",
-                        LayoutTextStyle::new(18.0).with_color(A4_TEXT_COLOR),
-                        db,
-                    );
-                    debug_text(
-                        b,
-                        "12pt",
-                        LayoutTextStyle::new(12.0).with_color(A4_TEXT_COLOR),
-                        db,
-                    );
-                    debug_text(
-                        b,
-                        "9pt",
-                        LayoutTextStyle::new(9.0).with_color(A4_TEXT_COLOR),
-                        db,
-                    );
-                },
-            );
+            build_font_samples_row(b, db);
 
             // ── Divider ─────────────────────────────────────────
             b.with(
@@ -1179,109 +1137,7 @@ fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
                 |_| {},
             );
 
-            // ── Two-column article ──────────────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(8.0)
-                    .border(db),
-                |b| {
-                    // Column 1
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(4.0)
-                            .border(db),
-                        |b| {
-                            debug_text(b, "Real Units, Real Sizes", heading.clone(), db);
-                            debug_text(
-                                b,
-                                "This page is 210 by 297 millimeters \u{2014} an A4 sheet \
-                                 at true physical scale, in a world where one unit equals \
-                                 one meter. The business card beside it is 3.5 by 2 inches. \
-                                 Neither required manual conversion. Each panel declares its \
-                                 own layout unit, and the system handles the rest.",
-                                body.clone(),
-                                db,
-                            );
-                            debug_text(
-                                b,
-                                "Font sizes are in typographic points. Padding and spacing \
-                                 follow the panel\u{2019}s layout unit. Mix freely: Mm(6.0) \
-                                 for a margin, Pt(18.0) for a heading, In(0.5) for a \
-                                 gutter. The convenience types carry their unit through the \
-                                 layout engine \u{2014} no math required.",
-                                body.clone(),
-                                db,
-                            );
-                            debug_text(
-                                b,
-                                "By default, a panel\u{2019}s dimensions map directly to \
-                                 meters. A 210mm-wide panel occupies 0.21 meters in the \
-                                 scene. But that is just the default.",
-                                body.clone(),
-                                db,
-                            );
-                        },
-                    );
-
-                    // Column divider
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(0.3))
-                            .height(Sizing::GROW)
-                            .background(A4_DIM_COLOR),
-                        |_| {},
-                    );
-
-                    // Column 2
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(4.0)
-                            .border(db),
-                        |b| {
-                            debug_text(b, "Any Scale You Need", heading.clone(), db);
-                            debug_text(
-                                b,
-                                "Set world_height on any panel and it scales uniformly to \
-                                 fit. A museum placard at 0.3 meters. A highway billboard \
-                                 at 12 meters. A planetary-scale announcement at 50,000 \
-                                 meters \u{2014} zoom out far enough and there it is. Text \
-                                 stays sharp at any distance because glyphs are rendered as \
-                                 signed distance fields, not rasterized bitmaps \u{2014} \
-                                 the GPU evaluates the distance function per fragment, so \
-                                 edges remain crisp regardless of scale.",
-                                body.clone(),
-                                db,
-                            );
-                            debug_text(
-                                b,
-                                "The global UnitConfig resource sets defaults for every \
-                                 panel: layout in meters, fonts in points. Override \
-                                 per-panel with layout_unit and font_unit, or per-element \
-                                 with types like Mm(10.0) and Pt(24.0) inline. The system \
-                                 converts at layout time so the engine always works in a \
-                                 consistent coordinate space internally.",
-                                body.clone(),
-                                db,
-                            );
-                            debug_text(
-                                b,
-                                "Custom(0.01) defines a centimeter. Custom(9.461e15) \
-                                 defines a light-year. The unit system does not care about \
-                                 scale \u{2014} it only needs to know the ratio to meters.",
-                                body.clone(),
-                                db,
-                            );
-                        },
-                    );
-                },
-            );
+            build_two_column_article(b, &heading, &body, db);
 
             // ── Divider ─────────────────────────────────────────
             b.with(
@@ -1311,6 +1167,141 @@ fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
     );
 
     builder.build()
+}
+
+fn build_font_samples_row(b: &mut LayoutBuilder, db: Border) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .direction(Direction::LeftToRight)
+            .child_gap(6.0)
+            .child_align_y(AlignY::Bottom)
+            .border(db),
+        |b| {
+            for (label, size) in [
+                ("72pt", 72.0),
+                ("36pt", 36.0),
+                ("24pt", 24.0),
+                ("18pt", 18.0),
+                ("12pt", 12.0),
+                ("9pt", 9.0),
+            ] {
+                debug_text(
+                    b,
+                    label,
+                    LayoutTextStyle::new(size).with_color(A4_TEXT_COLOR),
+                    db,
+                );
+            }
+        },
+    );
+}
+
+fn build_two_column_article(
+    b: &mut LayoutBuilder,
+    heading: &LayoutTextStyle,
+    body: &LayoutTextStyle,
+    db: Border,
+) {
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::LeftToRight)
+            .child_gap(8.0)
+            .border(db),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(4.0)
+                    .border(db),
+                |b| {
+                    debug_text(b, "Real Units, Real Sizes", heading.clone(), db);
+                    debug_text(
+                        b,
+                        "This page is 210 by 297 millimeters \u{2014} an A4 sheet \
+                         at true physical scale, in a world where one unit equals \
+                         one meter. The business card beside it is 3.5 by 2 inches. \
+                         Neither required manual conversion. Each panel declares its \
+                         own layout unit, and the system handles the rest.",
+                        body.clone(),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "Font sizes are in typographic points. Padding and spacing \
+                         follow the panel\u{2019}s layout unit. Mix freely: Mm(6.0) \
+                         for a margin, Pt(18.0) for a heading, In(0.5) for a \
+                         gutter. The convenience types carry their unit through the \
+                         layout engine \u{2014} no math required.",
+                        body.clone(),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "By default, a panel\u{2019}s dimensions map directly to \
+                         meters. A 210mm-wide panel occupies 0.21 meters in the \
+                         scene. But that is just the default.",
+                        body.clone(),
+                        db,
+                    );
+                },
+            );
+
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(0.3))
+                    .height(Sizing::GROW)
+                    .background(A4_DIM_COLOR),
+                |_| {},
+            );
+
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(4.0)
+                    .border(db),
+                |b| {
+                    debug_text(b, "Any Scale You Need", heading.clone(), db);
+                    debug_text(
+                        b,
+                        "Set world_height on any panel and it scales uniformly to \
+                         fit. A museum placard at 0.3 meters. A highway billboard \
+                         at 12 meters. A planetary-scale announcement at 50,000 \
+                         meters \u{2014} zoom out far enough and there it is. Text \
+                         stays sharp at any distance because glyphs are rendered as \
+                         signed distance fields, not rasterized bitmaps \u{2014} \
+                         the GPU evaluates the distance function per fragment, so \
+                         edges remain crisp regardless of scale.",
+                        body.clone(),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "The global UnitConfig resource sets defaults for every \
+                         panel: layout in meters, fonts in points. Override \
+                         per-panel with layout_unit and font_unit, or per-element \
+                         with types like Mm(10.0) and Pt(24.0) inline. The system \
+                         converts at layout time so the engine always works in a \
+                         consistent coordinate space internally.",
+                        body.clone(),
+                        db,
+                    );
+                    debug_text(
+                        b,
+                        "Custom(0.01) defines a centimeter. Custom(9.461e15) \
+                         defines a light-year. The unit system does not care about \
+                         scale \u{2014} it only needs to know the ratio to meters.",
+                        body.clone(),
+                        db,
+                    );
+                },
+            );
+        },
+    );
 }
 
 fn build_card(debug: bool) -> bevy_diegetic::LayoutTree {
