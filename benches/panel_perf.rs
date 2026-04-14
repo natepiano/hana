@@ -160,7 +160,7 @@ fn bench_panel(tree: bevy_diegetic::LayoutTree) -> DiegeticPanel {
         tree,
         width: LAYOUT_SIZE,
         height: LAYOUT_SIZE,
-        layout_unit: Some(Unit::Custom(LAYOUT_MPU)),
+        layout_unit: Unit::Custom(LAYOUT_MPU),
         font_unit: Some(Unit::Custom(LAYOUT_MPU)),
         ..Default::default()
     }
