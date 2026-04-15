@@ -27,7 +27,7 @@
 //!     .run();
 //! ```
 
-mod callouts;
+pub mod callouts;
 mod constants;
 #[cfg(feature = "typography_overlay")]
 mod debug;
@@ -38,6 +38,9 @@ mod text;
 
 // Layout types.
 // Debug overlay.
+pub use callouts::ArrowStyle;
+pub use callouts::CalloutCap;
+pub use callouts::CalloutLine;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]

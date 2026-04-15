@@ -338,7 +338,7 @@ fn spawn_font_metric_gizmos(
     anchor_y: f32,
     font_size: f32,
     scale: f32,
-    gizmo_assets: &mut Assets<GizmoAsset>,
+    _gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let extents = GlyphExtents {
         first_left:    computed.glyph_rects.first().map_or(0.0, |r| r[0]),
@@ -346,7 +346,7 @@ fn spawn_font_metric_gizmos(
         arrow_spacing: arrow_spacing(computed.first_advance),
     };
 
-    let (_lines_gizmo, arrows_gizmo, metric_lines) = build_metric_gizmos(
+    let (_lines_gizmo, _arrows_gizmo, metric_lines) = build_metric_gizmos(
         font_metrics,
         line_metrics,
         overlay,
@@ -368,18 +368,17 @@ fn spawn_font_metric_gizmos(
         scale,
     );
 
-    // Dimension arrows (thicker).
-    commands.entity(entity).with_child((
-        Gizmo {
-            handle:      gizmo_assets.add(arrows_gizmo),
-            line_config: GizmoLineConfig {
-                width: THICK_LINE_WIDTH,
-                ..default()
-            },
-            depth_bias:  -0.1,
-        },
-        Transform::IDENTITY,
-    ));
+    spawn_metric_arrow_callouts(
+        commands,
+        entity,
+        font_metrics,
+        line_metrics,
+        overlay,
+        anchor_y,
+        font_size,
+        scale,
+        &extents,
+    );
 
     if overlay.show_labels == GlyphMetricVisibility::Shown {
         spawn_metric_labels(
@@ -805,13 +804,20 @@ fn spawn_advancement_arrow(
     );
 
     // Horizontal dimension arrow.
-    callouts::draw_dimension_arrow(
-        &mut adv_gizmo,
-        Vec3::new(origin_x, arrow_y, z),
-        Vec3::new(advance_end_x, arrow_y, z),
-        overlay.color,
-        head,
-        gap,
+    callouts::spawn_callout_line(
+        commands,
+        entity,
+        &callouts::CalloutLine::new(
+            Vec3::new(origin_x, arrow_y, z),
+            Vec3::new(advance_end_x, arrow_y, z),
+        )
+        .color(overlay.color)
+        .thickness(callout_line_thickness(overlay, font_size, scale))
+        .cap_size(head)
+        .start_inset(gap)
+        .end_inset(gap)
+        .start_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open))
+        .end_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open)),
     );
 
     commands.entity(entity).with_child((
@@ -875,6 +881,11 @@ fn bbox_border_width(overlay: &TypographyOverlay, font_size: f32, scale: f32) ->
     let min_world = font_scale(font_size, scale) * 0.0025;
     let from_line_width = overlay.line_width.max(THIN_LINE_WIDTH) * min_world;
     from_line_width.max(min_world)
+}
+
+/// Thickness for panel-backed callout line segments in world units.
+fn callout_line_thickness(overlay: &TypographyOverlay, font_size: f32, scale: f32) -> f32 {
+    bbox_border_width(overlay, font_size, scale)
 }
 
 /// Border width for panel-backed horizontal metric lines in world units.
@@ -1109,6 +1120,129 @@ fn build_metric_gizmos(
     );
 
     (lines_gizmo, arrows_gizmo, metric_lines)
+}
+
+fn spawn_metric_arrow_callouts(
+    commands: &mut Commands,
+    entity: Entity,
+    font_metrics: &FontMetrics,
+    line_metrics: &LineMetricsSnapshot,
+    overlay: &TypographyOverlay,
+    anchor_y: f32,
+    font_size: f32,
+    scale: f32,
+    extents: &GlyphExtents,
+) {
+    let baseline_y = line_metrics.baseline;
+    let ascent_y = baseline_y - line_metrics.ascent;
+    let descent_y = baseline_y + line_metrics.descent;
+    let ascent_world = layout_to_world_y(ascent_y, anchor_y, scale);
+    let baseline_world = layout_to_world_y(baseline_y, anchor_y, scale);
+    let descent_world = layout_to_world_y(descent_y, anchor_y, scale);
+    let x_height_world = layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y, scale);
+    let cap_height_world = layout_to_world_y(baseline_y - font_metrics.cap_height, anchor_y, scale);
+
+    let left_1 = extents.first_left - extents.arrow_spacing;
+    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let right_1 = extents.last_right + extents.arrow_spacing;
+    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+    let head = arrowhead_size(font_size, scale);
+    let gap = arrow_gap(font_size, scale);
+    let thickness = callout_line_thickness(overlay, font_size, scale);
+
+    spawn_line_height_comparison_panel(
+        commands,
+        entity,
+        overlay,
+        left_2,
+        ascent_world,
+        descent_world,
+        thickness,
+    );
+
+    for (from, to) in [
+        (
+            Vec3::new(left_1, ascent_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(left_1, baseline_world, METRIC_LINE_Z_OFFSET),
+        ),
+        (
+            Vec3::new(left_1, baseline_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(left_1, descent_world, METRIC_LINE_Z_OFFSET),
+        ),
+        (
+            Vec3::new(left_2, ascent_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(left_2, descent_world, METRIC_LINE_Z_OFFSET),
+        ),
+        (
+            Vec3::new(right_1, x_height_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(right_1, baseline_world, METRIC_LINE_Z_OFFSET),
+        ),
+        (
+            Vec3::new(right_2, cap_height_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(right_2, baseline_world, METRIC_LINE_Z_OFFSET),
+        ),
+    ] {
+        callouts::spawn_callout_line(
+            commands,
+            entity,
+            &callouts::CalloutLine::new(from, to)
+                .color(overlay.color)
+                .thickness(thickness)
+                .cap_size(head)
+                .start_inset(gap)
+                .end_inset(gap)
+                .start_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open))
+                .end_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open)),
+        );
+    }
+}
+
+fn spawn_line_height_comparison_panel(
+    commands: &mut Commands,
+    entity: Entity,
+    _overlay: &TypographyOverlay,
+    arrow_x: f32,
+    top_y: f32,
+    bottom_y: f32,
+    border_width: f32,
+) {
+    let inset = border_width * 10.0;
+    let height = (top_y - bottom_y).abs() - inset * 2.0;
+    if height <= 0.0 {
+        return;
+    }
+
+    let width = height * 0.065;
+    let left_edge = arrow_x + border_width * 14.0;
+    let center_x = left_edge + width / 2.0;
+    let center_y = f32::midpoint(top_y, bottom_y);
+    let color = Color::srgb(0.3, 0.65, 1.0);
+
+    let mut material = default_panel_material();
+    material.base_color = Color::NONE;
+    material.alpha_mode = AlphaMode::Blend;
+    material.unlit = true;
+
+    let mut builder = LayoutBuilder::new(width, height);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .border(Border::all(border_width, color)),
+        |_| {},
+    );
+    let tree = builder.build();
+
+    commands.entity(entity).with_child((
+        DiegeticPanel::world()
+            .size(width, height)
+            .anchor(Anchor::Center)
+            .material(material)
+            .with_tree(tree)
+            .build()
+            .expect("comparison panel uses valid dimensions"),
+        Transform::from_xyz(center_x, center_y, CALLOUT_Z_OFFSET),
+    ));
 }
 
 /// Spawns labels for metric lines and dimension arrows.
