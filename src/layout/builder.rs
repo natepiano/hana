@@ -43,6 +43,7 @@ use super::types::Direction;
 use super::types::LayoutTextStyle;
 use super::types::Padding;
 use super::types::Sizing;
+use crate::DimensionMatch;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -89,14 +90,17 @@ impl El {
         self
     }
 
-    /// Sets both width and height to [`Sizing::fixed`] from two dimensions.
+    /// Sets both width and height to [`Sizing::fixed`] from two matching dimensions.
     ///
     /// Bare floats inherit the panel's layout unit. Typed wrappers like
     /// [`Mm`](crate::Mm) or [`Pt`](crate::Pt) set the unit explicitly.
+    /// Both arguments must have the same type; use `.width(...)` and
+    /// `.height(...)` separately when you intentionally want different
+    /// unit types on each axis.
     ///
     /// Can be overridden by subsequent `.width()` or `.height()` calls
     /// (last wins).
-    pub fn size(self, w: impl Into<Dimension>, h: impl Into<Dimension>) -> Self {
+    pub fn size<DM: DimensionMatch>(self, w: DM, h: DM) -> Self {
         let wd = w.into();
         let hd = h.into();
         self.width(Sizing::fixed(wd)).height(Sizing::fixed(hd))

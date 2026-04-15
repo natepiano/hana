@@ -417,6 +417,28 @@ impl From<Px> for Dimension {
     }
 }
 
+// ── DimensionMatch trait ────────────────────────────────────────────────────
+
+/// Marker trait for values accepted by `.size(w, h)` methods.
+///
+/// The `.size(...)` APIs on [`DiegeticPanelBuilder`](crate::DiegeticPanelBuilder)
+/// and [`El`](crate::El) require both arguments to have the same concrete type:
+///
+/// - `size(100.0, 50.0)` works
+/// - `size(Mm(210.0), Mm(297.0))` works
+/// - `size(Mm(210.0), In(11.0))` is a compile error
+///
+/// Use `.width(...)` and `.height(...)` separately when you intentionally want
+/// different unit types on each axis.
+pub trait DimensionMatch: Into<Dimension> {}
+
+impl DimensionMatch for f32 {}
+impl DimensionMatch for Dimension {}
+impl DimensionMatch for Pt {}
+impl DimensionMatch for Mm {}
+impl DimensionMatch for In {}
+impl DimensionMatch for Px {}
+
 // ── HasUnit trait ────────────────────────────────────────────────────────────
 
 /// Trait for types that carry a compile-time unit association.

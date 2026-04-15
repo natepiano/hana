@@ -8,13 +8,13 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::config::InvalidSize;
+use super::config::DimensionMatch;
 use super::config::PanelSize;
 use super::config::Pt;
 use super::config::UnitConfig;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
-use crate::layout::Dimension;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -576,7 +576,8 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
     ///
     /// Bare floats default to [`Unit::Meters`] for world-space panels.
     /// Typed wrappers like [`Mm`](super::config::Mm) or [`Pt`](super::config::Pt)
-    /// set the unit explicitly.
+    /// set the unit explicitly. Both arguments must have the same type;
+    /// mixed-unit panel sizing is unsupported.
     ///
     /// # Examples
     ///
@@ -585,10 +586,10 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
     /// DiegeticPanel::world().size(Mm(210.0), Mm(297.0))  // A4 in mm
     /// ```
     #[must_use]
-    pub fn size(
+    pub fn size<DM: DimensionMatch>(
         mut self,
-        w: impl Into<Dimension>,
-        h: impl Into<Dimension>,
+        w: DM,
+        h: DM,
     ) -> DiegeticPanelBuilder<World, HasSize> {
         let wd = w.into();
         let hd = h.into();
@@ -626,6 +627,8 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     ///
     /// Bare floats default to [`Unit::Pixels`] for screen-space panels.
     /// Typed wrappers like [`Pt`](super::config::Pt) set the unit explicitly.
+    /// Both arguments must have the same type; mixed-unit panel sizing is
+    /// unsupported.
     ///
     /// # Examples
     ///
@@ -634,10 +637,10 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     /// DiegeticPanel::screen().size(Pt(595.0), Pt(842.0))  // A4 in points
     /// ```
     #[must_use]
-    pub fn size(
+    pub fn size<DM: DimensionMatch>(
         mut self,
-        w: impl Into<Dimension>,
-        h: impl Into<Dimension>,
+        w: DM,
+        h: DM,
     ) -> DiegeticPanelBuilder<Screen, HasSize> {
         let wd = w.into();
         let hd = h.into();

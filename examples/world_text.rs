@@ -183,7 +183,7 @@ fn spawn_labeled_cube(
         });
 }
 
-/// Spawns the anchor demo panel: title, instructions, nine anchor-point
+/// Spawns the anchor demo: title, instructions, nine anchor-point
 /// labels with red dot markers, and the `AnchorDemoText` components.
 fn spawn_anchor_demo(
     commands: &mut Commands,

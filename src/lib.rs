@@ -87,6 +87,7 @@ pub use layout::WorldTextStyle;
 // Bevy plugin.
 pub use plugin::AtlasConfig;
 pub use plugin::ComputedDiegeticPanel;
+pub use plugin::DimensionMatch;
 pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelBuilder;
 pub use plugin::DiegeticPanelGizmoGroup;

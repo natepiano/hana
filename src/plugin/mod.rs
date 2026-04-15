@@ -21,6 +21,7 @@ pub use components::ScreenDimension;
 pub use components::ScreenPosition;
 pub use components::SurfaceShadow;
 pub use config::AtlasConfig;
+pub use config::DimensionMatch;
 pub use config::GlyphWorkerThreads;
 pub use config::HasUnit;
 pub use config::In;
