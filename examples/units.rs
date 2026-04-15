@@ -25,9 +25,11 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Sizing;
@@ -232,8 +234,8 @@ fn setup(
     commands
         .spawn((
             A4Panel,
-            DiegeticPanel::builder()
-                .size(PaperSize::A4)
+            DiegeticPanel::world()
+                .paper(PaperSize::A4)
                 .anchor(Anchor::Center)
                 .surface_shadow(SurfaceShadow::On)
                 .layout(|b| build_a4_content(b, false))
@@ -278,8 +280,8 @@ fn setup(
     commands
         .spawn((
             CardPanel,
-            DiegeticPanel::builder()
-                .size(PaperSize::BusinessCard)
+            DiegeticPanel::world()
+                .paper(PaperSize::BusinessCard)
                 .anchor(Anchor::Center)
                 .surface_shadow(SurfaceShadow::On)
                 .layout(|b| build_card_content(b, false))
@@ -304,8 +306,8 @@ fn setup(
     commands
         .spawn((
             IndexPanel,
-            DiegeticPanel::builder()
-                .size(PaperSize::Photo5x7)
+            DiegeticPanel::world()
+                .paper(PaperSize::Photo5x7)
                 .anchor(Anchor::Center)
                 .surface_shadow(SurfaceShadow::On)
                 .layout(|b| build_index_content(b, false))
@@ -331,14 +333,16 @@ fn setup(
     let index_ruler_top = index_y + index_height_m / 2.0 + index_ruler_extra * IN_TO_M;
     commands.spawn((
         PanelRuler,
-        DiegeticPanel {
-            tree: build_imperial_panel_ruler(index_sixteenths, index_ruler_height, ruler_color),
-            width: PANEL_RULER_INCH_WIDTH,
-            height: index_ruler_height,
-            layout_unit: Unit::Inches,
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(In(PANEL_RULER_INCH_WIDTH), In(index_ruler_height))
+            .anchor(Anchor::TopLeft)
+            .with_tree(build_imperial_panel_ruler(
+                index_sixteenths,
+                index_ruler_height,
+                ruler_color,
+            ))
+            .build()
+            .expect("valid index vertical ruler dimensions"),
         Transform::from_xyz(index_ruler_x, index_ruler_top, 0.0),
     ));
 
@@ -348,14 +352,15 @@ fn setup(
     let index_w_sixteenths = (index_w * 16.0).round().to_i32();
     commands.spawn((
         PanelRuler,
-        DiegeticPanel {
-            tree: build_imperial_horizontal_ruler(index_w_sixteenths, ruler_color),
-            width: index_w,
-            height: PANEL_RULER_INCH_WIDTH,
-            layout_unit: Unit::Inches,
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(In(index_w), In(PANEL_RULER_INCH_WIDTH))
+            .anchor(Anchor::TopLeft)
+            .with_tree(build_imperial_horizontal_ruler(
+                index_w_sixteenths,
+                ruler_color,
+            ))
+            .build()
+            .expect("valid index horizontal ruler dimensions"),
         Transform::from_xyz(index_bottom_ruler_x, index_bottom_ruler_y, 0.0),
     ));
 
@@ -383,8 +388,8 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
     let hud_width = windows.iter().next().map_or(800.0, Window::width);
     commands.spawn((
         ControlsPanel,
-        DiegeticPanel::builder()
-            .size_px(hud_width, HUD_HEIGHT)
+        DiegeticPanel::screen()
+            .size(hud_width, HUD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .material(unlit.clone())
             .text_material(unlit)
@@ -392,7 +397,8 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
             .layout(|b| {
                 build_controls_content(b, false, true, true);
             })
-            .build_screen_space(),
+            .build()
+            .expect("valid controls HUD dimensions"),
         Transform::default(),
     ));
 
@@ -401,13 +407,14 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
         ..bevy_diegetic::default_panel_material()
     };
     commands.spawn((
-        DiegeticPanel::builder()
-            .size_px(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
+        DiegeticPanel::screen()
+            .size(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
             .anchor(Anchor::BottomRight)
             .material(cam_unlit.clone())
             .text_material(cam_unlit)
             .layout(build_camera_help)
-            .build_screen_space(),
+            .build()
+            .expect("valid camera help HUD dimensions"),
         Transform::default(),
     ));
 }
@@ -429,14 +436,12 @@ fn spawn_rulers(
     let a4_ruler_top = a4_y + a4_height_m / 2.0;
     commands.spawn((
         PanelRuler,
-        DiegeticPanel {
-            tree: build_metric_panel_ruler(A4_H.to_i32(), ruler_color),
-            width: PANEL_RULER_WIDTH,
-            height: A4_H,
-            layout_unit: Unit::Millimeters,
-            anchor: Anchor::TopRight,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(Mm(PANEL_RULER_WIDTH), Mm(A4_H))
+            .anchor(Anchor::TopRight)
+            .with_tree(build_metric_panel_ruler(A4_H.to_i32(), ruler_color))
+            .build()
+            .expect("valid A4 vertical ruler dimensions"),
         Transform::from_xyz(a4_ruler_x, a4_ruler_top, 0.0),
     ));
 
@@ -445,14 +450,12 @@ fn spawn_rulers(
     let a4_bottom_ruler_y = a4_y - a4_height_m / 2.0 - RULER_GAP;
     commands.spawn((
         PanelRuler,
-        DiegeticPanel {
-            tree: build_metric_horizontal_ruler(A4_W.to_i32(), ruler_color),
-            width: A4_W,
-            height: PANEL_RULER_WIDTH,
-            layout_unit: Unit::Millimeters,
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(Mm(A4_W), Mm(PANEL_RULER_WIDTH))
+            .anchor(Anchor::TopLeft)
+            .with_tree(build_metric_horizontal_ruler(A4_W.to_i32(), ruler_color))
+            .build()
+            .expect("valid A4 horizontal ruler dimensions"),
         Transform::from_xyz(a4_bottom_ruler_x, a4_bottom_ruler_y, 0.0),
     ));
 
@@ -464,14 +467,16 @@ fn spawn_rulers(
     let card_ruler_top = card_y + card_height_m / 2.0 + card_ruler_extra * IN_TO_M;
     commands.spawn((
         PanelRuler,
-        DiegeticPanel {
-            tree: build_imperial_panel_ruler(card_sixteenths, card_ruler_height, ruler_color),
-            width: PANEL_RULER_INCH_WIDTH,
-            height: card_ruler_height,
-            layout_unit: Unit::Inches,
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(In(PANEL_RULER_INCH_WIDTH), In(card_ruler_height))
+            .anchor(Anchor::TopLeft)
+            .with_tree(build_imperial_panel_ruler(
+                card_sixteenths,
+                card_ruler_height,
+                ruler_color,
+            ))
+            .build()
+            .expect("valid card vertical ruler dimensions"),
         Transform::from_xyz(card_ruler_x, card_ruler_top, 0.0),
     ));
 
@@ -481,14 +486,15 @@ fn spawn_rulers(
     let card_w_sixteenths = (CARD_W * 16.0).round().to_i32();
     commands.spawn((
         PanelRuler,
-        DiegeticPanel {
-            tree: build_imperial_horizontal_ruler(card_w_sixteenths, ruler_color),
-            width: CARD_W,
-            height: PANEL_RULER_INCH_WIDTH,
-            layout_unit: Unit::Inches,
-            anchor: Anchor::TopLeft,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(In(CARD_W), In(PANEL_RULER_INCH_WIDTH))
+            .anchor(Anchor::TopLeft)
+            .with_tree(build_imperial_horizontal_ruler(
+                card_w_sixteenths,
+                ruler_color,
+            ))
+            .build()
+            .expect("valid card horizontal ruler dimensions"),
         Transform::from_xyz(card_bottom_ruler_x, card_bottom_ruler_y, 0.0),
     ));
 }
@@ -660,13 +666,13 @@ fn toggle_debug_outlines(
     bevy::log::info!("debug outlines: {on}");
 
     for mut panel in &mut a4_panels {
-        panel.tree = build_a4_page(on);
+        panel.set_tree(build_a4_page(on));
     }
     for mut panel in &mut card_panels {
-        panel.tree = build_card(on);
+        panel.set_tree(build_card(on));
     }
     for mut panel in &mut index_panels {
-        panel.tree = build_index_page(on);
+        panel.set_tree(build_index_page(on));
     }
 }
 
@@ -1221,7 +1227,7 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
 
     builder.with(
         El::new()
-            .size(PaperSize::A4)
+            .size(A4_W, A4_H)
             .padding(Padding::all(15.0))
             .direction(Direction::TopToBottom)
             .child_gap(4.0)
@@ -1416,7 +1422,7 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
 
     builder.with(
         El::new()
-            .size(PaperSize::BusinessCard)
+            .size(CARD_W, CARD_H)
             .padding(Padding::all(0.15))
             .direction(Direction::TopToBottom)
             .child_gap(0.04)
@@ -1479,7 +1485,7 @@ fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
 
     builder.with(
         El::new()
-            .size(PaperSize::Photo5x7)
+            .size(5.0, 7.0)
             .padding(Padding::all(0.2))
             .direction(Direction::TopToBottom)
             .child_gap(0.08)
@@ -1489,40 +1495,19 @@ fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
 
             // ── Panel sizing ────────────────────────────────────
             debug_text(b, "Panel Sizing", subheading.clone(), db);
-            index_row(b, "(f32, f32)", ".size((0.127, 0.178))", &label, &code, db);
-            index_row(
-                b,
-                "(In, In)",
-                ".size((In(5.0), In(7.0)))",
-                &label,
-                &code,
-                db,
-            );
-            index_row(
-                b,
-                "(Mm, Mm)",
-                ".size((Mm(127.0), Mm(177.8)))",
-                &label,
-                &code,
-                db,
-            );
-            index_row(
-                b,
-                "(Pt, Pt)",
-                ".size((Pt(360.0), Pt(504.0)))",
-                &label,
-                &code,
-                db,
-            );
+            index_row(b, "f32", ".size(0.127, 0.178)", &label, &code, db);
+            index_row(b, "In", ".size(In(5.0), In(7.0))", &label, &code, db);
+            index_row(b, "Mm", ".size(Mm(127.0), Mm(177.8))", &label, &code, db);
+            index_row(b, "Pt", ".size(Pt(360.0), Pt(504.0))", &label, &code, db);
             index_row(
                 b,
                 "PaperSize",
-                ".size(PaperSize::Photo5x7)",
+                ".paper(PaperSize::Photo5x7)",
                 &label,
                 &code,
                 db,
             );
-            index_row(b, "Pixels", ".size_px(800.0, 600.0)", &label, &code, db);
+            index_row(b, "Pixels", ".size(800.0, 600.0)", &label, &code, db);
 
             // ── Divider ─────────────────────────────────────────
             b.with(
@@ -1852,7 +1837,7 @@ fn update_controls_hud(
     *previous_state = state;
 
     for mut panel in &mut huds {
-        panel.tree = build_controls_tree(debug.0, rulers.0, perspective);
+        panel.set_tree(build_controls_tree(debug.0, rulers.0, perspective));
     }
 }
 
