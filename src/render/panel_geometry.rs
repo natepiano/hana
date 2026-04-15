@@ -107,12 +107,12 @@ fn build_panel_geometry(
 
         let points_to_world = panel.points_to_world(&unit_config);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
-        let render_style = if panel.render_mode == RenderMode::Geometry {
+        let render_style = if panel.render_mode() == RenderMode::Geometry {
             RenderStyle::Geometry
         } else {
             RenderStyle::Texture
         };
-        let shadow_mode = if panel.surface_shadow == SurfaceShadow::Off {
+        let shadow_mode = if panel.surface_shadow() == SurfaceShadow::Off {
             ShadowMode::Suppressed
         } else {
             ShadowMode::Enabled
@@ -285,8 +285,8 @@ fn spawn_sdf_element(
     commands: &mut Commands,
     panel_entity: Entity,
 ) {
-    let element_mat = panel.tree.element_material(surface.element_idx);
-    let corner_radius = panel.tree.element_corner_radius(surface.element_idx);
+    let element_mat = panel.tree().element_material(surface.element_idx);
+    let corner_radius = panel.tree().element_corner_radius(surface.element_idx);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -297,7 +297,7 @@ fn spawn_sdf_element(
         }
     });
     let mut base =
-        constants::resolve_material(element_mat, panel.material.as_ref(), effective_color);
+        constants::resolve_material(element_mat, panel.material(), effective_color);
     if render_style == RenderStyle::Texture {
         base.unlit = true;
     } else {

@@ -144,7 +144,7 @@ pub(super) fn setup_panel_rtt(
         }
 
         // Geometry mode renders directly — no RTT infrastructure needed.
-        if panel.render_mode == RenderMode::Geometry {
+        if panel.render_mode() == RenderMode::Geometry {
             continue;
         }
 
@@ -233,7 +233,7 @@ pub(super) fn setup_panel_rtt(
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let quad_mesh = meshes.add(Rectangle::new(world_w, world_h));
         let quad_material =
-            materials.add(display_quad_material(panel.material.as_ref(), image_handle));
+            materials.add(display_quad_material(panel.material(), image_handle));
 
         // Position the quad at the center of the panel content area.
         let quad_base = (
@@ -244,7 +244,7 @@ pub(super) fn setup_panel_rtt(
             scene_layer,
             Transform::from_xyz(cam_x, cam_y, 0.0),
         );
-        if panel.surface_shadow == SurfaceShadow::On {
+        if panel.surface_shadow() == SurfaceShadow::On {
             commands.entity(panel_entity).with_child(quad_base);
         } else {
             commands

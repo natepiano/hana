@@ -1,5 +1,6 @@
 //! Components and resources for diegetic UI panels.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bevy::camera::visibility::RenderLayers;
@@ -8,11 +9,12 @@ use bevy_kana::ToF32;
 
 use super::config::InvalidSize;
 use super::config::PanelSize;
-use super::config::Px;
+use super::config::Pt;
 use super::config::UnitConfig;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
+use crate::layout::Dimension;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -53,6 +55,75 @@ pub enum SurfaceShadow {
     On,
 }
 
+/// How a screen-space panel derives its size along one axis from the window.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub enum ScreenDimension {
+    /// Explicit pixel size. The panel's width/height is set to this value
+    /// regardless of window size.
+    Fixed(f32),
+    /// Fraction of the window along this axis (0.0–1.0).
+    /// `Percent(1.0)` fills the full window width or height.
+    ///
+    /// When used, the layout tree's root element is automatically set to
+    /// `Sizing::GROW` on the percent-sized axis. This allows the layout
+    /// engine to reflow children when the panel resizes — no tree rebuild
+    /// is needed for pure resize.
+    Percent(f32),
+}
+
+/// Where a screen-space panel is placed within the window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
+pub enum ScreenPosition {
+    /// Pin to the window edge/corner that matches the panel's [`Anchor`].
+    /// `Anchor::TopLeft` pins to the window's top-left corner,
+    /// `Anchor::Center` pins to the window's center, etc.
+    #[default]
+    Screen,
+    /// Place at an explicit pixel position (top-left origin, y-down).
+    /// The panel's [`Anchor`] determines which point of the panel sits
+    /// at this position.
+    At(Vec2),
+}
+
+/// Whether the panel lives in 3D world space or as a 2D screen overlay.
+///
+/// `World` panels are positioned and scaled in 3D space.
+/// `Screen` panels render via an orthographic overlay camera.
+#[derive(Clone, Debug, Default, Reflect)]
+pub enum PanelMode {
+    /// Panel lives in 3D world space.
+    #[default]
+    World,
+    /// Panel renders as a 2D screen overlay.
+    Screen {
+        /// Where to place the panel within the window.
+        position:      ScreenPosition,
+        /// How to derive panel width from the window.
+        /// `None` keeps the panel's spawn-time width.
+        width:         Option<ScreenDimension>,
+        /// How to derive panel height from the window.
+        /// `None` keeps the panel's spawn-time height.
+        height:        Option<ScreenDimension>,
+        /// Camera render order. Higher orders render on top. Default: `1`.
+        camera_order:  isize,
+        /// Render layers for isolation from the scene camera.
+        /// Default: `RenderLayers::layer(31)`.
+        render_layers: RenderLayers,
+    },
+}
+
+/// Default camera order for screen-space overlay cameras.
+const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
+
+/// Default render layer for screen-space panels.
+const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
+
+impl PanelMode {
+    /// Returns `true` if this is a screen-space panel.
+    #[must_use]
+    pub const fn is_screen(&self) -> bool { matches!(self, Self::Screen { .. }) }
+}
+
 /// A diegetic UI panel attached to a 3D entity.
 ///
 /// Defines a layout tree and the panel's dimensions in layout units.
@@ -60,19 +131,19 @@ pub enum SurfaceShadow {
 /// (or the global [`UnitConfig`] default). Font sizes in the tree are
 /// interpreted in `font_unit` (defaults to [`Unit::Points`]).
 ///
-/// Use [`DiegeticPanel::builder`] for ergonomic construction:
+/// Construct via [`DiegeticPanel::world`] or [`DiegeticPanel::screen`]:
 ///
 /// ```ignore
-/// commands.spawn(
-///     DiegeticPanel::builder()
-///         .size(PaperSize::USLetter)
-///         .layout_unit(Unit::Points)
-///         .world_height(3.1)
+/// commands.spawn((
+///     DiegeticPanel::world()
+///         .size(Mm(210.0), Mm(297.0))
+///         .world_height(0.5)
 ///         .layout(|b| {
 ///             b.text("Hello", LayoutTextStyle::new(48.0));
 ///         })
-///         .build()
-/// );
+///         .build()?,
+///     Transform::from_xyz(0.0, 0.0, 0.0),
+/// ));
 /// ```
 ///
 /// The layout engine runs automatically when this component changes,
@@ -85,45 +156,47 @@ pub enum SurfaceShadow {
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    pub tree:           LayoutTree,
+    tree:           LayoutTree,
     /// Panel width in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub width:          f32,
+    width:          f32,
     /// Panel height in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub height:         f32,
+    height:         f32,
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
-    pub layout_unit:    Unit,
+    layout_unit:    Unit,
     /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
-    pub font_unit:      Option<Unit>,
+    font_unit:      Option<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
-    pub anchor:         Anchor,
+    anchor:         Anchor,
     /// Target world width in meters. When set, the panel is uniformly scaled
     /// so its width matches this value (height follows aspect ratio).
     /// If both `world_width` and `world_height` are set, non-uniform scaling
     /// is applied.
-    pub world_width:    Option<f32>,
+    world_width:    Option<f32>,
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
-    pub world_height:   Option<f32>,
+    world_height:   Option<f32>,
     /// How the panel renders its content. Defaults to [`RenderMode::Geometry`].
-    pub render_mode:    RenderMode,
+    render_mode:    RenderMode,
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via [`GlyphShadowMode`].
-    pub surface_shadow: SurfaceShadow,
+    surface_shadow: SurfaceShadow,
     /// Default PBR material for backgrounds and borders. When `None`, the
     /// library uses a matte default (roughness 0.95, reflectance 0.02).
     /// Individual elements can override via [`El::material`].
     /// `base_color` is overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub material:       Option<StandardMaterial>,
+    material:       Option<StandardMaterial>,
     /// Default PBR material for text. When `None`, uses the same default as
     /// `material`. Individual text elements can override.
     /// `base_color` is overridden by [`LayoutTextStyle::color`] when set.
     #[reflect(ignore)]
-    pub text_material:  Option<StandardMaterial>,
+    text_material:  Option<StandardMaterial>,
+    /// Whether the panel is world-space or screen-space.
+    mode:           PanelMode,
 }
 
 impl Default for DiegeticPanel {
@@ -141,20 +214,78 @@ impl Default for DiegeticPanel {
             surface_shadow: SurfaceShadow::Off,
             material:       None,
             text_material:  None,
+            mode:           PanelMode::World,
         }
     }
 }
 
-impl DiegeticPanel {
-    /// Returns a builder for ergonomic panel construction.
-    #[must_use]
-    pub fn builder() -> DiegeticPanelBuilder { DiegeticPanelBuilder::default() }
+// ── Public read-only accessors ──────────────────────────────────────────────
 
+impl DiegeticPanel {
+    /// Returns a reference to the layout tree.
+    #[must_use]
+    pub const fn tree(&self) -> &LayoutTree { &self.tree }
+
+    /// Panel width in layout units.
+    #[must_use]
+    pub const fn width(&self) -> f32 { self.width }
+
+    /// Panel height in layout units.
+    #[must_use]
+    pub const fn height(&self) -> f32 { self.height }
+
+    /// The layout unit for this panel's dimensions.
+    #[must_use]
+    pub const fn layout_unit(&self) -> Unit { self.layout_unit }
+
+    /// The font unit override, or `None` if inheriting from [`UnitConfig`].
+    #[must_use]
+    pub const fn font_unit(&self) -> Option<Unit> { self.font_unit }
+
+    /// The panel's anchor point.
+    #[must_use]
+    pub const fn anchor(&self) -> Anchor { self.anchor }
+
+    /// The rendering mode.
+    #[must_use]
+    pub const fn render_mode(&self) -> RenderMode { self.render_mode }
+
+    /// Whether the panel surface casts shadows.
+    #[must_use]
+    pub const fn surface_shadow(&self) -> SurfaceShadow { self.surface_shadow }
+
+    /// The default panel material, if set.
+    #[must_use]
+    pub const fn material(&self) -> Option<&StandardMaterial> { self.material.as_ref() }
+
+    /// Mutable access to the default panel material.
+    pub const fn material_mut(&mut self) -> &mut Option<StandardMaterial> { &mut self.material }
+
+    /// The default text material, if set.
+    #[must_use]
+    pub const fn text_material(&self) -> Option<&StandardMaterial> { self.text_material.as_ref() }
+
+    /// Mutable access to the default text material.
+    pub const fn text_material_mut(&mut self) -> &mut Option<StandardMaterial> {
+        &mut self.text_material
+    }
+
+    /// The panel's mode (world or screen).
+    #[must_use]
+    pub const fn mode(&self) -> &PanelMode { &self.mode }
+}
+
+// ── Public mutators ─────────────────────────────────────────────────────────
+
+impl DiegeticPanel {
     /// Atomically updates the panel's width, height, and layout unit.
     ///
-    /// Returns `Err(InvalidSize)` if either dimension is zero or negative.
     /// This is the preferred way to resize a panel at runtime (e.g. for
     /// animation) because it keeps dimensions and unit in sync.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidSize`] if either dimension is zero or negative.
     pub fn set_size(&mut self, size: impl PanelSize) -> Result<(), InvalidSize> {
         let (w, h, unit) = size.dimensions();
         if w <= 0.0 || h <= 0.0 {
@@ -168,284 +299,65 @@ impl DiegeticPanel {
         self.layout_unit = unit;
         Ok(())
     }
+
+    /// Replaces the layout tree.
+    pub fn set_tree(&mut self, tree: LayoutTree) { self.tree = tree; }
+
+    /// Sets the panel width directly (in layout units).
+    ///
+    /// Used by the screen-space positioning system to resize panels
+    /// whose dimensions are derived from the window.
+    pub const fn set_width(&mut self, width: f32) { self.width = width; }
+
+    /// Sets the panel height directly (in layout units).
+    pub const fn set_height(&mut self, height: f32) { self.height = height; }
 }
 
-/// Builder for [`DiegeticPanel`].
-///
-/// Eliminates the need to specify layout dimensions twice (once for the
-/// `LayoutBuilder`, once for the panel). The `.layout()` closure receives
-/// a pre-sized `LayoutBuilder`.
-///
-/// Call `.size()` before `.layout()` — the layout closure uses the
-/// dimensions set by `.size()`.
-///
-/// # Example
-///
-/// ```ignore
-/// DiegeticPanel::builder()
-///     .size(PaperSize::A4)
-///     .world_height(0.5)
-///     .layout(|b| {
-///         b.with(El::new()..., |b| { ... });
-///     })
-///     .build()
-///     .expect("valid panel dimensions")
-/// ```
-#[derive(Default)]
-pub struct DiegeticPanelBuilder {
-    width:          f32,
-    height:         f32,
-    layout_unit:    Unit,
-    font_unit:      Option<Unit>,
-    anchor:         Option<Anchor>,
-    world_width:    Option<f32>,
-    world_height:   Option<f32>,
-    render_mode:    RenderMode,
-    surface_shadow: SurfaceShadow,
-    material:       Option<StandardMaterial>,
-    text_material:  Option<StandardMaterial>,
-    tree:           Option<LayoutTree>,
-    screen_space:   Option<ScreenSpace>,
-}
+// ── Builder entry points ────────────────────────────────────────────────────
 
-impl DiegeticPanelBuilder {
-    /// Sets the panel dimensions and layout unit atomically.
+impl DiegeticPanel {
+    /// Returns a builder for a world-space panel.
     ///
-    /// Accepts [`PaperSize`], same-unit tuples like `(Mm(210.0), Mm(297.0))`,
-    /// or bare `(f32, f32)` which defaults to [`Unit::Meters`].
+    /// Bare floats in `.size()` default to [`Unit::Meters`].
     #[must_use]
-    pub fn size(mut self, size: impl PanelSize) -> Self {
-        let (w, h, unit) = size.dimensions();
-        self.width = w;
-        self.height = h;
-        self.layout_unit = unit;
-        self
-    }
-
-    /// Builds the layout tree from a closure. The closure receives a
-    /// [`LayoutBuilder`] pre-configured with the panel's dimensions.
-    #[must_use]
-    pub fn layout(mut self, f: impl FnOnce(&mut LayoutBuilder)) -> Self {
-        let mut builder = LayoutBuilder::new(self.width, self.height);
-        f(&mut builder);
-        self.tree = Some(builder.build());
-        self
-    }
-
-    /// Overrides the font unit (default inherits from [`UnitConfig::font`]).
-    #[must_use]
-    pub const fn font_unit(mut self, unit: Unit) -> Self {
-        self.font_unit = Some(unit);
-        self
-    }
-
-    /// Sets the anchor point (default [`Anchor::TopLeft`]).
-    #[must_use]
-    pub const fn anchor(mut self, anchor: Anchor) -> Self {
-        self.anchor = Some(anchor);
-        self
-    }
-
-    /// Scales the panel uniformly so its world width matches this value in meters.
-    /// Height follows the aspect ratio.
-    #[must_use]
-    pub const fn world_width(mut self, meters: f32) -> Self {
-        self.world_width = Some(meters);
-        self
-    }
-
-    /// Scales the panel uniformly so its world height matches this value in meters.
-    /// Width follows the aspect ratio.
-    #[must_use]
-    pub const fn world_height(mut self, meters: f32) -> Self {
-        self.world_height = Some(meters);
-        self
-    }
-
-    /// Sets the rendering mode. Defaults to [`RenderMode::Geometry`].
-    #[must_use]
-    pub const fn render_mode(mut self, mode: RenderMode) -> Self {
-        self.render_mode = mode;
-        self
-    }
-
-    /// Sets whether the panel surface casts 3D shadows.
-    /// Defaults to [`SurfaceShadow::Off`].
-    #[must_use]
-    pub const fn surface_shadow(mut self, shadow: SurfaceShadow) -> Self {
-        self.surface_shadow = shadow;
-        self
-    }
-
-    /// Sets the default PBR material for backgrounds and borders.
-    ///
-    /// `base_color` is overridden by the layout color when both are set.
-    /// Individual elements can override via [`El::material`].
-    #[must_use]
-    pub fn material(mut self, material: StandardMaterial) -> Self {
-        self.material = Some(material);
-        self
-    }
-
-    /// Sets the default PBR material for text.
-    ///
-    /// `base_color` is overridden by [`LayoutTextStyle::color`] when set.
-    #[must_use]
-    pub fn text_material(mut self, material: StandardMaterial) -> Self {
-        self.text_material = Some(material);
-        self
-    }
-
-    /// Shorthand for `.size((Px(width), Px(height)))`.
-    ///
-    /// For [`ScreenSpace`] panels, these map 1:1 to on-screen pixels.
-    /// For world-space panels, the system can resolve pixel dimensions
-    /// per-frame using the active camera's projection.
-    #[must_use]
-    pub fn size_px(self, width: f32, height: f32) -> Self { self.size((Px(width), Px(height))) }
-
-    /// Stores a custom [`ScreenSpace`] configuration for use with
-    /// [`build_screen_space`](Self::build_screen_space).
-    ///
-    /// If not called, [`build_screen_space`](Self::build_screen_space)
-    /// uses [`ScreenSpace::default`].
-    #[must_use]
-    pub fn screen_space_with(mut self, config: ScreenSpace) -> Self {
-        self.screen_space = Some(config);
-        self
-    }
-
-    /// Places the panel at an explicit pixel position (top-left origin, y-down).
-    /// The panel's [`Anchor`] determines which point sits at this position.
-    #[must_use]
-    pub fn screen_position(mut self, x: f32, y: f32) -> Self {
-        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
-        ss.position = ScreenPosition::At(Vec2::new(x, y));
-        self
-    }
-
-    /// Panel width fills a fraction of the window (0.0–1.0).
-    #[must_use]
-    pub fn width_percent(mut self, fraction: f32) -> Self {
-        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
-        ss.width = Some(ScreenDimension::Percent(fraction));
-        self
-    }
-
-    /// Panel height fills a fraction of the window (0.0–1.0).
-    #[must_use]
-    pub fn height_percent(mut self, fraction: f32) -> Self {
-        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
-        ss.height = Some(ScreenDimension::Percent(fraction));
-        self
-    }
-
-    /// Panel width is a fixed pixel value, managed by the plugin.
-    #[must_use]
-    pub fn width_px(mut self, pixels: f32) -> Self {
-        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
-        ss.width = Some(ScreenDimension::Fixed(pixels));
-        self
-    }
-
-    /// Panel height is a fixed pixel value, managed by the plugin.
-    #[must_use]
-    pub fn height_px(mut self, pixels: f32) -> Self {
-        let ss = self.screen_space.get_or_insert_with(ScreenSpace::default);
-        ss.height = Some(ScreenDimension::Fixed(pixels));
-        self
-    }
-
-    /// Consumes the builder and returns a `(DiegeticPanel, ScreenSpace)` tuple.
-    ///
-    /// The tuple is a valid Bevy bundle — pass it directly to
-    /// `commands.spawn(...)`. Sets `layout_unit` to [`Unit::Pixels`] and
-    /// `world_height` to match the panel height so that `points_to_world`
-    /// equals 1.0 (1 layout point = 1 world unit = 1 screen pixel under
-    /// the orthographic overlay camera).
-    ///
-    /// When [`ScreenDimension::Percent`] is used for width or height,
-    /// the layout tree's root element is automatically set to
-    /// `Sizing::GROW` on that axis. This means the plugin can resize
-    /// the panel by updating `panel.width`/`panel.height` and the
-    /// layout engine reflows children without a tree rebuild. If you
-    /// rebuild the tree for state changes, use
-    /// [`LayoutBuilder::with_root`] with a `Sizing::GROW` root so
-    /// the rebuilt tree also reflows correctly on resize.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// commands.spawn(
-    ///     DiegeticPanel::builder()
-    ///         .size_px(400.0, 300.0)
-    ///         .layout(|b| {
-    ///             b.text("Score: 999", LayoutTextStyle::new(24.0));
-    ///         })
-    ///         .build_screen_space()
-    /// );
-    /// ```
-    #[must_use]
-    pub fn build_screen_space(mut self) -> (DiegeticPanel, ScreenSpace) {
-        let screen_space = self.screen_space.take().unwrap_or_default();
-        // Set world_height = height so points_to_world = 1.0.
-        // (viewport_pts_h = height * to_points() = height * 1.0 = height,
-        //  so points_to_world = world_height / viewport_pts_h = height / height = 1.0)
-        if self.world_height.is_none() && self.world_width.is_none() {
-            self.world_height = Some(self.height);
+    pub fn world() -> DiegeticPanelBuilder<World, NeedsSize> {
+        DiegeticPanelBuilder {
+            data:    BuilderData::default(),
+            _marker: PhantomData,
         }
-        // For percent-sized axes, set the root element to GROW so that
-        // changing panel.width/height reflows without a tree rebuild.
-        if let Some(ref mut tree) = self.tree {
-            if matches!(screen_space.width, Some(ScreenDimension::Percent(_))) {
-                tree.set_root_grow_width();
-            }
-            if matches!(screen_space.height, Some(ScreenDimension::Percent(_))) {
-                tree.set_root_grow_height();
-            }
-        }
-        (self.build_internal(), screen_space)
     }
 
-    /// Consumes the builder and returns a [`DiegeticPanel`] component.
+    /// Returns a builder for a screen-space panel.
     ///
-    /// Returns `Err(InvalidSize)` if width or height is zero or negative.
-    pub fn build(self) -> Result<DiegeticPanel, InvalidSize> {
-        if self.width <= 0.0 || self.height <= 0.0 {
-            return Err(InvalidSize {
-                width:  self.width,
-                height: self.height,
-            });
-        }
-        Ok(self.build_internal())
-    }
-
-    /// Internal build that skips validation (used by `build_screen_space`
-    /// where dimensions may be zero before the first frame sizes them).
-    fn build_internal(self) -> DiegeticPanel {
-        DiegeticPanel {
-            tree:           self.tree.unwrap_or_default(),
-            width:          self.width,
-            height:         self.height,
-            layout_unit:    self.layout_unit,
-            font_unit:      self.font_unit,
-            anchor:         self.anchor.unwrap_or(Anchor::TopLeft),
-            world_width:    self.world_width,
-            world_height:   self.world_height,
-            render_mode:    self.render_mode,
-            surface_shadow: self.surface_shadow,
-            material:       self.material,
-            text_material:  self.text_material,
+    /// Bare floats in `.size()` default to [`Unit::Pixels`].
+    #[must_use]
+    pub fn screen() -> DiegeticPanelBuilder<Screen, NeedsSize> {
+        DiegeticPanelBuilder {
+            data:    BuilderData {
+                mode: PanelMode::Screen {
+                    position:      ScreenPosition::default(),
+                    width:         None,
+                    height:        None,
+                    camera_order:  DEFAULT_SCREEN_SPACE_CAMERA_ORDER,
+                    render_layers: RenderLayers::layer(DEFAULT_SCREEN_SPACE_RENDER_LAYER),
+                },
+                ..BuilderData::default()
+            },
+            _marker: PhantomData,
         }
     }
 }
+
+// ── Computation methods ─────────────────────────────────────────────────────
 
 impl DiegeticPanel {
     /// Returns the layout unit.
-    fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit { self.layout_unit }
+    pub(crate) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit {
+        self.layout_unit
+    }
 
     /// Resolves the font unit, falling back to the global [`UnitConfig`].
-    fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {
+    pub(crate) fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {
         self.font_unit.unwrap_or(config.font)
     }
 
@@ -548,100 +460,477 @@ impl DiegeticPanel {
     }
 }
 
-/// Marker component that renders a [`DiegeticPanel`] in screen space.
+// ── Typestate marker types ──────────────────────────────────────────────────
+
+/// Marker: panel lives in 3D world space.
+pub struct World;
+
+/// Marker: panel renders as a screen overlay.
+pub struct Screen;
+
+/// Marker: builder needs `.size()` or `.paper()` before `.layout()` or `.build()`.
+pub struct NeedsSize;
+
+/// Marker: dimensions are set, `.layout()` or `.build()` are available.
+pub struct HasSize;
+
+/// Marker: layout tree is built, `.build()` is available.
+pub struct Ready;
+
+// ── Builder data (shared across all states) ─────────────────────────────────
+
+#[derive(Default)]
+struct BuilderData {
+    width:          f32,
+    height:         f32,
+    layout_unit:    Unit,
+    font_unit:      Option<Unit>,
+    anchor:         Option<Anchor>,
+    world_width:    Option<f32>,
+    world_height:   Option<f32>,
+    render_mode:    RenderMode,
+    surface_shadow: SurfaceShadow,
+    material:       Option<StandardMaterial>,
+    text_material:  Option<StandardMaterial>,
+    tree:           Option<LayoutTree>,
+    mode:           PanelMode,
+}
+
+/// Builder for [`DiegeticPanel`].
 ///
-/// When attached, the plugin spawns a dedicated orthographic camera
-/// (1 world unit = 1 logical pixel) on a separate [`RenderLayers`] layer,
-/// plus a directional light on the same layer. The panel renders as a 2D
-/// overlay on top of the 3D scene, with layout units mapping 1:1 to
-/// screen pixels.
+/// Constructed via [`DiegeticPanel::world()`] or [`DiegeticPanel::screen()`].
+/// The type parameters enforce the correct method call order at compile time:
 ///
-/// Use [`DiegeticPanelBuilder::build_screen_space`] to construct a panel
-/// with this component already attached.
+/// - `Mode`: [`World`] or [`Screen`] — determines which methods are available
+/// - `State`: [`NeedsSize`] → [`HasSize`] → [`Ready`] — enforces `.size()`
+///   before `.layout()`, and `.layout()` before or instead of `.build()`
 ///
-/// # Camera order
+/// # State machine
 ///
-/// `camera_order` controls rendering priority relative to other cameras.
-/// The default (`1`) renders after the typical scene camera (`0`). Override
-/// if your app already uses camera order 1 for something else.
-///
-/// # Render layer
-///
-/// How a screen-space panel derives its size along one axis from the window.
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub enum ScreenDimension {
-    /// Explicit pixel size. The panel's width/height is set to this value
-    /// regardless of window size.
-    Fixed(f32),
-    /// Fraction of the window along this axis (0.0–1.0).
-    /// `Percent(1.0)` fills the full window width or height.
+/// ```text
+/// NeedsSize ──.size()/.paper()──→ HasSize ──.layout()──→ Ready
+///                                    │                     │
+///                                    └──.build()───────────┘──→ Result<DiegeticPanel>
+/// ```
+pub struct DiegeticPanelBuilder<Mode, State> {
+    data:    BuilderData,
+    _marker: PhantomData<(Mode, State)>,
+}
+
+// ── Shared methods (all modes, all states) ──────────────────────────────────
+
+impl<M, S> DiegeticPanelBuilder<M, S> {
+    /// Sets the anchor point (default [`Anchor::TopLeft`]).
+    #[must_use]
+    pub const fn anchor(mut self, anchor: Anchor) -> Self {
+        self.data.anchor = Some(anchor);
+        self
+    }
+
+    /// Sets the default PBR material for backgrounds and borders.
     ///
-    /// When used with [`DiegeticPanelBuilder::build_screen_space`], the
-    /// layout tree's root element is automatically set to `Sizing::GROW`
-    /// on the percent-sized axis. This allows the layout engine to reflow
-    /// children when `panel.width`/`panel.height` changes — no tree
-    /// rebuild is needed for pure resize.
-    Percent(f32),
+    /// `base_color` is overridden by the layout color when both are set.
+    /// Individual elements can override via [`El::material`].
+    #[must_use]
+    pub fn material(mut self, material: StandardMaterial) -> Self {
+        self.data.material = Some(material);
+        self
+    }
+
+    /// Sets the default PBR material for text.
+    ///
+    /// `base_color` is overridden by [`LayoutTextStyle::color`] when set.
+    #[must_use]
+    pub fn text_material(mut self, material: StandardMaterial) -> Self {
+        self.data.text_material = Some(material);
+        self
+    }
+
+    /// Overrides the font unit (default inherits from [`UnitConfig::font`]).
+    #[must_use]
+    pub const fn font_unit(mut self, unit: Unit) -> Self {
+        self.data.font_unit = Some(unit);
+        self
+    }
+
+    /// Sets the rendering mode. Defaults to [`RenderMode::Geometry`].
+    #[must_use]
+    pub const fn render_mode(mut self, mode: RenderMode) -> Self {
+        self.data.render_mode = mode;
+        self
+    }
+
+    /// Sets whether the panel surface casts 3D shadows.
+    /// Defaults to [`SurfaceShadow::Off`].
+    #[must_use]
+    pub const fn surface_shadow(mut self, shadow: SurfaceShadow) -> Self {
+        self.data.surface_shadow = shadow;
+        self
+    }
 }
 
-/// Where a screen-space panel is placed within the window.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
-pub enum ScreenPosition {
-    /// Pin to the window edge/corner that matches the panel's [`Anchor`].
-    /// `Anchor::TopLeft` pins to the window's top-left corner,
-    /// `Anchor::Center` pins to the window's center, etc.
-    #[default]
-    Screen,
-    /// Place at an explicit pixel position (top-left origin, y-down).
-    /// The panel's [`Anchor`] determines which point of the panel sits
-    /// at this position.
-    At(Vec2),
-}
+// ── NeedsSize → HasSize transitions ────────────────────────────────────────
 
-/// Marks a panel for screen-space rendering with an orthographic overlay camera.
-///
-/// The plugin automatically positions and (optionally) sizes the panel each
-/// frame based on window dimensions, the panel's [`Anchor`], and the fields
-/// below. No per-example update system is needed for positioning or resize.
-///
-/// `render_layer` isolates the panel from the scene camera. The default
-/// (`31`) uses the highest standard Bevy render layer to minimize
-/// collisions with user-defined layers.
-#[derive(Component, Clone, Debug, Reflect)]
-#[reflect(Component)]
-pub struct ScreenSpace {
-    /// Camera render order. Matches [`Camera::order`] (`isize`).
-    /// Higher orders render on top. Default: `1`.
-    pub camera_order:  isize,
-    /// Render layers for isolation from the scene camera.
-    /// Default: `RenderLayers::layer(31)`.
-    pub render_layers: RenderLayers,
-    /// Where to place the panel within the window.
-    /// Default: [`ScreenPosition::Screen`] (pin to the panel's anchor corner).
-    pub position:      ScreenPosition,
-    /// How to derive panel width from the window.
-    /// `None` means the panel keeps whatever width was set at spawn time.
-    pub width:         Option<ScreenDimension>,
-    /// How to derive panel height from the window.
-    /// `None` means the panel keeps its spawn-time height.
-    pub height:        Option<ScreenDimension>,
-}
-
-/// Default camera order for [`ScreenSpace`] overlay cameras.
-const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
-
-/// Default render layer for [`ScreenSpace`] panels.
-const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
-
-impl Default for ScreenSpace {
-    fn default() -> Self {
-        Self {
-            camera_order:  DEFAULT_SCREEN_SPACE_CAMERA_ORDER,
-            render_layers: RenderLayers::layer(DEFAULT_SCREEN_SPACE_RENDER_LAYER),
-            position:      ScreenPosition::default(),
-            width:         None,
-            height:        None,
+impl DiegeticPanelBuilder<World, NeedsSize> {
+    /// Sets the panel dimensions and layout unit.
+    ///
+    /// Bare floats default to [`Unit::Meters`] for world-space panels.
+    /// Typed wrappers like [`Mm`](super::config::Mm) or [`Pt`](super::config::Pt)
+    /// set the unit explicitly.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// DiegeticPanel::world().size(0.5, 0.3)              // 0.5 × 0.3 meters
+    /// DiegeticPanel::world().size(Mm(210.0), Mm(297.0))  // A4 in mm
+    /// ```
+    #[must_use]
+    pub fn size(
+        mut self,
+        w: impl Into<Dimension>,
+        h: impl Into<Dimension>,
+    ) -> DiegeticPanelBuilder<World, HasSize> {
+        let wd = w.into();
+        let hd = h.into();
+        let unit = wd.unit.or(hd.unit).unwrap_or(Unit::Meters);
+        self.data.width = wd.value;
+        self.data.height = hd.value;
+        self.data.layout_unit = unit;
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
         }
+    }
+
+    /// Sets the panel dimensions from a predefined paper size.
+    ///
+    /// Uses the paper's native unit (mm for ISO, inches for North American).
+    #[must_use]
+    pub fn paper(
+        mut self,
+        paper: super::config::PaperSize,
+    ) -> DiegeticPanelBuilder<World, HasSize> {
+        let (w, h, unit) = paper.dimensions();
+        self.data.width = w;
+        self.data.height = h;
+        self.data.layout_unit = unit;
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl DiegeticPanelBuilder<Screen, NeedsSize> {
+    /// Sets the panel dimensions and layout unit.
+    ///
+    /// Bare floats default to [`Unit::Pixels`] for screen-space panels.
+    /// Typed wrappers like [`Pt`](super::config::Pt) set the unit explicitly.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// DiegeticPanel::screen().size(800.0, 600.0)          // 800 × 600 pixels
+    /// DiegeticPanel::screen().size(Pt(595.0), Pt(842.0))  // A4 in points
+    /// ```
+    #[must_use]
+    pub fn size(
+        mut self,
+        w: impl Into<Dimension>,
+        h: impl Into<Dimension>,
+    ) -> DiegeticPanelBuilder<Screen, HasSize> {
+        let wd = w.into();
+        let hd = h.into();
+        let unit = wd.unit.or(hd.unit).unwrap_or(Unit::Pixels);
+        self.data.width = wd.value;
+        self.data.height = hd.value;
+        self.data.layout_unit = unit;
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Sets the panel dimensions from a predefined paper size.
+    ///
+    /// Converts to pixels at 72 PPI (1 pt = 1 px in our system).
+    #[must_use]
+    pub fn paper(
+        mut self,
+        paper: super::config::PaperSize,
+    ) -> DiegeticPanelBuilder<Screen, HasSize> {
+        let w = paper.width_as::<Pt>();
+        let h = paper.height_as::<Pt>();
+        self.data.width = w;
+        self.data.height = h;
+        self.data.layout_unit = Unit::Pixels;
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+// ── World-only methods (any state) ──────────────────────────────────────────
+
+impl<S> DiegeticPanelBuilder<World, S> {
+    /// Scales the panel uniformly so its world width matches this value in meters.
+    /// Height follows the aspect ratio.
+    #[must_use]
+    pub const fn world_width(mut self, meters: f32) -> Self {
+        self.data.world_width = Some(meters);
+        self
+    }
+
+    /// Scales the panel uniformly so its world height matches this value in meters.
+    /// Width follows the aspect ratio.
+    #[must_use]
+    pub const fn world_height(mut self, meters: f32) -> Self {
+        self.data.world_height = Some(meters);
+        self
+    }
+}
+
+// ── Screen-only methods on HasSize ──────────────────────────────────────────
+
+impl DiegeticPanelBuilder<Screen, HasSize> {
+    /// Panel width fills a fraction of the window (0.0–1.0).
+    #[must_use]
+    pub const fn width_percent(mut self, fraction: f32) -> Self {
+        if let PanelMode::Screen { ref mut width, .. } = self.data.mode {
+            *width = Some(ScreenDimension::Percent(fraction));
+        }
+        self
+    }
+
+    /// Panel height fills a fraction of the window (0.0–1.0).
+    #[must_use]
+    pub const fn height_percent(mut self, fraction: f32) -> Self {
+        if let PanelMode::Screen { ref mut height, .. } = self.data.mode {
+            *height = Some(ScreenDimension::Percent(fraction));
+        }
+        self
+    }
+
+    /// Panel width is a fixed pixel value, managed by the plugin.
+    #[must_use]
+    pub const fn width_px(mut self, pixels: f32) -> Self {
+        if let PanelMode::Screen { ref mut width, .. } = self.data.mode {
+            *width = Some(ScreenDimension::Fixed(pixels));
+        }
+        self
+    }
+
+    /// Panel height is a fixed pixel value, managed by the plugin.
+    #[must_use]
+    pub const fn height_px(mut self, pixels: f32) -> Self {
+        if let PanelMode::Screen { ref mut height, .. } = self.data.mode {
+            *height = Some(ScreenDimension::Fixed(pixels));
+        }
+        self
+    }
+
+    /// Places the panel at an explicit pixel position (top-left origin, y-down).
+    #[must_use]
+    pub const fn screen_position(mut self, x: f32, y: f32) -> Self {
+        if let PanelMode::Screen {
+            ref mut position, ..
+        } = self.data.mode
+        {
+            *position = ScreenPosition::At(Vec2::new(x, y));
+        }
+        self
+    }
+
+    /// Sets the overlay camera render order. Default: `1`.
+    #[must_use]
+    pub const fn camera_order(mut self, order: isize) -> Self {
+        if let PanelMode::Screen {
+            ref mut camera_order,
+            ..
+        } = self.data.mode
+        {
+            *camera_order = order;
+        }
+        self
+    }
+
+    /// Sets the render layers for camera isolation. Default: layer 31.
+    #[must_use]
+    pub fn render_layers(mut self, layers: RenderLayers) -> Self {
+        if let PanelMode::Screen {
+            ref mut render_layers,
+            ..
+        } = self.data.mode
+        {
+            *render_layers = layers;
+        }
+        self
+    }
+}
+
+// ── HasSize → Ready transition (layout) ─────────────────────────────────────
+
+impl DiegeticPanelBuilder<World, HasSize> {
+    /// Builds the layout tree from a closure. The closure receives a
+    /// [`LayoutBuilder`] pre-configured with the panel's dimensions.
+    #[must_use]
+    pub fn layout(
+        mut self,
+        f: impl FnOnce(&mut LayoutBuilder),
+    ) -> DiegeticPanelBuilder<World, Ready> {
+        let mut builder = LayoutBuilder::new(self.data.width, self.data.height);
+        f(&mut builder);
+        self.data.tree = Some(builder.build());
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Attaches a pre-built layout tree.
+    #[must_use]
+    pub fn with_tree(mut self, tree: LayoutTree) -> DiegeticPanelBuilder<World, Ready> {
+        self.data.tree = Some(tree);
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl DiegeticPanelBuilder<Screen, HasSize> {
+    /// Builds the layout tree from a closure. The closure receives a
+    /// [`LayoutBuilder`] pre-configured with the panel's dimensions.
+    #[must_use]
+    pub fn layout(
+        mut self,
+        f: impl FnOnce(&mut LayoutBuilder),
+    ) -> DiegeticPanelBuilder<Screen, Ready> {
+        let mut builder = LayoutBuilder::new(self.data.width, self.data.height);
+        f(&mut builder);
+        self.data.tree = Some(builder.build());
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Attaches a pre-built layout tree.
+    #[must_use]
+    pub fn with_tree(mut self, tree: LayoutTree) -> DiegeticPanelBuilder<Screen, Ready> {
+        self.data.tree = Some(tree);
+        DiegeticPanelBuilder {
+            data:    self.data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+// ── Sealed CanBuild trait ───────────────────────────────────────────────────
+
+mod sealed {
+    pub trait CanBuild {}
+}
+
+impl sealed::CanBuild for HasSize {}
+impl sealed::CanBuild for Ready {}
+
+// ── Build (on HasSize or Ready, either mode) ────────────────────────────────
+
+impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
+    /// Consumes the builder and returns a [`DiegeticPanel`] component.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidSize`] if width or height is zero or negative.
+    pub fn build(self) -> Result<DiegeticPanel, InvalidSize> {
+        if self.data.width <= 0.0 || self.data.height <= 0.0 {
+            return Err(InvalidSize {
+                width:  self.data.width,
+                height: self.data.height,
+            });
+        }
+        Ok(build_panel(self.data))
+    }
+}
+
+impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
+    /// Consumes the builder and returns a [`DiegeticPanel`] component.
+    ///
+    /// For screen-space panels, sets `world_height = height` if neither
+    /// `world_width` nor `world_height` is set, so that `points_to_world`
+    /// equals 1.0 (1 layout unit = 1 world unit = 1 screen pixel under
+    /// the orthographic overlay camera).
+    ///
+    /// When [`ScreenDimension::Percent`] is used for width or height,
+    /// the layout tree's root element is automatically set to
+    /// `Sizing::GROW` on that axis.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidSize`] if width or height is zero or negative
+    /// and no percent-based sizing will fill them later.
+    pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
+        let has_percent_width = matches!(
+            self.data.mode,
+            PanelMode::Screen {
+                width: Some(ScreenDimension::Percent(_)),
+                ..
+            }
+        );
+        let has_percent_height = matches!(
+            self.data.mode,
+            PanelMode::Screen {
+                height: Some(ScreenDimension::Percent(_)),
+                ..
+            }
+        );
+
+        if !has_percent_width && !has_percent_height
+            && (self.data.width <= 0.0 || self.data.height <= 0.0)
+        {
+            return Err(InvalidSize {
+                width:  self.data.width,
+                height: self.data.height,
+            });
+        }
+
+        // Set world_height = height so points_to_world = 1.0.
+        if self.data.world_height.is_none() && self.data.world_width.is_none() {
+            self.data.world_height = Some(self.data.height);
+        }
+
+        // For percent-sized axes, set the root element to GROW.
+        if let Some(ref mut tree) = self.data.tree {
+            if has_percent_width {
+                tree.set_root_grow_width();
+            }
+            if has_percent_height {
+                tree.set_root_grow_height();
+            }
+        }
+
+        Ok(build_panel(self.data))
+    }
+}
+
+/// Internal build from `BuilderData`.
+fn build_panel(data: BuilderData) -> DiegeticPanel {
+    DiegeticPanel {
+        tree:           data.tree.unwrap_or_default(),
+        width:          data.width,
+        height:         data.height,
+        layout_unit:    data.layout_unit,
+        font_unit:      data.font_unit,
+        anchor:         data.anchor.unwrap_or(Anchor::TopLeft),
+        world_width:    data.world_width,
+        world_height:   data.world_height,
+        render_mode:    data.render_mode,
+        surface_shadow: data.surface_shadow,
+        material:       data.material,
+        text_material:  data.text_material,
+        mode:           data.mode,
     }
 }
 

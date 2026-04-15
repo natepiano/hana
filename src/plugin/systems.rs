@@ -16,7 +16,6 @@ use super::components::ComputedDiegeticPanel;
 use super::components::DiegeticPanel;
 use super::components::DiegeticTextMeasurer;
 use super::components::RenderMode;
-use super::components::ScreenSpace;
 use super::screen_space::ScreenSpaceCamera;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Border;
@@ -90,7 +89,7 @@ pub(super) fn ensure_oit_on_cameras(
     >,
     mut commands: Commands,
 ) {
-    let needs_oit = panels.iter().any(|p| p.render_mode == RenderMode::Geometry);
+    let needs_oit = panels.iter().any(|p| p.render_mode() == RenderMode::Geometry);
     if !needs_oit {
         return;
     }
@@ -297,18 +296,18 @@ pub(super) fn compute_panel_layouts(
         };
         panel_count += 1;
 
-        let layout_unit = panel_ref.layout_unit;
-        let font_unit = panel_ref.font_unit.unwrap_or(unit_config.font);
+        let layout_unit = panel_ref.layout_unit();
+        let font_unit = panel_ref.font_unit().unwrap_or(unit_config.font);
         let layout_to_pts = layout_unit.to_points();
         let font_to_pts = font_unit.to_points();
 
         // Pre-scale tree to points so parley always gets reasonable font sizes.
-        let scaled_tree = panel_ref.tree.scaled(layout_to_pts, font_to_pts);
+        let scaled_tree = panel_ref.tree().scaled(layout_to_pts, font_to_pts);
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(
             &scaled_tree,
-            panel_ref.width * layout_to_pts,
-            panel_ref.height * layout_to_pts,
+            panel_ref.width() * layout_to_pts,
+            panel_ref.height() * layout_to_pts,
             1.0, // tree is already in points — no additional font scaling
         );
 
@@ -426,7 +425,6 @@ pub(super) fn render_layout_gizmos(
             Entity,
             &DiegeticPanel,
             &ComputedDiegeticPanel,
-            Has<ScreenSpace>,
         ),
         Changed<ComputedDiegeticPanel>,
     >,
@@ -442,9 +440,10 @@ pub(super) fn render_layout_gizmos(
 
     let screen_pixels_per_meter = pixels_per_meter(&cameras);
 
-    for (panel_entity, panel, computed, is_screen_space) in &changed_panels {
+    for (panel_entity, panel, computed) in &changed_panels {
+        let is_screen_space = panel.mode().is_screen();
         // Geometry mode renders real meshes — gizmos are redundant.
-        if panel.render_mode == RenderMode::Geometry {
+        if panel.render_mode() == RenderMode::Geometry {
             continue;
         }
 

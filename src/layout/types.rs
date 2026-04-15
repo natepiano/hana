@@ -653,8 +653,8 @@ pub enum Unit {
     ///
     /// In the layout engine, pixels map 1:1 with typographic points
     /// (`to_points()` returns 1.0). The actual screen-pixel behavior
-    /// is provided by the camera system: [`ScreenSpace`](crate::ScreenSpace)
-    /// panels use an orthographic camera where 1 world unit = 1 pixel;
+    /// is provided by the camera system: screen-space panels
+    /// use an orthographic camera where 1 world unit = 1 pixel;
     /// world-space panels can use per-frame `Transform` scaling.
     Pixels,
     /// 1 unit = 1 inch (0.0254 m).

@@ -546,7 +546,7 @@ fn reconcile_panel_image_children(
         let layer = rtt_registry
             .get_layer(panel_entity)
             .map_or(RenderLayers::layer(0), RenderLayers::layer);
-        let is_geometry = panel.render_mode == RenderMode::Geometry;
+        let is_geometry = panel.render_mode() == RenderMode::Geometry;
 
         // Collect image commands, skipping those entirely outside their clip rect.
         let clip_rects = super::clip::compute_clip_rects(&result.commands);
@@ -776,7 +776,7 @@ fn build_panel_batched_meshes(
             continue;
         };
         let hue = hue_offset.map_or(0.0, |h| h.0);
-        let is_geometry = panel.render_mode == RenderMode::Geometry;
+        let is_geometry = panel.render_mode() == RenderMode::Geometry;
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
 
         // Collect all quads from this panel's `PanelTextChild` children
@@ -825,8 +825,8 @@ fn build_panel_batched_meshes(
 
         // Resolve the base StandardMaterial for text in this panel.
         let mut text_base = panel
-            .text_material
-            .clone()
+            .text_material()
+            .cloned()
             .unwrap_or_else(constants::default_panel_material);
         text_base.alpha_mode = AlphaMode::Blend;
         text_base.double_sided = true;

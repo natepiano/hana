@@ -363,7 +363,7 @@ pub struct In(pub f32);
 
 /// A value in logical pixels.
 ///
-/// On [`ScreenSpace`](crate::ScreenSpace) panels, pixels map 1:1 to
+/// On screen-space panels, pixels map 1:1 to
 /// on-screen logical pixels. On world-space panels, the system resolves
 /// pixel dimensions per-frame using the active camera's projection.
 #[derive(Clone, Copy, Debug)]
