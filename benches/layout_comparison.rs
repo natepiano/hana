@@ -417,14 +417,21 @@ fn create_bench_app() -> App {
 
 fn bench_panel(tree: bevy_diegetic::LayoutTree, size: f32) -> DiegeticPanel {
     let layout_mpu = 1.0 / size;
-    DiegeticPanel {
-        tree,
-        width: size,
-        height: size,
-        layout_unit: Unit::Custom(layout_mpu),
-        font_unit: Some(Unit::Custom(layout_mpu)),
-        ..Default::default()
-    }
+    DiegeticPanel::world()
+        .size(
+            bevy_diegetic::Dimension {
+                value: size,
+                unit:  Some(Unit::Custom(layout_mpu)),
+            },
+            bevy_diegetic::Dimension {
+                value: size,
+                unit:  Some(Unit::Custom(layout_mpu)),
+            },
+        )
+        .font_unit(Unit::Custom(layout_mpu))
+        .with_tree(tree)
+        .build()
+        .expect("bench panel dimensions must be valid")
 }
 
 // ── Benchmark runners ───────────────────────────────────────────────────
@@ -443,7 +450,7 @@ fn run_diegetic_layout(app: &mut App, entity: Entity, rows: &[(&str, &str)], siz
     app.world_mut()
         .get_mut::<DiegeticPanel>(entity)
         .expect("panel entity must exist")
-        .tree = tree;
+        .set_tree(tree);
     app.update();
     let computed = app.world().get::<ComputedDiegeticPanel>(entity);
     black_box(&computed);

@@ -156,14 +156,21 @@ fn create_bench_app() -> App {
 }
 
 fn bench_panel(tree: bevy_diegetic::LayoutTree) -> DiegeticPanel {
-    DiegeticPanel {
-        tree,
-        width: LAYOUT_SIZE,
-        height: LAYOUT_SIZE,
-        layout_unit: Unit::Custom(LAYOUT_MPU),
-        font_unit: Some(Unit::Custom(LAYOUT_MPU)),
-        ..Default::default()
-    }
+    DiegeticPanel::world()
+        .size(
+            bevy_diegetic::Dimension {
+                value: LAYOUT_SIZE,
+                unit:  Some(Unit::Custom(LAYOUT_MPU)),
+            },
+            bevy_diegetic::Dimension {
+                value: LAYOUT_SIZE,
+                unit:  Some(Unit::Custom(LAYOUT_MPU)),
+            },
+        )
+        .font_unit(Unit::Custom(LAYOUT_MPU))
+        .with_tree(tree)
+        .build()
+        .expect("bench panel dimensions must be valid")
 }
 
 // ── Benchmarks ──────────────────────────────────────────────────────────
@@ -203,7 +210,7 @@ fn bench_panel_layout(c: &mut Criterion) {
                 app.world_mut()
                     .get_mut::<DiegeticPanel>(entity)
                     .expect("entity must exist")
-                    .tree = tree;
+                    .set_tree(tree);
                 app.update();
                 black_box(app.world().get::<ComputedDiegeticPanel>(entity));
             });
@@ -230,7 +237,7 @@ fn bench_panel_layout(c: &mut Criterion) {
                 app.world_mut()
                     .get_mut::<DiegeticPanel>(entity)
                     .expect("entity must exist")
-                    .tree = tree;
+                    .set_tree(tree);
                 app.update();
                 black_box(app.world().get::<ComputedDiegeticPanel>(entity));
             });

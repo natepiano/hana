@@ -502,8 +502,8 @@ struct BuilderData {
 /// The type parameters enforce the correct method call order at compile time:
 ///
 /// - `Mode`: [`World`] or [`Screen`] — determines which methods are available
-/// - `State`: [`NeedsSize`] → [`HasSize`] → [`Ready`] — enforces `.size()`
-///   before `.layout()`, and `.layout()` before or instead of `.build()`
+/// - `State`: [`NeedsSize`] → [`HasSize`] → [`Ready`] — enforces `.size()` before `.layout()`, and
+///   `.layout()` before or instead of `.build()`
 ///
 /// # State machine
 ///
@@ -887,7 +887,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             }
         );
 
-        if !has_percent_width && !has_percent_height
+        if !has_percent_width
+            && !has_percent_height
             && (self.data.width <= 0.0 || self.data.height <= 0.0)
         {
             return Err(InvalidSize {

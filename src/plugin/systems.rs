@@ -89,7 +89,9 @@ pub(super) fn ensure_oit_on_cameras(
     >,
     mut commands: Commands,
 ) {
-    let needs_oit = panels.iter().any(|p| p.render_mode() == RenderMode::Geometry);
+    let needs_oit = panels
+        .iter()
+        .any(|p| p.render_mode() == RenderMode::Geometry);
     if !needs_oit {
         return;
     }
@@ -421,11 +423,7 @@ fn spawn_rect_gizmo(
 /// path for panel layout geometry — always active.
 pub(super) fn render_layout_gizmos(
     changed_panels: Query<
-        (
-            Entity,
-            &DiegeticPanel,
-            &ComputedDiegeticPanel,
-        ),
+        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
         Changed<ComputedDiegeticPanel>,
     >,
     existing_gizmos: Query<(Entity, &ChildOf), With<PanelGizmoChild>>,

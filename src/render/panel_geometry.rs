@@ -296,8 +296,7 @@ fn spawn_sdf_element(
             Some(Color::NONE)
         }
     });
-    let mut base =
-        constants::resolve_material(element_mat, panel.material(), effective_color);
+    let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
     if render_style == RenderStyle::Texture {
         base.unlit = true;
     } else {

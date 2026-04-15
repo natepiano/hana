@@ -232,8 +232,7 @@ pub(super) fn setup_panel_rtt(
         // Spawn display quad — visible to the panel's scene layer.
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
         let quad_mesh = meshes.add(Rectangle::new(world_w, world_h));
-        let quad_material =
-            materials.add(display_quad_material(panel.material(), image_handle));
+        let quad_material = materials.add(display_quad_material(panel.material(), image_handle));
 
         // Position the quad at the center of the panel content area.
         let quad_base = (
