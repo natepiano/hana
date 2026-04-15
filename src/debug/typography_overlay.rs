@@ -803,12 +803,21 @@ fn spawn_advancement_arrow(
         )
         .color(overlay.color)
         .thickness(callout_line_thickness(overlay, font_size, scale))
-        .cap_size(head)
         .surface_shadow(SurfaceShadow::On)
         .start_inset(gap)
         .end_inset(gap)
-        .start_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open))
-        .end_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open)),
+        .start_cap(
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
+        )
+        .end_cap(
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
+        ),
     );
 
     commands.entity(entity).with_child((
@@ -1141,26 +1150,72 @@ fn spawn_metric_arrow_callouts(
     let gap = arrow_gap(font_size, scale);
     let thickness = callout_line_thickness(overlay, font_size, scale);
 
-    for (from, to) in [
+    let baseline_color = Color::srgb(0.9, 0.2, 0.2);
+
+    for (from, to, start_cap, end_cap) in [
         (
             Vec3::new(left_1, ascent_world, METRIC_LINE_Z_OFFSET),
             Vec3::new(left_1, baseline_world, METRIC_LINE_Z_OFFSET),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head)
+                .color(baseline_color),
         ),
         (
             Vec3::new(left_1, baseline_world, METRIC_LINE_Z_OFFSET),
             Vec3::new(left_1, descent_world, METRIC_LINE_Z_OFFSET),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head)
+                .color(baseline_color),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
         ),
         (
             Vec3::new(left_2, ascent_world, METRIC_LINE_Z_OFFSET),
             Vec3::new(left_2, descent_world, METRIC_LINE_Z_OFFSET),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
         ),
         (
             Vec3::new(right_1, x_height_world, METRIC_LINE_Z_OFFSET),
             Vec3::new(right_1, baseline_world, METRIC_LINE_Z_OFFSET),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head)
+                .color(baseline_color),
         ),
         (
             Vec3::new(right_2, cap_height_world, METRIC_LINE_Z_OFFSET),
             Vec3::new(right_2, baseline_world, METRIC_LINE_Z_OFFSET),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head),
+            callouts::CalloutCap::arrow()
+                .solid()
+                .length(head)
+                .width(head)
+                .color(baseline_color),
         ),
     ] {
         callouts::spawn_callout_line(
@@ -1169,12 +1224,11 @@ fn spawn_metric_arrow_callouts(
             &callouts::CalloutLine::new(from, to)
                 .color(overlay.color)
                 .thickness(thickness)
-                .cap_size(head)
                 .surface_shadow(SurfaceShadow::On)
                 .start_inset(gap)
                 .end_inset(gap)
-                .start_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open))
-                .end_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open)),
+                .start_cap(start_cap)
+                .end_cap(end_cap),
         );
     }
 }

@@ -34,21 +34,306 @@ use crate::render::SDF_AA_PADDING;
 use crate::render::SdfPanelMaterial;
 use crate::render::default_panel_material;
 use crate::render::sdf_panel_material;
+use crate::render::sdf_shape_material;
 
 /// Visual style for arrow end caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArrowStyle {
     /// Open chevron made from two line segments.
     Open,
+    /// Solid triangular arrowhead with a sharp point.
+    Solid,
+}
+
+/// Arrow-cap configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArrowCap {
+    style:  ArrowStyle,
+    length: Option<f32>,
+    width:  Option<f32>,
+    color:  Option<Color>,
+}
+
+impl ArrowCap {
+    /// Creates a default arrow cap.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            style:  ArrowStyle::Open,
+            length: None,
+            width:  None,
+            color:  None,
+        }
+    }
+
+    /// Uses the open chevron arrow style.
+    #[must_use]
+    pub const fn open(mut self) -> Self {
+        self.style = ArrowStyle::Open;
+        self
+    }
+
+    /// Uses the solid triangular arrow style.
+    #[must_use]
+    pub const fn solid(mut self) -> Self {
+        self.style = ArrowStyle::Solid;
+        self
+    }
+
+    /// Sets the cap length along the line direction.
+    #[must_use]
+    pub const fn length(mut self, length: f32) -> Self {
+        self.length = Some(length);
+        self
+    }
+
+    /// Sets the cap width across the line direction.
+    #[must_use]
+    pub const fn width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    /// Overrides the cap color. Defaults to the line color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+/// Circle-cap configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CircleCap {
+    radius: Option<f32>,
+    color:  Option<Color>,
+}
+
+impl CircleCap {
+    /// Creates a default circle cap.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            radius: None,
+            color:  None,
+        }
+    }
+
+    /// Sets the circle radius.
+    #[must_use]
+    pub const fn radius(mut self, radius: f32) -> Self {
+        self.radius = Some(radius);
+        self
+    }
+
+    /// Overrides the cap color. Defaults to the line color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+/// Square-cap configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquareCap {
+    size:  Option<f32>,
+    color: Option<Color>,
+}
+
+impl SquareCap {
+    /// Creates a default square cap.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            size:  None,
+            color: None,
+        }
+    }
+
+    /// Sets the full square size.
+    #[must_use]
+    pub const fn size(mut self, size: f32) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// Overrides the cap color. Defaults to the line color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+/// Diamond-cap configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DiamondCap {
+    width:  Option<f32>,
+    height: Option<f32>,
+    color:  Option<Color>,
+}
+
+impl DiamondCap {
+    /// Creates a default diamond cap.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            width:  None,
+            height: None,
+            color:  None,
+        }
+    }
+
+    /// Sets the full diamond width.
+    #[must_use]
+    pub const fn width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    /// Sets the full diamond height.
+    #[must_use]
+    pub const fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    /// Overrides the cap color. Defaults to the line color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
 }
 
 /// Decoration that can appear at either end of a [`CalloutLine`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CalloutCap {
     /// No end cap.
     None,
     /// Arrow end cap with the given style.
-    Arrow(ArrowStyle),
+    Arrow(ArrowCap),
+    /// Filled circular cap.
+    Circle(CircleCap),
+    /// Filled square cap.
+    Square(SquareCap),
+    /// Filled diamond cap.
+    Diamond(DiamondCap),
+}
+
+impl CalloutCap {
+    /// Creates an arrow cap with default open styling.
+    #[must_use]
+    pub const fn arrow() -> Self { Self::Arrow(ArrowCap::new()) }
+
+    /// Creates a circular cap.
+    #[must_use]
+    pub const fn circle() -> Self { Self::Circle(CircleCap::new()) }
+
+    /// Creates a square cap.
+    #[must_use]
+    pub const fn square() -> Self { Self::Square(SquareCap::new()) }
+
+    /// Creates a diamond cap.
+    #[must_use]
+    pub const fn diamond() -> Self { Self::Diamond(DiamondCap::new()) }
+
+    /// Sets an arrow cap to the open chevron style.
+    #[must_use]
+    pub const fn open(self) -> Self {
+        match self {
+            Self::Arrow(cap) => Self::Arrow(cap.open()),
+            other => other,
+        }
+    }
+
+    /// Sets an arrow cap to the solid triangular style.
+    #[must_use]
+    pub const fn solid(self) -> Self {
+        match self {
+            Self::Arrow(cap) => Self::Arrow(cap.solid()),
+            other => other,
+        }
+    }
+
+    /// Sets the cap length along the line direction.
+    #[must_use]
+    pub const fn length(self, length: f32) -> Self {
+        match self {
+            Self::Arrow(cap) => Self::Arrow(cap.length(length)),
+            other => other,
+        }
+    }
+
+    /// Sets the cap width across the line direction.
+    #[must_use]
+    pub const fn width(self, width: f32) -> Self {
+        match self {
+            Self::Arrow(cap) => Self::Arrow(cap.width(width)),
+            Self::Diamond(cap) => Self::Diamond(cap.width(width)),
+            other => other,
+        }
+    }
+
+    /// Sets the cap height for shapes that support an explicit height.
+    #[must_use]
+    pub const fn height(self, height: f32) -> Self {
+        match self {
+            Self::Diamond(cap) => Self::Diamond(cap.height(height)),
+            other => other,
+        }
+    }
+
+    /// Sets the cap radius for circular caps.
+    #[must_use]
+    pub const fn radius(self, radius: f32) -> Self {
+        match self {
+            Self::Circle(cap) => Self::Circle(cap.radius(radius)),
+            other => other,
+        }
+    }
+
+    /// Sets the cap size for square caps.
+    #[must_use]
+    pub const fn size(self, size: f32) -> Self {
+        match self {
+            Self::Square(cap) => Self::Square(cap.size(size)),
+            other => other,
+        }
+    }
+
+    /// Overrides the cap color. Defaults to the callout line color.
+    #[must_use]
+    pub const fn color(self, color: Color) -> Self {
+        match self {
+            Self::Arrow(cap) => Self::Arrow(cap.color(color)),
+            Self::Circle(cap) => Self::Circle(cap.color(color)),
+            Self::Square(cap) => Self::Square(cap.color(color)),
+            Self::Diamond(cap) => Self::Diamond(cap.color(color)),
+            Self::None => Self::None,
+        }
+    }
+
+    fn shaft_inset(self, default_size: f32) -> f32 {
+        match self {
+            Self::None => 0.0,
+            Self::Arrow(cap) => cap.length.unwrap_or(default_size),
+            Self::Circle(cap) => cap.radius.unwrap_or(default_size * 0.5),
+            Self::Square(cap) => cap.size.unwrap_or(default_size) * 0.5,
+            Self::Diamond(cap) => cap.width.unwrap_or(default_size) * 0.5,
+        }
+    }
+
+    fn resolved_color(self, fallback: Color) -> Color {
+        match self {
+            Self::None => fallback,
+            Self::Arrow(cap) => cap.color.unwrap_or(fallback),
+            Self::Circle(cap) => cap.color.unwrap_or(fallback),
+            Self::Square(cap) => cap.color.unwrap_or(fallback),
+            Self::Diamond(cap) => cap.color.unwrap_or(fallback),
+        }
+    }
 }
 
 /// World-space/local-space callout line with configurable end caps.
@@ -188,30 +473,34 @@ pub(crate) fn update_callout_lines(
             continue;
         }
         let dir = delta / len;
-        let shaft_start = line.start + dir * line.start_inset;
-        let shaft_end = line.end - dir * line.end_inset;
+        let start_tip = line.start + dir * line.start_inset;
+        let end_tip = line.end - dir * line.end_inset;
+        let shaft_start = start_tip + dir * line.start_cap.shaft_inset(line.cap_size);
+        let shaft_end = end_tip - dir * line.end_cap.shaft_inset(line.cap_size);
         let layer = layers.cloned().unwrap_or(RenderLayers::layer(0));
         let mut order = 0_u32;
 
-        spawn_segment(
-            &mut commands,
-            entity,
-            shaft_start,
-            shaft_end,
-            line.thickness,
-            line.color,
-            line.surface_shadow,
-            &layer,
-            order,
-            &mut meshes,
-            &mut sdf_materials,
-        );
-        order += 1;
+        if (shaft_end - shaft_start).length_squared() > f32::EPSILON {
+            spawn_segment(
+                &mut commands,
+                entity,
+                shaft_start,
+                shaft_end,
+                line.thickness,
+                line.color,
+                line.surface_shadow,
+                &layer,
+                order,
+                &mut meshes,
+                &mut sdf_materials,
+            );
+            order += 1;
+        }
 
         order = spawn_cap(
             &mut commands,
             entity,
-            shaft_start,
+            start_tip,
             dir,
             line.start_cap,
             line.cap_size,
@@ -227,7 +516,7 @@ pub(crate) fn update_callout_lines(
         let _ = spawn_cap(
             &mut commands,
             entity,
-            shaft_end,
+            end_tip,
             dir,
             line.end_cap,
             line.cap_size,
@@ -260,14 +549,17 @@ fn spawn_cap(
     sdf_materials: &mut Assets<SdfPanelMaterial>,
     is_start: bool,
 ) -> u32 {
+    let color = cap.resolved_color(color);
     match cap {
         CalloutCap::None => order,
-        CalloutCap::Arrow(ArrowStyle::Open) => {
+        CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Open => {
             let shaft_dir = if is_start { dir } else { -dir };
             let perp = cap_perp(shaft_dir);
+            let length = cap.length.unwrap_or(cap_size);
+            let width = cap.width.unwrap_or(length);
             for end in [
-                tip + shaft_dir * cap_size + perp * cap_size,
-                tip + shaft_dir * cap_size - perp * cap_size,
+                tip + shaft_dir * length + perp * width,
+                tip + shaft_dir * length - perp * width,
             ] {
                 spawn_segment(
                     commands,
@@ -286,6 +578,108 @@ fn spawn_cap(
             }
             order
         },
+        CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Solid => {
+            let length = cap.length.unwrap_or(cap_size);
+            let width = cap.width.unwrap_or(length);
+            spawn_cap_shape(
+                commands,
+                parent,
+                tip,
+                if is_start { -dir } else { dir },
+                CapShape::Triangle,
+                length,
+                width,
+                thickness,
+                color,
+                shadow,
+                layer,
+                order,
+                meshes,
+                sdf_materials,
+            );
+            order + 1
+        },
+        CalloutCap::Circle(cap) => {
+            let radius = cap.radius.unwrap_or(cap_size * 0.5);
+            spawn_cap_shape(
+                commands,
+                parent,
+                tip,
+                if is_start { dir } else { -dir },
+                CapShape::Circle,
+                radius * 2.0,
+                radius * 2.0,
+                thickness,
+                color,
+                shadow,
+                layer,
+                order,
+                meshes,
+                sdf_materials,
+            );
+            order + 1
+        },
+        CalloutCap::Square(cap) => {
+            let size = cap.size.unwrap_or(cap_size);
+            spawn_cap_shape(
+                commands,
+                parent,
+                tip,
+                if is_start { dir } else { -dir },
+                CapShape::Square,
+                size,
+                size,
+                thickness,
+                color,
+                shadow,
+                layer,
+                order,
+                meshes,
+                sdf_materials,
+            );
+            order + 1
+        },
+        CalloutCap::Diamond(cap) => {
+            let width = cap.width.unwrap_or(cap_size);
+            let height = cap.height.unwrap_or(width);
+            spawn_cap_shape(
+                commands,
+                parent,
+                tip,
+                if is_start { dir } else { -dir },
+                CapShape::Diamond,
+                width,
+                height,
+                thickness,
+                color,
+                shadow,
+                layer,
+                order,
+                meshes,
+                sdf_materials,
+            );
+            order + 1
+        },
+        CalloutCap::Arrow(_) => order,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CapShape {
+    Triangle,
+    Circle,
+    Square,
+    Diamond,
+}
+
+impl CapShape {
+    const fn sdf_kind(self) -> u32 {
+        match self {
+            Self::Triangle => 1,
+            Self::Circle => 2,
+            Self::Square => 0,
+            Self::Diamond => 3,
+        }
     }
 }
 
@@ -365,6 +759,82 @@ fn spawn_segment(
 }
 
 fn line_panel_height(thickness: f32) -> f32 { thickness * 8.0 }
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_cap_shape(
+    commands: &mut Commands,
+    parent: Entity,
+    tip: Vec3,
+    dir: Vec3,
+    shape: CapShape,
+    cap_width: f32,
+    cap_height: f32,
+    _thickness: f32,
+    color: Color,
+    shadow: SurfaceShadow,
+    layer: &RenderLayers,
+    order: u32,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
+) {
+    if cap_width <= 0.0 || cap_height <= 0.0 {
+        return;
+    }
+
+    let (half_w, half_h) = match shape {
+        CapShape::Triangle => (cap_width, cap_height),
+        CapShape::Circle | CapShape::Square | CapShape::Diamond => {
+            (cap_width * 0.5, cap_height * 0.5)
+        },
+    };
+    let mesh_half_w = half_w + SDF_AA_PADDING;
+    let mesh_half_h = half_h + SDF_AA_PADDING;
+
+    let mut base = default_panel_material();
+    base.base_color = color;
+    base.alpha_mode = AlphaMode::Blend;
+    base.unlit = true;
+    base.depth_bias = order.to_f32() * LAYER_DEPTH_BIAS;
+
+    let shape_params = match shape {
+        CapShape::Triangle => Vec4::new(cap_width * 0.08, 0.6, 0.0, 0.0),
+        _ => Vec4::ZERO,
+    };
+
+    let material = sdf_shape_material(
+        base,
+        half_w,
+        half_h,
+        mesh_half_w,
+        mesh_half_h,
+        [0.0; 4],
+        [0.0; 4],
+        None,
+        shape.sdf_kind(),
+        shape_params,
+        Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+        order.to_f32() * OIT_DEPTH_STEP,
+    );
+    let mesh = meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
+    let material = sdf_materials.add(material);
+    let rotation = Quat::from_rotation_arc(Vec3::X, dir);
+    let center = tip - rotation * Vec3::X * half_w;
+
+    let common = (
+        CalloutVisual,
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::from_translation(center).with_rotation(rotation),
+        layer.clone(),
+    );
+
+    match shadow {
+        SurfaceShadow::Off => commands
+            .entity(parent)
+            .with_child((common, NotShadowCaster)),
+        SurfaceShadow::On => commands.entity(parent).with_child(common),
+    };
+}
 
 /// Draws a double-headed dimension arrow into a gizmo asset.
 pub(crate) fn draw_dimension_arrow(

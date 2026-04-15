@@ -20,6 +20,7 @@ pub use panel_geometry::PanelGeometryPlugin;
 pub use panel_rtt::PanelRttPlugin;
 pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::sdf_panel_material;
+pub(crate) use sdf_material::sdf_shape_material;
 pub use text_renderer::LineMetricsSnapshot;
 pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;

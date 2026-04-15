@@ -39,6 +39,11 @@ pub(crate) struct SdfPanelUniform {
     pub border_widths:    Vec4,
     /// Border color in linear RGBA.
     pub border_color:     Vec4,
+    /// Shape selector. `0` = rounded rect, `1` = triangle, `2` = circle,
+    /// `3` = diamond.
+    pub shape_kind:       u32,
+    /// Extra shape parameters for custom SDF shapes.
+    pub shape_params:     Vec4,
     /// Alpha of the fill/base color. Used by the shadow prepass to
     /// distinguish filled surfaces from border-only rings.
     pub fill_alpha:       f32,
@@ -81,6 +86,37 @@ impl MaterialExtension for SdfPanelExtension {
 /// are overridden for panel rendering.
 #[must_use]
 pub(crate) fn sdf_panel_material(
+    base: StandardMaterial,
+    half_width: f32,
+    half_height: f32,
+    mesh_half_width: f32,
+    mesh_half_height: f32,
+    corner_radii: [f32; 4],
+    border_widths: [f32; 4],
+    border_color: Option<Color>,
+    clip_rect: Vec4,
+    oit_depth_offset: f32,
+) -> SdfPanelMaterial {
+    sdf_shape_material(
+        base,
+        half_width,
+        half_height,
+        mesh_half_width,
+        mesh_half_height,
+        corner_radii,
+        border_widths,
+        border_color,
+        0,
+        Vec4::ZERO,
+        clip_rect,
+        oit_depth_offset,
+    )
+}
+
+/// Creates a new [`SdfPanelMaterial`] with an explicit shape kind.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sdf_shape_material(
     mut base: StandardMaterial,
     half_width: f32,
     half_height: f32,
@@ -89,6 +125,8 @@ pub(crate) fn sdf_panel_material(
     corner_radii: [f32; 4],
     border_widths: [f32; 4],
     border_color: Option<Color>,
+    shape_kind: u32,
+    shape_params: Vec4,
     clip_rect: Vec4,
     oit_depth_offset: f32,
 ) -> SdfPanelMaterial {
@@ -112,6 +150,8 @@ pub(crate) fn sdf_panel_material(
                 corner_radii: Vec4::from_array(corner_radii),
                 border_widths: Vec4::from_array(border_widths),
                 border_color: border_linear,
+                shape_kind,
+                shape_params,
                 fill_alpha,
                 clip_rect,
                 oit_depth_offset,

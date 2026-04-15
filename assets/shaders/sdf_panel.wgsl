@@ -47,6 +47,11 @@ struct SdfPanelUniform {
     border_widths: vec4<f32>,
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
+    /// Shape selector. `0` = rounded rect, `1` = triangle, `2` = circle,
+    /// `3` = diamond.
+    shape_kind:    u32,
+    /// Extra shape parameters for custom SDF shapes.
+    shape_params:  vec4<f32>,
     /// Alpha of the fill/base color. Lets the prepass distinguish
     /// filled panels from border-only panels.
     fill_alpha:    f32,
@@ -70,6 +75,75 @@ fn sd_rounded_box(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
     let radius = select(r.x, r.y, p.y > 0.0);
     let q = abs(p) - half_size + radius;
     return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - radius;
+}
+
+/// Distance to a line segment from `a` to `b`.
+fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+/// Signed distance to a right-pointing isosceles triangle whose tip is
+/// at `(+half_size.x, 0)` and whose base spans `(-half_size.x, ±half_size.y)`.
+fn sd_triangle(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    let a = vec2<f32>(half_size.x + sdf.shape_params.x, 0.0);
+    let b = vec2<f32>(-half_size.x, half_size.y);
+    let c = vec2<f32>(-half_size.x, -half_size.y);
+
+    let d = min(sd_segment(p, a, b), min(sd_segment(p, b, c), sd_segment(p, c, a)));
+
+    let s1 = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    let s2 = (c.x - b.x) * (p.y - b.y) - (c.y - b.y) * (p.x - b.x);
+    let s3 = (a.x - c.x) * (p.y - c.y) - (a.y - c.y) * (p.x - c.x);
+    let has_neg = s1 < 0.0 || s2 < 0.0 || s3 < 0.0;
+    let has_pos = s1 > 0.0 || s2 > 0.0 || s3 > 0.0;
+    let inside = !(has_neg && has_pos);
+
+    return select(d, -d, inside);
+}
+
+/// Signed distance to a centered circle.
+fn sd_circle(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    return length(p) - min(half_size.x, half_size.y);
+}
+
+/// Signed distance to a right-pointing diamond.
+fn sd_diamond(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    let a = vec2<f32>(half_size.x, 0.0);
+    let b = vec2<f32>(0.0, half_size.y);
+    let c = vec2<f32>(-half_size.x, 0.0);
+    let d = vec2<f32>(0.0, -half_size.y);
+
+    let dist = min(
+        min(sd_segment(p, a, b), sd_segment(p, b, c)),
+        min(sd_segment(p, c, d), sd_segment(p, d, a)),
+    );
+
+    let s1 = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    let s2 = (c.x - b.x) * (p.y - b.y) - (c.y - b.y) * (p.x - b.x);
+    let s3 = (d.x - c.x) * (p.y - c.y) - (d.y - c.y) * (p.x - c.x);
+    let s4 = (a.x - d.x) * (p.y - d.y) - (a.y - d.y) * (p.x - d.x);
+    let has_neg = s1 < 0.0 || s2 < 0.0 || s3 < 0.0 || s4 < 0.0;
+    let has_pos = s1 > 0.0 || s2 > 0.0 || s3 > 0.0 || s4 > 0.0;
+    let inside = !(has_neg && has_pos);
+
+    return select(dist, -dist, inside);
+}
+
+/// Shape dispatch for callouts/panels sharing the same SDF backend.
+fn sd_shape(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    if sdf.shape_kind == 1u {
+        return sd_triangle(p, half_size);
+    }
+    if sdf.shape_kind == 2u {
+        return sd_circle(p, half_size);
+    }
+    if sdf.shape_kind == 3u {
+        return sd_diamond(p, half_size);
+    }
+    return sd_rounded_box(p, half_size, radii);
 }
 
 /// Computes the effective inner half-size after subtracting border widths.
@@ -108,6 +182,13 @@ fn aa_width(dist: f32) -> f32 {
     return fwidth(dist) * 0.75;
 }
 
+fn shape_aa_width(dist: f32) -> f32 {
+    if sdf.shape_kind == 1u {
+        return aa_width(dist) * max(0.1, sdf.shape_params.y);
+    }
+    return aa_width(dist);
+}
+
 // ── Prepass ─────────────────────────────────────────────────────────
 
 #ifdef PREPASS_PIPELINE
@@ -122,7 +203,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
         discard;
     }
 
-    let dist = sd_rounded_box(local, sdf.half_size, sdf.corner_radii);
+    let dist = sd_shape(local, sdf.half_size, sdf.corner_radii);
 
     // Discard fragments outside the rounded shape.
     if dist > 0.0 {
@@ -148,7 +229,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
         let inner_hs = inner_half_size(shadow_border_widths);
         let inner_offset = border_center_offset(shadow_border_widths);
         let inner_radii = inner_corner_radii(shadow_border_widths);
-        let inner_dist = sd_rounded_box(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
+        let inner_dist = sd_shape(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
         if inner_dist <= 0.0 {
             discard;
         }
@@ -191,10 +272,10 @@ fn fragment(
     }
 
     // Outer shape distance (using potentially inflated half-size).
-    let outer_dist = sd_rounded_box(local, effective_half_size, sdf.corner_radii);
+    let outer_dist = sd_shape(local, effective_half_size, sdf.corner_radii);
 
     // Base AA width from screen-space derivatives of the SDF.
-    let base_aa = aa_width(outer_dist);
+    let base_aa = shape_aa_width(outer_dist);
 
     // Outer shape alpha — exterior-only falloff with doubled ramp width.
     // Interior pixels (dist ≤ 0) are fully opaque so adjacent quads
@@ -218,10 +299,10 @@ fn fragment(
     let inner_hs = inner_half_size(sdf.border_widths);
     let inner_offset = border_center_offset(sdf.border_widths);
     let inner_radii = inner_corner_radii(sdf.border_widths);
-    let inner_dist = sd_rounded_box(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
+    let inner_dist = sd_shape(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
 
     // Inner fill alpha.
-    let inner_aa = aa_width(inner_dist);
+    let inner_aa = shape_aa_width(inner_dist);
     let inner_alpha = 1.0 - smoothstep(-inner_aa, inner_aa, inner_dist);
 
     // Standard PBR input from the base StandardMaterial.

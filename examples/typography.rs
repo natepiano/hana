@@ -163,6 +163,9 @@ struct WordCycle {
 #[derive(Resource, Default)]
 struct FontHandles(Vec<Handle<Font>>);
 
+#[derive(Resource)]
+struct SelectedFont(usize);
+
 fn main() {
     App::new()
         .add_plugins((
@@ -177,6 +180,7 @@ fn main() {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
         })
+        .insert_resource(SelectedFont(0))
         .init_resource::<FontHandles>()
         .add_systems(Startup, setup)
         .add_systems(
@@ -320,7 +324,7 @@ fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
             .anchor(bevy_diegetic::Anchor::TopRight)
             .material(unlit.clone())
             .text_material(unlit.clone())
-            .with_tree(build_fonts_panel(registry))
+            .with_tree(build_fonts_panel(registry, 0))
             .build()
             .expect("valid fonts HUD dimensions"),
         Transform::default(),
@@ -477,24 +481,41 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
     );
 }
 
-fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
+fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_diegetic::LayoutTree {
     let row_h = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
-    let key_cfg = LayoutTextStyle::new(FONTS_KEY_SIZE).with_color(HUD_INACTIVE_COLOR);
-
     let key_cells: Vec<ColumnCell> = FONT_KEYS
         .iter()
-        .map(|(label, _, _)| ColumnCell::Text(label, key_cfg.clone()))
+        .enumerate()
+        .map(|(idx, (label, _, _))| {
+            let color = if idx == selected_font {
+                HUD_ACTIVE_COLOR
+            } else {
+                HUD_INACTIVE_COLOR
+            };
+            ColumnCell::Text(
+                *label,
+                LayoutTextStyle::new(FONTS_KEY_SIZE).with_color(color),
+            )
+        })
         .collect();
     let name_cells: Vec<ColumnCell> = FONT_KEYS
         .iter()
-        .map(|(_, name, _)| {
+        .enumerate()
+        .map(|(idx, (_, name, _))| {
             let font_id = registry
                 .font_id_by_name(name)
                 .unwrap_or(FontId::MONOSPACE)
                 .0;
+            let color = if idx == selected_font {
+                HUD_ACTIVE_COLOR
+            } else {
+                HUD_INACTIVE_COLOR
+            };
             ColumnCell::Text(
-                name,
-                LayoutTextStyle::new(FONTS_SAMPLE_SIZE).with_font(font_id),
+                *name,
+                LayoutTextStyle::new(FONTS_SAMPLE_SIZE)
+                    .with_font(font_id)
+                    .with_color(color),
             )
         })
         .collect();
@@ -703,6 +724,7 @@ fn on_font_registered(
     trigger: On<FontRegistered>,
     mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
     registry: Res<FontRegistry>,
+    selected_font: Res<SelectedFont>,
 ) {
     info!(
         "FontRegistered: {} (id: {}, {:?})",
@@ -710,7 +732,7 @@ fn on_font_registered(
     );
     for mut panel in &mut panels {
         info!("Rebuilding fonts panel");
-        panel.set_tree(build_fonts_panel(&registry));
+        panel.set_tree(build_fonts_panel(&registry, selected_font.0));
     }
 }
 
@@ -827,14 +849,18 @@ fn cycle_word(
 fn switch_font(
     keyboard: Res<ButtonInput<KeyCode>>,
     registry: Res<FontRegistry>,
+    mut selected_font: ResMut<SelectedFont>,
+    mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
     mut texts: Query<&mut WorldTextStyle, With<DisplayText>>,
 ) {
     let pressed = FONT_KEYS
         .iter()
-        .find(|(_, _, key)| keyboard.just_pressed(*key));
-    let Some((_, name, _)) = pressed else {
+        .enumerate()
+        .find(|(_, (_, _, key))| keyboard.just_pressed(*key));
+    let Some((idx, (_, name, _))) = pressed else {
         return;
     };
+    selected_font.0 = idx;
     let font_id = registry
         .font_id_by_name(name)
         .unwrap_or(FontId::MONOSPACE)
@@ -843,5 +869,8 @@ fn switch_font(
         *style = WorldTextStyle::new(DISPLAY_SIZE)
             .with_font(font_id)
             .with_color(Color::srgb(0.9, 0.9, 0.9));
+    }
+    for mut panel in &mut panels {
+        panel.set_tree(build_fonts_panel(&registry, selected_font.0));
     }
 }
