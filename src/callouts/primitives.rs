@@ -1,22 +1,39 @@
 //! Low-level callout primitives.
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::color::Color;
+use bevy::light::NotShadowCaster;
 use bevy::math::Quat;
 use bevy::math::Vec3;
-use bevy::pbr::StandardMaterial;
+use bevy::math::Vec4;
 use bevy::prelude::AlphaMode;
+use bevy::prelude::Assets;
+use bevy::prelude::Changed;
+use bevy::prelude::Children;
 use bevy::prelude::Commands;
+use bevy::prelude::Component;
 use bevy::prelude::Entity;
 use bevy::prelude::GizmoAsset;
+use bevy::prelude::Mesh;
+use bevy::prelude::Mesh3d;
+use bevy::prelude::MeshMaterial3d;
+use bevy::prelude::Or;
+use bevy::prelude::Query;
+use bevy::prelude::Rectangle;
+use bevy::prelude::ResMut;
 use bevy::prelude::Transform;
+use bevy::prelude::Visibility;
+use bevy::prelude::With;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
 
-use crate::Anchor;
-use crate::DiegeticPanel;
-use crate::El;
-use crate::LayoutBuilder;
-use crate::default_panel_material;
+use crate::plugin::SurfaceShadow;
+use crate::render::LAYER_DEPTH_BIAS;
+use crate::render::OIT_DEPTH_STEP;
+use crate::render::SDF_AA_PADDING;
+use crate::render::SdfPanelMaterial;
+use crate::render::default_panel_material;
+use crate::render::sdf_panel_material;
 
 /// Visual style for arrow end caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,18 +51,22 @@ pub enum CalloutCap {
     Arrow(ArrowStyle),
 }
 
-/// World-space callout line with configurable end caps.
-#[derive(Clone, Debug)]
+/// World-space/local-space callout line with configurable end caps.
+///
+/// The line is expressed in the entity's local space. If the entity is
+/// parented or transformed, the rendered callout follows naturally.
+#[derive(Component, Clone, Debug)]
 pub struct CalloutLine {
-    start:       Vec3,
-    end:         Vec3,
-    color:       Color,
-    thickness:   f32,
-    cap_size:    f32,
-    start_inset: f32,
-    end_inset:   f32,
-    start_cap:   CalloutCap,
-    end_cap:     CalloutCap,
+    start:          Vec3,
+    end:            Vec3,
+    color:          Color,
+    thickness:      f32,
+    cap_size:       f32,
+    start_inset:    f32,
+    end_inset:      f32,
+    start_cap:      CalloutCap,
+    end_cap:        CalloutCap,
+    surface_shadow: SurfaceShadow,
 }
 
 impl CalloutLine {
@@ -62,6 +83,7 @@ impl CalloutLine {
             end_inset: 0.0,
             start_cap: CalloutCap::None,
             end_cap: CalloutCap::None,
+            surface_shadow: SurfaceShadow::Off,
         }
     }
 
@@ -113,56 +135,115 @@ impl CalloutLine {
         self.end_cap = cap;
         self
     }
-}
 
-/// Spawns a panel-backed callout line as children of `parent`.
-pub fn spawn_callout_line(commands: &mut Commands, parent: Entity, line: &CalloutLine) {
-    let delta = line.end - line.start;
-    let len = delta.length();
-    if len < f32::EPSILON {
-        return;
+    /// Controls whether this callout contributes to shadows.
+    #[must_use]
+    pub const fn surface_shadow(mut self, mode: SurfaceShadow) -> Self {
+        self.surface_shadow = mode;
+        self
     }
-    let dir = delta / len;
-    let shaft_start = line.start + dir * line.start_inset;
-    let shaft_end = line.end - dir * line.end_inset;
-
-    let material = callout_material();
-    spawn_segment(
-        commands,
-        parent,
-        shaft_start,
-        shaft_end,
-        line.thickness,
-        line.color,
-        &material,
-    );
-
-    spawn_cap(
-        commands,
-        parent,
-        shaft_start,
-        dir,
-        line.start_cap,
-        line.cap_size,
-        line.thickness,
-        line.color,
-        &material,
-        true,
-    );
-    spawn_cap(
-        commands,
-        parent,
-        shaft_end,
-        dir,
-        line.end_cap,
-        line.cap_size,
-        line.thickness,
-        line.color,
-        &material,
-        false,
-    );
 }
 
+/// Child marker for generated callout meshes.
+#[derive(Component)]
+pub(crate) struct CalloutVisual;
+
+/// Spawns a callout-line entity under `parent`.
+///
+/// This is the simplest public entry point. The actual SDF mesh segments
+/// are built by the callout rendering system.
+pub fn spawn_callout_line(commands: &mut Commands, parent: Entity, line: &CalloutLine) {
+    commands
+        .entity(parent)
+        .with_child((line.clone(), Transform::IDENTITY, Visibility::Inherited));
+}
+
+pub(crate) fn update_callout_lines(
+    changed: Query<
+        (
+            Entity,
+            &CalloutLine,
+            Option<&RenderLayers>,
+            Option<&Children>,
+        ),
+        Or<(Changed<CalloutLine>, Changed<RenderLayers>)>,
+    >,
+    old_visuals: Query<(), With<CalloutVisual>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut sdf_materials: ResMut<Assets<SdfPanelMaterial>>,
+    mut commands: Commands,
+) {
+    for (entity, line, layers, children) in &changed {
+        if let Some(children) = children {
+            for child in children.iter() {
+                if old_visuals.contains(*child) {
+                    commands.entity(*child).despawn();
+                }
+            }
+        }
+
+        let delta = line.end - line.start;
+        let len = delta.length();
+        if len < f32::EPSILON {
+            continue;
+        }
+        let dir = delta / len;
+        let shaft_start = line.start + dir * line.start_inset;
+        let shaft_end = line.end - dir * line.end_inset;
+        let layer = layers.cloned().unwrap_or(RenderLayers::layer(0));
+        let mut order = 0_u32;
+
+        spawn_segment(
+            &mut commands,
+            entity,
+            shaft_start,
+            shaft_end,
+            line.thickness,
+            line.color,
+            line.surface_shadow,
+            &layer,
+            order,
+            &mut meshes,
+            &mut sdf_materials,
+        );
+        order += 1;
+
+        order = spawn_cap(
+            &mut commands,
+            entity,
+            shaft_start,
+            dir,
+            line.start_cap,
+            line.cap_size,
+            line.thickness,
+            line.color,
+            line.surface_shadow,
+            &layer,
+            order,
+            &mut meshes,
+            &mut sdf_materials,
+            true,
+        );
+        let _ = spawn_cap(
+            &mut commands,
+            entity,
+            shaft_end,
+            dir,
+            line.end_cap,
+            line.cap_size,
+            line.thickness,
+            line.color,
+            line.surface_shadow,
+            &layer,
+            order,
+            &mut meshes,
+            &mut sdf_materials,
+            false,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_cap(
     commands: &mut Commands,
     parent: Entity,
@@ -172,32 +253,38 @@ fn spawn_cap(
     cap_size: f32,
     thickness: f32,
     color: Color,
-    material: &StandardMaterial,
+    shadow: SurfaceShadow,
+    layer: &RenderLayers,
+    mut order: u32,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
     is_start: bool,
-) {
+) -> u32 {
     match cap {
-        CalloutCap::None => {},
+        CalloutCap::None => order,
         CalloutCap::Arrow(ArrowStyle::Open) => {
             let shaft_dir = if is_start { dir } else { -dir };
             let perp = cap_perp(shaft_dir);
-            spawn_segment(
-                commands,
-                parent,
-                tip,
+            for end in [
                 tip + shaft_dir * cap_size + perp * cap_size,
-                thickness,
-                color,
-                material,
-            );
-            spawn_segment(
-                commands,
-                parent,
-                tip,
                 tip + shaft_dir * cap_size - perp * cap_size,
-                thickness,
-                color,
-                material,
-            );
+            ] {
+                spawn_segment(
+                    commands,
+                    parent,
+                    tip,
+                    end,
+                    thickness,
+                    color,
+                    shadow,
+                    layer,
+                    order,
+                    meshes,
+                    sdf_materials,
+                );
+                order += 1;
+            }
+            order
         },
     }
 }
@@ -211,6 +298,7 @@ fn cap_perp(dir: Vec3) -> Vec3 {
     dir.cross(reference).normalize()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_segment(
     commands: &mut Commands,
     parent: Entity,
@@ -218,7 +306,11 @@ fn spawn_segment(
     end: Vec3,
     thickness: f32,
     color: Color,
-    material: &StandardMaterial,
+    shadow: SurfaceShadow,
+    layer: &RenderLayers,
+    order: u32,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
 ) {
     let delta = end - start;
     let length = delta.length();
@@ -227,41 +319,52 @@ fn spawn_segment(
     }
 
     let panel_height = line_panel_height(thickness);
+    let half_w = length * 0.5;
+    let half_h = panel_height * 0.5;
+    let mesh_half_w = half_w + SDF_AA_PADDING;
+    let mesh_half_h = half_h + SDF_AA_PADDING;
+
+    let mut base = default_panel_material();
+    base.base_color = Color::NONE;
+    base.alpha_mode = AlphaMode::Blend;
+    base.unlit = true;
+    base.depth_bias = order.to_f32() * LAYER_DEPTH_BIAS;
+
+    let material = sdf_panel_material(
+        base,
+        half_w,
+        half_h,
+        mesh_half_w,
+        mesh_half_h,
+        [0.0; 4],
+        [thickness, 0.0, 0.0, 0.0],
+        Some(color),
+        Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+        order.to_f32() * OIT_DEPTH_STEP,
+    );
+    let mesh = meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
+    let material = sdf_materials.add(material);
+
     let mid = (start + end) * 0.5;
     let rotation = Quat::from_rotation_arc(Vec3::X, delta / length);
     let line_center_offset = rotation * Vec3::Y * -(panel_height * 0.5 - thickness * 0.5);
-    let tree = line_tree(length, panel_height, thickness, color);
-
-    commands.entity(parent).with_child((
-        DiegeticPanel::world()
-            .size(length, panel_height)
-            .anchor(Anchor::Center)
-            .material(material.clone())
-            .with_tree(tree)
-            .build()
-            .expect("callout line segment uses valid dimensions"),
+    let common = (
+        CalloutVisual,
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
         Transform::from_translation(mid + line_center_offset).with_rotation(rotation),
-    ));
-}
+        layer.clone(),
+    );
 
-fn line_tree(length: f32, panel_height: f32, thickness: f32, color: Color) -> crate::LayoutTree {
-    LayoutBuilder::with_root(
-        El::new()
-            .size(length, panel_height)
-            .border(crate::Border::default().top(thickness).color(color)),
-    )
-    .build()
+    match shadow {
+        SurfaceShadow::Off => commands
+            .entity(parent)
+            .with_child((common, NotShadowCaster)),
+        SurfaceShadow::On => commands.entity(parent).with_child(common),
+    };
 }
 
 fn line_panel_height(thickness: f32) -> f32 { thickness * 8.0 }
-
-fn callout_material() -> StandardMaterial {
-    let mut material = default_panel_material();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
-    material
-}
 
 /// Draws a double-headed dimension arrow into a gizmo asset.
 pub(crate) fn draw_dimension_arrow(

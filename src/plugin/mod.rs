@@ -37,6 +37,7 @@ pub use systems::DiegeticPanelGizmoGroup;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 
+use crate::callouts::CalloutPlugin;
 pub use crate::layout::Unit;
 use crate::render::PanelGeometryPlugin;
 use crate::render::PanelRttPlugin;
@@ -254,6 +255,7 @@ fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option
         .init_asset::<Font>()
         .init_asset_loader::<FontLoader>()
         .add_plugins(LayoutPlugin)
+        .add_plugins(CalloutPlugin)
         .init_resource::<ShowTextGizmos>()
         .add_plugins(TextRenderPlugin)
         .add_plugins(PanelGeometryPlugin)

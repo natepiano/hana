@@ -446,6 +446,7 @@ fn spawn_metric_line_panel(
         DiegeticPanel::world()
             .size(width, height)
             .anchor(Anchor::TopLeft)
+            .surface_shadow(SurfaceShadow::On)
             .material(material)
             .with_tree(tree)
             .build()
@@ -567,9 +568,10 @@ fn spawn_bounding_box_callout(
     font_size: f32,
     scale: f32,
     bbox_color: Color,
-    gizmo_assets: &mut Assets<GizmoAsset>,
+    _gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let label_size = font_scale(font_size, scale) * LABEL_SIZE_RATIO;
+    let callout_thickness = font_scale(font_size, scale) * 0.0025;
     let z = CALLOUT_Z_OFFSET;
 
     let Some(last) = computed.glyph_rects.last() else {
@@ -597,31 +599,26 @@ fn spawn_bounding_box_callout(
     let callout_top_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let callout_top_world = layout_to_world_y(callout_top_layout, anchor_y, scale);
 
-    let mut callout_gizmo = GizmoAsset::default();
-    // Horizontal shelf.
-    callout_gizmo.line(
-        Vec3::new(shelf_right_x, shelf_y, z),
-        Vec3::new(shelf_end_x, shelf_y, z),
-        bbox_color,
+    callouts::spawn_callout_line(
+        commands,
+        entity,
+        &callouts::CalloutLine::new(
+            Vec3::new(shelf_right_x, shelf_y, z),
+            Vec3::new(shelf_end_x, shelf_y, z),
+        )
+        .color(bbox_color)
+        .thickness(callout_thickness),
     );
-    // Vertical riser.
-    callout_gizmo.line(
-        Vec3::new(shelf_end_x, shelf_y, z),
-        Vec3::new(shelf_end_x, callout_top_world, z),
-        bbox_color,
+    callouts::spawn_callout_line(
+        commands,
+        entity,
+        &callouts::CalloutLine::new(
+            Vec3::new(shelf_end_x, shelf_y, z),
+            Vec3::new(shelf_end_x, callout_top_world, z),
+        )
+        .color(bbox_color)
+        .thickness(callout_thickness),
     );
-
-    commands.entity(entity).with_child((
-        Gizmo {
-            handle:      gizmo_assets.add(callout_gizmo),
-            line_config: GizmoLineConfig {
-                width: THIN_LINE_WIDTH,
-                ..default()
-            },
-            depth_bias:  -0.1,
-        },
-        Transform::IDENTITY,
-    ));
 
     // Label at the top of the riser, to the left (CenterRight anchor).
     let ascent_mid_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
@@ -699,23 +696,16 @@ fn spawn_origin_and_advancement(
     let len = dx.hypot(dy);
     let edge_x = (dx / len).mul_add(-dot_radius, origin_x);
     let edge_y = (dy / len).mul_add(-dot_radius, origin_y);
-    let mut origin_callout = GizmoAsset::default();
-    origin_callout.line(
-        Vec3::new(edge_x, edge_y, z),
-        Vec3::new(first_mid_x, label_top_y, z),
-        callout_color,
+    callouts::spawn_callout_line(
+        commands,
+        entity,
+        &callouts::CalloutLine::new(
+            Vec3::new(edge_x, edge_y, z),
+            Vec3::new(first_mid_x, label_top_y, z),
+        )
+        .color(callout_color)
+        .thickness(callout_line_thickness(overlay, font_size, scale)),
     );
-    commands.entity(entity).with_child((
-        Gizmo {
-            handle:      gizmo_assets.add(origin_callout),
-            line_config: GizmoLineConfig {
-                width: THICK_LINE_WIDTH,
-                ..default()
-            },
-            depth_bias:  -0.1,
-        },
-        Transform::IDENTITY,
-    ));
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ORIGIN),
         WorldTextStyle::new(label_size)
@@ -814,6 +804,7 @@ fn spawn_advancement_arrow(
         .color(overlay.color)
         .thickness(callout_line_thickness(overlay, font_size, scale))
         .cap_size(head)
+        .surface_shadow(SurfaceShadow::On)
         .start_inset(gap)
         .end_inset(gap)
         .start_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open))
@@ -1150,16 +1141,6 @@ fn spawn_metric_arrow_callouts(
     let gap = arrow_gap(font_size, scale);
     let thickness = callout_line_thickness(overlay, font_size, scale);
 
-    spawn_line_height_comparison_panel(
-        commands,
-        entity,
-        overlay,
-        left_2,
-        ascent_world,
-        descent_world,
-        thickness,
-    );
-
     for (from, to) in [
         (
             Vec3::new(left_1, ascent_world, METRIC_LINE_Z_OFFSET),
@@ -1189,60 +1170,13 @@ fn spawn_metric_arrow_callouts(
                 .color(overlay.color)
                 .thickness(thickness)
                 .cap_size(head)
+                .surface_shadow(SurfaceShadow::On)
                 .start_inset(gap)
                 .end_inset(gap)
                 .start_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open))
                 .end_cap(callouts::CalloutCap::Arrow(callouts::ArrowStyle::Open)),
         );
     }
-}
-
-fn spawn_line_height_comparison_panel(
-    commands: &mut Commands,
-    entity: Entity,
-    _overlay: &TypographyOverlay,
-    arrow_x: f32,
-    top_y: f32,
-    bottom_y: f32,
-    border_width: f32,
-) {
-    let inset = border_width * 10.0;
-    let height = (top_y - bottom_y).abs() - inset * 2.0;
-    if height <= 0.0 {
-        return;
-    }
-
-    let width = height * 0.065;
-    let left_edge = arrow_x + border_width * 14.0;
-    let center_x = left_edge + width / 2.0;
-    let center_y = f32::midpoint(top_y, bottom_y);
-    let color = Color::srgb(0.3, 0.65, 1.0);
-
-    let mut material = default_panel_material();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
-
-    let mut builder = LayoutBuilder::new(width, height);
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .border(Border::all(border_width, color)),
-        |_| {},
-    );
-    let tree = builder.build();
-
-    commands.entity(entity).with_child((
-        DiegeticPanel::world()
-            .size(width, height)
-            .anchor(Anchor::Center)
-            .material(material)
-            .with_tree(tree)
-            .build()
-            .expect("comparison panel uses valid dimensions"),
-        Transform::from_xyz(center_x, center_y, CALLOUT_Z_OFFSET),
-    ));
 }
 
 /// Spawns labels for metric lines and dimension arrows.

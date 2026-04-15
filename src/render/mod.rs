@@ -12,9 +12,14 @@ mod sdf_material;
 mod text_renderer;
 mod world_text;
 
+pub(crate) use constants::LAYER_DEPTH_BIAS;
+pub(crate) use constants::OIT_DEPTH_STEP;
+pub(crate) use constants::SDF_AA_PADDING;
 pub use constants::default_panel_material;
 pub use panel_geometry::PanelGeometryPlugin;
 pub use panel_rtt::PanelRttPlugin;
+pub(crate) use sdf_material::SdfPanelMaterial;
+pub(crate) use sdf_material::sdf_panel_material;
 pub use text_renderer::LineMetricsSnapshot;
 pub use text_renderer::ShapedTextCache;
 pub use text_renderer::TextRenderPlugin;

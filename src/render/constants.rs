@@ -10,12 +10,12 @@ use bevy::prelude::*;
 /// Controls the `Transparent3d` sort key so back-to-front submission
 /// order matches the painter's order. Also wins the depth test for
 /// coplanar fragments.
-pub(super) const LAYER_DEPTH_BIAS: f32 = 1.0;
+pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 
 /// World-space padding added to each SDF quad mesh beyond the shape boundary.
 /// Gives the exterior anti-aliasing ramp room to render — without this, the
 /// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
-pub(super) const SDF_AA_PADDING: f32 = 0.001;
+pub(crate) const SDF_AA_PADDING: f32 = 0.001;
 
 /// Per-command OIT depth offset for coplanar fragment ordering.
 ///
@@ -23,7 +23,7 @@ pub(super) const SDF_AA_PADDING: f32 = 0.001;
 /// stores the fragment. Pipeline `depth_bias` does NOT affect
 /// `in.position.z`, so we apply this offset manually.
 /// Reverse-Z: positive = closer to camera = composited in front.
-pub(super) const OIT_DEPTH_STEP: f32 = 0.0001;
+pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 
 // Material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).
