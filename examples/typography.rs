@@ -16,6 +16,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
+use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -28,10 +29,11 @@ use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
+use bevy_diegetic::Pt;
+use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::TypographyOverlayReady;
-use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::CameraMove;
@@ -45,22 +47,58 @@ use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 const DISPLAY_SIZE: f32 = 0.48;
+const DISPLAY_Y: f32 = 0.5;
+const DISPLAY_Z: f32 = 2.0;
 const ZOOM_TO_FIT_MARGIN: f32 = 0.05;
 const ZOOM_DURATION_MS: u64 = 1000;
+const KEY_LIGHT_LUX: f32 = 15_000.0;
+const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 2.5, 6.0);
+const REFLECTION_LIGHT_LEVEL: f32 = 150_000.0;
+const REFLECTION_LIGHT_POS: Vec3 = Vec3::new(0.7, 1.9, 6.2);
+const REFLECTION_TARGET: Vec3 = Vec3::new(0.15, 0.0, 1.7);
+
+const GROUND_WIDTH: f32 = 5.4;
+const GROUND_FRONT_MARGIN: f32 = 0.7;
+const GROUND_BACK_MARGIN: f32 = 2.35;
 
 const HOME_FOCUS: Vec3 = Vec3::new(-0.001, 0.461, 2.002);
 const HOME_RADIUS: f32 = 2.84;
 const HOME_YAW: f32 = 0.0;
 const HOME_PITCH: f32 = 0.055;
 
-const CONTROLS_LAYOUT_W: f32 = 200.0;
-const CONTROLS_LAYOUT_H: f32 = 100.0;
-const CONTROLS_WORLD_W: f32 = 1.2;
-const CONTROLS_FONT_SIZE: f32 = 9.0;
-const CONTROLS_TITLE_SIZE: f32 = 10.5;
-const CONTROLS_ARROW_SIZE: f32 = CONTROLS_FONT_SIZE * 0.5;
-const CONTROLS_ROW_HEIGHT: f32 = CONTROLS_FONT_SIZE * 1.4;
-const CONTROLS_TITLE_COLOR: Color = Color::srgb(0.42, 0.5, 0.72);
+const HUD_HEIGHT: Px = Px(48.0);
+const CONTROLS_WIDTH: Px = Px(620.0);
+const HUD_PADDING: Px = Px(12.0);
+const HUD_GAP: Px = Px(14.0);
+const HUD_TITLE_SIZE: Pt = Pt(16.0);
+const HUD_HINT_SIZE: Pt = Pt(12.0);
+const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.80);
+const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
+const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
+const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
+const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
+const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
+const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
+const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
+
+const CAM_HELP_WIDTH: Px = Px(280.0);
+const CAM_HELP_HEIGHT: Px = Px(160.0);
+const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
+const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
+const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
+const CAM_HELP_RADIUS: Px = Px(15.0);
+const CAM_HELP_FRAME_PAD: Px = Px(2.0);
+const CAM_HELP_BORDER: Px = Px(2.0);
+const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
+const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
+
+const FONTS_PANEL_WIDTH: Px = CAM_HELP_WIDTH;
+const FONTS_PANEL_HEIGHT: Px = Px(208.0);
+const FONTS_PANEL_GAP: Px = Px(10.0);
+const FONTS_PANEL_ROW_HEIGHT: Px = Px(24.0);
+const FONTS_PANEL_KEY_WIDTH: Px = Px(18.0);
+const FONTS_KEY_SIZE: Pt = Pt(12.0);
+const FONTS_SAMPLE_SIZE: Pt = Pt(15.0);
 
 /// Font key bindings: (digit key label, font family name, `KeyCode`).
 /// `JetBrains` Mono is always available; the rest are loaded at runtime.
@@ -143,7 +181,14 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (toggle_overlay, home_camera, switch_font, cycle_word),
+            (
+                toggle_overlay,
+                home_camera,
+                fit_scene,
+                switch_font,
+                cycle_word,
+                update_controls_hud,
+            ),
         )
         .add_observer(on_world_text_added)
         .add_observer(on_font_registered)
@@ -162,13 +207,26 @@ fn setup(
     // Ground plane — subtle, light gray.
     let ground = commands
         .spawn((
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(5.4, 5.4))),
+            Mesh3d(
+                meshes.add(
+                    Plane3d::default()
+                        .mesh()
+                        .size(GROUND_WIDTH, GROUND_FRONT_MARGIN + GROUND_BACK_MARGIN),
+                ),
+            ),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.08, 0.08, 0.08),
+                perceptual_roughness: 0.15,
+                metallic: 0.0,
                 double_sided: true,
                 cull_mode: None,
                 ..default()
             })),
+            Transform::from_xyz(
+                0.0,
+                0.0,
+                DISPLAY_Z + (GROUND_FRONT_MARGIN - GROUND_BACK_MARGIN) / 2.0,
+            ),
         ))
         .observe(on_ground_clicked)
         .id();
@@ -184,7 +242,7 @@ fn setup(
                 .with_color(Color::srgb(0.9, 0.9, 0.9))
                 .with_loading_policy(GlyphLoadingPolicy::Progressive),
             TypographyOverlay::default(),
-            Transform::from_xyz(0.0, 0.5, 2.0),
+            Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z),
         ))
         .observe(
             |trigger: On<TypographyOverlayReady>,
@@ -192,55 +250,25 @@ fn setup(
              mut commands: Commands| {
                 info!("TypographyOverlayReady: {:?}", trigger.entity);
                 for camera in &cameras {
-                    commands.trigger(
-                        ZoomToFit::new(camera, trigger.entity)
-                            .margin(ZOOM_TO_FIT_MARGIN)
-                            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-                    );
+                    commands.trigger(PlayAnimation::new(
+                        camera,
+                        [CameraMove::ToOrbit {
+                            focus:    HOME_FOCUS,
+                            yaw:      HOME_YAW,
+                            pitch:    HOME_PITCH,
+                            radius:   HOME_RADIUS,
+                            duration: Duration::from_millis(ZOOM_DURATION_MS),
+                            easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
+                        }],
+                    ));
                 }
-                // Only zoom on initial load — remove this observer.
+                // Only run once on initial load — remove this observer.
                 commands.entity(trigger.observer()).despawn();
             },
         );
 
-    // Hint text
-    commands.spawn((
-        WorldText::new("Click text to zoom in · Click plane to zoom out"),
-        WorldTextStyle::new(0.02).with_color(Color::srgba(0.6, 0.6, 0.6, 0.8)),
-        Transform::from_xyz(0.0, 0.0, 3.45),
-    ));
-
     spawn_lights(&mut commands);
-
-    // Controls panel — upper left.
-    commands
-        .spawn((
-            ControlsPanel,
-            DiegeticPanel {
-                tree: build_controls_panel(),
-                width: CONTROLS_LAYOUT_W,
-                height: CONTROLS_LAYOUT_H,
-                layout_unit: Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W),
-                ..default()
-            },
-            Transform::from_xyz(-1.2, 1.5, 0.5),
-        ))
-        .observe(on_panel_clicked);
-
-    // Fonts panel — upper right (symmetric with controls).
-    commands
-        .spawn((
-            FontsPanel,
-            DiegeticPanel {
-                tree: build_fonts_panel(&registry),
-                width: CONTROLS_LAYOUT_W,
-                height: CONTROLS_LAYOUT_H,
-                layout_unit: Unit::Custom(CONTROLS_WORLD_W / CONTROLS_LAYOUT_W),
-                ..default()
-            },
-            Transform::from_xyz(1.2, 1.5, 0.5),
-        ))
-        .observe(on_panel_clicked);
+    spawn_hud_panels(&mut commands, &registry);
 
     // Camera
     commands.spawn((OrbitCam {
@@ -265,20 +293,72 @@ fn setup(
     },));
 }
 
+fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
+    let unlit_material = bevy_diegetic::default_panel_material();
+    let unlit = StandardMaterial {
+        unlit: true,
+        ..unlit_material
+    };
+
+    commands.spawn((
+        ControlsPanel,
+        DiegeticPanel::screen()
+            .size(CONTROLS_WIDTH, HUD_HEIGHT)
+            .anchor(bevy_diegetic::Anchor::TopLeft)
+            .material(unlit.clone())
+            .text_material(unlit.clone())
+            .layout(|b| build_controls_content(b, true))
+            .build()
+            .expect("valid controls HUD dimensions"),
+        Transform::default(),
+    ));
+
+    commands.spawn((
+        FontsPanel,
+        DiegeticPanel::screen()
+            .size(FONTS_PANEL_WIDTH, FONTS_PANEL_HEIGHT)
+            .anchor(bevy_diegetic::Anchor::TopRight)
+            .material(unlit.clone())
+            .text_material(unlit.clone())
+            .with_tree(build_fonts_panel(registry))
+            .build()
+            .expect("valid fonts HUD dimensions"),
+        Transform::default(),
+    ));
+
+    commands.spawn((
+        DiegeticPanel::screen()
+            .size(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
+            .anchor(bevy_diegetic::Anchor::BottomRight)
+            .material(unlit.clone())
+            .text_material(unlit)
+            .layout(build_camera_help)
+            .build()
+            .expect("valid camera help HUD dimensions"),
+        Transform::default(),
+    ));
+}
+
 fn spawn_lights(commands: &mut Commands) {
     commands.spawn((
         DirectionalLight {
+            illuminance: KEY_LIGHT_LUX,
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(0.0, 1.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_translation(KEY_LIGHT_POS)
+            .looking_at(Vec3::new(0.0, DISPLAY_Y, DISPLAY_Z), Vec3::Y),
     ));
     commands.spawn((
-        DirectionalLight {
+        SpotLight {
+            intensity: REFLECTION_LIGHT_LEVEL,
+            range: 20.0,
             shadows_enabled: false,
+            inner_angle: 0.0,
+            outer_angle: core::f32::consts::FRAC_PI_6,
             ..default()
         },
-        Transform::from_xyz(0.0, 1.5, -3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_translation(REFLECTION_LIGHT_POS).looking_at(REFLECTION_TARGET, Vec3::Y),
     ));
 }
 
@@ -323,110 +403,87 @@ fn on_text_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     );
 }
 
-fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
-    if click.button != PointerButton::Primary {
-        return;
-    }
-    click.propagate(false);
-    let camera = click.hit.camera;
-    commands.trigger(
-        ZoomToFit::new(camera, click.entity)
-            .margin(ZOOM_TO_FIT_MARGIN)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+fn build_controls_tree(overlay_on: bool) -> bevy_diegetic::LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(HUD_HEIGHT)),
     );
+    build_controls_content(&mut builder, overlay_on);
+    builder.build()
 }
 
-fn build_controls_panel() -> bevy_diegetic::LayoutTree {
-    let border_color = Color::srgb(0.4, 0.4, 0.45);
-    let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let row_h = Sizing::fixed(CONTROLS_ROW_HEIGHT);
-    let cfg = LayoutTextStyle::new(CONTROLS_FONT_SIZE);
-    let arrow_cfg = LayoutTextStyle::new(CONTROLS_ARROW_SIZE);
+fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
+    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
 
-    let mut builder = LayoutBuilder::new(CONTROLS_LAYOUT_W, CONTROLS_LAYOUT_H);
-    builder.with(
+    b.with(
         El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .padding(Padding::all(2.5))
-            .direction(Direction::TopToBottom)
-            .child_gap(1.5)
-            .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
-            .border(Border::all(1.0, border_color)),
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(Px(2.0)))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
         |b| {
-            b.text(
-                "controls",
-                LayoutTextStyle::new(CONTROLS_TITLE_SIZE).with_color(CONTROLS_TITLE_COLOR),
-            );
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(0.3))
-                    .background(divider_color),
-                |_| {},
-            );
-            // Three columns with fixed row heights.
-            b.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
+                    .height(Sizing::GROW)
                     .direction(Direction::LeftToRight)
-                    .child_gap(2.0),
+                    .padding(Padding::new(Px(8.0), HUD_PADDING, Px(8.0), HUD_PADDING))
+                    .child_gap(HUD_GAP)
+                    .child_align_y(AlignY::Center)
+                    .clip()
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                 |b| {
-                    // Key column (centered).
-                    column(
-                        b,
-                        AlignX::Center,
-                        row_h,
-                        &[
-                            ColumnCell::Text("t", cfg.clone()),
-                            ColumnCell::Text("h", cfg.clone()),
-                            ColumnCell::Text("\u{2190} \u{2192}", cfg.clone()),
-                        ],
+                    b.text("CONTROLS", title);
+                    hud_separator(b);
+
+                    b.text(
+                        "H Home",
+                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
                     );
-                    // Arrow column (centered).
-                    column(
-                        b,
-                        AlignX::Center,
-                        row_h,
-                        &[
-                            ColumnCell::Text("  ->  ", arrow_cfg.clone()),
-                            ColumnCell::Text("  ->  ", arrow_cfg.clone()),
-                            ColumnCell::Text("  ->  ", arrow_cfg.clone()),
-                        ],
+                    hud_separator(b);
+
+                    let overlay_label = if overlay_on {
+                        "T Overlay On"
+                    } else {
+                        "T Overlay Off"
+                    };
+                    let overlay_color = if overlay_on {
+                        HUD_ACTIVE_COLOR
+                    } else {
+                        HUD_INACTIVE_COLOR
+                    };
+                    b.text(
+                        overlay_label,
+                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(overlay_color),
                     );
-                    // Description column (left-aligned).
-                    column(
-                        b,
-                        AlignX::Left,
-                        row_h,
-                        &[
-                            ColumnCell::Text("toggle overlay", cfg.clone()),
-                            ColumnCell::Text("home camera", cfg.clone()),
-                            ColumnCell::Text("cycle word", cfg.clone()),
-                        ],
+                    hud_separator(b);
+
+                    b.text(
+                        "F Fit Screen",
+                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
+                    );
+                    hud_separator(b);
+
+                    b.text(
+                        "←/→ Cycle Word",
+                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
                     );
                 },
             );
         },
     );
-    builder.build()
 }
 
 fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
-    let border_color = Color::srgb(0.4, 0.4, 0.45);
-    let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let row_h = Sizing::fixed(CONTROLS_ROW_HEIGHT);
-    let cfg = LayoutTextStyle::new(CONTROLS_FONT_SIZE);
-    let arrow_cfg = LayoutTextStyle::new(CONTROLS_ARROW_SIZE);
+    let row_h = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
+    let key_cfg = LayoutTextStyle::new(FONTS_KEY_SIZE).with_color(HUD_INACTIVE_COLOR);
 
     let key_cells: Vec<ColumnCell> = FONT_KEYS
         .iter()
-        .map(|(label, _, _)| ColumnCell::Text(label, cfg.clone()))
-        .collect();
-    let arrow_cells: Vec<ColumnCell> = FONT_KEYS
-        .iter()
-        .map(|_| ColumnCell::Text("  ->  ", arrow_cfg.clone()))
+        .map(|(label, _, _)| ColumnCell::Text(label, key_cfg.clone()))
         .collect();
     let name_cells: Vec<ColumnCell> = FONT_KEYS
         .iter()
@@ -435,47 +492,181 @@ fn build_fonts_panel(registry: &FontRegistry) -> bevy_diegetic::LayoutTree {
                 .font_id_by_name(name)
                 .unwrap_or(FontId::MONOSPACE)
                 .0;
-            ColumnCell::Text(name, cfg.clone().with_font(font_id))
+            ColumnCell::Text(
+                name,
+                LayoutTextStyle::new(FONTS_SAMPLE_SIZE).with_font(font_id),
+            )
         })
         .collect();
 
-    let mut builder = LayoutBuilder::new(CONTROLS_LAYOUT_W, CONTROLS_LAYOUT_H);
+    let mut builder = LayoutBuilder::new(FONTS_PANEL_WIDTH, FONTS_PANEL_HEIGHT);
     builder.with(
         El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .padding(Padding::all(2.5))
-            .direction(Direction::TopToBottom)
-            .child_gap(1.5)
-            .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
-            .border(Border::all(1.0, border_color)),
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(CAM_HELP_FRAME_PAD))
+            .corner_radius(CornerRadius::new(
+                Px(0.0),
+                Px(0.0),
+                Px(0.0),
+                CAM_HELP_RADIUS,
+            ))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
         |b| {
-            b.text(
-                "fonts",
-                LayoutTextStyle::new(CONTROLS_TITLE_SIZE).with_color(CONTROLS_TITLE_COLOR),
-            );
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .height(Sizing::fixed(0.3))
-                    .background(divider_color),
-                |_| {},
-            );
-            b.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(2.0),
+                    .height(Sizing::GROW)
+                    .padding(Padding::all(Px(10.0)))
+                    .direction(Direction::TopToBottom)
+                    .child_gap(Px(6.0))
+                    .corner_radius(CornerRadius::new(
+                        Px(0.0),
+                        Px(0.0),
+                        Px(0.0),
+                        CAM_HELP_INNER_RADIUS,
+                    ))
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                 |b| {
-                    column(b, AlignX::Center, row_h, &key_cells);
-                    column(b, AlignX::Center, row_h, &arrow_cells);
-                    column(b, AlignX::Left, row_h, &name_cells);
+                    b.text(
+                        "FONTS",
+                        LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR),
+                    );
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(FONTS_PANEL_GAP),
+                        |b| {
+                            b.with(
+                                El::new()
+                                    .width(Sizing::fixed(FONTS_PANEL_KEY_WIDTH))
+                                    .height(Sizing::FIT)
+                                    .direction(Direction::TopToBottom)
+                                    .child_align_x(AlignX::Center),
+                                |b| {
+                                    for cell in &key_cells {
+                                        let ColumnCell::Text(text, config) = cell;
+                                        b.with(
+                                            El::new()
+                                                .width(Sizing::GROW)
+                                                .height(row_h)
+                                                .child_align_x(AlignX::Center)
+                                                .child_align_y(AlignY::Center),
+                                            |b| {
+                                                b.text(*text, config.clone());
+                                            },
+                                        );
+                                    }
+                                },
+                            );
+                            column(b, AlignX::Left, row_h, &name_cells);
+                        },
+                    );
                 },
             );
         },
     );
     builder.build()
+}
+
+fn build_camera_help(b: &mut LayoutBuilder) {
+    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
+    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
+
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(CAM_HELP_FRAME_PAD))
+            .corner_radius(CornerRadius::new(
+                CAM_HELP_RADIUS,
+                Px(0.0),
+                CAM_HELP_RADIUS,
+                Px(0.0),
+            ))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .padding(Padding::all(Px(10.0)))
+                    .child_gap(Px(6.0))
+                    .corner_radius(CornerRadius::new(
+                        CAM_HELP_INNER_RADIUS,
+                        Px(0.0),
+                        CAM_HELP_INNER_RADIUS,
+                        Px(0.0),
+                    ))
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
+                |b| {
+                    b.text("CAMERA", title);
+
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(Px(12.0)),
+                        |b| {
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(Px(4.0)),
+                                |b| {
+                                    b.text("Mouse", header.clone());
+                                    b.text("MMB drag → Orbit", label.clone());
+                                    b.text("Shift+MMB → Pan", label.clone());
+                                    b.text("Scroll → Zoom", label.clone());
+                                },
+                            );
+
+                            b.with(
+                                El::new()
+                                    .width(Sizing::fixed(Px(1.0)))
+                                    .height(Sizing::GROW)
+                                    .background(HUD_DIVIDER_COLOR),
+                                |_| {},
+                            );
+
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(Px(4.0)),
+                                |b| {
+                                    b.text("Trackpad", header.clone());
+                                    b.text("Scroll → Orbit", label.clone());
+                                    b.text("Shift+Scroll → Pan", label.clone());
+                                    b.text("Ctrl+Scroll → Zoom", label.clone());
+                                    b.text("Pinch → Zoom", label.clone());
+                                },
+                            );
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn hud_separator(b: &mut LayoutBuilder) {
+    b.with(
+        El::new()
+            .width(Sizing::fixed(Px(1.0)))
+            .height(Sizing::GROW)
+            .background(HUD_DIVIDER_COLOR),
+        |_| {},
+    );
 }
 
 /// Cell content for a column.
@@ -519,7 +710,23 @@ fn on_font_registered(
     );
     for mut panel in &mut panels {
         info!("Rebuilding fonts panel");
-        panel.tree = build_fonts_panel(&registry);
+        panel.set_tree(build_fonts_panel(&registry));
+    }
+}
+
+fn update_controls_hud(
+    mut huds: Query<&mut DiegeticPanel, With<ControlsPanel>>,
+    with_overlay: Query<Entity, (With<DisplayText>, With<TypographyOverlay>)>,
+    mut previous_state: Local<bool>,
+) {
+    let overlay_on = !with_overlay.is_empty();
+    if *previous_state == overlay_on {
+        return;
+    }
+    *previous_state = overlay_on;
+
+    for mut panel in &mut huds {
+        panel.set_tree(build_controls_tree(overlay_on));
     }
 }
 
@@ -563,6 +770,24 @@ fn home_camera(
                 easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
             }],
         ));
+    }
+}
+
+fn fit_scene(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    scene: Res<SceneBounds>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyF) {
+        return;
+    }
+    for camera in &cameras {
+        commands.trigger(
+            ZoomToFit::new(camera, scene.0)
+                .margin(ZOOM_TO_FIT_MARGIN)
+                .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+        );
     }
 }
 

@@ -35,9 +35,18 @@ use super::constants::METRIC_LINE_Z_OFFSET;
 use super::constants::THICK_LINE_WIDTH;
 use super::constants::THIN_LINE_WIDTH;
 use crate::callouts;
+use crate::default_panel_material;
 use crate::layout::Anchor;
+use crate::layout::Border;
+use crate::layout::Direction;
+use crate::layout::El;
 use crate::layout::GlyphShadowMode;
+use crate::layout::LayoutBuilder;
+use crate::layout::Sizing;
 use crate::layout::WorldTextStyle;
+use crate::plugin::DiegeticPanel;
+use crate::plugin::SurfaceShadow;
+use crate::plugin::Unit;
 use crate::plugin::UnitConfig;
 use crate::render::ComputedWorldText;
 use crate::render::LineMetricsSnapshot;
@@ -218,14 +227,35 @@ pub fn build_typography_overlay(
             continue;
         };
 
-        let font_size = style.size();
+        // Standalone world text is shaped in boosted point space, then the
+        // renderer scales the result back to world meters. Use the same
+        // boosted measure here so the overlay sees the same line metrics.
+        let points_to_world = Unit::Points.meters_per_unit();
+        let boost = if points_to_world > 0.0 {
+            1.0 / points_to_world
+        } else {
+            1.0
+        };
+        let font_size = style.size() * boost;
         let font_metrics = font.metrics(font_size);
 
-        let anchor_x = computed.anchor_x;
-        let anchor_y = computed.anchor_y;
-        let scale = unit_config.world_font.meters_per_unit();
+        let unit_scale = style
+            .world_scale()
+            .or_else(|| style.unit().map(Unit::meters_per_unit))
+            .unwrap_or_else(|| unit_config.world_font.meters_per_unit());
+        let scale = unit_scale * points_to_world;
+        let anchor_x = if scale > 0.0 {
+            computed.anchor_x / scale
+        } else {
+            0.0
+        };
+        let anchor_y = if scale > 0.0 {
+            computed.anchor_y / scale
+        } else {
+            0.0
+        };
 
-        let measure = style.as_layout_config().as_measure();
+        let measure = style.as_layout_config().scaled(boost).as_measure();
         let Some(line_metrics) = cache
             .get_shaped(&world_text.0, &measure)
             .and_then(|s| s.line_metrics.first().copied())
@@ -316,7 +346,7 @@ fn spawn_font_metric_gizmos(
         arrow_spacing: arrow_spacing(computed.first_advance),
     };
 
-    let (lines_gizmo, arrows_gizmo, metric_lines) = build_metric_gizmos(
+    let (_lines_gizmo, arrows_gizmo, metric_lines) = build_metric_gizmos(
         font_metrics,
         line_metrics,
         overlay,
@@ -326,18 +356,17 @@ fn spawn_font_metric_gizmos(
         scale,
     );
 
-    // Horizontal metric lines.
-    commands.entity(entity).with_child((
-        Gizmo {
-            handle:      gizmo_assets.add(lines_gizmo),
-            line_config: GizmoLineConfig {
-                width: THIN_LINE_WIDTH,
-                ..default()
-            },
-            depth_bias:  -0.1,
-        },
-        Transform::IDENTITY,
-    ));
+    spawn_metric_line_panel(
+        commands,
+        entity,
+        overlay,
+        font_metrics,
+        line_metrics,
+        &extents,
+        anchor_y,
+        font_size,
+        scale,
+    );
 
     // Dimension arrows (thicker).
     commands.entity(entity).with_child((
@@ -369,6 +398,63 @@ fn spawn_font_metric_gizmos(
     }
 }
 
+/// Spawns horizontal font metric lines as a single transparent world panel.
+fn spawn_metric_line_panel(
+    commands: &mut Commands,
+    entity: Entity,
+    overlay: &TypographyOverlay,
+    font_metrics: &FontMetrics,
+    line_metrics: &LineMetricsSnapshot,
+    extents: &GlyphExtents,
+    anchor_y: f32,
+    font_size: f32,
+    scale: f32,
+) {
+    let line_specs = metric_line_specs(font_metrics, line_metrics, overlay, anchor_y, scale);
+    if line_specs.len() < 2 {
+        return;
+    }
+
+    let width = extents.last_right - extents.first_left + 5.0 * extents.arrow_spacing;
+    if width <= 0.0 {
+        return;
+    }
+
+    let height = line_specs.last().map_or(0.0, |line| line.offset_y)
+        - line_specs.first().map_or(0.0, |line| line.offset_y);
+    if height <= 0.0 {
+        return;
+    }
+
+    let border_width = metric_line_border_width(overlay, font_size, scale);
+    let tree = build_metric_line_tree(width, height, &line_specs, border_width);
+
+    let mut material = default_panel_material();
+    material.base_color = Color::NONE;
+    material.alpha_mode = AlphaMode::Blend;
+    material.unlit = true;
+
+    let x = extents.first_left - 3.0 * extents.arrow_spacing;
+    let top_layout =
+        if (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5 {
+            line_metrics.top
+        } else {
+            line_metrics.baseline - line_metrics.ascent
+        };
+    let top_world = layout_to_world_y(top_layout, anchor_y, scale);
+
+    commands.entity(entity).with_child((
+        DiegeticPanel::world()
+            .size(width, height)
+            .anchor(Anchor::TopLeft)
+            .material(material)
+            .with_tree(tree)
+            .build()
+            .expect("metric line panel uses valid dimensions"),
+        Transform::from_xyz(x, top_world, METRIC_LINE_Z_OFFSET),
+    ));
+}
+
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.
 fn spawn_glyph_metric_gizmos(
     commands: &mut Commands,
@@ -386,19 +472,9 @@ fn spawn_glyph_metric_gizmos(
     dot_materials: &mut Assets<StandardMaterial>,
 ) {
     let bbox_color = Color::srgba(1.0, 1.0, 0.6, 0.7);
-    let glyph_gizmo = build_glyph_box_gizmo(&computed.glyph_rects, bbox_color);
-
-    commands.entity(entity).with_child((
-        Gizmo {
-            handle:      gizmo_assets.add(glyph_gizmo),
-            line_config: GizmoLineConfig {
-                width: THIN_LINE_WIDTH,
-                ..default()
-            },
-            depth_bias:  -0.1,
-        },
-        Transform::IDENTITY,
-    ));
+    spawn_glyph_box_panels(
+        commands, entity, overlay, computed, bbox_color, font_size, scale,
+    );
 
     // "Bounding Box" callout from the first glyph's bbox.
     if !computed.glyph_rects.is_empty() && overlay.show_labels == GlyphMetricVisibility::Shown {
@@ -435,6 +511,52 @@ fn spawn_glyph_metric_gizmos(
     }
 }
 
+/// Spawns one transparent bordered world panel per glyph bounding box.
+fn spawn_glyph_box_panels(
+    commands: &mut Commands,
+    entity: Entity,
+    overlay: &TypographyOverlay,
+    computed: &ComputedWorldText,
+    bbox_color: Color,
+    font_size: f32,
+    scale: f32,
+) {
+    let mut material = default_panel_material();
+    material.base_color = Color::NONE;
+    material.alpha_mode = AlphaMode::Blend;
+    material.unlit = true;
+
+    let border_width = bbox_border_width(overlay, font_size, scale);
+
+    for &[x, y, w, h] in &computed.glyph_rects {
+        if w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+
+        let mut builder = LayoutBuilder::new(w, h);
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .border(Border::all(border_width, bbox_color)),
+            |_| {},
+        );
+        let tree = builder.build();
+
+        commands.entity(entity).with_child((
+            DiegeticPanel::world()
+                .size(w, h)
+                .anchor(Anchor::Center)
+                .surface_shadow(SurfaceShadow::On)
+                .material(material.clone())
+                .with_tree(tree)
+                .build()
+                .expect("glyph bounding box panels use valid dimensions"),
+            Transform::from_xyz(x + w / 2.0, y - h / 2.0, CALLOUT_Z_OFFSET),
+        ));
+    }
+}
+
 /// Spawns the "Bounding Box" callout label with shelf and riser lines.
 fn spawn_bounding_box_callout(
     commands: &mut Commands,
@@ -448,7 +570,7 @@ fn spawn_bounding_box_callout(
     bbox_color: Color,
     gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
-    let label_size = font_size * LABEL_SIZE_RATIO;
+    let label_size = font_scale(font_size, scale) * LABEL_SIZE_RATIO;
     let z = CALLOUT_Z_OFFSET;
 
     let Some(last) = computed.glyph_rects.last() else {
@@ -535,7 +657,7 @@ fn spawn_origin_and_advancement(
     dot_materials: &mut Assets<StandardMaterial>,
 ) {
     let callout_color = Color::srgb(0.9, 0.2, 0.2);
-    let label_size = font_size * LABEL_SIZE_RATIO;
+    let label_size = font_scale(font_size, scale) * LABEL_SIZE_RATIO;
     let z = CALLOUT_Z_OFFSET;
     let dot_radius = dot_radius(font_size, scale);
 
@@ -717,25 +839,6 @@ fn spawn_advancement_arrow(
     ));
 }
 
-/// Builds a gizmo with per-glyph bounding box rectangles.
-fn build_glyph_box_gizmo(glyph_rects: &[[f32; 4]], color: Color) -> GizmoAsset {
-    let mut gizmo = GizmoAsset::default();
-
-    for &[x, y, w, h] in glyph_rects {
-        let tl = Vec3::new(x, y, CALLOUT_Z_OFFSET);
-        let tr = Vec3::new(x + w, y, CALLOUT_Z_OFFSET);
-        let br = Vec3::new(x + w, y - h, CALLOUT_Z_OFFSET);
-        let bl = Vec3::new(x, y - h, CALLOUT_Z_OFFSET);
-
-        gizmo.line(tl, tr, color);
-        gizmo.line(tr, br, color);
-        gizmo.line(br, bl, color);
-        gizmo.line(bl, tl, color);
-    }
-
-    gizmo
-}
-
 /// Convert layout Y-down to world Y-up, with anchor offset.
 fn layout_to_world_y(layout_y: f32, anchor_y: f32, scale: f32) -> f32 {
     -(layout_y - anchor_y) * scale
@@ -767,11 +870,118 @@ fn arrow_gap(font_size: f32, scale: f32) -> f32 { ARROW_GAP_RATIO * font_scale(f
 /// Label gap in world units, scaled to the font size.
 fn label_gap(font_size: f32, scale: f32) -> f32 { LABEL_GAP_RATIO * font_scale(font_size, scale) }
 
+/// Border width for panel-backed glyph boxes in world units.
+fn bbox_border_width(overlay: &TypographyOverlay, font_size: f32, scale: f32) -> f32 {
+    let min_world = font_scale(font_size, scale) * 0.0025;
+    let from_line_width = overlay.line_width.max(THIN_LINE_WIDTH) * min_world;
+    from_line_width.max(min_world)
+}
+
+/// Border width for panel-backed horizontal metric lines in world units.
+fn metric_line_border_width(overlay: &TypographyOverlay, font_size: f32, scale: f32) -> f32 {
+    1.5 * bbox_border_width(overlay, font_size, scale)
+}
+
 /// Horizontal extents of the glyph run and the uniform arrow column spacing.
 struct GlyphExtents {
     first_left:    f32,
     last_right:    f32,
     arrow_spacing: f32,
+}
+
+struct MetricLineSpec {
+    offset_y: f32,
+    color:    Color,
+}
+
+fn metric_line_specs(
+    font_metrics: &FontMetrics,
+    line_metrics: &LineMetricsSnapshot,
+    overlay: &TypographyOverlay,
+    anchor_y: f32,
+    scale: f32,
+) -> Vec<MetricLineSpec> {
+    let baseline_y = line_metrics.baseline;
+    let ascent_y = baseline_y - line_metrics.ascent;
+    let descent_y = baseline_y + line_metrics.descent;
+    let top_y = line_metrics.top;
+    let bottom_y = line_metrics.bottom;
+
+    let include_top = (top_y - ascent_y).abs() > 0.5;
+    let top_layout = if include_top { top_y } else { ascent_y };
+    let top_world = layout_to_world_y(top_layout, anchor_y, scale);
+    let offset = |layout_y: f32| top_world - layout_to_world_y(layout_y, anchor_y, scale);
+
+    let mut specs = Vec::with_capacity(7);
+    if include_top {
+        specs.push(MetricLineSpec {
+            offset_y: 0.0,
+            color:    overlay.color,
+        });
+    }
+    specs.push(MetricLineSpec {
+        offset_y: offset(ascent_y),
+        color:    overlay.color,
+    });
+    specs.push(MetricLineSpec {
+        offset_y: offset(baseline_y - font_metrics.cap_height),
+        color:    overlay.color,
+    });
+    specs.push(MetricLineSpec {
+        offset_y: offset(baseline_y - font_metrics.x_height),
+        color:    overlay.color,
+    });
+    specs.push(MetricLineSpec {
+        offset_y: offset(baseline_y),
+        color:    Color::srgb(0.9, 0.2, 0.2),
+    });
+    specs.push(MetricLineSpec {
+        offset_y: offset(descent_y),
+        color:    overlay.color,
+    });
+    if (bottom_y - descent_y).abs() > 0.5 {
+        specs.push(MetricLineSpec {
+            offset_y: offset(bottom_y),
+            color:    overlay.color,
+        });
+    }
+    specs
+}
+
+fn build_metric_line_tree(
+    width: f32,
+    height: f32,
+    line_specs: &[MetricLineSpec],
+    border_width: f32,
+) -> crate::layout::LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .size(width, height)
+            .direction(Direction::TopToBottom),
+    );
+
+    for (index, window) in line_specs.windows(2).enumerate() {
+        let current = &window[0];
+        let next = &window[1];
+        let segment_h = next.offset_y - current.offset_y;
+        if segment_h <= 0.0 {
+            continue;
+        }
+
+        let mut border = Border::new().bottom(border_width).color(next.color);
+        if index == 0 {
+            border = border.top(border_width).color(current.color);
+        }
+
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::fixed(segment_h))
+                .border(border),
+            |_| {},
+        );
+    }
+    builder.build()
 }
 
 /// Builds gizmos for horizontal metric lines and dimension arrows.
@@ -918,7 +1128,7 @@ fn spawn_metric_labels(
     scale: f32,
     extents: &GlyphExtents,
 ) {
-    let label_size = font_size * LABEL_SIZE_RATIO;
+    let label_size = font_scale(font_size, scale) * LABEL_SIZE_RATIO;
     let color = overlay.color;
     let z = METRIC_LINE_Z_OFFSET;
     let gap = label_gap(font_size, scale);

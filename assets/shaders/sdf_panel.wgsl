@@ -47,6 +47,9 @@ struct SdfPanelUniform {
     border_widths: vec4<f32>,
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
+    /// Alpha of the fill/base color. Lets the prepass distinguish
+    /// filled panels from border-only panels.
+    fill_alpha:    f32,
     /// Clip rect in local quad space: [left, bottom, right, top].
     /// Fragments outside are discarded.
     clip_rect:         vec4<f32>,
@@ -70,30 +73,30 @@ fn sd_rounded_box(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
 }
 
 /// Computes the effective inner half-size after subtracting border widths.
-fn inner_half_size() -> vec2<f32> {
+fn inner_half_size(border_widths: vec4<f32>) -> vec2<f32> {
     return vec2<f32>(
-        sdf.half_size.x - 0.5 * (sdf.border_widths.y + sdf.border_widths.w),
-        sdf.half_size.y - 0.5 * (sdf.border_widths.x + sdf.border_widths.z),
+        sdf.half_size.x - 0.5 * (border_widths.y + border_widths.w),
+        sdf.half_size.y - 0.5 * (border_widths.x + border_widths.z),
     );
 }
 
 /// Computes the offset from center due to asymmetric border widths.
-fn border_center_offset() -> vec2<f32> {
+fn border_center_offset(border_widths: vec4<f32>) -> vec2<f32> {
     return vec2<f32>(
-        0.5 * (sdf.border_widths.w - sdf.border_widths.y),
-        0.5 * (sdf.border_widths.x - sdf.border_widths.z),
+        0.5 * (border_widths.w - border_widths.y),
+        0.5 * (border_widths.x - border_widths.z),
     );
 }
 
 /// Shrinks corner radii by the minimum border width on adjacent sides.
-fn inner_corner_radii() -> vec4<f32> {
+fn inner_corner_radii(border_widths: vec4<f32>) -> vec4<f32> {
     return max(
         vec4(0.0),
         vec4<f32>(
-            sdf.corner_radii.x - min(sdf.border_widths.x, sdf.border_widths.w), // TL
-            sdf.corner_radii.y - min(sdf.border_widths.x, sdf.border_widths.y), // TR
-            sdf.corner_radii.z - min(sdf.border_widths.z, sdf.border_widths.y), // BR
-            sdf.corner_radii.w - min(sdf.border_widths.z, sdf.border_widths.w), // BL
+            sdf.corner_radii.x - min(border_widths.x, border_widths.w), // TL
+            sdf.corner_radii.y - min(border_widths.x, border_widths.y), // TR
+            sdf.corner_radii.z - min(border_widths.z, border_widths.y), // BR
+            sdf.corner_radii.w - min(border_widths.z, border_widths.w), // BL
         ),
     );
 }
@@ -124,6 +127,31 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
     // Discard fragments outside the rounded shape.
     if dist > 0.0 {
         discard;
+    }
+
+    let has_border = sdf.border_widths.x > 0.0
+        || sdf.border_widths.y > 0.0
+        || sdf.border_widths.z > 0.0
+        || sdf.border_widths.w > 0.0;
+    let has_fill = sdf.fill_alpha > 0.001;
+
+    // Border-only panels should cast only the visible ring, not the
+    // transparent interior.
+    if has_border && !has_fill {
+        // Keep border-only casters readable in the shadow map by giving
+        // each side at least a 1px screen-space footprint in the prepass.
+        let pixel_size = vec2<f32>(fwidth(local.x), fwidth(local.y));
+        let shadow_border_widths = max(
+            sdf.border_widths,
+            vec4<f32>(pixel_size.y, pixel_size.x, pixel_size.y, pixel_size.x),
+        );
+        let inner_hs = inner_half_size(shadow_border_widths);
+        let inner_offset = border_center_offset(shadow_border_widths);
+        let inner_radii = inner_corner_radii(shadow_border_widths);
+        let inner_dist = sd_rounded_box(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
+        if inner_dist <= 0.0 {
+            discard;
+        }
     }
 }
 #else
@@ -187,9 +215,9 @@ fn fragment(
         || sdf.border_widths.w > 0.0;
 
     // Inner shape distance (inside the border).
-    let inner_hs = inner_half_size();
-    let inner_offset = border_center_offset();
-    let inner_radii = inner_corner_radii();
+    let inner_hs = inner_half_size(sdf.border_widths);
+    let inner_offset = border_center_offset(sdf.border_widths);
+    let inner_radii = inner_corner_radii(sdf.border_widths);
     let inner_dist = sd_rounded_box(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
 
     // Inner fill alpha.

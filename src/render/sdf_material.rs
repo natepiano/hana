@@ -6,6 +6,7 @@
 //! all `StandardMaterial` properties for free.
 
 use bevy::asset::Asset;
+use bevy::color::Alpha;
 use bevy::color::Color;
 use bevy::color::LinearRgba;
 use bevy::math::Vec2;
@@ -38,6 +39,9 @@ pub(super) struct SdfPanelUniform {
     pub border_widths:    Vec4,
     /// Border color in linear RGBA.
     pub border_color:     Vec4,
+    /// Alpha of the fill/base color. Used by the shadow prepass to
+    /// distinguish filled surfaces from border-only rings.
+    pub fill_alpha:       f32,
     /// Clip rect in local quad space: `[left, bottom, right, top]`.
     /// Fragments outside this rect are discarded. Defaults to the full
     /// quad bounds (`[-half_w, -half_h, half_w, half_h]`) when no clip
@@ -92,6 +96,7 @@ pub(super) fn sdf_panel_material(
     base.cull_mode = None;
     // SDF provides its own per-fragment alpha — always use Blend.
     base.alpha_mode = AlphaMode::Blend;
+    let fill_alpha = base.base_color.alpha();
 
     let border_linear: Vec4 = border_color.map_or(Vec4::ZERO, |c| {
         let l: LinearRgba = c.into();
@@ -107,6 +112,7 @@ pub(super) fn sdf_panel_material(
                 corner_radii: Vec4::from_array(corner_radii),
                 border_widths: Vec4::from_array(border_widths),
                 border_color: border_linear,
+                fill_alpha,
                 clip_rect,
                 oit_depth_offset,
             },
