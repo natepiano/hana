@@ -87,7 +87,6 @@ pub use layout::WorldTextStyle;
 // Bevy plugin.
 pub use plugin::AtlasConfig;
 pub use plugin::ComputedDiegeticPanel;
-pub use plugin::DimensionMatch;
 pub use plugin::DiegeticPanel;
 pub use plugin::DiegeticPanelBuilder;
 pub use plugin::DiegeticPanelGizmoGroup;
@@ -95,6 +94,7 @@ pub use plugin::DiegeticPerfStats;
 pub use plugin::DiegeticTextMeasurer;
 pub use plugin::DiegeticUiPlugin;
 pub use plugin::DiegeticUiPluginConfigured;
+pub use plugin::DimensionMatch;
 pub use plugin::GlyphWorkerThreads;
 pub use plugin::HasUnit;
 pub use plugin::HueOffset;

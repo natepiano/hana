@@ -7,8 +7,8 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
-use super::config::InvalidSize;
 use super::config::DimensionMatch;
+use super::config::InvalidSize;
 use super::config::PanelSize;
 use super::config::Pt;
 use super::config::UnitConfig;
