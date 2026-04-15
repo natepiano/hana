@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use bevy::asset::load_internal_asset;
+use bevy::asset::uuid_handle;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
@@ -50,8 +52,17 @@ enum ShadowMode {
 /// Plugin that adds panel geometry rendering (backgrounds and borders).
 pub struct PanelGeometryPlugin;
 
+const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");
+
 impl Plugin for PanelGeometryPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            SDF_STROKE_SHADER_HANDLE,
+            "sdf_stroke.wgsl",
+            Shader::from_wgsl
+        );
         app.add_plugins(MaterialPlugin::<SdfPanelMaterial>::default());
         app.add_systems(
             PostUpdate,

@@ -36,6 +36,13 @@
 }
 #endif
 
+#import bevy_diegetic::sdf_stroke::{
+    centered_stroke_alpha,
+    inflate_subpixel_half_size,
+    stable_border_alpha,
+    stable_line_alpha,
+}
+
 struct SdfPanelUniform {
     /// Half-size of the SDF shape in world units (width/2, height/2).
     half_size:      vec2<f32>,
@@ -48,7 +55,7 @@ struct SdfPanelUniform {
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
     /// Shape selector. `0` = rounded rect, `1` = triangle, `2` = circle,
-    /// `3` = diamond.
+    /// `3` = diamond, `4` = line segment.
     shape_kind:    u32,
     /// Extra shape parameters for custom SDF shapes.
     shape_params:  vec4<f32>,
@@ -109,6 +116,21 @@ fn sd_circle(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     return length(p) - min(half_size.x, half_size.y);
 }
 
+/// Signed distance to a horizontal line segment with thickness
+/// `2 * half_size.y`, centered on the X axis and spanning
+/// `[-half_size.x, +half_size.x]`.
+fn sd_line_segment(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    let a = vec2<f32>(-half_size.x, 0.0);
+    let b = vec2<f32>(half_size.x, 0.0);
+    return sd_segment(p, a, b) - half_size.y;
+}
+
+fn line_center_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    let a = vec2<f32>(-half_size.x, 0.0);
+    let b = vec2<f32>(half_size.x, 0.0);
+    return sd_segment(p, a, b);
+}
+
 /// Signed distance to a right-pointing diamond.
 fn sd_diamond(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     let a = vec2<f32>(half_size.x, 0.0);
@@ -142,6 +164,9 @@ fn sd_shape(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
     }
     if sdf.shape_kind == 3u {
         return sd_diamond(p, half_size);
+    }
+    if sdf.shape_kind == 4u {
+        return sd_line_segment(p, half_size);
     }
     return sd_rounded_box(p, half_size, radii);
 }
@@ -222,9 +247,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
         // Keep border-only casters readable in the shadow map by giving
         // each side at least a 1px screen-space footprint in the prepass.
         let pixel_size = vec2<f32>(fwidth(local.x), fwidth(local.y));
-        let shadow_border_widths = max(
-            sdf.border_widths,
-            vec4<f32>(pixel_size.y, pixel_size.x, pixel_size.y, pixel_size.x),
+        let min_shadow_widths = vec4<f32>(pixel_size.y, pixel_size.x, pixel_size.y, pixel_size.x);
+        let shadow_border_widths = select(
+            vec4<f32>(0.0),
+            max(sdf.border_widths, min_shadow_widths),
+            sdf.border_widths > vec4<f32>(0.0),
         );
         let inner_hs = inner_half_size(shadow_border_widths);
         let inner_offset = border_center_offset(shadow_border_widths);
@@ -259,16 +286,24 @@ fn fragment(
     // A 0.3px line renders as a 1px line at 30% alpha — always visible,
     // always consistent, physically correct when zoomed in.
     let pixel_size = vec2<f32>(fwidth(local.x), fwidth(local.y));
-    let min_half = pixel_size * 0.5;
-    var effective_half_size = sdf.half_size;
-    var coverage_scale = 1.0;
-    if sdf.half_size.x < min_half.x && sdf.half_size.x > 0.0 {
-        coverage_scale *= sdf.half_size.x / min_half.x;
-        effective_half_size.x = min_half.x;
-    }
-    if sdf.half_size.y < min_half.y && sdf.half_size.y > 0.0 {
-        coverage_scale *= sdf.half_size.y / min_half.y;
-        effective_half_size.y = min_half.y;
+    let inflated = inflate_subpixel_half_size(sdf.half_size, pixel_size);
+    let effective_half_size = inflated.xy;
+    let coverage_scale = inflated.z;
+
+    let is_line_shape = sdf.shape_kind == 4u;
+    let line_center_dist = line_center_distance(local, effective_half_size);
+    let line_outer_dist = line_center_dist - effective_half_size.y;
+    let line_inner_dist = line_center_dist + effective_half_size.y;
+    let line_outer_aa = max(fwidth(line_outer_dist) * 0.75, 0.0001);
+    let line_outer_alpha = 1.0 - smoothstep(0.0, 2.0 * line_outer_aa, line_outer_dist);
+    let line_alpha = select(
+        0.0,
+        stable_border_alpha(line_outer_alpha, line_outer_dist, line_inner_dist),
+        is_line_shape,
+    );
+
+    if is_line_shape && line_alpha < 0.001 {
+        discard;
     }
 
     // Outer shape distance (using potentially inflated half-size).
@@ -285,7 +320,7 @@ fn fragment(
     let outer_alpha = (1.0 - smoothstep(0.0, 2.0 * base_aa, outer_dist)) * coverage_scale;
 
     // Discard fully outside fragments.
-    if outer_alpha < 0.001 {
+    if !is_line_shape && outer_alpha < 0.001 {
         discard;
     }
 
@@ -314,28 +349,15 @@ fn fragment(
     // ── Border alpha ───────────────────────────────────────────────
     // Classic ring formula: works for thick borders and filled elements.
     let classic_border_alpha = outer_alpha * (1.0 - inner_alpha);
-
-    // Stroke-centerline formula: treats the border as a stroke centered
-    // between the outer and inner SDFs. Guarantees alpha=1 at the stroke
-    // center, giving TAA a stable opaque pixel to lock onto. Used for
-    // thin border-only elements where the classic formula has no solid core.
-    let stroke_center = 0.5 * (outer_dist + inner_dist);
-    let stroke_half_width = max(0.5 * (inner_dist - outer_dist), 0.0);
-    let stroke_aa = max(fwidth(stroke_center), 0.0001);
-    let stroke_shape = 1.0 - smoothstep(
-        stroke_half_width - stroke_aa,
-        stroke_half_width + stroke_aa,
-        abs(stroke_center),
-    );
-    // Sub-pixel coverage fade: prevent persistent hairlines when zoomed out.
-    let border_screen = (2.0 * stroke_half_width) / stroke_aa;
-    let coverage = smoothstep(0.0, 1.0, border_screen);
-    let thin_stroke_alpha = stroke_shape * coverage;
+    let thin_stroke_alpha = centered_stroke_alpha(outer_dist, inner_dist);
 
     // Blend between classic and stroke formulas based on whether the
     // border is thick enough for the classic formula to have a solid core.
     var border_alpha = classic_border_alpha;
     if !has_fill && has_border {
+        let stroke_center = 0.5 * (outer_dist + inner_dist);
+        let stroke_half_width = max(0.5 * (inner_dist - outer_dist), 0.0);
+        let stroke_aa = max(fwidth(stroke_center), 0.0001);
         let thin_border_mix = 1.0 - smoothstep(0.75, 1.5, stroke_half_width / stroke_aa);
         border_alpha = mix(classic_border_alpha, thin_stroke_alpha, thin_border_mix);
     }
@@ -359,12 +381,21 @@ fn fragment(
                 border.a * border_alpha,
             );
         }
+    } else if is_line_shape {
+        final_color = vec4<f32>(
+            fill.rgb,
+            fill.a * line_alpha,
+        );
     } else {
         // Fill only, no border.
         final_color = vec4<f32>(
             fill.rgb,
             fill.a * outer_alpha,
         );
+    }
+
+    if final_color.a < 0.001 {
+        discard;
     }
 
     pbr_input.material.base_color = final_color;

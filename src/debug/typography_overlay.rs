@@ -10,6 +10,8 @@
 //! children.
 
 use bevy::color::palettes::css::WHITE;
+use bevy::light::NotShadowCaster;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 
 use super::constants::ARROW_GAP_RATIO;
@@ -31,8 +33,8 @@ use super::constants::LABEL_ORIGIN;
 use super::constants::LABEL_SIZE_RATIO;
 use super::constants::LABEL_TOP;
 use super::constants::LABEL_X_HEIGHT;
+use super::constants::METRIC_ARROW_Z_OFFSET;
 use super::constants::METRIC_LINE_Z_OFFSET;
-use super::constants::THICK_LINE_WIDTH;
 use super::constants::THIN_LINE_WIDTH;
 use crate::callouts;
 use crate::default_panel_material;
@@ -43,6 +45,7 @@ use crate::layout::El;
 use crate::layout::GlyphShadowMode;
 use crate::layout::LayoutBuilder;
 use crate::layout::Sizing;
+use crate::layout::TextDimensions;
 use crate::layout::WorldTextStyle;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::SurfaceShadow;
@@ -56,6 +59,7 @@ use crate::render::WorldText;
 use crate::text::FontId;
 use crate::text::FontMetrics;
 use crate::text::FontRegistry;
+use crate::text::create_parley_measurer;
 
 /// Whether per-glyph bounding box annotations are visible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, bevy::prelude::Reflect)]
@@ -100,6 +104,8 @@ pub struct TypographyOverlay {
     pub label_size:         f32,
     /// How far annotation lines extend beyond text bounds (in layout units).
     pub extend:             f32,
+    /// Whether overlay geometry and labels cast shadows.
+    pub shadow:             SurfaceShadow,
 }
 
 impl Default for TypographyOverlay {
@@ -112,6 +118,23 @@ impl Default for TypographyOverlay {
             line_width:         DEFAULT_LINE_WIDTH,
             label_size:         6.0,
             extend:             8.0,
+            shadow:             SurfaceShadow::Off,
+        }
+    }
+}
+
+impl TypographyOverlay {
+    /// Sets whether overlay constituents cast shadows.
+    #[must_use]
+    pub const fn with_shadow(mut self, shadow: SurfaceShadow) -> Self {
+        self.shadow = shadow;
+        self
+    }
+
+    const fn label_shadow_mode(&self) -> GlyphShadowMode {
+        match self.shadow {
+            SurfaceShadow::Off => GlyphShadowMode::None,
+            SurfaceShadow::On => GlyphShadowMode::Text,
         }
     }
 }
@@ -121,18 +144,28 @@ impl Default for TypographyOverlay {
 #[derive(Component)]
 pub struct OverlayContainer;
 
+/// Hidden mesh entity representing the full overlay extent for fit/home
+/// operations.
+#[derive(Component)]
+pub struct OverlayBoundingBox;
+
 /// Fired on the [`WorldText`] entity when its [`TypographyOverlay`] and
 /// all descendant label text are fully rendered and interactable.
 #[derive(EntityEvent)]
 pub struct TypographyOverlayReady {
-    /// The [`WorldText`] entity whose overlay is ready.
+    /// The hidden overlay-bounds entity that is ready to use as a fit target.
+    #[event_target]
     pub entity: Entity,
+    /// The [`WorldText`] entity that owns the overlay.
+    pub owner:  Entity,
 }
 
 /// Internal marker: overlay labels have been spawned, waiting for their
 /// glyphs to finish and transforms to propagate.
 #[derive(Component)]
-pub struct AwaitingOverlayReady;
+pub struct AwaitingOverlayReady {
+    ready_target: Entity,
+}
 
 /// Observer: spawns an [`OverlayContainer`] child when
 /// [`TypographyOverlay`] is added to an entity.
@@ -188,7 +221,7 @@ pub fn build_typography_overlay(
     >,
     containers: Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
     font_registry: Res<FontRegistry>,
-    cache: Res<ShapedTextCache>,
+    mut cache: ResMut<ShapedTextCache>,
     unit_config: Res<UnitConfig>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -196,6 +229,8 @@ pub fn build_typography_overlay(
     mut commands: Commands,
 ) {
     let changed_entities: Vec<Entity> = text_changed.iter().collect();
+    let measure_text =
+        create_parley_measurer(font_registry.font_context(), font_registry.family_names());
 
     for (entity, world_text, style, overlay, computed) in &query {
         if !changed_entities.contains(&entity) {
@@ -264,7 +299,7 @@ pub fn build_typography_overlay(
         };
 
         if overlay.show_font_metrics == GlyphMetricVisibility::Shown {
-            spawn_font_metric_gizmos(
+            let bounds_target = spawn_font_metric_gizmos(
                 &mut commands,
                 container_entity,
                 font.name(),
@@ -276,7 +311,17 @@ pub fn build_typography_overlay(
                 font_size,
                 scale,
                 &mut gizmo_assets,
+                &measure_text,
+                &mut cache,
+                &mut meshes,
+                &mut dot_materials,
             );
+
+            // Mark for deferred readiness check — label glyphs may still
+            // need rasterization and transform propagation.
+            commands.entity(entity).insert(AwaitingOverlayReady {
+                ready_target: bounds_target,
+            });
         }
 
         if overlay.show_glyph_metrics == GlyphMetricVisibility::Shown {
@@ -297,9 +342,11 @@ pub fn build_typography_overlay(
             );
         }
 
-        // Mark for deferred readiness check — label glyphs may still
-        // need rasterization and transform propagation.
-        commands.entity(entity).insert(AwaitingOverlayReady);
+        if overlay.show_font_metrics != GlyphMetricVisibility::Shown {
+            commands.entity(entity).insert(AwaitingOverlayReady {
+                ready_target: container_entity,
+            });
+        }
     }
 }
 
@@ -307,12 +354,12 @@ pub fn build_typography_overlay(
 /// once all descendant [`WorldText`] labels have no [`PendingGlyphs`].
 /// Runs after `CalculateBounds` so transforms and AABBs are available.
 pub fn emit_typography_overlay_ready(
-    awaiting: Query<Entity, With<AwaitingOverlayReady>>,
+    awaiting: Query<(Entity, &AwaitingOverlayReady)>,
     pending: Query<(), With<PendingGlyphs>>,
     children_query: Query<&Children>,
     mut commands: Commands,
 ) {
-    for entity in &awaiting {
+    for (entity, awaiting) in &awaiting {
         let any_pending = children_query
             .iter_descendants(entity)
             .any(|d| pending.get(d).is_ok());
@@ -320,9 +367,13 @@ pub fn emit_typography_overlay_ready(
             continue;
         }
         commands.entity(entity).remove::<AwaitingOverlayReady>();
+        let ready_target = awaiting.ready_target;
         commands
-            .entity(entity)
-            .trigger(|e| TypographyOverlayReady { entity: e });
+            .entity(ready_target)
+            .trigger(|e| TypographyOverlayReady {
+                entity: e,
+                owner:  entity,
+            });
     }
 }
 
@@ -339,7 +390,11 @@ fn spawn_font_metric_gizmos(
     font_size: f32,
     scale: f32,
     _gizmo_assets: &mut Assets<GizmoAsset>,
-) {
+    measure_text: &crate::layout::MeasureTextFn,
+    cache: &mut ShapedTextCache,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) -> Entity {
     let extents = GlyphExtents {
         first_left:    computed.glyph_rects.first().map_or(0.0, |r| r[0]),
         last_right:    computed.glyph_rects.last().map_or(0.0, |r| r[0] + r[2]),
@@ -395,6 +450,22 @@ fn spawn_font_metric_gizmos(
             &extents,
         );
     }
+
+    spawn_overlay_bounds_target(
+        commands,
+        entity,
+        font_name,
+        font_metrics,
+        line_metrics,
+        anchor_y,
+        font_size,
+        scale,
+        &extents,
+        measure_text,
+        cache,
+        meshes,
+        materials,
+    )
 }
 
 /// Spawns horizontal font metric lines as a single transparent world panel.
@@ -446,7 +517,7 @@ fn spawn_metric_line_panel(
         DiegeticPanel::world()
             .size(width, height)
             .anchor(Anchor::TopLeft)
-            .surface_shadow(SurfaceShadow::On)
+            .surface_shadow(overlay.shadow)
             .material(material)
             .with_tree(tree)
             .build()
@@ -483,6 +554,7 @@ fn spawn_glyph_metric_gizmos(
             entity,
             font_metrics,
             line_metrics,
+            overlay,
             computed,
             anchor_y,
             font_size,
@@ -504,7 +576,6 @@ fn spawn_glyph_metric_gizmos(
             anchor_y,
             font_size,
             scale,
-            gizmo_assets,
             meshes,
             dot_materials,
         );
@@ -547,7 +618,7 @@ fn spawn_glyph_box_panels(
             DiegeticPanel::world()
                 .size(w, h)
                 .anchor(Anchor::Center)
-                .surface_shadow(SurfaceShadow::On)
+                .surface_shadow(overlay.shadow)
                 .material(material.clone())
                 .with_tree(tree)
                 .build()
@@ -563,6 +634,7 @@ fn spawn_bounding_box_callout(
     entity: Entity,
     font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
+    overlay: &TypographyOverlay,
     computed: &ComputedWorldText,
     anchor_y: f32,
     font_size: f32,
@@ -607,7 +679,8 @@ fn spawn_bounding_box_callout(
             Vec3::new(shelf_end_x, shelf_y, z),
         )
         .color(bbox_color)
-        .thickness(callout_thickness),
+        .thickness(callout_thickness)
+        .surface_shadow(overlay.shadow),
     );
     callouts::spawn_callout_line(
         commands,
@@ -617,7 +690,8 @@ fn spawn_bounding_box_callout(
             Vec3::new(shelf_end_x, callout_top_world, z),
         )
         .color(bbox_color)
-        .thickness(callout_thickness),
+        .thickness(callout_thickness)
+        .surface_shadow(overlay.shadow),
     );
 
     // Label at the top of the riser, to the left (CenterRight anchor).
@@ -628,7 +702,7 @@ fn spawn_bounding_box_callout(
         WorldTextStyle::new(label_size)
             .with_color(bbox_color)
             .with_anchor(Anchor::CenterRight)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(
             shelf_end_x - label_gap(font_size, scale),
             ascent_mid_world,
@@ -648,7 +722,6 @@ fn spawn_origin_and_advancement(
     anchor_y: f32,
     font_size: f32,
     scale: f32,
-    gizmo_assets: &mut Assets<GizmoAsset>,
     meshes: &mut Assets<Mesh>,
     dot_materials: &mut Assets<StandardMaterial>,
 ) {
@@ -671,15 +744,16 @@ fn spawn_origin_and_advancement(
     let origin_y = baseline_world;
 
     // Origin dot — small filled circle at (origin, baseline).
-    commands.entity(entity).with_child((
-        Mesh3d(meshes.add(Circle::new(dot_radius))),
-        MeshMaterial3d(dot_materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_xyz(origin_x, origin_y, z),
-    ));
+    spawn_overlay_dot(
+        commands,
+        entity,
+        meshes,
+        dot_materials,
+        dot_radius,
+        Vec3::new(origin_x, origin_y, z),
+        Color::WHITE,
+        overlay.shadow,
+    );
 
     // Origin label — centered between the bottom of the first
     // glyph's bbox and the Descent line.
@@ -704,28 +778,30 @@ fn spawn_origin_and_advancement(
             Vec3::new(first_mid_x, label_top_y, z),
         )
         .color(callout_color)
-        .thickness(callout_line_thickness(overlay, font_size, scale)),
+        .thickness(callout_line_thickness(overlay, font_size, scale))
+        .surface_shadow(overlay.shadow),
     );
     commands.entity(entity).with_child((
         WorldText::new(LABEL_ORIGIN),
         WorldTextStyle::new(label_size)
             .with_color(overlay.color)
             .with_anchor(Anchor::Center)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(first_mid_x, origin_label_y, z),
     ));
 
     // Advancement end dot — filled circle at (origin + advance, baseline).
     let advance_end_x = origin_x + computed.first_advance;
-    commands.entity(entity).with_child((
-        Mesh3d(meshes.add(Circle::new(dot_radius))),
-        MeshMaterial3d(dot_materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_xyz(advance_end_x, origin_y, z),
-    ));
+    spawn_overlay_dot(
+        commands,
+        entity,
+        meshes,
+        dot_materials,
+        dot_radius,
+        Vec3::new(advance_end_x, origin_y, z),
+        Color::WHITE,
+        overlay.shadow,
+    );
 
     // Advancement arrow — horizontal double-headed arrow below descent.
     let spacing = arrow_spacing(computed.first_advance);
@@ -743,7 +819,6 @@ fn spawn_origin_and_advancement(
         font_size,
         scale,
         z,
-        gizmo_assets,
     );
 }
 
@@ -762,13 +837,10 @@ fn spawn_advancement_arrow(
     font_size: f32,
     scale: f32,
     z: f32,
-    gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let arrow_y = descent_world - spacing;
     let head = arrowhead_size(font_size, scale);
     let gap = arrow_gap(font_size, scale);
-
-    let mut adv_gizmo = GizmoAsset::default();
 
     // Dashed vertical bracket lines — from below the arrow to just
     // above the origin/advance dots on the baseline.
@@ -776,21 +848,27 @@ fn spawn_advancement_arrow(
     let tick_below = arrow_y - head;
     let dash_len = spacing * 0.125;
     let gap_len = spacing * 0.125 / 2.0;
-    callouts::draw_dashed_line(
-        &mut adv_gizmo,
+    spawn_dashed_callout_line(
+        commands,
+        entity,
         Vec3::new(origin_x, tick_below, z),
         Vec3::new(origin_x, tick_above, z),
         dash_len,
         gap_len,
         overlay.color,
+        callout_line_thickness(overlay, font_size, scale),
+        overlay.shadow,
     );
-    callouts::draw_dashed_line(
-        &mut adv_gizmo,
+    spawn_dashed_callout_line(
+        commands,
+        entity,
         Vec3::new(advance_end_x, tick_below, z),
         Vec3::new(advance_end_x, tick_above, z),
         dash_len,
         gap_len,
         overlay.color,
+        callout_line_thickness(overlay, font_size, scale),
+        overlay.shadow,
     );
 
     // Horizontal dimension arrow.
@@ -803,7 +881,7 @@ fn spawn_advancement_arrow(
         )
         .color(overlay.color)
         .thickness(callout_line_thickness(overlay, font_size, scale))
-        .surface_shadow(SurfaceShadow::On)
+        .surface_shadow(overlay.shadow)
         .start_inset(gap)
         .end_inset(gap)
         .start_cap(
@@ -820,18 +898,6 @@ fn spawn_advancement_arrow(
         ),
     );
 
-    commands.entity(entity).with_child((
-        Gizmo {
-            handle:      gizmo_assets.add(adv_gizmo),
-            line_config: GizmoLineConfig {
-                width: THICK_LINE_WIDTH,
-                ..default()
-            },
-            depth_bias:  -0.1,
-        },
-        Transform::IDENTITY,
-    ));
-
     // "Advancement" label centered below the arrow.
     let adv_mid_x = f32::midpoint(origin_x, advance_end_x);
     let adv_label_y = spacing.mul_add(-0.5, arrow_y);
@@ -840,9 +906,69 @@ fn spawn_advancement_arrow(
         WorldTextStyle::new(label_size)
             .with_color(overlay.color)
             .with_anchor(Anchor::TopCenter)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(adv_mid_x, adv_label_y, z),
     ));
+}
+
+fn spawn_overlay_dot(
+    commands: &mut Commands,
+    entity: Entity,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    radius: f32,
+    position: Vec3,
+    color: Color,
+    shadow: SurfaceShadow,
+) {
+    let common = (
+        Mesh3d(meshes.add(Circle::new(radius))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: color,
+            unlit: true,
+            ..default()
+        })),
+        Transform::from_translation(position),
+    );
+    match shadow {
+        SurfaceShadow::On => commands.entity(entity).with_child(common),
+        SurfaceShadow::Off => commands
+            .entity(entity)
+            .with_child((common, NotShadowCaster)),
+    };
+}
+
+fn spawn_dashed_callout_line(
+    commands: &mut Commands,
+    entity: Entity,
+    start: Vec3,
+    end: Vec3,
+    dash_len: f32,
+    gap_len: f32,
+    color: Color,
+    thickness: f32,
+    shadow: SurfaceShadow,
+) {
+    let delta = end - start;
+    let total_len = delta.length();
+    if total_len < f32::EPSILON {
+        return;
+    }
+    let dir = delta / total_len;
+    let stride = dash_len + gap_len;
+    let count = (total_len / stride).ceil() as usize;
+    for i in 0..count {
+        let t = i as f32 * stride;
+        let dash_end = (t + dash_len).min(total_len);
+        callouts::spawn_callout_line(
+            commands,
+            entity,
+            &callouts::CalloutLine::new(start + dir * t, start + dir * dash_end)
+                .color(color)
+                .thickness(thickness)
+                .surface_shadow(shadow),
+        );
+    }
 }
 
 /// Convert layout Y-down to world Y-up, with anchor offset.
@@ -1154,8 +1280,8 @@ fn spawn_metric_arrow_callouts(
 
     for (from, to, start_cap, end_cap) in [
         (
-            Vec3::new(left_1, ascent_world, METRIC_LINE_Z_OFFSET),
-            Vec3::new(left_1, baseline_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(left_1, ascent_world, METRIC_ARROW_Z_OFFSET),
+            Vec3::new(left_1, baseline_world, METRIC_ARROW_Z_OFFSET),
             callouts::CalloutCap::arrow()
                 .solid()
                 .length(head)
@@ -1167,8 +1293,8 @@ fn spawn_metric_arrow_callouts(
                 .color(baseline_color),
         ),
         (
-            Vec3::new(left_1, baseline_world, METRIC_LINE_Z_OFFSET),
-            Vec3::new(left_1, descent_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(left_1, baseline_world, METRIC_ARROW_Z_OFFSET),
+            Vec3::new(left_1, descent_world, METRIC_ARROW_Z_OFFSET),
             callouts::CalloutCap::arrow()
                 .solid()
                 .length(head)
@@ -1180,8 +1306,8 @@ fn spawn_metric_arrow_callouts(
                 .width(head),
         ),
         (
-            Vec3::new(left_2, ascent_world, METRIC_LINE_Z_OFFSET),
-            Vec3::new(left_2, descent_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(left_2, ascent_world, METRIC_ARROW_Z_OFFSET),
+            Vec3::new(left_2, descent_world, METRIC_ARROW_Z_OFFSET),
             callouts::CalloutCap::arrow()
                 .solid()
                 .length(head)
@@ -1192,8 +1318,8 @@ fn spawn_metric_arrow_callouts(
                 .width(head),
         ),
         (
-            Vec3::new(right_1, x_height_world, METRIC_LINE_Z_OFFSET),
-            Vec3::new(right_1, baseline_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(right_1, x_height_world, METRIC_ARROW_Z_OFFSET),
+            Vec3::new(right_1, baseline_world, METRIC_ARROW_Z_OFFSET),
             callouts::CalloutCap::arrow()
                 .solid()
                 .length(head)
@@ -1205,8 +1331,8 @@ fn spawn_metric_arrow_callouts(
                 .color(baseline_color),
         ),
         (
-            Vec3::new(right_2, cap_height_world, METRIC_LINE_Z_OFFSET),
-            Vec3::new(right_2, baseline_world, METRIC_LINE_Z_OFFSET),
+            Vec3::new(right_2, cap_height_world, METRIC_ARROW_Z_OFFSET),
+            Vec3::new(right_2, baseline_world, METRIC_ARROW_Z_OFFSET),
             callouts::CalloutCap::arrow()
                 .solid()
                 .length(head)
@@ -1224,7 +1350,7 @@ fn spawn_metric_arrow_callouts(
             &callouts::CalloutLine::new(from, to)
                 .color(overlay.color)
                 .thickness(thickness)
-                .surface_shadow(SurfaceShadow::On)
+                .surface_shadow(overlay.shadow)
                 .start_inset(gap)
                 .end_inset(gap)
                 .start_cap(start_cap)
@@ -1273,6 +1399,7 @@ fn spawn_metric_labels(
         commands,
         parent,
         metric_lines,
+        overlay,
         anchor_y,
         label_size,
         color,
@@ -1286,6 +1413,7 @@ fn spawn_metric_labels(
         parent,
         line_metrics,
         font_name,
+        overlay,
         anchor_y,
         label_size,
         color,
@@ -1302,6 +1430,7 @@ fn spawn_metric_labels(
     spawn_right_arrow_labels(
         commands,
         parent,
+        overlay,
         anchor_y,
         label_size,
         color,
@@ -1316,11 +1445,152 @@ fn spawn_metric_labels(
     );
 }
 
+fn measure_overlay_label(
+    cache: &mut ShapedTextCache,
+    measure_text: &crate::layout::MeasureTextFn,
+    text: &str,
+    size: f32,
+    boost: f32,
+    scale: f32,
+) -> TextDimensions {
+    let measure = WorldTextStyle::new(size)
+        .as_layout_config()
+        .scaled(boost)
+        .as_measure();
+    if let Some(dims) = cache.get_measurement(text, &measure) {
+        return TextDimensions {
+            width:       dims.width * scale,
+            height:      dims.height * scale,
+            line_height: dims.line_height * scale,
+        };
+    }
+    let dims = (measure_text)(text, &measure);
+    cache.insert_measurement(text, &measure, dims);
+    TextDimensions {
+        width:       dims.width * scale,
+        height:      dims.height * scale,
+        line_height: dims.line_height * scale,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_overlay_bounds_target(
+    commands: &mut Commands,
+    parent: Entity,
+    font_name: &str,
+    _font_metrics: &FontMetrics,
+    line_metrics: &LineMetricsSnapshot,
+    anchor_y: f32,
+    font_size: f32,
+    scale: f32,
+    extents: &GlyphExtents,
+    measure_text: &crate::layout::MeasureTextFn,
+    cache: &mut ShapedTextCache,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) -> Entity {
+    let label_size = font_scale(font_size, scale) * LABEL_SIZE_RATIO;
+    let gap = label_gap(font_size, scale);
+    let boost = if Unit::Points.meters_per_unit() > 0.0 {
+        1.0 / Unit::Points.meters_per_unit()
+    } else {
+        1.0
+    };
+
+    let line_height_dims = measure_overlay_label(
+        cache,
+        measure_text,
+        LABEL_LINE_HEIGHT,
+        label_size,
+        boost,
+        scale,
+    );
+    let cap_height_dims = measure_overlay_label(
+        cache,
+        measure_text,
+        LABEL_CAP_HEIGHT,
+        label_size,
+        boost,
+        scale,
+    );
+    let advancement_dims = measure_overlay_label(
+        cache,
+        measure_text,
+        LABEL_ADVANCEMENT,
+        label_size,
+        boost,
+        scale,
+    );
+
+    let baseline_y = line_metrics.baseline;
+    let ascent_y = baseline_y - line_metrics.ascent;
+    let top_y = line_metrics.top;
+    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+
+    let line_height_anchor_x = left_2 - gap;
+    let cap_height_anchor_x = right_2 + gap;
+    let line_height_left = line_height_anchor_x - line_height_dims.width;
+    let cap_height_right = cap_height_anchor_x + cap_height_dims.width;
+
+    let descent_world = layout_to_world_y(baseline_y + line_metrics.descent, anchor_y, scale);
+    let spacing = extents.arrow_spacing;
+    let arrow_y = descent_world - spacing;
+    let advancement_anchor_y = spacing.mul_add(-0.5, arrow_y);
+    let advancement_bottom = advancement_anchor_y - advancement_dims.height;
+
+    let has_line_gap = (line_metrics.top - ascent_y).abs() > 0.5;
+    let top_line_y = if has_line_gap { top_y } else { ascent_y };
+    let mut top_extent = layout_to_world_y(top_line_y, anchor_y, scale);
+    if !has_line_gap {
+        let no_gap_label = format!("no line gap for {font_name}");
+        let no_gap_dims =
+            measure_overlay_label(cache, measure_text, &no_gap_label, label_size, boost, scale);
+        let no_gap_top = layout_to_world_y(ascent_y, anchor_y, scale) + no_gap_dims.height;
+        top_extent = top_extent.max(no_gap_top);
+    }
+
+    let left = line_height_left;
+    let right = cap_height_right;
+    let top = top_extent;
+    let bottom = advancement_bottom;
+    let width = (right - left).max(0.001);
+    let height = (top - bottom).max(0.001);
+    let center = Vec3::new(
+        f32::midpoint(left, right),
+        f32::midpoint(top, bottom),
+        CALLOUT_Z_OFFSET,
+    );
+
+    let mesh = Mesh3d(meshes.add(Rectangle::new(width, height)));
+    let material = MeshMaterial3d(materials.add(StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    }));
+
+    commands
+        .spawn((
+            Name::new("OverlayBoundingBox"),
+            OverlayBoundingBox,
+            Pickable::IGNORE,
+            NotShadowCaster,
+            mesh,
+            material,
+            Transform::from_translation(center),
+            Visibility::Inherited,
+            ChildOf(parent),
+        ))
+        .id()
+}
+
 /// Spawns Top/Bottom line-edge labels.
 fn spawn_line_edge_labels(
     commands: &mut Commands,
     parent: Entity,
     metric_lines: &[(&str, f32)],
+    overlay: &TypographyOverlay,
     anchor_y: f32,
     label_size: f32,
     color: Color,
@@ -1339,7 +1609,7 @@ fn spawn_line_edge_labels(
             WorldTextStyle::new(label_size)
                 .with_color(color)
                 .with_anchor(Anchor::CenterRight)
-                .with_shadow_mode(GlyphShadowMode::None),
+                .with_shadow_mode(overlay.label_shadow_mode()),
             Transform::from_xyz(label_x - label_gap, line_world_y, z),
         ));
     }
@@ -1351,6 +1621,7 @@ fn spawn_left_arrow_labels(
     parent: Entity,
     line_metrics: &LineMetricsSnapshot,
     font_name: &str,
+    overlay: &TypographyOverlay,
     anchor_y: f32,
     label_size: f32,
     color: Color,
@@ -1372,7 +1643,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(left_1 - label_gap, label_y_mid_world, z),
     ));
 
@@ -1384,7 +1655,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(left_1 - label_gap, descent_mid_world, z),
     ));
 
@@ -1394,7 +1665,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(left_2 - label_gap, label_y_mid_world, z),
     ));
 
@@ -1409,7 +1680,7 @@ fn spawn_left_arrow_labels(
         WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterRight)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(left_2 - label_gap, baseline_label_world, z),
     ));
 
@@ -1424,7 +1695,7 @@ fn spawn_left_arrow_labels(
             WorldTextStyle::new(label_size)
                 .with_color(color)
                 .with_anchor(Anchor::BottomLeft)
-                .with_shadow_mode(GlyphShadowMode::None),
+                .with_shadow_mode(overlay.label_shadow_mode()),
             Transform::from_xyz(left_2, ascent_world, z),
         ));
     }
@@ -1434,6 +1705,7 @@ fn spawn_left_arrow_labels(
 fn spawn_right_arrow_labels(
     commands: &mut Commands,
     parent: Entity,
+    overlay: &TypographyOverlay,
     anchor_y: f32,
     label_size: f32,
     color: Color,
@@ -1454,7 +1726,7 @@ fn spawn_right_arrow_labels(
         WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterLeft)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(right_1 + label_gap, x_height_mid_world, z),
     ));
 
@@ -1466,7 +1738,7 @@ fn spawn_right_arrow_labels(
         WorldTextStyle::new(label_size)
             .with_color(color)
             .with_anchor(Anchor::CenterLeft)
-            .with_shadow_mode(GlyphShadowMode::None),
+            .with_shadow_mode(overlay.label_shadow_mode()),
         Transform::from_xyz(right_2 + label_gap, cap_mid_world, z),
     ));
 }

@@ -40,7 +40,7 @@ pub(crate) struct SdfPanelUniform {
     /// Border color in linear RGBA.
     pub border_color:     Vec4,
     /// Shape selector. `0` = rounded rect, `1` = triangle, `2` = circle,
-    /// `3` = diamond.
+    /// `3` = diamond, `4` = line segment.
     pub shape_kind:       u32,
     /// Extra shape parameters for custom SDF shapes.
     pub shape_params:     Vec4,

@@ -25,7 +25,6 @@ use bevy::prelude::Transform;
 use bevy::prelude::Visibility;
 use bevy::prelude::With;
 use bevy_kana::ToF32;
-use bevy_kana::ToUsize;
 
 use crate::plugin::SurfaceShadow;
 use crate::render::LAYER_DEPTH_BIAS;
@@ -712,9 +711,9 @@ fn spawn_segment(
         return;
     }
 
-    let panel_height = line_panel_height(thickness);
     let half_w = length * 0.5;
-    let half_h = panel_height * 0.5;
+    let hidden_half_h = thickness * 4.0;
+    let half_h = hidden_half_h + thickness * 0.5;
     let mesh_half_w = half_w + SDF_AA_PADDING;
     let mesh_half_h = half_h + SDF_AA_PADDING;
 
@@ -731,7 +730,7 @@ fn spawn_segment(
         mesh_half_w,
         mesh_half_h,
         [0.0; 4],
-        [thickness, 0.0, 0.0, 0.0],
+        [0.0, 0.0, thickness, 0.0],
         Some(color),
         Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
         order.to_f32() * OIT_DEPTH_STEP,
@@ -741,7 +740,7 @@ fn spawn_segment(
 
     let mid = (start + end) * 0.5;
     let rotation = Quat::from_rotation_arc(Vec3::X, delta / length);
-    let line_center_offset = rotation * Vec3::Y * -(panel_height * 0.5 - thickness * 0.5);
+    let line_center_offset = rotation * Vec3::Y * (half_h - thickness * 0.5);
     let common = (
         CalloutVisual,
         Mesh3d(mesh),
@@ -757,8 +756,6 @@ fn spawn_segment(
         SurfaceShadow::On => commands.entity(parent).with_child(common),
     };
 }
-
-fn line_panel_height(thickness: f32) -> f32 { thickness * 8.0 }
 
 #[allow(clippy::too_many_arguments)]
 fn spawn_cap_shape(
@@ -869,29 +866,4 @@ pub(crate) fn draw_dimension_arrow(
     );
     gizmo.line(tip_to, tip_to - dir * head_size + perp * head_size, color);
     gizmo.line(tip_to, tip_to - dir * head_size - perp * head_size, color);
-}
-
-/// Draws a dashed line between two points. Dashes and gaps are
-/// specified in world units along the line direction.
-pub(crate) fn draw_dashed_line(
-    gizmo: &mut GizmoAsset,
-    start: Vec3,
-    end: Vec3,
-    dash_len: f32,
-    gap_len: f32,
-    color: Color,
-) {
-    let delta = end - start;
-    let total_len = delta.length();
-    if total_len < f32::EPSILON {
-        return;
-    }
-    let dir = delta / total_len;
-    let stride = dash_len + gap_len;
-    let count = (total_len / stride).ceil().to_usize();
-    for i in 0..count {
-        let t = i.to_f32() * stride;
-        let dash_end = (t + dash_len).min(total_len);
-        gizmo.line(start + dir * t, start + dir * dash_end, color);
-    }
 }

@@ -44,6 +44,8 @@ pub use callouts::CalloutLine;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
+pub use debug::OverlayBoundingBox;
+#[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlayReady;

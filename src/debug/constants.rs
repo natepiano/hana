@@ -63,9 +63,6 @@ pub(super) const LABEL_X_HEIGHT: &str = "x-height";
 /// Default line width for overlay gizmos (in pixels).
 pub(super) const DEFAULT_LINE_WIDTH: f32 = 0.5;
 
-/// Line width for arrows, callout lines, and arrow points.
-pub(super) const THICK_LINE_WIDTH: f32 = 2.5;
-
 /// Line width for metric lines, bounding boxes, and callout backgrounds.
 pub(super) const THIN_LINE_WIDTH: f32 = 1.0;
 
@@ -75,3 +72,5 @@ pub(super) const CALLOUT_Z_OFFSET: f32 = 0.002;
 
 /// Z offset for metric lines and vertical dimension arrows.
 pub(super) const METRIC_LINE_Z_OFFSET: f32 = 0.001;
+/// Z offset for metric callout arrows rendered above the metric lines.
+pub(super) const METRIC_ARROW_Z_OFFSET: f32 = 0.0015;

@@ -9,6 +9,8 @@
 
 use std::time::Duration;
 
+use bevy::light::CascadeShadowConfigBuilder;
+use bevy::light::DirectionalLightShadowMap;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -28,19 +30,20 @@ use bevy_diegetic::FontRegistry;
 use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::OverlayBoundingBox;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::CameraMove;
+use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
@@ -53,6 +56,12 @@ const ZOOM_TO_FIT_MARGIN: f32 = 0.05;
 const ZOOM_DURATION_MS: u64 = 1000;
 const KEY_LIGHT_LUX: f32 = 15_000.0;
 const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 2.5, 6.0);
+const KEY_LIGHT_SHADOW_MAP_SIZE: usize = 4096;
+const KEY_LIGHT_SHADOW_MAX_DISTANCE: f32 = 16.0;
+const KEY_LIGHT_FIRST_CASCADE_FAR_BOUND: f32 = 4.0;
+const KEY_LIGHT_SHADOW_MIN_DISTANCE: f32 = 0.2;
+const KEY_LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.01;
+const KEY_LIGHT_SHADOW_NORMAL_BIAS: f32 = 0.6;
 const REFLECTION_LIGHT_LEVEL: f32 = 150_000.0;
 const REFLECTION_LIGHT_POS: Vec3 = Vec3::new(0.7, 1.9, 6.2);
 const REFLECTION_TARGET: Vec3 = Vec3::new(0.15, 0.0, 1.7);
@@ -166,6 +175,13 @@ struct FontHandles(Vec<Handle<Font>>);
 #[derive(Resource)]
 struct SelectedFont(usize);
 
+#[derive(EntityEvent)]
+struct OverlayHome {
+    #[event_target]
+    entity: Entity,
+    camera: Entity,
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -176,6 +192,9 @@ fn main() {
             MeshPickingPlugin,
             DiegeticUiPlugin,
         ))
+        .insert_resource(DirectionalLightShadowMap {
+            size: KEY_LIGHT_SHADOW_MAP_SIZE,
+        })
         .insert_resource(WordCycle {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
@@ -188,7 +207,6 @@ fn main() {
             (
                 toggle_overlay,
                 home_camera,
-                fit_scene,
                 switch_font,
                 cycle_word,
                 update_controls_hud,
@@ -196,6 +214,7 @@ fn main() {
         )
         .add_observer(on_world_text_added)
         .add_observer(on_font_registered)
+        .add_observer(on_typography_overlay_ready)
         .run();
 }
 
@@ -238,38 +257,15 @@ fn setup(
     commands.insert_resource(SceneBounds(ground));
 
     // Display word with typography overlay.
-    commands
-        .spawn((
-            DisplayText,
-            WorldText::new(DISPLAY_WORDS[0]),
-            WorldTextStyle::new(DISPLAY_SIZE)
-                .with_color(Color::srgb(0.9, 0.9, 0.9))
-                .with_loading_policy(GlyphLoadingPolicy::Progressive),
-            TypographyOverlay::default(),
-            Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z),
-        ))
-        .observe(
-            |trigger: On<TypographyOverlayReady>,
-             cameras: Query<Entity, With<OrbitCam>>,
-             mut commands: Commands| {
-                info!("TypographyOverlayReady: {:?}", trigger.entity);
-                for camera in &cameras {
-                    commands.trigger(PlayAnimation::new(
-                        camera,
-                        [CameraMove::ToOrbit {
-                            focus:    HOME_FOCUS,
-                            yaw:      HOME_YAW,
-                            pitch:    HOME_PITCH,
-                            radius:   HOME_RADIUS,
-                            duration: Duration::from_millis(ZOOM_DURATION_MS),
-                            easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
-                        }],
-                    ));
-                }
-                // Only run once on initial load — remove this observer.
-                commands.entity(trigger.observer()).despawn();
-            },
-        );
+    commands.spawn((
+        DisplayText,
+        WorldText::new(DISPLAY_WORDS[0]),
+        WorldTextStyle::new(DISPLAY_SIZE)
+            .with_color(Color::srgb(0.9, 0.9, 0.9))
+            .with_loading_policy(GlyphLoadingPolicy::Progressive),
+        TypographyOverlay::default().with_shadow(SurfaceShadow::On),
+        Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z),
+    ));
 
     spawn_lights(&mut commands);
     spawn_hud_panels(&mut commands, &registry);
@@ -348,8 +344,17 @@ fn spawn_lights(commands: &mut Commands) {
         DirectionalLight {
             illuminance: KEY_LIGHT_LUX,
             shadows_enabled: true,
+            shadow_depth_bias: KEY_LIGHT_SHADOW_DEPTH_BIAS,
+            shadow_normal_bias: KEY_LIGHT_SHADOW_NORMAL_BIAS,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            minimum_distance: KEY_LIGHT_SHADOW_MIN_DISTANCE,
+            maximum_distance: KEY_LIGHT_SHADOW_MAX_DISTANCE,
+            first_cascade_far_bound: KEY_LIGHT_FIRST_CASCADE_FAR_BOUND,
+            ..default()
+        }
+        .build(),
         Transform::from_translation(KEY_LIGHT_POS)
             .looking_at(Vec3::new(0.0, DISPLAY_Y, DISPLAY_Z), Vec3::Y),
     ));
@@ -394,6 +399,38 @@ fn on_world_text_added(added: On<Add, WorldText>, mut commands: Commands) {
     commands.entity(added.entity).observe(on_text_clicked);
 }
 
+fn on_typography_overlay_ready(
+    trigger: On<TypographyOverlayReady>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut initialized: Local<bool>,
+    mut commands: Commands,
+) {
+    let target = trigger.event_target();
+    info!("TypographyOverlayReady: {target:?}");
+    commands.entity(target).observe(on_overlay_home);
+    if *initialized {
+        return;
+    }
+    *initialized = true;
+    for camera in &cameras {
+        commands.trigger(OverlayHome {
+            entity: target,
+            camera,
+        });
+    }
+}
+
+fn on_overlay_home(event: On<OverlayHome>, mut commands: Commands) {
+    commands.trigger(
+        AnimateToFit::new(event.camera, event.event_target())
+            .yaw(HOME_YAW)
+            .pitch(HOME_PITCH)
+            .margin(ZOOM_TO_FIT_MARGIN)
+            .duration(Duration::from_millis(ZOOM_DURATION_MS))
+            .easing(bevy::math::curve::easing::EaseFunction::CubicOut),
+    );
+}
+
 fn on_text_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     if click.button != PointerButton::Primary {
         return;
@@ -410,7 +447,7 @@ fn on_text_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
 fn build_controls_tree(overlay_on: bool) -> bevy_diegetic::LayoutTree {
     let mut builder = LayoutBuilder::with_root(
         El::new()
-            .width(Sizing::GROW)
+            .width(Sizing::FIT)
             .height(Sizing::fixed(HUD_HEIGHT)),
     );
     build_controls_content(&mut builder, overlay_on);
@@ -422,21 +459,33 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
 
     b.with(
         El::new()
-            .width(Sizing::GROW)
+            .width(Sizing::FIT)
             .height(Sizing::GROW)
             .padding(Padding::all(Px(2.0)))
+            .corner_radius(CornerRadius::new(
+                Px(0.0),
+                Px(0.0),
+                CAM_HELP_RADIUS,
+                Px(0.0),
+            ))
             .background(HUD_FRAME_BACKGROUND)
             .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
         |b| {
             b.with(
                 El::new()
-                    .width(Sizing::GROW)
+                    .width(Sizing::FIT)
                     .height(Sizing::GROW)
                     .direction(Direction::LeftToRight)
                     .padding(Padding::new(Px(8.0), HUD_PADDING, Px(8.0), HUD_PADDING))
                     .child_gap(HUD_GAP)
                     .child_align_y(AlignY::Center)
                     .clip()
+                    .corner_radius(CornerRadius::new(
+                        Px(0.0),
+                        Px(0.0),
+                        CAM_HELP_INNER_RADIUS,
+                        Px(0.0),
+                    ))
                     .background(HUD_BACKGROUND)
                     .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                 |b| {
@@ -462,12 +511,6 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
                     b.text(
                         overlay_label,
                         LayoutTextStyle::new(HUD_HINT_SIZE).with_color(overlay_color),
-                    );
-                    hud_separator(b);
-
-                    b.text(
-                        "F Fit Screen",
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
                     );
                     hud_separator(b);
 
@@ -525,66 +568,75 @@ fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_dieg
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(CAM_HELP_FRAME_PAD))
-            .corner_radius(CornerRadius::new(
-                Px(0.0),
-                Px(0.0),
-                Px(0.0),
-                CAM_HELP_RADIUS,
-            ))
-            .background(HUD_FRAME_BACKGROUND)
-            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
+            .child_align_x(AlignX::Right),
         |b| {
             b.with(
                 El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .padding(Padding::all(Px(10.0)))
-                    .direction(Direction::TopToBottom)
-                    .child_gap(Px(6.0))
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .padding(Padding::all(CAM_HELP_FRAME_PAD))
                     .corner_radius(CornerRadius::new(
                         Px(0.0),
                         Px(0.0),
                         Px(0.0),
-                        CAM_HELP_INNER_RADIUS,
+                        CAM_HELP_RADIUS,
                     ))
-                    .background(HUD_BACKGROUND)
-                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
+                    .background(HUD_FRAME_BACKGROUND)
+                    .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
                 |b| {
-                    b.text(
-                        "FONTS",
-                        LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR),
-                    );
                     b.with(
                         El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(FONTS_PANEL_GAP),
+                            .width(Sizing::FIT)
+                            .height(Sizing::FIT)
+                            .padding(Padding::all(Px(10.0)))
+                            .direction(Direction::TopToBottom)
+                            .child_gap(Px(6.0))
+                            .corner_radius(CornerRadius::new(
+                                Px(0.0),
+                                Px(0.0),
+                                Px(0.0),
+                                CAM_HELP_INNER_RADIUS,
+                            ))
+                            .background(HUD_BACKGROUND)
+                            .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                         |b| {
+                            b.text(
+                                "FONTS",
+                                LayoutTextStyle::new(CAM_HELP_TITLE_SIZE)
+                                    .with_color(HUD_TITLE_COLOR),
+                            );
                             b.with(
                                 El::new()
-                                    .width(Sizing::fixed(FONTS_PANEL_KEY_WIDTH))
+                                    .width(Sizing::FIT)
                                     .height(Sizing::FIT)
-                                    .direction(Direction::TopToBottom)
-                                    .child_align_x(AlignX::Center),
+                                    .direction(Direction::LeftToRight)
+                                    .child_gap(FONTS_PANEL_GAP),
                                 |b| {
-                                    for cell in &key_cells {
-                                        let ColumnCell::Text(text, config) = cell;
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::GROW)
-                                                .height(row_h)
-                                                .child_align_x(AlignX::Center)
-                                                .child_align_y(AlignY::Center),
-                                            |b| {
-                                                b.text(*text, config.clone());
-                                            },
-                                        );
-                                    }
+                                    b.with(
+                                        El::new()
+                                            .width(Sizing::fixed(FONTS_PANEL_KEY_WIDTH))
+                                            .height(Sizing::FIT)
+                                            .direction(Direction::TopToBottom)
+                                            .child_align_x(AlignX::Center),
+                                        |b| {
+                                            for cell in &key_cells {
+                                                let ColumnCell::Text(text, config) = cell;
+                                                b.with(
+                                                    El::new()
+                                                        .width(Sizing::GROW)
+                                                        .height(row_h)
+                                                        .child_align_x(AlignX::Center)
+                                                        .child_align_y(AlignY::Center),
+                                                    |b| {
+                                                        b.text(*text, config.clone());
+                                                    },
+                                                );
+                                            }
+                                        },
+                                    );
+                                    column(b, AlignX::Left, row_h, &name_cells);
                                 },
                             );
-                            column(b, AlignX::Left, row_h, &name_cells);
                         },
                     );
                 },
@@ -775,41 +827,20 @@ fn toggle_overlay(
 fn home_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     cameras: Query<Entity, With<OrbitCam>>,
+    overlay_bounds: Query<Entity, With<OverlayBoundingBox>>,
     mut commands: Commands,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyH) {
         return;
     }
-    for camera in &cameras {
-        commands.trigger(PlayAnimation::new(
-            camera,
-            [CameraMove::ToOrbit {
-                focus:    HOME_FOCUS,
-                yaw:      HOME_YAW,
-                pitch:    HOME_PITCH,
-                radius:   HOME_RADIUS,
-                duration: Duration::from_millis(ZOOM_DURATION_MS),
-                easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
-            }],
-        ));
-    }
-}
-
-fn fit_scene(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    scene: Res<SceneBounds>,
-    mut commands: Commands,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyF) {
+    let Some(target) = overlay_bounds.iter().next() else {
         return;
-    }
+    };
     for camera in &cameras {
-        commands.trigger(
-            ZoomToFit::new(camera, scene.0)
-                .margin(ZOOM_TO_FIT_MARGIN)
-                .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-        );
+        commands.trigger(OverlayHome {
+            entity: target,
+            camera,
+        });
     }
 }
 
