@@ -9,7 +9,7 @@ license     = "MIT OR Apache-2.0"
 name        = "bevy_lagrange"
 readme      = "README.md"
 repository  = "https://github.com/natepiano/bevy_lagrange"
-version     = "0.0.3-dev"
+version     = "0.0.3"
 
 [lints.clippy]
 # Our strict lints

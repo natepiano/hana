@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera). Thank you
 > for graciously allowing this project to build on your foundation.
 
-## [Unreleased]
+## [0.0.3] - 2026-04-15
 
 ### Changed
 - Reduced the default `OrbitCam` perspective zoom lower limit from `0.05` to `1e-7` so close-up orbiting can zoom much nearer to the target
