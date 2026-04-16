@@ -42,7 +42,7 @@ pub(crate) const DEFAULT_PAN_SMOOTHNESS: f32 = 0.02;
 /// Default orbital radius.
 pub(crate) const DEFAULT_TARGET_RADIUS: f32 = 1.0;
 /// Default lower limit on zoom (radius or orthographic scale).
-pub(crate) const DEFAULT_ZOOM_LOWER_LIMIT: f32 = 0.05;
+pub(crate) const DEFAULT_ZOOM_LOWER_LIMIT: f32 = 1e-7;
 /// Default smoothing factor for zoom motion.
 pub(crate) const DEFAULT_ZOOM_SMOOTHNESS: f32 = 0.1;
 
@@ -59,6 +59,10 @@ pub(crate) const SMOOTHNESS_EXPONENT: i32 = 7;
 pub(crate) const TOUCH_PINCH_SCALE: f32 = 0.015;
 
 // Projection constants
+/// Perspective near plane as a fraction of the current orbit radius.
+pub(crate) const PERSPECTIVE_NEAR_RADIUS_FACTOR: f32 = 0.001;
+/// Absolute minimum perspective near plane.
+pub(crate) const PERSPECTIVE_NEAR_MIN: f32 = 1e-6;
 /// Minimum depth for a point to be considered in front of the camera.
 /// Points at or below this depth are treated as behind the camera in perspective projection.
 pub(crate) const MIN_VISIBLE_DEPTH: f32 = 0.1;

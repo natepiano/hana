@@ -3,6 +3,8 @@ use bevy_kana::Position;
 
 use super::constants::EPSILON;
 use super::constants::MIN_ORBIT_RADIUS;
+use super::constants::PERSPECTIVE_NEAR_MIN;
+use super::constants::PERSPECTIVE_NEAR_RADIUS_FACTOR;
 use super::constants::SMOOTHNESS_EXPONENT;
 
 pub(crate) fn calculate_from_translation_and_focus(
@@ -36,28 +38,40 @@ pub(crate) fn update_orbit_transform(
 ) {
     let focus = focus.into();
     let mut new_transform = Transform::IDENTITY;
-    if let Projection::Orthographic(ref mut p) = *projection {
-        p.scale = radius;
-        // IMPORTANT: Do NOT replace this with `f32::midpoint()`.
-        // On aarch64, `midpoint()` promotes to f64 intermediate precision:
-        //   ((self as f64 + other as f64) / 2.0) as f32
-        // This produces a subtly different camera distance than plain f32 arithmetic.
-        // That tiny difference shifts the projected screen-space bounds just enough
-        // to flip the fit overlay balance check (tolerance: 0.001) — causing
-        // all margin labels to show green/balanced when they should show red/unbalanced.
-        #[expect(
-            clippy::manual_midpoint,
-            reason = "f32::midpoint uses f64 on aarch64, breaking fit visualization balance detection"
-        )]
-        {
-            radius = (p.near + p.far) / 2.0;
-        }
+    match &mut *projection {
+        Projection::Orthographic(p) => {
+            p.scale = radius;
+            // IMPORTANT: Do NOT replace this with `f32::midpoint()`.
+            // On aarch64, `midpoint()` promotes to f64 intermediate precision:
+            //   ((self as f64 + other as f64) / 2.0) as f32
+            // This produces a subtly different camera distance than plain f32 arithmetic.
+            // That tiny difference shifts the projected screen-space bounds just enough
+            // to flip the fit overlay balance check (tolerance: 0.001) — causing
+            // all margin labels to show green/balanced when they should show red/unbalanced.
+            #[expect(
+                clippy::manual_midpoint,
+                reason = "f32::midpoint uses f64 on aarch64, breaking fit visualization balance detection"
+            )]
+            {
+                radius = (p.near + p.far) / 2.0;
+            }
+        },
+        Projection::Perspective(p) => sync_perspective_near_clip(p, radius),
+        Projection::Custom(_) => {},
     }
     let yaw_rot = Quat::from_axis_angle(axis[1], yaw);
     let pitch_rot = Quat::from_axis_angle(axis[0], -pitch);
     new_transform.rotation *= yaw_rot * pitch_rot;
     new_transform.translation += *focus + new_transform.rotation * Vec3::new(0.0, 0.0, radius);
     *transform = new_transform;
+}
+
+fn sync_perspective_near_clip(projection: &mut PerspectiveProjection, radius: f32) {
+    let new_near = (radius * PERSPECTIVE_NEAR_RADIUS_FACTOR)
+        .max(PERSPECTIVE_NEAR_MIN)
+        .min(projection.far);
+    projection.near = new_near;
+    projection.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -new_near);
 }
 
 pub(crate) const fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
@@ -218,6 +232,48 @@ mod approx_equal_tests {
     #[test]
     fn value_outside_threshold_is_not_approx_equal() {
         assert!(!approx_equal(1.0, 1.01));
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "tests verify exact near-plane sync behavior"
+)]
+mod sync_perspective_near_clip_tests {
+    use super::*;
+
+    #[test]
+    fn near_plane_tracks_radius() {
+        let mut projection = PerspectiveProjection::default();
+        sync_perspective_near_clip(&mut projection, 2.0);
+        assert_eq!(projection.near, 0.002);
+        assert_eq!(
+            projection.near_clip_plane,
+            Vec4::new(0.0, 0.0, -1.0, -0.002)
+        );
+    }
+
+    #[test]
+    fn near_plane_respects_absolute_minimum() {
+        let mut projection = PerspectiveProjection::default();
+        sync_perspective_near_clip(&mut projection, 1e-9);
+        assert_eq!(projection.near, PERSPECTIVE_NEAR_MIN);
+        assert_eq!(
+            projection.near_clip_plane,
+            Vec4::new(0.0, 0.0, -1.0, -PERSPECTIVE_NEAR_MIN)
+        );
+    }
+
+    #[test]
+    fn near_plane_never_exceeds_far_plane() {
+        let mut projection = PerspectiveProjection {
+            far: 0.01,
+            ..default()
+        };
+        sync_perspective_near_clip(&mut projection, 20.0);
+        assert_eq!(projection.near, 0.01);
+        assert_eq!(projection.near_clip_plane, Vec4::new(0.0, 0.0, -1.0, -0.01));
     }
 }
 

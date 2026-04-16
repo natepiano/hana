@@ -46,7 +46,7 @@ fn setup(mut commands: Commands) {
 }
 ```
 
-`OrbitCam` automatically requires `Camera3d`. Out of the box you get orbit, pan, and zoom with smoothing.
+`OrbitCam` automatically requires `Camera3d`. Out of the box you get orbit, pan, and zoom with smoothing. For perspective cameras, the default near clip plane scales with orbit radius so close-up zooming does not clip away the target.
 
 ## Controls
 

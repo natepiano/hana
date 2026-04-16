@@ -160,7 +160,7 @@ pub struct OrbitCam {
     /// Lower limit on the zoom. This applies to `radius`, in the case of using a perspective
     /// camera, or the projection's `scale` in the case of using an orthographic camera.
     /// Should always be >0 otherwise you'll get stuck at 0.
-    /// Defaults to `0.05`.
+    /// Defaults to `1e-7`.
     pub zoom_lower_limit:    f32,
     /// The sensitivity of the orbiting motion. A value of `0.0` disables orbiting.
     /// Defaults to `1.0`.

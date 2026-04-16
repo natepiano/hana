@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Reduced the default `OrbitCam` perspective zoom lower limit from `0.05` to `1e-7` so close-up orbiting can zoom much nearer to the target
+- Perspective cameras now keep their near clip plane synchronized to orbit radius, with a minimum floor and far-plane clamp, to avoid clipping the focus target during close zoom
+
+### Added
+- Utility tests covering perspective near-plane synchronization for radius tracking, minimum clamping, and far-plane clamping
+
 ## [0.0.2] - 2026-04-06
 
 ### Changed
