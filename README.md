@@ -143,7 +143,7 @@ All operations support instant (`Duration::ZERO`) and animated paths with full l
 
 | `bevy_lagrange` | Bevy |
 |---------------|------|
-| 0.0.2         | 0.18 |
+| 0.0.3         | 0.18 |
 
 ## Credits
 
