@@ -35,7 +35,7 @@ use super::events::ZoomContext;
 use super::events::ZoomEnd;
 use super::events::ZoomToFit;
 use super::fit;
-use super::support;
+use super::projection;
 
 /// Parameters for an instant orbital snap.
 struct SnapOrbit {
@@ -120,7 +120,7 @@ fn prepare_fit_for_target(
 ) -> Option<fit::FitSolution> {
     let context = req.context;
     let target = req.target;
-    let Some((vertices, geometric_center)) = support::extract_mesh_vertices(
+    let Some((vertices, geometric_center)) = projection::extract_mesh_vertices(
         target,
         children_query,
         mesh_query,

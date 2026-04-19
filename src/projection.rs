@@ -1,4 +1,4 @@
-//! Shared utility functions used across multiple modules.
+//! Projection, screen-space, and mesh-extraction helpers.
 
 use bevy::prelude::*;
 use bevy_kana::Position;

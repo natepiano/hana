@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use crate::support;
-use crate::support::CameraBasis;
+use crate::projection;
+use crate::projection::CameraBasis;
 
 /// 2D cross product for three points (for convex hull turn detection).
 fn cross_2d(o: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -55,7 +55,7 @@ pub(super) fn project_vertices_to_2d(
     vertices
         .iter()
         .filter_map(|v| {
-            let (norm_x, norm_y, _) = support::project_point(*v, camera, is_ortho)?;
+            let (norm_x, norm_y, _) = projection::project_point(*v, camera, is_ortho)?;
             Some((norm_x, norm_y))
         })
         .collect()

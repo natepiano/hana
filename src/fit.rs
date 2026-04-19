@@ -19,7 +19,8 @@ use super::constants::MAX_RADIUS_MULTIPLIER;
 use super::constants::MIN_MARGIN;
 use super::constants::MIN_RADIUS_MULTIPLIER;
 use super::constants::TOLERANCE;
-use super::support;
+use super::projection;
+use super::projection::ScreenSpaceBounds;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
 /// For example, a margin of 0.08 returns 1.087 (8% margin).
@@ -77,10 +78,7 @@ impl fmt::Display for FitError {
 
 /// Computes the target margins for the constraining dimension based on aspect ratios.
 /// Returns `(target_margin_x, target_margin_y)`.
-fn calculate_target_margins(
-    bounds: &support::ScreenSpaceBounds,
-    zoom_multiplier: f32,
-) -> (f32, f32) {
+const fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f32) -> (f32, f32) {
     let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
     let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
 
@@ -166,8 +164,9 @@ pub(crate) fn calculate_fit(
         );
     }
 
-    let aspect_ratio = support::projection_aspect_ratio(projection, camera.logical_viewport_size())
-        .ok_or(FitError::NoViewport)?;
+    let aspect_ratio =
+        projection::projection_aspect_ratio(projection, camera.logical_viewport_size())
+            .ok_or(FitError::NoViewport)?;
 
     let ortho_fixed_distance = match projection {
         Projection::Orthographic(o) => Some((o.near + o.far) * 0.5),
@@ -192,8 +191,8 @@ pub(crate) fn calculate_fit(
 
 /// Determines which screen dimension constrains the fit and returns the current margin,
 /// target margin, and dimension label.
-fn find_constraining_margin(
-    bounds: &support::ScreenSpaceBounds,
+const fn find_constraining_margin(
+    bounds: &ScreenSpaceBounds,
     target_margin_x: f32,
     target_margin_y: f32,
 ) -> (f32, f32, &'static str) {
@@ -252,7 +251,7 @@ fn binary_search_for_fit(
             Transform::from_translation(camera_pos).with_rotation(params.rot),
         );
 
-        let Some((bounds, _)) = support::ScreenSpaceBounds::from_points(
+        let Some((bounds, _)) = ScreenSpaceBounds::from_points(
             points,
             &camera_global,
             &test_projection,
@@ -376,12 +375,9 @@ fn refine_focus_centering(
         let camera_pos = focus + rot * Vec3::new(0.0, 0.0, camera_distance);
         let camera_global =
             GlobalTransform::from(Transform::from_translation(camera_pos).with_rotation(rot));
-        let Some((bounds, depths)) = support::ScreenSpaceBounds::from_points(
-            points,
-            &camera_global,
-            projection,
-            aspect_ratio,
-        ) else {
+        let Some((bounds, depths)) =
+            ScreenSpaceBounds::from_points(points, &camera_global, projection, aspect_ratio)
+        else {
             break;
         };
         let (cx, cy) = bounds.center();
@@ -504,7 +500,11 @@ mod tests {
             Vec3::new(-0.5, 0.0, 0.5),
             Vec3::new(0.5, 0.0, 0.5),
         ];
-        let object_radius = points.iter().map(|p| p.length()).fold(0.0_f32, f32::max);
+        let object_radius = points
+            .iter()
+            .copied()
+            .map(Vec3::length)
+            .fold(0.0_f32, f32::max);
 
         let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 0.1, &projection, &camera)
             .expect("edge-on flat plane should produce a valid fit");
@@ -529,7 +529,11 @@ mod tests {
             Vec3::new(-0.5, 0.0, 0.5),
             Vec3::new(0.5, 0.0, 0.5),
         ];
-        let object_radius = points.iter().map(|p| p.length()).fold(0.0_f32, f32::max);
+        let object_radius = points
+            .iter()
+            .copied()
+            .map(Vec3::length)
+            .fold(0.0_f32, f32::max);
 
         let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.001, 0.1, &projection, &camera)
             .expect("near-edge-on flat plane should produce a valid fit");

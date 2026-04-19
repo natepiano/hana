@@ -15,9 +15,9 @@ use crate::components::CurrentFitTarget;
 use crate::components::FitOverlay;
 use crate::constants::TOLERANCE;
 use crate::fit::Edge;
-use crate::support;
-use crate::support::CameraBasis;
-use crate::support::ScreenSpaceBounds;
+use crate::projection;
+use crate::projection::CameraBasis;
+use crate::projection::ScreenSpaceBounds;
 
 /// Calculates the color for an edge based on balance state.
 const fn calculate_edge_color(
@@ -288,7 +288,7 @@ pub(super) fn draw_fit_target_bounds(
     mut bounds_label_query: Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
 ) {
     for (camera, camera_component, camera_global, projection, current_target) in &camera_query {
-        let Some((vertices, _)) = support::extract_mesh_vertices(
+        let Some((vertices, _)) = projection::extract_mesh_vertices(
             current_target.0,
             &children_query,
             &mesh_query,
@@ -341,7 +341,7 @@ fn draw_bounds_for_camera(
     let camera_basis = CameraBasis::from_global_transform(camera_global);
 
     let Some(aspect_ratio) =
-        support::projection_aspect_ratio(projection, camera_component.logical_viewport_size())
+        projection::projection_aspect_ratio(projection, camera_component.logical_viewport_size())
     else {
         return;
     };

@@ -1,15 +1,6 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-use bevy::camera::CameraUpdateSystems;
-use bevy::prelude::*;
-use bevy::transform::TransformSystems;
-#[cfg(feature = "bevy_egui")]
-use bevy_egui::EguiPreUpdateSet;
-
-use crate::input::MouseKeyTracker;
-use crate::touch::TouchTracker;
-
 #[allow(
     clippy::used_underscore_binding,
     reason = "false positive on enum variant fields"
@@ -26,18 +17,22 @@ mod fit_overlay;
 mod input;
 mod observers;
 mod orbit_cam;
-mod support;
+mod orbital_math;
+mod projection;
 mod touch;
-mod traits;
 #[allow(
     clippy::used_underscore_binding,
     reason = "false positive on enum variant fields"
 )]
 mod types;
-mod util;
 
 pub use animation::CameraMove;
 pub use animation::CameraMoveList;
+use bevy::camera::CameraUpdateSystems;
+use bevy::prelude::*;
+use bevy::transform::TransformSystems;
+#[cfg(feature = "bevy_egui")]
+use bevy_egui::EguiPreUpdateSet;
 pub use components::AnimationConflictPolicy;
 pub use components::CameraInputInterruptBehavior;
 pub use components::CurrentFitTarget;
@@ -68,9 +63,11 @@ pub use events::ZoomEnd;
 pub use events::ZoomToFit;
 #[cfg(feature = "fit_overlay")]
 pub use fit_overlay::FitTargetOverlayConfig;
+use input::MouseKeyTracker;
 pub use orbit_cam::OrbitCam;
 pub use orbit_cam::OrbitCamSystemSet;
 pub use touch::TouchInput;
+use touch::TouchTracker;
 pub use types::ActiveCameraData;
 pub use types::ButtonZoomAxis;
 pub use types::CameraInputDetection;

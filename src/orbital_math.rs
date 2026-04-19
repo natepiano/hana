@@ -1,3 +1,5 @@
+//! Orbit camera math and interpolation helpers.
+
 use bevy::prelude::*;
 use bevy_kana::Position;
 
@@ -247,10 +249,11 @@ mod sync_perspective_near_clip_tests {
     fn near_plane_tracks_radius() {
         let mut projection = PerspectiveProjection::default();
         sync_perspective_near_clip(&mut projection, 2.0);
-        assert_eq!(projection.near, 0.002);
+        let expected_near = 2.0 * PERSPECTIVE_NEAR_RADIUS_FACTOR;
+        assert_eq!(projection.near, expected_near);
         assert_eq!(
             projection.near_clip_plane,
-            Vec4::new(0.0, 0.0, -1.0, -0.002)
+            Vec4::new(0.0, 0.0, -1.0, -expected_near)
         );
     }
 

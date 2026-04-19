@@ -2,11 +2,12 @@ use bevy::prelude::*;
 use bevy::ui::UiTargetCamera;
 use bevy_kana::ScreenPosition;
 
+use super::constants::BOUNDS_LABEL_COLOR;
 use super::constants::LABEL_FONT_SIZE;
 use super::constants::LABEL_PIXEL_OFFSET;
 use super::screen_space;
 use crate::fit::Edge;
-use crate::support::ScreenSpaceBounds;
+use crate::projection::ScreenSpaceBounds;
 
 /// Component marking margin percentage labels, scoped to a specific camera entity.
 #[derive(Component, Reflect)]
@@ -169,7 +170,7 @@ pub(super) fn update_or_create_bounds_label(
                 font_size: LABEL_FONT_SIZE,
                 ..default()
             },
-            TextColor(Color::srgb(1.0, 1.0, 0.0)),
+            TextColor(BOUNDS_LABEL_COLOR),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(screen_pos.x),

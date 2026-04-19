@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::support::ScreenSpaceBounds;
+use crate::projection::ScreenSpaceBounds;
 
 /// Gizmo config group for fit target visualization (screen-aligned overlay).
 /// Toggle by inserting/removing the `FitVisualization` component on the camera entity.

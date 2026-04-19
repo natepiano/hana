@@ -211,7 +211,7 @@ fn keyboard_input(
                 yaw: 5.5,
                 pitch: 0.1,
                 radius: 2.0,
-                duration: Duration::from_millis(1000),
+                duration: Duration::from_secs(1),
                 easing: EaseFunction::CubicIn,
             },
             CameraMove::ToOrbit {

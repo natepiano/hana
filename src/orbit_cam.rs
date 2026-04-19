@@ -6,6 +6,7 @@ use std::f32::consts::TAU;
 use bevy::camera::RenderTarget;
 use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::MouseWheel;
+use bevy::input::touch::Touch;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
@@ -23,10 +24,10 @@ use super::egui::BlockOnEguiFocus;
 use super::egui::EguiWantsFocus;
 use super::input;
 use super::input::MouseKeyTracker;
+use super::orbital_math;
 use super::touch::TouchGestures;
 use super::touch::TouchInput;
 use super::touch::TouchTracker;
-use super::traits;
 use super::types::ActiveCameraData;
 use super::types::ButtonZoomAxis;
 use super::types::CameraInputDetection;
@@ -37,7 +38,6 @@ use super::types::InputControl;
 use super::types::TimeSource;
 use super::types::UpsideDownPolicy;
 use super::types::ZoomDirection;
-use super::util;
 
 /// Base system set to allow ordering of `OrbitCam`
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -55,6 +55,21 @@ enum CameraOrientation {
     #[default]
     Normal,
     UpsideDown,
+}
+
+const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
+    let mut clamped_value = value;
+    if let Some(min) = min
+        && clamped_value < min
+    {
+        clamped_value = min;
+    }
+    if let Some(max) = max
+        && clamped_value > max
+    {
+        clamped_value = max;
+    }
+    clamped_value
 }
 
 /// Tags an entity as capable of panning and orbiting.
@@ -277,15 +292,15 @@ impl Default for OrbitCam {
 
 impl OrbitCam {
     const fn clamp_yaw(&self, yaw: f32) -> f32 {
-        traits::clamp_optional(yaw, self.yaw_lower_limit, self.yaw_upper_limit)
+        clamp_optional(yaw, self.yaw_lower_limit, self.yaw_upper_limit)
     }
 
     const fn clamp_pitch(&self, pitch: f32) -> f32 {
-        traits::clamp_optional(pitch, self.pitch_lower_limit, self.pitch_upper_limit)
+        clamp_optional(pitch, self.pitch_lower_limit, self.pitch_upper_limit)
     }
 
     const fn clamp_zoom(&self, zoom: f32) -> f32 {
-        traits::clamp_optional(zoom, Some(self.zoom_lower_limit), self.zoom_upper_limit)
+        clamp_optional(zoom, Some(self.zoom_lower_limit), self.zoom_upper_limit)
     }
 
     fn clamp_focus(&self, focus: Vec3) -> Vec3 {
@@ -319,7 +334,7 @@ pub(crate) fn active_viewport_data(
     #[cfg(feature = "bevy_egui")] egui_wants_focus: Res<EguiWantsFocus>,
     #[cfg(feature = "bevy_egui")] block_on_egui_query: Query<&BlockOnEguiFocus>,
 ) {
-    let mut new_resource = ActiveCameraData::default();
+    let mut new_active_camera_data = ActiveCameraData::default();
     let mut max_camera_order = 0;
 
     let mut has_input = false;
@@ -367,7 +382,8 @@ pub(crate) fn active_viewport_data(
                         .iter_just_pressed()
                         .collect::<Vec<_>>()
                         .first()
-                        .map(|touch| touch.position())
+                        .copied()
+                        .map(Touch::position)
                 }) && let Some(Rect { min, max }) = camera.logical_viewport_rect()
                 {
                     // Window coordinates have Y starting at the bottom, so we need to
@@ -382,7 +398,7 @@ pub(crate) fn active_viewport_data(
                     // value in the case the viewport is
                     // overlapping another viewport.
                     if cursor_in_vp && camera.order >= max_camera_order {
-                        new_resource = ActiveCameraData {
+                        new_active_camera_data = ActiveCameraData {
                             entity:        Some(entity),
                             viewport_size: camera.logical_viewport_size(),
                             window_size:   Some(Vec2::new(window.width(), window.height())),
@@ -396,7 +412,7 @@ pub(crate) fn active_viewport_data(
     }
 
     if has_input {
-        active_cam.set_if_neq(new_resource);
+        active_cam.set_if_neq(new_active_camera_data);
     }
 }
 
@@ -419,7 +435,7 @@ fn initialize_orbit_cam(
     transform: &mut Transform,
     projection: &mut Projection,
 ) {
-    let (yaw, pitch, radius) = util::calculate_from_translation_and_focus(
+    let (yaw, pitch, radius) = orbital_math::calculate_from_translation_and_focus(
         transform.translation,
         pan_orbit.focus,
         pan_orbit.axis,
@@ -442,7 +458,7 @@ fn initialize_orbit_cam(
     pan_orbit.target_radius = radius;
     pan_orbit.target_focus = focus;
 
-    util::update_orbit_transform(
+    orbital_math::update_orbit_transform(
         yaw,
         pitch,
         radius,
@@ -619,28 +635,32 @@ fn smooth_and_update_transform(
         return;
     };
 
-    let new_yaw =
-        util::lerp_and_snap_f32(yaw, pan_orbit.target_yaw, pan_orbit.orbit_smoothness, delta);
-    let new_pitch = util::lerp_and_snap_f32(
+    let new_yaw = orbital_math::lerp_and_snap_f32(
+        yaw,
+        pan_orbit.target_yaw,
+        pan_orbit.orbit_smoothness,
+        delta,
+    );
+    let new_pitch = orbital_math::lerp_and_snap_f32(
         pitch,
         pan_orbit.target_pitch,
         pan_orbit.orbit_smoothness,
         delta,
     );
-    let new_radius = util::lerp_and_snap_f32(
+    let new_radius = orbital_math::lerp_and_snap_f32(
         radius,
         pan_orbit.target_radius,
         pan_orbit.zoom_smoothness,
         delta,
     );
-    let new_focus = util::lerp_and_snap_position(
+    let new_focus = orbital_math::lerp_and_snap_position(
         pan_orbit.focus,
         pan_orbit.target_focus,
         pan_orbit.pan_smoothness,
         delta,
     );
 
-    util::update_orbit_transform(
+    orbital_math::update_orbit_transform(
         new_yaw,
         new_pitch,
         new_radius,

@@ -57,9 +57,9 @@ pub(crate) fn check_egui_wants_focus(
         new_wants_focus |= context_wants_focus;
     }
 
-    let new_res = EguiWantsFocus {
+    let new_egui_wants_focus = EguiWantsFocus {
         prev: wants_focus.curr,
         curr: new_wants_focus,
     };
-    wants_focus.set_if_neq(new_res);
+    wants_focus.set_if_neq(new_egui_wants_focus);
 }

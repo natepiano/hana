@@ -48,10 +48,10 @@ pub(crate) fn mouse_key_tracker(
 
     // Scroll processing needs to account for mouse and trackpad. In `BlenderLike` mode, pixel
     // scrolling may produce orbit or pan instead of zoom.
-    let scroll_result = process_scroll_events(&scroll_events_vec, pan_orbit, &key_input);
+    let scroll_processing_result = process_scroll_events(&scroll_events_vec, pan_orbit, &key_input);
     // Initialize orbit and pan with trackpad contributions
-    let mut orbit = scroll_result.trackpad_orbit;
-    let mut pan = scroll_result.trackpad_pan;
+    let mut orbit = scroll_processing_result.trackpad_orbit;
+    let mut pan = scroll_processing_result.trackpad_pan;
 
     // Handle pinch gestures separately
     // Process pinch events
@@ -88,8 +88,8 @@ pub(crate) fn mouse_key_tracker(
     // Update the movement resource
     camera_movement.orbit = orbit;
     camera_movement.pan = pan;
-    camera_movement.scroll_line = scroll_result.scroll_line;
-    camera_movement.scroll_pixel = scroll_result.scroll_pixel + pinch_zoom + mouse_zoom;
+    camera_movement.scroll_line = scroll_processing_result.scroll_line;
+    camera_movement.scroll_pixel = scroll_processing_result.scroll_pixel + pinch_zoom + mouse_zoom;
     camera_movement.orbit_button_changed = orbit_button_changed;
 }
 
@@ -124,28 +124,28 @@ fn process_scroll_events(
             let is_pan_modifier_pressed =
                 modifier_pan.is_none_or(|modifier| key_input.pressed(modifier));
 
-            let mut result = ScrollProcessingResult::default();
+            let mut scroll_processing_result = ScrollProcessingResult::default();
 
             for event in scroll_events {
                 match event.unit {
                     MouseScrollUnit::Line => {
-                        result.scroll_line += event.y;
+                        scroll_processing_result.scroll_line += event.y;
                     },
                     MouseScrollUnit::Pixel => {
                         if is_zoom_modifier_pressed {
-                            result.scroll_pixel += event.y * PIXEL_SCROLL_SCALE;
+                            scroll_processing_result.scroll_pixel += event.y * PIXEL_SCROLL_SCALE;
                         } else if is_pan_modifier_pressed {
-                            result.trackpad_pan +=
+                            scroll_processing_result.trackpad_pan +=
                                 Vec2::new(event.x, event.y) * trackpad_input.sensitivity;
                         } else {
-                            result.trackpad_orbit +=
+                            scroll_processing_result.trackpad_orbit +=
                                 Vec2::new(event.x, event.y) * trackpad_input.sensitivity;
                         }
                     },
                 }
             }
 
-            result
+            scroll_processing_result
         },
         TrackpadBehavior::ZoomOnly => {
             // Zoom-only behavior: all scroll events contribute to zoom.

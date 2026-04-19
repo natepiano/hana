@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy_kana::ScreenPosition;
 
 use crate::fit::Edge;
-use crate::support::CameraBasis;
-use crate::support::ScreenSpaceBounds;
+use crate::projection::CameraBasis;
+use crate::projection::ScreenSpaceBounds;
 
 /// Returns true if horizontal margins are balanced.
 pub(super) const fn is_horizontally_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
@@ -42,7 +42,10 @@ const fn clamped_center_x(bounds: &ScreenSpaceBounds, left_edge: f32, right_edge
 }
 
 /// Returns the center of a boundary edge in normalized space.
-pub(super) fn boundary_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -> Option<(f32, f32)> {
+pub(super) const fn boundary_edge_center(
+    bounds: &ScreenSpaceBounds,
+    edge: Edge,
+) -> Option<(f32, f32)> {
     let (left_edge, right_edge, top_edge, bottom_edge) = screen_edges_normalized(bounds);
 
     match edge {
