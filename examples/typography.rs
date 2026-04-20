@@ -87,6 +87,7 @@ const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
 const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
 const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
+const HUD_CAMERA_HEADER_COLOR: Color = Color::srgb(1.0, 0.82, 0.52);
 const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
 const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
 
@@ -455,7 +456,12 @@ fn build_controls_tree(overlay_on: bool) -> bevy_diegetic::LayoutTree {
 }
 
 fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
-    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let title = LayoutTextStyle::new(HUD_TITLE_SIZE)
+        .with_font(FontId::MONOSPACE.0)
+        .with_color(HUD_TITLE_COLOR);
+    let hint = LayoutTextStyle::new(HUD_HINT_SIZE)
+        .with_font(FontId::MONOSPACE.0)
+        .with_color(HUD_INACTIVE_COLOR);
 
     b.with(
         El::new()
@@ -463,10 +469,10 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
             .height(Sizing::GROW)
             .padding(Padding::all(Px(2.0)))
             .corner_radius(CornerRadius::new(
-                Px(0.0),
-                Px(0.0),
                 CAM_HELP_RADIUS,
-                Px(0.0),
+                CAM_HELP_RADIUS,
+                CAM_HELP_RADIUS,
+                CAM_HELP_RADIUS,
             ))
             .background(HUD_FRAME_BACKGROUND)
             .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
@@ -481,10 +487,10 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
                     .child_align_y(AlignY::Center)
                     .clip()
                     .corner_radius(CornerRadius::new(
-                        Px(0.0),
-                        Px(0.0),
                         CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
+                        CAM_HELP_INNER_RADIUS,
+                        CAM_HELP_INNER_RADIUS,
+                        CAM_HELP_INNER_RADIUS,
                     ))
                     .background(HUD_BACKGROUND)
                     .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
@@ -492,10 +498,7 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
                     b.text("CONTROLS", title);
                     hud_separator(b);
 
-                    b.text(
-                        "H Home",
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
-                    );
+                    b.text("H Home", hint.clone());
                     hud_separator(b);
 
                     let overlay_label = if overlay_on {
@@ -508,16 +511,10 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
                     } else {
                         HUD_INACTIVE_COLOR
                     };
-                    b.text(
-                        overlay_label,
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(overlay_color),
-                    );
+                    b.text(overlay_label, hint.clone().with_color(overlay_color));
                     hud_separator(b);
 
-                    b.text(
-                        "←/→ Cycle Word",
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
-                    );
+                    b.text("←/→ Cycle Word", hint);
                 },
             );
         },
@@ -576,9 +573,9 @@ fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_dieg
                     .height(Sizing::FIT)
                     .padding(Padding::all(CAM_HELP_FRAME_PAD))
                     .corner_radius(CornerRadius::new(
-                        Px(0.0),
-                        Px(0.0),
-                        Px(0.0),
+                        CAM_HELP_RADIUS,
+                        CAM_HELP_RADIUS,
+                        CAM_HELP_RADIUS,
                         CAM_HELP_RADIUS,
                     ))
                     .background(HUD_FRAME_BACKGROUND)
@@ -592,9 +589,9 @@ fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_dieg
                             .direction(Direction::TopToBottom)
                             .child_gap(Px(6.0))
                             .corner_radius(CornerRadius::new(
-                                Px(0.0),
-                                Px(0.0),
-                                Px(0.0),
+                                CAM_HELP_INNER_RADIUS,
+                                CAM_HELP_INNER_RADIUS,
+                                CAM_HELP_INNER_RADIUS,
                                 CAM_HELP_INNER_RADIUS,
                             ))
                             .background(HUD_BACKGROUND)
@@ -648,7 +645,7 @@ fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_dieg
 
 fn build_camera_help(b: &mut LayoutBuilder) {
     let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
+    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_CAMERA_HEADER_COLOR);
     let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
 
     b.with(
@@ -658,9 +655,9 @@ fn build_camera_help(b: &mut LayoutBuilder) {
             .padding(Padding::all(CAM_HELP_FRAME_PAD))
             .corner_radius(CornerRadius::new(
                 CAM_HELP_RADIUS,
-                Px(0.0),
                 CAM_HELP_RADIUS,
-                Px(0.0),
+                CAM_HELP_RADIUS,
+                CAM_HELP_RADIUS,
             ))
             .background(HUD_FRAME_BACKGROUND)
             .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
@@ -674,9 +671,9 @@ fn build_camera_help(b: &mut LayoutBuilder) {
                     .child_gap(Px(6.0))
                     .corner_radius(CornerRadius::new(
                         CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
                         CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
+                        CAM_HELP_INNER_RADIUS,
+                        CAM_HELP_INNER_RADIUS,
                     ))
                     .background(HUD_BACKGROUND)
                     .border(Border::all(Px(1.0), HUD_BORDER_DIM)),

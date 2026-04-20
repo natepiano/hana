@@ -312,12 +312,15 @@ fn fragment(
     // Base AA width from screen-space derivatives of the SDF.
     let base_aa = shape_aa_width(outer_dist);
 
-    // Outer shape alpha — exterior-only falloff with doubled ramp width.
-    // Interior pixels (dist ≤ 0) are fully opaque so adjacent quads
-    // sharing an edge don't double-blend and produce visible seams.
-    // The 2× ramp compensates for the one-sided shift, preserving the
-    // same visual AA band width as a centered smoothstep.
-    let outer_alpha = (1.0 - smoothstep(0.0, 2.0 * base_aa, outer_dist)) * coverage_scale;
+    // Outer shape alpha — centered smoothstep. 50%-alpha pixel lands
+    // exactly on the requested edge, so rendered width matches the
+    // requested SDF half-size. Previously this used a one-sided
+    // `smoothstep(0, 2*base_aa, outer_dist)` to keep interior pixels
+    // fully opaque (avoiding seam double-blend where two panels share
+    // an edge at zero gap), but that fattened every stroke by ~1 px
+    // on each edge, visibly inflating thin shapes like callout shafts
+    // and fine borders.
+    let outer_alpha = (1.0 - smoothstep(-base_aa, base_aa, outer_dist)) * coverage_scale;
 
     // Discard fully outside fragments.
     if !is_line_shape && outer_alpha < 0.001 {
