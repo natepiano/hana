@@ -138,7 +138,9 @@ impl DiegeticUiPlugin {
 }
 
 impl Plugin for DiegeticUiPlugin {
-    fn build(&self, app: &mut App) { app.add_plugins(runtime::DiegeticRuntimePlugin::new(None, None)); }
+    fn build(&self, app: &mut App) {
+        app.add_plugins(runtime::DiegeticRuntimePlugin::new(None, None));
+    }
 }
 
 /// Configured variant of [`DiegeticUiPlugin`] with custom atlas settings.

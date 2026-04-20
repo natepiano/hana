@@ -220,7 +220,9 @@ impl AtlasConfig {
 
     /// Returns the estimated memory per atlas page in bytes (RGBA texture).
     #[must_use]
-    pub fn estimated_page_bytes(&self) -> usize { (self.page_size() * self.page_size() * 4).to_usize() }
+    pub fn estimated_page_bytes(&self) -> usize {
+        (self.page_size() * self.page_size() * 4).to_usize()
+    }
 
     /// Logs warnings for out-of-range values and an info summary.
     pub(super) fn log_and_clamp(&self) {

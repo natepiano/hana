@@ -450,7 +450,10 @@ fn spawn_rulers(
         DiegeticPanel::world()
             .size(A4_WIDTH, PANEL_RULER_WIDTH)
             .anchor(Anchor::TopLeft)
-            .with_tree(build_metric_horizontal_ruler(A4_WIDTH.0.to_i32(), ruler_color))
+            .with_tree(build_metric_horizontal_ruler(
+                A4_WIDTH.0.to_i32(),
+                ruler_color,
+            ))
             .build()
             .expect("valid A4 horizontal ruler dimensions"),
         Transform::from_xyz(a4_bottom_ruler_x, a4_bottom_ruler_y, 0.0),

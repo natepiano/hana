@@ -19,5 +19,7 @@ pub use primitives::spawn_callout_line;
 pub(crate) struct CalloutPlugin;
 
 impl Plugin for CalloutPlugin {
-    fn build(&self, app: &mut App) { app.add_systems(PostUpdate, primitives::update_callout_lines); }
+    fn build(&self, app: &mut App) {
+        app.add_systems(PostUpdate, primitives::update_callout_lines);
+    }
 }

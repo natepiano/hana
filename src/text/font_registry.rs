@@ -143,7 +143,9 @@ impl FontRegistry {
 
     /// Returns the [`Font`] for a given [`FontId`].
     #[must_use]
-    pub fn font(&self, id: impl Into<FontId>) -> Option<&Font> { self.fonts.get(usize::from(id.into().0)) }
+    pub fn font(&self, id: impl Into<FontId>) -> Option<&Font> {
+        self.fonts.get(usize::from(id.into().0))
+    }
 
     /// Returns the family name for a given [`FontId`].
     #[must_use]
@@ -210,6 +212,10 @@ impl FontRegistry {
     /// Returns a cloned list of family names for the measurement closure.
     #[must_use]
     pub fn family_names(&self) -> Vec<String> {
-        self.fonts.iter().map(Font::name).map(String::from).collect()
+        self.fonts
+            .iter()
+            .map(Font::name)
+            .map(String::from)
+            .collect()
     }
 }

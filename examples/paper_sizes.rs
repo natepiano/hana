@@ -277,8 +277,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
     let code_style = LayoutTextStyle::new(8.0).with_color(CODE_COLOR);
 
     // Column content width = (PANEL_WIDTH - padding*2 - gaps) / 5.
-    let col_content_w =
-        OUTER_PADDING.mul_add(-2.0, COLUMN_GAP.mul_add(-4.0, PANEL_WIDTH)) / 5.0;
+    let col_content_w = OUTER_PADDING.mul_add(-2.0, COLUMN_GAP.mul_add(-4.0, PANEL_WIDTH)) / 5.0;
     // Each paper pair (portrait + gap + landscape) must fit in col_content_w - some margin.
     let pair_max_w = col_content_w - 8.0; // leave room for column padding
 

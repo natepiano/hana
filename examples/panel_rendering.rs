@@ -224,7 +224,9 @@ fn cycle_lighting_preset(
     let lights_visible = preset.lights_on();
 
     for mut panel in &mut panels {
-        let mat = panel.material_mut().get_or_insert_with(default_panel_material);
+        let mat = panel
+            .material_mut()
+            .get_or_insert_with(default_panel_material);
         mat.unlit = unlit;
         let text_mat = panel
             .text_material_mut()

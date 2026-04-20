@@ -25,7 +25,10 @@ pub(super) struct DiegeticRuntimePlugin {
 
 impl DiegeticRuntimePlugin {
     pub(super) const fn new(config: Option<AtlasConfig>, unit_config: Option<UnitConfig>) -> Self {
-        Self { config, unit_config }
+        Self {
+            config,
+            unit_config,
+        }
     }
 }
 
@@ -37,7 +40,10 @@ impl Plugin for DiegeticRuntimePlugin {
             return;
         };
         let measurer = DiegeticTextMeasurer {
-            measure_fn: text::create_parley_measurer(registry.font_context(), registry.family_names()),
+            measure_fn: text::create_parley_measurer(
+                registry.font_context(),
+                registry.family_names(),
+            ),
         };
 
         // Initialize MSDF atlas — glyphs are rasterized on demand.

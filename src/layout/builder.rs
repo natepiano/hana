@@ -31,9 +31,6 @@ use bevy::color::Color;
 use bevy::image::Image;
 use bevy::pbr::StandardMaterial;
 
-use super::element::Element;
-use super::element::ElementContent;
-use super::element::LayoutTree;
 use super::AlignX;
 use super::AlignY;
 use super::Border;
@@ -43,6 +40,9 @@ use super::Direction;
 use super::LayoutTextStyle;
 use super::Padding;
 use super::Sizing;
+use super::element::Element;
+use super::element::ElementContent;
+use super::element::LayoutTree;
 use crate::DimensionMatch;
 
 /// Shorthand element declaration for the builder API.

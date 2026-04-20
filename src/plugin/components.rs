@@ -7,14 +7,14 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
-use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
-use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use super::config::DimensionMatch;
 use super::config::InvalidSize;
 use super::config::PanelSize;
 use super::config::PaperSize;
 use super::config::Pt;
 use super::config::UnitConfig;
+use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
+use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
@@ -349,10 +349,14 @@ impl DiegeticPanel {
 
 impl DiegeticPanel {
     /// Returns the layout unit.
-    pub(super) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit { self.layout_unit }
+    pub(super) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit {
+        self.layout_unit
+    }
 
     /// Resolves the font unit, falling back to the global [`UnitConfig`].
-    pub(super) fn resolved_font_unit(&self, config: &UnitConfig) -> Unit { self.font_unit.unwrap_or(config.font) }
+    pub(super) fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {
+        self.font_unit.unwrap_or(config.font)
+    }
 
     /// Physical width in meters before world scaling.
     fn physical_width(&self, config: &UnitConfig) -> f32 {

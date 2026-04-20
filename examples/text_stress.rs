@@ -50,7 +50,7 @@ use bevy_lagrange::TrackpadInput;
 /// Font size for content panel text (in millimeters, matched to `font_unit`).
 const FONT_SIZE: f32 = 2.1;
 const ROW_HEIGHT: f32 = 0.07;
-const ROW_GAP: f32 = 0.05;
+const ROW_SPACING: f32 = 0.05;
 const COLUMN_GAP: f32 = 0.05;
 const HEADER_HEIGHT: f32 = ROW_HEIGHT + 0.01;
 
@@ -445,8 +445,8 @@ fn update_status_panel(
         frame_ms:  frame_ms_value,
         update_ms: stress_perf.panel_update_ms,
         tree_ms:   stress_perf.tree_build_ms,
-        layout_ms: diegetic_perf.last_compute_ms,
-        text_ms:   diegetic_perf.last_text_extract_ms,
+        layout_ms: diegetic_perf.compute_ms,
+        text_ms:   diegetic_perf.text_extract_ms,
     });
 
     let cutoff = time.elapsed_secs() - PERF_PEAK_WINDOW_SECS;
@@ -482,8 +482,8 @@ fn update_status_panel(
         frame = ms_str,
         upd = format!("{:.1}", stress_perf.panel_update_ms),
         tree = format!("{:.1}", stress_perf.tree_build_ms),
-        layout = format!("{:.1}", diegetic_perf.last_compute_ms),
-        text_ms = format!("{:.1}", diegetic_perf.last_text_extract_ms),
+        layout = format!("{:.1}", diegetic_perf.compute_ms),
+        text_ms = format!("{:.1}", diegetic_perf.text_extract_ms),
         max_fps = format!("{:.0}", max_fps),
         max_frame = format!("{:.1}", max_frame_ms),
         max_upd = format!("{:.1}", max_update_ms),
@@ -737,7 +737,7 @@ fn build_panel_tree(
                                     .width(Sizing::GROW)
                                     .height(Sizing::FIT)
                                     .direction(Direction::LeftToRight)
-                                    .child_gap(ROW_GAP),
+                                    .child_gap(ROW_SPACING),
                                 |b| {
                                     b.text(&label, config.clone());
                                     b.with(

@@ -349,9 +349,9 @@ fn overlay_container_entity(
     containers: &Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
     entity: Entity,
 ) -> Option<Entity> {
-    containers
-        .iter()
-        .find_map(|(child_entity, child_of, _)| (child_of.parent() == entity).then_some(child_entity))
+    containers.iter().find_map(|(child_entity, child_of, _)| {
+        (child_of.parent() == entity).then_some(child_entity)
+    })
 }
 
 fn despawn_overlay_children(
@@ -359,7 +359,10 @@ fn despawn_overlay_children(
     containers: &Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
     container_entity: Entity,
 ) {
-    if let Some((_, _, Some(children))) = containers.iter().find(|(entity, _, _)| *entity == container_entity) {
+    if let Some((_, _, Some(children))) = containers
+        .iter()
+        .find(|(entity, _, _)| *entity == container_entity)
+    {
         for child in children {
             commands.entity(*child).despawn();
         }
@@ -501,7 +504,10 @@ fn spawn_metric_line_panel(
         return;
     }
 
-    let width = 5.0_f32.mul_add(extents.arrow_spacing, extents.last_right - extents.first_left);
+    let width = 5.0_f32.mul_add(
+        extents.arrow_spacing,
+        extents.last_right - extents.first_left,
+    );
     if width <= 0.0 {
         return;
     }
@@ -540,9 +546,10 @@ fn spawn_metric_line_panel(
         return;
     };
 
-    commands
-        .entity(entity)
-        .with_child((panel, Transform::from_xyz(x, top_world, METRIC_LINE_Z_OFFSET)));
+    commands.entity(entity).with_child((
+        panel,
+        Transform::from_xyz(x, top_world, METRIC_LINE_Z_OFFSET),
+    ));
 }
 
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.

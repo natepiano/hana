@@ -358,21 +358,21 @@ fn poll_atlas_glyphs(
         shared_mats.handles.clear();
     }
 
-    perf.last_atlas_poll_ms = poll_ms;
-    perf.last_atlas_sync_ms = sync_ms;
-    perf.last_atlas_completed_glyphs = poll_stats.completed;
-    perf.last_atlas_inserted_glyphs = poll_stats.inserted;
-    perf.last_atlas_invisible_glyphs = poll_stats.invisible;
-    perf.last_atlas_pages_added = poll_stats.pages_added;
-    perf.last_atlas_dirty_pages = dirty_pages;
-    perf.last_atlas_in_flight_glyphs = atlas.in_flight_count();
-    perf.last_atlas_active_jobs = atlas.active_job_count();
-    perf.last_atlas_peak_active_jobs = atlas.peak_active_job_count();
-    perf.last_atlas_worker_threads = poll_stats.worker_threads;
-    perf.last_atlas_avg_raster_ms = poll_stats.avg_raster_ms;
-    perf.last_atlas_max_raster_ms = poll_stats.max_raster_ms;
-    perf.last_atlas_batch_max_active_jobs = poll_stats.max_active_jobs;
-    perf.last_atlas_total_glyphs = atlas.glyph_count();
+    perf.atlas_poll_ms = poll_ms;
+    perf.atlas_sync_ms = sync_ms;
+    perf.atlas_completed_glyphs = poll_stats.completed;
+    perf.atlas_inserted_glyphs = poll_stats.inserted;
+    perf.atlas_invisible_glyphs = poll_stats.invisible;
+    perf.atlas_pages_added = poll_stats.pages_added;
+    perf.atlas_dirty_pages = dirty_pages;
+    perf.atlas_in_flight_glyphs = atlas.in_flight_count();
+    perf.atlas_active_jobs = atlas.active_job_count();
+    perf.atlas_peak_active_jobs = atlas.peak_active_job_count();
+    perf.atlas_worker_threads = poll_stats.worker_threads;
+    perf.atlas_avg_raster_ms = poll_stats.avg_raster_ms;
+    perf.atlas_max_raster_ms = poll_stats.max_raster_ms;
+    perf.atlas_batch_max_active_jobs = poll_stats.max_active_jobs;
+    perf.atlas_total_glyphs = atlas.glyph_count();
 
     if poll_stats.completed > 0 || sync_ms > 0.0 {
         bevy::log::debug!(

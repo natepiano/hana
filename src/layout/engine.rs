@@ -11,13 +11,6 @@ use std::sync::Arc;
 
 use bevy_kana::ToF32;
 
-use super::constants::LAYOUT_EPSILON;
-use super::element::Element;
-use super::element::ElementContent;
-use super::element::LayoutTree;
-use super::render::RectangleSource;
-use super::render::RenderCommand;
-use super::render::RenderCommandKind;
 use super::AlignX;
 use super::AlignY;
 use super::Border;
@@ -28,6 +21,13 @@ use super::Sizing;
 use super::TextDimensions;
 use super::TextMeasure;
 use super::TextWrap;
+use super::constants::LAYOUT_EPSILON;
+use super::element::Element;
+use super::element::ElementContent;
+use super::element::LayoutTree;
+use super::render::RectangleSource;
+use super::render::RenderCommand;
+use super::render::RenderCommandKind;
 
 /// Selects which layout axis a sizing or positioning operation targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

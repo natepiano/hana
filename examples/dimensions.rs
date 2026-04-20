@@ -41,7 +41,7 @@ use bevy_window_manager::WindowManagerPlugin;
 // ── Layout ───────────────────────────────────────────────────────────
 const DEMO_WIDTH: f32 = 90.0; // mm
 const DEMO_HEIGHT: f32 = 60.0; // mm
-const COL_GAP: f32 = 0.008; // meters
+const COLUMN_GAP: f32 = 0.008; // meters
 const HEADER_GAP: f32 = 0.003; // meters
 const MARGIN: f32 = 0.004; // meters
 const MM_TO_M: f32 = 0.001;
@@ -93,9 +93,9 @@ fn setup(
     let note_w = NOTE_WIDTH * MM_TO_M;
     let note_h = NOTE_HEIGHT * MM_TO_M;
 
-    let total_w = demo_w + COL_GAP + note_w;
+    let total_w = demo_w + COLUMN_GAP + note_w;
     let left_x = -total_w / 2.0;
-    let note_x = left_x + demo_w + COL_GAP;
+    let note_x = left_x + demo_w + COLUMN_GAP;
     let max_h = demo_h.max(note_h);
     let header_y = max_h + HEADER_GAP;
     let content_top = Pt(9.0)

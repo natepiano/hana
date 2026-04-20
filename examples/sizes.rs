@@ -43,12 +43,12 @@ use bevy_window_manager::WindowManagerPlugin;
 const PANEL_WIDTH: f32 = 60.0; // mm
 const PANEL_HEIGHT: f32 = 42.0; // mm — content only (no title row)
 const PANEL_PAD: f32 = 3.0; // mm
-const ROW_GAP: f32 = 1.5; // mm between rows
+const ROW_SPACING: f32 = 1.5; // mm between rows
 const LABEL_COL: f32 = 22.0; // mm — fixed label column
-const COL_GAP: f32 = 0.008; // meters between columns
+const COLUMN_GAP: f32 = 0.008; // meters between columns
 const HEADER_GAP: f32 = 0.003; // meters between header and content
 const MARGIN: f32 = 0.004; // meters — backdrop overshoot
-const MM_TO_M: f32 = 0.001;
+const MILLIMETERS_PER_METER: f32 = 0.001;
 
 // ── Commentary panel ─────────────────────────────────────────────────
 const NOTE_WIDTH: f32 = 80.0; // mm
@@ -100,18 +100,18 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let panel_w = PANEL_WIDTH * MM_TO_M;
-    let panel_h = PANEL_HEIGHT * MM_TO_M;
-    let note_w = NOTE_WIDTH * MM_TO_M;
-    let note_h = NOTE_HEIGHT * MM_TO_M;
+    let panel_w = PANEL_WIDTH * MILLIMETERS_PER_METER;
+    let panel_h = PANEL_HEIGHT * MILLIMETERS_PER_METER;
+    let note_w = NOTE_WIDTH * MILLIMETERS_PER_METER;
+    let note_h = NOTE_HEIGHT * MILLIMETERS_PER_METER;
 
     // Three columns: demo panel | WorldText | commentary.
     // WorldText column is narrower than the panel — size to actual content.
-    let wt_col_w = (LABEL_COL + 28.0) * MM_TO_M; // label col + "Hello" width
-    let total_w = panel_w + COL_GAP + wt_col_w + COL_GAP + note_w;
+    let wt_col_w = (LABEL_COL + 28.0) * MILLIMETERS_PER_METER; // label col + "Hello" width
+    let total_w = panel_w + COLUMN_GAP + wt_col_w + COLUMN_GAP + note_w;
     let left_x = -total_w / 2.0;
-    let right_x = left_x + panel_w + COL_GAP;
-    let note_x = right_x + wt_col_w + COL_GAP;
+    let right_x = left_x + panel_w + COLUMN_GAP;
+    let note_x = right_x + wt_col_w + COLUMN_GAP;
 
     // All three headers top-align at this Y. Content sits below.
     let header_style = WorldTextStyle::new(Pt(9.0))
@@ -222,9 +222,9 @@ fn spawn_world_text_column(
         WorldTextStyle::new(SIZE_BARE_WORLD).with_color(SAMPLE_COLOR),
     ];
 
-    let first_row_dy = -(PANEL_PAD + BORDER_WIDTH).mul_add(MM_TO_M, HEADER_GAP);
-    let sample_dx = LABEL_COL * MM_TO_M;
-    let row_step = (SIZE_MM + ROW_GAP + 2.0) * MM_TO_M;
+    let first_row_dy = -(PANEL_PAD + BORDER_WIDTH).mul_add(MILLIMETERS_PER_METER, HEADER_GAP);
+    let sample_dx = LABEL_COL * MILLIMETERS_PER_METER;
+    let row_step = (SIZE_MM + ROW_SPACING + 2.0) * MILLIMETERS_PER_METER;
 
     for (i, (label, style)) in WORLD_LABELS.iter().zip(world_styles.iter()).enumerate() {
         let dy = first_row_dy - row_step * i.to_f32();
@@ -334,7 +334,7 @@ fn build_demo_panel() -> bevy_diegetic::LayoutTree {
         El::new()
             .direction(Direction::TopToBottom)
             .padding(Padding::all(PANEL_PAD))
-            .child_gap(ROW_GAP)
+            .child_gap(ROW_SPACING)
             .border(Border::all(BORDER_WIDTH, BORDER_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
