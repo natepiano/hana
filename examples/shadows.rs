@@ -60,10 +60,10 @@ const ROW_SPACING: f32 = 1.8;
 const PANEL_OFFSET: f32 = 2.0;
 
 // ── Info panel dimensions (meters) ───────────────────────────────────
-const INFO_W: f32 = 0.12;
-const INFO_H: f32 = 0.03;
-const INFO_FONT: f32 = 3.5;
-const INFO_TITLE_FONT: f32 = 4.2;
+const INFO_PANEL_WIDTH: f32 = 0.12;
+const INFO_PANEL_HEIGHT: f32 = 0.03;
+const INFO_FONT_SIZE: f32 = 3.5;
+const INFO_TITLE_FONT_SIZE: f32 = 4.2;
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -149,13 +149,12 @@ fn setup(
 
     // Info panel — below the grid.
     commands.spawn((
-        DiegeticPanel {
-            tree: build_info_panel(),
-            width: INFO_W,
-            height: INFO_H,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(build_info_panel())
+            .build()
+            .expect("valid info panel dimensions"),
         Transform::from_xyz(-0.06, 0.315, 0.0),
     ));
 }
@@ -337,10 +336,10 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
 fn build_info_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let cfg = LayoutTextStyle::new(INFO_FONT);
-    let title_cfg = LayoutTextStyle::new(INFO_TITLE_FONT);
+    let cfg = LayoutTextStyle::new(INFO_FONT_SIZE);
+    let title_cfg = LayoutTextStyle::new(INFO_TITLE_FONT_SIZE);
 
-    let mut builder = LayoutBuilder::new(INFO_W, INFO_H);
+    let mut builder = LayoutBuilder::new(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT);
     builder.with(
         El::new()
             .width(Sizing::FIT)

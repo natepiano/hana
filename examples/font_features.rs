@@ -134,8 +134,8 @@ fn setup(
 
     commands.spawn((
         ShowcasePanel,
-        DiegeticPanel::builder()
-            .size((Pt(layout_w), Pt(layout_h)))
+        DiegeticPanel::world()
+            .size(Pt(layout_w), Pt(layout_h))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {
@@ -233,11 +233,11 @@ fn resize_panel(
             clippy::float_cmp,
             reason = "exact comparison detects whether dimensions changed from values this code assigned"
         )]
-        if panel.width == layout_w && panel.height == layout_h {
+        if panel.width() == layout_w && panel.height() == layout_h {
             continue;
         }
-        let new = DiegeticPanel::builder()
-            .size((Pt(layout_w), Pt(layout_h)))
+        let new = DiegeticPanel::world()
+            .size(Pt(layout_w), Pt(layout_h))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {
@@ -272,8 +272,8 @@ fn on_font_registered(
     };
     let (layout_w, layout_h) = layout_dimensions(window);
     for mut panel in &mut panels {
-        let new = DiegeticPanel::builder()
-            .size((Pt(layout_w), Pt(layout_h)))
+        let new = DiegeticPanel::world()
+            .size(Pt(layout_w), Pt(layout_h))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {

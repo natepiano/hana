@@ -19,25 +19,15 @@ use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
 use super::constants;
+use super::constants::DEFAULT_TEXELS_PER_METER;
+use super::constants::MAX_TEXTURE_SIZE;
+use super::constants::MIN_TEXTURE_SIZE;
+use super::constants::PANEL_LAYER_OFFSET;
 use crate::plugin::ComputedDiegeticPanel;
 use crate::plugin::DiegeticPanel;
 use crate::plugin::RenderMode;
 use crate::plugin::SurfaceShadow;
 use crate::plugin::UnitConfig;
-
-/// Render layer offset — panel layers start here to avoid conflicts with
-/// user-defined layers.
-const PANEL_LAYER_OFFSET: usize = 16;
-
-/// Default texels per world-space meter for RTT resolution.
-/// ~200 DPI at arm's length.
-const DEFAULT_TEXELS_PER_METER: f32 = 10000.0;
-
-/// Minimum texture dimension in pixels.
-const MIN_TEXTURE_SIZE: u32 = 64;
-
-/// Maximum texture dimension in pixels.
-const MAX_TEXTURE_SIZE: u32 = 4096;
 
 // ── Components ──────────────────────────────────────────────────────────────
 

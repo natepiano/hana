@@ -1,105 +1,83 @@
 //! Internal diagnostics registration and publishing for diegetic UI.
 
 use bevy::diagnostic::Diagnostic;
-use bevy::diagnostic::DiagnosticPath;
 use bevy::diagnostic::Diagnostics;
 use bevy::diagnostic::RegisterDiagnostic;
 use bevy::prelude::*;
 use bevy_kana::ToF64;
 
+use super::constants::DIAG_ATLAS_ACTIVE_JOBS;
+use super::constants::DIAG_ATLAS_AVG_RASTER_MS;
+use super::constants::DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS;
+use super::constants::DIAG_ATLAS_COMPLETED_GLYPHS;
+use super::constants::DIAG_ATLAS_DIRTY_PAGES;
+use super::constants::DIAG_ATLAS_IN_FLIGHT_GLYPHS;
+use super::constants::DIAG_ATLAS_INSERTED_GLYPHS;
+use super::constants::DIAG_ATLAS_INVISIBLE_GLYPHS;
+use super::constants::DIAG_ATLAS_MAX_RASTER_MS;
+use super::constants::DIAG_ATLAS_PAGES_ADDED;
+use super::constants::DIAG_ATLAS_PEAK_ACTIVE_JOBS;
+use super::constants::DIAG_ATLAS_POLL_MS;
+use super::constants::DIAG_ATLAS_SYNC_MS;
+use super::constants::DIAG_ATLAS_TOTAL_GLYPHS;
+use super::constants::DIAG_ATLAS_WORKER_THREADS;
+use super::constants::DIAG_LAYOUT_COMPUTE_MS;
+use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
+use super::constants::DIAG_TEXT_ATLAS_MS;
+use super::constants::DIAG_TEXT_EXTRACT_MS;
+use super::constants::DIAG_TEXT_EXTRACT_PANELS;
+use super::constants::DIAG_TEXT_PENDING_GLYPHS;
+use super::constants::DIAG_TEXT_QUEUED_GLYPHS;
+use super::constants::DIAG_TEXT_SHAPE_MS;
+use super::constants::DIAG_TEXT_SPAWN_MS;
 use super::systems::DiegeticPerfStats;
-
-pub(super) const DIAG_LAYOUT_COMPUTE_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/layout/compute_ms");
-pub(super) const DIAG_LAYOUT_COMPUTE_PANELS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/layout/compute_panels");
-pub(super) const DIAG_TEXT_EXTRACT_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/extract_ms");
-pub(super) const DIAG_TEXT_EXTRACT_PANELS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/extract_panels");
-pub(super) const DIAG_TEXT_SHAPE_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/shape_ms");
-pub(super) const DIAG_TEXT_ATLAS_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/atlas_lookup_ms");
-pub(super) const DIAG_TEXT_SPAWN_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/spawn_ms");
-pub(super) const DIAG_TEXT_QUEUED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/queued_glyphs");
-pub(super) const DIAG_TEXT_PENDING_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/pending_glyphs");
-pub(super) const DIAG_ATLAS_POLL_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/poll_ms");
-pub(super) const DIAG_ATLAS_SYNC_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/sync_ms");
-pub(super) const DIAG_ATLAS_COMPLETED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/completed_glyphs");
-pub(super) const DIAG_ATLAS_INSERTED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/inserted_glyphs");
-pub(super) const DIAG_ATLAS_INVISIBLE_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/invisible_glyphs");
-pub(super) const DIAG_ATLAS_PAGES_ADDED: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/pages_added");
-pub(super) const DIAG_ATLAS_DIRTY_PAGES: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/dirty_pages");
-pub(super) const DIAG_ATLAS_IN_FLIGHT_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/in_flight_glyphs");
-pub(super) const DIAG_ATLAS_ACTIVE_JOBS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/active_jobs");
-pub(super) const DIAG_ATLAS_PEAK_ACTIVE_JOBS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/peak_active_jobs");
-pub(super) const DIAG_ATLAS_WORKER_THREADS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/worker_threads");
-pub(super) const DIAG_ATLAS_AVG_RASTER_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/avg_raster_ms");
-pub(super) const DIAG_ATLAS_MAX_RASTER_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/max_raster_ms");
-pub(super) const DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/batch_max_active_jobs");
-pub(super) const DIAG_ATLAS_TOTAL_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/total_glyphs");
 
 #[derive(Resource, Default)]
 struct DiegeticDiagnosticsRegistered;
 
-pub(super) fn install(app: &mut App) {
-    if app
-        .world()
-        .contains_resource::<DiegeticDiagnosticsRegistered>()
-    {
-        return;
-    }
+pub(super) struct DiagnosticsPlugin;
 
-    app.insert_resource(DiegeticDiagnosticsRegistered);
-    for diagnostic in [
-        Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
-        Diagnostic::new(DIAG_TEXT_EXTRACT_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_TEXT_EXTRACT_PANELS),
-        Diagnostic::new(DIAG_TEXT_SHAPE_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_TEXT_ATLAS_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_TEXT_SPAWN_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_TEXT_QUEUED_GLYPHS),
-        Diagnostic::new(DIAG_TEXT_PENDING_GLYPHS),
-        Diagnostic::new(DIAG_ATLAS_POLL_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_ATLAS_SYNC_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_ATLAS_COMPLETED_GLYPHS),
-        Diagnostic::new(DIAG_ATLAS_INSERTED_GLYPHS),
-        Diagnostic::new(DIAG_ATLAS_INVISIBLE_GLYPHS),
-        Diagnostic::new(DIAG_ATLAS_PAGES_ADDED),
-        Diagnostic::new(DIAG_ATLAS_DIRTY_PAGES),
-        Diagnostic::new(DIAG_ATLAS_IN_FLIGHT_GLYPHS),
-        Diagnostic::new(DIAG_ATLAS_ACTIVE_JOBS),
-        Diagnostic::new(DIAG_ATLAS_PEAK_ACTIVE_JOBS),
-        Diagnostic::new(DIAG_ATLAS_WORKER_THREADS),
-        Diagnostic::new(DIAG_ATLAS_AVG_RASTER_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_ATLAS_MAX_RASTER_MS).with_suffix(" ms"),
-        Diagnostic::new(DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS),
-        Diagnostic::new(DIAG_ATLAS_TOTAL_GLYPHS),
-    ] {
-        app.register_diagnostic(diagnostic);
-    }
+impl Plugin for DiagnosticsPlugin {
+    fn build(&self, app: &mut App) {
+        if app
+            .world()
+            .contains_resource::<DiegeticDiagnosticsRegistered>()
+        {
+            return;
+        }
 
-    app.add_systems(Last, publish_perf_diagnostics);
+        app.insert_resource(DiegeticDiagnosticsRegistered);
+        for diagnostic in [
+            Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
+            Diagnostic::new(DIAG_TEXT_EXTRACT_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_TEXT_EXTRACT_PANELS),
+            Diagnostic::new(DIAG_TEXT_SHAPE_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_TEXT_ATLAS_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_TEXT_SPAWN_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_TEXT_QUEUED_GLYPHS),
+            Diagnostic::new(DIAG_TEXT_PENDING_GLYPHS),
+            Diagnostic::new(DIAG_ATLAS_POLL_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_ATLAS_SYNC_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_ATLAS_COMPLETED_GLYPHS),
+            Diagnostic::new(DIAG_ATLAS_INSERTED_GLYPHS),
+            Diagnostic::new(DIAG_ATLAS_INVISIBLE_GLYPHS),
+            Diagnostic::new(DIAG_ATLAS_PAGES_ADDED),
+            Diagnostic::new(DIAG_ATLAS_DIRTY_PAGES),
+            Diagnostic::new(DIAG_ATLAS_IN_FLIGHT_GLYPHS),
+            Diagnostic::new(DIAG_ATLAS_ACTIVE_JOBS),
+            Diagnostic::new(DIAG_ATLAS_PEAK_ACTIVE_JOBS),
+            Diagnostic::new(DIAG_ATLAS_WORKER_THREADS),
+            Diagnostic::new(DIAG_ATLAS_AVG_RASTER_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_ATLAS_MAX_RASTER_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS),
+            Diagnostic::new(DIAG_ATLAS_TOTAL_GLYPHS),
+        ] {
+            app.register_diagnostic(diagnostic);
+        }
+
+        app.add_systems(Last, publish_perf_diagnostics);
+    }
 }
 
 fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagnostics) {

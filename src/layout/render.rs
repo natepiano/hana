@@ -4,9 +4,9 @@ use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
 
-use super::types::Border;
-use super::types::BoundingBox;
-use super::types::LayoutTextStyle;
+use super::Border;
+use super::BoundingBox;
+use super::LayoutTextStyle;
 
 /// A single render command produced by the layout pass.
 ///

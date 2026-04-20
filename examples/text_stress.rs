@@ -272,26 +272,24 @@ fn setup(
     // Status panel (combined FPS + row/panel counts) — top-right area.
     commands.spawn((
         StatusPanel,
-        DiegeticPanel {
-            tree: build_status_panel("fps: --  ms: --  rows: 0  panels: 0"),
-            width: STATUS_LAYOUT_WIDTH,
-            height: STATUS_LAYOUT_HEIGHT,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(build_status_panel("fps: --  ms: --  rows: 0  panels: 0"))
+            .build()
+            .expect("valid status panel dimensions"),
         Transform::from_xyz(3.9, 5.015, 2.0),
     ));
 
     // Controls panel (static help text) — bottom-left area.
     commands.spawn((
         ControlsPanel,
-        DiegeticPanel {
-            tree: build_controls_panel(),
-            width: CONTROLS_LAYOUT_WIDTH,
-            height: CONTROLS_LAYOUT_HEIGHT,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(CONTROLS_LAYOUT_WIDTH, CONTROLS_LAYOUT_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(build_controls_panel())
+            .build()
+            .expect("valid controls panel dimensions"),
         Transform::from_xyz(-4.04, 0.51, 3.0),
     ));
 }
@@ -497,7 +495,7 @@ fn update_status_panel(
     if new_text != last_displayed.text {
         last_displayed.text.clone_from(&new_text);
         for mut panel in &mut panels {
-            panel.tree = build_status_panel(&new_text);
+            panel.set_tree(build_status_panel(&new_text));
         }
     }
 }
@@ -569,13 +567,12 @@ fn update_panels(
         tree_builds += 1;
         commands.spawn((
             StressPanel(idx),
-            DiegeticPanel {
-                tree,
-                width: MAX_LAYOUT_WIDTH,
-                height: LAYOUT_HEIGHT,
-                font_unit: Some(Unit::Millimeters),
-                ..default()
-            },
+            DiegeticPanel::world()
+                .size(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT)
+                .font_unit(Unit::Millimeters)
+                .with_tree(tree)
+                .build()
+                .expect("valid stress panel dimensions"),
             panel_transform(idx, needed, ww, wh),
         ));
     }
@@ -592,7 +589,7 @@ fn update_panels(
             if sp.0 == active_panel_idx {
                 // Active panel — content changed, rebuild tree.
                 let tree_start = Instant::now();
-                panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
+                panel.set_tree(build_panel_tree(&state, sp.0, rpp, &words));
                 tree_build_ms = tree_start
                     .elapsed()
                     .as_secs_f32()
@@ -603,7 +600,7 @@ fn update_panels(
                 // redistribute hue spacing against the new row_count.
                 // Between boundary crossings, hue_offset on the shader
                 // handles color rotation with zero CPU cost.
-                panel.tree = build_panel_tree(&state, sp.0, rpp, &words);
+                panel.set_tree(build_panel_tree(&state, sp.0, rpp, &words));
             }
             *transform = panel_transform(sp.0, needed, ww, wh);
         }

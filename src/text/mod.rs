@@ -12,6 +12,7 @@
 //! for GPU rendering.
 
 mod atlas;
+mod constants;
 mod font;
 mod font_loader;
 mod font_registry;
@@ -28,6 +29,7 @@ pub use atlas::GlyphKey;
 pub use atlas::GlyphLookup;
 pub use atlas::GlyphMetrics;
 pub use atlas::MsdfAtlas;
+pub use constants::EMBEDDED_FONT;
 pub use font::Font;
 pub use font::FontMetrics;
 #[cfg(feature = "typography_overlay")]
@@ -35,7 +37,6 @@ pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
 pub use font_loader::FontLoader;
-pub use font_registry::EMBEDDED_FONT;
 pub use font_registry::FontId;
 pub use font_registry::FontLoadFailed;
 pub use font_registry::FontRegistered;

@@ -27,7 +27,6 @@ use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::Unit;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -97,37 +96,33 @@ fn main() {
 fn setup(mut commands: Commands, windows: Query<&Window>) {
     // ── Left panel: full-alpha border (shimmers) ────────────────────
     commands.spawn((
-        DiegeticPanel {
-            tree: build_panel(
+        DiegeticPanel::world()
+            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+            .anchor(Anchor::TopCenter)
+            .with_tree(build_panel(
                 "Full Alpha Border",
                 "border: Color::WHITE (alpha 1.0)",
                 "High contrast alpha variation\ncauses visible shimmer\nunder TAA jitter.\n\nNote: TAA also softens text.\nToggle T to compare.",
                 FULL_ALPHA_BORDER,
-            ),
-            width: PANEL_WIDTH,
-            height: PANEL_HEIGHT,
-            layout_unit: Unit::Millimeters,
-            anchor: Anchor::TopCenter,
-            ..default()
-        },
+            ))
+            .build()
+            .expect("valid panel dimensions"),
         Transform::from_xyz(-(PANEL_WIDTH + PANEL_GAP) * 0.5 * 0.001, 0.0, 0.0),
     ));
 
     // ── Right panel: reduced-alpha border (stable) ──────────────────
     commands.spawn((
-        DiegeticPanel {
-            tree: build_panel(
+        DiegeticPanel::world()
+            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+            .anchor(Anchor::TopCenter)
+            .with_tree(build_panel(
                 "Reduced Alpha Border",
                 "border: srgba(0.7, 0.7, 0.8, 0.6)",
                 "Lower alpha reduces the\nframe-to-frame contrast,\nso TAA can converge.\n\nNote: TAA also softens text.\nToggle T to compare.",
                 REDUCED_ALPHA_BORDER,
-            ),
-            width: PANEL_WIDTH,
-            height: PANEL_HEIGHT,
-            layout_unit: Unit::Millimeters,
-            anchor: Anchor::TopCenter,
-            ..default()
-        },
+            ))
+            .build()
+            .expect("valid panel dimensions"),
         Transform::from_xyz((PANEL_WIDTH + PANEL_GAP) * 0.5 * 0.001, 0.0, 0.0),
     ));
 
@@ -148,17 +143,18 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         ..unlit_material
     };
     let hud_width = windows.iter().next().map_or(800.0, Window::width);
-    let (mut hud_panel, screen_space) = DiegeticPanel::builder()
-        .size_px(hud_width, HUD_HEIGHT)
+    let mut hud_panel = DiegeticPanel::screen()
+        .size(hud_width, HUD_HEIGHT)
         .anchor(Anchor::TopLeft)
         .material(unlit.clone())
         .text_material(unlit)
         .layout(|b| {
             build_hud_content(b, true);
         })
-        .build_screen_space();
-    hud_panel.tree = build_hud_tree(true, hud_width);
-    commands.spawn((HudPanel, hud_panel, screen_space, Transform::default()));
+        .build()
+        .expect("valid HUD dimensions");
+    hud_panel.set_tree(build_hud_tree(true, hud_width));
+    commands.spawn((HudPanel, hud_panel, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────
     commands.spawn((
@@ -330,12 +326,13 @@ fn update_hud(
         transform.translation.x = -half_width;
         transform.translation.y = half_height;
 
-        let width_changed = (panel.width - win_width).abs() > 1.0;
+        let width_changed = (panel.width() - win_width).abs() > 1.0;
         if width_changed {
-            panel.width = win_width;
+            panel.set_width(win_width);
         }
         if *previous_state != state || width_changed {
-            panel.tree = build_hud_tree(taa.0, panel.width);
+            let panel_width = panel.width();
+            panel.set_tree(build_hud_tree(taa.0, panel_width));
         }
     }
     *previous_state = state;

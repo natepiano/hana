@@ -27,7 +27,7 @@
 //!     .run();
 //! ```
 
-pub mod callouts;
+mod callouts;
 mod constants;
 #[cfg(feature = "typography_overlay")]
 mod debug;

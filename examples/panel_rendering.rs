@@ -25,7 +25,6 @@ use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::InputControl;
@@ -225,10 +224,10 @@ fn cycle_lighting_preset(
     let lights_visible = preset.lights_on();
 
     for mut panel in &mut panels {
-        let mat = panel.material.get_or_insert_with(default_panel_material);
+        let mat = panel.material_mut().get_or_insert_with(default_panel_material);
         mat.unlit = unlit;
         let text_mat = panel
-            .text_material
+            .text_material_mut()
             .get_or_insert_with(default_panel_material);
         text_mat.unlit = unlit;
     }
@@ -307,14 +306,12 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
     let tree = build_unified_panel();
     commands
         .spawn((
-            DiegeticPanel {
-                tree,
-                width: PANEL_WIDTH,
-                height: PANEL_HEIGHT,
-                layout_unit: Unit::Millimeters,
-                anchor: Anchor::TopCenter,
-                ..default()
-            },
+            DiegeticPanel::world()
+                .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+                .anchor(Anchor::TopCenter)
+                .with_tree(tree)
+                .build()
+                .expect("valid panel dimensions"),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ))
         .observe(on_panel_clicked);
@@ -339,22 +336,23 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         ..default_panel_material()
     };
     let hud_width = windows.iter().next().map_or(HUD_WIDTH, Window::width);
-    let (mut hud_panel, screen_space) = DiegeticPanel::builder()
-        .size_px(hud_width, HUD_HEIGHT)
+    let mut hud_panel = DiegeticPanel::screen()
+        .size(hud_width, HUD_HEIGHT)
         .anchor(Anchor::TopLeft)
         .material(unlit_material.clone())
         .text_material(unlit_material)
         .layout(|b| {
             build_hud_content(b, LightingPreset::default(), SCENE_ILLUMINANCE, true);
         })
-        .build_screen_space();
-    hud_panel.tree = build_hud_tree(
+        .build()
+        .expect("valid HUD dimensions");
+    hud_panel.set_tree(build_hud_tree(
         LightingPreset::default(),
         SCENE_ILLUMINANCE,
         hud_width,
         true,
-    );
-    commands.spawn((HudPanel, hud_panel, screen_space, Transform::default()));
+    ));
+    commands.spawn((HudPanel, hud_panel, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────
     commands.spawn((
@@ -783,12 +781,13 @@ fn update_hud(
         transform.translation.x = -half_width;
         transform.translation.y = half_height;
 
-        let width_changed = (panel.width - win_width).abs() > 1.0;
+        let width_changed = (panel.width() - win_width).abs() > 1.0;
         if width_changed {
-            panel.width = win_width;
+            panel.set_width(win_width);
         }
         if *previous_state != state || width_changed {
-            panel.tree = build_hud_tree(*preset, lux, panel.width, taa.0);
+            let panel_width = panel.width();
+            panel.set_tree(build_hud_tree(*preset, lux, panel_width, taa.0));
         }
     }
     *previous_state = state;

@@ -25,7 +25,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::InputControl;
@@ -39,11 +38,11 @@ use bevy_window_manager::WindowManagerPlugin;
 // ── Panel layout (all in points) ─────────────────────────────────────
 // The panel is designed in points like a document, then world_width
 // scales it to fit the viewport.
-const PANEL_W: f32 = 1200.0; // pt
-const PANEL_H: f32 = 900.0; // pt
-const OUTER_PAD: f32 = 16.0; // pt
-const COL_GAP: f32 = 12.0; // pt between columns
-const ROW_GAP: f32 = 8.0; // pt between rows within a column
+const PANEL_WIDTH: f32 = 1200.0; // pt
+const PANEL_HEIGHT: f32 = 900.0; // pt
+const OUTER_PADDING: f32 = 16.0; // pt
+const COLUMN_GAP: f32 = 12.0; // pt between columns
+const ROW_SPACING: f32 = 8.0; // pt between rows within a column
 const PAIR_GAP: f32 = 4.0; // pt between portrait and landscape
 
 // World scale: panel spans ~1.2m wide so text at 10pt is readable.
@@ -164,7 +163,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let world_h = WORLD_WIDTH * PANEL_H / PANEL_W;
+    let world_h = WORLD_WIDTH * PANEL_HEIGHT / PANEL_WIDTH;
 
     // ── Backdrop ─────────────────────────────────────────────────────
     let backdrop = commands
@@ -195,15 +194,13 @@ fn setup(
 
     // ── Main panel ───────────────────────────────────────────────────
     commands.spawn((
-        DiegeticPanel {
-            tree: build_panel(),
-            width: PANEL_W,
-            height: PANEL_H,
-            layout_unit: Unit::Points,
-            world_width: Some(WORLD_WIDTH),
-            anchor: Anchor::TopCenter,
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(Pt(PANEL_WIDTH), Pt(PANEL_HEIGHT))
+            .world_width(WORLD_WIDTH)
+            .anchor(Anchor::TopCenter)
+            .with_tree(build_panel())
+            .build()
+            .expect("valid panel dimensions"),
         Transform::from_xyz(0.0, world_h, 0.0),
     ));
 
@@ -279,17 +276,18 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
     let note_style = LayoutTextStyle::new(9.0).with_color(NOTE_COLOR);
     let code_style = LayoutTextStyle::new(8.0).with_color(CODE_COLOR);
 
-    // Column content width = (PANEL_W - padding*2 - gaps) / 5.
-    let col_content_w = OUTER_PAD.mul_add(-2.0, COL_GAP.mul_add(-4.0, PANEL_W)) / 5.0;
+    // Column content width = (PANEL_WIDTH - padding*2 - gaps) / 5.
+    let col_content_w =
+        OUTER_PADDING.mul_add(-2.0, COLUMN_GAP.mul_add(-4.0, PANEL_WIDTH)) / 5.0;
     // Each paper pair (portrait + gap + landscape) must fit in col_content_w - some margin.
     let pair_max_w = col_content_w - 8.0; // leave room for column padding
 
-    let mut builder = LayoutBuilder::new(PANEL_W, PANEL_H);
+    let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
     builder.with(
         El::new()
             .direction(Direction::LeftToRight)
-            .padding(Padding::all(OUTER_PAD))
-            .child_gap(COL_GAP)
+            .padding(Padding::all(OUTER_PADDING))
+            .child_gap(COLUMN_GAP)
             .border(Border::all(Pt(1.0), BORDER_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
@@ -306,7 +304,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                 b.with(
                     El::new()
                         .direction(Direction::TopToBottom)
-                        .child_gap(ROW_GAP)
+                        .child_gap(ROW_SPACING)
                         .border(Border::all(Pt(0.5), BORDER_COLOR))
                         .padding(Padding::xy(0.0, 6.0))
                         .width(Sizing::fixed(col_content_w))

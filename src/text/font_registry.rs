@@ -67,13 +67,9 @@ use parley::FontContext;
 use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;
 
+use super::constants::DEFAULT_FAMILY;
+use super::constants::EMBEDDED_FONT;
 use super::font::Font;
-
-/// Embedded `JetBrains Mono` Regular font binary (SIL Open Font License).
-pub const EMBEDDED_FONT: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
-
-/// Default font family name.
-const DEFAULT_FAMILY: &str = "JetBrains Mono";
 
 /// Unique identifier for a loaded font family.
 ///
@@ -147,9 +143,7 @@ impl FontRegistry {
 
     /// Returns the [`Font`] for a given [`FontId`].
     #[must_use]
-    pub fn font(&self, id: impl Into<FontId>) -> Option<&Font> {
-        self.fonts.get(id.into().0 as usize)
-    }
+    pub fn font(&self, id: impl Into<FontId>) -> Option<&Font> { self.fonts.get(usize::from(id.into().0)) }
 
     /// Returns the family name for a given [`FontId`].
     #[must_use]
@@ -160,8 +154,8 @@ impl FontRegistry {
     /// Returns the [`FontId`] assigned to the new font, or `None` if the
     /// font data cannot be parsed.
     ///
-    /// The font is immediately available for use in [`TextConfig`] and
-    /// [`TextStyle`] via `.with_font(id.0)`. Glyphs are rasterized
+    /// The font is immediately available for use in `TextConfig` and
+    /// `TextStyle` via `.with_font(id.0)`. Glyphs are rasterized
     /// on demand into the MSDF atlas when text using this font is first
     /// rendered.
     ///
@@ -173,7 +167,7 @@ impl FontRegistry {
     /// fn setup(mut registry: ResMut<FontRegistry>) {
     ///     let id = registry.register_font("Noto Sans", NOTO_SANS)
     ///         .expect("font should parse");
-    ///     // Use id.0 with TextConfig::new(size).with_font(id.0)
+    ///     // Use `id.0` with `TextConfig::new(size).with_font(id.0)`.
     /// }
     /// ```
     pub fn register_font(&mut self, name: &str, data: &[u8]) -> Option<FontId> {
@@ -216,6 +210,6 @@ impl FontRegistry {
     /// Returns a cloned list of family names for the measurement closure.
     #[must_use]
     pub fn family_names(&self) -> Vec<String> {
-        self.fonts.iter().map(|f| (*f.name()).to_string()).collect()
+        self.fonts.iter().map(Font::name).map(String::from).collect()
     }
 }

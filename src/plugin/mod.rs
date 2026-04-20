@@ -3,9 +3,15 @@
 //! Provides [`DiegeticUiPlugin`], which adds layout computation and optional
 //! gizmo debug rendering for [`DiegeticPanel`] entities.
 
+#[allow(
+    clippy::used_underscore_binding,
+    reason = "false positive from derive-generated code for `PanelMode::Screen` variant fields"
+)]
 mod components;
 mod config;
+mod constants;
 mod diagnostics;
+mod runtime;
 mod screen_space;
 mod systems;
 
@@ -37,17 +43,8 @@ pub use systems::DiegeticPanelGizmoGroup;
 pub use systems::DiegeticPerfStats;
 pub use systems::ShowTextGizmos;
 
-use crate::callouts::CalloutPlugin;
 pub use crate::layout::Unit;
-use crate::render::PanelGeometryPlugin;
-use crate::render::PanelRttPlugin;
 use crate::render::ShapedTextCache;
-use crate::render::TextRenderPlugin;
-use crate::text;
-use crate::text::Font;
-use crate::text::FontLoader;
-use crate::text::FontRegistry;
-use crate::text::MsdfAtlas;
 
 /// Layout-only plugin for diegetic UI panels.
 ///
@@ -61,7 +58,7 @@ pub struct LayoutPlugin;
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<Self>() {
-            diagnostics::install(app);
+            app.add_plugins(diagnostics::DiagnosticsPlugin);
             app.init_resource::<ShapedTextCache>()
                 .init_resource::<DiegeticPerfStats>()
                 .add_systems(Update, systems::compute_panel_layouts);
@@ -141,7 +138,7 @@ impl DiegeticUiPlugin {
 }
 
 impl Plugin for DiegeticUiPlugin {
-    fn build(&self, app: &mut App) { build_plugin(app, None, None); }
+    fn build(&self, app: &mut App) { app.add_plugins(runtime::DiegeticRuntimePlugin::new(None, None)); }
 }
 
 /// Configured variant of [`DiegeticUiPlugin`] with custom atlas settings.
@@ -213,92 +210,10 @@ impl DiegeticUiPluginConfigured {
 }
 
 impl Plugin for DiegeticUiPluginConfigured {
-    fn build(&self, app: &mut App) { build_plugin(app, Some(&self.config), self.unit_config); }
-}
-
-/// Shared plugin build logic for both [`DiegeticUiPlugin`] and
-/// [`DiegeticUiPluginConfigured`].
-fn build_plugin(app: &mut App, config: Option<&AtlasConfig>, unit_config: Option<UnitConfig>) {
-    diagnostics::install(app);
-    // Initialize font registry and wire up parley-backed text measurement.
-    let Some(registry) = FontRegistry::new() else {
-        warn!("bevy_diegetic: embedded font failed to parse — plugin disabled");
-        return;
-    };
-    let measurer = DiegeticTextMeasurer {
-        measure_fn: text::create_parley_measurer(registry.font_context(), registry.family_names()),
-    };
-
-    // Initialize MSDF atlas — glyphs are rasterized on demand.
-    // Skip if the user pre-inserted a custom atlas resource directly.
-    if !app.world().contains_resource::<MsdfAtlas>() {
-        let cfg = config.copied().unwrap_or_default();
-
-        // Only log when the user explicitly configured the atlas.
-        if config.is_some() {
-            cfg.log_and_clamp();
-        }
-
-        let page_size = cfg.page_size();
-        let canonical_size = cfg.canonical_size();
-        let glyph_worker_threads = cfg.clamped_glyph_worker_threads();
-        app.insert_resource(MsdfAtlas::with_config(
-            page_size,
-            canonical_size,
-            glyph_worker_threads,
+    fn build(&self, app: &mut App) {
+        app.add_plugins(runtime::DiegeticRuntimePlugin::new(
+            Some(self.config),
+            self.unit_config,
         ));
-    }
-
-    app.insert_resource(unit_config.unwrap_or_default())
-        .insert_resource(registry)
-        .insert_resource(measurer)
-        .init_asset::<Font>()
-        .init_asset_loader::<FontLoader>()
-        .add_plugins(LayoutPlugin)
-        .add_plugins(CalloutPlugin)
-        .init_resource::<ShowTextGizmos>()
-        .add_plugins(TextRenderPlugin)
-        .add_plugins(PanelGeometryPlugin)
-        .add_plugins(PanelRttPlugin)
-        .init_gizmo_group::<DiegeticPanelGizmoGroup>()
-        .add_systems(
-            Startup,
-            (
-                systems::init_atlas_and_embedded_font,
-                systems::configure_panel_gizmos,
-            ),
-        )
-        .add_systems(
-            PostUpdate,
-            (systems::consume_loaded_fonts, systems::watch_font_failures),
-        )
-        .add_systems(
-            Update,
-            (
-                systems::ensure_oit_on_cameras,
-                screen_space::position_screen_space_panels.before(systems::compute_panel_layouts),
-                screen_space::setup_screen_space_cameras.after(systems::compute_panel_layouts),
-                systems::render_layout_gizmos.after(systems::compute_panel_layouts),
-                systems::render_debug_gizmos.after(systems::compute_panel_layouts),
-            ),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                screen_space::propagate_screen_space_render_layers,
-                screen_space::cleanup_screen_space_cameras,
-            ),
-        );
-
-    #[cfg(feature = "typography_overlay")]
-    {
-        app.add_observer(crate::debug::on_overlay_added);
-        app.add_observer(crate::debug::on_overlay_removed);
-        app.add_systems(Update, crate::debug::build_typography_overlay);
-        app.add_systems(
-            PostUpdate,
-            crate::debug::emit_typography_overlay_ready
-                .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
-        );
     }
 }

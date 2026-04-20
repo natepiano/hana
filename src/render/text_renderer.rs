@@ -18,6 +18,7 @@ use bevy_kana::ToU16;
 use bevy_kana::ToU32;
 
 use super::constants;
+use super::constants::TEXT_Z_OFFSET;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
@@ -50,12 +51,6 @@ use crate::text::FontRegistry;
 use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
 use crate::text::MsdfAtlas;
-
-/// Fixed panel-local Z for text and image meshes.
-///
-/// Layering is handled by `StandardMaterial::depth_bias`, so panel-local
-/// geometry stays coplanar.
-const TEXT_Z_OFFSET: f32 = 0.0;
 
 // ── Shaped text cache ────────────────────────────────────────────────────────
 
@@ -236,7 +231,7 @@ fn panel_clip_rect_local(
     anchor_x: f32,
     anchor_y: f32,
 ) -> Vec4 {
-    clip_rect.map_or(super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
+    clip_rect.map_or(constants::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
         Vec4::new(
             clip.x.mul_add(scale_x, -anchor_x),
             (clip.y + clip.height).mul_add(-scale_y, anchor_y),
@@ -1350,7 +1345,7 @@ mod tests {
             atlas_image.clone(),
             0.0,
             0,
-            msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+            constants::UNCLIPPED_TEXT_CLIP_RECT,
             0.0,
         ));
 
@@ -1367,7 +1362,7 @@ mod tests {
                     atlas_image.clone(),
                     hue,
                     0,
-                    msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                    constants::UNCLIPPED_TEXT_CLIP_RECT,
                     0.0,
                 ))
             }

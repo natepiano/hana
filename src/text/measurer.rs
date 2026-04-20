@@ -35,7 +35,7 @@ pub fn create_parley_measurer(
 
     Arc::new(move |text: &str, measure: &TextMeasure| {
         let family_name = families
-            .get(measure.font_id as usize)
+            .get(usize::from(measure.font_id))
             .map_or("JetBrains Mono", String::as_str);
 
         let mut font_cx = font_cx.lock().unwrap_or_else(PoisonError::into_inner);

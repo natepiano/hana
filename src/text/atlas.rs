@@ -26,6 +26,10 @@ use bevy_kana::ToUsize;
 use etagere::AtlasAllocator;
 use etagere::size2;
 
+use super::constants::ATLAS_GUTTER;
+use super::constants::BYTES_PER_PIXEL;
+use super::constants::DEFAULT_ATLAS_SIZE;
+use super::constants::DEFAULT_GLYPH_WORKER_THREADS;
 use super::font::Font;
 use super::font_registry::FontId;
 use super::font_registry::FontRegistry;
@@ -35,29 +39,6 @@ use super::msdf_rasterizer::DEFAULT_GLYPH_PADDING;
 use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
 use super::msdf_rasterizer::MsdfBitmap;
 use crate::constants::MILLISECONDS_PER_SECOND;
-
-/// Default atlas page texture size in pixels.
-const DEFAULT_ATLAS_SIZE: u32 = 1024;
-
-/// Default number of worker threads used by the atlas when no override is provided.
-const DEFAULT_GLYPH_WORKER_THREADS: usize = 6;
-
-/// Number of bytes per pixel (RGBA).
-const BYTES_PER_PIXEL: u32 = 4;
-
-/// Texel gutter around each glyph in the atlas.
-///
-/// Prevents linear filtering from sampling into adjacent glyph regions,
-/// which causes the MSDF median-of-three decode to produce faint vertical
-/// line artifacts at glyph boundaries. Border texels are replicated into
-/// the gutter so the distance field is continuous at the edge, and UV
-/// coordinates are inset by half a texel so the sampler hits texel centers.
-///
-/// This is one of two fixes for MSDF seam artifacts — see the module docs
-/// in [`glyph_quad`](crate::render::glyph_quad) for the full explanation.
-/// The other fix is [`clip_overlapping_quads`](crate::render::glyph_quad::clip_overlapping_quads)
-/// which handles overlapping geometry.
-const ATLAS_GUTTER: u32 = 1;
 
 /// Key for looking up a cached glyph in the atlas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -335,7 +316,7 @@ impl MsdfAtlas {
     #[must_use]
     pub fn image_handle(&self, page: u32) -> Option<&Handle<Image>> {
         self.pages
-            .get(page as usize)
+            .get(page.to_usize())
             .and_then(|p| p.image_handle.as_ref())
     }
 

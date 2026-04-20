@@ -13,6 +13,8 @@ use bevy::color::palettes::css::WHITE;
 use bevy::light::NotShadowCaster;
 use bevy::picking::Pickable;
 use bevy::prelude::*;
+use bevy_kana::ToF32;
+use bevy_kana::ToUsize;
 
 use super::constants::ARROW_GAP_RATIO;
 use super::constants::ARROW_SPACING_RATIO;
@@ -44,6 +46,8 @@ use crate::layout::Direction;
 use crate::layout::El;
 use crate::layout::GlyphShadowMode;
 use crate::layout::LayoutBuilder;
+use crate::layout::LayoutTree;
+use crate::layout::MeasureTextFn;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::WorldTextStyle;
@@ -56,10 +60,10 @@ use crate::render::LineMetricsSnapshot;
 use crate::render::PendingGlyphs;
 use crate::render::ShapedTextCache;
 use crate::render::WorldText;
+use crate::text;
 use crate::text::FontId;
 use crate::text::FontMetrics;
 use crate::text::FontRegistry;
-use crate::text::create_parley_measurer;
 
 /// Whether per-glyph bounding box annotations are visible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, bevy::prelude::Reflect)]
@@ -230,7 +234,7 @@ pub fn build_typography_overlay(
 ) {
     let changed_entities: Vec<Entity> = text_changed.iter().collect();
     let measure_text =
-        create_parley_measurer(font_registry.font_context(), font_registry.family_names());
+        text::create_parley_measurer(font_registry.font_context(), font_registry.family_names());
 
     for (entity, world_text, style, overlay, computed) in &query {
         if !changed_entities.contains(&entity) {
@@ -241,21 +245,12 @@ pub fn build_typography_overlay(
         }
 
         // Find the overlay container child for this entity.
-        let Some(container_entity) = containers
-            .iter()
-            .find_map(|(e, child_of, _)| (child_of.parent() == entity).then_some(e))
-        else {
+        let Some(container_entity) = overlay_container_entity(&containers, entity) else {
             continue;
         };
 
         // Despawn previous overlay children, keeping the container.
-        if let Some((_, _, Some(children))) =
-            containers.iter().find(|(e, _, _)| *e == container_entity)
-        {
-            for child in children.iter() {
-                commands.entity(child).despawn();
-            }
-        }
+        despawn_overlay_children(&mut commands, &containers, container_entity);
 
         let font_id = FontId(style.font_id());
         let Some(font) = font_registry.font(font_id) else {
@@ -350,6 +345,27 @@ pub fn build_typography_overlay(
     }
 }
 
+fn overlay_container_entity(
+    containers: &Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
+    entity: Entity,
+) -> Option<Entity> {
+    containers
+        .iter()
+        .find_map(|(child_entity, child_of, _)| (child_of.parent() == entity).then_some(child_entity))
+}
+
+fn despawn_overlay_children(
+    commands: &mut Commands,
+    containers: &Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
+    container_entity: Entity,
+) {
+    if let Some((_, _, Some(children))) = containers.iter().find(|(entity, _, _)| *entity == container_entity) {
+        for child in children {
+            commands.entity(*child).despawn();
+        }
+    }
+}
+
 /// Checks overlay label readiness and fires [`TypographyOverlayReady`]
 /// once all descendant [`WorldText`] labels have no [`PendingGlyphs`].
 /// Runs after `CalculateBounds` so transforms and AABBs are available.
@@ -390,7 +406,7 @@ fn spawn_font_metric_gizmos(
     font_size: f32,
     scale: f32,
     _gizmo_assets: &mut Assets<GizmoAsset>,
-    measure_text: &crate::layout::MeasureTextFn,
+    measure_text: &MeasureTextFn,
     cache: &mut ShapedTextCache,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -485,7 +501,7 @@ fn spawn_metric_line_panel(
         return;
     }
 
-    let width = extents.last_right - extents.first_left + 5.0 * extents.arrow_spacing;
+    let width = 5.0_f32.mul_add(extents.arrow_spacing, extents.last_right - extents.first_left);
     if width <= 0.0 {
         return;
     }
@@ -504,7 +520,7 @@ fn spawn_metric_line_panel(
     material.alpha_mode = AlphaMode::Blend;
     material.unlit = true;
 
-    let x = extents.first_left - 3.0 * extents.arrow_spacing;
+    let x = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
     let top_layout =
         if (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5 {
             line_metrics.top
@@ -513,17 +529,20 @@ fn spawn_metric_line_panel(
         };
     let top_world = layout_to_world_y(top_layout, anchor_y, scale);
 
-    commands.entity(entity).with_child((
-        DiegeticPanel::world()
-            .size(width, height)
-            .anchor(Anchor::TopLeft)
-            .surface_shadow(overlay.shadow)
-            .material(material)
-            .with_tree(tree)
-            .build()
-            .expect("metric line panel uses valid dimensions"),
-        Transform::from_xyz(x, top_world, METRIC_LINE_Z_OFFSET),
-    ));
+    let Ok(panel) = DiegeticPanel::world()
+        .size(width, height)
+        .anchor(Anchor::TopLeft)
+        .surface_shadow(overlay.shadow)
+        .material(material)
+        .with_tree(tree)
+        .build()
+    else {
+        return;
+    };
+
+    commands
+        .entity(entity)
+        .with_child((panel, Transform::from_xyz(x, top_world, METRIC_LINE_Z_OFFSET)));
 }
 
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.
@@ -614,15 +633,19 @@ fn spawn_glyph_box_panels(
         );
         let tree = builder.build();
 
+        let Ok(panel) = DiegeticPanel::world()
+            .size(w, h)
+            .anchor(Anchor::Center)
+            .surface_shadow(overlay.shadow)
+            .material(material.clone())
+            .with_tree(tree)
+            .build()
+        else {
+            continue;
+        };
+
         commands.entity(entity).with_child((
-            DiegeticPanel::world()
-                .size(w, h)
-                .anchor(Anchor::Center)
-                .surface_shadow(overlay.shadow)
-                .material(material.clone())
-                .with_tree(tree)
-                .build()
-                .expect("glyph bounding box panels use valid dimensions"),
+            panel,
             Transform::from_xyz(x + w / 2.0, y - h / 2.0, CALLOUT_Z_OFFSET),
         ));
     }
@@ -956,9 +979,9 @@ fn spawn_dashed_callout_line(
     }
     let dir = delta / total_len;
     let stride = dash_len + gap_len;
-    let count = (total_len / stride).ceil() as usize;
+    let count = (total_len / stride).ceil().to_usize();
     for i in 0..count {
-        let t = i as f32 * stride;
+        let t = i.to_f32() * stride;
         let dash_end = (t + dash_len).min(total_len);
         callouts::spawn_callout_line(
             commands,
@@ -1090,7 +1113,7 @@ fn build_metric_line_tree(
     height: f32,
     line_specs: &[MetricLineSpec],
     border_width: f32,
-) -> crate::layout::LayoutTree {
+) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
         El::new()
             .size(width, height)
@@ -1447,7 +1470,7 @@ fn spawn_metric_labels(
 
 fn measure_overlay_label(
     cache: &mut ShapedTextCache,
-    measure_text: &crate::layout::MeasureTextFn,
+    measure_text: &MeasureTextFn,
     text: &str,
     size: f32,
     boost: f32,
@@ -1473,7 +1496,6 @@ fn measure_overlay_label(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_overlay_bounds_target(
     commands: &mut Commands,
     parent: Entity,
@@ -1484,7 +1506,7 @@ fn spawn_overlay_bounds_target(
     font_size: f32,
     scale: f32,
     extents: &GlyphExtents,
-    measure_text: &crate::layout::MeasureTextFn,
+    measure_text: &MeasureTextFn,
     cache: &mut ShapedTextCache,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,

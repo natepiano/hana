@@ -116,8 +116,8 @@ fn spawn_scene(
 
 fn spawn_hud(commands: &mut Commands) {
     commands.spawn((
-        DiegeticPanel::builder()
-            .size_px(PANEL_WIDTH, PANEL_HEIGHT)
+        DiegeticPanel::screen()
+            .size(PANEL_WIDTH, PANEL_HEIGHT)
             .anchor(Anchor::Center)
             .layout(|b| {
                 // Outer frame.
@@ -197,7 +197,8 @@ fn spawn_hud(commands: &mut Commands) {
                     },
                 );
             })
-            .build_screen_space(),
+            .build()
+            .expect("valid HUD dimensions"),
         Transform::from_xyz(-250.0, 150.0, 0.0),
     ));
 }

@@ -14,16 +14,17 @@ use bevy::image::Image;
 use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
-use super::types::AlignX;
-use super::types::AlignY;
-use super::types::Border;
-use super::types::CornerRadius;
-use super::types::Dimension;
-use super::types::Direction;
-use super::types::LayoutTextStyle;
-use super::types::Padding;
-use super::types::Sizing;
-use super::types::Unit;
+use super::AlignX;
+use super::AlignY;
+use super::Border;
+use super::CornerRadius;
+use super::Dimension;
+use super::Direction;
+use super::LayoutTextStyle;
+use super::Padding;
+use super::Sizing;
+use super::Unit;
+use super::constants::INLINE_CHILDREN;
 
 /// A single element in the layout tree.
 ///
@@ -60,11 +61,6 @@ pub(super) struct Element {
     /// Content of this element.
     pub(super) content:       ElementContent,
 }
-
-/// Inline capacity for child index lists. Most elements have 1–4 children;
-/// only top-level containers (e.g., a column of many rows) exceed this and
-/// spill to the heap.
-const INLINE_CHILDREN: usize = 4;
 
 /// What an element contains.
 #[derive(Clone, Debug)]
@@ -180,7 +176,7 @@ impl LayoutTree {
     /// Used by `build_screen_space()` when the panel width is
     /// window-relative (`Percent`) so that changing `panel.width`
     /// triggers correct reflow without a tree rebuild.
-    pub(crate) fn set_root_grow_width(&mut self) {
+    pub(super) fn set_root_grow_width(&mut self) {
         if let Some(root) = self.root
             && let Some(element) = self.elements.get_mut(root)
         {
@@ -191,7 +187,7 @@ impl LayoutTree {
     /// Changes the root element's height sizing to `GROW`.
     ///
     /// See [`set_root_grow_width`](Self::set_root_grow_width) for rationale.
-    pub(crate) fn set_root_grow_height(&mut self) {
+    pub(super) fn set_root_grow_height(&mut self) {
         if let Some(root) = self.root
             && let Some(element) = self.elements.get_mut(root)
         {

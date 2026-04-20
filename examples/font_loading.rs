@@ -178,13 +178,12 @@ fn setup(
     // Status panel.
     commands.spawn((
         StatusPanel,
-        DiegeticPanel {
-            tree: build_status_panel("Fonts: loading..."),
-            width: STATUS_LAYOUT_WIDTH,
-            height: STATUS_LAYOUT_HEIGHT,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(build_status_panel("Fonts: loading..."))
+            .build()
+            .expect("valid status panel dimensions"),
         Transform::from_xyz(-1.54, 3.515, 0.0),
     ));
 }
@@ -243,7 +242,7 @@ fn on_font_registered(
     // Update status panel.
     let status = format!("Fonts registered: {}", font_count.0);
     for mut panel in &mut panels {
-        panel.tree = build_status_panel(&status);
+        panel.set_tree(build_status_panel(&status));
     }
 
     info!(
@@ -261,7 +260,7 @@ fn on_font_load_failed(
 
     let status = format!("FAILED: {}", trigger.path);
     for mut panel in &mut panels {
-        panel.tree = build_status_panel(&status);
+        panel.set_tree(build_status_panel(&status));
     }
 }
 

@@ -16,25 +16,11 @@ use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
-/// Angle threshold for edge coloring (3 degrees, as recommended by Chlumsky).
-const EDGE_COLORING_ANGLE: f64 = 3.0;
-
-/// Seed for deterministic edge coloring.
-const EDGE_COLORING_SEED: u64 = 0;
-
-/// Default SDF range in pixels.
-///
-/// Higher values = smoother edges at extreme zoom but less precision.
-pub(super) const DEFAULT_SDF_RANGE: f64 = 4.0;
-
-/// Default canonical pixel size for MSDF generation.
-///
-/// MSDF is resolution-independent, so all glyphs are generated at this
-/// single size. The shader handles scaling.
-pub(super) const DEFAULT_CANONICAL_SIZE: u32 = 64;
-
-/// Default padding around each glyph in pixels.
-pub(super) const DEFAULT_GLYPH_PADDING: u32 = 2;
+pub(super) use super::constants::DEFAULT_CANONICAL_SIZE;
+pub(super) use super::constants::DEFAULT_GLYPH_PADDING;
+pub(super) use super::constants::DEFAULT_SDF_RANGE;
+use super::constants::EDGE_COLORING_ANGLE;
+use super::constants::EDGE_COLORING_SEED;
 
 /// Raw MSDF bitmap output from rasterization.
 #[derive(Clone, Debug)]

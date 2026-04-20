@@ -7,9 +7,12 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
+use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use super::config::DimensionMatch;
 use super::config::InvalidSize;
 use super::config::PanelSize;
+use super::config::PaperSize;
 use super::config::Pt;
 use super::config::UnitConfig;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
@@ -111,12 +114,6 @@ pub enum PanelMode {
         render_layers: RenderLayers,
     },
 }
-
-/// Default camera order for screen-space overlay cameras.
-const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
-
-/// Default render layer for screen-space panels.
-const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
 
 impl PanelMode {
     /// Returns `true` if this is a screen-space panel.
@@ -352,14 +349,10 @@ impl DiegeticPanel {
 
 impl DiegeticPanel {
     /// Returns the layout unit.
-    pub(crate) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit {
-        self.layout_unit
-    }
+    pub(super) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit { self.layout_unit }
 
     /// Resolves the font unit, falling back to the global [`UnitConfig`].
-    pub(crate) fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {
-        self.font_unit.unwrap_or(config.font)
-    }
+    pub(super) fn resolved_font_unit(&self, config: &UnitConfig) -> Unit { self.font_unit.unwrap_or(config.font) }
 
     /// Physical width in meters before world scaling.
     fn physical_width(&self, config: &UnitConfig) -> f32 {
@@ -607,10 +600,7 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
     ///
     /// Uses the paper's native unit (mm for ISO, inches for North American).
     #[must_use]
-    pub fn paper(
-        mut self,
-        paper: super::config::PaperSize,
-    ) -> DiegeticPanelBuilder<World, HasSize> {
+    pub fn paper(mut self, paper: PaperSize) -> DiegeticPanelBuilder<World, HasSize> {
         let (w, h, unit) = paper.dimensions();
         self.data.width = w;
         self.data.height = h;
@@ -658,10 +648,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     ///
     /// Converts to pixels at 72 PPI (1 pt = 1 px in our system).
     #[must_use]
-    pub fn paper(
-        mut self,
-        paper: super::config::PaperSize,
-    ) -> DiegeticPanelBuilder<Screen, HasSize> {
+    pub fn paper(mut self, paper: PaperSize) -> DiegeticPanelBuilder<Screen, HasSize> {
         let w = paper.width_as::<Pt>();
         let h = paper.height_as::<Pt>();
         self.data.width = w;
@@ -700,7 +687,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Panel width fills a fraction of the window (0.0–1.0).
     #[must_use]
     pub const fn width_percent(mut self, fraction: f32) -> Self {
-        if let PanelMode::Screen { ref mut width, .. } = self.data.mode {
+        if let PanelMode::Screen { width, .. } = &mut self.data.mode {
             *width = Some(ScreenDimension::Percent(fraction));
         }
         self
@@ -709,7 +696,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Panel height fills a fraction of the window (0.0–1.0).
     #[must_use]
     pub const fn height_percent(mut self, fraction: f32) -> Self {
-        if let PanelMode::Screen { ref mut height, .. } = self.data.mode {
+        if let PanelMode::Screen { height, .. } = &mut self.data.mode {
             *height = Some(ScreenDimension::Percent(fraction));
         }
         self
@@ -718,7 +705,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Panel width is a fixed pixel value, managed by the plugin.
     #[must_use]
     pub const fn width_px(mut self, pixels: f32) -> Self {
-        if let PanelMode::Screen { ref mut width, .. } = self.data.mode {
+        if let PanelMode::Screen { width, .. } = &mut self.data.mode {
             *width = Some(ScreenDimension::Fixed(pixels));
         }
         self
@@ -727,7 +714,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Panel height is a fixed pixel value, managed by the plugin.
     #[must_use]
     pub const fn height_px(mut self, pixels: f32) -> Self {
-        if let PanelMode::Screen { ref mut height, .. } = self.data.mode {
+        if let PanelMode::Screen { height, .. } = &mut self.data.mode {
             *height = Some(ScreenDimension::Fixed(pixels));
         }
         self
@@ -736,10 +723,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Places the panel at an explicit pixel position (top-left origin, y-down).
     #[must_use]
     pub const fn screen_position(mut self, x: f32, y: f32) -> Self {
-        if let PanelMode::Screen {
-            ref mut position, ..
-        } = self.data.mode
-        {
+        if let PanelMode::Screen { position, .. } = &mut self.data.mode {
             *position = ScreenPosition::At(Vec2::new(x, y));
         }
         self
@@ -748,11 +732,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Sets the overlay camera render order. Default: `1`.
     #[must_use]
     pub const fn camera_order(mut self, order: isize) -> Self {
-        if let PanelMode::Screen {
-            ref mut camera_order,
-            ..
-        } = self.data.mode
-        {
+        if let PanelMode::Screen { camera_order, .. } = &mut self.data.mode {
             *camera_order = order;
         }
         self
@@ -761,11 +741,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Sets the render layers for camera isolation. Default: layer 31.
     #[must_use]
     pub fn render_layers(mut self, layers: RenderLayers) -> Self {
-        if let PanelMode::Screen {
-            ref mut render_layers,
-            ..
-        } = self.data.mode
-        {
+        if let PanelMode::Screen { render_layers, .. } = &mut self.data.mode {
             *render_layers = layers;
         }
         self
@@ -908,10 +884,10 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         // For percent-sized axes, set the root element to GROW.
         if let Some(ref mut tree) = self.data.tree {
             if has_percent_width {
-                tree.set_root_grow_width();
+                crate::layout::set_root_grow_width(tree);
             }
             if has_percent_height {
-                tree.set_root_grow_height();
+                crate::layout::set_root_grow_height(tree);
             }
         }
 

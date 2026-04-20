@@ -33,15 +33,6 @@ use super::msdf_rasterizer;
 const JETBRAINS_MONO: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 const NOTO_SANS: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 
-/// SDF range in pixels.
-const SDF_RANGE: f64 = 4.0;
-
-/// Padding for fdsm.
-const PADDING: u32 = 2;
-
-/// Canonical render size for comparison.
-const COMPARE_SIZE: u32 = 64;
-
 /// Maximum acceptable difference in fill fraction between engines.
 ///
 /// Set to 15% to accommodate framing differences (fdsm: tight bounding box,
@@ -49,6 +40,9 @@ const COMPARE_SIZE: u32 = 64;
 /// outlines show higher variance in fill fraction due to different pixel
 /// coverage at different scales/offsets.
 const FILL_FRACTION_TOLERANCE: f64 = 0.15;
+
+/// Canonical render size for comparison.
+const COMPARE_SIZE: u32 = msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,7 +90,13 @@ fn float_to_byte(v: f32) -> u8 { (v * 255.0).round().clamp(0.0, 255.0).to_u8() }
 /// Generate MSDF with fdsm. Returns fill fraction.
 fn fdsm_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
     let idx = glyph_index_for(font_data, ch)?;
-    let bitmap = msdf_rasterizer::rasterize_glyph(font_data, idx, px_size, SDF_RANGE, PADDING)?;
+    let bitmap = msdf_rasterizer::rasterize_glyph(
+        font_data,
+        idx,
+        px_size,
+        msdf_rasterizer::DEFAULT_SDF_RANGE,
+        msdf_rasterizer::DEFAULT_GLYPH_PADDING,
+    )?;
     Some(fill_fraction_rgb(&bitmap.data, bitmap.width, bitmap.height))
 }
 
@@ -107,7 +107,12 @@ fn msdfgen_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
     let mut shape = face.glyph_shape(glyph_id)?;
 
     let bound = shape.get_bound();
-    let framing = bound.autoframe(px_size, px_size, Range::Px(SDF_RANGE), None)?;
+    let framing = bound.autoframe(
+        px_size,
+        px_size,
+        Range::Px(msdf_rasterizer::DEFAULT_SDF_RANGE),
+        None,
+    )?;
 
     shape.edge_coloring_simple(3.0, 0);
     let config = MsdfGeneratorConfig::default();
@@ -328,8 +333,13 @@ fn utf8_rasterization_noto_sans() {
             "Noto Sans should have glyph for '{ch}' ({script})"
         );
 
-        let bitmap =
-            msdf_rasterizer::rasterize_glyph(NOTO_SANS, idx.unwrap(), 32, SDF_RANGE, PADDING);
+        let bitmap = msdf_rasterizer::rasterize_glyph(
+            NOTO_SANS,
+            idx.unwrap(),
+            32,
+            msdf_rasterizer::DEFAULT_SDF_RANGE,
+            msdf_rasterizer::DEFAULT_GLYPH_PADDING,
+        );
         assert!(bitmap.is_some(), "fdsm should rasterize '{ch}' ({script})");
 
         let bmp = bitmap.unwrap();
@@ -355,8 +365,13 @@ fn missing_glyphs_return_none_gracefully() {
         let idx = glyph_index_for(JETBRAINS_MONO, ch);
         if let Some(idx) = idx {
             // Font has the glyph index but it might have no outline.
-            let result =
-                msdf_rasterizer::rasterize_glyph(JETBRAINS_MONO, idx, 32, SDF_RANGE, PADDING);
+            let result = msdf_rasterizer::rasterize_glyph(
+                JETBRAINS_MONO,
+                idx,
+                32,
+                msdf_rasterizer::DEFAULT_SDF_RANGE,
+                msdf_rasterizer::DEFAULT_GLYPH_PADDING,
+            );
             // Either None (no outline) or Some (font has it) — both OK.
             // The important thing is no panic.
             drop(result);

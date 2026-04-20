@@ -11,22 +11,23 @@ use std::sync::Arc;
 
 use bevy_kana::ToF32;
 
+use super::constants::LAYOUT_EPSILON;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
 use super::render::RectangleSource;
 use super::render::RenderCommand;
 use super::render::RenderCommandKind;
-use super::types::AlignX;
-use super::types::AlignY;
-use super::types::Border;
-use super::types::BoundingBox;
-use super::types::Direction;
-use super::types::LayoutTextStyle;
-use super::types::Sizing;
-use super::types::TextDimensions;
-use super::types::TextMeasure;
-use super::types::TextWrap;
+use super::AlignX;
+use super::AlignY;
+use super::Border;
+use super::BoundingBox;
+use super::Direction;
+use super::LayoutTextStyle;
+use super::Sizing;
+use super::TextDimensions;
+use super::TextMeasure;
+use super::TextWrap;
 
 /// Selects which layout axis a sizing or positioning operation targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,13 +64,6 @@ fn border_leading(element: &Element, axis: Axis) -> f32 {
 /// Uses `Arc` so the function can be shared across threads and cloned cheaply
 /// (e.g. stored in a Bevy `Resource` and cloned to create `LayoutEngine` instances).
 pub type MeasureTextFn = Arc<dyn Fn(&str, &TextMeasure) -> TextDimensions + Send + Sync>;
-
-/// Clay-style tolerance for layout convergence and float grouping.
-///
-/// Layout operates in pixel-like units, so differences below one hundredth
-/// of a unit are not visually meaningful but can cause iterative sizing loops
-/// to spin forever if treated as significant.
-const LAYOUT_EPSILON: f32 = 0.01;
 
 /// Computed layout data for a single element.
 #[derive(Clone, Copy, Debug, Default)]

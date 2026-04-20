@@ -40,12 +40,17 @@
 mod builder;
 #[cfg(test)]
 mod clay_parity_tests;
+mod constants;
 mod element;
 mod engine;
+mod font_features;
+mod geometry;
 #[cfg(test)]
 mod layout_tests;
 mod render;
-mod types;
+mod sizing;
+mod text_props;
+mod units;
 
 pub use builder::El;
 pub use builder::LayoutBuilder;
@@ -53,33 +58,44 @@ pub use element::LayoutTree;
 pub use engine::LayoutEngine;
 pub use engine::LayoutResult;
 pub use engine::MeasureTextFn;
+pub use font_features::FontFeatureFlags;
+pub use font_features::FontFeatures;
+pub use geometry::Border;
+pub use geometry::BoundingBox;
+pub use geometry::CornerRadius;
 pub use render::RectangleSource;
 pub use render::RenderCommand;
 pub use render::RenderCommandKind;
-pub use types::AlignX;
-pub use types::AlignY;
-pub use types::Anchor;
-pub use types::Border;
-pub use types::BoundingBox;
-pub use types::CornerRadius;
-pub use types::Dimension;
-pub use types::Direction;
-pub use types::FontFeatureFlags;
-pub use types::FontFeatures;
-pub use types::FontSlant;
-pub use types::FontWeight;
-pub use types::ForLayout;
-pub use types::ForStandalone;
-pub use types::GlyphLoadingPolicy;
-pub use types::GlyphRenderMode;
-pub use types::GlyphShadowMode;
-pub use types::LayoutTextStyle;
-pub use types::Padding;
-pub use types::Sizing;
-pub use types::TextAlign;
-pub use types::TextDimensions;
-pub use types::TextMeasure;
-pub use types::TextProps;
-pub use types::TextWrap;
-pub use types::Unit;
-pub use types::WorldTextStyle;
+pub use sizing::AlignX;
+pub use sizing::AlignY;
+pub use sizing::Direction;
+pub use sizing::Padding;
+pub use sizing::Sizing;
+pub use text_props::FontSlant;
+pub use text_props::FontWeight;
+pub use text_props::ForLayout;
+pub use text_props::ForStandalone;
+pub use text_props::GlyphLoadingPolicy;
+pub use text_props::GlyphRenderMode;
+pub use text_props::GlyphShadowMode;
+pub use text_props::LayoutTextStyle;
+pub use text_props::TextAlign;
+pub use text_props::TextDimensions;
+pub use text_props::TextMeasure;
+pub use text_props::TextProps;
+pub use text_props::TextWrap;
+pub use text_props::WorldTextStyle;
+pub use units::Anchor;
+pub use units::Dimension;
+pub use units::Unit;
+
+/// Sets the root element's width sizing to `GROW`.
+///
+/// Screen-space percent sizing uses this crate-internal facade so wider
+/// callers do not need direct access to nested `element` internals.
+pub(crate) fn set_root_grow_width(tree: &mut LayoutTree) { tree.set_root_grow_width(); }
+
+/// Sets the root element's height sizing to `GROW`.
+///
+/// See [`set_root_grow_width`] for the rationale behind this facade.
+pub(crate) fn set_root_grow_height(tree: &mut LayoutTree) { tree.set_root_grow_height(); }

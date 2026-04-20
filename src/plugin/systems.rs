@@ -1,5 +1,6 @@
 //! Systems for diegetic UI panel layout computation and debug rendering.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -22,6 +23,7 @@ use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
 use crate::layout::MeasureTextFn;
+use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextMeasure;
 use crate::render::ShapedTextCache;
@@ -450,21 +452,10 @@ pub(super) fn render_layout_gizmos(
         };
 
         let points_to_world = panel.points_to_world(&unit_config);
-        for (entity, child_of) in &existing_gizmos {
-            if child_of.parent() == panel_entity {
-                commands.entity(entity).despawn();
-            }
-        }
-
+        despawn_gizmo_children(&mut commands, &existing_gizmos, panel_entity);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
-        let mut border_by_idx: std::collections::HashMap<usize, &Border> =
-            std::collections::HashMap::new();
-        for cmd in &result.commands {
-            if let RenderCommandKind::Border { ref border } = cmd.kind {
-                border_by_idx.insert(cmd.element_idx, border);
-            }
-        }
+        let border_by_idx = collect_borders_by_index(&result.commands);
 
         for cmd in &result.commands {
             match &cmd.kind {
@@ -572,12 +563,7 @@ pub(super) fn render_debug_gizmos(
         };
 
         let points_to_world = panel.points_to_world(&unit_config);
-        for (entity, child_of) in &existing_gizmos {
-            if child_of.parent() == panel_entity {
-                commands.entity(entity).despawn();
-            }
-        }
-
+        despawn_gizmo_children(&mut commands, &existing_gizmos, panel_entity);
         let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
 
         for cmd in &result.commands {
@@ -599,6 +585,28 @@ pub(super) fn render_debug_gizmos(
             }
         }
     }
+}
+
+fn despawn_gizmo_children<T: Component>(
+    commands: &mut Commands,
+    existing_gizmos: &Query<(Entity, &ChildOf), With<T>>,
+    panel_entity: Entity,
+) {
+    for (entity, child_of) in existing_gizmos {
+        if child_of.parent() == panel_entity {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn collect_borders_by_index(commands: &[RenderCommand]) -> HashMap<usize, &Border> {
+    let mut border_by_index = HashMap::new();
+    for command in commands {
+        if let RenderCommandKind::Border { ref border } = command.kind {
+            border_by_index.insert(command.element_idx, border);
+        }
+    }
+    border_by_index
 }
 
 /// Adds a rectangle outline to a `GizmoAsset` in panel-local coordinates.

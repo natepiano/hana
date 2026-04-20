@@ -115,7 +115,6 @@ pub(crate) fn sdf_panel_material(
 
 /// Creates a new [`SdfPanelMaterial`] with an explicit shape kind.
 #[must_use]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn sdf_shape_material(
     mut base: StandardMaterial,
     half_width: f32,

@@ -4,42 +4,20 @@ use bevy::prelude::*;
 use bevy::tasks;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
+use bevy_kana::ToUsize;
 
+use super::constants::AVERAGE_GLYPH_COVERAGE;
+use super::constants::DEFAULT_AUTO_GLYPH_WORKER_THREADS;
+use super::constants::DEFAULT_GLYPHS_PER_PAGE;
+use super::constants::GLYPH_PADDING;
+use super::constants::MAX_CUSTOM_RASTER_SIZE;
+use super::constants::MAX_GLYPHS_PER_PAGE;
+use super::constants::MIN_CUSTOM_RASTER_SIZE;
+use super::constants::MIN_GLYPHS_PER_PAGE;
+use super::constants::SDF_RANGE;
+use super::constants::SHELF_PACKING_EFFICIENCY;
 use crate::layout::Dimension;
 use crate::layout::Unit;
-
-/// Minimum canonical rasterization size in pixels.
-const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
-
-/// Maximum canonical rasterization size in pixels.
-const MAX_CUSTOM_RASTER_SIZE: u32 = 256;
-
-/// Glyph padding used during MSDF rasterization (mirrors
-/// `msdf_rasterizer::DEFAULT_GLYPH_PADDING`).
-const GLYPH_PADDING: u32 = 2;
-
-/// SDF distance range used during MSDF rasterization (mirrors
-/// `msdf_rasterizer::DEFAULT_SDF_RANGE`).
-const SDF_RANGE: u32 = 4;
-
-/// Average glyph coverage ratio — most glyphs use roughly this fraction of
-/// the canonical size.
-const AVERAGE_GLYPH_COVERAGE: f32 = 0.75;
-
-/// Estimated packing efficiency for a shelf-based atlas allocator.
-const SHELF_PACKING_EFFICIENCY: f32 = 0.80;
-
-/// Minimum glyphs per atlas page.
-const MIN_GLYPHS_PER_PAGE: u16 = 10;
-
-/// Maximum glyphs per atlas page.
-const MAX_GLYPHS_PER_PAGE: u16 = 2000;
-
-/// Default glyphs per atlas page.
-const DEFAULT_GLYPHS_PER_PAGE: u16 = 100;
-
-/// Default auto-selected glyph raster worker count on sufficiently parallel machines.
-const DEFAULT_AUTO_GLYPH_WORKER_THREADS: usize = 6;
 
 /// Controls the pixel resolution of MSDF glyph rasterization.
 ///
@@ -242,10 +220,7 @@ impl AtlasConfig {
 
     /// Returns the estimated memory per atlas page in bytes (RGBA texture).
     #[must_use]
-    pub fn estimated_page_bytes(&self) -> usize {
-        let size = self.page_size();
-        (size * size * 4) as usize
-    }
+    pub fn estimated_page_bytes(&self) -> usize { (self.page_size() * self.page_size() * 4).to_usize() }
 
     /// Logs warnings for out-of-range values and an info summary.
     pub(super) fn log_and_clamp(&self) {

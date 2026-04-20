@@ -349,8 +349,6 @@ fn spawn_world_text_meshes(
 
         // Spawn visible mesh (skip for Invisible render mode).
         if !is_invisible {
-            let render_mode_u32 = style.render_mode() as u32;
-
             let visible_base = StandardMaterial {
                 depth_bias: constants::LAYER_DEPTH_BIAS,
                 ..Default::default()
@@ -362,8 +360,8 @@ fn spawn_world_text_meshes(
                 atlas.height(),
                 page_image.clone(),
                 0.0,
-                render_mode_u32,
-                super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                u32::from(style.render_mode()),
+                constants::UNCLIPPED_TEXT_CLIP_RECT,
                 constants::OIT_DEPTH_STEP,
             );
 
@@ -390,9 +388,9 @@ fn spawn_world_text_meshes(
         // Shadow proxy for shaped shadows (or any shadow when Invisible).
         if needs_proxy {
             let shadow_render_mode = match style.shadow_mode() {
-                GlyphShadowMode::SolidQuad => GlyphRenderMode::SolidQuad as u32,
-                GlyphShadowMode::PunchOut => GlyphRenderMode::PunchOut as u32,
-                GlyphShadowMode::None | GlyphShadowMode::Text => GlyphRenderMode::Text as u32,
+                GlyphShadowMode::SolidQuad => u32::from(GlyphRenderMode::SolidQuad),
+                GlyphShadowMode::PunchOut => u32::from(GlyphRenderMode::PunchOut),
+                GlyphShadowMode::None | GlyphShadowMode::Text => u32::from(GlyphRenderMode::Text),
             };
 
             let proxy_base = StandardMaterial {
@@ -407,7 +405,7 @@ fn spawn_world_text_meshes(
                 page_image,
                 0.0,
                 shadow_render_mode,
-                super::msdf_material::UNCLIPPED_TEXT_CLIP_RECT,
+                constants::UNCLIPPED_TEXT_CLIP_RECT,
                 0.0,
             ));
 

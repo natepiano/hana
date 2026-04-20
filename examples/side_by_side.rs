@@ -97,12 +97,12 @@ const WRAP_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit
 const WORLD_TEXT_SCALE: f32 = 0.01;
 
 // ── Controls panel dimensions (meters) ──────────────────────────────
-const CTRL_W: f32 = 0.089;
-const CTRL_H: f32 = 0.03;
-const CTRL_FONT: f32 = 3.5;
-const CTRL_TITLE_FONT: f32 = 4.2;
-const CTRL_ARROW_SIZE: f32 = CTRL_FONT * 0.5;
-const CTRL_ROW_H: f32 = 0.005;
+const CONTROL_LAYOUT_WIDTH: f32 = 0.089;
+const CONTROL_LAYOUT_HEIGHT: f32 = 0.03;
+const CONTROL_FONT_SIZE: f32 = 3.5;
+const CONTROL_TITLE_FONT_SIZE: f32 = 4.2;
+const CONTROL_ARROW_SIZE: f32 = CONTROL_FONT_SIZE * 0.5;
+const CONTROL_ROW_HEIGHT: f32 = 0.005;
 
 // ── Gizmo groups ─────────────────────────────────────────────────────────────
 
@@ -356,26 +356,28 @@ fn setup(
     let tree = build_diegetic_tree(&diegetic_rows, world_size);
     let world_height = world_size * PANEL_ASPECT;
     commands.spawn((
-        DiegeticPanel {
-            tree,
-            width: world_size,
-            height: world_height,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(world_size, world_height)
+            .font_unit(Unit::Millimeters)
+            .with_tree(tree)
+            .build()
+            .expect("valid diegetic panel dimensions"),
         Transform::from_xyz(offset, world_height * 0.5, 0.0),
     ));
 
     // Controls panel — below the two panels.
     commands.spawn((
-        DiegeticPanel {
-            tree: build_controls_panel(),
-            width: CTRL_W,
-            height: CTRL_H,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
-        Transform::from_xyz(-CTRL_W * 0.5, CTRL_H.mul_add(0.5, -0.85), 0.0),
+        DiegeticPanel::world()
+            .size(CONTROL_LAYOUT_WIDTH, CONTROL_LAYOUT_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(build_controls_panel())
+            .build()
+            .expect("valid controls panel dimensions"),
+        Transform::from_xyz(
+            -CONTROL_LAYOUT_WIDTH * 0.5,
+            CONTROL_LAYOUT_HEIGHT.mul_add(0.5, -0.85),
+            0.0,
+        ),
     ));
 }
 
@@ -416,8 +418,8 @@ fn cycle_panel_size(
             t.translation.x = offset;
             t.translation.y = world_height * 0.5;
             // Update panel dimensions to match new sizing.
-            panel.width = sizing.world_size;
-            panel.height = world_height;
+            panel.set_width(sizing.world_size);
+            panel.set_height(world_height);
         }
     }
 }
@@ -451,13 +453,13 @@ fn update_dynamic_rows(
 fn build_controls_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let cfg = LayoutTextStyle::new(CTRL_FONT);
-    let arrow_cfg = LayoutTextStyle::new(CTRL_ARROW_SIZE);
-    let title_cfg = LayoutTextStyle::new(CTRL_TITLE_FONT);
-    let row_h = Sizing::fixed(CTRL_ROW_H);
+    let cfg = LayoutTextStyle::new(CONTROL_FONT_SIZE);
+    let arrow_cfg = LayoutTextStyle::new(CONTROL_ARROW_SIZE);
+    let title_cfg = LayoutTextStyle::new(CONTROL_TITLE_FONT_SIZE);
+    let row_h = Sizing::fixed(CONTROL_ROW_HEIGHT);
     let dim_color = Color::srgba(0.6, 0.6, 0.6, 0.8);
 
-    let mut builder = LayoutBuilder::new(CTRL_W, CTRL_H);
+    let mut builder = LayoutBuilder::new(CONTROL_LAYOUT_WIDTH, CONTROL_LAYOUT_HEIGHT);
     builder.with(
         El::new()
             .width(Sizing::FIT)
@@ -570,7 +572,7 @@ fn rebuild_diegetic_panel(
     }
     let rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
     for mut panel in &mut panels {
-        panel.tree = build_diegetic_tree(&rows, sizing.world_size);
+        panel.set_tree(build_diegetic_tree(&rows, sizing.world_size));
     }
 }
 

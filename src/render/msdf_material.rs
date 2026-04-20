@@ -16,6 +16,7 @@ use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
+use bevy_kana::ToF32;
 
 /// The full MSDF text material type: `StandardMaterial` extended with MSDF
 /// atlas decoding.
@@ -24,10 +25,6 @@ use bevy::shader::ShaderRef;
 /// exposes all `StandardMaterial` properties (metallic, roughness, emissive,
 /// `double_sided`, etc.) for full PBR control.
 pub(super) type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
-
-/// Default clip rect for unclipped text: effectively infinite panel-local
-/// bounds so the shader clip test becomes a no-op.
-pub(super) const UNCLIPPED_TEXT_CLIP_RECT: Vec4 = Vec4::new(-1e6, -1e6, 1e6, 1e6);
 
 /// Uniform data for the MSDF extension shader.
 #[derive(Clone, Debug, ShaderType)]
@@ -107,11 +104,7 @@ impl MaterialExtension for MsdfExtension {
 /// overridden for text rendering. All other PBR properties (roughness,
 /// metallic, reflectance, `base_color`, unlit) are preserved from the caller.
 #[must_use]
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "const fn — trait methods cannot be called in const context"
-)]
-pub(super) const fn msdf_text_material(
+pub(super) fn msdf_text_material(
     mut base: StandardMaterial,
     sdf_range: f32,
     atlas_width: u32,
@@ -131,8 +124,8 @@ pub(super) const fn msdf_text_material(
         extension: MsdfExtension {
             uniforms: MsdfTextUniform {
                 sdf_range,
-                atlas_width: atlas_width as f32,
-                atlas_height: atlas_height as f32,
+                atlas_width: atlas_width.to_f32(),
+                atlas_height: atlas_height.to_f32(),
                 hue_offset,
                 render_mode,
                 is_shadow_proxy: 0,
@@ -150,11 +143,7 @@ pub(super) const fn msdf_text_material(
 /// - `alpha_mode: Mask(0.5)` so the shadow prepass runs the fragment shader
 /// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments
 #[must_use]
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "const fn — trait methods cannot be called in const context"
-)]
-pub(super) const fn msdf_shadow_proxy_material(
+pub(super) fn msdf_shadow_proxy_material(
     mut base: StandardMaterial,
     sdf_range: f32,
     atlas_width: u32,
@@ -174,8 +163,8 @@ pub(super) const fn msdf_shadow_proxy_material(
         extension: MsdfExtension {
             uniforms: MsdfTextUniform {
                 sdf_range,
-                atlas_width: atlas_width as f32,
-                atlas_height: atlas_height as f32,
+                atlas_width: atlas_width.to_f32(),
+                atlas_height: atlas_height.to_f32(),
                 hue_offset,
                 render_mode,
                 is_shadow_proxy: 1,

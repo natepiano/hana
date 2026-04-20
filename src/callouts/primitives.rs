@@ -27,13 +27,11 @@ use bevy::prelude::With;
 use bevy_kana::ToF32;
 
 use crate::plugin::SurfaceShadow;
+use crate::render;
 use crate::render::LAYER_DEPTH_BIAS;
 use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
 use crate::render::SdfPanelMaterial;
-use crate::render::default_panel_material;
-use crate::render::sdf_panel_material;
-use crate::render::sdf_shape_material;
 
 /// Visual style for arrow end caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,7 +354,7 @@ pub struct CalloutLine {
 impl CalloutLine {
     /// Creates a new line from `start` to `end`.
     #[must_use]
-    pub fn new(start: Vec3, end: Vec3) -> Self {
+    pub const fn new(start: Vec3, end: Vec3) -> Self {
         Self {
             start,
             end,
@@ -442,7 +440,7 @@ pub fn spawn_callout_line(commands: &mut Commands, parent: Entity, line: &Callou
         .with_child((line.clone(), Transform::IDENTITY, Visibility::Inherited));
 }
 
-pub(crate) fn update_callout_lines(
+pub fn update_callout_lines(
     changed: Query<
         (
             Entity,
@@ -459,7 +457,7 @@ pub(crate) fn update_callout_lines(
 ) {
     for (entity, line, layers, children) in &changed {
         if let Some(children) = children {
-            for child in children.iter() {
+            for child in children {
                 if old_visuals.contains(*child) {
                     commands.entity(*child).despawn();
                 }
@@ -531,7 +529,6 @@ pub(crate) fn update_callout_lines(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_cap(
     commands: &mut Commands,
     parent: Entity,
@@ -543,48 +540,39 @@ fn spawn_cap(
     color: Color,
     shadow: SurfaceShadow,
     layer: &RenderLayers,
-    mut order: u32,
+    order: u32,
     meshes: &mut Assets<Mesh>,
     sdf_materials: &mut Assets<SdfPanelMaterial>,
     is_start: bool,
 ) -> u32 {
     let color = cap.resolved_color(color);
+    let shape_dir = if is_start { dir } else { -dir };
     match cap {
-        CalloutCap::None => order,
         CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Open => {
-            let shaft_dir = if is_start { dir } else { -dir };
-            let perp = cap_perp(shaft_dir);
-            let length = cap.length.unwrap_or(cap_size);
-            let width = cap.width.unwrap_or(length);
-            for end in [
-                tip + shaft_dir * length + perp * width,
-                tip + shaft_dir * length - perp * width,
-            ] {
-                spawn_segment(
-                    commands,
-                    parent,
-                    tip,
-                    end,
-                    thickness,
-                    color,
-                    shadow,
-                    layer,
-                    order,
-                    meshes,
-                    sdf_materials,
-                );
-                order += 1;
-            }
-            order
-        },
-        CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Solid => {
-            let length = cap.length.unwrap_or(cap_size);
-            let width = cap.width.unwrap_or(length);
-            spawn_cap_shape(
+            let (length, width) = resolved_arrow_dimensions(cap, cap_size);
+            spawn_open_arrow_cap(
                 commands,
                 parent,
                 tip,
-                if is_start { -dir } else { dir },
+                shape_dir,
+                length,
+                width,
+                thickness,
+                color,
+                shadow,
+                layer,
+                order,
+                meshes,
+                sdf_materials,
+            )
+        },
+        CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Solid => {
+            let (length, width) = resolved_arrow_dimensions(cap, cap_size);
+            spawn_single_shape_cap(
+                commands,
+                parent,
+                tip,
+                -shape_dir,
                 CapShape::Triangle,
                 length,
                 width,
@@ -595,16 +583,15 @@ fn spawn_cap(
                 order,
                 meshes,
                 sdf_materials,
-            );
-            order + 1
+            )
         },
         CalloutCap::Circle(cap) => {
             let radius = cap.radius.unwrap_or(cap_size * 0.5);
-            spawn_cap_shape(
+            spawn_single_shape_cap(
                 commands,
                 parent,
                 tip,
-                if is_start { dir } else { -dir },
+                shape_dir,
                 CapShape::Circle,
                 radius * 2.0,
                 radius * 2.0,
@@ -615,16 +602,15 @@ fn spawn_cap(
                 order,
                 meshes,
                 sdf_materials,
-            );
-            order + 1
+            )
         },
         CalloutCap::Square(cap) => {
             let size = cap.size.unwrap_or(cap_size);
-            spawn_cap_shape(
+            spawn_single_shape_cap(
                 commands,
                 parent,
                 tip,
-                if is_start { dir } else { -dir },
+                shape_dir,
                 CapShape::Square,
                 size,
                 size,
@@ -635,17 +621,15 @@ fn spawn_cap(
                 order,
                 meshes,
                 sdf_materials,
-            );
-            order + 1
+            )
         },
         CalloutCap::Diamond(cap) => {
-            let width = cap.width.unwrap_or(cap_size);
-            let height = cap.height.unwrap_or(width);
-            spawn_cap_shape(
+            let (width, height) = resolved_diamond_dimensions(cap, cap_size);
+            spawn_single_shape_cap(
                 commands,
                 parent,
                 tip,
-                if is_start { dir } else { -dir },
+                shape_dir,
                 CapShape::Diamond,
                 width,
                 height,
@@ -656,11 +640,93 @@ fn spawn_cap(
                 order,
                 meshes,
                 sdf_materials,
-            );
-            order + 1
+            )
         },
-        CalloutCap::Arrow(_) => order,
+        CalloutCap::None | CalloutCap::Arrow(_) => order,
     }
+}
+
+fn resolved_arrow_dimensions(cap: ArrowCap, cap_size: f32) -> (f32, f32) {
+    let length = cap.length.unwrap_or(cap_size);
+    (length, cap.width.unwrap_or(length))
+}
+
+fn resolved_diamond_dimensions(cap: DiamondCap, cap_size: f32) -> (f32, f32) {
+    let width = cap.width.unwrap_or(cap_size);
+    (width, cap.height.unwrap_or(width))
+}
+
+fn spawn_open_arrow_cap(
+    commands: &mut Commands,
+    parent: Entity,
+    tip: Vec3,
+    shaft_dir: Vec3,
+    length: f32,
+    width: f32,
+    thickness: f32,
+    color: Color,
+    shadow: SurfaceShadow,
+    layer: &RenderLayers,
+    mut order: u32,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
+) -> u32 {
+    let perp = cap_perp(shaft_dir);
+    for end in [
+        tip + shaft_dir * length + perp * width,
+        tip + shaft_dir * length - perp * width,
+    ] {
+        spawn_segment(
+            commands,
+            parent,
+            tip,
+            end,
+            thickness,
+            color,
+            shadow,
+            layer,
+            order,
+            meshes,
+            sdf_materials,
+        );
+        order += 1;
+    }
+    order
+}
+
+fn spawn_single_shape_cap(
+    commands: &mut Commands,
+    parent: Entity,
+    tip: Vec3,
+    dir: Vec3,
+    shape: CapShape,
+    cap_width: f32,
+    cap_height: f32,
+    thickness: f32,
+    color: Color,
+    shadow: SurfaceShadow,
+    layer: &RenderLayers,
+    order: u32,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
+) -> u32 {
+    spawn_cap_shape(
+        commands,
+        parent,
+        tip,
+        dir,
+        shape,
+        cap_width,
+        cap_height,
+        thickness,
+        color,
+        shadow,
+        layer,
+        order,
+        meshes,
+        sdf_materials,
+    );
+    order + 1
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -691,7 +757,6 @@ fn cap_perp(dir: Vec3) -> Vec3 {
     dir.cross(reference).normalize()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_segment(
     commands: &mut Commands,
     parent: Entity,
@@ -713,17 +778,17 @@ fn spawn_segment(
 
     let half_w = length * 0.5;
     let hidden_half_h = thickness * 4.0;
-    let half_h = hidden_half_h + thickness * 0.5;
+    let half_h = thickness.mul_add(0.5, hidden_half_h);
     let mesh_half_w = half_w + SDF_AA_PADDING;
     let mesh_half_h = half_h + SDF_AA_PADDING;
 
-    let mut base = default_panel_material();
+    let mut base = render::default_panel_material();
     base.base_color = Color::NONE;
     base.alpha_mode = AlphaMode::Blend;
     base.unlit = true;
     base.depth_bias = order.to_f32() * LAYER_DEPTH_BIAS;
 
-    let material = sdf_panel_material(
+    let material = render::sdf_panel_material(
         base,
         half_w,
         half_h,
@@ -740,7 +805,7 @@ fn spawn_segment(
 
     let mid = (start + end) * 0.5;
     let rotation = Quat::from_rotation_arc(Vec3::X, delta / length);
-    let line_center_offset = rotation * Vec3::Y * (half_h - thickness * 0.5);
+    let line_center_offset = rotation * Vec3::Y * thickness.mul_add(-0.5, half_h);
     let common = (
         CalloutVisual,
         Mesh3d(mesh),
@@ -757,7 +822,6 @@ fn spawn_segment(
     };
 }
 
-#[allow(clippy::too_many_arguments)]
 fn spawn_cap_shape(
     commands: &mut Commands,
     parent: Entity,
@@ -787,7 +851,7 @@ fn spawn_cap_shape(
     let mesh_half_w = half_w + SDF_AA_PADDING;
     let mesh_half_h = half_h + SDF_AA_PADDING;
 
-    let mut base = default_panel_material();
+    let mut base = render::default_panel_material();
     base.base_color = color;
     base.alpha_mode = AlphaMode::Blend;
     base.unlit = true;
@@ -798,7 +862,7 @@ fn spawn_cap_shape(
         _ => Vec4::ZERO,
     };
 
-    let material = sdf_shape_material(
+    let material = render::sdf_shape_material(
         base,
         half_w,
         half_h,
@@ -834,7 +898,7 @@ fn spawn_cap_shape(
 }
 
 /// Draws a double-headed dimension arrow into a gizmo asset.
-pub(crate) fn draw_dimension_arrow(
+pub fn draw_dimension_arrow(
     gizmo: &mut GizmoAsset,
     from: Vec3,
     to: Vec3,

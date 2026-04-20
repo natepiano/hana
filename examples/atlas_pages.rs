@@ -459,8 +459,8 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
     let layout_height = ROW_LAYOUT_HEIGHT * rows.to_f32();
     let world_height = ROW_WORLD_HEIGHT * rows.to_f32();
 
-    DiegeticPanel::builder()
-        .size((Pt(layout_width), Pt(layout_height)))
+    DiegeticPanel::world()
+        .size(Pt(layout_width), Pt(layout_height))
         .world_height(world_height)
         .anchor(Anchor::Center)
         .layout(|b| {
@@ -909,8 +909,8 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
         .with_color(Color::srgba(0.5, 0.5, 0.5, 0.8))
         .with_shadow_mode(GlyphShadowMode::None);
 
-    DiegeticPanel::builder()
-        .size((Pt(STATUS_LAYOUT_WIDTH), Pt(STATUS_LAYOUT_HEIGHT)))
+    DiegeticPanel::world()
+        .size(Pt(STATUS_LAYOUT_WIDTH), Pt(STATUS_LAYOUT_HEIGHT))
         .world_height(STATUS_WORLD_HEIGHT)
         .anchor(Anchor::TopLeft)
         .layout(|b| {

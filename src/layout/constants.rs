@@ -1,0 +1,32 @@
+//! Shared constants for the layout engine.
+
+// Font feature tags
+/// OpenType tag for contextual alternates.
+pub(super) const CALT_TAG: [u8; 4] = *b"calt";
+/// OpenType tag for discretionary ligatures.
+pub(super) const DLIG_TAG: [u8; 4] = *b"dlig";
+/// OpenType tag for kerning.
+pub(super) const KERN_TAG: [u8; 4] = *b"kern";
+/// OpenType tag for standard ligatures.
+pub(super) const LIGA_TAG: [u8; 4] = *b"liga";
+
+// Layout engine
+/// Inline capacity for child index lists. Most elements have 1–4 children;
+/// only top-level containers (e.g., a column of many rows) exceed this and
+/// spill to the heap.
+pub(super) const INLINE_CHILDREN: usize = 4;
+/// Epsilon for layout convergence — differences below this are not visually
+/// meaningful but can cause iterative sizing loops to spin forever.
+pub(super) const LAYOUT_EPSILON: f32 = 0.01;
+
+// Text defaults
+/// Default font size in layout units.
+pub(super) const DEFAULT_FONT_SIZE: f32 = 16.0;
+
+// Unit conversion
+/// Minimum `meters_per_unit` for `Unit::Custom`, equal to `Unit::Points`.
+///
+/// Units smaller than a typographic point would cause font sizes to shrink
+/// below 1.0 when converted to points for the layout engine, hitting parley's
+/// integer quantization and producing incorrect baselines.
+pub(super) const MIN_CUSTOM_MPU: f32 = 0.0254 / 72.0;

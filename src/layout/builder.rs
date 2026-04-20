@@ -34,15 +34,15 @@ use bevy::pbr::StandardMaterial;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
-use super::types::AlignX;
-use super::types::AlignY;
-use super::types::Border;
-use super::types::CornerRadius;
-use super::types::Dimension;
-use super::types::Direction;
-use super::types::LayoutTextStyle;
-use super::types::Padding;
-use super::types::Sizing;
+use super::AlignX;
+use super::AlignY;
+use super::Border;
+use super::CornerRadius;
+use super::Dimension;
+use super::Direction;
+use super::LayoutTextStyle;
+use super::Padding;
+use super::Sizing;
 use crate::DimensionMatch;
 
 /// Shorthand element declaration for the builder API.

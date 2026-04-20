@@ -53,12 +53,12 @@ use bevy_window_manager::WindowManagerPlugin;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
 const A4: PaperSize = PaperSize::A4;
-const A4_W: Mm = Mm(A4.width_mm());
-const A4_H: Mm = Mm(A4.height_mm());
+const A4_WIDTH: Mm = Mm(A4.width_mm());
+const A4_HEIGHT: Mm = Mm(A4.height_mm());
 
 // ── US business card dimensions ──────────────────────────────────────
-const CARD_W: In = In(3.5);
-const CARD_H: In = In(2.0);
+const CARD_WIDTH: In = In(3.5);
+const CARD_HEIGHT: In = In(2.0);
 const CARD_NAME_SIZE: Pt = Pt(15.0);
 const CARD_TITLE_SIZE: Pt = Pt(13.0);
 const CARD_DETAIL_SIZE: Pt = Pt(11.0);
@@ -141,7 +141,7 @@ const PANEL_RULER_QTR_TICK: In = In(0.12);
 const PANEL_RULER_IN_LABEL_GAP: In = In(0.0315);
 
 // ── Home / zoom ─────────────────────────────────────────────────────
-const HOME_FOCUS_Y: Mm = Mm(A4_H.0 / 2.0 + LIFT.0);
+const HOME_FOCUS_Y: Mm = Mm(A4_HEIGHT.0 / 2.0 + LIFT.0);
 const HOME_PITCH: f32 = 0.1;
 const HOME_RADIUS: Mm = Mm(500.0);
 const HOME_YAW: f32 = 0.0;
@@ -214,10 +214,10 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     windows: Query<&Window>,
 ) {
-    let a4_width_m = f32::from(A4_W);
-    let a4_height_m = f32::from(A4_H);
-    let card_width_m = f32::from(CARD_W);
-    let card_height_m = f32::from(CARD_H);
+    let a4_width_m = f32::from(A4_WIDTH);
+    let a4_height_m = f32::from(A4_HEIGHT);
+    let card_width_m = f32::from(CARD_WIDTH);
+    let card_height_m = f32::from(CARD_HEIGHT);
     let gap = f32::from(GAP);
     let lift = f32::from(LIFT);
     let title_gap = f32::from(TITLE_GAP);
@@ -434,9 +434,9 @@ fn spawn_rulers(
     commands.spawn((
         PanelRuler,
         DiegeticPanel::world()
-            .size(PANEL_RULER_WIDTH, A4_H)
+            .size(PANEL_RULER_WIDTH, A4_HEIGHT)
             .anchor(Anchor::TopRight)
-            .with_tree(build_metric_panel_ruler(A4_H.0.to_i32(), ruler_color))
+            .with_tree(build_metric_panel_ruler(A4_HEIGHT.0.to_i32(), ruler_color))
             .build()
             .expect("valid A4 vertical ruler dimensions"),
         Transform::from_xyz(a4_ruler_x, a4_ruler_top, 0.0),
@@ -448,9 +448,9 @@ fn spawn_rulers(
     commands.spawn((
         PanelRuler,
         DiegeticPanel::world()
-            .size(A4_W, PANEL_RULER_WIDTH)
+            .size(A4_WIDTH, PANEL_RULER_WIDTH)
             .anchor(Anchor::TopLeft)
-            .with_tree(build_metric_horizontal_ruler(A4_W.0.to_i32(), ruler_color))
+            .with_tree(build_metric_horizontal_ruler(A4_WIDTH.0.to_i32(), ruler_color))
             .build()
             .expect("valid A4 horizontal ruler dimensions"),
         Transform::from_xyz(a4_bottom_ruler_x, a4_bottom_ruler_y, 0.0),
@@ -458,8 +458,8 @@ fn spawn_rulers(
 
     // Card vertical ruler (right side).
     let card_ruler_x = card_x + card_width_m / 2.0 + f32::from(RULER_GAP);
-    let card_sixteenths = (CARD_H.0 * 16.0).round().to_i32();
-    let card_ruler_height = In(CARD_H.0 + EDGE_LABEL_EXTRA.0);
+    let card_sixteenths = (CARD_HEIGHT.0 * 16.0).round().to_i32();
+    let card_ruler_height = In(CARD_HEIGHT.0 + EDGE_LABEL_EXTRA.0);
     let card_ruler_top = card_y + card_height_m / 2.0 + f32::from(EDGE_LABEL_EXTRA);
     commands.spawn((
         PanelRuler,
@@ -479,11 +479,11 @@ fn spawn_rulers(
     // Card horizontal ruler (bottom).
     let card_bottom_ruler_x = card_x - card_width_m / 2.0;
     let card_bottom_ruler_y = card_y - card_height_m / 2.0 - f32::from(RULER_GAP);
-    let card_w_sixteenths = (CARD_W.0 * 16.0).round().to_i32();
+    let card_w_sixteenths = (CARD_WIDTH.0 * 16.0).round().to_i32();
     commands.spawn((
         PanelRuler,
         DiegeticPanel::world()
-            .size(CARD_W, PANEL_RULER_INCH_WIDTH)
+            .size(CARD_WIDTH, PANEL_RULER_INCH_WIDTH)
             .anchor(Anchor::TopLeft)
             .with_tree(build_imperial_horizontal_ruler(
                 card_w_sixteenths,
@@ -1236,7 +1236,7 @@ fn debug_text(
 
 /// Builds an A4 page layout tree (used by toggle_debug_outlines for runtime rebuild).
 fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(A4_W, A4_H);
+    let mut builder = LayoutBuilder::new(A4_WIDTH, A4_HEIGHT);
     build_a4_content(&mut builder, debug);
     builder.build()
 }
@@ -1250,7 +1250,7 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
 
     builder.with(
         El::new()
-            .size(A4_W, A4_H)
+            .size(A4_WIDTH, A4_HEIGHT)
             .padding(Padding::all(Mm(15.0)))
             .direction(Direction::TopToBottom)
             .child_gap(Mm(4.0))
@@ -1434,7 +1434,7 @@ fn build_two_column_article(
 
 /// Builds a business card layout tree (used by toggle_debug_outlines for runtime rebuild).
 fn build_card(debug: bool) -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(CARD_W, CARD_H);
+    let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
     build_card_content(&mut builder, debug);
     builder.build()
 }
@@ -1445,7 +1445,7 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
 
     builder.with(
         El::new()
-            .size(CARD_W, CARD_H)
+            .size(CARD_WIDTH, CARD_HEIGHT)
             .padding(Padding::all(In(0.15)))
             .direction(Direction::TopToBottom)
             .child_gap(In(0.04))

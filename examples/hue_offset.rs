@@ -41,18 +41,18 @@ use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-const LAYOUT_W: f32 = 1.0;
-const LAYOUT_H: f32 = 0.85;
+const LAYOUT_WIDTH: f32 = 1.0;
+const LAYOUT_HEIGHT: f32 = 0.85;
 const FONT_SIZE: f32 = 2.5;
 const ROW_COUNT: usize = 10;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
 
 // ── Info panel dimensions (meters) ───────────────────────────────────
-const INFO_W: f32 = 0.14;
-const INFO_H: f32 = 0.03;
-const INFO_FONT: f32 = 3.5;
-const INFO_TITLE_FONT: f32 = 4.2;
+const INFO_PANEL_WIDTH: f32 = 0.14;
+const INFO_PANEL_HEIGHT: f32 = 0.03;
+const INFO_FONT_SIZE: f32 = 3.5;
+const INFO_TITLE_FONT_SIZE: f32 = 4.2;
 
 #[derive(Component)]
 struct RotatingPanel;
@@ -99,7 +99,7 @@ fn setup(
     commands.insert_resource(SceneBounds(ground));
 
     // Dark backdrop — bottom edge sits on the ground plane.
-    let panel_height = LAYOUT_H;
+    let panel_height = LAYOUT_HEIGHT;
     let panel_center_y = panel_height.mul_add(0.5, 0.2);
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(3.0, panel_height + 0.4))),
@@ -115,25 +115,23 @@ fn setup(
     // Left panel — rotating hue.
     commands.spawn((
         RotatingPanel,
-        DiegeticPanel {
-            tree: tree.clone(),
-            width: LAYOUT_W,
-            height: LAYOUT_H,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(LAYOUT_WIDTH, LAYOUT_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(tree.clone())
+            .build()
+            .expect("valid panel dimensions"),
         Transform::from_xyz(-1.1, 1.05, 0.0),
     ));
 
     // Right panel — no hue offset (static colors).
     commands.spawn((
-        DiegeticPanel {
-            tree,
-            width: LAYOUT_W,
-            height: LAYOUT_H,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(LAYOUT_WIDTH, LAYOUT_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(tree)
+            .build()
+            .expect("valid panel dimensions"),
         Transform::from_xyz(0.1, 1.05, 0.0),
     ));
 
@@ -177,19 +175,18 @@ fn setup(
 
     // Info panel — below the two panels.
     commands.spawn((
-        DiegeticPanel {
-            tree: build_info_panel(),
-            width: INFO_W,
-            height: INFO_H,
-            font_unit: Some(Unit::Millimeters),
-            ..default()
-        },
+        DiegeticPanel::world()
+            .size(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
+            .font_unit(Unit::Millimeters)
+            .with_tree(build_info_panel())
+            .build()
+            .expect("valid info panel dimensions"),
         Transform::from_xyz(-0.07, -0.085, 0.0),
     ));
 }
 
 fn build_panel() -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(LAYOUT_W, LAYOUT_H);
+    let mut builder = LayoutBuilder::new(LAYOUT_WIDTH, LAYOUT_HEIGHT);
     builder.with(
         El::new()
             .width(Sizing::GROW)
@@ -234,10 +231,10 @@ fn rotate_hue(panels: Query<Entity, With<RotatingPanel>>, mut commands: Commands
 fn build_info_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let cfg = LayoutTextStyle::new(INFO_FONT);
-    let title_cfg = LayoutTextStyle::new(INFO_TITLE_FONT);
+    let cfg = LayoutTextStyle::new(INFO_FONT_SIZE);
+    let title_cfg = LayoutTextStyle::new(INFO_TITLE_FONT_SIZE);
 
-    let mut builder = LayoutBuilder::new(INFO_W, INFO_H);
+    let mut builder = LayoutBuilder::new(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT);
     builder.with(
         El::new()
             .width(Sizing::FIT)
