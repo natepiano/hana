@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! Screen-space HUD overlay example.
 //!
 //! Demonstrates a [`ScreenSpace`] panel rendered as a 2D overlay on top

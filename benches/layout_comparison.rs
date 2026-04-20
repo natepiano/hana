@@ -8,7 +8,7 @@
 //!
 //! - **Clay**: immediate-mode full cycle (allocate + build + layout + collect).
 //! - **Diegetic**: ECS-based — spawn a `DiegeticPanel`, run `app.update()`, read
-//!   `ComputedDiegeticPanel`. Uses [`LayoutPlugin`] for headless operation.
+//!   `ComputedDiegeticPanel`. Uses [`HeadlessLayoutPlugin`] for headless operation.
 //!
 //! # Methodology notes
 //!
@@ -39,8 +39,8 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticTextMeasurer;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::HeadlessLayoutPlugin;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutPlugin;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
@@ -401,7 +401,7 @@ fn build_diegetic_tree(rows: &[(&str, &str)], size: f32) -> bevy_diegetic::Layou
 
 // ── Headless Bevy app for diegetic benchmarking ─────────────────────────
 
-/// Creates a minimal headless Bevy app with `LayoutPlugin`.
+/// Creates a minimal headless Bevy app with `HeadlessLayoutPlugin`.
 ///
 /// No rendering, no window, no GPU — only the ECS scheduler and
 /// layout computation with a monospace measurer.
@@ -410,7 +410,7 @@ fn create_bench_app() -> App {
     app.add_plugins(MinimalPlugins);
     app.insert_resource(monospace_measurer());
     app.insert_resource(UnitConfig::default());
-    app.add_plugins(LayoutPlugin);
+    app.add_plugins(HeadlessLayoutPlugin);
     app.update();
     app
 }

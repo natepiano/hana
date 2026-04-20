@@ -100,9 +100,9 @@ impl MaterialExtension for MsdfExtension {
 
 /// Creates a new [`MsdfTextMaterial`] from a resolved base `StandardMaterial`.
 ///
-/// The base material's `alpha_mode`, `double_sided`, and `cull_mode` are
-/// overridden for text rendering. All other PBR properties (roughness,
-/// metallic, reflectance, `base_color`, unlit) are preserved from the caller.
+/// The base material's `alpha_mode` is overridden for text rendering.
+/// Other PBR properties, including sidedness/culling, are preserved from
+/// the caller.
 #[must_use]
 pub(super) fn msdf_text_material(
     mut base: StandardMaterial,
@@ -116,8 +116,6 @@ pub(super) fn msdf_text_material(
     oit_depth_offset: f32,
 ) -> MsdfTextMaterial {
     base.alpha_mode = AlphaMode::Blend;
-    base.double_sided = true;
-    base.cull_mode = None;
 
     ExtendedMaterial {
         base,
@@ -155,8 +153,6 @@ pub(super) fn msdf_shadow_proxy_material(
     oit_depth_offset: f32,
 ) -> MsdfTextMaterial {
     base.alpha_mode = AlphaMode::Mask(0.5);
-    base.double_sided = true;
-    base.cull_mode = None;
 
     ExtendedMaterial {
         base,

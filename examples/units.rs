@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! Unit system demo — real physical sizes.
 //!
 //! Two panels at their true physical scale in a world where 1 unit = 1 meter:
@@ -234,35 +239,7 @@ fn setup(
 
     let ruler_color = Color::WHITE;
 
-    // ── A4 page ──────────────────────────────────────────────────────
-    commands
-        .spawn((
-            A4Panel,
-            DiegeticPanel::world()
-                .paper(PaperSize::A4)
-                .anchor(Anchor::Center)
-                .surface_shadow(SurfaceShadow::On)
-                .layout(|b| build_a4_content(b, false))
-                .build()
-                .expect("valid A4 dimensions"),
-            Transform::from_xyz(a4_x, a4_y, 0.0),
-        ))
-        .observe(on_panel_clicked);
-
-    // ── Panel titles ────────────────────────────────────────────────
-    let title_style = WorldTextStyle::new(Pt(18.0))
-        .with_color(Color::WHITE)
-        .with_anchor(Anchor::BottomCenter);
-    commands.spawn((
-        WorldText::new("A4 Paper — 210 × 297 mm"),
-        title_style.clone(),
-        Transform::from_xyz(a4_x, a4_top + title_gap, 0.0),
-    ));
-    commands.spawn((
-        WorldText::new("US Business Card — 3½ × 2 in"),
-        title_style,
-        Transform::from_xyz(card_x, a4_top + title_gap, 0.0),
-    ));
+    spawn_a4_with_titles(&mut commands, a4_x, a4_y, a4_top, card_x, title_gap);
 
     spawn_rulers(
         &mut commands,
@@ -277,7 +254,78 @@ fn setup(
         card_height_m,
     );
 
-    // ── Business card ────────────────────────────────────────────────
+    spawn_card_panel(&mut commands, card_x, card_y);
+
+    let index_width_m = f32::from(INDEX_W);
+    let index_height_m = f32::from(INDEX_H);
+    let card_left = card_x - card_width_m / 2.0;
+    let index_x = card_left + index_width_m / 2.0;
+    let a4_bottom = a4_y - a4_height_m / 2.0;
+    let index_y = a4_bottom + index_height_m / 2.0;
+
+    spawn_photo_panel_with_title(&mut commands, index_x, index_y, index_height_m, title_gap);
+    spawn_index_card_rulers(
+        &mut commands,
+        index_x,
+        index_y,
+        index_width_m,
+        index_height_m,
+        ruler_color,
+    );
+
+    spawn_hud_panels(&mut commands, &windows);
+
+    // ── Ground plane ─────────────────────────────────────────────────
+    spawn_ground_plane(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        total_w,
+        a4_height_m,
+    );
+
+    // ── Light + camera ───────────────────────────────────────────────
+    spawn_lights_and_camera(&mut commands, a4_height_m);
+}
+
+fn spawn_a4_with_titles(
+    commands: &mut Commands,
+    a4_x: f32,
+    a4_y: f32,
+    a4_top: f32,
+    card_x: f32,
+    title_gap: f32,
+) {
+    commands
+        .spawn((
+            A4Panel,
+            DiegeticPanel::world()
+                .paper(PaperSize::A4)
+                .anchor(Anchor::Center)
+                .surface_shadow(SurfaceShadow::On)
+                .layout(|b| build_a4_content(b, false))
+                .build()
+                .expect("valid A4 dimensions"),
+            Transform::from_xyz(a4_x, a4_y, 0.0),
+        ))
+        .observe(on_panel_clicked);
+
+    let title_style = WorldTextStyle::new(Pt(18.0))
+        .with_color(Color::WHITE)
+        .with_anchor(Anchor::BottomCenter);
+    commands.spawn((
+        WorldText::new("A4 Paper — 210 × 297 mm"),
+        title_style.clone(),
+        Transform::from_xyz(a4_x, a4_top + title_gap, 0.0),
+    ));
+    commands.spawn((
+        WorldText::new("US Business Card — 3½ × 2 in"),
+        title_style,
+        Transform::from_xyz(card_x, a4_top + title_gap, 0.0),
+    ));
+}
+
+fn spawn_card_panel(commands: &mut Commands, card_x: f32, card_y: f32) {
     commands
         .spawn((
             CardPanel,
@@ -291,17 +339,15 @@ fn setup(
             Transform::from_xyz(card_x, card_y, 0.0),
         ))
         .observe(on_panel_clicked);
+}
 
-    // ── Photo 5×7 (portrait) ───────────────────────────────────────────
-    let index_width_m = f32::from(INDEX_W);
-    let index_height_m = f32::from(INDEX_H);
-    // Left edge aligns with business card left edge.
-    let card_left = card_x - card_width_m / 2.0;
-    let index_x = card_left + index_width_m / 2.0;
-    // Bottom aligns with A4 bottom.
-    let a4_bottom = a4_y - a4_height_m / 2.0;
-    let index_y = a4_bottom + index_height_m / 2.0;
-
+fn spawn_photo_panel_with_title(
+    commands: &mut Commands,
+    index_x: f32,
+    index_y: f32,
+    index_height_m: f32,
+    title_gap: f32,
+) {
     commands
         .spawn((
             IndexPanel,
@@ -322,8 +368,17 @@ fn setup(
             .with_anchor(Anchor::BottomCenter),
         Transform::from_xyz(index_x, index_y + index_height_m / 2.0 + title_gap, 0.0),
     ));
+}
 
-    // Index card ruler (right side, like business card).
+fn spawn_index_card_rulers(
+    commands: &mut Commands,
+    index_x: f32,
+    index_y: f32,
+    index_width_m: f32,
+    index_height_m: f32,
+    ruler_color: Color,
+) {
+    // Vertical ruler (right side).
     let index_ruler_x = index_x + index_width_m / 2.0 + f32::from(RULER_GAP);
     let index_sixteenths = (INDEX_H.0 * 16.0).round().to_i32();
     let index_ruler_height = In(INDEX_H.0 + EDGE_LABEL_EXTRA.0);
@@ -343,7 +398,7 @@ fn setup(
         Transform::from_xyz(index_ruler_x, index_ruler_top, 0.0),
     ));
 
-    // Index card horizontal ruler (bottom).
+    // Horizontal ruler (bottom).
     let index_bottom_ruler_x = index_x - index_width_m / 2.0;
     let index_bottom_ruler_y = index_y - index_height_m / 2.0 - f32::from(RULER_GAP);
     let index_w_sixteenths = (INDEX_W.0 * 16.0).round().to_i32();
@@ -360,20 +415,6 @@ fn setup(
             .expect("valid index horizontal ruler dimensions"),
         Transform::from_xyz(index_bottom_ruler_x, index_bottom_ruler_y, 0.0),
     ));
-
-    spawn_hud_panels(&mut commands, &windows);
-
-    // ── Ground plane ─────────────────────────────────────────────────
-    spawn_ground_plane(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        total_w,
-        a4_height_m,
-    );
-
-    // ── Light + camera ───────────────────────────────────────────────
-    spawn_lights_and_camera(&mut commands, a4_height_m);
 }
 
 fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
@@ -1237,7 +1278,7 @@ fn debug_text(
     });
 }
 
-/// Builds an A4 page layout tree (used by toggle_debug_outlines for runtime rebuild).
+/// Builds an A4 page layout tree (used by `toggle_debug_outlines` for runtime rebuild).
 fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
     let mut builder = LayoutBuilder::new(A4_WIDTH, A4_HEIGHT);
     build_a4_content(&mut builder, debug);
@@ -1435,7 +1476,7 @@ fn build_two_column_article(
     );
 }
 
-/// Builds a business card layout tree (used by toggle_debug_outlines for runtime rebuild).
+/// Builds a business card layout tree (used by `toggle_debug_outlines` for runtime rebuild).
 fn build_card(debug: bool) -> bevy_diegetic::LayoutTree {
     let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
     build_card_content(&mut builder, debug);
@@ -1493,7 +1534,7 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
     );
 }
 
-/// Builds a 5×7 index page layout tree (used by toggle_debug_outlines for runtime rebuild).
+/// Builds a 5×7 index page layout tree (used by `toggle_debug_outlines` for runtime rebuild).
 fn build_index_page(debug: bool) -> bevy_diegetic::LayoutTree {
     let mut builder = LayoutBuilder::new(INDEX_W, INDEX_H);
     build_index_content(&mut builder, debug);

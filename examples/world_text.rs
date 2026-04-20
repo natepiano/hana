@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! @generated `bevy_example_template`
 //! `WorldText` example — standalone MSDF text in world space.
 //!
@@ -6,17 +11,33 @@
 
 use std::time::Duration;
 
+use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::Border;
+use bevy_diegetic::CornerRadius;
+use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::GlyphSidedness;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Pt;
+use bevy_diegetic::Px;
+use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_lagrange::CameraMove;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
@@ -25,6 +46,35 @@ use bevy_window_manager::WindowManagerPlugin;
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
 const ZOOM_DURATION_MS: u64 = 1000;
+const HOME_FOCUS: Vec3 = Vec3::ZERO;
+const HOME_RADIUS: f32 = 11.33;
+const HOME_YAW: f32 = 0.015;
+const HOME_PITCH: f32 = 0.667;
+
+const HUD_HEIGHT: Px = Px(48.0);
+const HUD_PADDING: Px = Px(12.0);
+const HUD_GAP: Px = Px(14.0);
+const HUD_TITLE_SIZE: Pt = Pt(16.0);
+const HUD_HINT_SIZE: Pt = Pt(12.0);
+const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.80);
+const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
+const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
+const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
+const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
+const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
+const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
+const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
+
+const CAM_HELP_WIDTH: Px = Px(280.0);
+const CAM_HELP_HEIGHT: Px = Px(160.0);
+const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
+const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
+const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
+const CAM_HELP_RADIUS: Px = Px(15.0);
+const CAM_HELP_FRAME_PAD: Px = Px(2.0);
+const CAM_HELP_BORDER: Px = Px(2.0);
+const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
+const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -62,7 +112,7 @@ fn main() {
         ))
         .init_resource::<AnchorRotation>()
         .add_systems(Startup, setup)
-        .add_systems(Update, rotate_anchor_demo)
+        .add_systems(Update, (home_camera, rotate_anchor_demo))
         .run();
 }
 
@@ -70,6 +120,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    windows: Query<&Window>,
 ) {
     let ground = spawn_ground(&mut commands, &mut meshes, &mut materials);
     commands.insert_resource(SceneBounds(ground));
@@ -77,7 +128,45 @@ fn setup(
     spawn_labeled_cube(&mut commands, &mut meshes, &mut materials);
     spawn_anchor_demo(&mut commands, &mut meshes, &mut materials);
     spawn_ground_text(&mut commands);
+    spawn_hud_panels(&mut commands, &windows);
     spawn_lighting_and_camera(&mut commands);
+}
+
+fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
+    let unlit_material = bevy_diegetic::default_panel_material();
+    let unlit = StandardMaterial {
+        unlit: true,
+        ..unlit_material
+    };
+    let hud_width = windows.iter().next().map_or(800.0, Window::width);
+    commands.spawn((
+        DiegeticPanel::screen()
+            .size(Px(hud_width), HUD_HEIGHT)
+            .anchor(Anchor::TopLeft)
+            .material(unlit.clone())
+            .text_material(unlit)
+            .width_percent(1.0)
+            .layout(build_controls_content)
+            .build()
+            .expect("valid controls HUD dimensions"),
+        Transform::default(),
+    ));
+
+    let cam_unlit = StandardMaterial {
+        unlit: true,
+        ..bevy_diegetic::default_panel_material()
+    };
+    commands.spawn((
+        DiegeticPanel::screen()
+            .size(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
+            .anchor(Anchor::BottomRight)
+            .material(cam_unlit.clone())
+            .text_material(cam_unlit)
+            .layout(build_camera_help)
+            .build()
+            .expect("valid camera help HUD dimensions"),
+        Transform::default(),
+    ));
 }
 
 /// Spawns the translucent ground plane.
@@ -120,13 +209,15 @@ fn spawn_labeled_cube(
         ))
         .observe(on_mesh_clicked)
         .with_children(|parent| {
-            let face_style = WorldTextStyle::new(0.20).with_color(Color::srgb(0.9, 0.3, 0.1));
+            let one_sided_face_style = WorldTextStyle::new(0.20)
+                .with_color(Color::srgb(0.9, 0.3, 0.1))
+                .with_sidedness(GlyphSidedness::OneSided);
 
             // Front face (+Z).
             parent
                 .spawn((
                     WorldText::new("FRONT"),
-                    face_style.clone(),
+                    one_sided_face_style.clone(),
                     Transform::from_xyz(0.0, 0.0, 0.501),
                 ))
                 .observe(on_text_clicked);
@@ -135,7 +226,7 @@ fn spawn_labeled_cube(
             parent
                 .spawn((
                     WorldText::new("BACK"),
-                    face_style.clone(),
+                    one_sided_face_style.clone(),
                     Transform::from_xyz(0.0, 0.0, -0.501)
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                 ))
@@ -145,7 +236,7 @@ fn spawn_labeled_cube(
             parent
                 .spawn((
                     WorldText::new("TOP"),
-                    face_style.clone(),
+                    one_sided_face_style.clone(),
                     Transform::from_xyz(0.0, 0.501, 0.0)
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 ))
@@ -155,7 +246,7 @@ fn spawn_labeled_cube(
             parent
                 .spawn((
                     WorldText::new("BOTTOM"),
-                    face_style.clone(),
+                    one_sided_face_style.clone(),
                     Transform::from_xyz(0.0, -0.501, 0.0)
                         .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
                 ))
@@ -165,7 +256,7 @@ fn spawn_labeled_cube(
             parent
                 .spawn((
                     WorldText::new("LEFT"),
-                    face_style.clone(),
+                    one_sided_face_style.clone(),
                     Transform::from_xyz(-0.501, 0.0, 0.0)
                         .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
                 ))
@@ -175,7 +266,7 @@ fn spawn_labeled_cube(
             parent
                 .spawn((
                     WorldText::new("RIGHT"),
-                    face_style,
+                    one_sided_face_style,
                     Transform::from_xyz(0.501, 0.0, 0.0)
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
                 ))
@@ -269,7 +360,9 @@ fn spawn_ground_text(commands: &mut Commands) {
     commands
         .spawn((
             WorldText::new("GROUND"),
-            WorldTextStyle::new(0.48).with_color(Color::srgb(0.9, 0.9, 0.1)),
+            WorldTextStyle::new(0.48)
+                .with_color(Color::srgb(0.9, 0.9, 0.1))
+                .with_sidedness(GlyphSidedness::OneSided),
             Transform::from_xyz(0.0, 0.001, 1.5)
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         ))
@@ -310,26 +403,158 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
         Transform::from_xyz(-4.0, 8.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((OrbitCam {
-        focus: Vec3::ZERO,
-        radius: Some(11.33),
-        yaw: Some(0.015),
-        pitch: Some(0.667),
-        button_orbit: MouseButton::Middle,
-        button_pan: MouseButton::Middle,
-        modifier_pan: Some(KeyCode::ShiftLeft),
-        input_control: Some(InputControl {
-            trackpad: Some(TrackpadInput {
-                behavior:    TrackpadBehavior::BlenderLike {
-                    modifier_pan:  Some(KeyCode::ShiftLeft),
-                    modifier_zoom: Some(KeyCode::ControlLeft),
-                },
-                sensitivity: 0.5,
+    commands.spawn((
+        OrbitCam {
+            focus: HOME_FOCUS,
+            radius: Some(HOME_RADIUS),
+            yaw: Some(HOME_YAW),
+            pitch: Some(HOME_PITCH),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior:    TrackpadBehavior::BlenderLike {
+                        modifier_pan:  Some(KeyCode::ShiftLeft),
+                        modifier_zoom: Some(KeyCode::ControlLeft),
+                    },
+                    sensitivity: 0.5,
+                }),
+                ..default()
             }),
             ..default()
-        }),
-        ..default()
-    },));
+        },
+        OrderIndependentTransparencySettings::default(),
+        bevy::render::view::Msaa::Off,
+    ));
+}
+
+fn build_controls_content(b: &mut LayoutBuilder) {
+    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let hint = LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR);
+
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(Px(2.0)))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::LeftToRight)
+                    .padding(Padding::new(Px(8.0), HUD_PADDING, Px(8.0), HUD_PADDING))
+                    .child_gap(HUD_GAP)
+                    .child_align_y(AlignY::Center)
+                    .clip()
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
+                |b| {
+                    b.text("CONTROLS", title);
+                    hud_separator(b);
+                    b.text("H Home", hint);
+                },
+            );
+        },
+    );
+}
+
+fn build_camera_help(b: &mut LayoutBuilder) {
+    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
+    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
+
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(CAM_HELP_FRAME_PAD))
+            .corner_radius(CornerRadius::new(
+                CAM_HELP_RADIUS,
+                Px(0.0),
+                CAM_HELP_RADIUS,
+                Px(0.0),
+            ))
+            .background(HUD_FRAME_BACKGROUND)
+            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .padding(Padding::all(Px(10.0)))
+                    .child_gap(Px(6.0))
+                    .corner_radius(CornerRadius::new(
+                        CAM_HELP_INNER_RADIUS,
+                        Px(0.0),
+                        CAM_HELP_INNER_RADIUS,
+                        Px(0.0),
+                    ))
+                    .background(HUD_BACKGROUND)
+                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
+                |b| {
+                    b.text("CAMERA", title);
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::LeftToRight)
+                            .child_gap(Px(12.0)),
+                        |b| {
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(Px(4.0)),
+                                |b| {
+                                    b.text("Mouse", header.clone());
+                                    b.text("MMB drag \u{2192} Orbit", label.clone());
+                                    b.text("Shift+MMB \u{2192} Pan", label.clone());
+                                    b.text("Scroll \u{2192} Zoom", label.clone());
+                                },
+                            );
+
+                            b.with(
+                                El::new()
+                                    .width(Sizing::fixed(Px(1.0)))
+                                    .height(Sizing::GROW)
+                                    .background(HUD_DIVIDER_COLOR),
+                                |_| {},
+                            );
+
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .direction(Direction::TopToBottom)
+                                    .child_gap(Px(4.0)),
+                                |b| {
+                                    b.text("Trackpad", header.clone());
+                                    b.text("Scroll \u{2192} Orbit", label.clone());
+                                    b.text("Shift+Scroll \u{2192} Pan", label.clone());
+                                    b.text("Ctrl+Scroll \u{2192} Zoom", label.clone());
+                                    b.text("Pinch \u{2192} Zoom", label.clone());
+                                },
+                            );
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn hud_separator(b: &mut LayoutBuilder) {
+    b.with(
+        El::new()
+            .width(Sizing::fixed(Px(1.0)))
+            .height(Sizing::GROW)
+            .background(HUD_DIVIDER_COLOR),
+        |_| {},
+    );
 }
 
 fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
@@ -381,6 +606,29 @@ fn on_text_clicked(
             .margin(ZOOM_MARGIN_MESH)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
+}
+
+fn home_camera(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyH) {
+        return;
+    }
+    for camera in &cameras {
+        commands.trigger(PlayAnimation::new(
+            camera,
+            [CameraMove::ToOrbit {
+                focus:    HOME_FOCUS,
+                yaw:      HOME_YAW,
+                pitch:    HOME_PITCH,
+                radius:   HOME_RADIUS,
+                duration: Duration::from_millis(ZOOM_DURATION_MS),
+                easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
+            }],
+        ));
+    }
 }
 
 /// Press X, Y, or Z to start a full rotation around that local axis.

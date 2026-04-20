@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! @generated `bevy_example_template`
 //! MSDF atlas paging — inspecting committed atlas pages directly.
 //!
@@ -21,6 +26,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::AtlasConfig;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -243,11 +249,14 @@ struct LastDisplayedStatus {
 
 fn main() {
     App::new()
+        .insert_resource(
+            AtlasConfig::new()
+                .with_quality(ATLAS_QUALITY)
+                .with_glyphs_per_page(GLYPHS_PER_PAGE),
+        )
         .add_plugins((
             DefaultPlugins,
-            DiegeticUiPlugin::with_atlas()
-                .quality(ATLAS_QUALITY)
-                .glyphs_per_page(GLYPHS_PER_PAGE),
+            DiegeticUiPlugin,
             LagrangePlugin,
             BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
             WindowManagerPlugin,

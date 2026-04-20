@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! @generated `bevy_example_template`
 //! Layout dimensions — `Dimension` newtypes in spatial properties.
 //!

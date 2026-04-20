@@ -27,8 +27,8 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticTextMeasurer;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::HeadlessLayoutPlugin;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutPlugin;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
@@ -150,7 +150,7 @@ fn create_bench_app() -> App {
     app.add_plugins(MinimalPlugins);
     app.insert_resource(monospace_measurer());
     app.insert_resource(UnitConfig::default());
-    app.add_plugins(LayoutPlugin);
+    app.add_plugins(HeadlessLayoutPlugin);
     app.update();
     app
 }

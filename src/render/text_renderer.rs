@@ -1,9 +1,6 @@
 //! Text rendering system — extracts text from layout results and builds glyph meshes.
 
 use std::collections::HashMap;
-use std::hash::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Instant;
@@ -13,9 +10,7 @@ use bevy::light::NotShadowCaster;
 use bevy::math::Vec4;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
-use bevy_kana::ToI32;
 use bevy_kana::ToU16;
-use bevy_kana::ToU32;
 
 use super::constants;
 use super::constants::TEXT_Z_OFFSET;
@@ -29,145 +24,28 @@ use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
-use crate::layout::FontFeatures;
-use crate::layout::FontSlant;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::LayoutTextStyle;
+use crate::layout::LineMetricsSnapshot;
 use crate::layout::RenderCommandKind;
-use crate::layout::TextDimensions;
-use crate::layout::TextMeasure;
+use crate::layout::ShapedGlyph;
+use crate::layout::ShapedTextCache;
+use crate::layout::ShapedTextRun;
+use crate::layout::UnitConfig;
 use crate::layout::WorldTextStyle;
-use crate::plugin::ComputedDiegeticPanel;
-use crate::plugin::DiegeticPanel;
-use crate::plugin::DiegeticPerfStats;
-use crate::plugin::HueOffset;
-use crate::plugin::RenderMode;
-use crate::plugin::UnitConfig;
+use crate::panel::ComputedDiegeticPanel;
+use crate::panel::DiegeticPanel;
+use crate::panel::DiegeticPerfStats;
+use crate::panel::HueOffset;
+use crate::panel::RenderMode;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
 use crate::text::MsdfAtlas;
-
-// ── Shaped text cache ────────────────────────────────────────────────────────
-
-/// A single shaped glyph from parley — glyph ID plus its position relative to
-/// the text origin. This is the parley shaping output, independent of layout
-/// bounds or panel scale.
-#[derive(Clone, Debug)]
-pub struct ShapedGlyph {
-    /// Glyph index within the font.
-    pub glyph_id: u16,
-    /// X position relative to the text origin (accumulated advance + fine offset).
-    pub x:        f32,
-    /// Y position relative to the text origin (baseline-relative).
-    pub y:        f32,
-    /// Baseline of the line this glyph belongs to.
-    pub baseline: f32,
-}
-
-/// Snapshot of parley's per-line metrics, captured during text shaping.
-///
-/// All values are in layout units (Y-down coordinate system).
-#[derive(Clone, Copy, Debug)]
-pub struct LineMetricsSnapshot {
-    /// Typographic ascent for this line.
-    pub ascent:   f32,
-    /// Typographic descent for this line.
-    pub descent:  f32,
-    /// Offset to the baseline from the top of the layout.
-    pub baseline: f32,
-    /// Top of the line box (parley `min_coord`).
-    pub top:      f32,
-    /// Bottom of the line box (parley `max_coord`).
-    pub bottom:   f32,
-}
-
-/// Cached shaping result for a text string at a specific font configuration.
-#[derive(Clone, Debug)]
-pub struct ShapedTextRun {
-    /// The shaped glyphs in order.
-    pub glyphs:       Vec<ShapedGlyph>,
-    /// Per-line metrics from parley, captured during shaping.
-    pub line_metrics: Vec<LineMetricsSnapshot>,
-}
-
-/// Cache key: hash of the text string + the full `TextMeasure` identity.
-#[derive(Clone, Eq, PartialEq, Hash)]
-struct ShapedCacheKey {
-    text_hash:                u64,
-    font_id:                  u16,
-    /// Size quantized to avoid floating-point hash issues (size * 100 as u32).
-    size_quantized:           u32,
-    weight_quantized:         u32,
-    slant:                    u8,
-    line_height_quantized:    u32,
-    letter_spacing_quantized: i32,
-    word_spacing_quantized:   i32,
-    font_features:            FontFeatures,
-}
-
-impl ShapedCacheKey {
-    fn new(text: &str, m: &TextMeasure) -> Self {
-        let mut hasher = DefaultHasher::new();
-        text.hash(&mut hasher);
-        Self {
-            text_hash:                hasher.finish(),
-            font_id:                  m.font_id,
-            size_quantized:           (m.size * 100.0).to_u32(),
-            weight_quantized:         (m.weight.0 * 10.0).to_u32(),
-            slant:                    match m.slant {
-                FontSlant::Normal => 0,
-                FontSlant::Italic => 1,
-                FontSlant::Oblique => 2,
-            },
-            line_height_quantized:    (m.line_height * 100.0).to_u32(),
-            letter_spacing_quantized: (m.letter_spacing * 100.0).to_i32(),
-            word_spacing_quantized:   (m.word_spacing * 100.0).to_i32(),
-            font_features:            m.font_features,
-        }
-    }
-}
-
-/// Caches shaped text runs and measurement results to avoid redundant parley
-/// shaping.
-///
-/// Keyed by `(text_content, TextMeasure)`. Stores both the shaped glyph
-/// positions (for rendering) and the `TextDimensions` (for layout measurement).
-/// Shared between the layout engine's `MeasureTextFn` and the renderer's
-/// `shape_text_to_quads` via `Arc<Mutex<>>`.
-#[derive(Resource, Clone, Default)]
-pub struct ShapedTextCache {
-    entries:      HashMap<ShapedCacheKey, ShapedTextRun>,
-    measurements: HashMap<ShapedCacheKey, TextDimensions>,
-}
-
-impl ShapedTextCache {
-    /// Returns cached measurement dimensions for the given text + config,
-    /// or `None` if not yet cached.
-    #[must_use]
-    pub fn get_measurement(&self, text: &str, measure: &TextMeasure) -> Option<TextDimensions> {
-        let key = ShapedCacheKey::new(text, measure);
-        self.measurements.get(&key).copied()
-    }
-
-    /// Returns the cached shaped text run for the given text + config,
-    /// or `None` if not yet cached.
-    #[must_use]
-    pub fn get_shaped(&self, text: &str, measure: &TextMeasure) -> Option<&ShapedTextRun> {
-        let key = ShapedCacheKey::new(text, measure);
-        self.entries.get(&key)
-    }
-
-    /// Inserts a measurement result into the cache.
-    pub fn insert_measurement(&mut self, text: &str, measure: &TextMeasure, dims: TextDimensions) {
-        let key = ShapedCacheKey::new(text, measure);
-        self.measurements.insert(key, dims);
-    }
-}
 
 /// Reusable parley shaping buffers.
 ///
@@ -301,7 +179,7 @@ impl TextBuildStats {
 ///
 /// Registers the [`MsdfTextMaterial`], adds the text extraction system,
 /// and sets up rendering.
-pub struct TextRenderPlugin;
+pub(super) struct TextRenderPlugin;
 
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
@@ -1046,9 +924,9 @@ pub(super) fn shape_text_cached(
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
 ) -> ShapedTextRun {
-    let key = ShapedCacheKey::new(text, &config.as_measure());
+    let measure = config.as_measure();
 
-    if let Some(cached) = cache.entries.get(&key) {
+    if let Some(cached) = cache.get_shaped(text, &measure) {
         return cached.clone();
     }
 
@@ -1146,8 +1024,7 @@ pub(super) fn shape_text_cached(
         glyphs,
         line_metrics: line_metrics_list,
     };
-    cache.measurements.insert(key.clone(), dims);
-    cache.entries.insert(key, run.clone());
+    cache.insert_shaped(text, &measure, run.clone(), dims);
     run
 }
 

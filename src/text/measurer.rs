@@ -1,9 +1,11 @@
-//! Parley-backed text measurement.
+//! Parley-backed text measurement and the [`DiegeticTextMeasurer`] resource.
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
+use bevy::prelude::*;
+use bevy_kana::ToF32;
 use parley::FontContext;
 use parley::Layout;
 use parley::LayoutContext;
@@ -14,9 +16,55 @@ use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
 use crate::FontSlant;
+use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::MeasureTextFn;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
+
+/// Resource providing text measurement for layout computation.
+///
+/// Insert before adding [`DiegeticUiPlugin`](crate::DiegeticUiPlugin) to
+/// override the default monospace approximation. The plugin replaces the
+/// default with a parley-backed measurer when it initializes the font
+/// registry.
+///
+/// The default measurer estimates text dimensions using a fixed character
+/// width (60% of font size). Custom measurers are useful when bridging
+/// to external layout engines. See the `side_by_side` example for a
+/// real-world case where clay-layout delegates measurement through this
+/// interface.
+///
+/// # Example
+///
+/// ```ignore
+/// app.insert_resource(DiegeticTextMeasurer {
+///     measure_fn: Arc::new(|text, measure| {
+///         TextDimensions { width: 100.0, height: 12.0, line_height: 12.0 }
+///     }),
+/// });
+/// ```
+#[derive(Resource)]
+pub struct DiegeticTextMeasurer {
+    /// The measurement function. Takes a text string and a [`TextMeasure`]
+    /// describing the font configuration, returns [`TextDimensions`].
+    pub measure_fn: MeasureTextFn,
+}
+
+impl Default for DiegeticTextMeasurer {
+    fn default() -> Self {
+        Self {
+            measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
+                let char_width = measure.size * MONOSPACE_WIDTH_RATIO;
+                let width = char_width * text.len().to_f32();
+                TextDimensions {
+                    width,
+                    height: measure.size,
+                    line_height: measure.size,
+                }
+            }),
+        }
+    }
+}
 
 /// Creates a [`MeasureTextFn`] backed by parley's layout engine.
 ///

@@ -143,6 +143,19 @@ pub enum GlyphShadowMode {
     PunchOut,
 }
 
+/// Whether glyph meshes render both faces or only the front face.
+///
+/// This only affects standalone [`WorldText`](crate::WorldText) rendering.
+/// Layout text stores the value but does not use it directly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+pub enum GlyphSidedness {
+    /// Render both faces with no culling (default).
+    #[default]
+    DoubleSided,
+    /// Render only the front face with back-face culling.
+    OneSided,
+}
+
 /// Controls when text becomes visible during async glyph rasterization.
 ///
 /// When glyphs are rasterized asynchronously, there is a brief window
@@ -216,6 +229,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     anchor:         Anchor,
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
+    sidedness:      GlyphSidedness,
     loading_policy: GlyphLoadingPolicy,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from global config.
@@ -243,6 +257,7 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.anchor == other.anchor
             && self.render_mode == other.render_mode
             && self.shadow_mode == other.shadow_mode
+            && self.sidedness == other.sidedness
             && self.loading_policy == other.loading_policy
             && self.font_features == other.font_features
             && self.unit == other.unit
@@ -377,6 +392,10 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns whether glyph meshes render one or both faces.
+    #[must_use]
+    pub const fn sidedness(&self) -> GlyphSidedness { self.sidedness }
+
     /// Returns the glyph loading policy.
     #[must_use]
     pub const fn loading_policy(&self) -> GlyphLoadingPolicy { self.loading_policy }
@@ -435,6 +454,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             color: _,
             render_mode: _,
             shadow_mode: _,
+            sidedness: _,
             loading_policy: _,
             // Standalone-only — not relevant for layout shaping cache.
             unit: _,
@@ -501,6 +521,7 @@ impl TextProps<ForLayout> {
             anchor:         Anchor::Center,
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
+            sidedness:      GlyphSidedness::DoubleSided,
             loading_policy: GlyphLoadingPolicy::WhenReady,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
@@ -563,6 +584,7 @@ impl TextProps<ForLayout> {
             anchor:         Anchor::Center,
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
+            sidedness:      self.sidedness,
             loading_policy: self.loading_policy,
             font_features:  self.font_features,
             unit:           self.unit,
@@ -603,6 +625,7 @@ impl TextProps<ForStandalone> {
             anchor:         Anchor::Center,
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
+            sidedness:      GlyphSidedness::DoubleSided,
             loading_policy: GlyphLoadingPolicy::WhenReady,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
@@ -630,6 +653,13 @@ impl TextProps<ForStandalone> {
     #[must_use]
     pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
+        self
+    }
+
+    /// Sets whether glyph meshes render one or both faces.
+    #[must_use]
+    pub const fn with_sidedness(mut self, sidedness: GlyphSidedness) -> Self {
+        self.sidedness = sidedness;
         self
     }
 
@@ -697,6 +727,7 @@ impl TextProps<ForStandalone> {
             anchor:         Anchor::Center,
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
+            sidedness:      self.sidedness,
             loading_policy: self.loading_policy,
             font_features:  self.font_features,
             unit:           self.unit,

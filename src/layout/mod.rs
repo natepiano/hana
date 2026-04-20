@@ -48,6 +48,7 @@ mod geometry;
 #[cfg(test)]
 mod layout_tests;
 mod render;
+mod shape_cache;
 mod sizing;
 mod text_props;
 mod units;
@@ -66,6 +67,10 @@ pub use geometry::CornerRadius;
 pub use render::RectangleSource;
 pub use render::RenderCommand;
 pub use render::RenderCommandKind;
+pub use shape_cache::LineMetricsSnapshot;
+pub use shape_cache::ShapedGlyph;
+pub use shape_cache::ShapedTextCache;
+pub use shape_cache::ShapedTextRun;
 pub use sizing::AlignX;
 pub use sizing::AlignY;
 pub use sizing::Direction;
@@ -78,6 +83,7 @@ pub use text_props::ForStandalone;
 pub use text_props::GlyphLoadingPolicy;
 pub use text_props::GlyphRenderMode;
 pub use text_props::GlyphShadowMode;
+pub use text_props::GlyphSidedness;
 pub use text_props::LayoutTextStyle;
 pub use text_props::TextAlign;
 pub use text_props::TextDimensions;
@@ -87,7 +93,17 @@ pub use text_props::TextWrap;
 pub use text_props::WorldTextStyle;
 pub use units::Anchor;
 pub use units::Dimension;
+pub use units::DimensionMatch;
+pub use units::HasUnit;
+pub use units::In;
+pub use units::InvalidSize;
+pub use units::Mm;
+pub use units::PanelSize;
+pub use units::PaperSize;
+pub use units::Pt;
+pub use units::Px;
 pub use units::Unit;
+pub use units::UnitConfig;
 
 /// Sets the root element's width sizing to `GROW`.
 ///

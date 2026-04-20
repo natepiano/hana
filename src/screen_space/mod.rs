@@ -1,5 +1,4 @@
-//! Systems for managing screen-space overlay cameras and render layer
-//! propagation for screen-space panels.
+//! Screen-space overlay support for diegetic panels.
 
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;
@@ -9,16 +8,51 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 
-use super::components::DiegeticPanel;
-use super::components::PanelMode;
-use super::components::ScreenDimension;
-use super::components::ScreenPosition;
+use crate::panel::DiegeticPanel;
+use crate::panel::PanelMode;
+use crate::panel::PanelSystems;
+use crate::panel::ScreenDimension;
+use crate::panel::ScreenPosition;
+
+/// Marker on overlay cameras spawned by the screen-space system.
+#[derive(Component)]
+pub(crate) struct ScreenSpaceCamera {
+    pub render_layers: RenderLayers,
+    pub camera_order:  isize,
+}
+
+/// Marker on directional lights spawned alongside overlay cameras.
+#[derive(Component)]
+pub(crate) struct ScreenSpaceLight {
+    pub render_layers: RenderLayers,
+}
+
+pub(crate) struct ScreenSpacePlugin;
+
+impl Plugin for ScreenSpacePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                position_screen_space_panels.before(PanelSystems::ComputeLayout),
+                setup_screen_space_cameras.after(PanelSystems::ComputeLayout),
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                propagate_screen_space_render_layers,
+                cleanup_screen_space_cameras,
+            ),
+        );
+    }
+}
 
 /// Positions and sizes screen-space panels relative to the window.
 ///
 /// Runs before `compute_panel_layouts` so that any dimension changes
 /// trigger layout recomputation via Bevy change detection.
-pub(super) fn position_screen_space_panels(
+fn position_screen_space_panels(
     windows: Query<&Window>,
     mut panels: Query<(&mut Transform, &mut DiegeticPanel)>,
 ) {
@@ -47,7 +81,6 @@ pub(super) fn position_screen_space_panels(
         let width = *width;
         let height = *height;
 
-        // ── Sizing ──────────────────────────────────────────────
         if let Some(dim) = width {
             let new_w = match dim {
                 ScreenDimension::Fixed(px) => px,
@@ -67,7 +100,6 @@ pub(super) fn position_screen_space_panels(
             }
         }
 
-        // ── Positioning ─────────────────────────────────────────
         let (screen_x, screen_y) = match position {
             ScreenPosition::Screen => {
                 let (fx, fy) = panel.anchor().offset_fraction();
@@ -76,24 +108,9 @@ pub(super) fn position_screen_space_panels(
             ScreenPosition::At(pos) => (pos.x, pos.y),
         };
 
-        // Convert screen coords (top-left origin, y-down) to camera
-        // coords (center origin, y-up).
         transform.translation.x = screen_x - half_w;
         transform.translation.y = half_h - screen_y;
     }
-}
-
-/// Marker on overlay cameras spawned by the screen-space system.
-#[derive(Component)]
-pub(super) struct ScreenSpaceCamera {
-    pub render_layers: RenderLayers,
-    pub camera_order:  isize,
-}
-
-/// Marker on directional lights spawned alongside overlay cameras.
-#[derive(Component)]
-pub(super) struct ScreenSpaceLight {
-    pub render_layers: RenderLayers,
 }
 
 /// Spawns overlay cameras and lights for newly added screen-space panels.
@@ -102,13 +119,11 @@ pub(super) struct ScreenSpaceLight {
 /// orthographic camera is created with `ScalingMode::WindowSize`
 /// (1 world unit = 1 logical pixel). A directional light on the same
 /// render layers provides stable illumination for PBR text materials.
-pub(super) fn setup_screen_space_cameras(
+fn setup_screen_space_cameras(
     added_panels: Query<(Entity, &DiegeticPanel), Added<DiegeticPanel>>,
     existing_cameras: Query<&ScreenSpaceCamera>,
     mut commands: Commands,
 ) {
-    // Track pairs spawned this frame so panels added in the same frame
-    // share one camera instead of each spawning their own.
     let mut spawned_this_frame: Vec<(isize, RenderLayers)> = Vec::new();
 
     for (panel_entity, panel) in &added_panels {
@@ -124,11 +139,8 @@ pub(super) fn setup_screen_space_cameras(
         let layers = render_layers;
         let order = camera_order;
 
-        // Add render layers to the panel entity.
         commands.entity(panel_entity).insert(layers.clone());
 
-        // Check if a camera for this (order, layers) pair already exists
-        // — either from a previous frame or spawned earlier this frame.
         let camera_exists = existing_cameras
             .iter()
             .any(|cam| cam.render_layers == *layers && cam.camera_order == order)
@@ -142,7 +154,6 @@ pub(super) fn setup_screen_space_cameras(
 
         spawned_this_frame.push((order, layers.clone()));
 
-        // Spawn overlay camera — orthographic, 1 unit = 1 pixel.
         commands.spawn((
             ScreenSpaceCamera {
                 render_layers: layers.clone(),
@@ -169,7 +180,6 @@ pub(super) fn setup_screen_space_cameras(
             layers.clone(),
         ));
 
-        // Spawn a directional light on the same layers for PBR illumination.
         commands.spawn((
             ScreenSpaceLight {
                 render_layers: layers.clone(),
@@ -195,7 +205,7 @@ pub(super) fn setup_screen_space_cameras(
 ///
 /// Runs after text/image/gizmo reconciliation so that newly spawned
 /// children are picked up.
-pub(super) fn propagate_screen_space_render_layers(
+fn propagate_screen_space_render_layers(
     panels_with_layers: Query<(Entity, &RenderLayers, &DiegeticPanel)>,
     children_query: Query<&Children>,
     existing_layers: Query<&RenderLayers>,
@@ -218,7 +228,6 @@ pub(super) fn propagate_screen_space_render_layers(
     }
 }
 
-/// Recursively propagates `RenderLayers` to all descendants.
 fn propagate_layers_recursive(
     children_query: &Query<&Children>,
     existing_layers: &Query<&RenderLayers>,
@@ -244,18 +253,13 @@ fn propagate_layers_recursive(
 
 /// Despawns overlay cameras and lights when no screen-space panels
 /// reference their `(camera_order, render_layers)` pair.
-///
-/// Uses a `Local` to track which `(order, layers)` pairs were active
-/// on the previous frame, since we no longer have a `RemovedComponents`
-/// signal for `ScreenSpace`.
-pub(super) fn cleanup_screen_space_cameras(
+fn cleanup_screen_space_cameras(
     panels: Query<&DiegeticPanel>,
     cameras: Query<(Entity, &ScreenSpaceCamera)>,
     lights: Query<(Entity, &ScreenSpaceLight)>,
     mut commands: Commands,
     mut prev_pairs: Local<Vec<(isize, RenderLayers)>>,
 ) {
-    // Collect which (order, layers) pairs are currently active.
     let current_pairs: Vec<(isize, RenderLayers)> = panels
         .iter()
         .filter_map(|panel| {
@@ -272,7 +276,6 @@ pub(super) fn cleanup_screen_space_cameras(
         })
         .collect();
 
-    // Only check for cleanup if something changed.
     if current_pairs.len() == prev_pairs.len()
         && current_pairs
             .iter()
@@ -283,7 +286,6 @@ pub(super) fn cleanup_screen_space_cameras(
         return;
     }
 
-    // Despawn cameras whose pair is no longer active.
     for (entity, cam) in &cameras {
         let still_active = current_pairs
             .iter()
@@ -293,7 +295,6 @@ pub(super) fn cleanup_screen_space_cameras(
         }
     }
 
-    // Despawn lights whose layers are no longer active.
     for (entity, light) in &lights {
         let still_active = current_pairs
             .iter()

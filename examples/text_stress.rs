@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! Text stress test — add/remove rows to measure per-element rendering cost.
 //!
 //! Press '+' to add rows, '-' to remove (hold for accelerating repeat).
@@ -678,8 +683,8 @@ fn build_panel_tree(
 
     builder.with(
         El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
             .child_gap(COLUMN_GAP)
             .padding(Padding::all(0.03))

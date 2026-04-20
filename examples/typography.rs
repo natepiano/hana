@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! Typography overlay demo — visualizes font-level metric lines and
 //! per-glyph bounding boxes on a `WorldText` entity using the library's
 //! built-in `TypographyOverlay` debug component.
@@ -521,24 +526,32 @@ fn build_controls_content(b: &mut LayoutBuilder, overlay_on: bool) {
     );
 }
 
-fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_diegetic::LayoutTree {
-    let row_h = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
-    let key_cells: Vec<ColumnCell> = FONT_KEYS
+const fn row_color(active: bool) -> Color {
+    if active {
+        HUD_ACTIVE_COLOR
+    } else {
+        HUD_INACTIVE_COLOR
+    }
+}
+
+fn build_font_key_cells(selected_font: usize) -> Vec<ColumnCell<'static>> {
+    FONT_KEYS
         .iter()
         .enumerate()
         .map(|(idx, (label, _, _))| {
-            let color = if idx == selected_font {
-                HUD_ACTIVE_COLOR
-            } else {
-                HUD_INACTIVE_COLOR
-            };
             ColumnCell::Text(
-                *label,
-                LayoutTextStyle::new(FONTS_KEY_SIZE).with_color(color),
+                label,
+                LayoutTextStyle::new(FONTS_KEY_SIZE).with_color(row_color(idx == selected_font)),
             )
         })
-        .collect();
-    let name_cells: Vec<ColumnCell> = FONT_KEYS
+        .collect()
+}
+
+fn build_font_name_cells(
+    registry: &FontRegistry,
+    selected_font: usize,
+) -> Vec<ColumnCell<'static>> {
+    FONT_KEYS
         .iter()
         .enumerate()
         .map(|(idx, (_, name, _))| {
@@ -546,19 +559,20 @@ fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_dieg
                 .font_id_by_name(name)
                 .unwrap_or(FontId::MONOSPACE)
                 .0;
-            let color = if idx == selected_font {
-                HUD_ACTIVE_COLOR
-            } else {
-                HUD_INACTIVE_COLOR
-            };
             ColumnCell::Text(
-                *name,
+                name,
                 LayoutTextStyle::new(FONTS_SAMPLE_SIZE)
                     .with_font(font_id)
-                    .with_color(color),
+                    .with_color(row_color(idx == selected_font)),
             )
         })
-        .collect();
+        .collect()
+}
+
+fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_diegetic::LayoutTree {
+    let row_h = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
+    let key_cells = build_font_key_cells(selected_font);
+    let name_cells = build_font_name_cells(registry, selected_font);
 
     let mut builder = LayoutBuilder::new(FONTS_PANEL_WIDTH, FONTS_PANEL_HEIGHT);
     builder.with(

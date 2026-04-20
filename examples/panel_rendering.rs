@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! Panel geometry rendering test — backgrounds, borders, and text.
 //!
 //! Displays several diegetic panels with different background colors,

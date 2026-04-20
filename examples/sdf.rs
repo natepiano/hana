@@ -1,3 +1,13 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::suboptimal_flops,
+    reason = "demo SDF math; grid indices and shader coordinates stay within f32 precision"
+)]
+
 //! SDF primitive lab.
 //!
 //! Static comparison scene for experimenting with line rendering in world
@@ -619,7 +629,7 @@ fn trigger_home_camera(
 
 fn rotate_vertical() -> Quat { Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2) }
 
-/// Row 0 — `sd_line_segment` (shape_kind = 4). The path the doc
+/// Row 0 — `sd_line_segment` (`shape_kind` = 4). The path the doc
 /// flags as producing artifacts.
 fn spawn_raw_line(
     commands: &mut Commands,
@@ -654,7 +664,7 @@ fn spawn_stretched_rect(
 }
 
 /// Shared filled-shape spawner for rows 0 and 1. Same mesh, same
-/// transform, only the shape_kind differs.
+/// transform, only the `shape_kind` differs.
 fn spawn_line_with_shape(
     commands: &mut Commands,
     parent: Entity,

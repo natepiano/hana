@@ -21,11 +21,11 @@ use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
-use crate::plugin::ComputedDiegeticPanel;
-use crate::plugin::DiegeticPanel;
-use crate::plugin::RenderMode;
-use crate::plugin::SurfaceShadow;
-use crate::plugin::UnitConfig;
+use crate::layout::UnitConfig;
+use crate::panel::ComputedDiegeticPanel;
+use crate::panel::DiegeticPanel;
+use crate::panel::RenderMode;
+use crate::panel::SurfaceShadow;
 
 /// Marker for SDF panel mesh entities.
 #[derive(Component)]
@@ -50,7 +50,7 @@ enum ShadowMode {
 }
 
 /// Plugin that adds panel geometry rendering (backgrounds and borders).
-pub struct PanelGeometryPlugin;
+pub(super) struct PanelGeometryPlugin;
 
 impl Plugin for PanelGeometryPlugin {
     fn build(&self, app: &mut App) {

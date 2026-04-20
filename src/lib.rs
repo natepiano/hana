@@ -14,7 +14,7 @@
 //! unconditionally every frame; retained mode lets Bevy's change detection skip layout
 //! entirely on frames where the tree hasn't been touched.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```ignore
 //! use bevy::prelude::*;
@@ -26,18 +26,34 @@
 //!     .add_systems(Startup, setup)
 //!     .run();
 //! ```
+//!
+//! # Configuration
+//!
+//! Insert [`AtlasConfig`] and/or [`UnitConfig`] as resources before adding
+//! [`DiegeticUiPlugin`] to override defaults:
+//!
+//! ```ignore
+//! App::new()
+//!     .insert_resource(
+//!         AtlasConfig::new()
+//!             .with_quality(RasterQuality::Low)
+//!             .with_glyphs_per_page(50),
+//!     )
+//!     .insert_resource(UnitConfig::new().with_font(Unit::Millimeters))
+//!     .add_plugins(DiegeticUiPlugin);
+//! ```
 
 mod callouts;
 mod constants;
 #[cfg(feature = "typography_overlay")]
 mod debug;
 mod layout;
-mod plugin;
+mod panel;
 mod render;
+mod screen_space;
 mod text;
 
-// Layout types.
-// Debug overlay.
+use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
 pub use callouts::CalloutLine;
@@ -56,8 +72,8 @@ pub use layout::Border;
 pub use layout::BoundingBox;
 pub use layout::CornerRadius;
 pub use layout::Dimension;
+pub use layout::DimensionMatch;
 pub use layout::Direction;
-// Layout tree.
 pub use layout::El;
 pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
@@ -68,6 +84,10 @@ pub use layout::ForStandalone;
 pub use layout::GlyphLoadingPolicy;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
+pub use layout::GlyphSidedness;
+pub use layout::HasUnit;
+pub use layout::In;
+pub use layout::InvalidSize;
 pub use layout::LayoutBuilder;
 pub use layout::LayoutTextStyle;
 pub use layout::LayoutTree;
@@ -76,7 +96,12 @@ pub use layout::LayoutTree;
 /// [`TextDimensions`]. See [`DiegeticTextMeasurer`] and the `side_by_side`
 /// example for usage.
 pub use layout::MeasureTextFn;
+pub use layout::Mm;
 pub use layout::Padding;
+pub use layout::PanelSize;
+pub use layout::PaperSize;
+pub use layout::Pt;
+pub use layout::Px;
 pub use layout::Sizing;
 pub use layout::TextAlign;
 /// Measured width and height of a text string, returned by [`MeasureTextFn`].
@@ -88,45 +113,29 @@ pub use layout::TextDimensions;
 pub use layout::TextMeasure;
 pub use layout::TextProps;
 pub use layout::TextWrap;
+pub use layout::Unit;
+pub use layout::UnitConfig;
 pub use layout::WorldTextStyle;
-// Bevy plugin.
-pub use plugin::AtlasConfig;
-pub use plugin::ComputedDiegeticPanel;
-pub use plugin::DiegeticPanel;
-pub use plugin::DiegeticPanelBuilder;
-pub use plugin::DiegeticPanelGizmoGroup;
-pub use plugin::DiegeticPerfStats;
-pub use plugin::DiegeticTextMeasurer;
-pub use plugin::DiegeticUiPlugin;
-pub use plugin::DiegeticUiPluginConfigured;
-pub use plugin::DimensionMatch;
-pub use plugin::GlyphWorkerThreads;
-pub use plugin::HasUnit;
-pub use plugin::HueOffset;
-pub use plugin::In;
-pub use plugin::InvalidSize;
-pub use plugin::LayoutPlugin;
-pub use plugin::Mm;
-pub use plugin::PanelMode;
-pub use plugin::PanelSize;
-pub use plugin::PaperSize;
-pub use plugin::Pt;
-pub use plugin::Px;
-pub use plugin::RasterQuality;
-pub use plugin::RenderMode;
-pub use plugin::ScreenDimension;
-pub use plugin::ScreenPosition;
-pub use plugin::ShowTextGizmos;
-pub use plugin::SurfaceShadow;
-pub use plugin::Unit;
-pub use plugin::UnitConfig;
+pub use panel::ComputedDiegeticPanel;
+pub use panel::DiegeticPanel;
+pub use panel::DiegeticPanelBuilder;
+pub use panel::DiegeticPanelGizmoGroup;
+pub use panel::DiegeticPerfStats;
+pub use panel::HeadlessLayoutPlugin;
+pub use panel::HueOffset;
+pub use panel::PanelMode;
+pub use panel::RenderMode;
+pub use panel::ScreenDimension;
+pub use panel::ScreenPosition;
+pub use panel::ShowTextGizmos;
+pub use panel::SurfaceShadow;
 pub use render::PanelTextChild;
 pub use render::PendingGlyphs;
 pub use render::WorldText;
 pub use render::WorldTextReady;
-// Render.
 pub use render::default_panel_material;
-// Text.
+pub use text::AtlasConfig;
+pub use text::DiegeticTextMeasurer;
 pub use text::Font;
 pub use text::FontId;
 pub use text::FontLoadFailed;
@@ -140,4 +149,48 @@ pub use text::GlyphKey;
 pub use text::GlyphMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
+pub use text::GlyphWorkerThreads;
 pub use text::MsdfAtlas;
+pub use text::RasterQuality;
+
+/// Bevy plugin that adds diegetic UI panel support.
+///
+/// Composes layout, rendering, text, callouts, and screen-space overlay
+/// support into a single plugin. Insert configuration resources
+/// ([`AtlasConfig`], [`UnitConfig`]) before adding this plugin — they
+/// take effect through the child plugins at build time.
+///
+/// # Quick start
+///
+/// ```ignore
+/// App::new().add_plugins(DiegeticUiPlugin)
+/// ```
+///
+/// # Custom atlas configuration
+///
+/// ```ignore
+/// App::new()
+///     .insert_resource(
+///         AtlasConfig::new()
+///             .with_quality(RasterQuality::Low)
+///             .with_glyphs_per_page(50)
+///             .with_glyph_worker_threads(GlyphWorkerThreads::Fixed(4)),
+///     )
+///     .add_plugins(DiegeticUiPlugin);
+/// ```
+pub struct DiegeticUiPlugin;
+
+impl Plugin for DiegeticUiPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<UnitConfig>();
+        app.add_plugins((
+            text::TextPlugin,
+            panel::PanelPlugin,
+            screen_space::ScreenSpacePlugin,
+            render::RenderPlugin,
+            callouts::CalloutPlugin,
+            #[cfg(feature = "typography_overlay")]
+            debug::TypographyOverlayPlugin,
+        ));
+    }
+}

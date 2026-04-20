@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
 use super::constants;
@@ -12,8 +13,6 @@ use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer;
-use super::text_renderer::ShapedGlyph;
-use super::text_renderer::ShapedTextCache;
 use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -21,9 +20,12 @@ use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
+use crate::layout::GlyphSidedness;
+use crate::layout::ShapedGlyph;
+use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
+use crate::layout::UnitConfig;
 use crate::layout::WorldTextStyle;
-use crate::plugin::UnitConfig;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -316,6 +318,21 @@ pub(super) fn emit_world_text_ready(
 /// Spawns visible mesh and optional shadow proxy entities for each atlas page
 /// of glyph quads under the given `entity`. Returns accumulated mesh build time
 /// in milliseconds.
+/// Configures a `StandardMaterial`'s `double_sided` and `cull_mode` fields
+/// from a [`GlyphSidedness`] choice.
+const fn apply_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness) {
+    match sidedness {
+        GlyphSidedness::DoubleSided => {
+            base.double_sided = true;
+            base.cull_mode = None;
+        },
+        GlyphSidedness::OneSided => {
+            base.double_sided = false;
+            base.cull_mode = Some(Face::Back);
+        },
+    }
+}
+
 fn spawn_world_text_meshes(
     page_quads: &HashMap<u32, Vec<GlyphQuadData>>,
     entity: Entity,
@@ -349,10 +366,11 @@ fn spawn_world_text_meshes(
 
         // Spawn visible mesh (skip for Invisible render mode).
         if !is_invisible {
-            let visible_base = StandardMaterial {
-                depth_bias: constants::LAYER_DEPTH_BIAS,
+            let mut visible_base = StandardMaterial {
+                depth_bias: -1.0,
                 ..Default::default()
             };
+            apply_sidedness(&mut visible_base, style.sidedness());
             let mat = super::msdf_material::msdf_text_material(
                 visible_base,
                 MsdfAtlas::sdf_range().to_f32(),
@@ -393,10 +411,11 @@ fn spawn_world_text_meshes(
                 GlyphShadowMode::None | GlyphShadowMode::Text => u32::from(GlyphRenderMode::Text),
             };
 
-            let proxy_base = StandardMaterial {
+            let mut proxy_base = StandardMaterial {
                 depth_bias: -constants::LAYER_DEPTH_BIAS,
                 ..Default::default()
             };
+            apply_sidedness(&mut proxy_base, style.sidedness());
             let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
                 proxy_base,
                 MsdfAtlas::sdf_range().to_f32(),

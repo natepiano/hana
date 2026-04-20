@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! TAA shimmer demonstration.
 //!
 //! Shows how Temporal Anti-Aliasing interacts with SDF border-only

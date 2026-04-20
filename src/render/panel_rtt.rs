@@ -23,11 +23,11 @@ use super::constants::DEFAULT_TEXELS_PER_METER;
 use super::constants::MAX_TEXTURE_SIZE;
 use super::constants::MIN_TEXTURE_SIZE;
 use super::constants::PANEL_LAYER_OFFSET;
-use crate::plugin::ComputedDiegeticPanel;
-use crate::plugin::DiegeticPanel;
-use crate::plugin::RenderMode;
-use crate::plugin::SurfaceShadow;
-use crate::plugin::UnitConfig;
+use crate::layout::UnitConfig;
+use crate::panel::ComputedDiegeticPanel;
+use crate::panel::DiegeticPanel;
+use crate::panel::RenderMode;
+use crate::panel::SurfaceShadow;
 
 // ── Components ──────────────────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ struct PanelRttState {
 /// Registers resources. The `setup_panel_rtt` system is added by
 /// [`super::text_renderer::TextRenderPlugin`] with correct ordering
 /// relative to content spawners.
-pub struct PanelRttPlugin;
+pub(super) struct PanelRttPlugin;
 
 impl Plugin for PanelRttPlugin {
     fn build(&self, app: &mut App) {

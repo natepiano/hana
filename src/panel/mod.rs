@@ -1,0 +1,88 @@
+//! Panel integration: components, layout computation, gizmo rendering,
+//! and OIT setup — the Bevy-facing half of diegetic UI.
+
+mod builder;
+mod compute_layout;
+mod diegetic_panel;
+mod gizmos;
+mod modes;
+mod perf;
+
+use bevy::prelude::*;
+pub use builder::DiegeticPanelBuilder;
+pub use diegetic_panel::ComputedDiegeticPanel;
+pub use diegetic_panel::DiegeticPanel;
+pub use gizmos::DiegeticPanelGizmoGroup;
+pub use gizmos::ShowTextGizmos;
+pub use modes::HueOffset;
+pub use modes::PanelMode;
+pub use modes::RenderMode;
+pub use modes::ScreenDimension;
+pub use modes::ScreenPosition;
+pub use modes::SurfaceShadow;
+pub use perf::DiegeticPerfStats;
+
+use crate::layout::ShapedTextCache;
+
+/// System sets for ordering panel work and its cross-module dependencies.
+///
+/// Other plugins (e.g., [`ScreenSpacePlugin`](crate::screen_space::ScreenSpacePlugin))
+/// use `.before(PanelSystems::ComputeLayout)` / `.after(PanelSystems::ComputeLayout)`
+/// rather than referencing concrete system symbols.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum PanelSystems {
+    /// Runs [`compute_panel_layouts`](compute_layout::compute_panel_layouts).
+    ComputeLayout,
+    /// Runs gizmo reconciliation
+    /// ([`render_layout_gizmos`](gizmos::render_layout_gizmos) +
+    /// [`render_debug_gizmos`](gizmos::render_debug_gizmos)).
+    RenderGizmos,
+}
+
+/// Headless layout runner — schedules `compute_panel_layouts` on `Update`
+/// and initializes the resources it consumes (diagnostics, perf stats,
+/// shaped-text cache).
+///
+/// External consumers (benchmarks, non-UI apps) register this plugin
+/// instead of [`DiegeticUiPlugin`](crate::DiegeticUiPlugin) when they
+/// only need [`DiegeticPanel`] → [`ComputedDiegeticPanel`] computation.
+/// Callers insert their own
+/// [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer) and
+/// [`UnitConfig`](crate::UnitConfig) before adding this plugin.
+pub struct HeadlessLayoutPlugin;
+
+impl Plugin for HeadlessLayoutPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(perf::DiagnosticsPlugin)
+            .init_resource::<DiegeticPerfStats>()
+            .init_resource::<ShapedTextCache>()
+            .add_systems(
+                Update,
+                compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
+            );
+    }
+}
+
+/// Full panel integration — headless layout plus gizmo debug rendering.
+/// Registered by [`DiegeticUiPlugin`](crate::DiegeticUiPlugin).
+pub(crate) struct PanelPlugin;
+
+impl Plugin for PanelPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(HeadlessLayoutPlugin)
+            .init_resource::<ShowTextGizmos>()
+            .init_gizmo_group::<DiegeticPanelGizmoGroup>()
+            .configure_sets(
+                Update,
+                PanelSystems::RenderGizmos.after(PanelSystems::ComputeLayout),
+            )
+            .add_systems(Startup, gizmos::configure_panel_gizmos)
+            .add_systems(
+                Update,
+                (
+                    gizmos::render_layout_gizmos.in_set(PanelSystems::RenderGizmos),
+                    gizmos::render_debug_gizmos.in_set(PanelSystems::RenderGizmos),
+                ),
+            );
+    }
+}

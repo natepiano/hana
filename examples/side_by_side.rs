@@ -1,3 +1,8 @@
+#![allow(
+    clippy::expect_used,
+    reason = "demo code; panic on invalid setup is acceptable"
+)]
+
 //! Side-by-side layout comparison: Clay (C FFI) vs `bevy_diegetic` (Rust).
 //!
 //! Renders the same status panel using two layout engines side by side.

@@ -26,7 +26,7 @@ use bevy::prelude::Visibility;
 use bevy::prelude::With;
 use bevy_kana::ToF32;
 
-use crate::plugin::SurfaceShadow;
+use crate::panel::SurfaceShadow;
 use crate::render;
 use crate::render::LAYER_DEPTH_BIAS;
 use crate::render::OIT_DEPTH_STEP;
