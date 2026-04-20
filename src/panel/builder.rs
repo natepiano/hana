@@ -6,12 +6,12 @@ use std::marker::PhantomData;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use super::diegetic_panel::DiegeticPanel;
 use super::modes::PanelMode;
 use super::modes::RenderMode;
 use super::modes::ScreenDimension;
 use super::modes::ScreenPosition;
 use super::modes::SurfaceShadow;
-use super::diegetic_panel::DiegeticPanel;
 use crate::layout::Anchor;
 use crate::layout::DimensionMatch;
 use crate::layout::InvalidSize;
