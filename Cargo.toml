@@ -23,15 +23,15 @@ nursery  = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 
 # Universal allows
-redundant_pub_crate = "allow"
 multiple_crate_versions = "allow"
+redundant_pub_crate     = "allow"
 
 # Allow specific lints that conflict with Bevy patterns
-needless_pass_by_value  = "allow"
-option_if_let_else      = "allow"
-too_many_arguments      = "allow"
-type_complexity         = "allow"
-wildcard_imports        = "allow"
+needless_pass_by_value = "allow"
+option_if_let_else     = "allow"
+too_many_arguments     = "allow"
+type_complexity        = "allow"
+wildcard_imports       = "allow"
 
 [lints.rust]
 missing_docs = "deny"
