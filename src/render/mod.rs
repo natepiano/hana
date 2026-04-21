@@ -48,34 +48,30 @@ impl Plugin for RenderPlugin {
     }
 }
 
-/// Marker: this text entity's cached alpha mode was resolved through an
-/// earlier [`TextAlphaModeDefault`] value that has since changed, so its
-/// rendered material is stale and must be rebuilt.
+/// Marker: this standalone [`WorldText`] entity's cached alpha mode was
+/// resolved through an earlier [`TextAlphaModeDefault`] value that has since
+/// changed, so its rendered material is stale and must be rebuilt.
 ///
 /// Inserted by [`queue_alpha_default_refresh`] when the resource changes;
-/// cleared unconditionally at the top of each consumer's per-entity loop.
+/// cleared unconditionally at the top of `render_world_text`. Panel-text
+/// entities went through the cascade framework in phase 2; this marker is
+/// removed entirely in phase 3 when [`WorldTextAlpha`] migrates standalone
+/// world text to [`Resolved<WorldTextAlpha>`].
 #[derive(Component)]
 pub(super) struct StaleAlphaMode;
 
-/// Queues standalone and panel text entities for an alpha-mode rebuild when
-/// [`TextAlphaModeDefault`] changes. Entities with explicit alpha mode overrides
-/// are still marked — the optimization to skip them requires access to per-panel
-/// alpha mode from this system and hasn't shown up as a measurable cost.
+/// Queues standalone [`WorldText`] entities for an alpha-mode rebuild when
+/// [`TextAlphaModeDefault`] changes. Panel text is handled by the cascade
+/// framework and is not marked here. Removed entirely in phase 3.
 fn queue_alpha_default_refresh(
     alpha_default: Res<TextAlphaModeDefault>,
     world_texts: Query<Entity, (With<world_text::WorldText>, Without<PanelTextChild>)>,
-    panel_texts: Query<Entity, With<PanelTextChild>>,
     mut commands: Commands,
 ) {
     if !alpha_default.is_changed() {
         return;
     }
-
     for entity in &world_texts {
-        commands.entity(entity).insert(StaleAlphaMode);
-    }
-
-    for entity in &panel_texts {
         commands.entity(entity).insert(StaleAlphaMode);
     }
 }

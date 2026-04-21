@@ -12,7 +12,6 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU16;
 
-use super::StaleAlphaMode;
 use super::clip;
 use super::constants;
 use super::constants::TEXT_Z_OFFSET;
@@ -22,12 +21,15 @@ use super::msdf_material;
 use super::msdf_material::MsdfTextMaterial;
 use super::panel_rtt;
 use super::panel_rtt::PanelRttRegistry;
-use super::transparency::TextAlphaModeDefault;
 use super::world_text;
 use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
+use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadePanelChild;
+use crate::cascade::CascadePanelChildPlugin;
+use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
@@ -207,6 +209,7 @@ pub(super) struct TextRenderPlugin;
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
+        app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterials>();
@@ -308,8 +311,36 @@ pub(super) struct PanelTextQuads {
     /// The glyph shadow mode for this text element.
     pub shadow_mode: GlyphShadowMode,
     /// Per-style alpha-mode override (from `LayoutTextStyle`). `None` means
-    /// inherit from panel or resource default.
+    /// the entity inherits from its parent panel, which in turn inherits from
+    /// [`CascadeDefaults::text_alpha`]. Resolution is cached in
+    /// [`Resolved<PanelTextAlpha>`].
     pub alpha_mode:  Option<AlphaMode>,
+}
+
+/// Cascading attribute for panel-text alpha mode.
+///
+/// 3-tier cascade: [`PanelTextQuads::alpha_mode`] (entity) →
+/// [`DiegeticPanel::text_alpha_mode`] (panel) →
+/// [`CascadeDefaults::text_alpha`] (global). The final resolved value is
+/// cached in [`Resolved<PanelTextAlpha>`] on each panel and each text child;
+/// [`build_panel_meshes_for_entity`] reads it to key material batches by
+/// alpha mode.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub(super) struct PanelTextAlpha(pub AlphaMode);
+
+impl CascadePanelChild for PanelTextAlpha {
+    type EntityOverride = PanelTextQuads;
+    type PanelOverride = DiegeticPanel;
+
+    fn entity_value(entity_override: &PanelTextQuads) -> Option<Self> {
+        entity_override.alpha_mode.map(Self)
+    }
+
+    fn panel_value(panel_override: &DiegeticPanel) -> Option<Self> {
+        panel_override.text_alpha_mode().map(Self)
+    }
+
+    fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.text_alpha) }
 }
 
 // ── System 1: reconcile_panel_text_children ─────────────────────────────────
@@ -565,12 +596,14 @@ fn shape_panel_text_children(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
                 Changed<PanelTextChild>,
-                With<StaleAlphaMode>,
+                Changed<Resolved<PanelTextAlpha>>,
             )>,
         ),
     >,
     pending_texts: Query<Entity, (With<PanelTextChild>, With<WorldText>, With<PendingGlyphs>)>,
     texts: Query<(&WorldText, &WorldTextStyle, &PanelTextChild, &ChildOf)>,
+    panel_alpha: Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
+    defaults: Res<CascadeDefaults>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -604,11 +637,6 @@ fn shape_panel_text_children(
     }
 
     for entity in to_process {
-        // Clear the stale-alpha marker on entry — reaching this entity in
-        // the loop satisfies its rebuild request, regardless of which
-        // branch below we take.
-        commands.entity(entity).remove::<StaleAlphaMode>();
-
         let Ok((world_text, style, ptc, child_of)) = texts.get(entity) else {
             continue;
         };
@@ -645,12 +673,23 @@ fn shape_panel_text_children(
         let has_pending = stats.pending_glyphs > 0 || stats.queued_glyphs > 0;
 
         if all_ready {
-            commands.entity(entity).insert(PanelTextQuads {
+            let ptq = PanelTextQuads {
                 quads,
                 render_mode: config.render_mode(),
                 shadow_mode: config.shadow_mode(),
                 alpha_mode: config.alpha_mode(),
-            });
+            };
+            // Tier-1 re-resolve: `PanelTextQuads.alpha_mode` is recomputed
+            // from `LayoutTextStyle` every shape pass, so write a fresh
+            // `Resolved<PanelTextAlpha>` alongside the quads. Falls through
+            // to the parent panel's `Resolved<PanelTextAlpha>` (or the
+            // global default if the parent lookup fails).
+            let panel_fallback = panel_alpha.get(child_of.parent()).map_or_else(
+                |_| PanelTextAlpha::global_default(&defaults),
+                |resolved| resolved.0,
+            );
+            let resolved = PanelTextAlpha::entity_value(&ptq).unwrap_or(panel_fallback);
+            commands.entity(entity).insert((ptq, Resolved(resolved)));
             commands.entity(entity).remove::<PendingGlyphs>();
             commands.entity(entity).insert(AwaitingReady);
         } else if has_pending {
@@ -679,15 +718,16 @@ fn shape_panel_text_children(
 /// 4. Spawns new batched mesh entities via [`spawn_batch_meshes`].
 fn build_panel_batched_meshes(
     changed_quads: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelTextQuads>)>,
-    panel_children: Query<(&PanelTextQuads, &PanelTextChild, &ChildOf)>,
+    panel_children: Query<(Entity, &PanelTextQuads, &PanelTextChild, &ChildOf)>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
     panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
+    resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    defaults: Res<CascadeDefaults>,
     atlas: Res<MsdfAtlas>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     rtt_registry: Res<PanelRttRegistry>,
-    alpha_default: Res<TextAlphaModeDefault>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -716,12 +756,13 @@ fn build_panel_batched_meshes(
             &panel_children,
             &old_meshes,
             &panels,
+            &resolved_alphas,
+            &defaults,
             &atlas,
             &mut meshes,
             &mut materials,
             &mut shared_mats,
             &rtt_registry,
-            *alpha_default,
             &mut commands,
         );
     }
@@ -734,15 +775,16 @@ fn build_panel_batched_meshes(
 #[allow(clippy::too_many_arguments, reason = "internal per-panel dispatch")]
 fn build_panel_meshes_for_entity(
     panel_entity: Entity,
-    panel_children: &Query<(&PanelTextQuads, &PanelTextChild, &ChildOf)>,
+    panel_children: &Query<(Entity, &PanelTextQuads, &PanelTextChild, &ChildOf)>,
     old_meshes: &Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
     panels: &Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
+    resolved_alphas: &Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    defaults: &CascadeDefaults,
     atlas: &MsdfAtlas,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<MsdfTextMaterial>,
     shared_mats: &mut SharedMsdfMaterials,
     rtt_registry: &PanelRttRegistry,
-    alpha_default: TextAlphaModeDefault,
     commands: &mut Commands,
 ) {
     let Ok((panel, hue_offset, panel_layers)) = panels.get(panel_entity) else {
@@ -756,7 +798,7 @@ fn build_panel_meshes_for_entity(
     // and track the maximum command index for layer ordering.
     let mut batches: HashMap<TextBatchKey, (AlphaMode, Vec<GlyphQuadData>)> = HashMap::new();
     let mut max_command_index: usize = 0;
-    for (ptq, ptc, child_of) in panel_children {
+    for (child_entity, ptq, ptc, child_of) in panel_children {
         if child_of.parent() != panel_entity {
             continue;
         }
@@ -769,10 +811,10 @@ fn build_panel_meshes_for_entity(
             ptc.anchor_y,
         );
         let clip_rect = clip_rect_bits(clip_rect);
-        let resolved_alpha = ptq
-            .alpha_mode
-            .or_else(|| panel.text_alpha_mode())
-            .unwrap_or(alpha_default.0);
+        let resolved_alpha = resolved_alphas.get(child_entity).map_or_else(
+            |_| PanelTextAlpha::global_default(defaults).0,
+            |resolved| resolved.0.0,
+        );
         let alpha_bits = alpha_mode_bits(resolved_alpha);
         for (page_index, quad) in &ptq.quads {
             let key = TextBatchKey {

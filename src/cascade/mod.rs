@@ -96,10 +96,11 @@ mod set;
 mod target;
 
 pub use defaults::CascadeDefaults;
+pub(crate) use panel_child::CascadePanelChildPlugin;
+pub(crate) use resolved::CascadePanelChild;
+pub(crate) use resolved::Resolved;
 pub use set::CascadeSet;
 
-// Internal plugin types (`CascadePanelChildPlugin`, `CascadePanelPlugin`,
-// `CascadeEntityPlugin`) and trait surface (`CascadePanelChild`,
-// `CascadeTarget`, `Resolved`) are re-exported at `pub(crate)` as phases 2+
-// migrate each attribute and add a consumer — keeping the facade honest
-// about what's actually in use.
+// The 2-tier plugins (`CascadePanelPlugin`, `CascadeEntityPlugin`) and
+// `CascadeTarget` are re-exported at `pub(crate)` when phases 3+ add
+// consumers — keeping the facade honest about what's in use.
