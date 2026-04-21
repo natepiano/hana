@@ -23,7 +23,6 @@ use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
 use crate::layout::Sizing;
 use crate::layout::TextMeasure;
-use crate::layout::UnitConfig;
 use crate::text::DiegeticTextMeasurer;
 
 /// Recomputes layout for panels whose [`DiegeticPanel`] component has changed.
@@ -39,7 +38,6 @@ pub(super) fn compute_panel_layouts(
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
-    unit_config: Res<UnitConfig>,
     defaults: Res<CascadeDefaults>,
 ) {
     let changed_entities: Vec<Entity> = panels
@@ -102,7 +100,7 @@ pub(super) fn compute_panel_layouts(
         );
 
         if let Some(bounds) = result.content_bounds() {
-            let s = panel_ref.points_to_world(&unit_config);
+            let s = panel_ref.points_to_world();
             computed.set_content_size(bounds.width * s, bounds.height * s);
         }
 

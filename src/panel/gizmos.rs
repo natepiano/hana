@@ -11,7 +11,6 @@ use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
-use crate::layout::UnitConfig;
 
 /// Gizmo group for diegetic panel debug wireframes.
 ///
@@ -127,7 +126,6 @@ pub(super) fn render_layout_gizmos(
         Changed<ComputedDiegeticPanel>,
     >,
     existing_gizmos: Query<(Entity, &ChildOf), With<PanelGizmoChild>>,
-    unit_config: Res<UnitConfig>,
     cameras: Query<(&Camera, &Projection)>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut commands: Commands,
@@ -148,9 +146,9 @@ pub(super) fn render_layout_gizmos(
             continue;
         };
 
-        let points_to_world = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world();
         despawn_gizmo_children(&mut commands, &existing_gizmos, panel_entity);
-        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         let border_by_idx = collect_borders_by_index(&result.commands);
 
@@ -241,7 +239,6 @@ pub(super) fn render_debug_gizmos(
     >,
     existing_gizmos: Query<(Entity, &ChildOf), With<DebugGizmoChild>>,
     show_text: Res<ShowTextGizmos>,
-    unit_config: Res<UnitConfig>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut commands: Commands,
 ) {
@@ -254,9 +251,9 @@ pub(super) fn render_debug_gizmos(
             continue;
         };
 
-        let points_to_world = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world();
         despawn_gizmo_children(&mut commands, &existing_gizmos, panel_entity);
-        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         for cmd in &result.commands {
             if matches!(cmd.kind, RenderCommandKind::Text { .. }) {

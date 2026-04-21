@@ -18,14 +18,13 @@ use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
 use crate::layout::PanelSize;
 use crate::layout::Unit;
-use crate::layout::UnitConfig;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///
 /// Defines a layout tree and the panel's dimensions in layout units.
-/// World-space size is computed automatically from the `layout_unit`
-/// (or the global [`UnitConfig`] default). Font sizes in the tree are
-/// interpreted in `font_unit` (defaults to [`Unit::Points`]).
+/// World-space size is computed automatically from the panel's
+/// `layout_unit`. Font sizes in the tree are interpreted in `font_unit`
+/// (defaults through [`CascadeDefaults::panel_font_unit`]).
 ///
 /// Construct via [`DiegeticPanel::world`] or [`DiegeticPanel::screen`]:
 ///
@@ -242,20 +241,11 @@ impl DiegeticPanel {
 // ── Computation methods ─────────────────────────────────────────────────────
 
 impl DiegeticPanel {
-    /// Returns the layout unit.
-    pub(crate) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit {
-        self.layout_unit
-    }
-
     /// Physical width in meters before world scaling.
-    fn physical_width(&self, config: &UnitConfig) -> f32 {
-        self.width * self.resolved_layout_unit(config).meters_per_unit()
-    }
+    fn physical_width(&self) -> f32 { self.width * self.layout_unit.meters_per_unit() }
 
     /// Physical height in meters before world scaling.
-    fn physical_height(&self, config: &UnitConfig) -> f32 {
-        self.height * self.resolved_layout_unit(config).meters_per_unit()
-    }
+    fn physical_height(&self) -> f32 { self.height * self.layout_unit.meters_per_unit() }
 
     /// Panel width in meters (world units), incorporating `world_width`
     /// and `world_height` scaling.
@@ -264,9 +254,9 @@ impl DiegeticPanel {
     /// - `world_height` only: uniform scale from height, width follows aspect ratio.
     /// - Neither: physical size from layout units.
     #[must_use]
-    pub fn world_width(&self, config: &UnitConfig) -> f32 {
-        let physical_width = self.physical_width(config);
-        let physical_height = self.physical_height(config);
+    pub fn world_width(&self) -> f32 {
+        let physical_width = self.physical_width();
+        let physical_height = self.physical_height();
         match (self.world_width, self.world_height) {
             (Some(target_width), _) => target_width,
             (None, Some(target_height)) => {
@@ -287,9 +277,9 @@ impl DiegeticPanel {
     /// - `world_width` only: uniform scale from width, height follows aspect ratio.
     /// - Neither: physical size from layout units.
     #[must_use]
-    pub fn world_height(&self, config: &UnitConfig) -> f32 {
-        let physical_width = self.physical_width(config);
-        let physical_height = self.physical_height(config);
+    pub fn world_height(&self) -> f32 {
+        let physical_width = self.physical_width();
+        let physical_height = self.physical_height();
         match (self.world_width, self.world_height) {
             (_, Some(target_height)) => target_height,
             (Some(target_width), None) => {
@@ -318,14 +308,12 @@ impl DiegeticPanel {
     /// `world_width` / `world_height` fields are left unset at build
     /// time.
     #[must_use]
-    pub fn anchor_offsets(&self, config: &UnitConfig) -> (f32, f32) {
+    pub fn anchor_offsets(&self) -> (f32, f32) {
         let (fx, fy) = self.anchor.offset_fraction();
         if self.mode.is_screen() {
             return (self.width * fx, self.height * fy);
         }
-        let w = self.world_width(config);
-        let h = self.world_height(config);
-        (w * fx, h * fy)
+        (self.world_width() * fx, self.world_height() * fy)
     }
 
     /// Conversion factor from layout points to world meters.
@@ -334,8 +322,7 @@ impl DiegeticPanel {
     /// value (in points) by this factor to get world meters. Incorporates
     /// `world_width`/`world_height` scaling.
     #[must_use]
-    pub fn points_to_world(&self, config: &UnitConfig) -> f32 {
-        let layout_unit = self.resolved_layout_unit(config);
+    pub fn points_to_world(&self) -> f32 {
         // Screen panels render under an orthographic camera where 1 world
         // unit = 1 logical pixel. The layout engine scales dimensions by
         // `layout_unit.to_points()`; reversing that factor returns values
@@ -344,13 +331,13 @@ impl DiegeticPanel {
         // across dynamic `Sizing::Fit` / `Sizing::Grow` sizing where
         // `panel.height` is recomputed each frame.
         if self.mode.is_screen() {
-            let to_pts = layout_unit.to_points();
+            let to_pts = self.layout_unit.to_points();
             if to_pts > 0.0 {
                 return 1.0 / to_pts;
             }
         }
-        let viewport_pts_h = self.height * layout_unit.to_points();
-        let wh = self.world_height(config);
+        let viewport_pts_h = self.height * self.layout_unit.to_points();
+        let wh = self.world_height();
         if viewport_pts_h > 0.0 {
             wh / viewport_pts_h
         } else {

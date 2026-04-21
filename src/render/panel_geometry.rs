@@ -24,7 +24,6 @@ use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
-use crate::layout::UnitConfig;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::RenderMode;
@@ -107,7 +106,6 @@ fn build_panel_geometry(
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     mut sdf_materials: ResMut<Assets<SdfPanelMaterial>>,
-    unit_config: Res<UnitConfig>,
     rtt_registry: Res<PanelRttRegistry>,
     mut commands: Commands,
 ) {
@@ -116,8 +114,8 @@ fn build_panel_geometry(
             continue;
         };
 
-        let points_to_world = panel.points_to_world(&unit_config);
-        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let points_to_world = panel.points_to_world();
+        let (anchor_x, anchor_y) = panel.anchor_offsets();
         let render_style = if panel.render_mode() == RenderMode::Geometry {
             RenderStyle::Geometry
         } else {
@@ -187,8 +185,8 @@ fn build_panel_geometry(
 
         // ── Interaction mesh (Geometry mode only) ───────────────────
         if render_style == RenderStyle::Geometry {
-            let world_w = panel.world_width(&unit_config);
-            let world_h = panel.world_height(&unit_config);
+            let world_w = panel.world_width();
+            let world_h = panel.world_height();
             let center_x = world_w.mul_add(0.5, -anchor_x);
             let center_y = world_h.mul_add(-0.5, anchor_y);
 

@@ -29,8 +29,8 @@
 //!
 //! # Configuration
 //!
-//! Insert [`AtlasConfig`] and/or [`UnitConfig`] as resources before adding
-//! [`DiegeticUiPlugin`] to override defaults:
+//! Insert [`AtlasConfig`] and/or [`CascadeDefaults`] as resources before
+//! adding [`DiegeticUiPlugin`] to override defaults:
 //!
 //! ```ignore
 //! App::new()
@@ -39,7 +39,10 @@
 //!             .with_quality(RasterQuality::Low)
 //!             .with_glyphs_per_page(50),
 //!     )
-//!     .insert_resource(UnitConfig::new().with_font(Unit::Millimeters))
+//!     .insert_resource(CascadeDefaults {
+//!         panel_font_unit: Unit::Millimeters,
+//!         ..default()
+//!     })
 //!     .add_plugins(DiegeticUiPlugin);
 //! ```
 
@@ -117,7 +120,6 @@ pub use layout::TextMeasure;
 pub use layout::TextProps;
 pub use layout::TextWrap;
 pub use layout::Unit;
-pub use layout::UnitConfig;
 pub use layout::WorldTextStyle;
 pub use panel::AnyUnit;
 pub use panel::AtlasPerfStats;
@@ -176,8 +178,8 @@ pub use text::RasterQuality;
 ///
 /// Composes layout, rendering, text, callouts, and screen-space overlay
 /// support into a single plugin. Insert configuration resources
-/// ([`AtlasConfig`], [`UnitConfig`]) before adding this plugin — they
-/// take effect through the child plugins at build time.
+/// ([`AtlasConfig`], [`CascadeDefaults`]) before adding this plugin —
+/// they take effect through the child plugins at build time.
 ///
 /// # Quick start
 ///
@@ -201,7 +203,6 @@ pub struct DiegeticUiPlugin;
 
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<UnitConfig>();
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((
             text::TextPlugin,

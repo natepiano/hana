@@ -103,7 +103,6 @@ pub use units::PaperSize;
 pub use units::Pt;
 pub use units::Px;
 pub use units::Unit;
-pub use units::UnitConfig;
 
 /// Sets the root element's width sizing to `Grow { min, max }`.
 ///

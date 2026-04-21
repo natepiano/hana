@@ -42,7 +42,6 @@ use crate::layout::RenderCommandKind;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
-use crate::layout::UnitConfig;
 use crate::layout::WorldTextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -361,7 +360,6 @@ fn reconcile_panel_text_children(
     >,
     existing_children: Query<(Entity, &PanelTextChild, &ChildOf)>,
     mut commands: Commands,
-    unit_config: Res<UnitConfig>,
 ) {
     for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
@@ -370,10 +368,10 @@ fn reconcile_panel_text_children(
 
         // Layout output is in points. Convert to world meters
         // (incorporates world_width/world_height scaling).
-        let points_to_world = panel.points_to_world(&unit_config);
+        let points_to_world = panel.points_to_world();
         let scale_x = points_to_world;
         let scale_y = points_to_world;
-        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         // Collect text commands from layout result, preserving the
         // command index for Z-offset layering in Geometry mode.
@@ -472,7 +470,6 @@ fn reconcile_panel_image_children(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    unit_config: Res<UnitConfig>,
     rtt_registry: Res<PanelRttRegistry>,
 ) {
     for (panel_entity, panel, computed) in &changed_panels {
@@ -480,8 +477,8 @@ fn reconcile_panel_image_children(
             continue;
         };
 
-        let points_to_world = panel.points_to_world(&unit_config);
-        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let points_to_world = panel.points_to_world();
+        let (anchor_x, anchor_y) = panel.anchor_offsets();
         let layer = rtt_registry
             .get_layer(panel_entity)
             .map_or(RenderLayers::layer(0), RenderLayers::layer);

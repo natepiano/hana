@@ -634,7 +634,7 @@ impl TextProps<ForStandalone> {
     ///
     /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
     /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
-    /// global [`UnitConfig::world_font`](crate::UnitConfig).
+    /// global [`CascadeDefaults::world_font_unit`](crate::CascadeDefaults).
     ///
     /// Defaults to centered anchor, white color, normal weight.
     #[must_use]
@@ -698,7 +698,7 @@ impl TextProps<ForStandalone> {
     /// When set, the renderer converts the size to world meters using the
     /// unit's [`meters_per_unit`](Unit::meters_per_unit) factor. When `None`
     /// (the default), the global
-    /// [`UnitConfig::world_font`](crate::UnitConfig) is used.
+    /// [`CascadeDefaults::world_font_unit`](crate::CascadeDefaults) is used.
     ///
     /// # Example
     ///

@@ -23,7 +23,6 @@ use super::constants::DEFAULT_TEXELS_PER_METER;
 use super::constants::MAX_TEXTURE_SIZE;
 use super::constants::MIN_TEXTURE_SIZE;
 use super::constants::PANEL_LAYER_OFFSET;
-use crate::layout::UnitConfig;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::RenderMode;
@@ -125,7 +124,6 @@ pub(super) fn setup_panel_rtt(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    unit_config: Res<UnitConfig>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, computed, panel_layers) in &panels {
@@ -151,9 +149,9 @@ pub(super) fn setup_panel_rtt(
         let layer = registry.layer_for(panel_entity);
         let render_layers = RenderLayers::layer(layer);
 
-        let world_w = panel.world_width(&unit_config);
-        let world_h = panel.world_height(&unit_config);
-        let (anchor_x, anchor_y) = panel.anchor_offsets(&unit_config);
+        let world_w = panel.world_width();
+        let world_h = panel.world_height();
+        let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         // Compute texture dimensions. Values are clamped to [64, 4096].
         let tex_w = (world_w * DEFAULT_TEXELS_PER_METER)

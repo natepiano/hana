@@ -27,7 +27,6 @@ use crate::Fit;
 use crate::FitMax;
 use crate::LayoutTextStyle;
 use crate::Mm;
-use crate::UnitConfig;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
@@ -61,7 +60,6 @@ fn make_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.insert_resource(monospace_measurer());
-    app.insert_resource(UnitConfig::default());
     app.add_plugins(HeadlessLayoutPlugin);
     app
 }
@@ -256,8 +254,7 @@ fn screen_fit_panel_shrinks_to_content_bounds() {
     // Panel defaults to Anchor::TopLeft (fraction 0,0), so both axes
     // of anchor_offsets should be ~0. A non-zero value would indicate
     // the screen-mode short-circuit isn't honoring anchor fractions.
-    let config = *app.world().resource::<UnitConfig>();
-    let (ax, ay) = panel.anchor_offsets(&config);
+    let (ax, ay) = panel.anchor_offsets();
     assert!(
         ax.abs() < 0.01 && ay.abs() < 0.01,
         "TopLeft anchor_offsets = ({ax}, {ay}), expected ~(0, 0)",
@@ -323,8 +320,6 @@ fn screen_anchor_offsets_equal_panel_size_for_all_sizing_modes() {
         app.update();
     }
 
-    let config = *app.world().resource::<UnitConfig>();
-
     for (entity, label, anchor) in [
         (e_fixed, "fixed", Anchor::BottomRight),
         (e_percent, "percent", Anchor::TopRight),
@@ -334,7 +329,7 @@ fn screen_anchor_offsets_equal_panel_size_for_all_sizing_modes() {
             .world()
             .get::<DiegeticPanel>(entity)
             .expect("panel component");
-        let (ax, ay) = panel.anchor_offsets(&config);
+        let (ax, ay) = panel.anchor_offsets();
         let (fx, fy) = anchor.offset_fraction();
         let expected_x = panel.width() * fx;
         let expected_y = panel.height() * fy;

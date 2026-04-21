@@ -248,34 +248,24 @@ pub(super) fn render_world_text(
         text_count += 1;
 
         if world_text.0.is_empty() {
-            for (mesh_entity, child_of) in &old_meshes {
-                if child_of.parent() == entity {
-                    commands.entity(mesh_entity).despawn();
-                }
-            }
+            despawn_mesh_children(entity, &old_meshes, &mut commands);
             commands.entity(entity).remove::<PendingGlyphs>();
             continue;
         }
 
-        // Tier-1 re-resolve: `WorldTextStyle.unit` may have changed since the
-        // cascade plugin's `On<Add>` observer fired, so recompute
-        // `Resolved<WorldFontUnit>` from the current style.
-        let resolved_unit = WorldFontUnit::override_value(style)
-            .unwrap_or_else(|| WorldFontUnit::global_default(&defaults));
-        if resolved_units
-            .get(entity)
-            .is_ok_and(|current| current.0 != resolved_unit)
-            || resolved_units.get(entity).is_err()
-        {
-            commands.entity(entity).insert(Resolved(resolved_unit));
-        }
+        let resolved_unit = re_resolve_world_font_unit(
+            entity,
+            style,
+            &resolved_units,
+            &defaults,
+            &mut commands,
+        );
         // `WorldTextStyle.world_scale` is a raw meters-per-unit override
         // that bypasses the cascade entirely.
         let scale = style
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
-        // Shape text and build quads in entity-local coordinates.
         let shaped = shape_world_text(
             &world_text.0,
             style,
@@ -290,9 +280,6 @@ pub(super) fn render_world_text(
         let all_ready = shaped.stats.glyphs > 0 && shaped.stats.ready_glyphs == shaped.stats.glyphs;
         let has_pending = shaped.stats.pending_glyphs > 0 || shaped.stats.queued_glyphs > 0;
 
-        // Store computed layout data for the typography overlay.
-        // Only inserted when all glyphs are ready so the overlay
-        // appears atomically with the complete text.
         #[cfg(feature = "typography_overlay")]
         if all_ready {
             commands.entity(entity).insert(ComputedWorldText {
@@ -303,37 +290,16 @@ pub(super) fn render_world_text(
             });
         }
 
-        // Group quads by page.
         let mut page_quads: HashMap<u32, Vec<GlyphQuadData>> = HashMap::new();
         for (page_index, quad) in shaped.quads {
             page_quads.entry(page_index).or_default().push(quad);
         }
-
         let total_quads: usize = page_quads.values().map(Vec::len).sum();
 
         if total_quads > 0 {
-            // Despawn previous mesh children and rebuild.
-            for (mesh_entity, child_of) in &old_meshes {
-                if child_of.parent() == entity {
-                    commands.entity(mesh_entity).despawn();
-                }
-            }
-
-            // Tier-1 re-resolve: recompute `Resolved<WorldTextAlpha>` each
-            // mesh build so `WorldTextStyle.alpha_mode` mutations are picked
-            // up (the cascade plugin's `On<Add>` observer only fires the
-            // first time `WorldTextStyle` is inserted; subsequent field
-            // mutations are detected here via `Changed<WorldTextStyle>`).
-            let resolved_alpha = WorldTextAlpha::override_value(style)
-                .unwrap_or_else(|| WorldTextAlpha::global_default(&defaults));
-            if resolved_alphas
-                .get(entity)
-                .is_ok_and(|current| current.0 != resolved_alpha)
-                || resolved_alphas.get(entity).is_err()
-            {
-                commands.entity(entity).insert(Resolved(resolved_alpha));
-            }
-            let resolved_alpha = resolved_alpha.0;
+            despawn_mesh_children(entity, &old_meshes, &mut commands);
+            let resolved_alpha =
+                re_resolve_world_text_alpha(entity, style, &resolved_alphas, &defaults, &mut commands);
             mesh_ms_total += spawn_world_text_meshes(
                 &page_quads,
                 entity,
@@ -341,12 +307,11 @@ pub(super) fn render_world_text(
                 &atlas,
                 &mut meshes,
                 &mut materials,
-                resolved_alpha,
+                resolved_alpha.0,
                 &mut commands,
             );
         }
 
-        // Track per-entity glyph readiness.
         if has_pending {
             commands.entity(entity).insert_if_new(PendingGlyphs);
         } else if all_ready {
@@ -400,6 +365,57 @@ fn collect_entities_to_process(
         }
     }
     to_process
+}
+
+/// Tier-1 re-resolve for `WorldFontUnit`: recomputes from the current
+/// [`WorldTextStyle`] and writes a fresh `Resolved<WorldFontUnit>` only
+/// when the value actually transitioned. Covers mutations to
+/// `WorldTextStyle.unit` that the cascade plugin's `On<Add>` observer
+/// doesn't see.
+fn re_resolve_world_font_unit(
+    entity: Entity,
+    style: &WorldTextStyle,
+    current: &Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
+    defaults: &CascadeDefaults,
+    commands: &mut Commands,
+) -> WorldFontUnit {
+    let resolved = WorldFontUnit::override_value(style)
+        .unwrap_or_else(|| WorldFontUnit::global_default(defaults));
+    if current.get(entity).map_or(true, |c| c.0 != resolved) {
+        commands.entity(entity).insert(Resolved(resolved));
+    }
+    resolved
+}
+
+/// Tier-1 re-resolve for `WorldTextAlpha`: mirrors
+/// [`re_resolve_world_font_unit`] for the alpha-mode cascade.
+fn re_resolve_world_text_alpha(
+    entity: Entity,
+    style: &WorldTextStyle,
+    current: &Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
+    defaults: &CascadeDefaults,
+    commands: &mut Commands,
+) -> WorldTextAlpha {
+    let resolved = WorldTextAlpha::override_value(style)
+        .unwrap_or_else(|| WorldTextAlpha::global_default(defaults));
+    if current.get(entity).map_or(true, |c| c.0 != resolved) {
+        commands.entity(entity).insert(Resolved(resolved));
+    }
+    resolved
+}
+
+/// Despawns existing mesh children (text meshes and shadow proxies) of the
+/// given parent entity.
+fn despawn_mesh_children(
+    parent: Entity,
+    old_meshes: &Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
+    commands: &mut Commands,
+) {
+    for (mesh_entity, child_of) in old_meshes {
+        if child_of.parent() == parent {
+            commands.entity(mesh_entity).despawn();
+        }
+    }
 }
 
 /// Fires [`WorldTextReady`] for entities whose meshes and transforms are

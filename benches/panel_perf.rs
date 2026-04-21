@@ -35,7 +35,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextMeasure;
 use bevy_diegetic::Unit;
-use bevy_diegetic::UnitConfig;
 use bevy_kana::ToF32;
 use criterion::Criterion;
 use criterion::criterion_group;
@@ -148,9 +147,8 @@ fn build_panel_tree(rows: &[(String, &str)], text_color: Color) -> bevy_diegetic
 fn create_bench_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.insert_resource(monospace_measurer());
-    app.insert_resource(UnitConfig::default());
     app.add_plugins(HeadlessLayoutPlugin);
+    app.insert_resource(monospace_measurer());
     app.update();
     app
 }

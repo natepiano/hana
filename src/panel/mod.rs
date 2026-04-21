@@ -70,9 +70,9 @@ pub(crate) enum PanelSystems {
 /// External consumers (benchmarks, non-UI apps) register this plugin
 /// instead of [`DiegeticUiPlugin`](crate::DiegeticUiPlugin) when they
 /// only need [`DiegeticPanel`] → [`ComputedDiegeticPanel`] computation.
-/// Callers insert their own
-/// [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer) and
-/// [`UnitConfig`](crate::UnitConfig) before adding this plugin.
+/// The plugin initializes [`CascadeDefaults`] itself (idempotent); callers
+/// insert their own [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer)
+/// and optionally override [`CascadeDefaults`] before adding this plugin.
 pub struct HeadlessLayoutPlugin;
 
 impl Plugin for HeadlessLayoutPlugin {
