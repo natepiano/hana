@@ -1143,8 +1143,8 @@ pub(super) fn shape_text_cached(
             ascent:   lm.ascent,
             descent:  lm.descent,
             baseline: lm.baseline,
-            top:      lm.min_coord,
-            bottom:   lm.max_coord,
+            top:      lm.block_min_coord,
+            bottom:   lm.block_max_coord,
         });
         for item in line.items() {
             let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {

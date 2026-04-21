@@ -52,9 +52,9 @@ pub struct LineMetricsSnapshot {
     pub descent:  f32,
     /// Offset to the baseline from the top of the layout.
     pub baseline: f32,
-    /// Top of the line box (parley `min_coord`).
+    /// Top of the line box (parley `block_min_coord`).
     pub top:      f32,
-    /// Bottom of the line box (parley `max_coord`).
+    /// Bottom of the line box (parley `block_max_coord`).
     pub bottom:   f32,
 }
 
