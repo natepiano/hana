@@ -123,7 +123,10 @@ fn spawn_scene(
 fn spawn_hud(commands: &mut Commands) {
     commands.spawn((
         DiegeticPanel::screen()
-            .size(Sizing::fixed(Px(PANEL_WIDTH)), Sizing::fixed(Px(PANEL_HEIGHT)))
+            .size(
+                Sizing::fixed(Px(PANEL_WIDTH)),
+                Sizing::fixed(Px(PANEL_HEIGHT)),
+            )
             .anchor(Anchor::Center)
             .layout(|b| {
                 // Outer frame.

@@ -343,7 +343,10 @@ fn spawn_controls_panel(commands: &mut Commands) {
     commands.spawn((
         ControlsPanel,
         DiegeticPanel::screen()
-            .size(Sizing::fixed(CONTROLS_WIDTH), Sizing::fixed(CONTROLS_HEIGHT))
+            .size(
+                Sizing::fixed(CONTROLS_WIDTH),
+                Sizing::fixed(CONTROLS_HEIGHT),
+            )
             .anchor(Anchor::TopLeft)
             .material(unlit.clone())
             .text_material(unlit)
@@ -409,7 +412,10 @@ fn spawn_camera_help_panel(commands: &mut Commands) {
     commands.spawn((
         CameraHelpPanel,
         DiegeticPanel::screen()
-            .size(Sizing::fixed(CAM_HELP_WIDTH), Sizing::fixed(CAM_HELP_HEIGHT))
+            .size(
+                Sizing::fixed(CAM_HELP_WIDTH),
+                Sizing::fixed(CAM_HELP_HEIGHT),
+            )
             .anchor(Anchor::BottomRight)
             .material(unlit.clone())
             .text_material(unlit)

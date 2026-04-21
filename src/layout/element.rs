@@ -220,7 +220,6 @@ impl LayoutTree {
         }
     }
 
-
     /// Returns an iterator over child indices of the given element.
     #[must_use]
     pub(super) fn children_of(&self, index: usize) -> &[usize] {

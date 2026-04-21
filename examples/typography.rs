@@ -322,7 +322,10 @@ fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
     commands.spawn((
         FontsPanel,
         DiegeticPanel::screen()
-            .size(Sizing::fixed(FONTS_PANEL_WIDTH), Sizing::fixed(FONTS_PANEL_HEIGHT))
+            .size(
+                Sizing::fixed(FONTS_PANEL_WIDTH),
+                Sizing::fixed(FONTS_PANEL_HEIGHT),
+            )
             .anchor(bevy_diegetic::Anchor::TopRight)
             .material(unlit.clone())
             .text_material(unlit.clone())
@@ -334,7 +337,10 @@ fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
 
     commands.spawn((
         DiegeticPanel::screen()
-            .size(Sizing::fixed(CAM_HELP_WIDTH), Sizing::fixed(CAM_HELP_HEIGHT))
+            .size(
+                Sizing::fixed(CAM_HELP_WIDTH),
+                Sizing::fixed(CAM_HELP_HEIGHT),
+            )
             .anchor(bevy_diegetic::Anchor::BottomRight)
             .material(unlit.clone())
             .text_material(unlit)

@@ -445,7 +445,10 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
     };
     commands.spawn((
         DiegeticPanel::screen()
-            .size(Sizing::fixed(CAM_HELP_WIDTH), Sizing::fixed(CAM_HELP_HEIGHT))
+            .size(
+                Sizing::fixed(CAM_HELP_WIDTH),
+                Sizing::fixed(CAM_HELP_HEIGHT),
+            )
             .anchor(Anchor::BottomRight)
             .material(cam_unlit.clone())
             .text_material(cam_unlit)

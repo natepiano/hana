@@ -256,11 +256,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     /// DiegeticPanel::screen().size(Sizing::GROW, Sizing::GROW)
     /// ```
     #[must_use]
-    pub fn size(
-        mut self,
-        w: Sizing,
-        h: Sizing,
-    ) -> DiegeticPanelBuilder<Screen, HasSize> {
+    pub fn size(mut self, w: Sizing, h: Sizing) -> DiegeticPanelBuilder<Screen, HasSize> {
         // Screen panels always use `Unit::Pixels` for their layout dimension.
         self.data.layout_unit = Unit::Pixels;
         self.data.width = initial_panel_size(w);
@@ -301,7 +297,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
 /// the exact value; for any dynamic [`Sizing`] we use `0.0` as a placeholder
 /// that the screen-space system resolves each frame against the window and
 /// the layout result.
-fn initial_panel_size(s: Sizing) -> f32 {
+const fn initial_panel_size(s: Sizing) -> f32 {
     match s {
         Sizing::Fixed(d) => d.value,
         _ => 0.0,
@@ -463,9 +459,16 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
     /// Returns [`InvalidSize`] if width or height is zero or negative
     /// and no dynamic sizing will fill it later.
     pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
-        let (w_sizing, h_sizing) = match self.data.mode {
-            PanelMode::Screen { width, height, .. } => (width, height),
-            PanelMode::World => unreachable!("Screen builder cannot have World mode"),
+        let PanelMode::Screen {
+            width: w_sizing,
+            height: h_sizing,
+            ..
+        } = self.data.mode
+        else {
+            return Err(InvalidSize {
+                width:  self.data.width,
+                height: self.data.height,
+            });
         };
         let has_dynamic_width = !matches!(w_sizing, Sizing::Fixed(_));
         let has_dynamic_height = !matches!(h_sizing, Sizing::Fixed(_));
@@ -491,12 +494,16 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             // the matching root kind here.
             match w_sizing {
                 Sizing::Fit { min, max } => crate::layout::set_root_fit_width(tree, min, max),
-                Sizing::Grow { .. } | Sizing::Percent(_) => crate::layout::set_root_grow_width(tree),
+                Sizing::Grow { .. } | Sizing::Percent(_) => {
+                    crate::layout::set_root_grow_width(tree);
+                },
                 Sizing::Fixed(_) => {},
             }
             match h_sizing {
                 Sizing::Fit { min, max } => crate::layout::set_root_fit_height(tree, min, max),
-                Sizing::Grow { .. } | Sizing::Percent(_) => crate::layout::set_root_grow_height(tree),
+                Sizing::Grow { .. } | Sizing::Percent(_) => {
+                    crate::layout::set_root_grow_height(tree);
+                },
                 Sizing::Fixed(_) => {},
             }
         }

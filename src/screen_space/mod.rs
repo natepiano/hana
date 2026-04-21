@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 
 use crate::layout::Sizing;
+use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelMode;
 use crate::panel::PanelSystems;
@@ -54,7 +55,7 @@ impl Plugin for ScreenSpacePlugin {
 /// trigger layout recomputation via Bevy change detection.
 fn position_screen_space_panels(
     windows: Query<&Window>,
-    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &crate::panel::ComputedDiegeticPanel)>,
+    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -120,7 +121,11 @@ fn resolve_screen_axis(sizing: Sizing, window_axis: f32, content: f32, current: 
             let lower = min.value;
             // Use last-computed content size if the layout engine has produced
             // one; otherwise allow room to grow on the first frame.
-            let target = if content > 0.0 { content } else { current.max(upper) };
+            let target = if content > 0.0 {
+                content
+            } else {
+                current.max(upper)
+            };
             target.clamp(lower, upper)
         },
         Sizing::Grow { min, max } => window_axis.clamp(min.value, max.value),
@@ -327,11 +332,14 @@ mod tests {
     use crate::layout::Dimension;
     use crate::layout::Sizing;
 
-    fn px(value: f32) -> Dimension {
-        Dimension {
-            value,
-            unit: None,
-        }
+    fn px(value: f32) -> Dimension { Dimension { value, unit: None } }
+
+    #[track_caller]
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "expected {expected}, got {actual}",
+        );
     }
 
     /// Fixed pixel value is returned unchanged regardless of window, content,
@@ -339,17 +347,17 @@ mod tests {
     #[test]
     fn fixed_returns_exact_value() {
         let size = Sizing::Fixed(px(280.0));
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 280.0);
-        assert_eq!(resolve_screen_axis(size, 800.0, 500.0, 100.0), 280.0);
-        assert_eq!(resolve_screen_axis(size, 2000.0, 0.0, 0.0), 280.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 280.0);
+        assert_close(resolve_screen_axis(size, 800.0, 500.0, 100.0), 280.0);
+        assert_close(resolve_screen_axis(size, 2000.0, 0.0, 0.0), 280.0);
     }
 
     /// Percent multiplies the window axis by the fraction.
     #[test]
     fn percent_scales_with_window() {
         let size = Sizing::Percent(0.25);
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 200.0);
-        assert_eq!(resolve_screen_axis(size, 1600.0, 0.0, 0.0), 400.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 200.0);
+        assert_close(resolve_screen_axis(size, 1600.0, 0.0, 0.0), 400.0);
     }
 
     /// `Fit` on the first frame (content unknown) grows up to the `max` cap,
@@ -358,21 +366,21 @@ mod tests {
     fn fit_first_frame_uses_max_budget() {
         // Unbounded Fit: grows up to the window axis.
         let size = Sizing::FIT;
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
 
         // Fit with an explicit max smaller than the window: grows to the max.
         let size = Sizing::Fit {
             min: px(0.0),
             max: px(400.0),
         };
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 400.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 400.0);
 
         // Fit with an explicit max larger than the window: clamped to window.
         let size = Sizing::Fit {
             min: px(0.0),
             max: px(2000.0),
         };
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
     }
 
     /// Once the layout engine reports a content size, `Fit` shrinks the panel
@@ -381,9 +389,9 @@ mod tests {
     fn fit_shrinks_to_content_when_known() {
         let size = Sizing::FIT;
         // Content well under window → panel equals content.
-        assert_eq!(resolve_screen_axis(size, 800.0, 320.0, 800.0), 320.0);
+        assert_close(resolve_screen_axis(size, 800.0, 320.0, 800.0), 320.0);
         // Content larger than window → clamped to window.
-        assert_eq!(resolve_screen_axis(size, 800.0, 1200.0, 800.0), 800.0);
+        assert_close(resolve_screen_axis(size, 800.0, 1200.0, 800.0), 800.0);
     }
 
     /// `Fit { min, max }` clamps content to the configured bounds.
@@ -394,11 +402,11 @@ mod tests {
             max: px(500.0),
         };
         // Content below min → floor at min.
-        assert_eq!(resolve_screen_axis(size, 800.0, 50.0, 0.0), 100.0);
+        assert_close(resolve_screen_axis(size, 800.0, 50.0, 0.0), 100.0);
         // Content within range → unchanged.
-        assert_eq!(resolve_screen_axis(size, 800.0, 300.0, 0.0), 300.0);
+        assert_close(resolve_screen_axis(size, 800.0, 300.0, 0.0), 300.0);
         // Content above max → cap at max.
-        assert_eq!(resolve_screen_axis(size, 800.0, 600.0, 0.0), 500.0);
+        assert_close(resolve_screen_axis(size, 800.0, 600.0, 0.0), 500.0);
     }
 
     /// `Grow` fills the window axis, clamped to `[min, max]`.
@@ -406,20 +414,20 @@ mod tests {
     fn grow_fills_window_clamped() {
         // Unbounded Grow: equals window.
         let size = Sizing::GROW;
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
 
         // Grow with explicit cap below window: capped.
         let size = Sizing::Grow {
             min: px(100.0),
             max: px(500.0),
         };
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 500.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 500.0);
 
         // Grow with min above window: floored at min.
         let size = Sizing::Grow {
             min: px(1000.0),
             max: px(f32::INFINITY),
         };
-        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 1000.0);
+        assert_close(resolve_screen_axis(size, 800.0, 0.0, 0.0), 1000.0);
     }
 }

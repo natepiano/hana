@@ -40,7 +40,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlphaModeDefault;
 use bevy_diegetic::WorldText;
@@ -318,7 +317,10 @@ fn setup(
     // panel text stays legible regardless of the current alpha-mode default.
     commands.spawn((
         DiegeticPanel::screen()
-            .size(Sizing::fixed(CAM_HELP_WIDTH), Sizing::fixed(CAM_HELP_HEIGHT))
+            .size(
+                Sizing::fixed(CAM_HELP_WIDTH),
+                Sizing::fixed(CAM_HELP_HEIGHT),
+            )
             .anchor(Anchor::BottomRight)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(build_camera_help)

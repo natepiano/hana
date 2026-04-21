@@ -125,4 +125,3 @@ pub(crate) fn set_root_fit_width(tree: &mut LayoutTree, min: Dimension, max: Dim
 pub(crate) fn set_root_fit_height(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
     tree.set_root_fit_height(min, max);
 }
-
