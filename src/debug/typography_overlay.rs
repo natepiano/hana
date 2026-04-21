@@ -95,34 +95,34 @@ pub enum GlyphMetricVisibility {
 pub struct TypographyOverlay {
     /// Show font-level metric lines (ascent, descent, cap height, x-height,
     /// baseline, top, bottom).
-    pub show_font_metrics:  GlyphMetricVisibility,
+    pub font_metrics:  GlyphMetricVisibility,
     /// Show per-glyph bounding boxes as gizmo lines (from font bbox).
-    pub show_glyph_metrics: GlyphMetricVisibility,
+    pub glyph_metrics: GlyphMetricVisibility,
     /// Show text labels on the metric lines.
-    pub show_labels:        GlyphMetricVisibility,
+    pub labels:        GlyphMetricVisibility,
     /// Color for overlay lines and labels (includes alpha).
-    pub color:              Color,
+    pub color:         Color,
     /// Gizmo line width in pixels.
-    pub line_width:         f32,
+    pub line_width:    f32,
     /// Font size for metric labels.
-    pub label_size:         f32,
+    pub label_size:    f32,
     /// How far annotation lines extend beyond text bounds (in layout units).
-    pub extend:             f32,
+    pub extend:        f32,
     /// Whether overlay geometry and labels cast shadows.
-    pub shadow:             SurfaceShadow,
+    pub shadow:        SurfaceShadow,
 }
 
 impl Default for TypographyOverlay {
     fn default() -> Self {
         Self {
-            show_font_metrics:  GlyphMetricVisibility::Shown,
-            show_glyph_metrics: GlyphMetricVisibility::Shown,
-            show_labels:        GlyphMetricVisibility::Shown,
-            color:              Color::from(WHITE),
-            line_width:         DEFAULT_LINE_WIDTH,
-            label_size:         6.0,
-            extend:             8.0,
-            shadow:             SurfaceShadow::Off,
+            font_metrics:  GlyphMetricVisibility::Shown,
+            glyph_metrics: GlyphMetricVisibility::Shown,
+            labels:        GlyphMetricVisibility::Shown,
+            color:         Color::from(WHITE),
+            line_width:    DEFAULT_LINE_WIDTH,
+            label_size:    6.0,
+            extend:        8.0,
+            shadow:        SurfaceShadow::Off,
         }
     }
 }
@@ -293,7 +293,7 @@ pub fn build_typography_overlay(
             continue;
         };
 
-        if overlay.show_font_metrics == GlyphMetricVisibility::Shown {
+        if overlay.font_metrics == GlyphMetricVisibility::Shown {
             let bounds_target = spawn_font_metric_gizmos(
                 &mut commands,
                 container_entity,
@@ -319,7 +319,7 @@ pub fn build_typography_overlay(
             });
         }
 
-        if overlay.show_glyph_metrics == GlyphMetricVisibility::Shown {
+        if overlay.glyph_metrics == GlyphMetricVisibility::Shown {
             spawn_glyph_metric_gizmos(
                 &mut commands,
                 container_entity,
@@ -337,7 +337,7 @@ pub fn build_typography_overlay(
             );
         }
 
-        if overlay.show_font_metrics != GlyphMetricVisibility::Shown {
+        if overlay.font_metrics != GlyphMetricVisibility::Shown {
             commands.entity(entity).insert(AwaitingOverlayReady {
                 ready_target: container_entity,
             });
@@ -454,7 +454,7 @@ fn spawn_font_metric_gizmos(
         &extents,
     );
 
-    if overlay.show_labels == GlyphMetricVisibility::Shown {
+    if overlay.labels == GlyphMetricVisibility::Shown {
         spawn_metric_labels(
             commands,
             entity,
@@ -574,7 +574,7 @@ fn spawn_glyph_metric_gizmos(
     );
 
     // "Bounding Box" callout from the first glyph's bbox.
-    if !computed.glyph_rects.is_empty() && overlay.show_labels == GlyphMetricVisibility::Shown {
+    if !computed.glyph_rects.is_empty() && overlay.labels == GlyphMetricVisibility::Shown {
         spawn_bounding_box_callout(
             commands,
             entity,
@@ -591,7 +591,7 @@ fn spawn_glyph_metric_gizmos(
     }
 
     // Origin dots + Advancement arrow below the first glyph.
-    if !computed.glyph_rects.is_empty() && overlay.show_labels == GlyphMetricVisibility::Shown {
+    if !computed.glyph_rects.is_empty() && overlay.labels == GlyphMetricVisibility::Shown {
         spawn_origin_and_advancement(
             commands,
             entity,

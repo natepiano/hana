@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! Panel geometry rendering test — backgrounds, borders, and text.
 //!
 //! Displays several diegetic panels with different background colors,
@@ -312,16 +307,18 @@ fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
 fn setup(mut commands: Commands, windows: Query<&Window>) {
     // ── Single panel containing three cards ──────────────────────────
     let tree = build_unified_panel();
+    let panel = DiegeticPanel::world()
+        .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+        .anchor(Anchor::TopCenter)
+        .with_tree(tree)
+        .build();
+    let Ok(panel) = panel else {
+        error!("failed to build panel dimensions");
+        return;
+    };
+
     commands
-        .spawn((
-            DiegeticPanel::world()
-                .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
-                .anchor(Anchor::TopCenter)
-                .with_tree(tree)
-                .build()
-                .expect("valid panel dimensions"),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-        ))
+        .spawn((panel, Transform::from_xyz(0.0, 0.0, 0.0)))
         .observe(on_panel_clicked);
 
     // ── Lighting ────────────────────────────────────────────────────
@@ -344,7 +341,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         ..default_panel_material()
     };
     let hud_width = windows.iter().next().map_or(HUD_WIDTH, Window::width);
-    let mut hud_panel = DiegeticPanel::screen()
+    let hud_panel = DiegeticPanel::screen()
         .size(Sizing::fixed(Px(hud_width)), Sizing::fixed(Px(HUD_HEIGHT)))
         .anchor(Anchor::TopLeft)
         .material(unlit_material.clone())
@@ -352,8 +349,11 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         .layout(|b| {
             build_hud_content(b, LightingPreset::default(), SCENE_ILLUMINANCE, true);
         })
-        .build()
-        .expect("valid HUD dimensions");
+        .build();
+    let Ok(mut hud_panel) = hud_panel else {
+        error!("failed to build HUD dimensions");
+        return;
+    };
     hud_panel.set_tree(build_hud_tree(
         LightingPreset::default(),
         SCENE_ILLUMINANCE,

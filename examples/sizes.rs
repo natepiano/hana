@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! Font size newtypes — `Pt`, `Mm`, `In`, and bare `f32`.
 //!
@@ -182,22 +177,28 @@ fn spawn_headers(
 }
 
 fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: f32) {
+    let demo_panel = DiegeticPanel::world()
+        .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+        .anchor(Anchor::TopLeft)
+        .with_tree(build_demo_panel())
+        .build();
+    let Ok(demo_panel) = demo_panel else {
+        error!("failed to build demo panel dimensions");
+        return;
+    };
+    commands.spawn((demo_panel, Transform::from_xyz(left_x, content_top, 0.0)));
+
+    let commentary_panel = DiegeticPanel::world()
+        .size(Mm(NOTE_WIDTH), Mm(NOTE_HEIGHT))
+        .anchor(Anchor::TopLeft)
+        .with_tree(build_commentary())
+        .build();
+    let Ok(commentary_panel) = commentary_panel else {
+        error!("failed to build commentary panel dimensions");
+        return;
+    };
     commands.spawn((
-        DiegeticPanel::world()
-            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
-            .anchor(Anchor::TopLeft)
-            .with_tree(build_demo_panel())
-            .build()
-            .expect("valid demo panel dimensions"),
-        Transform::from_xyz(left_x, content_top, 0.0),
-    ));
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(Mm(NOTE_WIDTH), Mm(NOTE_HEIGHT))
-            .anchor(Anchor::TopLeft)
-            .with_tree(build_commentary())
-            .build()
-            .expect("valid commentary panel dimensions"),
+        commentary_panel,
         Transform::from_xyz(note_x, content_top, 0.0),
     ));
 }

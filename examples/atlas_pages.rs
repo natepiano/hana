@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! MSDF atlas paging — inspecting committed atlas pages directly.
 //!
@@ -223,6 +218,19 @@ struct CommittedPages(Vec<CommittedPage>);
 #[derive(Resource)]
 struct PagesRevealed(usize);
 
+fn build_panel_or_log(
+    panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
+    label: &str,
+) -> Option<DiegeticPanel> {
+    match panel {
+        Ok(panel) => Some(panel),
+        Err(error) => {
+            error!("failed to build {label}: {error}");
+            None
+        },
+    }
+}
+
 /// Entities spawned by the display system (atlas quads + click planes).
 #[derive(Resource, Default)]
 struct SpawnedCellEntities(Vec<Entity>);
@@ -335,8 +343,12 @@ fn setup(
     commands.insert_resource(InvisibleMaterial(invisible_material));
 
     // Grid panel — visible display, built from committed snapshots.
+    let Some(grid_panel) = build_panel_or_log(build_grid_panel(&[]), "grid panel dimensions")
+    else {
+        return;
+    };
     let grid_entity = commands
-        .spawn((GridPanel, build_grid_panel(&[]), Transform::IDENTITY))
+        .spawn((GridPanel, grid_panel, Transform::IDENTITY))
         .id();
     commands.entity(tilt_root).add_child(grid_entity);
 
@@ -391,13 +403,19 @@ fn setup(
     commands.insert_resource(CameraEntity(camera));
 
     // Status panel (floating in world, outside the tilt hierarchy).
-    commands.spawn((
-        StatusPanel,
+    let Some(status_panel) = build_panel_or_log(
         build_status_panel(&StatusData {
             pages:     0,
             glyphs:    0,
             remaining: CHARACTER_BATCHES.len(),
         }),
+        "status panel dimensions",
+    ) else {
+        return;
+    };
+    commands.spawn((
+        StatusPanel,
+        status_panel,
         Transform::from_xyz(-6.0, 4.0, 2.0),
     ));
 }
@@ -459,7 +477,7 @@ const fn glyph_color_for(chars: &[char]) -> Color {
 }
 
 /// Builds the single grid panel containing committed page text cells.
-fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
+fn build_grid_panel(cells: &[PageCellData]) -> Result<DiegeticPanel, bevy_diegetic::InvalidSize> {
     let total_cells = cells.len();
     let cols = GRID_COLUMNS.min(total_cells).max(1);
     let rows = total_cells.div_ceil(cols).max(1);
@@ -505,7 +523,6 @@ fn build_grid_panel(cells: &[PageCellData]) -> DiegeticPanel {
             );
         })
         .build()
-        .expect("valid panel dimensions")
 }
 
 /// Builds a single text cell with a header, glyph grid, and footer.
@@ -757,7 +774,11 @@ fn display_committed_pages(
 
     // Update the grid panel tree.
     for mut panel in &mut grid_panels {
-        *panel = build_grid_panel(&cells);
+        let Some(new_panel) = build_panel_or_log(build_grid_panel(&cells), "grid panel dimensions")
+        else {
+            return;
+        };
+        *panel = new_panel;
     }
 
     // Despawn previous click planes.
@@ -904,7 +925,7 @@ struct StatusData {
     remaining: usize,
 }
 
-fn build_status_panel(data: &StatusData) -> DiegeticPanel {
+fn build_status_panel(data: &StatusData) -> Result<DiegeticPanel, bevy_diegetic::InvalidSize> {
     let label_style = LayoutTextStyle::new(STATUS_FONT_SIZE)
         .with_color(Color::srgba(0.6, 0.6, 0.6, 0.9))
         .with_shadow_mode(GlyphShadowMode::None);
@@ -948,7 +969,6 @@ fn build_status_panel(data: &StatusData) -> DiegeticPanel {
             );
         })
         .build()
-        .expect("valid panel dimensions")
 }
 
 fn build_status_rows(
@@ -1033,6 +1053,11 @@ fn update_diagnostics(
         remaining,
     };
     for mut panel in &mut status_panels {
-        *panel = build_status_panel(&data);
+        let Some(new_panel) =
+            build_panel_or_log(build_status_panel(&data), "status panel dimensions")
+        else {
+            return;
+        };
+        *panel = new_panel;
     }
 }

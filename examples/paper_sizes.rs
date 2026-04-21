@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! Paper sizes — portrait and landscape for standard sizes.
 //!
@@ -198,16 +193,18 @@ fn setup(
     ));
 
     // ── Main panel ───────────────────────────────────────────────────
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(Pt(PANEL_WIDTH), Pt(PANEL_HEIGHT))
-            .world_width(WORLD_WIDTH)
-            .anchor(Anchor::TopCenter)
-            .with_tree(build_panel())
-            .build()
-            .expect("valid panel dimensions"),
-        Transform::from_xyz(0.0, world_h, 0.0),
-    ));
+    let panel = DiegeticPanel::world()
+        .size(Pt(PANEL_WIDTH), Pt(PANEL_HEIGHT))
+        .world_width(WORLD_WIDTH)
+        .anchor(Anchor::TopCenter)
+        .with_tree(build_panel())
+        .build();
+    let Ok(panel) = panel else {
+        error!("failed to build panel dimensions");
+        return;
+    };
+
+    commands.spawn((panel, Transform::from_xyz(0.0, world_h, 0.0)));
 
     // ── Lighting ─────────────────────────────────────────────────────
     commands.spawn((

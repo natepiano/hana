@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! Layout dimensions — `Dimension` newtypes in spatial properties.
 //!
@@ -157,25 +152,29 @@ fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f3
 }
 
 fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: f32) {
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(Mm(DEMO_WIDTH), Mm(DEMO_HEIGHT))
-            .anchor(Anchor::TopLeft)
-            .with_tree(build_demo())
-            .build()
-            .expect("valid demo panel dimensions"),
-        Transform::from_xyz(left_x, content_top, 0.0),
-    ));
+    let demo_panel = DiegeticPanel::world()
+        .size(Mm(DEMO_WIDTH), Mm(DEMO_HEIGHT))
+        .anchor(Anchor::TopLeft)
+        .with_tree(build_demo())
+        .build();
+    let Ok(demo_panel) = demo_panel else {
+        error!("failed to build demo panel dimensions");
+        return;
+    };
 
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(Mm(NOTE_WIDTH), Mm(NOTE_HEIGHT))
-            .anchor(Anchor::TopLeft)
-            .with_tree(build_commentary())
-            .build()
-            .expect("valid note panel dimensions"),
-        Transform::from_xyz(note_x, content_top, 0.0),
-    ));
+    commands.spawn((demo_panel, Transform::from_xyz(left_x, content_top, 0.0)));
+
+    let note_panel = DiegeticPanel::world()
+        .size(Mm(NOTE_WIDTH), Mm(NOTE_HEIGHT))
+        .anchor(Anchor::TopLeft)
+        .with_tree(build_commentary())
+        .build();
+    let Ok(note_panel) = note_panel else {
+        error!("failed to build note panel dimensions");
+        return;
+    };
+
+    commands.spawn((note_panel, Transform::from_xyz(note_x, content_top, 0.0)));
 }
 
 fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {

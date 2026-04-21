@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! Font loading validation.
 //!
@@ -181,14 +176,19 @@ fn setup(
     ));
 
     // Status panel.
+    let status_panel = DiegeticPanel::world()
+        .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(build_status_panel("Fonts: loading..."))
+        .build();
+    let Ok(status_panel) = status_panel else {
+        error!("failed to build status panel dimensions");
+        return;
+    };
+
     commands.spawn((
         StatusPanel,
-        DiegeticPanel::world()
-            .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(build_status_panel("Fonts: loading..."))
-            .build()
-            .expect("valid status panel dimensions"),
+        status_panel,
         Transform::from_xyz(-1.54, 3.515, 0.0),
     ));
 }

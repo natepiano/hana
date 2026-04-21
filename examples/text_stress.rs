@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! Text stress test — add/remove rows to measure per-element rendering cost.
 //!
 //! Press '+' to add rows, '-' to remove (hold for accelerating repeat).
@@ -75,12 +70,10 @@ const PANEL_PADDING: f32 = 0.06;
 /// How many columns per panel.
 const MAX_COLUMNS: usize = 8;
 /// Max layout width — exactly fits `MAX_COLUMNS` with gaps and padding (meters).
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "const context — trait methods cannot be called in const expressions"
-)]
+const MAX_COLUMNS_F32: f32 = 8.0;
+const MAX_COLUMN_GAPS_F32: f32 = MAX_COLUMNS_F32 - 1.0;
 const MAX_LAYOUT_WIDTH: f32 =
-    COLUMN_WIDTH * MAX_COLUMNS as f32 + COLUMN_GAP * (MAX_COLUMNS - 1) as f32 + PANEL_PADDING * 2.0;
+    COLUMN_WIDTH * MAX_COLUMNS_F32 + COLUMN_GAP * MAX_COLUMN_GAPS_F32 + PANEL_PADDING * 2.0;
 /// Ground plane size — same as panel width (layout is already in meters).
 const GROUND_SIZE: f32 = MAX_LAYOUT_WIDTH;
 /// Distance between stacked panels along Z (on the ground plane).
@@ -275,26 +268,36 @@ fn setup(
     ));
 
     // Status panel (combined FPS + row/panel counts) — top-right area.
+    let status_panel = DiegeticPanel::world()
+        .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(build_status_panel("fps: --  ms: --  rows: 0  panels: 0"))
+        .build();
+    let Ok(status_panel) = status_panel else {
+        error!("failed to build status panel dimensions");
+        return;
+    };
+
     commands.spawn((
         StatusPanel,
-        DiegeticPanel::world()
-            .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(build_status_panel("fps: --  ms: --  rows: 0  panels: 0"))
-            .build()
-            .expect("valid status panel dimensions"),
+        status_panel,
         Transform::from_xyz(3.9, 5.015, 2.0),
     ));
 
     // Controls panel (static help text) — bottom-left area.
+    let controls_panel = DiegeticPanel::world()
+        .size(CONTROLS_LAYOUT_WIDTH, CONTROLS_LAYOUT_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(build_controls_panel())
+        .build();
+    let Ok(controls_panel) = controls_panel else {
+        error!("failed to build controls panel dimensions");
+        return;
+    };
+
     commands.spawn((
         ControlsPanel,
-        DiegeticPanel::world()
-            .size(CONTROLS_LAYOUT_WIDTH, CONTROLS_LAYOUT_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(build_controls_panel())
-            .build()
-            .expect("valid controls panel dimensions"),
+        controls_panel,
         Transform::from_xyz(-4.04, 0.51, 3.0),
     ));
 }
@@ -451,7 +454,7 @@ fn update_status_panel(
         update_ms: stress_perf.panel_update_ms,
         tree_ms:   stress_perf.tree_build_ms,
         layout_ms: diegetic_perf.compute_ms,
-        text_ms:   diegetic_perf.text_extract_ms,
+        text_ms:   diegetic_perf.panel_text.total_ms,
     });
 
     let cutoff = time.elapsed_secs() - PERF_PEAK_WINDOW_SECS;
@@ -488,7 +491,7 @@ fn update_status_panel(
         upd = format!("{:.1}", stress_perf.panel_update_ms),
         tree = format!("{:.1}", stress_perf.tree_build_ms),
         layout = format!("{:.1}", diegetic_perf.compute_ms),
-        text_ms = format!("{:.1}", diegetic_perf.text_extract_ms),
+        text_ms = format!("{:.1}", diegetic_perf.panel_text.total_ms),
         max_fps = format!("{:.0}", max_fps),
         max_frame = format!("{:.1}", max_frame_ms),
         max_upd = format!("{:.1}", max_update_ms),
@@ -572,12 +575,18 @@ fn update_panels(
         tree_builds += 1;
         commands.spawn((
             StressPanel(idx),
-            DiegeticPanel::world()
-                .size(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT)
-                .font_unit(Unit::Millimeters)
-                .with_tree(tree)
-                .build()
-                .expect("valid stress panel dimensions"),
+            {
+                let panel = DiegeticPanel::world()
+                    .size(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT)
+                    .font_unit(Unit::Millimeters)
+                    .with_tree(tree)
+                    .build();
+                let Ok(panel) = panel else {
+                    error!("failed to build stress panel dimensions");
+                    return;
+                };
+                panel
+            },
             panel_transform(idx, needed, ww, wh),
         ));
     }

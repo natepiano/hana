@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! Side-by-side layout comparison: Clay (C FFI) vs `bevy_diegetic` (Rust).
 //!
 //! Renders the same status panel using two layout engines side by side.
@@ -360,24 +355,34 @@ fn setup(
     let diegetic_rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
     let tree = build_diegetic_tree(&diegetic_rows, world_size);
     let world_height = world_size * PANEL_ASPECT;
+    let diegetic_panel = DiegeticPanel::world()
+        .size(world_size, world_height)
+        .font_unit(Unit::Millimeters)
+        .with_tree(tree)
+        .build();
+    let Ok(diegetic_panel) = diegetic_panel else {
+        error!("failed to build diegetic panel dimensions");
+        return;
+    };
+
     commands.spawn((
-        DiegeticPanel::world()
-            .size(world_size, world_height)
-            .font_unit(Unit::Millimeters)
-            .with_tree(tree)
-            .build()
-            .expect("valid diegetic panel dimensions"),
+        diegetic_panel,
         Transform::from_xyz(offset, world_height * 0.5, 0.0),
     ));
 
     // Controls panel — below the two panels.
+    let controls_panel = DiegeticPanel::world()
+        .size(CONTROL_LAYOUT_WIDTH, CONTROL_LAYOUT_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(build_controls_panel())
+        .build();
+    let Ok(controls_panel) = controls_panel else {
+        error!("failed to build controls panel dimensions");
+        return;
+    };
+
     commands.spawn((
-        DiegeticPanel::world()
-            .size(CONTROL_LAYOUT_WIDTH, CONTROL_LAYOUT_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(build_controls_panel())
-            .build()
-            .expect("valid controls panel dimensions"),
+        controls_panel,
         Transform::from_xyz(
             -CONTROL_LAYOUT_WIDTH * 0.5,
             CONTROL_LAYOUT_HEIGHT.mul_add(0.5, -0.85),

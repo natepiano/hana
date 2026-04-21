@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! `HueOffset` material sharing validation.
 //!
@@ -118,27 +113,34 @@ fn setup(
     ));
 
     // Left panel — rotating hue.
+    let rotating_panel = DiegeticPanel::world()
+        .size(LAYOUT_WIDTH, LAYOUT_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(tree.clone())
+        .build();
+    let Ok(rotating_panel) = rotating_panel else {
+        error!("failed to build rotating panel dimensions");
+        return;
+    };
+
     commands.spawn((
         RotatingPanel,
-        DiegeticPanel::world()
-            .size(LAYOUT_WIDTH, LAYOUT_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(tree.clone())
-            .build()
-            .expect("valid panel dimensions"),
+        rotating_panel,
         Transform::from_xyz(-1.1, 1.05, 0.0),
     ));
 
     // Right panel — no hue offset (static colors).
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(LAYOUT_WIDTH, LAYOUT_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(tree)
-            .build()
-            .expect("valid panel dimensions"),
-        Transform::from_xyz(0.1, 1.05, 0.0),
-    ));
+    let static_panel = DiegeticPanel::world()
+        .size(LAYOUT_WIDTH, LAYOUT_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(tree)
+        .build();
+    let Ok(static_panel) = static_panel else {
+        error!("failed to build static panel dimensions");
+        return;
+    };
+
+    commands.spawn((static_panel, Transform::from_xyz(0.1, 1.05, 0.0)));
 
     // Directional lights.
     commands.spawn((
@@ -179,15 +181,17 @@ fn setup(
     },));
 
     // Info panel — below the two panels.
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(build_info_panel())
-            .build()
-            .expect("valid info panel dimensions"),
-        Transform::from_xyz(-0.07, -0.085, 0.0),
-    ));
+    let info_panel = DiegeticPanel::world()
+        .size(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(build_info_panel())
+        .build();
+    let Ok(info_panel) = info_panel else {
+        error!("failed to build info panel dimensions");
+        return;
+    };
+
+    commands.spawn((info_panel, Transform::from_xyz(-0.07, -0.085, 0.0)));
 }
 
 fn build_panel() -> bevy_diegetic::LayoutTree {

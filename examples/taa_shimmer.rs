@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! TAA shimmer demonstration.
 //!
 //! Shows how Temporal Anti-Aliasing interacts with SDF border-only
@@ -101,34 +96,44 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     // ── Left panel: full-alpha border (shimmers) ────────────────────
+    let full_alpha_panel = DiegeticPanel::world()
+        .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+        .anchor(Anchor::TopCenter)
+        .with_tree(build_panel(
+            "Full Alpha Border",
+            "border: Color::WHITE (alpha 1.0)",
+            "High contrast alpha variation\ncauses visible shimmer\nunder TAA jitter.\n\nNote: TAA also softens text.\nToggle T to compare.",
+            FULL_ALPHA_BORDER,
+        ))
+        .build();
+    let Ok(full_alpha_panel) = full_alpha_panel else {
+        error!("failed to build full alpha panel dimensions");
+        return;
+    };
+
     commands.spawn((
-        DiegeticPanel::world()
-            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
-            .anchor(Anchor::TopCenter)
-            .with_tree(build_panel(
-                "Full Alpha Border",
-                "border: Color::WHITE (alpha 1.0)",
-                "High contrast alpha variation\ncauses visible shimmer\nunder TAA jitter.\n\nNote: TAA also softens text.\nToggle T to compare.",
-                FULL_ALPHA_BORDER,
-            ))
-            .build()
-            .expect("valid panel dimensions"),
+        full_alpha_panel,
         Transform::from_xyz(-(PANEL_WIDTH + PANEL_GAP) * 0.5 * 0.001, 0.0, 0.0),
     ));
 
     // ── Right panel: reduced-alpha border (stable) ──────────────────
+    let reduced_alpha_panel = DiegeticPanel::world()
+        .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+        .anchor(Anchor::TopCenter)
+        .with_tree(build_panel(
+            "Reduced Alpha Border",
+            "border: srgba(0.7, 0.7, 0.8, 0.6)",
+            "Lower alpha reduces the\nframe-to-frame contrast,\nso TAA can converge.\n\nNote: TAA also softens text.\nToggle T to compare.",
+            REDUCED_ALPHA_BORDER,
+        ))
+        .build();
+    let Ok(reduced_alpha_panel) = reduced_alpha_panel else {
+        error!("failed to build reduced alpha panel dimensions");
+        return;
+    };
+
     commands.spawn((
-        DiegeticPanel::world()
-            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
-            .anchor(Anchor::TopCenter)
-            .with_tree(build_panel(
-                "Reduced Alpha Border",
-                "border: srgba(0.7, 0.7, 0.8, 0.6)",
-                "Lower alpha reduces the\nframe-to-frame contrast,\nso TAA can converge.\n\nNote: TAA also softens text.\nToggle T to compare.",
-                REDUCED_ALPHA_BORDER,
-            ))
-            .build()
-            .expect("valid panel dimensions"),
+        reduced_alpha_panel,
         Transform::from_xyz((PANEL_WIDTH + PANEL_GAP) * 0.5 * 0.001, 0.0, 0.0),
     ));
 
@@ -156,8 +161,11 @@ fn setup(mut commands: Commands) {
         .layout(|b| {
             build_hud_content(b, true);
         })
-        .build()
-        .expect("valid HUD dimensions");
+        .build();
+    let Ok(hud_panel) = hud_panel else {
+        error!("failed to build HUD dimensions");
+        return;
+    };
     commands.spawn((HudPanel, hud_panel, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! OpenType font feature showcase.
 //!
@@ -86,6 +81,19 @@ struct FontHandles(Vec<Handle<Font>>);
 #[derive(Resource, Default)]
 struct SerifFontId(Option<u16>);
 
+fn build_panel_or_log(
+    panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
+    label: &str,
+) -> Option<DiegeticPanel> {
+    match panel {
+        Ok(panel) => Some(panel),
+        Err(error) => {
+            error!("failed to build {label}: {error}");
+            None
+        },
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -137,8 +145,7 @@ fn setup(
         Transform::from_xyz(0.0, 0.0, ground_z),
     ));
 
-    commands.spawn((
-        ShowcasePanel,
+    let Some(showcase_panel) = build_panel_or_log(
         DiegeticPanel::world()
             .size(Pt(layout_w), Pt(layout_h))
             .world_height(PANEL_WORLD_HEIGHT)
@@ -146,8 +153,15 @@ fn setup(
             .layout(|b| {
                 build_panel_content(b, noto_id.0);
             })
-            .build()
-            .expect("valid panel dimensions"),
+            .build(),
+        "panel dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        ShowcasePanel,
+        showcase_panel,
         panel_transform(world_w, world_h),
     ));
 
@@ -234,22 +248,24 @@ fn resize_panel(
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
-        #[allow(
-            clippy::float_cmp,
-            reason = "exact comparison detects whether dimensions changed from values this code assigned"
-        )]
-        if panel.width() == layout_w && panel.height() == layout_h {
+        let width_matches = (panel.width() - layout_w).abs() <= f32::EPSILON;
+        let height_matches = (panel.height() - layout_h).abs() <= f32::EPSILON;
+        if width_matches && height_matches {
             continue;
         }
-        let new = DiegeticPanel::world()
-            .size(Pt(layout_w), Pt(layout_h))
-            .world_height(PANEL_WORLD_HEIGHT)
-            .anchor(Anchor::TopLeft)
-            .layout(|b| {
-                build_panel_content(b, noto_id.0);
-            })
-            .build()
-            .expect("valid panel dimensions");
+        let Some(new) = build_panel_or_log(
+            DiegeticPanel::world()
+                .size(Pt(layout_w), Pt(layout_h))
+                .world_height(PANEL_WORLD_HEIGHT)
+                .anchor(Anchor::TopLeft)
+                .layout(|b| {
+                    build_panel_content(b, noto_id.0);
+                })
+                .build(),
+            "panel dimensions",
+        ) else {
+            return;
+        };
         *panel = new;
         *transform = panel_transform(world_w, world_h);
     }
@@ -277,15 +293,19 @@ fn on_font_registered(
     };
     let (layout_w, layout_h) = layout_dimensions(window);
     for mut panel in &mut panels {
-        let new = DiegeticPanel::world()
-            .size(Pt(layout_w), Pt(layout_h))
-            .world_height(PANEL_WORLD_HEIGHT)
-            .anchor(Anchor::TopLeft)
-            .layout(|b| {
-                build_panel_content(b, noto_id.0);
-            })
-            .build()
-            .expect("valid panel dimensions");
+        let Some(new) = build_panel_or_log(
+            DiegeticPanel::world()
+                .size(Pt(layout_w), Pt(layout_h))
+                .world_height(PANEL_WORLD_HEIGHT)
+                .anchor(Anchor::TopLeft)
+                .layout(|b| {
+                    build_panel_content(b, noto_id.0);
+                })
+                .build(),
+            "panel dimensions",
+        ) else {
+            return;
+        };
         *panel = new;
     }
 }

@@ -39,18 +39,22 @@ const DIAG_LAYOUT_COMPUTE_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/layout/compute_ms");
 const DIAG_LAYOUT_COMPUTE_PANELS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/layout/compute_panels");
-const DIAG_TEXT_ATLAS_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/atlas_lookup_ms");
-const DIAG_TEXT_EXTRACT_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/extract_ms");
-const DIAG_TEXT_EXTRACT_PANELS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/extract_panels");
-const DIAG_TEXT_PENDING_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/pending_glyphs");
-const DIAG_TEXT_QUEUED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/text/queued_glyphs");
-const DIAG_TEXT_SHAPE_MS: DiagnosticPath = DiagnosticPath::const_new("bevy_diegetic/text/shape_ms");
-const DIAG_TEXT_SPAWN_MS: DiagnosticPath = DiagnosticPath::const_new("bevy_diegetic/text/spawn_ms");
+const DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/atlas_lookup_ms");
+const DIAG_PANEL_TEXT_MESH_BUILD_MS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/mesh_build_ms");
+const DIAG_PANEL_TEXT_PARLEY_MS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/parley_ms");
+const DIAG_PANEL_TEXT_PENDING_GLYPHS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/pending_glyphs");
+const DIAG_PANEL_TEXT_QUEUED_GLYPHS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/queued_glyphs");
+const DIAG_PANEL_TEXT_SHAPE_MS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/shape_ms");
+const DIAG_PANEL_TEXT_SHAPED_PANELS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/shaped_panels");
+const DIAG_PANEL_TEXT_TOTAL_MS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/total_ms");
 
 /// Lightweight timing data for diegetic UI systems.
 ///
@@ -65,55 +69,103 @@ const DIAG_TEXT_SPAWN_MS: DiagnosticPath = DiagnosticPath::const_new("bevy_diege
 #[derive(Resource, Clone, Debug, Default, Reflect)]
 #[reflect(Resource)]
 pub struct DiegeticPerfStats {
-    /// Duration of the most recent `compute_panel_layouts` run, in milliseconds.
-    pub compute_ms:                  f32,
-    /// Number of panels processed by the most recent layout run.
-    pub compute_panels:              usize,
-    /// Duration of the most recent text extraction run, in milliseconds.
-    pub text_extract_ms:             f32,
-    /// Number of panels processed by the most recent text extraction run.
-    pub text_extract_panels:         usize,
-    /// Time spent shaping text during the most recent panel text extraction.
-    pub text_shape_ms:               f32,
-    /// Time spent in atlas lookups/queueing during the most recent panel text extraction.
-    pub text_atlas_ms:               f32,
-    /// Time spent spawning mesh/material batches during the most recent panel text extraction.
-    pub text_spawn_ms:               f32,
-    /// Number of glyphs newly queued for rasterization during the most recent panel text
-    /// extraction.
-    pub text_queued_glyphs:          usize,
-    /// Number of glyphs still pending rasterization during the most recent panel text extraction.
-    pub text_pending_glyphs:         usize,
+    /// Stage 1 — `compute_panel_layouts` wall time in milliseconds.
+    /// Layout math: element positions and sizes for every dirty panel.
+    pub compute_ms:     f32,
+    /// Stage 1 — panels processed by the most recent layout run.
+    pub compute_panels: usize,
+    /// Stages 2 & 3 — panel-text shape + mesh-build timings and counts.
+    pub panel_text:     PanelTextPerfStats,
+    /// Async MSDF atlas polling timings and glyph-job counts.
+    pub atlas:          AtlasPerfStats,
+}
+
+/// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
+///
+/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`]
+/// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → glyph quads)
+/// 3. `build_panel_batched_meshes` → [`Self::mesh_build_ms`] (quads → mesh entities)
+///
+/// Render-pass time is not measured here — it lives in Bevy's own diagnostics
+/// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
+/// crate's control.
+///
+/// Only panel text is covered. Standalone `WorldText` entities not parented to a
+/// panel run through a separate path (`render_world_text`) and are not included.
+#[derive(Clone, Debug, Default, Reflect)]
+pub struct PanelTextPerfStats {
+    /// End-to-end panel-text wall time this frame, in milliseconds.
+    /// Equals [`Self::shape_ms`] + [`Self::mesh_build_ms`].
+    ///
+    /// Written twice per frame: first by `shape_panel_text_children` using
+    /// the *previous* frame's `mesh_build_ms`, then overwritten by
+    /// `build_panel_batched_meshes` using the current frame's values. The
+    /// final value is only correct because mesh build is scheduled
+    /// `.after(shape_panel_text_children)`; reordering those systems would
+    /// leave `total_ms` stale by one frame.
+    pub total_ms:        f32,
+    /// Stage 2 — wall time of `shape_panel_text_children` this frame.
+    /// Covers string → glyph-quad shaping for every panel-text entity that
+    /// changed or is waiting on async glyph rasterization.
+    pub shape_ms:        f32,
+    /// Inside [`Self::shape_ms`] — time spent in parley text shaping,
+    /// summed across entities. If this dominates, the cost is content-side
+    /// (many strings, complex scripts, heavy font features).
+    pub parley_ms:       f32,
+    /// Inside [`Self::shape_ms`] — time spent in MSDF atlas lookups and
+    /// async glyph queueing, summed across entities. If this dominates,
+    /// the cost is atlas-side (cache misses, new glyph dispatch).
+    pub atlas_lookup_ms: f32,
+    /// Stage 3 — wall time of `build_panel_batched_meshes` this frame.
+    /// Covers batching `PanelTextQuads` into per-page mesh entities and
+    /// despawning stale meshes.
+    pub mesh_build_ms:   f32,
+    /// Number of panels whose text was re-shaped this frame.
+    pub shaped_panels:   usize,
+    /// Glyphs newly queued for async rasterization during the shape pass.
+    /// Non-zero in steady-state usually indicates new characters appearing
+    /// (font change, new content).
+    pub queued_glyphs:   usize,
+    /// Glyphs still awaiting async rasterization at the end of the shape
+    /// pass. Non-zero in steady-state means raster workers are saturated —
+    /// cross-reference [`AtlasPerfStats::in_flight_glyphs`] and
+    /// [`AtlasPerfStats::peak_active_jobs`].
+    pub pending_glyphs:  usize,
+}
+
+/// Atlas-poll timings and glyph-job counts.
+#[derive(Clone, Debug, Default, Reflect)]
+pub struct AtlasPerfStats {
     /// Time spent draining async atlas results in the most recent atlas poll.
-    pub atlas_poll_ms:               f32,
+    pub poll_ms:               f32,
     /// Time spent syncing dirty atlas pages to GPU images in the most recent atlas poll.
-    pub atlas_sync_ms:               f32,
+    pub sync_ms:               f32,
     /// Number of completed async glyph jobs drained by the most recent atlas poll.
-    pub atlas_completed_glyphs:      usize,
+    pub completed_glyphs:      usize,
     /// Number of visible glyphs inserted into atlas pages by the most recent atlas poll.
-    pub atlas_inserted_glyphs:       usize,
+    pub inserted_glyphs:       usize,
     /// Number of invisible glyph entries cached by the most recent atlas poll.
-    pub atlas_invisible_glyphs:      usize,
+    pub invisible_glyphs:      usize,
     /// Number of atlas pages added by the most recent atlas poll.
-    pub atlas_pages_added:           usize,
+    pub pages_added:           usize,
     /// Number of dirty atlas pages observed before the most recent GPU sync.
-    pub atlas_dirty_pages:           usize,
+    pub dirty_pages:           usize,
     /// Number of glyph raster jobs still in flight after the most recent atlas poll.
-    pub atlas_in_flight_glyphs:      usize,
+    pub in_flight_glyphs:      usize,
     /// Number of glyph raster jobs actively executing at the end of the most recent atlas poll.
-    pub atlas_active_jobs:           usize,
+    pub active_jobs:           usize,
     /// Peak concurrently executing glyph raster jobs observed so far.
-    pub atlas_peak_active_jobs:      usize,
+    pub peak_active_jobs:      usize,
     /// Number of distinct worker threads that completed jobs in the most recent atlas poll.
-    pub atlas_worker_threads:        usize,
+    pub worker_threads:        usize,
     /// Average worker-side glyph raster duration for the most recent drained batch.
-    pub atlas_avg_raster_ms:         f32,
+    pub avg_raster_ms:         f32,
     /// Maximum worker-side glyph raster duration for the most recent drained batch.
-    pub atlas_max_raster_ms:         f32,
+    pub max_raster_ms:         f32,
     /// Highest active-job count reported by any job in the most recent drained batch.
-    pub atlas_batch_max_active_jobs: usize,
+    pub batch_max_active_jobs: usize,
     /// Total number of glyphs currently cached in the atlas.
-    pub atlas_total_glyphs:          usize,
+    pub total_glyphs:          usize,
 }
 
 #[derive(Resource, Default)]
@@ -134,13 +186,14 @@ impl Plugin for DiagnosticsPlugin {
         for diagnostic in [
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
-            Diagnostic::new(DIAG_TEXT_EXTRACT_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_TEXT_EXTRACT_PANELS),
-            Diagnostic::new(DIAG_TEXT_SHAPE_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_TEXT_ATLAS_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_TEXT_SPAWN_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_TEXT_QUEUED_GLYPHS),
-            Diagnostic::new(DIAG_TEXT_PENDING_GLYPHS),
+            Diagnostic::new(DIAG_PANEL_TEXT_TOTAL_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_PANEL_TEXT_SHAPE_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_PANEL_TEXT_MESH_BUILD_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_PANEL_TEXT_SHAPED_PANELS),
+            Diagnostic::new(DIAG_PANEL_TEXT_QUEUED_GLYPHS),
+            Diagnostic::new(DIAG_PANEL_TEXT_PENDING_GLYPHS),
             Diagnostic::new(DIAG_ATLAS_POLL_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_ATLAS_SYNC_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_ATLAS_COMPLETED_GLYPHS),
@@ -167,52 +220,63 @@ impl Plugin for DiagnosticsPlugin {
 fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagnostics) {
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_MS, || f64::from(perf.compute_ms));
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_PANELS, || perf.compute_panels.to_f64());
-    diagnostics.add_measurement(&DIAG_TEXT_EXTRACT_MS, || f64::from(perf.text_extract_ms));
-    diagnostics.add_measurement(&DIAG_TEXT_EXTRACT_PANELS, || {
-        perf.text_extract_panels.to_f64()
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_TOTAL_MS, || {
+        f64::from(perf.panel_text.total_ms)
     });
-    diagnostics.add_measurement(&DIAG_TEXT_SHAPE_MS, || f64::from(perf.text_shape_ms));
-    diagnostics.add_measurement(&DIAG_TEXT_ATLAS_MS, || f64::from(perf.text_atlas_ms));
-    diagnostics.add_measurement(&DIAG_TEXT_SPAWN_MS, || f64::from(perf.text_spawn_ms));
-    diagnostics.add_measurement(&DIAG_TEXT_QUEUED_GLYPHS, || {
-        perf.text_queued_glyphs.to_f64()
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_SHAPE_MS, || {
+        f64::from(perf.panel_text.shape_ms)
     });
-    diagnostics.add_measurement(&DIAG_TEXT_PENDING_GLYPHS, || {
-        perf.text_pending_glyphs.to_f64()
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_PARLEY_MS, || {
+        f64::from(perf.panel_text.parley_ms)
     });
-    diagnostics.add_measurement(&DIAG_ATLAS_POLL_MS, || f64::from(perf.atlas_poll_ms));
-    diagnostics.add_measurement(&DIAG_ATLAS_SYNC_MS, || f64::from(perf.atlas_sync_ms));
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS, || {
+        f64::from(perf.panel_text.atlas_lookup_ms)
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_MESH_BUILD_MS, || {
+        f64::from(perf.panel_text.mesh_build_ms)
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_SHAPED_PANELS, || {
+        perf.panel_text.shaped_panels.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_QUEUED_GLYPHS, || {
+        perf.panel_text.queued_glyphs.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_TEXT_PENDING_GLYPHS, || {
+        perf.panel_text.pending_glyphs.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_ATLAS_POLL_MS, || f64::from(perf.atlas.poll_ms));
+    diagnostics.add_measurement(&DIAG_ATLAS_SYNC_MS, || f64::from(perf.atlas.sync_ms));
     diagnostics.add_measurement(&DIAG_ATLAS_COMPLETED_GLYPHS, || {
-        perf.atlas_completed_glyphs.to_f64()
+        perf.atlas.completed_glyphs.to_f64()
     });
     diagnostics.add_measurement(&DIAG_ATLAS_INSERTED_GLYPHS, || {
-        perf.atlas_inserted_glyphs.to_f64()
+        perf.atlas.inserted_glyphs.to_f64()
     });
     diagnostics.add_measurement(&DIAG_ATLAS_INVISIBLE_GLYPHS, || {
-        perf.atlas_invisible_glyphs.to_f64()
+        perf.atlas.invisible_glyphs.to_f64()
     });
-    diagnostics.add_measurement(&DIAG_ATLAS_PAGES_ADDED, || perf.atlas_pages_added.to_f64());
-    diagnostics.add_measurement(&DIAG_ATLAS_DIRTY_PAGES, || perf.atlas_dirty_pages.to_f64());
+    diagnostics.add_measurement(&DIAG_ATLAS_PAGES_ADDED, || perf.atlas.pages_added.to_f64());
+    diagnostics.add_measurement(&DIAG_ATLAS_DIRTY_PAGES, || perf.atlas.dirty_pages.to_f64());
     diagnostics.add_measurement(&DIAG_ATLAS_IN_FLIGHT_GLYPHS, || {
-        perf.atlas_in_flight_glyphs.to_f64()
+        perf.atlas.in_flight_glyphs.to_f64()
     });
-    diagnostics.add_measurement(&DIAG_ATLAS_ACTIVE_JOBS, || perf.atlas_active_jobs.to_f64());
+    diagnostics.add_measurement(&DIAG_ATLAS_ACTIVE_JOBS, || perf.atlas.active_jobs.to_f64());
     diagnostics.add_measurement(&DIAG_ATLAS_PEAK_ACTIVE_JOBS, || {
-        perf.atlas_peak_active_jobs.to_f64()
+        perf.atlas.peak_active_jobs.to_f64()
     });
     diagnostics.add_measurement(&DIAG_ATLAS_WORKER_THREADS, || {
-        perf.atlas_worker_threads.to_f64()
+        perf.atlas.worker_threads.to_f64()
     });
     diagnostics.add_measurement(&DIAG_ATLAS_AVG_RASTER_MS, || {
-        f64::from(perf.atlas_avg_raster_ms)
+        f64::from(perf.atlas.avg_raster_ms)
     });
     diagnostics.add_measurement(&DIAG_ATLAS_MAX_RASTER_MS, || {
-        f64::from(perf.atlas_max_raster_ms)
+        f64::from(perf.atlas.max_raster_ms)
     });
     diagnostics.add_measurement(&DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS, || {
-        perf.atlas_batch_max_active_jobs.to_f64()
+        perf.atlas.batch_max_active_jobs.to_f64()
     });
     diagnostics.add_measurement(&DIAG_ATLAS_TOTAL_GLYPHS, || {
-        perf.atlas_total_glyphs.to_f64()
+        perf.atlas.total_glyphs.to_f64()
     });
 }

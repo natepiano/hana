@@ -1,13 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-#![allow(
-    clippy::cast_precision_loss,
-    clippy::suboptimal_flops,
-    reason = "demo SDF math; grid indices and shader coordinates stay within f32 precision"
-)]
-
 //! SDF primitive lab.
 //!
 //! Static comparison scene for experimenting with line rendering in world
@@ -54,6 +44,7 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_kana::ToF32;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
@@ -238,7 +229,7 @@ fn spawn_scene_bounds(
     // labels to just right of the last column, and from the ground up
     // to just above the title.
     let left = ROW_LABEL_X - 0.6;
-    let right = START_X + (WIDTHS_PT.len() as f32 - 1.0) * X_STEP + 0.3;
+    let right = X_STEP.mul_add((WIDTHS_PT.len() - 1).to_f32(), START_X) + 0.3;
     let top = TITLE_Y + 0.15;
     let bottom = 0.0;
     let width = right - left;
@@ -340,21 +331,22 @@ fn spawn_controls_panel(commands: &mut Commands) {
         ..unlit_material
     };
 
-    commands.spawn((
-        ControlsPanel,
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(CONTROLS_WIDTH),
-                Sizing::fixed(CONTROLS_HEIGHT),
-            )
-            .anchor(Anchor::TopLeft)
-            .material(unlit.clone())
-            .text_material(unlit)
-            .with_tree(build_controls_panel())
-            .build()
-            .expect("valid controls HUD dimensions"),
-        Transform::default(),
-    ));
+    let controls_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(CONTROLS_WIDTH),
+            Sizing::fixed(CONTROLS_HEIGHT),
+        )
+        .anchor(Anchor::TopLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_controls_panel())
+        .build();
+    let Ok(controls_panel) = controls_panel else {
+        error!("failed to build controls HUD dimensions");
+        return;
+    };
+
+    commands.spawn((ControlsPanel, controls_panel, Transform::default()));
 }
 
 fn build_controls_panel() -> bevy_diegetic::LayoutTree {
@@ -409,21 +401,22 @@ fn spawn_camera_help_panel(commands: &mut Commands) {
         ..unlit_material
     };
 
-    commands.spawn((
-        CameraHelpPanel,
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(CAM_HELP_WIDTH),
-                Sizing::fixed(CAM_HELP_HEIGHT),
-            )
-            .anchor(Anchor::BottomRight)
-            .material(unlit.clone())
-            .text_material(unlit)
-            .layout(build_camera_help)
-            .build()
-            .expect("valid camera help HUD dimensions"),
-        Transform::default(),
-    ));
+    let camera_help_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(CAM_HELP_WIDTH),
+            Sizing::fixed(CAM_HELP_HEIGHT),
+        )
+        .anchor(Anchor::BottomRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .layout(build_camera_help)
+        .build();
+    let Ok(camera_help_panel) = camera_help_panel else {
+        error!("failed to build camera help HUD dimensions");
+        return;
+    };
+
+    commands.spawn((CameraHelpPanel, camera_help_panel, Transform::default()));
 }
 
 fn hud_separator(b: &mut LayoutBuilder) {
@@ -556,7 +549,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
         // Column width labels: one per column, placed below the bottom
         // row but above the ground plane.
         for (index, pt) in WIDTHS_PT.iter().enumerate() {
-            let x = START_X + index as f32 * X_STEP;
+            let x = X_STEP.mul_add(index.to_f32(), START_X);
             parent.spawn((
                 WorldText::new(format!("{pt}pt")),
                 WorldTextStyle::new(0.07).with_color(Color::srgb(0.7, 0.75, 0.85)),
@@ -573,7 +566,7 @@ fn spawn_line_rows(
     materials: &mut Assets<ExampleSdfMaterial>,
 ) {
     for (index, pt) in WIDTHS_PT.iter().enumerate() {
-        let x = START_X + index as f32 * X_STEP;
+        let x = X_STEP.mul_add(index.to_f32(), START_X);
         let width = pt * METERS_PER_PT;
         spawn_raw_line(commands, root, meshes, materials, x, ROW_Y[0], width);
         spawn_stretched_rect(commands, root, meshes, materials, x, ROW_Y[1], width);
@@ -748,7 +741,7 @@ fn spawn_border_edge(
         Some(REF_COLOR),
         0,
     ));
-    let visible_edge_offset = Vec3::X * (half_thickness - width * 0.5);
+    let visible_edge_offset = Vec3::X * width.mul_add(-0.5, half_thickness);
     commands.entity(parent).with_child((
         Mesh3d(meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0))),
         MeshMaterial3d(material),

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! Unit system demo — real physical sizes.
 //!
 //! Two panels at their true physical scale in a world where 1 unit = 1 meter:
@@ -191,6 +186,19 @@ impl Default for RulersVisible {
 #[derive(Resource)]
 struct SceneBounds(Entity);
 
+fn build_panel_or_log(
+    panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
+    label: &str,
+) -> Option<DiegeticPanel> {
+    match panel {
+        Ok(panel) => Some(panel),
+        Err(error) => {
+            error!("failed to build {label}: {error}");
+            None
+        },
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -296,18 +304,20 @@ fn spawn_a4_with_titles(
     card_x: f32,
     title_gap: f32,
 ) {
+    let Some(a4_panel) = build_panel_or_log(
+        DiegeticPanel::world()
+            .paper(PaperSize::A4)
+            .anchor(Anchor::Center)
+            .surface_shadow(SurfaceShadow::On)
+            .layout(|b| build_a4_content(b, false))
+            .build(),
+        "A4 dimensions",
+    ) else {
+        return;
+    };
+
     commands
-        .spawn((
-            A4Panel,
-            DiegeticPanel::world()
-                .paper(PaperSize::A4)
-                .anchor(Anchor::Center)
-                .surface_shadow(SurfaceShadow::On)
-                .layout(|b| build_a4_content(b, false))
-                .build()
-                .expect("valid A4 dimensions"),
-            Transform::from_xyz(a4_x, a4_y, 0.0),
-        ))
+        .spawn((A4Panel, a4_panel, Transform::from_xyz(a4_x, a4_y, 0.0)))
         .observe(on_panel_clicked);
 
     let title_style = WorldTextStyle::new(Pt(18.0))
@@ -326,16 +336,22 @@ fn spawn_a4_with_titles(
 }
 
 fn spawn_card_panel(commands: &mut Commands, card_x: f32, card_y: f32) {
+    let Some(card_panel) = build_panel_or_log(
+        DiegeticPanel::world()
+            .paper(PaperSize::BusinessCard)
+            .anchor(Anchor::Center)
+            .surface_shadow(SurfaceShadow::On)
+            .layout(|b| build_card_content(b, false))
+            .build(),
+        "card dimensions",
+    ) else {
+        return;
+    };
+
     commands
         .spawn((
             CardPanel,
-            DiegeticPanel::world()
-                .paper(PaperSize::BusinessCard)
-                .anchor(Anchor::Center)
-                .surface_shadow(SurfaceShadow::On)
-                .layout(|b| build_card_content(b, false))
-                .build()
-                .expect("valid card dimensions"),
+            card_panel,
             Transform::from_xyz(card_x, card_y, 0.0),
         ))
         .observe(on_panel_clicked);
@@ -348,16 +364,22 @@ fn spawn_photo_panel_with_title(
     index_height_m: f32,
     title_gap: f32,
 ) {
+    let Some(index_panel) = build_panel_or_log(
+        DiegeticPanel::world()
+            .paper(PaperSize::Photo5x7)
+            .anchor(Anchor::Center)
+            .surface_shadow(SurfaceShadow::On)
+            .layout(|b| build_index_content(b, false))
+            .build(),
+        "index card dimensions",
+    ) else {
+        return;
+    };
+
     commands
         .spawn((
             IndexPanel,
-            DiegeticPanel::world()
-                .paper(PaperSize::Photo5x7)
-                .anchor(Anchor::Center)
-                .surface_shadow(SurfaceShadow::On)
-                .layout(|b| build_index_content(b, false))
-                .build()
-                .expect("valid index card dimensions"),
+            index_panel,
             Transform::from_xyz(index_x, index_y, 0.0),
         ))
         .observe(on_panel_clicked);
@@ -383,8 +405,7 @@ fn spawn_index_card_rulers(
     let index_sixteenths = (INDEX_H.0 * 16.0).round().to_i32();
     let index_ruler_height = In(INDEX_H.0 + EDGE_LABEL_EXTRA.0);
     let index_ruler_top = index_y + index_height_m / 2.0 + f32::from(EDGE_LABEL_EXTRA);
-    commands.spawn((
-        PanelRuler,
+    let Some(index_vertical_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(PANEL_RULER_INCH_WIDTH, index_ruler_height)
             .anchor(Anchor::TopLeft)
@@ -393,8 +414,15 @@ fn spawn_index_card_rulers(
                 index_ruler_height,
                 ruler_color,
             ))
-            .build()
-            .expect("valid index vertical ruler dimensions"),
+            .build(),
+        "index vertical ruler dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        PanelRuler,
+        index_vertical_ruler,
         Transform::from_xyz(index_ruler_x, index_ruler_top, 0.0),
     ));
 
@@ -402,8 +430,7 @@ fn spawn_index_card_rulers(
     let index_bottom_ruler_x = index_x - index_width_m / 2.0;
     let index_bottom_ruler_y = index_y - index_height_m / 2.0 - f32::from(RULER_GAP);
     let index_w_sixteenths = (INDEX_W.0 * 16.0).round().to_i32();
-    commands.spawn((
-        PanelRuler,
+    let Some(index_horizontal_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(INDEX_W, PANEL_RULER_INCH_WIDTH)
             .anchor(Anchor::TopLeft)
@@ -411,8 +438,15 @@ fn spawn_index_card_rulers(
                 index_w_sixteenths,
                 ruler_color,
             ))
-            .build()
-            .expect("valid index horizontal ruler dimensions"),
+            .build(),
+        "index horizontal ruler dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        PanelRuler,
+        index_horizontal_ruler,
         Transform::from_xyz(index_bottom_ruler_x, index_bottom_ruler_y, 0.0),
     ));
 }
@@ -424,8 +458,7 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
         ..unlit_material
     };
     let _ = windows;
-    commands.spawn((
-        ControlsPanel,
+    let Some(controls_panel) = build_panel_or_log(
         DiegeticPanel::screen()
             .size(Sizing::percent(1.0), Sizing::fixed(HUD_HEIGHT))
             .anchor(Anchor::TopLeft)
@@ -434,16 +467,19 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
             .layout(|b| {
                 build_controls_content(b, false, true, true);
             })
-            .build()
-            .expect("valid controls HUD dimensions"),
-        Transform::default(),
-    ));
+            .build(),
+        "controls HUD dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((ControlsPanel, controls_panel, Transform::default()));
 
     let cam_unlit = StandardMaterial {
         unlit: true,
         ..bevy_diegetic::default_panel_material()
     };
-    commands.spawn((
+    let Some(camera_help_panel) = build_panel_or_log(
         DiegeticPanel::screen()
             .size(
                 Sizing::fixed(CAM_HELP_WIDTH),
@@ -453,10 +489,13 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
             .material(cam_unlit.clone())
             .text_material(cam_unlit)
             .layout(build_camera_help)
-            .build()
-            .expect("valid camera help HUD dimensions"),
-        Transform::default(),
-    ));
+            .build(),
+        "camera help HUD dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((camera_help_panel, Transform::default()));
 }
 
 fn spawn_rulers(
@@ -474,22 +513,27 @@ fn spawn_rulers(
     // A4 vertical ruler (left side).
     let a4_ruler_x = a4_x - a4_width_m / 2.0 - f32::from(RULER_GAP);
     let a4_ruler_top = a4_y + a4_height_m / 2.0;
-    commands.spawn((
-        PanelRuler,
+    let Some(a4_vertical_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(PANEL_RULER_WIDTH, A4_HEIGHT)
             .anchor(Anchor::TopRight)
             .with_tree(build_metric_panel_ruler(A4_HEIGHT.0.to_i32(), ruler_color))
-            .build()
-            .expect("valid A4 vertical ruler dimensions"),
+            .build(),
+        "A4 vertical ruler dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        PanelRuler,
+        a4_vertical_ruler,
         Transform::from_xyz(a4_ruler_x, a4_ruler_top, 0.0),
     ));
 
     // A4 horizontal ruler (bottom).
     let a4_bottom_ruler_x = a4_x - a4_width_m / 2.0;
     let a4_bottom_ruler_y = a4_y - a4_height_m / 2.0 - f32::from(RULER_GAP);
-    commands.spawn((
-        PanelRuler,
+    let Some(a4_horizontal_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(A4_WIDTH, PANEL_RULER_WIDTH)
             .anchor(Anchor::TopLeft)
@@ -497,8 +541,15 @@ fn spawn_rulers(
                 A4_WIDTH.0.to_i32(),
                 ruler_color,
             ))
-            .build()
-            .expect("valid A4 horizontal ruler dimensions"),
+            .build(),
+        "A4 horizontal ruler dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        PanelRuler,
+        a4_horizontal_ruler,
         Transform::from_xyz(a4_bottom_ruler_x, a4_bottom_ruler_y, 0.0),
     ));
 
@@ -507,8 +558,7 @@ fn spawn_rulers(
     let card_sixteenths = (CARD_HEIGHT.0 * 16.0).round().to_i32();
     let card_ruler_height = In(CARD_HEIGHT.0 + EDGE_LABEL_EXTRA.0);
     let card_ruler_top = card_y + card_height_m / 2.0 + f32::from(EDGE_LABEL_EXTRA);
-    commands.spawn((
-        PanelRuler,
+    let Some(card_vertical_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(PANEL_RULER_INCH_WIDTH, card_ruler_height)
             .anchor(Anchor::TopLeft)
@@ -517,8 +567,15 @@ fn spawn_rulers(
                 card_ruler_height,
                 ruler_color,
             ))
-            .build()
-            .expect("valid card vertical ruler dimensions"),
+            .build(),
+        "card vertical ruler dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        PanelRuler,
+        card_vertical_ruler,
         Transform::from_xyz(card_ruler_x, card_ruler_top, 0.0),
     ));
 
@@ -526,8 +583,7 @@ fn spawn_rulers(
     let card_bottom_ruler_x = card_x - card_width_m / 2.0;
     let card_bottom_ruler_y = card_y - card_height_m / 2.0 - f32::from(RULER_GAP);
     let card_w_sixteenths = (CARD_WIDTH.0 * 16.0).round().to_i32();
-    commands.spawn((
-        PanelRuler,
+    let Some(card_horizontal_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(CARD_WIDTH, PANEL_RULER_INCH_WIDTH)
             .anchor(Anchor::TopLeft)
@@ -535,8 +591,15 @@ fn spawn_rulers(
                 card_w_sixteenths,
                 ruler_color,
             ))
-            .build()
-            .expect("valid card horizontal ruler dimensions"),
+            .build(),
+        "card horizontal ruler dimensions",
+    ) else {
+        return;
+    };
+
+    commands.spawn((
+        PanelRuler,
+        card_horizontal_ruler,
         Transform::from_xyz(card_bottom_ruler_x, card_bottom_ruler_y, 0.0),
     ));
 }

@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU16;
 
+use super::StaleAlphaMode;
 use super::clip;
 use super::constants;
 use super::constants::TEXT_Z_OFFSET;
@@ -258,21 +259,21 @@ fn poll_atlas_glyphs(
         shared_mats.handles.clear();
     }
 
-    perf.atlas_poll_ms = poll_ms;
-    perf.atlas_sync_ms = sync_ms;
-    perf.atlas_completed_glyphs = poll_stats.completed;
-    perf.atlas_inserted_glyphs = poll_stats.inserted;
-    perf.atlas_invisible_glyphs = poll_stats.invisible;
-    perf.atlas_pages_added = poll_stats.pages_added;
-    perf.atlas_dirty_pages = dirty_pages;
-    perf.atlas_in_flight_glyphs = atlas.in_flight_count();
-    perf.atlas_active_jobs = atlas.active_job_count();
-    perf.atlas_peak_active_jobs = atlas.peak_active_job_count();
-    perf.atlas_worker_threads = poll_stats.worker_threads;
-    perf.atlas_avg_raster_ms = poll_stats.avg_raster_ms;
-    perf.atlas_max_raster_ms = poll_stats.max_raster_ms;
-    perf.atlas_batch_max_active_jobs = poll_stats.max_active_jobs;
-    perf.atlas_total_glyphs = atlas.glyph_count();
+    perf.atlas.poll_ms = poll_ms;
+    perf.atlas.sync_ms = sync_ms;
+    perf.atlas.completed_glyphs = poll_stats.completed;
+    perf.atlas.inserted_glyphs = poll_stats.inserted;
+    perf.atlas.invisible_glyphs = poll_stats.invisible;
+    perf.atlas.pages_added = poll_stats.pages_added;
+    perf.atlas.dirty_pages = dirty_pages;
+    perf.atlas.in_flight_glyphs = atlas.in_flight_count();
+    perf.atlas.active_jobs = atlas.active_job_count();
+    perf.atlas.peak_active_jobs = atlas.peak_active_job_count();
+    perf.atlas.worker_threads = poll_stats.worker_threads;
+    perf.atlas.avg_raster_ms = poll_stats.avg_raster_ms;
+    perf.atlas.max_raster_ms = poll_stats.max_raster_ms;
+    perf.atlas.batch_max_active_jobs = poll_stats.max_active_jobs;
+    perf.atlas.total_glyphs = atlas.glyph_count();
 
     if poll_stats.completed > 0 || sync_ms > 0.0 {
         bevy::log::debug!(
@@ -564,17 +565,23 @@ fn shape_panel_text_children(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
                 Changed<PanelTextChild>,
+                With<StaleAlphaMode>,
             )>,
         ),
     >,
     pending_texts: Query<Entity, (With<PanelTextChild>, With<WorldText>, With<PendingGlyphs>)>,
-    texts: Query<(&WorldText, &WorldTextStyle, &PanelTextChild)>,
+    texts: Query<(&WorldText, &WorldTextStyle, &PanelTextChild, &ChildOf)>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
+    mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
+    let shape_stage_start = Instant::now();
+    let mut agg = TextBuildStats::default();
+    let mut shaped_panels: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+
     let mut to_process = Vec::new();
     for entity in &changed_texts {
         to_process.push(entity);
@@ -586,11 +593,23 @@ fn shape_panel_text_children(
     }
 
     if to_process.is_empty() {
+        perf.panel_text.shape_ms = 0.0;
+        perf.panel_text.parley_ms = 0.0;
+        perf.panel_text.atlas_lookup_ms = 0.0;
+        perf.panel_text.shaped_panels = 0;
+        perf.panel_text.queued_glyphs = 0;
+        perf.panel_text.pending_glyphs = 0;
+        perf.panel_text.total_ms = perf.panel_text.mesh_build_ms;
         return;
     }
 
     for entity in to_process {
-        let Ok((world_text, style, ptc)) = texts.get(entity) else {
+        // Clear the stale-alpha marker on entry — reaching this entity in
+        // the loop satisfies its rebuild request, regardless of which
+        // branch below we take.
+        commands.entity(entity).remove::<StaleAlphaMode>();
+
+        let Ok((world_text, style, ptc, child_of)) = texts.get(entity) else {
             continue;
         };
 
@@ -619,6 +638,9 @@ fn shape_panel_text_children(
             ptc.clip_rect,
         );
 
+        agg.accumulate(&stats);
+        shaped_panels.insert(child_of.parent());
+
         let all_ready = stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs;
         let has_pending = stats.pending_glyphs > 0 || stats.queued_glyphs > 0;
 
@@ -635,6 +657,14 @@ fn shape_panel_text_children(
             commands.entity(entity).insert_if_new(PendingGlyphs);
         }
     }
+
+    perf.panel_text.shape_ms = shape_stage_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.panel_text.parley_ms = agg.shape_ms;
+    perf.panel_text.atlas_lookup_ms = agg.atlas_ms;
+    perf.panel_text.shaped_panels = shaped_panels.len();
+    perf.panel_text.queued_glyphs = agg.queued_glyphs;
+    perf.panel_text.pending_glyphs = agg.pending_glyphs;
+    perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
 }
 
 // ── System 3: build_panel_batched_meshes ────────────────────────────────────
@@ -658,8 +688,11 @@ fn build_panel_batched_meshes(
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     rtt_registry: Res<PanelRttRegistry>,
     alpha_default: Res<TextAlphaModeDefault>,
+    mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
+    let mesh_build_start = Instant::now();
+
     // Collect the set of panel entities that have at least one child with
     // changed `PanelTextQuads`.
     let mut dirty_panels: Vec<Entity> = Vec::new();
@@ -678,108 +711,141 @@ fn build_panel_batched_meshes(
     }
 
     for panel_entity in dirty_panels {
-        let Ok((panel, hue_offset, panel_layers)) = panels.get(panel_entity) else {
-            continue;
-        };
-        let hue = hue_offset.map_or(0.0, |h| h.0);
-        let is_geometry = panel.render_mode() == RenderMode::Geometry;
-        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-
-        // Collect all quads from this panel's `PanelTextChild` children
-        // and track the maximum command index for layer ordering.
-        let mut batches: HashMap<TextBatchKey, (AlphaMode, Vec<GlyphQuadData>)> = HashMap::new();
-        let mut max_command_index: usize = 0;
-        for (ptq, ptc, child_of) in &panel_children {
-            if child_of.parent() != panel_entity {
-                continue;
-            }
-            max_command_index = max_command_index.max(ptc.command_index);
-            let clip_rect = panel_clip_rect_local(
-                ptc.clip_rect,
-                ptc.scale_x,
-                ptc.scale_y,
-                ptc.anchor_x,
-                ptc.anchor_y,
-            );
-            let clip_rect = clip_rect_bits(clip_rect);
-            let resolved_alpha = ptq
-                .alpha_mode
-                .or_else(|| panel.text_alpha_mode())
-                .unwrap_or(alpha_default.0);
-            let alpha_bits = alpha_mode_bits(resolved_alpha);
-            for (page_index, quad) in &ptq.quads {
-                let key = TextBatchKey {
-                    render_mode: ptq.render_mode,
-                    shadow_mode: ptq.shadow_mode,
-                    page_index: *page_index,
-                    clip_rect,
-                    alpha_mode_bits: alpha_bits,
-                };
-                batches
-                    .entry(key)
-                    .or_insert_with(|| (resolved_alpha, Vec::new()))
-                    .1
-                    .push(*quad);
-            }
-        }
-
-        let total_quads: usize = batches.values().map(|(_, v)| v.len()).sum();
-        if total_quads == 0 {
-            continue;
-        }
-
-        // Despawn previous mesh children.
-        for (mesh_entity, child_of) in &old_meshes {
-            if child_of.parent() == panel_entity {
-                commands.entity(mesh_entity).despawn();
-            }
-        }
-
-        let content_layer = rtt_registry
-            .get_layer(panel_entity)
-            .map_or_else(|| scene_layer.clone(), RenderLayers::layer);
-
-        // Resolve the base StandardMaterial for text in this panel.
-        let mut text_base = panel
-            .text_material()
-            .cloned()
-            .unwrap_or_else(constants::default_panel_material);
-        text_base.alpha_mode = AlphaMode::Blend;
-        text_base.double_sided = true;
-        text_base.cull_mode = None;
-        if !is_geometry {
-            text_base.unlit = true;
-        }
-
-        // Text depth bias renders above all geometry at or below the
-        // last command index in the batch.
-        let text_depth_bias = if is_geometry {
-            max_command_index.saturating_add(1).to_f32() * constants::LAYER_DEPTH_BIAS
-        } else {
-            0.0
-        };
-        let text_oit_offset = if is_geometry {
-            max_command_index.saturating_add(1).to_f32() * constants::OIT_DEPTH_STEP
-        } else {
-            0.0
-        };
-
-        spawn_batch_meshes(
-            &batches,
+        build_panel_meshes_for_entity(
             panel_entity,
-            hue,
+            &panel_children,
+            &old_meshes,
+            &panels,
             &atlas,
             &mut meshes,
             &mut materials,
             &mut shared_mats,
-            &content_layer,
-            &scene_layer,
-            &text_base,
-            text_depth_bias,
-            text_oit_offset,
+            &rtt_registry,
+            *alpha_default,
             &mut commands,
         );
     }
+
+    perf.panel_text.mesh_build_ms =
+        mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
+}
+
+#[allow(clippy::too_many_arguments, reason = "internal per-panel dispatch")]
+fn build_panel_meshes_for_entity(
+    panel_entity: Entity,
+    panel_children: &Query<(&PanelTextQuads, &PanelTextChild, &ChildOf)>,
+    old_meshes: &Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
+    panels: &Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
+    atlas: &MsdfAtlas,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<MsdfTextMaterial>,
+    shared_mats: &mut SharedMsdfMaterials,
+    rtt_registry: &PanelRttRegistry,
+    alpha_default: TextAlphaModeDefault,
+    commands: &mut Commands,
+) {
+    let Ok((panel, hue_offset, panel_layers)) = panels.get(panel_entity) else {
+        return;
+    };
+    let hue = hue_offset.map_or(0.0, |h| h.0);
+    let is_geometry = panel.render_mode() == RenderMode::Geometry;
+    let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
+
+    // Collect all quads from this panel's `PanelTextChild` children
+    // and track the maximum command index for layer ordering.
+    let mut batches: HashMap<TextBatchKey, (AlphaMode, Vec<GlyphQuadData>)> = HashMap::new();
+    let mut max_command_index: usize = 0;
+    for (ptq, ptc, child_of) in panel_children {
+        if child_of.parent() != panel_entity {
+            continue;
+        }
+        max_command_index = max_command_index.max(ptc.command_index);
+        let clip_rect = panel_clip_rect_local(
+            ptc.clip_rect,
+            ptc.scale_x,
+            ptc.scale_y,
+            ptc.anchor_x,
+            ptc.anchor_y,
+        );
+        let clip_rect = clip_rect_bits(clip_rect);
+        let resolved_alpha = ptq
+            .alpha_mode
+            .or_else(|| panel.text_alpha_mode())
+            .unwrap_or(alpha_default.0);
+        let alpha_bits = alpha_mode_bits(resolved_alpha);
+        for (page_index, quad) in &ptq.quads {
+            let key = TextBatchKey {
+                render_mode: ptq.render_mode,
+                shadow_mode: ptq.shadow_mode,
+                page_index: *page_index,
+                clip_rect,
+                alpha_mode_bits: alpha_bits,
+            };
+            batches
+                .entry(key)
+                .or_insert_with(|| (resolved_alpha, Vec::new()))
+                .1
+                .push(*quad);
+        }
+    }
+
+    let total_quads: usize = batches.values().map(|(_, v)| v.len()).sum();
+    if total_quads == 0 {
+        return;
+    }
+
+    // Despawn previous mesh children.
+    for (mesh_entity, child_of) in old_meshes {
+        if child_of.parent() == panel_entity {
+            commands.entity(mesh_entity).despawn();
+        }
+    }
+
+    let content_layer = rtt_registry
+        .get_layer(panel_entity)
+        .map_or_else(|| scene_layer.clone(), RenderLayers::layer);
+
+    // Resolve the base StandardMaterial for text in this panel.
+    let mut text_base = panel
+        .text_material()
+        .cloned()
+        .unwrap_or_else(constants::default_panel_material);
+    text_base.alpha_mode = AlphaMode::Blend;
+    text_base.double_sided = true;
+    text_base.cull_mode = None;
+    if !is_geometry {
+        text_base.unlit = true;
+    }
+
+    // Text depth bias renders above all geometry at or below the
+    // last command index in the batch.
+    let text_depth_bias = if is_geometry {
+        max_command_index.saturating_add(1).to_f32() * constants::LAYER_DEPTH_BIAS
+    } else {
+        0.0
+    };
+    let text_oit_offset = if is_geometry {
+        max_command_index.saturating_add(1).to_f32() * constants::OIT_DEPTH_STEP
+    } else {
+        0.0
+    };
+
+    spawn_batch_meshes(
+        &batches,
+        panel_entity,
+        hue,
+        atlas,
+        meshes,
+        materials,
+        shared_mats,
+        &content_layer,
+        &scene_layer,
+        &text_base,
+        text_depth_bias,
+        text_oit_offset,
+        commands,
+    );
 }
 
 /// Spawns visible mesh and optional shadow proxy entities for each batch

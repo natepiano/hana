@@ -1,4 +1,8 @@
-//! Low-level callout primitives.
+//! Callout primitives for annotations.
+//!
+//! Public callout types render directly from SDF meshes/materials. Legacy
+//! gizmo helpers remain crate-internal while the typography overlay is
+//! migrated.
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::color::Color;
@@ -7,6 +11,7 @@ use bevy::math::Quat;
 use bevy::math::Vec3;
 use bevy::math::Vec4;
 use bevy::prelude::AlphaMode;
+use bevy::prelude::App;
 use bevy::prelude::Assets;
 use bevy::prelude::Changed;
 use bevy::prelude::Children;
@@ -18,6 +23,8 @@ use bevy::prelude::Mesh;
 use bevy::prelude::Mesh3d;
 use bevy::prelude::MeshMaterial3d;
 use bevy::prelude::Or;
+use bevy::prelude::Plugin;
+use bevy::prelude::PostUpdate;
 use bevy::prelude::Query;
 use bevy::prelude::Rectangle;
 use bevy::prelude::ResMut;
@@ -32,6 +39,12 @@ use crate::render::LAYER_DEPTH_BIAS;
 use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
 use crate::render::SdfPanelMaterial;
+
+pub(crate) struct CalloutPlugin;
+
+impl Plugin for CalloutPlugin {
+    fn build(&self, app: &mut App) { app.add_systems(PostUpdate, update_callout_lines); }
+}
 
 /// Visual style for arrow end caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -434,13 +447,13 @@ pub(crate) struct CalloutVisual;
 ///
 /// This is the simplest public entry point. The actual SDF mesh segments
 /// are built by the callout rendering system.
-pub fn spawn_callout_line(commands: &mut Commands, parent: Entity, line: &CalloutLine) {
+pub(crate) fn spawn_callout_line(commands: &mut Commands, parent: Entity, line: &CalloutLine) {
     commands
         .entity(parent)
         .with_child((line.clone(), Transform::IDENTITY, Visibility::Inherited));
 }
 
-pub fn update_callout_lines(
+pub(crate) fn update_callout_lines(
     changed: Query<
         (
             Entity,
@@ -898,7 +911,7 @@ fn spawn_cap_shape(
 }
 
 /// Draws a double-headed dimension arrow into a gizmo asset.
-pub fn draw_dimension_arrow(
+pub(crate) fn draw_dimension_arrow(
     gizmo: &mut GizmoAsset,
     from: Vec3,
     to: Vec3,

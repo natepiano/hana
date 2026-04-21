@@ -2,7 +2,7 @@
 
 #![allow(
     clippy::used_underscore_binding,
-    reason = "false positive from derive-generated code for `PanelMode::Screen` variant fields"
+    reason = "false positive on enum variant fields"
 )]
 
 use bevy::camera::visibility::RenderLayers;

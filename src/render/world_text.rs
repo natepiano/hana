@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
+use super::StaleAlphaMode;
 use super::constants;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
@@ -160,7 +161,11 @@ pub(super) fn render_world_text(
         (
             With<WorldText>,
             Without<PanelTextChild>,
-            Or<(Changed<WorldText>, Changed<WorldTextStyle>)>,
+            Or<(
+                Changed<WorldText>,
+                Changed<WorldTextStyle>,
+                With<StaleAlphaMode>,
+            )>,
         ),
     >,
     pending_texts: Query<
@@ -183,17 +188,7 @@ pub(super) fn render_world_text(
     mut commands: Commands,
     unit_config: Res<UnitConfig>,
 ) {
-    // Collect entities that need processing: changed texts + pending texts.
-    let mut to_process = Vec::new();
-    for entity in &changed_texts {
-        to_process.push(entity);
-    }
-    for entity in &pending_texts {
-        if !to_process.contains(&entity) {
-            to_process.push(entity);
-        }
-    }
-
+    let to_process = collect_entities_to_process(&changed_texts, &pending_texts);
     if to_process.is_empty() {
         return;
     }
@@ -204,6 +199,11 @@ pub(super) fn render_world_text(
     let mut mesh_ms_total = 0.0_f32;
 
     for entity in to_process {
+        // Clear the stale-alpha marker on entry — reaching this entity in
+        // the loop satisfies its rebuild request, regardless of which
+        // branch below we take.
+        commands.entity(entity).remove::<StaleAlphaMode>();
+
         let Ok((world_text, style)) = texts.get(entity) else {
             continue;
         };
@@ -303,6 +303,37 @@ pub(super) fn render_world_text(
             text_stats.emitted_quads,
         );
     }
+}
+
+fn collect_entities_to_process(
+    changed_texts: &Query<
+        Entity,
+        (
+            With<WorldText>,
+            Without<PanelTextChild>,
+            Or<(
+                Changed<WorldText>,
+                Changed<WorldTextStyle>,
+                With<StaleAlphaMode>,
+            )>,
+        ),
+    >,
+    pending_texts: &Query<
+        Entity,
+        (
+            With<WorldText>,
+            With<PendingGlyphs>,
+            Without<PanelTextChild>,
+        ),
+    >,
+) -> Vec<Entity> {
+    let mut to_process: Vec<Entity> = changed_texts.iter().collect();
+    for entity in pending_texts.iter() {
+        if !to_process.contains(&entity) {
+            to_process.push(entity);
+        }
+    }
+    to_process
 }
 
 /// Fires [`WorldTextReady`] for entities whose meshes and transforms are

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! `text_alpha` — interactive walk-through of all `AlphaMode` variants for
 //! text, paired with the three mutually-exclusive camera states
 //! (MSAA / `StableTransparency` / Off).
@@ -314,16 +309,18 @@ fn setup(
     // Bottom-right camera-help legend (static). Shrinks to its content on
     // both axes via `Fit`. Pinned to Blend so the panel text stays legible
     // regardless of the current alpha-mode default.
-    commands.spawn((
-        DiegeticPanel::screen()
-            .size(bevy_diegetic::Fit, bevy_diegetic::Fit)
-            .anchor(Anchor::BottomRight)
-            .text_alpha_mode(AlphaMode::Blend)
-            .layout(build_camera_help)
-            .build()
-            .expect("valid camera help"),
-        Transform::default(),
-    ));
+    let camera_help_panel = DiegeticPanel::screen()
+        .size(bevy_diegetic::Fit, bevy_diegetic::Fit)
+        .anchor(Anchor::BottomRight)
+        .text_alpha_mode(AlphaMode::Blend)
+        .layout(build_camera_help)
+        .build();
+    let Ok(camera_help_panel) = camera_help_panel else {
+        error!("failed to build camera help panel");
+        return;
+    };
+
+    commands.spawn((camera_help_panel, Transform::default()));
 
     // HUD and info panels are spawned by `apply_state_and_rebuild_hud` on
     // the first frame (via `Res::is_changed()` on initial resource insert).
@@ -456,32 +453,34 @@ fn apply_state_and_rebuild_hud(
 
 fn spawn_hud_panel(commands: &mut Commands, state: &ControlsState) {
     let camera_state = state.camera_state;
-    commands.spawn((
-        HudPanel,
-        DiegeticPanel::screen()
-            .size(HUD_WIDTH, HUD_HEIGHT)
-            .anchor(Anchor::TopLeft)
-            .text_alpha_mode(AlphaMode::Blend)
-            .layout(move |b| build_controls(b, camera_state))
-            .build()
-            .expect("valid HUD"),
-        Transform::default(),
-    ));
+    let hud_panel = DiegeticPanel::screen()
+        .size(HUD_WIDTH, HUD_HEIGHT)
+        .anchor(Anchor::TopLeft)
+        .text_alpha_mode(AlphaMode::Blend)
+        .layout(move |b| build_controls(b, camera_state))
+        .build();
+    let Ok(hud_panel) = hud_panel else {
+        error!("failed to build HUD");
+        return;
+    };
+
+    commands.spawn((HudPanel, hud_panel, Transform::default()));
 }
 
 fn spawn_info_panel(commands: &mut Commands, state: &ControlsState) {
     let mode = state.alpha_mode;
-    commands.spawn((
-        InfoPanel,
-        DiegeticPanel::screen()
-            .size(bevy_diegetic::Percent(0.22), INFO_HEIGHT)
-            .anchor(Anchor::TopRight)
-            .text_alpha_mode(AlphaMode::Blend)
-            .layout(move |b| build_info_panel(b, mode))
-            .build()
-            .expect("valid info panel"),
-        Transform::default(),
-    ));
+    let info_panel = DiegeticPanel::screen()
+        .size(bevy_diegetic::Percent(0.22), INFO_HEIGHT)
+        .anchor(Anchor::TopRight)
+        .text_alpha_mode(AlphaMode::Blend)
+        .layout(move |b| build_info_panel(b, mode))
+        .build();
+    let Ok(info_panel) = info_panel else {
+        error!("failed to build info panel");
+        return;
+    };
+
+    commands.spawn((InfoPanel, info_panel, Transform::default()));
 }
 
 fn hud_text_style(active: bool) -> LayoutTextStyle {

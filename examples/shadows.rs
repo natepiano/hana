@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! Glyph render mode × shadow mode matrix.
 //!
@@ -153,15 +148,17 @@ fn setup(
     spawn_lighting_and_camera(&mut commands);
 
     // Info panel — below the grid.
-    commands.spawn((
-        DiegeticPanel::world()
-            .size(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
-            .font_unit(Unit::Millimeters)
-            .with_tree(build_info_panel())
-            .build()
-            .expect("valid info panel dimensions"),
-        Transform::from_xyz(-0.06, 0.315, 0.0),
-    ));
+    let info_panel = DiegeticPanel::world()
+        .size(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
+        .font_unit(Unit::Millimeters)
+        .with_tree(build_info_panel())
+        .build();
+    let Ok(info_panel) = info_panel else {
+        error!("failed to build info panel dimensions");
+        return;
+    };
+
+    commands.spawn((info_panel, Transform::from_xyz(-0.06, 0.315, 0.0)));
 }
 
 /// Spawns the ground plane and shadow-receiver backdrop panel.

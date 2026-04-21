@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! Screen-space HUD overlay example.
 //!
 //! Demonstrates a [`ScreenSpace`] panel rendered as a 2D overlay on top
@@ -121,95 +116,97 @@ fn spawn_scene(
 }
 
 fn spawn_hud(commands: &mut Commands) {
-    commands.spawn((
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(Px(PANEL_WIDTH)),
-                Sizing::fixed(Px(PANEL_HEIGHT)),
-            )
-            .anchor(Anchor::Center)
-            .layout(|b| {
-                // Outer frame.
-                b.with(
-                    El::new()
-                        .width(Sizing::GROW)
-                        .height(Sizing::GROW)
-                        .padding(Padding::all(3.0))
-                        .background(Color::srgba(0.05, 0.05, 0.08, 0.9))
-                        .border(Border::all(2.0, BORDER_COLOR)),
-                    |b| {
-                        b.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::GROW)
-                                .direction(Direction::TopToBottom)
-                                .padding(Padding::all(PANEL_PADDING))
-                                .child_gap(6.0)
-                                .background(PANEL_BACKGROUND)
-                                .border(Border::all(1.0, Color::srgba(0.2, 0.3, 0.6, 0.4))),
-                            |b| {
-                                // Title.
-                                b.text(
-                                    "Mission Control",
-                                    LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR),
-                                );
-                                divider(b);
+    let hud_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(Px(PANEL_WIDTH)),
+            Sizing::fixed(Px(PANEL_HEIGHT)),
+        )
+        .anchor(Anchor::Center)
+        .layout(|b| {
+            // Outer frame.
+            b.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .padding(Padding::all(3.0))
+                    .background(Color::srgba(0.05, 0.05, 0.08, 0.9))
+                    .border(Border::all(2.0, BORDER_COLOR)),
+                |b| {
+                    b.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::TopToBottom)
+                            .padding(Padding::all(PANEL_PADDING))
+                            .child_gap(6.0)
+                            .background(PANEL_BACKGROUND)
+                            .border(Border::all(1.0, Color::srgba(0.2, 0.3, 0.6, 0.4))),
+                        |b| {
+                            // Title.
+                            b.text(
+                                "Mission Control",
+                                LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR),
+                            );
+                            divider(b);
 
-                                // Two-column layout.
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::GROW)
-                                        .direction(Direction::LeftToRight)
-                                        .child_gap(12.0),
-                                    |b| {
-                                        // Left column — Ship Status.
-                                        column(
-                                            b,
-                                            "Ship Status",
-                                            &[
-                                                ("Hull", "98%", VALUE_COLOR),
-                                                ("Shields", "74%", WARN_COLOR),
-                                                ("Fuel", "1,247 kg", VALUE_COLOR),
-                                                ("Velocity", "342 m/s", VALUE_COLOR),
-                                                ("Heading", "045.2\u{00b0}", BODY_COLOR),
-                                                ("Altitude", "12.4 km", VALUE_COLOR),
-                                            ],
-                                        );
+                            // Two-column layout.
+                            b.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::GROW)
+                                    .direction(Direction::LeftToRight)
+                                    .child_gap(12.0),
+                                |b| {
+                                    // Left column — Ship Status.
+                                    column(
+                                        b,
+                                        "Ship Status",
+                                        &[
+                                            ("Hull", "98%", VALUE_COLOR),
+                                            ("Shields", "74%", WARN_COLOR),
+                                            ("Fuel", "1,247 kg", VALUE_COLOR),
+                                            ("Velocity", "342 m/s", VALUE_COLOR),
+                                            ("Heading", "045.2\u{00b0}", BODY_COLOR),
+                                            ("Altitude", "12.4 km", VALUE_COLOR),
+                                        ],
+                                    );
 
-                                        // Vertical divider.
-                                        b.with(
-                                            El::new()
-                                                .width(Sizing::fixed(1.0))
-                                                .height(Sizing::GROW)
-                                                .background(BORDER_COLOR),
-                                            |_| {},
-                                        );
+                                    // Vertical divider.
+                                    b.with(
+                                        El::new()
+                                            .width(Sizing::fixed(1.0))
+                                            .height(Sizing::GROW)
+                                            .background(BORDER_COLOR),
+                                        |_| {},
+                                    );
 
-                                        // Right column — Environment.
-                                        column(
-                                            b,
-                                            "Environment",
-                                            &[
-                                                ("Sector", "Gamma-7", BODY_COLOR),
-                                                ("Hostiles", "3", WARN_COLOR),
-                                                ("Friendlies", "12", VALUE_COLOR),
-                                                ("Comms", "Online", VALUE_COLOR),
-                                                ("Gravity", "0.38 g", BODY_COLOR),
-                                                ("Temp", "-142 C", BODY_COLOR),
-                                            ],
-                                        );
-                                    },
-                                );
-                            },
-                        );
-                    },
-                );
-            })
-            .build()
-            .expect("valid HUD dimensions"),
-        Transform::from_xyz(-250.0, 150.0, 0.0),
-    ));
+                                    // Right column — Environment.
+                                    column(
+                                        b,
+                                        "Environment",
+                                        &[
+                                            ("Sector", "Gamma-7", BODY_COLOR),
+                                            ("Hostiles", "3", WARN_COLOR),
+                                            ("Friendlies", "12", VALUE_COLOR),
+                                            ("Comms", "Online", VALUE_COLOR),
+                                            ("Gravity", "0.38 g", BODY_COLOR),
+                                            ("Temp", "-142 C", BODY_COLOR),
+                                        ],
+                                    );
+                                },
+                            );
+                        },
+                    );
+                },
+            );
+        })
+        .build();
+    let Ok(hud_panel) = hud_panel else {
+        error!("failed to build HUD dimensions");
+        return;
+    };
+
+    commands.spawn((hud_panel, Transform::from_xyz(-250.0, 150.0, 0.0)));
 }
 
 fn divider(b: &mut LayoutBuilder) {

@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! @generated `bevy_example_template`
 //! `WorldText` example — standalone MSDF text in world space.
 //!
@@ -139,36 +134,40 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
         ..unlit_material
     };
     let _ = windows;
-    commands.spawn((
-        DiegeticPanel::screen()
-            .size(Sizing::percent(1.0), Sizing::fixed(HUD_HEIGHT))
-            .anchor(Anchor::TopLeft)
-            .material(unlit.clone())
-            .text_material(unlit)
-            .layout(build_controls_content)
-            .build()
-            .expect("valid controls HUD dimensions"),
-        Transform::default(),
-    ));
+    let controls_panel = DiegeticPanel::screen()
+        .size(Sizing::percent(1.0), Sizing::fixed(HUD_HEIGHT))
+        .anchor(Anchor::TopLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .layout(build_controls_content)
+        .build();
+    let Ok(controls_panel) = controls_panel else {
+        error!("failed to build controls HUD dimensions");
+        return;
+    };
+
+    commands.spawn((controls_panel, Transform::default()));
 
     let cam_unlit = StandardMaterial {
         unlit: true,
         ..bevy_diegetic::default_panel_material()
     };
-    commands.spawn((
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(CAM_HELP_WIDTH),
-                Sizing::fixed(CAM_HELP_HEIGHT),
-            )
-            .anchor(Anchor::BottomRight)
-            .material(cam_unlit.clone())
-            .text_material(cam_unlit)
-            .layout(build_camera_help)
-            .build()
-            .expect("valid camera help HUD dimensions"),
-        Transform::default(),
-    ));
+    let camera_help_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(CAM_HELP_WIDTH),
+            Sizing::fixed(CAM_HELP_HEIGHT),
+        )
+        .anchor(Anchor::BottomRight)
+        .material(cam_unlit.clone())
+        .text_material(cam_unlit)
+        .layout(build_camera_help)
+        .build();
+    let Ok(camera_help_panel) = camera_help_panel else {
+        error!("failed to build camera help HUD dimensions");
+        return;
+    };
+
+    commands.spawn((camera_help_panel, Transform::default()));
 }
 
 /// Spawns the translucent ground plane.

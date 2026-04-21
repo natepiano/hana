@@ -21,7 +21,6 @@ pub use constants::default_panel_material;
 pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_shape_material;
-use text_renderer::PanelTextQuads;
 pub use transparency::StableTransparency;
 pub use transparency::TextAlphaModeDefault;
 #[cfg(feature = "typography_overlay")]
@@ -30,8 +29,6 @@ pub use world_text::PanelTextChild;
 pub use world_text::PendingGlyphs;
 pub use world_text::WorldText;
 pub use world_text::WorldTextReady;
-
-use crate::layout::WorldTextStyle;
 
 /// Umbrella render plugin — registers the three render-side sub-plugins
 /// (MSDF text, SDF panel geometry, RTT panel compositing).
@@ -47,28 +44,38 @@ impl Plugin for RenderPlugin {
         .init_resource::<TextAlphaModeDefault>()
         .add_observer(transparency::on_stable_transparency_added)
         .add_observer(transparency::on_stable_transparency_removed)
-        .add_systems(Update, invalidate_text_on_alpha_default_change);
+        .add_systems(Update, queue_alpha_default_refresh);
     }
 }
 
-/// Forces text materials to rebuild when [`TextAlphaModeDefault`] changes.
+/// Marker: this text entity's cached alpha mode was resolved through an
+/// earlier [`TextAlphaModeDefault`] value that has since changed, so its
+/// rendered material is stale and must be rebuilt.
 ///
-/// Standalone `WorldText` and batched panel text cache their materials until
-/// their `Changed<>` filter fires. The resource-level default is invisible to
-/// those filters, so without this system users toggling the default would see
-/// no effect on already-spawned text.
-fn invalidate_text_on_alpha_default_change(
+/// Inserted by [`queue_alpha_default_refresh`] when the resource changes;
+/// cleared unconditionally at the top of each consumer's per-entity loop.
+#[derive(Component)]
+pub(super) struct StaleAlphaMode;
+
+/// Queues standalone and panel text entities for an alpha-mode rebuild when
+/// [`TextAlphaModeDefault`] changes. Entities with explicit alpha mode overrides
+/// are still marked — the optimization to skip them requires access to per-panel
+/// alpha mode from this system and hasn't shown up as a measurable cost.
+fn queue_alpha_default_refresh(
     alpha_default: Res<TextAlphaModeDefault>,
-    mut world_styles: Query<&mut WorldTextStyle>,
-    mut panel_quads: Query<&mut PanelTextQuads>,
+    world_texts: Query<Entity, (With<world_text::WorldText>, Without<PanelTextChild>)>,
+    panel_texts: Query<Entity, With<PanelTextChild>>,
+    mut commands: Commands,
 ) {
     if !alpha_default.is_changed() {
         return;
     }
-    for mut s in &mut world_styles {
-        let _ = s.as_mut();
+
+    for entity in &world_texts {
+        commands.entity(entity).insert(StaleAlphaMode);
     }
-    for mut q in &mut panel_quads {
-        let _ = q.as_mut();
+
+    for entity in &panel_texts {
+        commands.entity(entity).insert(StaleAlphaMode);
     }
 }

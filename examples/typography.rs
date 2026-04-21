@@ -1,8 +1,3 @@
-#![allow(
-    clippy::expect_used,
-    reason = "demo code; panic on invalid setup is acceptable"
-)]
-
 //! Typography overlay demo — visualizes font-level metric lines and
 //! per-glyph bounding boxes on a `WorldText` entity using the library's
 //! built-in `TypographyOverlay` debug component.
@@ -306,49 +301,53 @@ fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
         ..unlit_material
     };
 
-    commands.spawn((
-        ControlsPanel,
-        DiegeticPanel::screen()
-            .size(Sizing::fixed(CONTROLS_WIDTH), Sizing::fixed(HUD_HEIGHT))
-            .anchor(bevy_diegetic::Anchor::TopLeft)
-            .material(unlit.clone())
-            .text_material(unlit.clone())
-            .layout(|b| build_controls_content(b, true))
-            .build()
-            .expect("valid controls HUD dimensions"),
-        Transform::default(),
-    ));
+    let controls_panel = DiegeticPanel::screen()
+        .size(Sizing::fixed(CONTROLS_WIDTH), Sizing::fixed(HUD_HEIGHT))
+        .anchor(bevy_diegetic::Anchor::TopLeft)
+        .material(unlit.clone())
+        .text_material(unlit.clone())
+        .layout(|b| build_controls_content(b, true))
+        .build();
+    let Ok(controls_panel) = controls_panel else {
+        error!("failed to build controls HUD dimensions");
+        return;
+    };
 
-    commands.spawn((
-        FontsPanel,
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(FONTS_PANEL_WIDTH),
-                Sizing::fixed(FONTS_PANEL_HEIGHT),
-            )
-            .anchor(bevy_diegetic::Anchor::TopRight)
-            .material(unlit.clone())
-            .text_material(unlit.clone())
-            .with_tree(build_fonts_panel(registry, 0))
-            .build()
-            .expect("valid fonts HUD dimensions"),
-        Transform::default(),
-    ));
+    commands.spawn((ControlsPanel, controls_panel, Transform::default()));
 
-    commands.spawn((
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(CAM_HELP_WIDTH),
-                Sizing::fixed(CAM_HELP_HEIGHT),
-            )
-            .anchor(bevy_diegetic::Anchor::BottomRight)
-            .material(unlit.clone())
-            .text_material(unlit)
-            .layout(build_camera_help)
-            .build()
-            .expect("valid camera help HUD dimensions"),
-        Transform::default(),
-    ));
+    let fonts_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(FONTS_PANEL_WIDTH),
+            Sizing::fixed(FONTS_PANEL_HEIGHT),
+        )
+        .anchor(bevy_diegetic::Anchor::TopRight)
+        .material(unlit.clone())
+        .text_material(unlit.clone())
+        .with_tree(build_fonts_panel(registry, 0))
+        .build();
+    let Ok(fonts_panel) = fonts_panel else {
+        error!("failed to build fonts HUD dimensions");
+        return;
+    };
+
+    commands.spawn((FontsPanel, fonts_panel, Transform::default()));
+
+    let camera_help_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(CAM_HELP_WIDTH),
+            Sizing::fixed(CAM_HELP_HEIGHT),
+        )
+        .anchor(bevy_diegetic::Anchor::BottomRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .layout(build_camera_help)
+        .build();
+    let Ok(camera_help_panel) = camera_help_panel else {
+        error!("failed to build camera help HUD dimensions");
+        return;
+    };
+
+    commands.spawn((camera_help_panel, Transform::default()));
 }
 
 fn spawn_lights(commands: &mut Commands) {
