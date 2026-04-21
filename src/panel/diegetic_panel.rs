@@ -50,69 +50,69 @@ use crate::layout::UnitConfig;
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    pub(super) tree:           LayoutTree,
+    pub(super) tree:            LayoutTree,
     /// Panel width in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) width:          f32,
+    pub(super) width:           f32,
     /// Panel height in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) height:         f32,
+    pub(super) height:          f32,
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
-    pub(super) layout_unit:    Unit,
+    pub(super) layout_unit:     Unit,
     /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
-    pub(super) font_unit:      Option<Unit>,
+    pub(super) font_unit:       Option<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
-    pub(super) anchor:         Anchor,
+    pub(super) anchor:          Anchor,
     /// Target world width in meters. When set, the panel is uniformly scaled
     /// so its width matches this value (height follows aspect ratio).
     /// If both `world_width` and `world_height` are set, non-uniform scaling
     /// is applied.
-    pub(super) world_width:    Option<f32>,
+    pub(super) world_width:     Option<f32>,
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
-    pub(super) world_height:   Option<f32>,
+    pub(super) world_height:    Option<f32>,
     /// How the panel renders its content. Defaults to [`RenderMode::Geometry`].
-    pub(super) render_mode:    RenderMode,
+    pub(super) render_mode:     RenderMode,
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via `GlyphShadowMode`.
-    pub(super) surface_shadow: SurfaceShadow,
+    pub(super) surface_shadow:  SurfaceShadow,
     /// Default PBR material for backgrounds and borders. When `None`, the
     /// library uses a matte default (roughness 0.95, reflectance 0.02).
     /// Individual elements can override via `El::material`.
     /// `base_color` is overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub(super) material:       Option<StandardMaterial>,
+    pub(super) material:        Option<StandardMaterial>,
     /// Default PBR material for text. When `None`, uses the same default as
     /// `material`. Individual text elements can override.
     /// `base_color` is overridden by `LayoutTextStyle::color` when set.
     #[reflect(ignore)]
-    pub(super) text_material:  Option<StandardMaterial>,
+    pub(super) text_material:   Option<StandardMaterial>,
     /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
     /// falls through to the per-style setting and then to `TextAlphaModeDefault`.
     pub(super) text_alpha_mode: Option<AlphaMode>,
     /// Whether the panel is world-space or screen-space.
-    pub(super) mode:           PanelMode,
+    pub(super) mode:            PanelMode,
 }
 
 impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
-            tree:           LayoutTree::default(),
-            width:          0.0,
-            height:         0.0,
-            layout_unit:    Unit::Meters,
-            font_unit:      None,
-            anchor:         Anchor::TopLeft,
-            world_width:    None,
-            world_height:   None,
-            render_mode:    RenderMode::Geometry,
-            surface_shadow: SurfaceShadow::Off,
-            material:       None,
-            text_material:  None,
+            tree:            LayoutTree::default(),
+            width:           0.0,
+            height:          0.0,
+            layout_unit:     Unit::Meters,
+            font_unit:       None,
+            anchor:          Anchor::TopLeft,
+            world_width:     None,
+            world_height:    None,
+            render_mode:     RenderMode::Geometry,
+            surface_shadow:  SurfaceShadow::Off,
+            material:        None,
+            text_material:   None,
             text_alpha_mode: None,
-            mode:           PanelMode::World,
+            mode:            PanelMode::World,
         }
     }
 }

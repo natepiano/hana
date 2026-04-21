@@ -4,17 +4,15 @@
 //!
 //! # Two paths
 //!
-//! - **Default (order-independent):** `AlphaMode::AlphaToCoverage` on text,
-//!   MSAA enabled on the camera. No `StableTransparency` needed. Correct for
-//!   almost all scenes, including dense coplanar glyphs and scenes without
-//!   overlapping transparent primitives.
-//! - **Opt-in blended path:** add [`StableTransparency`] to a `Camera3d`. The
-//!   observer inserts `OrderIndependentTransparencySettings`, sets the
-//!   camera's depth texture to `TEXTURE_BINDING`, and forces `Msaa::Off`. It
-//!   also propagates `Msaa::Off` to every `ScreenSpaceCamera` in the app so
-//!   pipelines match. Pair with `AlphaMode::Blend` on text (via the per-style
-//!   override or [`TextAlphaModeDefault`]) when you need animated fades or
-//!   correct depth compositing with other translucent primitives.
+//! - **Default (order-independent):** `AlphaMode::AlphaToCoverage` on text, MSAA enabled on the
+//!   camera. No `StableTransparency` needed. Correct for almost all scenes, including dense
+//!   coplanar glyphs and scenes without overlapping transparent primitives.
+//! - **Opt-in blended path:** add [`StableTransparency`] to a `Camera3d`. The observer inserts
+//!   `OrderIndependentTransparencySettings`, sets the camera's depth texture to `TEXTURE_BINDING`,
+//!   and forces `Msaa::Off`. It also propagates `Msaa::Off` to every `ScreenSpaceCamera` in the app
+//!   so pipelines match. Pair with `AlphaMode::Blend` on text (via the per-style override or
+//!   [`TextAlphaModeDefault`]) when you need animated fades or correct depth compositing with other
+//!   translucent primitives.
 //!
 //! Removing the marker reverses all changes.
 
@@ -59,10 +57,9 @@ pub(super) fn on_stable_transparency_added(
     if let Ok(mut camera_3d) = cameras.get_mut(cam) {
         camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
     }
-    commands.entity(cam).insert((
-        OrderIndependentTransparencySettings::default(),
-        Msaa::Off,
-    ));
+    commands
+        .entity(cam)
+        .insert((OrderIndependentTransparencySettings::default(), Msaa::Off));
     for overlay in &mut msaa_overlays {
         commands.entity(overlay).insert(Msaa::Off);
     }

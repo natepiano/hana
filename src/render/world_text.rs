@@ -15,6 +15,7 @@ use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer;
 use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
+use super::transparency::TextAlphaModeDefault;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
@@ -177,7 +178,7 @@ pub(super) fn render_world_text(
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
-    alpha_default: Res<super::transparency::TextAlphaModeDefault>,
+    alpha_default: Res<TextAlphaModeDefault>,
     mut commands: Commands,
     unit_config: Res<UnitConfig>,
 ) {

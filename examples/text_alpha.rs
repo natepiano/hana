@@ -13,8 +13,7 @@
 //! - `H` — home the camera.
 //! - `M` — toggle MSAA (Sample4 ↔ Off). With A2C, MSAA off shows hard alpha.
 //! - `T` — toggle `StableTransparency` on the camera.
-//! - `1`..`5` — cycle `TextAlphaModeDefault`:
-//!   Coverage / Blend / Mask(0.5) / Add / Multiply.
+//! - `1`..`5` — cycle `TextAlphaModeDefault`: Coverage / Blend / Mask(0.5) / Add / Multiply.
 
 use std::time::Duration;
 
@@ -169,9 +168,8 @@ fn setup(
     commands.spawn((
         WorldText::new("GROUND"),
         WorldTextStyle::new(0.45).with_color(Color::srgb(1.0, 0.85, 0.1)),
-        Transform::from_xyz(0.0, 0.001, 1.125).with_rotation(Quat::from_rotation_x(
-            -core::f32::consts::FRAC_PI_2,
-        )),
+        Transform::from_xyz(0.0, 0.001, 1.125)
+            .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
     ));
 
     // Lighting.
@@ -379,18 +377,9 @@ fn build_controls(b: &mut LayoutBuilder, msaa_on: bool, stable_on: bool, mode: A
                         "1 Coverage",
                         hud_text_style(matches!(mode, AlphaMode::AlphaToCoverage)),
                     );
-                    b.text(
-                        "2 Blend",
-                        hud_text_style(matches!(mode, AlphaMode::Blend)),
-                    );
-                    b.text(
-                        "3 Mask",
-                        hud_text_style(matches!(mode, AlphaMode::Mask(_))),
-                    );
-                    b.text(
-                        "4 Add",
-                        hud_text_style(matches!(mode, AlphaMode::Add)),
-                    );
+                    b.text("2 Blend", hud_text_style(matches!(mode, AlphaMode::Blend)));
+                    b.text("3 Mask", hud_text_style(matches!(mode, AlphaMode::Mask(_))));
+                    b.text("4 Add", hud_text_style(matches!(mode, AlphaMode::Add)));
                     b.text(
                         "5 Multiply",
                         hud_text_style(matches!(mode, AlphaMode::Multiply)),

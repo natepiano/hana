@@ -18,6 +18,7 @@ use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material::MsdfTextMaterial;
 use super::panel_rtt::PanelRttRegistry;
+use super::transparency::TextAlphaModeDefault;
 use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
@@ -652,7 +653,7 @@ fn build_panel_batched_meshes(
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     rtt_registry: Res<PanelRttRegistry>,
-    alpha_default: Res<super::transparency::TextAlphaModeDefault>,
+    alpha_default: Res<TextAlphaModeDefault>,
     mut commands: Commands,
 ) {
     // Collect the set of panel entities that have at least one child with
@@ -820,72 +821,27 @@ fn spawn_batch_meshes(
             is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None;
 
         if !is_invisible {
-            let render_mode_u32 = glyph_render_mode_uniform(key.render_mode);
-            let clip_rect = clip_rect_from_bits(key.clip_rect);
             let mut batch_base = text_base.clone();
             batch_base.depth_bias = text_depth_bias;
-
-            let material_handle =
-                if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
-                    let shared_base = batch_base.clone();
-                    shared_mats
-                        .handles
-                        .entry(SharedMsdfMaterialKey {
-                            page_index:      key.page_index,
-                            clip_rect:       key.clip_rect,
-                            depth_bias_bits: text_depth_bias.to_bits(),
-                            alpha_mode_bits: key.alpha_mode_bits,
-                        })
-                        .or_insert_with(|| {
-                            materials.add(super::msdf_material::msdf_text_material(
-                                shared_base.clone(),
-                                MsdfAtlas::sdf_range().to_f32(),
-                                atlas.width(),
-                                atlas.height(),
-                                page_image.clone(),
-                                0.0,
-                                glyph_render_mode_uniform(GlyphRenderMode::Text),
-                                clip_rect,
-                                text_oit_offset,
-                                *alpha_mode,
-                            ))
-                        })
-                        .clone()
-                } else {
-                    materials.add(super::msdf_material::msdf_text_material(
-                        batch_base.clone(),
-                        MsdfAtlas::sdf_range().to_f32(),
-                        atlas.width(),
-                        atlas.height(),
-                        page_image.clone(),
-                        hue,
-                        render_mode_u32,
-                        clip_rect,
-                        text_oit_offset,
-                        *alpha_mode,
-                    ))
-                };
-
-            let text_transform = Transform::from_xyz(0.0, 0.0, 0.0);
-
-            if suppress_shadow {
-                commands.entity(panel_entity).with_child((
-                    DiegeticTextMesh,
-                    NotShadowCaster,
-                    Mesh3d(mesh_handle.clone()),
-                    MeshMaterial3d(material_handle),
-                    text_transform,
-                    content_layer.clone(),
-                ));
-            } else {
-                commands.entity(panel_entity).with_child((
-                    DiegeticTextMesh,
-                    Mesh3d(mesh_handle.clone()),
-                    MeshMaterial3d(material_handle),
-                    text_transform,
-                    content_layer.clone(),
-                ));
-            }
+            let material_handle = resolve_visible_material(
+                key,
+                hue,
+                *alpha_mode,
+                &batch_base,
+                &page_image,
+                atlas,
+                materials,
+                shared_mats,
+                text_oit_offset,
+            );
+            spawn_visible_mesh(
+                panel_entity,
+                mesh_handle.clone(),
+                material_handle,
+                suppress_shadow,
+                content_layer,
+                commands,
+            );
         }
 
         if needs_proxy {
@@ -904,6 +860,95 @@ fn spawn_batch_meshes(
                 commands,
             );
         }
+    }
+}
+
+/// Returns the `MsdfTextMaterial` handle for a visible glyph batch.
+///
+/// Zero-hue default text uses a shared handle keyed by page / clip / depth /
+/// alpha mode. Non-zero hue or non-default render modes produce a unique
+/// material per batch.
+fn resolve_visible_material(
+    key: &TextBatchKey,
+    hue: f32,
+    alpha_mode: AlphaMode,
+    batch_base: &StandardMaterial,
+    page_image: &Handle<Image>,
+    atlas: &MsdfAtlas,
+    materials: &mut Assets<MsdfTextMaterial>,
+    shared_mats: &mut SharedMsdfMaterials,
+    text_oit_offset: f32,
+) -> Handle<MsdfTextMaterial> {
+    let clip_rect = clip_rect_from_bits(key.clip_rect);
+    if hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
+        shared_mats
+            .handles
+            .entry(SharedMsdfMaterialKey {
+                page_index:      key.page_index,
+                clip_rect:       key.clip_rect,
+                depth_bias_bits: batch_base.depth_bias.to_bits(),
+                alpha_mode_bits: key.alpha_mode_bits,
+            })
+            .or_insert_with(|| {
+                materials.add(super::msdf_material::msdf_text_material(
+                    batch_base.clone(),
+                    MsdfAtlas::sdf_range().to_f32(),
+                    atlas.width(),
+                    atlas.height(),
+                    page_image.clone(),
+                    0.0,
+                    glyph_render_mode_uniform(GlyphRenderMode::Text),
+                    clip_rect,
+                    text_oit_offset,
+                    alpha_mode,
+                ))
+            })
+            .clone()
+    } else {
+        materials.add(super::msdf_material::msdf_text_material(
+            batch_base.clone(),
+            MsdfAtlas::sdf_range().to_f32(),
+            atlas.width(),
+            atlas.height(),
+            page_image.clone(),
+            hue,
+            glyph_render_mode_uniform(key.render_mode),
+            clip_rect,
+            text_oit_offset,
+            alpha_mode,
+        ))
+    }
+}
+
+/// Spawns the visible glyph-mesh child entity under `panel_entity`. When
+/// `suppress_shadow` is set (either because this batch is invisible, has a
+/// companion shadow proxy, or has shadows off), adds `NotShadowCaster`.
+fn spawn_visible_mesh(
+    panel_entity: Entity,
+    mesh_handle: Handle<Mesh>,
+    material_handle: Handle<MsdfTextMaterial>,
+    suppress_shadow: bool,
+    content_layer: &RenderLayers,
+    commands: &mut Commands,
+) {
+    let transform = Transform::from_xyz(0.0, 0.0, 0.0);
+    if suppress_shadow {
+        commands.entity(panel_entity).with_child((
+            DiegeticTextMesh,
+            NotShadowCaster,
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(material_handle),
+            transform,
+            content_layer.clone(),
+        ));
+    } else {
+        commands.entity(panel_entity).with_child((
+            DiegeticTextMesh,
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(material_handle),
+            transform,
+            content_layer.clone(),
+        ));
     }
 }
 
@@ -1239,6 +1284,10 @@ fn sync_panel_hue_offset(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use std::collections::HashMap;
 
@@ -1273,7 +1322,10 @@ mod tests {
                     anchor_y:      0.0,
                     clip_rect:     None,
                 };
-                (Entity::from_raw_u32(cmd.try_into().expect("small")).expect("valid"), ptc)
+                (
+                    Entity::from_raw_u32(cmd.try_into().expect("small")).expect("valid"),
+                    ptc,
+                )
             })
             .collect();
 

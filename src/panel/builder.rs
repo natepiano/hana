@@ -48,20 +48,20 @@ pub struct Ready;
 
 #[derive(Default)]
 pub(super) struct BuilderData {
-    width:          f32,
-    height:         f32,
-    layout_unit:    Unit,
-    font_unit:      Option<Unit>,
-    anchor:         Option<Anchor>,
-    world_width:    Option<f32>,
-    world_height:   Option<f32>,
-    render_mode:    RenderMode,
-    surface_shadow: SurfaceShadow,
-    material:       Option<StandardMaterial>,
-    text_material:  Option<StandardMaterial>,
+    width:           f32,
+    height:          f32,
+    layout_unit:     Unit,
+    font_unit:       Option<Unit>,
+    anchor:          Option<Anchor>,
+    world_width:     Option<f32>,
+    world_height:    Option<f32>,
+    render_mode:     RenderMode,
+    surface_shadow:  SurfaceShadow,
+    material:        Option<StandardMaterial>,
+    text_material:   Option<StandardMaterial>,
     text_alpha_mode: Option<AlphaMode>,
-    tree:           Option<LayoutTree>,
-    mode:           PanelMode,
+    tree:            Option<LayoutTree>,
+    mode:            PanelMode,
 }
 
 /// Builder for [`DiegeticPanel`].
@@ -508,19 +508,19 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
 
 fn build_panel(data: BuilderData) -> DiegeticPanel {
     DiegeticPanel {
-        tree:           data.tree.unwrap_or_default(),
-        width:          data.width,
-        height:         data.height,
-        layout_unit:    data.layout_unit,
-        font_unit:      data.font_unit,
-        anchor:         data.anchor.unwrap_or(Anchor::TopLeft),
-        world_width:    data.world_width,
-        world_height:   data.world_height,
-        render_mode:    data.render_mode,
-        surface_shadow: data.surface_shadow,
-        material:       data.material,
-        text_material:  data.text_material,
+        tree:            data.tree.unwrap_or_default(),
+        width:           data.width,
+        height:          data.height,
+        layout_unit:     data.layout_unit,
+        font_unit:       data.font_unit,
+        anchor:          data.anchor.unwrap_or(Anchor::TopLeft),
+        world_width:     data.world_width,
+        world_height:    data.world_height,
+        render_mode:     data.render_mode,
+        surface_shadow:  data.surface_shadow,
+        material:        data.material,
+        text_material:   data.text_material,
         text_alpha_mode: data.text_alpha_mode,
-        mode:           data.mode,
+        mode:            data.mode,
     }
 }

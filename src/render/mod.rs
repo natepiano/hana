@@ -21,6 +21,7 @@ pub use constants::default_panel_material;
 pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_shape_material;
+use text_renderer::PanelTextQuads;
 pub use transparency::StableTransparency;
 pub use transparency::TextAlphaModeDefault;
 #[cfg(feature = "typography_overlay")]
@@ -29,6 +30,8 @@ pub use world_text::PanelTextChild;
 pub use world_text::PendingGlyphs;
 pub use world_text::WorldText;
 pub use world_text::WorldTextReady;
+
+use crate::layout::WorldTextStyle;
 
 /// Umbrella render plugin — registers the three render-side sub-plugins
 /// (MSDF text, SDF panel geometry, RTT panel compositing).
@@ -47,9 +50,6 @@ impl Plugin for RenderPlugin {
         .add_systems(Update, invalidate_text_on_alpha_default_change);
     }
 }
-
-use crate::layout::WorldTextStyle;
-use text_renderer::PanelTextQuads;
 
 /// Forces text materials to rebuild when [`TextAlphaModeDefault`] changes.
 ///
