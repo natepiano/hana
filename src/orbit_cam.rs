@@ -23,25 +23,111 @@ use super::egui::BlockOnEguiFocus;
 #[cfg(feature = "bevy_egui")]
 use super::egui::EguiWantsFocus;
 use super::input;
+use super::input::ButtonZoomAxis;
+use super::input::InputControl;
 use super::input::MouseKeyTracker;
+use super::input::ZoomDirection;
 use super::orbital_math;
 use super::touch::TouchGestures;
 use super::touch::TouchInput;
 use super::touch::TouchTracker;
-use super::types::ActiveCameraData;
-use super::types::ButtonZoomAxis;
-use super::types::CameraInputDetection;
-use super::types::FocusBoundsShape;
-use super::types::ForceUpdate;
-use super::types::InitializationState;
-use super::types::InputControl;
-use super::types::TimeSource;
-use super::types::UpsideDownPolicy;
-use super::types::ZoomDirection;
 
 /// Base system set to allow ordering of `OrbitCam`
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct OrbitCamSystemSet;
+
+/// Tracks which `OrbitCam` is active (should handle input events).
+///
+/// Also stores the window and viewport dimensions, which are used for scaling mouse motion.
+/// `LagrangePlugin` manages this resource automatically, in order to support multiple
+/// viewports/windows. However, if this doesn't work for you, you can take over and manage it
+/// yourself, e.g. when you want to control a camera that is rendering to a texture.
+#[derive(Resource, Default, Debug, PartialEq)]
+pub struct ActiveCameraData {
+    /// ID of the entity with `OrbitCam` that will handle user input. In other words, this
+    /// is the camera that will move when you orbit/pan/zoom.
+    pub entity:        Option<Entity>,
+    /// The viewport size. This is only used to scale the panning mouse motion. I recommend setting
+    /// this to the actual render target dimensions (e.g. the image or viewport), and changing
+    /// `OrbitCam::pan_sensitivity` to adjust the sensitivity if required.
+    pub viewport_size: Option<Vec2>,
+    /// The size of the window. This is only used to scale the orbit mouse motion. I recommend
+    /// setting this to actual dimensions of the window that you want to control the camera from,
+    /// and changing `OrbitCam::orbit_sensitivity` to adjust the sensitivity if required.
+    pub window_size:   Option<Vec2>,
+    /// Controls whether `LagrangePlugin` auto-detects the active camera from cursor position.
+    /// Set to `CameraInputDetection::Manual` when you populate this resource yourself
+    /// (e.g. render-to-texture scenarios where there is no on-screen viewport to hit-test).
+    /// Note that `Manual` disables multi-viewport/window support unless you reimplement it.
+    pub detection:     CameraInputDetection,
+}
+
+/// Whether the plugin auto-detects which camera should receive input.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub enum CameraInputDetection {
+    /// The plugin hit-tests cursor position against viewport rects each frame.
+    #[default]
+    Automatic,
+    /// The user populates `ActiveCameraData` directly; the detection system is skipped.
+    Manual,
+}
+
+/// The shape to restrict the camera's focus inside.
+#[derive(Clone, PartialEq, Debug, Reflect, Copy)]
+pub enum FocusBoundsShape {
+    /// Limit the camera's focus to a sphere centered on `focus_bounds_origin`.
+    Sphere(Sphere),
+    /// Limit the camera's focus to a cuboid centered on `focus_bounds_origin`.
+    Cuboid(Cuboid),
+}
+
+impl From<Sphere> for FocusBoundsShape {
+    fn from(value: Sphere) -> Self { Self::Sphere(value) }
+}
+
+impl From<Cuboid> for FocusBoundsShape {
+    fn from(value: Cuboid) -> Self { Self::Cuboid(value) }
+}
+
+/// Whether the camera is allowed to orbit past the poles into an upside-down orientation.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
+pub enum UpsideDownPolicy {
+    /// Camera may orbit upside down.
+    Allow,
+    /// Camera pitch is clamped to prevent going upside down.
+    #[default]
+    Prevent,
+}
+
+/// Whether `OrbitCam` has been initialized from the camera's current transform.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
+pub enum InitializationState {
+    /// Initialization has not yet occurred.
+    #[default]
+    Pending,
+    /// Initialization is complete.
+    Complete,
+}
+
+/// Whether to force a transform update this frame regardless of input.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
+pub enum ForceUpdate {
+    /// No forced update.
+    #[default]
+    Idle,
+    /// Force a transform update this frame, then return to `Idle`.
+    Pending,
+}
+
+/// Which time source drives camera smoothing.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
+pub enum TimeSource {
+    /// Use Bevy's virtual time (respects pause).
+    #[default]
+    Virtual,
+    /// Use real (wall-clock) time (ignores pause).
+    Real,
+}
 
 /// Internal per-camera state used to keep orbit direction stable during a drag.
 #[derive(Component, Default, Copy, Clone, Debug, PartialEq, Eq)]

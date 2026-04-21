@@ -66,10 +66,8 @@ pub(super) struct FitMarginPercents {
     pub bottom: f32,
 }
 
-impl FitMarginPercents {
-    /// Constructs margin percentages from screen-space bounds, computing
-    /// screen dimensions once rather than per-edge.
-    pub(super) const fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
+impl From<&ScreenSpaceBounds> for FitMarginPercents {
+    fn from(bounds: &ScreenSpaceBounds) -> Self {
         let screen_width = 2.0 * bounds.half_extent_x;
         let screen_height = 2.0 * bounds.half_extent_y;
         Self {
@@ -403,7 +401,7 @@ fn draw_bounds_for_camera(
     let camera_global = camera_data.camera_global;
     let projection = camera_data.projection;
 
-    let camera_basis = CameraBasis::from_global_transform(camera_global);
+    let camera_basis = CameraBasis::from(camera_global);
 
     let Some(aspect_ratio) =
         projection::projection_aspect_ratio(projection, camera_component.logical_viewport_size())
@@ -433,7 +431,7 @@ fn draw_bounds_for_camera(
     // (e.g. closing a secondary window while visualization is active).
     commands
         .entity(camera)
-        .try_insert(FitMarginPercents::from_bounds(&bounds));
+        .try_insert(FitMarginPercents::from(&bounds));
 
     // Bounding rectangle
     let corners = create_screen_corners(&bounds, &camera_basis, avg_depth, projection_mode);

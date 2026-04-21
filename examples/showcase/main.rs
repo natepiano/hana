@@ -27,7 +27,6 @@ use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::time::Virtual;
 use bevy::ui::UiTargetCamera;
-use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_kana::ToUsize;
@@ -119,7 +118,6 @@ fn main() {
         .add_systems(
             Update,
             (
-                second_window::cleanup_second_window,
                 second_window::log_window_focus,
                 second_window::despawn_window_labels,
                 ui::toggle_pause,
@@ -154,6 +152,7 @@ fn main() {
         .add_observer(event_log::log_zoom_end)
         .add_observer(event_log::log_zoom_cancelled)
         .add_observer(event_log::log_animation_rejected)
+        .add_observer(second_window::on_second_window_removed)
         .run();
 }
 

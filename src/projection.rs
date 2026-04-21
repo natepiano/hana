@@ -18,8 +18,8 @@ pub(crate) struct CameraBasis {
     pub forward:  Vec3,
 }
 
-impl CameraBasis {
-    pub(crate) fn from_global_transform(global: &GlobalTransform) -> Self {
+impl From<&GlobalTransform> for CameraBasis {
+    fn from(global: &GlobalTransform) -> Self {
         let rot = global.rotation();
         Self {
             position: Position(global.translation()),
@@ -193,7 +193,7 @@ impl ScreenSpaceBounds {
             mode,
         } = ProjectionParams::from_projection(projection, viewport_aspect)?;
 
-        let camera_basis = CameraBasis::from_global_transform(camera_global);
+        let camera_basis = CameraBasis::from(camera_global);
 
         let mut min_norm_x = f32::INFINITY;
         let mut max_norm_x = f32::NEG_INFINITY;

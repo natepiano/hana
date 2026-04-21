@@ -1,3 +1,5 @@
+use bevy::window::WindowFocused;
+
 use super::*;
 
 #[derive(Resource)]
@@ -54,10 +56,9 @@ pub(super) fn toggle_second_window(
     }
 
     if let Some(second_window) = second {
+        // Despawn only the window — `on_second_window_removed` handles the
+        // camera despawn, resource removal, and "closed" log entry.
         commands.entity(second_window.window).despawn();
-        commands.entity(second_window.camera).despawn();
-        commands.remove_resource::<SecondWindowEntities>();
-        log.push("Window 2: closed".into());
         return;
     }
 
@@ -125,52 +126,43 @@ pub(super) fn toggle_second_window(
 
 pub(super) fn log_window_focus(
     second: Option<Res<SecondWindowEntities>>,
-    windows: Query<(Entity, &Window)>,
+    mut focus_events: MessageReader<WindowFocused>,
     mut log: ResMut<event_log::EventLog>,
-    mut last_focused: Local<Option<Entity>>,
 ) {
     let Some(second_window) = second else {
-        *last_focused = None;
+        focus_events.clear();
         return;
     };
 
-    let current_focused = windows
-        .iter()
-        .find(|(_, window)| window.focused)
-        .map(|(entity, _)| entity);
-
-    if current_focused != *last_focused {
-        if let Some(focused) = current_focused {
-            let label = if focused == second_window.window {
-                "Window 2"
-            } else {
-                "Window 1"
-            };
-            log.push(format!("{label} focused"));
+    for event in focus_events.read() {
+        if !event.focused {
+            continue;
         }
-        *last_focused = current_focused;
+        let label = if event.window == second_window.window {
+            "Window 2"
+        } else {
+            "Window 1"
+        };
+        log.push(format!("{label} focused"));
     }
 }
 
-pub(super) fn cleanup_second_window(
+pub(super) fn on_second_window_removed(
+    trigger: On<Remove, Window>,
     mut commands: Commands,
     second: Option<Res<SecondWindowEntities>>,
-    windows: Query<(), With<Window>>,
-    closing: Query<(), With<ClosingWindow>>,
     mut log: ResMut<event_log::EventLog>,
 ) {
     let Some(second_window) = second else {
         return;
     };
-    // Detect both already-despawned windows (`is_err`) and windows marked for close this
-    // frame (`ClosingWindow`). Catching `ClosingWindow` ensures the camera is despawned
-    // in the same command flush as the window, preventing `camera_system` from hitting a
-    // stale `RenderTarget`.
-    if windows.get(second_window.window).is_err() || closing.get(second_window.window).is_ok() {
-        commands.entity(second_window.camera).despawn();
-        commands.remove_resource::<SecondWindowEntities>();
-        log.push("Window 2: closed".into());
+    if second_window.window != trigger.entity {
+        return;
     }
+
+    commands.entity(second_window.camera).despawn();
+    commands.remove_resource::<SecondWindowEntities>();
+    log.push("Window 2: closed".into());
 }
 
 pub(super) fn despawn_window_labels(

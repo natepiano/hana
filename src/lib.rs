@@ -14,17 +14,16 @@ mod events;
 mod fit;
 #[cfg(feature = "fit_overlay")]
 mod fit_overlay;
+#[allow(
+    clippy::used_underscore_binding,
+    reason = "false positive on enum variant fields"
+)]
 mod input;
 mod observers;
 mod orbit_cam;
 mod orbital_math;
 mod projection;
 mod touch;
-#[allow(
-    clippy::used_underscore_binding,
-    reason = "false positive on enum variant fields"
-)]
-mod types;
 
 pub use animation::CameraMove;
 pub use animation::CameraMoveList;
@@ -63,23 +62,23 @@ pub use events::ZoomEnd;
 pub use events::ZoomToFit;
 #[cfg(feature = "fit_overlay")]
 pub use fit_overlay::FitTargetOverlayConfig;
+pub use input::ButtonZoomAxis;
+pub use input::InputControl;
 use input::MouseKeyTracker;
+pub use input::TrackpadBehavior;
+pub use input::TrackpadInput;
+pub use input::ZoomDirection;
+pub use orbit_cam::ActiveCameraData;
+pub use orbit_cam::CameraInputDetection;
+pub use orbit_cam::FocusBoundsShape;
+pub use orbit_cam::ForceUpdate;
+pub use orbit_cam::InitializationState;
 pub use orbit_cam::OrbitCam;
 pub use orbit_cam::OrbitCamSystemSet;
+pub use orbit_cam::TimeSource;
+pub use orbit_cam::UpsideDownPolicy;
 pub use touch::TouchInput;
 use touch::TouchTracker;
-pub use types::ActiveCameraData;
-pub use types::ButtonZoomAxis;
-pub use types::CameraInputDetection;
-pub use types::FocusBoundsShape;
-pub use types::ForceUpdate;
-pub use types::InitializationState;
-pub use types::InputControl;
-pub use types::TimeSource;
-pub use types::TrackpadBehavior;
-pub use types::TrackpadInput;
-pub use types::UpsideDownPolicy;
-pub use types::ZoomDirection;
 
 /// Bevy plugin that contains the systems for controlling `OrbitCam` components.
 /// # Example
@@ -132,14 +131,7 @@ impl Plugin for LagrangePlugin {
                 );
         }
 
-        app.add_observer(observers::on_camera_move_list_added)
-            .add_observer(observers::restore_camera_state)
-            .add_observer(observers::on_zoom_to_fit)
-            .add_observer(observers::on_play_animation)
-            .add_observer(observers::on_set_fit_target)
-            .add_observer(observers::on_animate_to_fit)
-            .add_observer(observers::on_look_at)
-            .add_observer(observers::on_look_at_and_zoom_to_fit)
+        app.add_plugins(observers::ObserverPlugin)
             .add_systems(Update, animation::process_camera_move_list);
 
         #[cfg(feature = "fit_overlay")]

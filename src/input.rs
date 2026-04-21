@@ -4,14 +4,114 @@ use bevy::input::mouse::MouseScrollUnit;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
-use super::ActiveCameraData;
-use super::ButtonZoomAxis;
-use super::OrbitCam;
-use super::TrackpadBehavior;
-use super::ZoomDirection;
 use super::constants::BUTTON_ZOOM_SCALE;
 use super::constants::PINCH_GESTURE_AMPLIFICATION;
 use super::constants::PIXEL_SCROLL_SCALE;
+use super::orbit_cam::ActiveCameraData;
+use super::orbit_cam::OrbitCam;
+use super::touch::TouchInput;
+
+/// Which axis controls button-based zoom.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy)]
+pub enum ButtonZoomAxis {
+    /// Zoom by moving the mouse along the x-axis.
+    X,
+    /// Zoom by moving the mouse along the y-axis.
+    Y,
+    /// Zoom by moving the mouse along either the x-axis or the y-axis.
+    XY,
+}
+
+/// Selects how trackpad input is interpreted.
+///
+/// In Blender the trackpad orbits when scrolling. If you hold down the `ShiftLeft`, it pans and
+/// holding down `ControlLeft` will zoom.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy)]
+pub enum TrackpadBehavior {
+    /// Trackpad scrolling and pinching both zoom.
+    ZoomOnly,
+    /// Trackpad scrolling orbits by default, and can pan or zoom with modifiers.
+    /// Pinching still zooms.
+    BlenderLike {
+        /// Modifier key that enables panning while scrolling
+        modifier_pan: Option<KeyCode>,
+
+        /// Modifier key that enables panning while scrolling
+        modifier_zoom: Option<KeyCode>,
+    },
+}
+
+impl TrackpadBehavior {
+    /// Creates a `BlenderLike` variant with default modifiers (Shift for pan, Ctrl for zoom)
+    #[must_use]
+    pub const fn blender_default() -> Self {
+        Self::BlenderLike {
+            modifier_pan:  Some(KeyCode::ShiftLeft),
+            modifier_zoom: Some(KeyCode::ControlLeft),
+        }
+    }
+}
+
+/// Interactive input configuration for `OrbitCam`.
+#[derive(Clone, PartialEq, Debug, Reflect, Copy)]
+pub struct InputControl {
+    /// The control scheme for touch inputs.
+    /// Set to `None` to disable touch input entirely.
+    pub touch:    Option<TouchInput>,
+    /// The trackpad input configuration.
+    pub trackpad: Option<TrackpadInput>,
+    /// Direction of all zoom input, including scroll, pinch, and button-drag zoom.
+    pub zoom:     ZoomDirection,
+}
+
+impl Default for InputControl {
+    fn default() -> Self {
+        Self {
+            touch:    Some(TouchInput::OneFingerOrbit),
+            trackpad: Some(TrackpadInput::default()),
+            zoom:     ZoomDirection::Normal,
+        }
+    }
+}
+
+/// Trackpad-specific input configuration for `OrbitCam`.
+#[derive(Clone, PartialEq, Debug, Reflect, Copy)]
+pub struct TrackpadInput {
+    /// The behavior for trackpad scroll input.
+    pub behavior:    TrackpadBehavior,
+    /// The sensitivity of trackpad gestures when using `BlenderLike` behavior.
+    pub sensitivity: f32,
+}
+
+impl Default for TrackpadInput {
+    fn default() -> Self {
+        Self {
+            behavior:    TrackpadBehavior::ZoomOnly,
+            sensitivity: 1.0,
+        }
+    }
+}
+
+impl TrackpadInput {
+    /// Creates a Blender-like trackpad configuration with default modifiers and sensitivity.
+    #[must_use]
+    pub const fn blender_default() -> Self {
+        Self {
+            behavior:    TrackpadBehavior::blender_default(),
+            sensitivity: 1.0,
+        }
+    }
+}
+
+/// Direction of scroll/zoom input.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
+pub enum ZoomDirection {
+    /// Scrolling zooms in the default direction.
+    #[default]
+    Normal,
+    /// Scrolling zooms in the opposite direction.
+    Reversed,
+}
 
 #[derive(Resource, Default, Debug)]
 pub(crate) struct MouseKeyTracker {
