@@ -29,6 +29,7 @@ use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
+use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimateToFit;
@@ -344,7 +345,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
     };
     let hud_width = windows.iter().next().map_or(HUD_WIDTH, Window::width);
     let mut hud_panel = DiegeticPanel::screen()
-        .size(hud_width, HUD_HEIGHT)
+        .size(Sizing::fixed(Px(hud_width)), Sizing::fixed(Px(HUD_HEIGHT)))
         .anchor(Anchor::TopLeft)
         .material(unlit_material.clone())
         .text_material(unlit_material)

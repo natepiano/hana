@@ -40,6 +40,7 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlphaModeDefault;
 use bevy_diegetic::WorldText;
@@ -317,7 +318,7 @@ fn setup(
     // panel text stays legible regardless of the current alpha-mode default.
     commands.spawn((
         DiegeticPanel::screen()
-            .size(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
+            .size(Sizing::fixed(CAM_HELP_WIDTH), Sizing::fixed(CAM_HELP_HEIGHT))
             .anchor(Anchor::BottomRight)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(build_camera_help)
@@ -460,7 +461,7 @@ fn spawn_hud_panel(commands: &mut Commands, state: &ControlsState) {
     commands.spawn((
         HudPanel,
         DiegeticPanel::screen()
-            .size(HUD_WIDTH, HUD_HEIGHT)
+            .size(Sizing::fixed(HUD_WIDTH), Sizing::fixed(HUD_HEIGHT))
             .anchor(Anchor::TopLeft)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(move |b| build_controls(b, camera_state))
@@ -475,9 +476,8 @@ fn spawn_info_panel(commands: &mut Commands, state: &ControlsState) {
     commands.spawn((
         InfoPanel,
         DiegeticPanel::screen()
-            .size(Px(0.0), INFO_HEIGHT)
+            .size(Sizing::percent(0.22), Sizing::fixed(INFO_HEIGHT))
             .anchor(Anchor::TopRight)
-            .width_percent(0.22)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(move |b| build_info_panel(b, mode))
             .build()

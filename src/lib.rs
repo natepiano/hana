@@ -125,7 +125,6 @@ pub use panel::HeadlessLayoutPlugin;
 pub use panel::HueOffset;
 pub use panel::PanelMode;
 pub use panel::RenderMode;
-pub use panel::ScreenDimension;
 pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;

@@ -195,6 +195,32 @@ impl LayoutTree {
         }
     }
 
+    /// Changes the root element's width sizing to `FIT { min, max }`.
+    ///
+    /// Paired with `DiegeticPanel::screen().size(Sizing::Fit { .. }, _)` so
+    /// the two-pass layout (`propagate_fit_sizes` bottom-up +
+    /// `size_along_axis` top-down) resolves root to its natural content
+    /// width, clamped to `[min, max]`.
+    pub(super) fn set_root_fit_width(&mut self, min: Dimension, max: Dimension) {
+        if let Some(root) = self.root
+            && let Some(element) = self.elements.get_mut(root)
+        {
+            element.width = Sizing::Fit { min, max };
+        }
+    }
+
+    /// Changes the root element's height sizing to `FIT { min, max }`.
+    ///
+    /// See [`set_root_fit_width`](Self::set_root_fit_width) for rationale.
+    pub(super) fn set_root_fit_height(&mut self, min: Dimension, max: Dimension) {
+        if let Some(root) = self.root
+            && let Some(element) = self.elements.get_mut(root)
+        {
+            element.height = Sizing::Fit { min, max };
+        }
+    }
+
+
     /// Returns an iterator over child indices of the given element.
     #[must_use]
     pub(super) fn children_of(&self, index: usize) -> &[usize] {

@@ -8,10 +8,10 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 
+use crate::layout::Sizing;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelMode;
 use crate::panel::PanelSystems;
-use crate::panel::ScreenDimension;
 use crate::panel::ScreenPosition;
 
 /// Marker on overlay cameras spawned by the screen-space system.
@@ -54,7 +54,7 @@ impl Plugin for ScreenSpacePlugin {
 /// trigger layout recomputation via Bevy change detection.
 fn position_screen_space_panels(
     windows: Query<&Window>,
-    mut panels: Query<(&mut Transform, &mut DiegeticPanel)>,
+    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &crate::panel::ComputedDiegeticPanel)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -67,7 +67,7 @@ fn position_screen_space_panels(
     let half_w = win_w / 2.0;
     let half_h = win_h / 2.0;
 
-    for (mut transform, mut panel) in &mut panels {
+    for (mut transform, mut panel, computed) in &mut panels {
         let PanelMode::Screen {
             position,
             width,
@@ -80,24 +80,15 @@ fn position_screen_space_panels(
         let position = *position;
         let width = *width;
         let height = *height;
+        let (content_w, content_h) = (computed.content_width(), computed.content_height());
 
-        if let Some(dim) = width {
-            let new_w = match dim {
-                ScreenDimension::Fixed(px) => px,
-                ScreenDimension::Percent(frac) => win_w * frac,
-            };
-            if (panel.width() - new_w).abs() > 0.01 {
-                panel.set_width(new_w);
-            }
+        let new_w = resolve_screen_axis(width, win_w, content_w, panel.width());
+        if (panel.width() - new_w).abs() > 0.01 {
+            panel.set_width(new_w);
         }
-        if let Some(dim) = height {
-            let new_h = match dim {
-                ScreenDimension::Fixed(px) => px,
-                ScreenDimension::Percent(frac) => win_h * frac,
-            };
-            if (panel.height() - new_h).abs() > 0.01 {
-                panel.set_height(new_h);
-            }
+        let new_h = resolve_screen_axis(height, win_h, content_h, panel.height());
+        if (panel.height() - new_h).abs() > 0.01 {
+            panel.set_height(new_h);
         }
 
         let (screen_x, screen_y) = match position {
@@ -110,6 +101,29 @@ fn position_screen_space_panels(
 
         transform.translation.x = screen_x - half_w;
         transform.translation.y = half_h - screen_y;
+    }
+}
+
+/// Resolves one axis of a screen-space panel's [`Sizing`] to a pixel value.
+///
+/// - `Fixed`    → the dimension's value in pixels.
+/// - `Percent`  → `window_axis * frac`.
+/// - `Fit`      → the last-computed content size, clamped to `[min, max]`, with
+///   `max.unwrap_or(window_axis)` as the growth budget on frame 1.
+/// - `Grow`     → the window axis clamped to `[min, max]`.
+fn resolve_screen_axis(sizing: Sizing, window_axis: f32, content: f32, current: f32) -> f32 {
+    match sizing {
+        Sizing::Fixed(dim) => dim.value,
+        Sizing::Percent(frac) => window_axis * frac,
+        Sizing::Fit { min, max } => {
+            let upper = max.value.min(window_axis);
+            let lower = min.value;
+            // Use last-computed content size if the layout engine has produced
+            // one; otherwise allow room to grow on the first frame.
+            let target = if content > 0.0 { content } else { current.max(upper) };
+            target.clamp(lower, upper)
+        },
+        Sizing::Grow { min, max } => window_axis.clamp(min.value, max.value),
     }
 }
 
@@ -305,4 +319,107 @@ fn cleanup_screen_space_cameras(
     }
 
     *prev_pairs = current_pairs;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_screen_axis;
+    use crate::layout::Dimension;
+    use crate::layout::Sizing;
+
+    fn px(value: f32) -> Dimension {
+        Dimension {
+            value,
+            unit: None,
+        }
+    }
+
+    /// Fixed pixel value is returned unchanged regardless of window, content,
+    /// or previous panel size.
+    #[test]
+    fn fixed_returns_exact_value() {
+        let size = Sizing::Fixed(px(280.0));
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 280.0);
+        assert_eq!(resolve_screen_axis(size, 800.0, 500.0, 100.0), 280.0);
+        assert_eq!(resolve_screen_axis(size, 2000.0, 0.0, 0.0), 280.0);
+    }
+
+    /// Percent multiplies the window axis by the fraction.
+    #[test]
+    fn percent_scales_with_window() {
+        let size = Sizing::Percent(0.25);
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 200.0);
+        assert_eq!(resolve_screen_axis(size, 1600.0, 0.0, 0.0), 400.0);
+    }
+
+    /// `Fit` on the first frame (content unknown) grows up to the `max` cap,
+    /// clamped by the window.
+    #[test]
+    fn fit_first_frame_uses_max_budget() {
+        // Unbounded Fit: grows up to the window axis.
+        let size = Sizing::FIT;
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
+
+        // Fit with an explicit max smaller than the window: grows to the max.
+        let size = Sizing::Fit {
+            min: px(0.0),
+            max: px(400.0),
+        };
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 400.0);
+
+        // Fit with an explicit max larger than the window: clamped to window.
+        let size = Sizing::Fit {
+            min: px(0.0),
+            max: px(2000.0),
+        };
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
+    }
+
+    /// Once the layout engine reports a content size, `Fit` shrinks the panel
+    /// to that size, clamped to `[min, max]`.
+    #[test]
+    fn fit_shrinks_to_content_when_known() {
+        let size = Sizing::FIT;
+        // Content well under window → panel equals content.
+        assert_eq!(resolve_screen_axis(size, 800.0, 320.0, 800.0), 320.0);
+        // Content larger than window → clamped to window.
+        assert_eq!(resolve_screen_axis(size, 800.0, 1200.0, 800.0), 800.0);
+    }
+
+    /// `Fit { min, max }` clamps content to the configured bounds.
+    #[test]
+    fn fit_clamps_content_to_min_max() {
+        let size = Sizing::Fit {
+            min: px(100.0),
+            max: px(500.0),
+        };
+        // Content below min → floor at min.
+        assert_eq!(resolve_screen_axis(size, 800.0, 50.0, 0.0), 100.0);
+        // Content within range → unchanged.
+        assert_eq!(resolve_screen_axis(size, 800.0, 300.0, 0.0), 300.0);
+        // Content above max → cap at max.
+        assert_eq!(resolve_screen_axis(size, 800.0, 600.0, 0.0), 500.0);
+    }
+
+    /// `Grow` fills the window axis, clamped to `[min, max]`.
+    #[test]
+    fn grow_fills_window_clamped() {
+        // Unbounded Grow: equals window.
+        let size = Sizing::GROW;
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 800.0);
+
+        // Grow with explicit cap below window: capped.
+        let size = Sizing::Grow {
+            min: px(100.0),
+            max: px(500.0),
+        };
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 500.0);
+
+        // Grow with min above window: floored at min.
+        let size = Sizing::Grow {
+            min: px(1000.0),
+            max: px(f32::INFINITY),
+        };
+        assert_eq!(resolve_screen_axis(size, 800.0, 0.0, 0.0), 1000.0);
+    }
 }

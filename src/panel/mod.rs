@@ -17,7 +17,6 @@ pub use gizmos::ShowTextGizmos;
 pub use modes::HueOffset;
 pub use modes::PanelMode;
 pub use modes::RenderMode;
-pub use modes::ScreenDimension;
 pub use modes::ScreenPosition;
 pub use modes::SurfaceShadow;
 pub use perf::DiegeticPerfStats;

@@ -423,15 +423,14 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
         unlit: true,
         ..unlit_material
     };
-    let hud_width = windows.iter().next().map_or(800.0, Window::width);
+    let _ = windows;
     commands.spawn((
         ControlsPanel,
         DiegeticPanel::screen()
-            .size(Px(hud_width), HUD_HEIGHT)
+            .size(Sizing::percent(1.0), Sizing::fixed(HUD_HEIGHT))
             .anchor(Anchor::TopLeft)
             .material(unlit.clone())
             .text_material(unlit)
-            .width_percent(1.0)
             .layout(|b| {
                 build_controls_content(b, false, true, true);
             })
@@ -446,7 +445,7 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
     };
     commands.spawn((
         DiegeticPanel::screen()
-            .size(CAM_HELP_WIDTH, CAM_HELP_HEIGHT)
+            .size(Sizing::fixed(CAM_HELP_WIDTH), Sizing::fixed(CAM_HELP_HEIGHT))
             .anchor(Anchor::BottomRight)
             .material(cam_unlit.clone())
             .text_material(cam_unlit)

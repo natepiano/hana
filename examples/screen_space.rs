@@ -21,6 +21,7 @@ use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
+use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
@@ -122,7 +123,7 @@ fn spawn_scene(
 fn spawn_hud(commands: &mut Commands) {
     commands.spawn((
         DiegeticPanel::screen()
-            .size(PANEL_WIDTH, PANEL_HEIGHT)
+            .size(Sizing::fixed(Px(PANEL_WIDTH)), Sizing::fixed(Px(PANEL_HEIGHT)))
             .anchor(Anchor::Center)
             .layout(|b| {
                 // Outer frame.

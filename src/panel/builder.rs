@@ -9,7 +9,6 @@ use bevy::prelude::*;
 use super::diegetic_panel::DiegeticPanel;
 use super::modes::PanelMode;
 use super::modes::RenderMode;
-use super::modes::ScreenDimension;
 use super::modes::ScreenPosition;
 use super::modes::SurfaceShadow;
 use crate::layout::Anchor;
@@ -20,6 +19,8 @@ use crate::layout::LayoutTree;
 use crate::layout::PanelSize;
 use crate::layout::PaperSize;
 use crate::layout::Pt;
+use crate::layout::Px;
+use crate::layout::Sizing;
 use crate::layout::Unit;
 
 /// Default camera render order for screen-space overlay panels.
@@ -100,8 +101,9 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
             data:    BuilderData {
                 mode: PanelMode::Screen {
                     position:      ScreenPosition::default(),
-                    width:         None,
-                    height:        None,
+                    // Placeholder — `.size()` overwrites both axes before build().
+                    width:         Sizing::fixed(Px(0.0)),
+                    height:        Sizing::fixed(Px(0.0)),
                     camera_order:  DEFAULT_SCREEN_SPACE_CAMERA_ORDER,
                     render_layers: RenderLayers::layer(DEFAULT_SCREEN_SPACE_RENDER_LAYER),
                 },
@@ -232,30 +234,41 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
 }
 
 impl DiegeticPanelBuilder<Screen, NeedsSize> {
-    /// Sets the panel dimensions and layout unit.
-    ///
-    /// Bare floats default to [`Unit::Pixels`] for screen-space panels.
-    /// Typed wrappers like [`Pt`] set the unit explicitly. Both arguments
-    /// must have the same type; mixed-unit panel sizing is unsupported.
+    /// Sets the panel dimensions using the layout engine's [`Sizing`] enum
+    /// on each axis. Screen panels always operate in logical pixels.
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// DiegeticPanel::screen().size(800.0, 600.0)          // 800 × 600 pixels
-    /// DiegeticPanel::screen().size(Pt(595.0), Pt(842.0))  // A4 in points
+    /// // Fixed-pixel panel.
+    /// DiegeticPanel::screen()
+    ///     .size(Sizing::fixed(Px(600.0)), Sizing::fixed(Px(44.0)))
+    ///
+    /// // Percent of window width, fixed-pixel height.
+    /// DiegeticPanel::screen()
+    ///     .size(Sizing::percent(0.25), Sizing::fixed(Px(440.0)))
+    ///
+    /// // Fit content up to 400 px wide, content-sized height.
+    /// DiegeticPanel::screen()
+    ///     .size(Sizing::fit_max(Px(400.0)), Sizing::fit())
+    ///
+    /// // Fill the window.
+    /// DiegeticPanel::screen().size(Sizing::GROW, Sizing::GROW)
     /// ```
     #[must_use]
-    pub fn size<DM: DimensionMatch>(
+    pub fn size(
         mut self,
-        w: DM,
-        h: DM,
+        w: Sizing,
+        h: Sizing,
     ) -> DiegeticPanelBuilder<Screen, HasSize> {
-        let wd = w.into();
-        let hd = h.into();
-        let unit = wd.unit.or(hd.unit).unwrap_or(Unit::Pixels);
-        self.data.width = wd.value;
-        self.data.height = hd.value;
-        self.data.layout_unit = unit;
+        // Screen panels always use `Unit::Pixels` for their layout dimension.
+        self.data.layout_unit = Unit::Pixels;
+        self.data.width = initial_panel_size(w);
+        self.data.height = initial_panel_size(h);
+        if let PanelMode::Screen { width, height, .. } = &mut self.data.mode {
+            *width = w;
+            *height = h;
+        }
         DiegeticPanelBuilder {
             data:    self.data,
             _marker: PhantomData,
@@ -264,7 +277,8 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
 
     /// Sets the panel dimensions from a predefined paper size.
     ///
-    /// Converts to pixels at 72 PPI (1 pt = 1 px in our system).
+    /// Uses [`Sizing::Fixed`] for both axes, in pixels (1 pt → 1 px under
+    /// the orthographic overlay camera).
     #[must_use]
     pub fn paper(mut self, paper: PaperSize) -> DiegeticPanelBuilder<Screen, HasSize> {
         let w = paper.width_as::<Pt>();
@@ -272,10 +286,25 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
         self.data.width = w;
         self.data.height = h;
         self.data.layout_unit = Unit::Pixels;
+        if let PanelMode::Screen { width, height, .. } = &mut self.data.mode {
+            *width = Sizing::fixed(Px(w));
+            *height = Sizing::fixed(Px(h));
+        }
         DiegeticPanelBuilder {
             data:    self.data,
             _marker: PhantomData,
         }
+    }
+}
+
+/// Initial panel width/height to stash in [`BuilderData`]. For `Fixed` we know
+/// the exact value; for any dynamic [`Sizing`] we use `0.0` as a placeholder
+/// that the screen-space system resolves each frame against the window and
+/// the layout result.
+fn initial_panel_size(s: Sizing) -> f32 {
+    match s {
+        Sizing::Fixed(d) => d.value,
+        _ => 0.0,
     }
 }
 
@@ -302,42 +331,6 @@ impl<S> DiegeticPanelBuilder<World, S> {
 // ── Screen-only methods on HasSize ──────────────────────────────────────────
 
 impl DiegeticPanelBuilder<Screen, HasSize> {
-    /// Panel width fills a fraction of the window (0.0–1.0).
-    #[must_use]
-    pub const fn width_percent(mut self, fraction: f32) -> Self {
-        if let PanelMode::Screen { width, .. } = &mut self.data.mode {
-            *width = Some(ScreenDimension::Percent(fraction));
-        }
-        self
-    }
-
-    /// Panel height fills a fraction of the window (0.0–1.0).
-    #[must_use]
-    pub const fn height_percent(mut self, fraction: f32) -> Self {
-        if let PanelMode::Screen { height, .. } = &mut self.data.mode {
-            *height = Some(ScreenDimension::Percent(fraction));
-        }
-        self
-    }
-
-    /// Panel width is a fixed pixel value, managed by the plugin.
-    #[must_use]
-    pub const fn width_px(mut self, pixels: f32) -> Self {
-        if let PanelMode::Screen { width, .. } = &mut self.data.mode {
-            *width = Some(ScreenDimension::Fixed(pixels));
-        }
-        self
-    }
-
-    /// Panel height is a fixed pixel value, managed by the plugin.
-    #[must_use]
-    pub const fn height_px(mut self, pixels: f32) -> Self {
-        if let PanelMode::Screen { height, .. } = &mut self.data.mode {
-            *height = Some(ScreenDimension::Fixed(pixels));
-        }
-        self
-    }
-
     /// Places the panel at an explicit pixel position (top-left origin, y-down).
     #[must_use]
     pub const fn screen_position(mut self, x: f32, y: f32) -> Self {
@@ -460,32 +453,25 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
     /// equals 1.0 (1 layout unit = 1 world unit = 1 screen pixel under
     /// the orthographic overlay camera).
     ///
-    /// When [`ScreenDimension::Percent`] is used for width or height,
-    /// the layout tree's root element is automatically set to
-    /// `Sizing::GROW` on that axis.
+    /// When the panel's width or height is [`Sizing::Percent`], [`Sizing::Fit`],
+    /// or [`Sizing::Grow`] the layout tree's root element is automatically
+    /// updated so the engine reflows against the resolved panel dimensions
+    /// without needing a tree rebuild.
     ///
     /// # Errors
     ///
     /// Returns [`InvalidSize`] if width or height is zero or negative
-    /// and no percent-based sizing will fill them later.
+    /// and no dynamic sizing will fill it later.
     pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
-        let has_percent_width = matches!(
-            self.data.mode,
-            PanelMode::Screen {
-                width: Some(ScreenDimension::Percent(_)),
-                ..
-            }
-        );
-        let has_percent_height = matches!(
-            self.data.mode,
-            PanelMode::Screen {
-                height: Some(ScreenDimension::Percent(_)),
-                ..
-            }
-        );
+        let (w_sizing, h_sizing) = match self.data.mode {
+            PanelMode::Screen { width, height, .. } => (width, height),
+            PanelMode::World => unreachable!("Screen builder cannot have World mode"),
+        };
+        let has_dynamic_width = !matches!(w_sizing, Sizing::Fixed(_));
+        let has_dynamic_height = !matches!(h_sizing, Sizing::Fixed(_));
 
-        if !has_percent_width
-            && !has_percent_height
+        if !has_dynamic_width
+            && !has_dynamic_height
             && (self.data.width <= 0.0 || self.data.height <= 0.0)
         {
             return Err(InvalidSize {
@@ -495,17 +481,26 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         }
 
         if self.data.world_height.is_none() && self.data.world_width.is_none() {
-            self.data.world_height = Some(self.data.height);
+            self.data.world_height = Some(self.data.height.max(1.0));
         }
 
         if let Some(ref mut tree) = self.data.tree {
-            if has_percent_width {
-                crate::layout::set_root_grow_width(tree);
+            // The layout engine's two passes (bottom-up `propagate_fit_sizes`
+            // and top-down `size_along_axis`) already resolve `Fit` roots to
+            // their natural content size, so we route each Sizing variant to
+            // the matching root kind here.
+            match w_sizing {
+                Sizing::Fit { min, max } => crate::layout::set_root_fit_width(tree, min, max),
+                Sizing::Grow { .. } | Sizing::Percent(_) => crate::layout::set_root_grow_width(tree),
+                Sizing::Fixed(_) => {},
             }
-            if has_percent_height {
-                crate::layout::set_root_grow_height(tree);
+            match h_sizing {
+                Sizing::Fit { min, max } => crate::layout::set_root_fit_height(tree, min, max),
+                Sizing::Grow { .. } | Sizing::Percent(_) => crate::layout::set_root_grow_height(tree),
+                Sizing::Fixed(_) => {},
             }
         }
+        let _ = (has_dynamic_width, has_dynamic_height);
 
         Ok(build_panel(self.data))
     }

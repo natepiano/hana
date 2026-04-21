@@ -31,6 +31,7 @@ use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
+use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
@@ -149,7 +150,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
     };
     let hud_width = windows.iter().next().map_or(800.0, Window::width);
     let mut hud_panel = DiegeticPanel::screen()
-        .size(hud_width, HUD_HEIGHT)
+        .size(Sizing::fixed(Px(hud_width)), Sizing::fixed(Px(HUD_HEIGHT)))
         .anchor(Anchor::TopLeft)
         .material(unlit.clone())
         .text_material(unlit)

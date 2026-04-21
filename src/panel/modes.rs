@@ -8,21 +8,7 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
-/// How a screen-space panel derives its size along one axis from the window.
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub enum ScreenDimension {
-    /// Explicit pixel size. The panel's width/height is set to this value
-    /// regardless of window size.
-    Fixed(f32),
-    /// Fraction of the window along this axis (0.0–1.0).
-    /// `Percent(1.0)` fills the full window width or height.
-    ///
-    /// When used, the layout tree's root element is automatically set to
-    /// `Sizing::GROW` on the percent-sized axis. This allows the layout
-    /// engine to reflow children when the panel resizes — no tree rebuild
-    /// is needed for pure resize.
-    Percent(f32),
-}
+use crate::layout::Sizing;
 
 /// Where a screen-space panel is placed within the window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
@@ -83,12 +69,15 @@ pub enum PanelMode {
     Screen {
         /// Where to place the panel within the window.
         position:      ScreenPosition,
-        /// How to derive panel width from the window.
-        /// `None` keeps the panel's spawn-time width.
-        width:         Option<ScreenDimension>,
-        /// How to derive panel height from the window.
-        /// `None` keeps the panel's spawn-time height.
-        height:        Option<ScreenDimension>,
+        /// Panel width, expressed with the layout engine's [`Sizing`] enum.
+        /// `Fixed` is a pixel value; `Percent(f)` is a fraction of the
+        /// window; `Fit { min, max }` grows to content (bounded by `max` if
+        /// set); `Grow { min, max }` fills the window clamped to `[min, max]`.
+        #[reflect(ignore)]
+        width:         Sizing,
+        /// Panel height, same semantics as `width`.
+        #[reflect(ignore)]
+        height:        Sizing,
         /// Camera render order. Higher orders render on top. Default: `1`.
         camera_order:  isize,
         /// Render layers for isolation from the scene camera.

@@ -115,3 +115,14 @@ pub(crate) fn set_root_grow_width(tree: &mut LayoutTree) { tree.set_root_grow_wi
 ///
 /// See [`set_root_grow_width`] for the rationale behind this facade.
 pub(crate) fn set_root_grow_height(tree: &mut LayoutTree) { tree.set_root_grow_height(); }
+
+/// Sets the root element's width sizing to `FIT { min, max }`.
+pub(crate) fn set_root_fit_width(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
+    tree.set_root_fit_width(min, max);
+}
+
+/// Sets the root element's height sizing to `FIT { min, max }`.
+pub(crate) fn set_root_fit_height(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
+    tree.set_root_fit_height(min, max);
+}
+

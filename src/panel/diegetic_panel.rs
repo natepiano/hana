@@ -324,6 +324,19 @@ impl DiegeticPanel {
     #[must_use]
     pub fn points_to_world(&self, config: &UnitConfig) -> f32 {
         let layout_unit = self.resolved_layout_unit(config);
+        // Screen panels render under an orthographic camera where 1 world
+        // unit = 1 logical pixel. The layout engine scales dimensions by
+        // `layout_unit.to_points()`; reversing that factor returns values
+        // to the layout unit (which equals world units for screen panels),
+        // independent of panel height. This keeps points_to_world stable
+        // across dynamic `Sizing::Fit` / `Sizing::Grow` sizing where
+        // `panel.height` is recomputed each frame.
+        if self.mode.is_screen() {
+            let to_pts = layout_unit.to_points();
+            if to_pts > 0.0 {
+                return 1.0 / to_pts;
+            }
+        }
         let viewport_pts_h = self.height * layout_unit.to_points();
         let wh = self.world_height(config);
         if viewport_pts_h > 0.0 {
