@@ -57,7 +57,7 @@ pub enum ArrowStyle {
 
 /// Arrow-cap configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ArrowCap {
+pub(crate) struct ArrowCap {
     style:  ArrowStyle,
     length: Option<f32>,
     width:  Option<f32>,
@@ -67,7 +67,7 @@ pub struct ArrowCap {
 impl ArrowCap {
     /// Creates a default arrow cap.
     #[must_use]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             style:  ArrowStyle::Open,
             length: None,
@@ -78,35 +78,35 @@ impl ArrowCap {
 
     /// Uses the open chevron arrow style.
     #[must_use]
-    pub const fn open(mut self) -> Self {
+    pub(crate) const fn open(mut self) -> Self {
         self.style = ArrowStyle::Open;
         self
     }
 
     /// Uses the solid triangular arrow style.
     #[must_use]
-    pub const fn solid(mut self) -> Self {
+    pub(crate) const fn solid(mut self) -> Self {
         self.style = ArrowStyle::Solid;
         self
     }
 
     /// Sets the cap length along the line direction.
     #[must_use]
-    pub const fn length(mut self, length: f32) -> Self {
+    pub(crate) const fn length(mut self, length: f32) -> Self {
         self.length = Some(length);
         self
     }
 
     /// Sets the cap width across the line direction.
     #[must_use]
-    pub const fn width(mut self, width: f32) -> Self {
+    pub(crate) const fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
         self
     }
 
     /// Overrides the cap color. Defaults to the line color.
     #[must_use]
-    pub const fn color(mut self, color: Color) -> Self {
+    pub(crate) const fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
         self
     }
@@ -114,7 +114,7 @@ impl ArrowCap {
 
 /// Circle-cap configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CircleCap {
+pub(crate) struct CircleCap {
     radius: Option<f32>,
     color:  Option<Color>,
 }
@@ -122,7 +122,7 @@ pub struct CircleCap {
 impl CircleCap {
     /// Creates a default circle cap.
     #[must_use]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             radius: None,
             color:  None,
@@ -131,14 +131,14 @@ impl CircleCap {
 
     /// Sets the circle radius.
     #[must_use]
-    pub const fn radius(mut self, radius: f32) -> Self {
+    pub(crate) const fn radius(mut self, radius: f32) -> Self {
         self.radius = Some(radius);
         self
     }
 
     /// Overrides the cap color. Defaults to the line color.
     #[must_use]
-    pub const fn color(mut self, color: Color) -> Self {
+    pub(crate) const fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
         self
     }
@@ -146,7 +146,7 @@ impl CircleCap {
 
 /// Square-cap configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SquareCap {
+pub(crate) struct SquareCap {
     size:  Option<f32>,
     color: Option<Color>,
 }
@@ -154,7 +154,7 @@ pub struct SquareCap {
 impl SquareCap {
     /// Creates a default square cap.
     #[must_use]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             size:  None,
             color: None,
@@ -163,14 +163,14 @@ impl SquareCap {
 
     /// Sets the full square size.
     #[must_use]
-    pub const fn size(mut self, size: f32) -> Self {
+    pub(crate) const fn size(mut self, size: f32) -> Self {
         self.size = Some(size);
         self
     }
 
     /// Overrides the cap color. Defaults to the line color.
     #[must_use]
-    pub const fn color(mut self, color: Color) -> Self {
+    pub(crate) const fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
         self
     }
@@ -178,7 +178,7 @@ impl SquareCap {
 
 /// Diamond-cap configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DiamondCap {
+pub(crate) struct DiamondCap {
     width:  Option<f32>,
     height: Option<f32>,
     color:  Option<Color>,
@@ -187,7 +187,7 @@ pub struct DiamondCap {
 impl DiamondCap {
     /// Creates a default diamond cap.
     #[must_use]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             width:  None,
             height: None,
@@ -197,21 +197,21 @@ impl DiamondCap {
 
     /// Sets the full diamond width.
     #[must_use]
-    pub const fn width(mut self, width: f32) -> Self {
+    pub(crate) const fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
         self
     }
 
     /// Sets the full diamond height.
     #[must_use]
-    pub const fn height(mut self, height: f32) -> Self {
+    pub(crate) const fn height(mut self, height: f32) -> Self {
         self.height = Some(height);
         self
     }
 
     /// Overrides the cap color. Defaults to the line color.
     #[must_use]
-    pub const fn color(mut self, color: Color) -> Self {
+    pub(crate) const fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
         self
     }
@@ -219,6 +219,10 @@ impl DiamondCap {
 
 /// Decoration that can appear at either end of a [`CalloutLine`].
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[expect(
+    private_interfaces,
+    reason = "variant payload structs are crate-internal; users configure caps via CalloutCap builder methods"
+)]
 pub enum CalloutCap {
     /// No end cap.
     None,
