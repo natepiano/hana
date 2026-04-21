@@ -142,10 +142,15 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     }
 
     /// Sets a panel-wide [`AlphaMode`] default for every text chunk in this
-    /// panel. Per-style overrides still win.
+    /// panel. Per-style overrides still win; this in turn overrides the
+    /// app-wide [`TextAlphaModeDefault`](crate::TextAlphaModeDefault)
+    /// resource.
     ///
-    /// See [`StableTransparency`](crate::StableTransparency) when pairing
-    /// this with [`AlphaMode::Blend`].
+    /// See [`TextAlphaModeDefault`](crate::TextAlphaModeDefault) for the
+    /// full two-path overview ([`AlphaMode::Blend`] +
+    /// [`StableTransparency`](crate::StableTransparency) vs
+    /// [`AlphaMode::AlphaToCoverage`] + MSAA) and guidance on mixing modes
+    /// for creative effects.
     #[must_use]
     pub const fn text_alpha_mode(mut self, mode: AlphaMode) -> Self {
         self.data.text_alpha_mode = Some(mode);

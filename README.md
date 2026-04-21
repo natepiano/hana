@@ -31,62 +31,95 @@ App::new()
     .run();
 ```
 
-## Anti-Aliasing
+## Text transparency
 
-bevy_diegetic uses Order Independent Transparency (OIT) for correct layering
-of coplanar panel elements. This has implications for anti-aliasing.
+MSDF text renders anti-aliased edges via fractional alpha computed from the
+signed distance field. Two questions determine which `AlphaMode` you want:
+**does it preserve the fractional alpha** (for smooth edges), and **is it
+subject to depth-sort flicker** on coplanar text (where you'd want
+`StableTransparency`).
 
-### ⛔ MSAA must be disabled
+### Preserves MSDF anti-aliasing?
 
-> **⚠️ CRITICAL: You must set `Msaa::Off` on any camera that renders diegetic
-> panels. Bevy will panic if MSAA > 1 is active alongside OIT.**
+| Mode | AA preserved? | Notes |
+|---|---|---|
+| `Blend` (default) | ✅ | Classic alpha compositing |
+| `Premultiplied` | ✅ | Like Blend; can look better on some scenes |
+| `Add` | ✅ | Alpha modulates additive contribution |
+| `Multiply` | ✅ | Alpha modulates multiplicative contribution |
+| `AlphaToCoverage` + MSAA | ✅ | Alpha → sub-pixel coverage mask |
+| `AlphaToCoverage` without MSAA | ❌ | Degrades to `Mask(0.5)` |
+| `Mask(t)` | ❌ | Thresholds alpha to 0/1 — jagged edges |
+| `Opaque` | ❌ | Ignores alpha — glyph rectangles |
 
-Bevy's default camera includes `Msaa::Sample4`. If you use Geometry mode
-panels (the default), the library enables OIT on your camera — and MSAA + OIT
-causes an immediate panic.
+### Subject to depth-sort flicker?
+
+In Bevy's transparent pass, any mode that writes alpha-blended fragments
+can flicker on coplanar text as the camera moves — depth testing and
+per-mesh back-to-front sort are not stable across all angles, even for
+blend ops that are mathematically commutative like `Add`.
+
+| Mode | Transparent queue? | `StableTransparency` helps? |
+|---|---|---|
+| `Blend`, `Premultiplied`, `Add`, `Multiply` | Yes | Yes — fixes flicker |
+| `AlphaToCoverage` | No (opaque pipeline) | Not needed |
+| `Mask(t)`, `Opaque` | No (opaque pipeline) | Not needed |
+
+### The rule
+
+- Want smooth text (any mode except `Mask`/`Opaque`) **and** seeing
+  flicker on coplanar text? Add [`StableTransparency`] to your camera.
+  Pair with `AlphaMode::Blend` (default) for best-looking text, or any
+  other smooth mode for creative effects.
+- Want MSAA in your scene? Use `AlphaMode::AlphaToCoverage` — the only
+  anti-aliased path that bypasses the transparent queue and leaves MSAA
+  intact.
+
+**Hardware constraint:** `StableTransparency` enables Bevy's Order
+Independent Transparency. Bevy's OIT plugin panics if a camera has OIT and
+MSAA — *"MSAA is not supported when using OrderIndependentTransparency."*
+`StableTransparency`'s observer forces `Msaa::Off`, so the two paths above
+are mutually exclusive at the camera level.
+
+### Quick recipes
 
 ```rust
-commands.spawn((
-    Camera3d::default(),
-    Msaa::Off, // Required — OIT panics with MSAA > 1
-    // ...
-));
+// Default — works out of the box. Blend + no camera config.
+// If coplanar text flickers, add StableTransparency:
+commands.spawn((Camera3d::default(), StableTransparency));
 ```
 
-MSAA would not help regardless — it only smooths geometric triangle edges,
-not the shader-computed SDF and MSDF boundaries that define panel corners,
-borders, and text.
+```rust
+// MSAA-friendly alternative. Switch the app-wide default to A2C:
+commands.insert_resource(TextAlphaModeDefault(AlphaMode::AlphaToCoverage));
+commands.spawn((Camera3d::default(), Msaa::Sample4));
+```
+
+```rust
+// Mix modes per-style for creative effects:
+let neon = LayoutTextStyle::new(Pt(24.0)).with_alpha_mode(AlphaMode::Add);
+let tint = LayoutTextStyle::new(Pt(14.0)).with_alpha_mode(AlphaMode::Multiply);
+```
+
+See the `text_alpha` example for an interactive walkthrough.
 
 ### TAA is optional but recommended
 
 The SDF and MSDF shaders use `fwidth`-based anti-aliasing that produces
-clean edges without any post-process AA. Panels look good with no AA at all.
+clean edges without any post-process AA. Panels look good with no AA at
+all.
 
-That said, Temporal Anti-Aliasing smooths everything — geometric edges, SDF
-panel boundaries, MSDF text edges, and specular aliasing — with minimal GPU
-cost. It works correctly with OIT and provides a visible improvement at
-extreme viewing angles.
+That said, Temporal Anti-Aliasing smooths everything — geometric edges,
+SDF panel boundaries, MSDF text edges, and specular aliasing — with
+minimal GPU cost. It works with either transparency path above.
 
 ```rust
 commands.spawn((
     Camera3d::default(),
-    Msaa::Off,
     bevy::anti_alias::taa::TemporalAntiAliasing::default(),
     // ...
 ));
 ```
-
-| | MSAA | TAA |
-|---|---|---|
-| SDF panel edges | No effect | Smoothed |
-| MSDF text edges | No effect | Smoothed |
-| OIT compatible | **No (panics)** | Yes |
-| GPU cost | High (2-8x framebuffer) | Low (history buffer + resolve) |
-| Tradeoff | — | Slight ghosting on fast camera motion |
-
-All examples include TAA and `Msaa::Off`. The `panel_rendering` example lets
-you toggle TAA with the `T` key — zoom into a panel edge at an angle to see
-the difference.
 
 ## Bevy compatibility
 

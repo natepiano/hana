@@ -420,10 +420,12 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 
     /// Sets the per-style alpha-mode override.
     ///
-    /// See the `AlphaMode` docs for guidance on which modes are meaningful
-    /// for text. `AlphaToCoverage` is the default (requires MSAA).
-    /// `Blend` requires a `StableTransparency` camera for correct
-    /// view-angle-independent ordering.
+    /// The library default is [`AlphaMode::Blend`] — see
+    /// [`TextAlphaModeDefault`](crate::TextAlphaModeDefault) for the full
+    /// guidance on when to use each mode, how
+    /// [`StableTransparency`](crate::StableTransparency) pairs with
+    /// [`AlphaMode::Blend`]/[`AlphaMode::Premultiplied`], and when
+    /// [`AlphaMode::AlphaToCoverage`] + MSAA is the better path.
     #[must_use]
     pub const fn with_alpha_mode(mut self, mode: AlphaMode) -> Self {
         self.alpha_mode = Some(mode);
