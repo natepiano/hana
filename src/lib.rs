@@ -44,6 +44,7 @@
 //! ```
 
 mod callouts;
+mod cascade;
 mod constants;
 #[cfg(feature = "typography_overlay")]
 mod debug;
@@ -57,6 +58,8 @@ use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
 pub use callouts::CalloutLine;
+pub use cascade::CascadeDefaults;
+pub use cascade::CascadeSet;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
@@ -200,6 +203,7 @@ pub struct DiegeticUiPlugin;
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UnitConfig>();
+        app.init_resource::<CascadeDefaults>();
         app.add_plugins((
             text::TextPlugin,
             panel::PanelPlugin,
