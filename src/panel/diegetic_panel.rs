@@ -112,7 +112,7 @@ impl Default for DiegeticPanel {
             material:        None,
             text_material:   None,
             text_alpha_mode: None,
-            mode:            PanelMode::World,
+            mode:            PanelMode::default(),
         }
     }
 }
@@ -308,11 +308,22 @@ impl DiegeticPanel {
     ///
     /// Layout local position = `(layout_x * scale - x_offset, -layout_y * scale + y_offset)`
     /// where `scale` is `points_mpu`.
+    ///
+    /// Screen panels render under an orthographic camera where 1 world
+    /// unit = 1 logical pixel, so anchor offsets are computed directly
+    /// from `panel.width`/`panel.height` (in layout units = pixels).
+    /// This keeps anchor positioning correct for dynamic-sized screen
+    /// panels (`Sizing::Fit` / `Sizing::Grow` / `Sizing::Percent`) whose
+    /// `world_width` / `world_height` fields are left unset at build
+    /// time.
     #[must_use]
     pub fn anchor_offsets(&self, config: &UnitConfig) -> (f32, f32) {
+        let (fx, fy) = self.anchor.offset_fraction();
+        if self.mode.is_screen() {
+            return (self.width * fx, self.height * fy);
+        }
         let w = self.world_width(config);
         let h = self.world_height(config);
-        let (fx, fy) = self.anchor.offset_fraction();
         (w * fx, h * fy)
     }
 

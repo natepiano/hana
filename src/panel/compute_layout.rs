@@ -1,4 +1,6 @@
-//! [`compute_panel_layouts`] — recomputes layout for changed panels.
+//! [`compute_panel_layouts`] — recomputes layout for changed panels, plus
+//! [`resolve_world_panel_fit`] — shrinks `Fit`-axis world panels to their
+//! content bounds after layout runs.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -9,11 +11,13 @@ use bevy::prelude::*;
 
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
+use super::modes::PanelMode;
 use super::perf::DiegeticPerfStats;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::LayoutEngine;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
+use crate::layout::Sizing;
 use crate::layout::TextMeasure;
 use crate::layout::UnitConfig;
 use crate::text::DiegeticTextMeasurer;
@@ -99,4 +103,47 @@ pub(super) fn compute_panel_layouts(
     let compute_ms = start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.compute_ms = compute_ms;
     perf.compute_panels = panel_count;
+}
+
+/// Resolves `Fit`-axis world panels to their content bounds.
+///
+/// Runs after [`compute_panel_layouts`] writes the layout result. For each
+/// world panel whose width or height is `Sizing::Fit { min, max }`, reads
+/// the computed content bounds (in layout points) and shrinks the panel's
+/// physical width / height to match, clamped to `[min, max]`.
+///
+/// Screen panels resolve their own dynamic sizing earlier in the pipeline
+/// via `position_screen_space_panels` + `resolve_screen_axis`, so this
+/// system intentionally only touches world panels.
+pub(super) fn resolve_world_panel_fit(
+    mut panels: Query<(&mut DiegeticPanel, &ComputedDiegeticPanel)>,
+) {
+    for (mut panel, computed) in &mut panels {
+        let (w_sizing, h_sizing) = match panel.mode() {
+            PanelMode::World { width, height } => (*width, *height),
+            PanelMode::Screen { .. } => continue,
+        };
+        let Some(bounds) = computed.content_bounds() else {
+            continue;
+        };
+        let layout_to_pts = panel.layout_unit().to_points();
+        if layout_to_pts <= 0.0 {
+            continue;
+        }
+        let horizontal_content = bounds.width / layout_to_pts;
+        let vertical_content = bounds.height / layout_to_pts;
+
+        if let Sizing::Fit { min, max } = w_sizing {
+            let clamped = horizontal_content.clamp(min.value, max.value);
+            if (panel.width() - clamped).abs() > 0.001 {
+                panel.set_width(clamped);
+            }
+        }
+        if let Sizing::Fit { min, max } = h_sizing {
+            let clamped = vertical_content.clamp(min.value, max.value);
+            if (panel.height() - clamped).abs() > 0.001 {
+                panel.set_height(clamped);
+            }
+        }
+    }
 }

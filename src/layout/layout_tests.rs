@@ -218,6 +218,66 @@ fn fit_with_min_respects_minimum() {
     assert!(result.computed[1].width >= 100.0);
 }
 
+// ── Engine sanity: Fit root with Grow children (panel-size plan step 1) ──────
+
+#[test]
+fn fit_root_clamps_grow_children_content_under_max() {
+    // Fit root (max 400) with two horizontal GROW children carrying text.
+    // Each "Hello" is 5 chars * 16 * 0.6 = 48 px; sum = 96 px < 400 max.
+    // Expect root resolves to content width (96), not the max.
+    let mut b = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fit_range(0.0, 400.0))
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight),
+    );
+    b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
+        b.text("Hello", LayoutTextStyle::new(16.0));
+    });
+    b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
+        b.text("Hello", LayoutTextStyle::new(16.0));
+    });
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(
+        approx_eq(result.computed[0].width, 96.0),
+        "root width = {}, expected 96",
+        result.computed[0].width
+    );
+}
+
+#[test]
+fn fit_root_caps_grow_children_content_at_max() {
+    // Same shape, but text wider than max: each child 30 chars * 9.6 = 288 px;
+    // sum = 576 px > 400 max. Expect root clamped to 400.
+    let wide = "HelloHelloHelloHelloHelloHello";
+    let mut b = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fit_range(0.0, 400.0))
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight),
+    );
+    b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
+        b.text(wide, LayoutTextStyle::new(16.0));
+    });
+    b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
+        b.text(wide, LayoutTextStyle::new(16.0));
+    });
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(
+        approx_eq(result.computed[0].width, 400.0),
+        "root width = {}, expected 400 (capped)",
+        result.computed[0].width
+    );
+}
+
 // ── Percent sizing ───────────────────────────────────────────────────────────
 
 #[test]

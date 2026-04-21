@@ -105,23 +105,27 @@ pub use units::Px;
 pub use units::Unit;
 pub use units::UnitConfig;
 
-/// Sets the root element's width sizing to `GROW`.
+/// Sets the root element's width sizing to `Grow { min, max }`.
 ///
-/// Screen-space percent sizing uses this crate-internal facade so wider
+/// Screen-space dynamic sizing uses this crate-internal facade so wider
 /// callers do not need direct access to nested `element` internals.
-pub(crate) fn set_root_grow_width(tree: &mut LayoutTree) { tree.set_root_grow_width(); }
+pub(crate) fn set_root_grow_width(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
+    tree.set_root_grow_width(min, max);
+}
 
-/// Sets the root element's height sizing to `GROW`.
+/// Sets the root element's height sizing to `Grow { min, max }`.
 ///
 /// See [`set_root_grow_width`] for the rationale behind this facade.
-pub(crate) fn set_root_grow_height(tree: &mut LayoutTree) { tree.set_root_grow_height(); }
+pub(crate) fn set_root_grow_height(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
+    tree.set_root_grow_height(min, max);
+}
 
-/// Sets the root element's width sizing to `FIT { min, max }`.
+/// Sets the root element's width sizing to `Fit { min, max }`.
 pub(crate) fn set_root_fit_width(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
     tree.set_root_fit_width(min, max);
 }
 
-/// Sets the root element's height sizing to `FIT { min, max }`.
+/// Sets the root element's height sizing to `Fit { min, max }`.
 pub(crate) fn set_root_fit_height(tree: &mut LayoutTree, min: Dimension, max: Dimension) {
     tree.set_root_fit_height(min, max);
 }

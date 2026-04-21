@@ -11,6 +11,7 @@ use bevy_kana::ToF32;
 use super::constants;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
+use super::msdf_material;
 use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer;
 use super::text_renderer::TextBuildStats;
@@ -376,7 +377,7 @@ fn spawn_world_text_meshes(
                 ..Default::default()
             };
             apply_sidedness(&mut visible_base, style.sidedness());
-            let mat = super::msdf_material::msdf_text_material(
+            let mat = msdf_material::msdf_text_material(
                 visible_base,
                 MsdfAtlas::sdf_range().to_f32(),
                 atlas.width(),
@@ -422,7 +423,7 @@ fn spawn_world_text_meshes(
                 ..Default::default()
             };
             apply_sidedness(&mut proxy_base, style.sidedness());
-            let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
+            let proxy_material = materials.add(msdf_material::msdf_shadow_proxy_material(
                 proxy_base,
                 MsdfAtlas::sdf_range().to_f32(),
                 atlas.width(),

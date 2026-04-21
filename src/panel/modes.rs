@@ -60,11 +60,21 @@ pub enum SurfaceShadow {
 ///
 /// `World` panels are positioned and scaled in 3D space.
 /// `Screen` panels render via an orthographic overlay camera.
-#[derive(Clone, Debug, Default, Reflect)]
+#[derive(Clone, Debug, Reflect)]
 pub enum PanelMode {
     /// Panel lives in 3D world space.
-    #[default]
-    World,
+    World {
+        /// Panel width, expressed with the layout engine's [`Sizing`] enum.
+        /// `Fixed` is a physical value in the panel's layout unit;
+        /// `Fit { min, max }` shrink-wraps content (bounded by `max`).
+        /// `Grow` / `Percent` are screen-only and rejected by the world
+        /// builder at compile time.
+        #[reflect(ignore)]
+        width:  Sizing,
+        /// Panel height, same semantics as `width`.
+        #[reflect(ignore)]
+        height: Sizing,
+    },
     /// Panel renders as a 2D screen overlay.
     Screen {
         /// Where to place the panel within the window.
@@ -84,6 +94,21 @@ pub enum PanelMode {
         /// Default: `RenderLayers::layer(31)`.
         render_layers: RenderLayers,
     },
+}
+
+impl Default for PanelMode {
+    fn default() -> Self {
+        Self::World {
+            width:  Sizing::Fixed(crate::layout::Dimension {
+                value: 0.0,
+                unit:  None,
+            }),
+            height: Sizing::Fixed(crate::layout::Dimension {
+                value: 0.0,
+                unit:  None,
+            }),
+        }
+    }
 }
 
 impl PanelMode {

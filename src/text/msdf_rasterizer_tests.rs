@@ -14,6 +14,7 @@ use bevy_kana::ToUsize;
 
 use super::atlas::GlyphKey;
 use super::atlas::MsdfAtlas;
+use super::measurer;
 use super::msdf_rasterizer;
 use crate::layout::FontSlant;
 
@@ -457,10 +458,8 @@ fn eb_garamond_measure_timing() {
         .register_fonts(EB_GARAMOND.to_vec().into(), None);
     let font_cx = Arc::new(Mutex::new(font_cx));
 
-    let measurer = crate::text::measurer::create_parley_measurer(
-        Arc::clone(&font_cx),
-        vec!["EB Garamond".to_string()],
-    );
+    let measurer =
+        measurer::create_parley_measurer(Arc::clone(&font_cx), vec!["EB Garamond".to_string()]);
 
     // Simulate the font_features example: ~72 text measurements
     let texts = [

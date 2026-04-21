@@ -13,9 +13,12 @@ use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::clip;
 use super::constants;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
+use super::panel_rtt;
 use super::panel_rtt::PanelRttRegistry;
+use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
@@ -63,7 +66,7 @@ impl Plugin for PanelGeometryPlugin {
         app.add_plugins(MaterialPlugin::<SdfPanelMaterial>::default());
         app.add_systems(
             PostUpdate,
-            build_panel_geometry.after(super::panel_rtt::setup_panel_rtt),
+            build_panel_geometry.after(panel_rtt::setup_panel_rtt),
         );
     }
 }
@@ -223,7 +226,7 @@ struct GatheredCommands {
 /// Computes the active clip rect for each command via
 /// [`clip::compute_clip_rects`] and stores it on each surface and divider.
 fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
-    let clip_rects = super::clip::compute_clip_rects(commands);
+    let clip_rects = clip::compute_clip_rects(commands);
     let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
     let mut dividers: Vec<(usize, BoundingBox, Color, Option<BoundingBox>)> = Vec::new();
 
@@ -340,7 +343,7 @@ fn spawn_sdf_element(
     );
 
     let oit_depth_offset = surface.command_index.to_f32() * constants::OIT_DEPTH_STEP;
-    let sdf_mat = super::sdf_material::sdf_panel_material(
+    let sdf_mat = sdf_material::sdf_panel_material(
         base,
         half_w,
         half_h,

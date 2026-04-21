@@ -66,12 +66,10 @@ const HUD_WIDTH: Px = Px(600.0);
 
 const INFO_HEIGHT: Px = Px(720.0);
 const INFO_HEADER_SIZE: Pt = Pt(14.0);
-const INFO_BODY_SIZE: Pt = Pt(12.0);
+const INFO_BODY_SIZE: Pt = Pt(10.0);
 const INFO_TITLE_SIZE: Pt = Pt(16.0);
 
-const CAM_HELP_WIDTH: Px = Px(380.0);
-const CAM_HELP_HEIGHT: Px = Px(200.0);
-const CAM_HELP_LABEL_SIZE: Pt = Pt(12.0);
+const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
 const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
 const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
 const CAM_HELP_RADIUS: Px = Px(15.0);
@@ -81,7 +79,7 @@ const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
 const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
 
 const HUD_TITLE_SIZE: Pt = Pt(14.0);
-const HUD_HINT_SIZE: Pt = Pt(12.0);
+const HUD_HINT_SIZE: Pt = Pt(11.0);
 const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
 const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.80);
 const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
@@ -313,14 +311,12 @@ fn setup(
     // Scene camera.
     commands.spawn((orbit_cam_home(), Msaa::Sample4, SceneCamera));
 
-    // Bottom-right camera-help legend (static). Pinned to Blend so the
-    // panel text stays legible regardless of the current alpha-mode default.
+    // Bottom-right camera-help legend (static). Shrinks to its content on
+    // both axes via `Fit`. Pinned to Blend so the panel text stays legible
+    // regardless of the current alpha-mode default.
     commands.spawn((
         DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(CAM_HELP_WIDTH),
-                Sizing::fixed(CAM_HELP_HEIGHT),
-            )
+            .size(bevy_diegetic::Fit, bevy_diegetic::Fit)
             .anchor(Anchor::BottomRight)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(build_camera_help)
@@ -463,7 +459,7 @@ fn spawn_hud_panel(commands: &mut Commands, state: &ControlsState) {
     commands.spawn((
         HudPanel,
         DiegeticPanel::screen()
-            .size(Sizing::fixed(HUD_WIDTH), Sizing::fixed(HUD_HEIGHT))
+            .size(HUD_WIDTH, HUD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(move |b| build_controls(b, camera_state))
@@ -478,7 +474,7 @@ fn spawn_info_panel(commands: &mut Commands, state: &ControlsState) {
     commands.spawn((
         InfoPanel,
         DiegeticPanel::screen()
-            .size(Sizing::percent(0.22), Sizing::fixed(INFO_HEIGHT))
+            .size(bevy_diegetic::Percent(0.22), INFO_HEIGHT)
             .anchor(Anchor::TopRight)
             .text_alpha_mode(AlphaMode::Blend)
             .layout(move |b| build_info_panel(b, mode))

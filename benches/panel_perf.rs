@@ -156,16 +156,14 @@ fn create_bench_app() -> App {
 }
 
 fn bench_panel(tree: bevy_diegetic::LayoutTree) -> DiegeticPanel {
+    let dim = bevy_diegetic::Dimension {
+        value: LAYOUT_SIZE,
+        unit:  Some(Unit::Custom(LAYOUT_MPU)),
+    };
     DiegeticPanel::world()
         .size(
-            bevy_diegetic::Dimension {
-                value: LAYOUT_SIZE,
-                unit:  Some(Unit::Custom(LAYOUT_MPU)),
-            },
-            bevy_diegetic::Dimension {
-                value: LAYOUT_SIZE,
-                unit:  Some(Unit::Custom(LAYOUT_MPU)),
-            },
+            bevy_diegetic::Sizing::Fixed(dim),
+            bevy_diegetic::Sizing::Fixed(dim),
         )
         .font_unit(Unit::Custom(LAYOUT_MPU))
         .with_tree(tree)

@@ -12,13 +12,17 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU16;
 
+use super::clip;
 use super::constants;
 use super::constants::TEXT_Z_OFFSET;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
+use super::msdf_material;
 use super::msdf_material::MsdfTextMaterial;
+use super::panel_rtt;
 use super::panel_rtt::PanelRttRegistry;
 use super::transparency::TextAlphaModeDefault;
+use super::world_text;
 use super::world_text::AwaitingReady;
 use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
@@ -209,21 +213,21 @@ impl Plugin for TextRenderPlugin {
         app.add_systems(
             PostUpdate,
             (
-                super::panel_rtt::setup_panel_rtt,
+                panel_rtt::setup_panel_rtt,
                 poll_atlas_glyphs,
                 reconcile_panel_text_children
                     .after(poll_atlas_glyphs)
-                    .after(super::panel_rtt::setup_panel_rtt),
+                    .after(panel_rtt::setup_panel_rtt),
                 reconcile_panel_image_children
                     .after(poll_atlas_glyphs)
-                    .after(super::panel_rtt::setup_panel_rtt),
+                    .after(panel_rtt::setup_panel_rtt),
                 shape_panel_text_children
                     .after(reconcile_panel_text_children)
                     .after(poll_atlas_glyphs),
                 build_panel_batched_meshes.after(shape_panel_text_children),
                 sync_panel_hue_offset.after(build_panel_batched_meshes),
-                super::world_text::render_world_text.after(poll_atlas_glyphs),
-                super::world_text::emit_world_text_ready
+                world_text::render_world_text.after(poll_atlas_glyphs),
+                world_text::emit_world_text_ready
                     .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
             ),
         );
@@ -338,7 +342,7 @@ fn reconcile_panel_text_children(
 
         // Collect text commands from layout result, preserving the
         // command index for Z-offset layering in Geometry mode.
-        let clip_rects = super::clip::compute_clip_rects(&result.commands);
+        let clip_rects = clip::compute_clip_rects(&result.commands);
         let text_commands: Vec<_> = result
             .commands
             .iter()
@@ -449,7 +453,7 @@ fn reconcile_panel_image_children(
         let is_geometry = panel.render_mode() == RenderMode::Geometry;
 
         // Collect image commands, skipping those entirely outside their clip rect.
-        let clip_rects = super::clip::compute_clip_rects(&result.commands);
+        let clip_rects = clip::compute_clip_rects(&result.commands);
         let image_commands: Vec<_> = result
             .commands
             .iter()
@@ -890,7 +894,7 @@ fn resolve_visible_material(
                 alpha_mode_bits: key.alpha_mode_bits,
             })
             .or_insert_with(|| {
-                materials.add(super::msdf_material::msdf_text_material(
+                materials.add(msdf_material::msdf_text_material(
                     batch_base.clone(),
                     MsdfAtlas::sdf_range().to_f32(),
                     atlas.width(),
@@ -905,7 +909,7 @@ fn resolve_visible_material(
             })
             .clone()
     } else {
-        materials.add(super::msdf_material::msdf_text_material(
+        materials.add(msdf_material::msdf_text_material(
             batch_base.clone(),
             MsdfAtlas::sdf_range().to_f32(),
             atlas.width(),
@@ -978,7 +982,7 @@ fn spawn_shadow_proxy(
     let mut proxy_base = text_base.clone();
     proxy_base.depth_bias = text_depth_bias - constants::LAYER_DEPTH_BIAS;
 
-    let proxy_material = materials.add(super::msdf_material::msdf_shadow_proxy_material(
+    let proxy_material = materials.add(msdf_material::msdf_shadow_proxy_material(
         proxy_base,
         MsdfAtlas::sdf_range().to_f32(),
         atlas.width(),
@@ -1227,7 +1231,7 @@ fn shape_text_to_quads(
         ));
     }
 
-    super::glyph_quad::clip_overlapping_quads(&mut quads);
+    glyph_quad::clip_overlapping_quads(&mut quads);
 
     // Cull glyphs entirely outside the clip region, but leave partially
     // visible quads intact for shader-side clipping. Trimming CPU-side UVs
@@ -1235,7 +1239,7 @@ fn shape_text_to_quads(
     if let Some(cr) = clip_rect {
         let clip_local = panel_clip_rect_local(Some(cr), scale_x, scale_y, anchor_x, anchor_y);
         quads.retain(|(_, quad)| {
-            super::glyph_quad::clip_quad_to_rect(quad, clip_local.to_array()).is_some()
+            glyph_quad::clip_quad_to_rect(quad, clip_local.to_array()).is_some()
         });
     }
 

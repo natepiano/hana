@@ -417,16 +417,14 @@ fn create_bench_app() -> App {
 
 fn bench_panel(tree: bevy_diegetic::LayoutTree, size: f32) -> DiegeticPanel {
     let layout_mpu = 1.0 / size;
+    let dim = bevy_diegetic::Dimension {
+        value: size,
+        unit:  Some(Unit::Custom(layout_mpu)),
+    };
     DiegeticPanel::world()
         .size(
-            bevy_diegetic::Dimension {
-                value: size,
-                unit:  Some(Unit::Custom(layout_mpu)),
-            },
-            bevy_diegetic::Dimension {
-                value: size,
-                unit:  Some(Unit::Custom(layout_mpu)),
-            },
+            bevy_diegetic::Sizing::Fixed(dim),
+            bevy_diegetic::Sizing::Fixed(dim),
         )
         .font_unit(Unit::Custom(layout_mpu))
         .with_tree(tree)

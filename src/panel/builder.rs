@@ -11,8 +11,11 @@ use super::modes::PanelMode;
 use super::modes::RenderMode;
 use super::modes::ScreenPosition;
 use super::modes::SurfaceShadow;
+use super::sizing::CompatibleUnits;
+use super::sizing::PanelSizing;
+use crate::layout;
 use crate::layout::Anchor;
-use crate::layout::DimensionMatch;
+use crate::layout::Dimension;
 use crate::layout::InvalidSize;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
@@ -81,6 +84,45 @@ pub(super) struct BuilderData {
 ///                                    │                     │
 ///                                    └──.build()───────────┘──→ Result<DiegeticPanel>
 /// ```
+///
+/// # Screen vs World sizing — divergence table
+///
+/// `.size<W, H>(w, h)` accepts any value implementing
+/// [`PanelSizing<Mode>`](super::sizing::PanelSizing). The trait is
+/// implemented differently for each mode:
+///
+/// | Value | `PanelSizing<Screen>` | `PanelSizing<World>` | Rationale |
+/// |---|:-:|:-:|---|
+/// | [`Px`] / [`Mm`] / [`Pt`] / [`In`](crate::layout::In) / bare `f32` | ✅ | ✅ | physical sizes — legal anywhere |
+/// | [`Sizing`] (engine enum — escape hatch) | ✅ | ✅ | both modes share one engine |
+/// | [`Fit`](super::sizing::Fit) / [`FitMax`](super::sizing::FitMax) / [`FitRange`](super::sizing::FitRange) | ✅ | ✅ | shrink-to-content works on both |
+/// | [`Percent`](super::sizing::Percent) | ✅ | ❌ compile error | world has no parent |
+/// | [`Grow`](super::sizing::Grow) / [`GrowMax`](super::sizing::GrowMax) / [`GrowRange`](super::sizing::GrowRange) | ✅ | ❌ compile error | world has no bounding container |
+/// | Physical-unit cross-axis match | N/A (pixel-only) | enforced via [`CompatibleUnits`](super::sizing::CompatibleUnits) | unit mixing in 3D is always a bug |
+/// | `.world_width(m)` / `.world_height(m)` | — | ✅ | world-space scaling |
+///
+/// # Zero / negative size is a runtime check
+///
+/// `Px(0.0)` is valid at compile time — the type system alone can't
+/// reject zero or negative sizes without reaching for `NonZeroDimension`
+/// wrappers that would break `Px(0.0)` as a legitimate `GrowRange` floor
+/// or `FitMax` sentinel. So `.build()` returns
+/// [`InvalidSize`](crate::layout::InvalidSize) when both axes are fixed
+/// and either is zero or negative. Dynamic axes
+/// (`Fit` / `Percent` / `Grow`) start at `0.0` and resolve later — they
+/// do *not* trip this check.
+///
+/// # `Sizing` escape-hatch footgun on world panels
+///
+/// Every value type routes to the engine's [`Sizing`] enum via
+/// [`PanelSizing::to_sizing`](super::sizing::PanelSizing::to_sizing).
+/// The enum itself implements `PanelSizing<World>`, so a caller can
+/// sneak a `Sizing::Grow { .. }` or `Sizing::Percent(_)` onto a world
+/// panel through the escape hatch, even though the compile-time guard
+/// rejects [`Grow`](super::sizing::Grow) / [`Percent`](super::sizing::Percent)
+/// directly. Debug builds catch this with a `debug_assert!` in the
+/// world `build()` path; release builds silently clamp to the resolved
+/// dimensions.
 pub struct DiegeticPanelBuilder<Mode, State> {
     data:    BuilderData,
     _marker: PhantomData<(Mode, State)>,
@@ -188,29 +230,50 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
 impl DiegeticPanelBuilder<World, NeedsSize> {
     /// Sets the panel dimensions and layout unit.
     ///
-    /// Bare floats default to [`Unit::Meters`] for world-space panels.
-    /// Typed wrappers like [`Mm`](crate::Mm) or [`Pt`] set the unit
-    /// explicitly. Both arguments must have the same type; mixed-unit
-    /// panel sizing is unsupported.
+    /// Each axis may use any value implementing
+    /// [`PanelSizing<World>`](super::sizing::PanelSizing): [`Px`], [`Mm`],
+    /// [`Pt`], [`In`](crate::layout::In), bare `f32`,
+    /// [`Fit`](super::sizing::Fit), [`FitMax`](super::sizing::FitMax),
+    /// [`FitRange`](super::sizing::FitRange), or the engine [`Sizing`]
+    /// enum (escape hatch). Screen-only variants
+    /// ([`Percent`](super::sizing::Percent), [`Grow`](super::sizing::Grow),
+    /// [`GrowMax`](super::sizing::GrowMax),
+    /// [`GrowRange`](super::sizing::GrowRange)) are compile errors on a
+    /// world panel — there is no parent container to resolve against.
+    ///
+    /// Cross-axis physical-unit consistency is enforced at compile time
+    /// via [`CompatibleUnits`](super::sizing::CompatibleUnits): two
+    /// concrete physical units must match (e.g. `(Mm, Mm)` is fine;
+    /// `(Mm, Px)` is a compile error). Unit-less values like [`Fit`] or
+    /// bare `f32` adopt the other axis's unit, or fall back to
+    /// [`Unit::Meters`] when both axes are unit-less.
     ///
     /// # Examples
     ///
     /// ```ignore
     /// DiegeticPanel::world().size(0.5, 0.3)              // 0.5 × 0.3 meters
     /// DiegeticPanel::world().size(Mm(210.0), Mm(297.0))  // A4 in mm
+    /// DiegeticPanel::world().size(Fit, FitMax(Mm(300.0)))
     /// ```
     #[must_use]
-    pub fn size<DM: DimensionMatch>(
-        mut self,
-        w: DM,
-        h: DM,
-    ) -> DiegeticPanelBuilder<World, HasSize> {
-        let wd = w.into();
-        let hd = h.into();
-        let unit = wd.unit.or(hd.unit).unwrap_or(Unit::Meters);
-        self.data.width = wd.value;
-        self.data.height = hd.value;
+    pub fn size<W, H>(mut self, w: W, h: H) -> DiegeticPanelBuilder<World, HasSize>
+    where
+        W: PanelSizing<World>,
+        H: PanelSizing<World>,
+        (W::Unit, H::Unit): CompatibleUnits,
+    {
+        let w_sizing = w.to_sizing();
+        let h_sizing = h.to_sizing();
+        let unit = sizing_unit(w_sizing)
+            .or_else(|| sizing_unit(h_sizing))
+            .unwrap_or(Unit::Meters);
+        self.data.width = initial_panel_size(w_sizing);
+        self.data.height = initial_panel_size(h_sizing);
         self.data.layout_unit = unit;
+        self.data.mode = PanelMode::World {
+            width:  w_sizing,
+            height: h_sizing,
+        };
         DiegeticPanelBuilder {
             data:    self.data,
             _marker: PhantomData,
@@ -226,6 +289,16 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
         self.data.width = w;
         self.data.height = h;
         self.data.layout_unit = unit;
+        self.data.mode = PanelMode::World {
+            width:  Sizing::fixed(Dimension {
+                value: w,
+                unit:  Some(unit),
+            }),
+            height: Sizing::fixed(Dimension {
+                value: h,
+                unit:  Some(unit),
+            }),
+        };
         DiegeticPanelBuilder {
             data:    self.data,
             _marker: PhantomData,
@@ -234,36 +307,46 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
 }
 
 impl DiegeticPanelBuilder<Screen, NeedsSize> {
-    /// Sets the panel dimensions using the layout engine's [`Sizing`] enum
-    /// on each axis. Screen panels always operate in logical pixels.
+    /// Sets the panel dimensions on each axis.
+    ///
+    /// Each axis may use any value implementing
+    /// [`PanelSizing<Screen>`](super::sizing::PanelSizing): [`Px`], [`Mm`],
+    /// [`Pt`], [`In`](crate::layout::In), bare `f32`,
+    /// [`Fit`](super::sizing::Fit), [`FitMax`](super::sizing::FitMax),
+    /// [`FitRange`](super::sizing::FitRange),
+    /// [`Percent`](super::sizing::Percent), [`Grow`](super::sizing::Grow),
+    /// [`GrowMax`](super::sizing::GrowMax),
+    /// [`GrowRange`](super::sizing::GrowRange), or the engine [`Sizing`]
+    /// enum (escape hatch). Axes are independent — no cross-axis unit
+    /// check applies.
+    ///
+    /// Screen panels always operate in logical pixels for layout; the
+    /// panel's internal `layout_unit` is always [`Unit::Pixels`]
+    /// regardless of what the argument types carry.
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// // Fixed-pixel panel.
-    /// DiegeticPanel::screen()
-    ///     .size(Sizing::fixed(Px(600.0)), Sizing::fixed(Px(44.0)))
-    ///
-    /// // Percent of window width, fixed-pixel height.
-    /// DiegeticPanel::screen()
-    ///     .size(Sizing::percent(0.25), Sizing::fixed(Px(440.0)))
-    ///
-    /// // Fit content up to 400 px wide, content-sized height.
-    /// DiegeticPanel::screen()
-    ///     .size(Sizing::fit_max(Px(400.0)), Sizing::fit())
-    ///
-    /// // Fill the window.
-    /// DiegeticPanel::screen().size(Sizing::GROW, Sizing::GROW)
+    /// DiegeticPanel::screen().size(Px(600.0), Px(44.0))            // fixed
+    /// DiegeticPanel::screen().size(Percent(0.25), Px(44.0))        // % width
+    /// DiegeticPanel::screen().size(FitMax(Px(400.0)), Fit)         // auto-shrink
+    /// DiegeticPanel::screen().size(Grow, Grow)                     // fill
     /// ```
     #[must_use]
-    pub fn size(mut self, w: Sizing, h: Sizing) -> DiegeticPanelBuilder<Screen, HasSize> {
+    pub fn size<W, H>(mut self, w: W, h: H) -> DiegeticPanelBuilder<Screen, HasSize>
+    where
+        W: PanelSizing<Screen>,
+        H: PanelSizing<Screen>,
+    {
+        let w_sizing = w.to_sizing();
+        let h_sizing = h.to_sizing();
         // Screen panels always use `Unit::Pixels` for their layout dimension.
         self.data.layout_unit = Unit::Pixels;
-        self.data.width = initial_panel_size(w);
-        self.data.height = initial_panel_size(h);
+        self.data.width = initial_panel_size(w_sizing);
+        self.data.height = initial_panel_size(h_sizing);
         if let PanelMode::Screen { width, height, .. } = &mut self.data.mode {
-            *width = w;
-            *height = h;
+            *width = w_sizing;
+            *height = h_sizing;
         }
         DiegeticPanelBuilder {
             data:    self.data,
@@ -301,6 +384,23 @@ const fn initial_panel_size(s: Sizing) -> f32 {
     match s {
         Sizing::Fixed(d) => d.value,
         _ => 0.0,
+    }
+}
+
+/// Returns the first explicit [`Unit`] observed inside a [`Sizing`] value,
+/// or `None` if the sizing carries only unit-less dimensions.
+///
+/// `Sizing::Fixed(Dimension { unit: Some(u), .. })` yields `Some(u)`;
+/// `Sizing::Fit { min, max }` prefers `min.unit` over `max.unit`;
+/// `Sizing::Percent` has no backing dimension and yields `None`.
+const fn sizing_unit(s: Sizing) -> Option<Unit> {
+    match s {
+        Sizing::Fixed(d) => d.unit,
+        Sizing::Fit { min, max } | Sizing::Grow { min, max } => match min.unit {
+            Some(u) => Some(u),
+            None => max.unit,
+        },
+        Sizing::Percent(_) => None,
     }
 }
 
@@ -427,16 +527,71 @@ impl sealed::CanBuild for Ready {}
 impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
     /// Consumes the builder and returns a [`DiegeticPanel`] component.
     ///
+    /// Dynamic axes (`Fit { .. }`) start at `0.0`; the post-layout system
+    /// resolves them to content bounds each frame, so zero-size inputs
+    /// are only rejected when *both* axes are `Fixed(_)`.
+    ///
+    /// `Percent` / `Grow` are compile-rejected for world panels via
+    /// [`PanelSizing<World>`](super::sizing::PanelSizing); a caller that
+    /// routes them in via [`Sizing`] (the escape hatch) gets them clamped
+    /// to the resolved dimensions — a `debug_assert!` flags the footgun
+    /// in debug builds.
+    ///
     /// # Errors
     ///
-    /// Returns [`InvalidSize`] if width or height is zero or negative.
-    pub fn build(self) -> Result<DiegeticPanel, InvalidSize> {
-        if self.data.width <= 0.0 || self.data.height <= 0.0 {
+    /// Returns [`InvalidSize`] if both axes are fixed-size and width or
+    /// height is zero or negative.
+    pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
+        let (w_sizing, h_sizing) = match self.data.mode {
+            PanelMode::World { width, height } => (width, height),
+            PanelMode::Screen { .. } => {
+                return Err(InvalidSize {
+                    width:  self.data.width,
+                    height: self.data.height,
+                });
+            },
+        };
+
+        debug_assert!(
+            !matches!(w_sizing, Sizing::Grow { .. } | Sizing::Percent(_)),
+            "world panel width is Grow/Percent — the escape-hatch `Sizing` bypassed the \
+             compile-time guard. These variants have no parent container in world space; \
+             use `Fit`, `FitMax`, `FitRange`, or a fixed physical unit instead."
+        );
+        debug_assert!(
+            !matches!(h_sizing, Sizing::Grow { .. } | Sizing::Percent(_)),
+            "world panel height is Grow/Percent — the escape-hatch `Sizing` bypassed the \
+             compile-time guard. These variants have no parent container in world space; \
+             use `Fit`, `FitMax`, `FitRange`, or a fixed physical unit instead."
+        );
+
+        let w_dynamic = !matches!(w_sizing, Sizing::Fixed(_));
+        let h_dynamic = !matches!(h_sizing, Sizing::Fixed(_));
+
+        if !w_dynamic && !h_dynamic && (self.data.width <= 0.0 || self.data.height <= 0.0) {
             return Err(InvalidSize {
                 width:  self.data.width,
                 height: self.data.height,
             });
         }
+
+        if let Some(ref mut tree) = self.data.tree {
+            match w_sizing {
+                Sizing::Fit { min, max } => layout::set_root_fit_width(tree, min, max),
+                Sizing::Grow { min, max } => {
+                    layout::set_root_grow_width(tree, min, max);
+                },
+                Sizing::Percent(_) | Sizing::Fixed(_) => {},
+            }
+            match h_sizing {
+                Sizing::Fit { min, max } => layout::set_root_fit_height(tree, min, max),
+                Sizing::Grow { min, max } => {
+                    layout::set_root_grow_height(tree, min, max);
+                },
+                Sizing::Percent(_) | Sizing::Fixed(_) => {},
+            }
+        }
+
         Ok(build_panel(self.data))
     }
 }
@@ -483,7 +638,17 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             });
         }
 
-        if self.data.world_height.is_none() && self.data.world_width.is_none() {
+        // Freeze `world_height` for fixed screen panels so 1 layout pixel
+        // maps to 1 world unit under the ortho camera. Dynamic-axis
+        // panels skip this: their `self.data.height` is still `0.0` at
+        // build time, and `anchor_offsets()` short-circuits to
+        // `panel.width`/`panel.height` directly for screen panels so
+        // the frozen field isn't needed for positioning.
+        if !has_dynamic_width
+            && !has_dynamic_height
+            && self.data.world_height.is_none()
+            && self.data.world_width.is_none()
+        {
             self.data.world_height = Some(self.data.height.max(1.0));
         }
 
@@ -491,18 +656,47 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             // The layout engine's two passes (bottom-up `propagate_fit_sizes`
             // and top-down `size_along_axis`) already resolve `Fit` roots to
             // their natural content size, so we route each Sizing variant to
-            // the matching root kind here.
+            // the matching root kind here. `Percent` routes to an unbounded
+            // `Grow` at the root because `resolve_screen_axis` has already
+            // pre-multiplied the panel width by the percent fraction — the
+            // viewport the engine receives is the post-percent panel size.
             match w_sizing {
-                Sizing::Fit { min, max } => crate::layout::set_root_fit_width(tree, min, max),
-                Sizing::Grow { .. } | Sizing::Percent(_) => {
-                    crate::layout::set_root_grow_width(tree);
+                Sizing::Fit { min, max } => layout::set_root_fit_width(tree, min, max),
+                Sizing::Grow { min, max } => {
+                    layout::set_root_grow_width(tree, min, max);
+                },
+                Sizing::Percent(_) => {
+                    layout::set_root_grow_width(
+                        tree,
+                        Dimension {
+                            value: 0.0,
+                            unit:  None,
+                        },
+                        Dimension {
+                            value: f32::MAX,
+                            unit:  None,
+                        },
+                    );
                 },
                 Sizing::Fixed(_) => {},
             }
             match h_sizing {
-                Sizing::Fit { min, max } => crate::layout::set_root_fit_height(tree, min, max),
-                Sizing::Grow { .. } | Sizing::Percent(_) => {
-                    crate::layout::set_root_grow_height(tree);
+                Sizing::Fit { min, max } => layout::set_root_fit_height(tree, min, max),
+                Sizing::Grow { min, max } => {
+                    layout::set_root_grow_height(tree, min, max);
+                },
+                Sizing::Percent(_) => {
+                    layout::set_root_grow_height(
+                        tree,
+                        Dimension {
+                            value: 0.0,
+                            unit:  None,
+                        },
+                        Dimension {
+                            value: f32::MAX,
+                            unit:  None,
+                        },
+                    );
                 },
                 Sizing::Fixed(_) => {},
             }
