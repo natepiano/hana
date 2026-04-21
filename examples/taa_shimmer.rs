@@ -99,7 +99,7 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, windows: Query<&Window>) {
+fn setup(mut commands: Commands) {
     // ── Left panel: full-alpha border (shimmers) ────────────────────
     commands.spawn((
         DiegeticPanel::world()
@@ -148,9 +148,8 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         unlit: true,
         ..unlit_material
     };
-    let hud_width = windows.iter().next().map_or(800.0, Window::width);
-    let mut hud_panel = DiegeticPanel::screen()
-        .size(Sizing::fixed(Px(hud_width)), Sizing::fixed(Px(HUD_HEIGHT)))
+    let hud_panel = DiegeticPanel::screen()
+        .size(Sizing::percent(1.0), Sizing::fixed(Px(HUD_HEIGHT)))
         .anchor(Anchor::TopLeft)
         .material(unlit.clone())
         .text_material(unlit)
@@ -159,7 +158,6 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         })
         .build()
         .expect("valid HUD dimensions");
-    hud_panel.set_tree(build_hud_tree(true, hud_width));
     commands.spawn((HudPanel, hud_panel, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────
@@ -226,8 +224,12 @@ fn build_panel(title: &str, subtitle: &str, description: &str, border_color: Col
 
 // ── HUD ─────────────────────────────────────────────────────────────
 
-fn build_hud_tree(taa: bool, width: f32) -> LayoutTree {
-    let mut builder = LayoutBuilder::new(width, HUD_HEIGHT);
+fn build_hud_tree(taa: bool) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(Px(HUD_HEIGHT))),
+    );
     build_hud_content(&mut builder, taa);
     builder.build()
 }
@@ -314,32 +316,11 @@ fn toggle_taa(
     }
 }
 
-fn update_hud(
-    taa: Res<TaaEnabled>,
-    windows: Query<&Window>,
-    mut huds: Query<(&mut Transform, &mut DiegeticPanel), With<HudPanel>>,
-    mut previous_state: Local<(bool, u32)>,
-) {
-    let Ok(window) = windows.single() else {
+fn update_hud(taa: Res<TaaEnabled>, mut huds: Query<&mut DiegeticPanel, With<HudPanel>>) {
+    if !taa.is_changed() {
         return;
-    };
-    let win_width = window.width();
-    let half_width = win_width / 2.0;
-    let half_height = window.height() / 2.0;
-    let state = (taa.0, win_width.to_bits());
-
-    for (mut transform, mut panel) in &mut huds {
-        transform.translation.x = -half_width;
-        transform.translation.y = half_height;
-
-        let width_changed = (panel.width() - win_width).abs() > 1.0;
-        if width_changed {
-            panel.set_width(win_width);
-        }
-        if *previous_state != state || width_changed {
-            let panel_width = panel.width();
-            panel.set_tree(build_hud_tree(taa.0, panel_width));
-        }
     }
-    *previous_state = state;
+    for mut panel in &mut huds {
+        panel.set_tree(build_hud_tree(taa.0));
+    }
 }
