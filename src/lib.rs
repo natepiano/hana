@@ -131,6 +131,8 @@ pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
 pub use render::PanelTextChild;
 pub use render::PendingGlyphs;
+pub use render::StableTransparency;
+pub use render::TextAlphaModeDefault;
 pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;

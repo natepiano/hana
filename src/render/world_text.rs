@@ -177,6 +177,7 @@ pub(super) fn render_world_text(
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
+    alpha_default: Res<super::transparency::TextAlphaModeDefault>,
     mut commands: Commands,
     unit_config: Res<UnitConfig>,
 ) {
@@ -265,6 +266,7 @@ pub(super) fn render_world_text(
                 }
             }
 
+            let resolved_alpha = style.alpha_mode().unwrap_or(alpha_default.0);
             mesh_ms_total += spawn_world_text_meshes(
                 &page_quads,
                 entity,
@@ -272,6 +274,7 @@ pub(super) fn render_world_text(
                 &atlas,
                 &mut meshes,
                 &mut materials,
+                resolved_alpha,
                 &mut commands,
             );
         }
@@ -340,6 +343,7 @@ fn spawn_world_text_meshes(
     atlas: &MsdfAtlas,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<MsdfTextMaterial>,
+    alpha_mode: AlphaMode,
     commands: &mut Commands,
 ) -> f32 {
     let is_invisible = style.render_mode() == GlyphRenderMode::Invisible;
@@ -381,6 +385,7 @@ fn spawn_world_text_meshes(
                 u32::from(style.render_mode()),
                 constants::UNCLIPPED_TEXT_CLIP_RECT,
                 constants::OIT_DEPTH_STEP,
+                alpha_mode,
             );
 
             let material_handle = materials.add(mat);

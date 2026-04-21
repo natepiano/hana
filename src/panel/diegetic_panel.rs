@@ -89,6 +89,9 @@ pub struct DiegeticPanel {
     /// `base_color` is overridden by `LayoutTextStyle::color` when set.
     #[reflect(ignore)]
     pub(super) text_material:  Option<StandardMaterial>,
+    /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
+    /// falls through to the per-style setting and then to `TextAlphaModeDefault`.
+    pub(super) text_alpha_mode: Option<AlphaMode>,
     /// Whether the panel is world-space or screen-space.
     pub(super) mode:           PanelMode,
 }
@@ -108,6 +111,7 @@ impl Default for DiegeticPanel {
             surface_shadow: SurfaceShadow::Off,
             material:       None,
             text_material:  None,
+            text_alpha_mode: None,
             mode:           PanelMode::World,
         }
     }
@@ -163,6 +167,10 @@ impl DiegeticPanel {
     pub const fn text_material_mut(&mut self) -> &mut Option<StandardMaterial> {
         &mut self.text_material
     }
+
+    /// The panel-level text [`AlphaMode`] override, if set.
+    #[must_use]
+    pub const fn text_alpha_mode(&self) -> Option<AlphaMode> { self.text_alpha_mode }
 
     /// The panel's mode (world or screen).
     #[must_use]

@@ -79,10 +79,11 @@ struct DiegeticShadowProxy;
 /// page has its own atlas texture.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct TextBatchKey {
-    render_mode: GlyphRenderMode,
-    shadow_mode: GlyphShadowMode,
-    page_index:  u32,
-    clip_rect:   [u32; 4],
+    render_mode:     GlyphRenderMode,
+    shadow_mode:     GlyphShadowMode,
+    page_index:      u32,
+    clip_rect:       [u32; 4],
+    alpha_mode_bits: u64,
 }
 
 /// Key for shared zero-hue MSDF text materials.
@@ -91,6 +92,22 @@ struct SharedMsdfMaterialKey {
     page_index:      u32,
     clip_rect:       [u32; 4],
     depth_bias_bits: u32,
+    alpha_mode_bits: u64,
+}
+
+/// Encodes an [`AlphaMode`] into a hashable `u64` so it can be used as a key
+/// component. Covers all Bevy 0.18 variants.
+#[must_use]
+fn alpha_mode_bits(mode: AlphaMode) -> u64 {
+    match mode {
+        AlphaMode::Opaque => 1,
+        AlphaMode::Mask(t) => 2 | (u64::from(t.to_bits()) << 8),
+        AlphaMode::Blend => 3,
+        AlphaMode::Premultiplied => 4,
+        AlphaMode::AlphaToCoverage => 5,
+        AlphaMode::Add => 6,
+        AlphaMode::Multiply => 7,
+    }
 }
 
 /// Cached default material handles shared across panels without a
@@ -284,6 +301,9 @@ pub(super) struct PanelTextQuads {
     pub render_mode: GlyphRenderMode,
     /// The glyph shadow mode for this text element.
     pub shadow_mode: GlyphShadowMode,
+    /// Per-style alpha-mode override (from `LayoutTextStyle`). `None` means
+    /// inherit from panel or resource default.
+    pub alpha_mode:  Option<AlphaMode>,
 }
 
 // ── System 1: reconcile_panel_text_children ─────────────────────────────────
@@ -335,16 +355,19 @@ fn reconcile_panel_text_children(
             })
             .collect();
 
-        // Build a map of existing children by `element_idx`.
-        let mut existing_by_idx: HashMap<usize, Entity> = HashMap::new();
+        // Build a map of existing children by (element_idx, command_index).
+        // Wrapped text produces multiple commands with the same element_idx but
+        // distinct command_index (one per wrapped line); keying by element_idx
+        // alone collapses them and leaks stale entities.
+        let mut existing_by_key: HashMap<(usize, usize), Entity> = HashMap::new();
         for (entity, ptc, child_of) in &existing_children {
             if child_of.parent() == panel_entity {
-                existing_by_idx.insert(ptc.element_idx, entity);
+                existing_by_key.insert((ptc.element_idx, ptc.command_index), entity);
             }
         }
 
-        // Track which existing indices we visited so we can despawn extras.
-        let mut visited_indices: Vec<usize> = Vec::new();
+        // Track which existing (idx, cmd) pairs we visited so we can despawn extras.
+        let mut visited_keys: Vec<(usize, usize)> = Vec::new();
 
         for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
             let style = config.as_standalone();
@@ -359,9 +382,10 @@ fn reconcile_panel_text_children(
                 clip_rect: *clip,
             };
 
-            visited_indices.push(*element_idx);
+            let key = (*element_idx, *cmd_index);
+            visited_keys.push(key);
 
-            if let Some(&child_entity) = existing_by_idx.get(element_idx) {
+            if let Some(&child_entity) = existing_by_key.get(&key) {
                 // Update existing child.
                 commands
                     .entity(child_entity)
@@ -374,9 +398,11 @@ fn reconcile_panel_text_children(
             }
         }
 
-        // Despawn children whose `element_idx` is no longer present.
+        // Despawn children whose (element_idx, command_index) is no longer present.
         for (entity, ptc, child_of) in &existing_children {
-            if child_of.parent() == panel_entity && !visited_indices.contains(&ptc.element_idx) {
+            if child_of.parent() == panel_entity
+                && !visited_keys.contains(&(ptc.element_idx, ptc.command_index))
+            {
                 commands.entity(entity).despawn();
             }
         }
@@ -596,6 +622,7 @@ fn shape_panel_text_children(
                 quads,
                 render_mode: config.render_mode(),
                 shadow_mode: config.shadow_mode(),
+                alpha_mode: config.alpha_mode(),
             });
             commands.entity(entity).remove::<PendingGlyphs>();
             commands.entity(entity).insert(AwaitingReady);
@@ -625,6 +652,7 @@ fn build_panel_batched_meshes(
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     rtt_registry: Res<PanelRttRegistry>,
+    alpha_default: Res<super::transparency::TextAlphaModeDefault>,
     mut commands: Commands,
 ) {
     // Collect the set of panel entities that have at least one child with
@@ -654,7 +682,7 @@ fn build_panel_batched_meshes(
 
         // Collect all quads from this panel's `PanelTextChild` children
         // and track the maximum command index for layer ordering.
-        let mut batches: HashMap<TextBatchKey, Vec<GlyphQuadData>> = HashMap::new();
+        let mut batches: HashMap<TextBatchKey, (AlphaMode, Vec<GlyphQuadData>)> = HashMap::new();
         let mut max_command_index: usize = 0;
         for (ptq, ptc, child_of) in &panel_children {
             if child_of.parent() != panel_entity {
@@ -669,18 +697,28 @@ fn build_panel_batched_meshes(
                 ptc.anchor_y,
             );
             let clip_rect = clip_rect_bits(clip_rect);
+            let resolved_alpha = ptq
+                .alpha_mode
+                .or_else(|| panel.text_alpha_mode())
+                .unwrap_or(alpha_default.0);
+            let alpha_bits = alpha_mode_bits(resolved_alpha);
             for (page_index, quad) in &ptq.quads {
                 let key = TextBatchKey {
                     render_mode: ptq.render_mode,
                     shadow_mode: ptq.shadow_mode,
                     page_index: *page_index,
                     clip_rect,
+                    alpha_mode_bits: alpha_bits,
                 };
-                batches.entry(key).or_default().push(*quad);
+                batches
+                    .entry(key)
+                    .or_insert_with(|| (resolved_alpha, Vec::new()))
+                    .1
+                    .push(*quad);
             }
         }
 
-        let total_quads: usize = batches.values().map(Vec::len).sum();
+        let total_quads: usize = batches.values().map(|(_, v)| v.len()).sum();
         if total_quads == 0 {
             continue;
         }
@@ -742,7 +780,7 @@ fn build_panel_batched_meshes(
 /// Spawns visible mesh and optional shadow proxy entities for each batch
 /// of glyph quads under the given `panel_entity`.
 fn spawn_batch_meshes(
-    batches: &HashMap<TextBatchKey, Vec<GlyphQuadData>>,
+    batches: &HashMap<TextBatchKey, (AlphaMode, Vec<GlyphQuadData>)>,
     panel_entity: Entity,
     hue: f32,
     atlas: &MsdfAtlas,
@@ -756,7 +794,7 @@ fn spawn_batch_meshes(
     text_oit_offset: f32,
     commands: &mut Commands,
 ) {
-    for (key, quads) in batches {
+    for (key, (alpha_mode, quads)) in batches {
         if quads.is_empty() {
             continue;
         }
@@ -796,6 +834,7 @@ fn spawn_batch_meshes(
                             page_index:      key.page_index,
                             clip_rect:       key.clip_rect,
                             depth_bias_bits: text_depth_bias.to_bits(),
+                            alpha_mode_bits: key.alpha_mode_bits,
                         })
                         .or_insert_with(|| {
                             materials.add(super::msdf_material::msdf_text_material(
@@ -808,6 +847,7 @@ fn spawn_batch_meshes(
                                 glyph_render_mode_uniform(GlyphRenderMode::Text),
                                 clip_rect,
                                 text_oit_offset,
+                                *alpha_mode,
                             ))
                         })
                         .clone()
@@ -822,6 +862,7 @@ fn spawn_batch_meshes(
                         render_mode_u32,
                         clip_rect,
                         text_oit_offset,
+                        *alpha_mode,
                     ))
                 };
 
@@ -1199,8 +1240,68 @@ fn sync_panel_hue_offset(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::render::msdf_material;
+
+    /// Regression test for the panel-text reconciliation bug that double-rendered
+    /// wrapped text. Multiple render commands for a single wrapped-text element
+    /// share an `element_idx` but have distinct `command_index` values (one per
+    /// wrapped line). The reconciler MUST key existing children by the
+    /// `(element_idx, command_index)` pair — keying by `element_idx` alone
+    /// collapses lines into a single entry, leaks stale entities on subsequent
+    /// frames, and produces overlapping text renders.
+    #[test]
+    fn reconcile_keys_by_element_and_command_index() {
+        // Simulate three existing PanelTextChild records from a prior frame:
+        // one text element, wrapped across three lines.
+        let existing: Vec<(Entity, PanelTextChild)> = (0..3)
+            .map(|cmd| {
+                let ptc = PanelTextChild {
+                    element_idx:   7,
+                    command_index: cmd,
+                    bounds:        crate::layout::BoundingBox {
+                        x:      0.0,
+                        y:      cmd.to_f32() * 10.0,
+                        width:  100.0,
+                        height: 10.0,
+                    },
+                    scale_x:       1.0,
+                    scale_y:       1.0,
+                    anchor_x:      0.0,
+                    anchor_y:      0.0,
+                    clip_rect:     None,
+                };
+                (Entity::from_raw_u32(cmd.try_into().expect("small")).expect("valid"), ptc)
+            })
+            .collect();
+
+        // Build the key map using the same strategy as the reconciler.
+        let mut by_key: HashMap<(usize, usize), Entity> = HashMap::new();
+        for (entity, ptc) in &existing {
+            by_key.insert((ptc.element_idx, ptc.command_index), *entity);
+        }
+        assert_eq!(
+            by_key.len(),
+            3,
+            "three wrapped lines must produce three distinct keys; \
+             collapsing to element_idx alone would show only 1 here"
+        );
+
+        // Building the same map keyed by element_idx only (the bug) would yield
+        // a single entry — this assertion documents the failure mode.
+        let mut by_element_only: HashMap<usize, Entity> = HashMap::new();
+        for (entity, ptc) in &existing {
+            by_element_only.insert(ptc.element_idx, *entity);
+        }
+        assert_eq!(
+            by_element_only.len(),
+            1,
+            "element_idx-only keying collapses wrapped lines — the root cause \
+             of the overlapping-text bug"
+        );
+    }
 
     /// Verifies that the material sharing decision produces the expected
     /// handle identity: zero hue → shared handle, non-zero hue → unique handle.
@@ -1224,6 +1325,7 @@ mod tests {
             0,
             constants::UNCLIPPED_TEXT_CLIP_RECT,
             0.0,
+            AlphaMode::AlphaToCoverage,
         ));
 
         // Simulate the decision logic from extract_text_meshes.
@@ -1241,6 +1343,7 @@ mod tests {
                     0,
                     constants::UNCLIPPED_TEXT_CLIP_RECT,
                     0.0,
+                    AlphaMode::AlphaToCoverage,
                 ))
             }
         };

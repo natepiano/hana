@@ -4,6 +4,7 @@ use bevy::prelude::Reflect;
 use bevy::prelude::Resource;
 
 use super::constants::MIN_CUSTOM_MPU;
+use super::constants::PIXELS_PER_INCH;
 
 /// Physical unit for interpreting numeric dimensions.
 ///
@@ -57,7 +58,9 @@ impl Unit {
         match self {
             Self::Meters => 1.0,
             Self::Millimeters => 0.001,
-            Self::Points | Self::Pixels => 0.0254 / 72.0,
+            Self::Points => 0.0254 / 72.0,
+            // 96 DPI convention: 1 point = 96/72 pixels ≈ 1.333 pixels.
+            Self::Pixels => 0.0254 / PIXELS_PER_INCH,
             Self::Inches => 0.0254,
             Self::Custom(mpu) => {
                 if mpu < MIN_CUSTOM_MPU {

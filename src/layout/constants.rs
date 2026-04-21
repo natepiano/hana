@@ -30,3 +30,14 @@ pub(super) const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// below 1.0 when converted to points for the layout engine, hitting parley's
 /// integer quantization and producing incorrect baselines.
 pub(super) const MIN_CUSTOM_MPU: f32 = 0.0254 / 72.0;
+
+/// Logical pixels per inch at the standard CSS / web typography resolution.
+///
+/// This is the conversion factor between `Unit::Pixels` and `Unit::Points`:
+/// 1 point = 1/72 inch, 1 pixel = 1/[`PIXELS_PER_INCH`] inch, so
+/// 1 point = [`PIXELS_PER_INCH`] / 72 pixels (≈ 1.333 at 96 DPI). This makes
+/// `Pt(12)` render at 16 logical pixels, matching CSS/Word/etc. conventions.
+///
+/// Physical pixels on a high-DPI display are still 1:1 with logical pixels
+/// via the window's `scale_factor`; we operate in logical pixels throughout.
+pub(super) const PIXELS_PER_INCH: f32 = 96.0;

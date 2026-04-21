@@ -59,6 +59,7 @@ pub(super) struct BuilderData {
     surface_shadow: SurfaceShadow,
     material:       Option<StandardMaterial>,
     text_material:  Option<StandardMaterial>,
+    text_alpha_mode: Option<AlphaMode>,
     tree:           Option<LayoutTree>,
     mode:           PanelMode,
 }
@@ -137,6 +138,17 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     #[must_use]
     pub fn text_material(mut self, material: StandardMaterial) -> Self {
         self.data.text_material = Some(material);
+        self
+    }
+
+    /// Sets a panel-wide [`AlphaMode`] default for every text chunk in this
+    /// panel. Per-style overrides still win.
+    ///
+    /// See [`StableTransparency`](crate::StableTransparency) when pairing
+    /// this with [`AlphaMode::Blend`].
+    #[must_use]
+    pub const fn text_alpha_mode(mut self, mode: AlphaMode) -> Self {
+        self.data.text_alpha_mode = Some(mode);
         self
     }
 
@@ -508,6 +520,7 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
         surface_shadow: data.surface_shadow,
         material:       data.material,
         text_material:  data.text_material,
+        text_alpha_mode: data.text_alpha_mode,
         mode:           data.mode,
     }
 }

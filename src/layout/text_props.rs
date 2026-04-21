@@ -4,6 +4,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 
 use bevy::color::Color;
+use bevy::prelude::AlphaMode;
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
 
@@ -238,6 +239,8 @@ pub struct TextProps<C: Send + Sync + 'static> {
     /// Explicit meters-per-design-unit override. `None` = derive from `unit`.
     /// Only meaningful for [`ForStandalone`] — ignored by layout text.
     world_scale:    Option<f32>,
+    /// Per-style alpha-mode override. `None` = inherit from panel or resource default.
+    alpha_mode:     Option<AlphaMode>,
     #[reflect(ignore)]
     _context:       PhantomData<C>,
 }
@@ -262,6 +265,7 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.world_scale == other.world_scale
+            && self.alpha_mode == other.alpha_mode
     }
 }
 
@@ -407,6 +411,25 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns the per-style alpha-mode override, if any.
+    ///
+    /// `None` means "inherit" — resolution falls through to panel-level
+    /// override, then to the app-wide `TextAlphaModeDefault` resource.
+    #[must_use]
+    pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
+
+    /// Sets the per-style alpha-mode override.
+    ///
+    /// See the `AlphaMode` docs for guidance on which modes are meaningful
+    /// for text. `AlphaToCoverage` is the default (requires MSAA).
+    /// `Blend` requires a `StableTransparency` camera for correct
+    /// view-angle-independent ordering.
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, mode: AlphaMode) -> Self {
+        self.alpha_mode = Some(mode);
+        self
+    }
+
     /// Returns the font feature overrides.
     #[must_use]
     pub const fn font_features(&self) -> FontFeatures { self.font_features }
@@ -459,6 +482,8 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             // Standalone-only — not relevant for layout shaping cache.
             unit: _,
             world_scale: _,
+            // Render-only — affects compositing, not shaping.
+            alpha_mode: _,
             _context: _,
         } = self;
 
@@ -526,6 +551,7 @@ impl TextProps<ForLayout> {
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
+            alpha_mode:     None,
             _context:       PhantomData,
         }
     }
@@ -589,6 +615,7 @@ impl TextProps<ForLayout> {
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    None,
+            alpha_mode:     self.alpha_mode,
             _context:       PhantomData,
         }
     }
@@ -630,6 +657,7 @@ impl TextProps<ForStandalone> {
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
+            alpha_mode:     None,
             _context:       PhantomData,
         }
     }
@@ -732,6 +760,7 @@ impl TextProps<ForStandalone> {
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    self.world_scale,
+            alpha_mode:     self.alpha_mode,
             _context:       PhantomData,
         }
     }
