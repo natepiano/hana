@@ -8,16 +8,78 @@ use super::labels::BoundsLabel;
 use super::labels::MarginLabel;
 use super::labels::MarginLabelParams;
 use super::screen_space;
-use super::types::FitTargetGizmo;
-use super::types::FitTargetOverlayConfig;
-use super::types::FitTargetViewportMarginPcts;
 use crate::components::CurrentFitTarget;
 use crate::components::FitOverlay;
 use crate::constants::TOLERANCE;
 use crate::fit::Edge;
 use crate::projection;
 use crate::projection::CameraBasis;
+use crate::projection::ProjectionMode;
 use crate::projection::ScreenSpaceBounds;
+
+/// Gizmo config group for fit target visualization (screen-aligned overlay).
+/// Toggle by inserting/removing the `FitOverlay` component on the camera entity.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub(super) struct FitTargetGizmo;
+
+/// Configuration for fit target visualization colors and appearance.
+#[derive(Resource, Reflect, Debug, Clone)]
+#[reflect(Resource)]
+pub struct FitTargetOverlayConfig {
+    /// Color for the screen-aligned bounding rectangle.
+    pub rectangle_color:  Color,
+    /// Color for the silhouette convex hull.
+    pub silhouette_color: Color,
+    /// Color for balanced margins (left ≈ right, top ≈ bottom).
+    pub balanced_color:   Color,
+    /// Color for unbalanced margins.
+    pub unbalanced_color: Color,
+    /// Line width for gizmo rendering.
+    pub line_width:       f32,
+}
+
+impl Default for FitTargetOverlayConfig {
+    fn default() -> Self {
+        Self {
+            rectangle_color:  Color::srgb(1.0, 1.0, 0.0), // Yellow
+            silhouette_color: Color::srgb(1.0, 0.5, 0.0), // Orange
+            balanced_color:   Color::srgb(0.0, 1.0, 0.0), // Green
+            unbalanced_color: Color::srgb(1.0, 0.0, 0.0), // Red
+            line_width:       2.0,
+        }
+    }
+}
+
+/// Current screen-space margin percentages for the fit target.
+/// Updated every frame by the visualization system.
+/// Removed when fit target visualization is disabled.
+#[derive(Component, Reflect, Debug, Default, Clone)]
+#[reflect(Component)]
+pub(super) struct FitMarginPercents {
+    /// Left margin as a percentage of screen width.
+    pub left:   f32,
+    /// Right margin as a percentage of screen width.
+    pub right:  f32,
+    /// Top margin as a percentage of screen height.
+    pub top:    f32,
+    /// Bottom margin as a percentage of screen height.
+    pub bottom: f32,
+}
+
+impl FitMarginPercents {
+    /// Constructs margin percentages from screen-space bounds, computing
+    /// screen dimensions once rather than per-edge.
+    pub(super) const fn from_bounds(bounds: &ScreenSpaceBounds) -> Self {
+        let screen_width = 2.0 * bounds.half_extent_x;
+        let screen_height = 2.0 * bounds.half_extent_y;
+        Self {
+            left:   (bounds.left_margin / screen_width) * 100.0,
+            right:  (bounds.right_margin / screen_width) * 100.0,
+            top:    (bounds.top_margin / screen_height) * 100.0,
+            bottom: (bounds.bottom_margin / screen_height) * 100.0,
+        }
+    }
+}
 
 /// Calculates the color for an edge based on balance state.
 const fn calculate_edge_color(
@@ -49,7 +111,7 @@ fn create_screen_corners(
     bounds: &ScreenSpaceBounds,
     camera: &CameraBasis,
     avg_depth: f32,
-    is_ortho: bool,
+    projection_mode: ProjectionMode,
 ) -> [Vec3; 4] {
     [
         screen_space::normalized_to_world(
@@ -57,28 +119,28 @@ fn create_screen_corners(
             bounds.min_norm_y,
             camera,
             avg_depth,
-            is_ortho,
+            projection_mode,
         ),
         screen_space::normalized_to_world(
             bounds.max_norm_x,
             bounds.min_norm_y,
             camera,
             avg_depth,
-            is_ortho,
+            projection_mode,
         ),
         screen_space::normalized_to_world(
             bounds.max_norm_x,
             bounds.max_norm_y,
             camera,
             avg_depth,
-            is_ortho,
+            projection_mode,
         ),
         screen_space::normalized_to_world(
             bounds.min_norm_x,
             bounds.max_norm_y,
             camera,
             avg_depth,
-            is_ortho,
+            projection_mode,
         ),
     ]
 }
@@ -101,10 +163,10 @@ fn draw_silhouette(
     vertices: &[Vec3],
     camera: &CameraBasis,
     avg_depth: f32,
-    is_ortho: bool,
+    projection_mode: ProjectionMode,
     color: Color,
 ) {
-    let projected = convex_hull::project_vertices_to_2d(vertices, camera, is_ortho);
+    let projected = convex_hull::project_vertices_to_2d(vertices, camera, projection_mode);
     let hull = convex_hull::convex_hull_2d(&projected);
 
     if hull.len() < 2 {
@@ -113,14 +175,19 @@ fn draw_silhouette(
 
     for i in 0..hull.len() {
         let next = (i + 1) % hull.len();
-        let start =
-            screen_space::normalized_to_world(hull[i].0, hull[i].1, camera, avg_depth, is_ortho);
+        let start = screen_space::normalized_to_world(
+            hull[i].0,
+            hull[i].1,
+            camera,
+            avg_depth,
+            projection_mode,
+        );
         let end = screen_space::normalized_to_world(
             hull[next].0,
             hull[next].1,
             camera,
             avg_depth,
-            is_ortho,
+            projection_mode,
         );
         gizmos.line(start, end, color);
     }
@@ -128,12 +195,12 @@ fn draw_silhouette(
 
 /// Camera-derived drawing parameters shared across margin/bounds rendering.
 struct DrawContext<'a> {
-    camera:        Entity,
-    bounds:        &'a ScreenSpaceBounds,
-    camera_basis:  &'a CameraBasis,
-    avg_depth:     f32,
-    is_ortho:      bool,
-    viewport_size: Option<Vec2>,
+    camera:          Entity,
+    bounds:          &'a ScreenSpaceBounds,
+    camera_basis:    &'a CameraBasis,
+    avg_depth:       f32,
+    projection_mode: ProjectionMode,
+    viewport_size:   Option<Vec2>,
 }
 
 /// Draws margin lines from boundary edges to screen edges and updates margin labels.
@@ -149,7 +216,7 @@ fn draw_margin_lines_and_labels(
     let bounds = ctx.bounds;
     let camera_basis = ctx.camera_basis;
     let avg_depth = ctx.avg_depth;
-    let is_ortho = ctx.is_ortho;
+    let projection_mode = ctx.projection_mode;
     let viewport_size = ctx.viewport_size;
     let h_balanced = screen_space::is_horizontally_balanced(bounds, TOLERANCE);
     let v_balanced = screen_space::is_vertically_balanced(bounds, TOLERANCE);
@@ -169,14 +236,14 @@ fn draw_margin_lines_and_labels(
             boundary_y,
             camera_basis,
             avg_depth,
-            is_ortho,
+            projection_mode,
         );
         let screen_pos = screen_space::normalized_to_world(
             screen_x,
             screen_y,
             camera_basis,
             avg_depth,
-            is_ortho,
+            projection_mode,
         );
 
         let color = calculate_edge_color(edge, h_balanced, v_balanced, config);
@@ -232,9 +299,7 @@ pub(super) fn on_remove_fit_visualization(
     // Clean up viewport margins from the camera entity.
     // `try_remove` silently skips if the entity was despawned this frame
     // (e.g. closing a secondary window triggers component removal during despawn).
-    commands
-        .entity(camera)
-        .try_remove::<FitTargetViewportMarginPcts>();
+    commands.entity(camera).try_remove::<FitMarginPercents>();
 
     // Clean up labels belonging to this camera
     for (entity, label) in &label_query {
@@ -353,7 +418,14 @@ fn draw_bounds_for_camera(
     };
 
     let avg_depth = depths.sum / depths.count.to_f32();
-    let is_ortho = matches!(projection, Projection::Orthographic(_));
+    let projection_mode = match projection {
+        Projection::Perspective(_) => Some(ProjectionMode::Perspective),
+        Projection::Orthographic(_) => Some(ProjectionMode::Orthographic),
+        Projection::Custom(_) => None,
+    };
+    let Some(projection_mode) = projection_mode else {
+        return;
+    };
     let viewport_size = camera_component.logical_viewport_size();
 
     // Update margin percentages on camera entity for BRP inspection.
@@ -361,10 +433,10 @@ fn draw_bounds_for_camera(
     // (e.g. closing a secondary window while visualization is active).
     commands
         .entity(camera)
-        .try_insert(FitTargetViewportMarginPcts::from_bounds(&bounds));
+        .try_insert(FitMarginPercents::from_bounds(&bounds));
 
     // Bounding rectangle
-    let corners = create_screen_corners(&bounds, &camera_basis, avg_depth, is_ortho);
+    let corners = create_screen_corners(&bounds, &camera_basis, avg_depth, projection_mode);
     draw_rectangle(gizmos, &corners, config);
 
     // Silhouette convex hull
@@ -373,7 +445,7 @@ fn draw_bounds_for_camera(
         vertices,
         &camera_basis,
         avg_depth,
-        is_ortho,
+        projection_mode,
         config.silhouette_color,
     );
 
@@ -400,7 +472,7 @@ fn draw_bounds_for_camera(
         bounds: &bounds,
         camera_basis: &camera_basis,
         avg_depth,
-        is_ortho,
+        projection_mode,
         viewport_size,
     };
     let visible_edges =

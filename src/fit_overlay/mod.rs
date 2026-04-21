@@ -6,14 +6,13 @@
 
 mod constants;
 mod convex_hull;
+mod fit_target_bounds;
 mod labels;
 mod screen_space;
-mod systems;
-mod types;
 
 use bevy::prelude::*;
-use types::FitTargetGizmo;
-pub use types::FitTargetOverlayConfig;
+use fit_target_bounds::FitTargetGizmo;
+pub use fit_target_bounds::FitTargetOverlayConfig;
 
 use super::components::FitOverlay;
 
@@ -27,12 +26,12 @@ impl Plugin for ZoomOverlayPlugin {
         }
 
         app.init_resource::<FitTargetOverlayConfig>()
-            .add_observer(systems::on_remove_fit_visualization)
+            .add_observer(fit_target_bounds::on_remove_fit_visualization)
             .add_systems(
                 Update,
                 (
-                    systems::sync_gizmo_render_layers,
-                    systems::draw_fit_target_bounds,
+                    fit_target_bounds::sync_gizmo_render_layers,
+                    fit_target_bounds::draw_fit_target_bounds,
                 )
                     .chain()
                     .run_if(any_with_component::<FitOverlay>),

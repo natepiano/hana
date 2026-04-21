@@ -59,6 +59,8 @@ pub(crate) enum FitError {
     NoViewport,
     /// All candidate fits projected points behind the camera.
     PointsBehindCamera,
+    /// Projection variant is not supported (e.g. `Projection::Custom`).
+    UnsupportedProjection,
 }
 
 impl fmt::Display for FitError {
@@ -68,6 +70,7 @@ impl fmt::Display for FitError {
             Self::PointsBehindCamera => {
                 write!(f, "all candidate fits project points behind camera")
             },
+            Self::UnsupportedProjection => write!(f, "projection variant is not supported"),
         }
     }
 }
@@ -88,33 +91,32 @@ const fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f
     // dimension never constrains the binary search.
     if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
         let target_x = bounds.half_extent_x / zoom_multiplier;
-        return (bounds.half_extent_x - target_x, bounds.half_extent_y);
-    }
-    if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
+        (bounds.half_extent_x - target_x, bounds.half_extent_y)
+    } else if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
         let target_y = bounds.half_extent_y / zoom_multiplier;
-        return (bounds.half_extent_x, bounds.half_extent_y - target_y);
-    }
-
-    let boundary_aspect = horizontal_extent / vertical_extent;
-    let screen_aspect = bounds.half_extent_x / bounds.half_extent_y;
-
-    // If boundary is wider (relative to height) than screen, width constrains
-    let width_constrains = boundary_aspect > screen_aspect;
-
-    let (target_edge_x, target_edge_y) = if width_constrains {
-        let target_x = bounds.half_extent_x / zoom_multiplier;
-        let target_y = target_x / boundary_aspect;
-        (target_x, target_y)
+        (bounds.half_extent_x, bounds.half_extent_y - target_y)
     } else {
-        let target_y = bounds.half_extent_y / zoom_multiplier;
-        let target_x = target_y * boundary_aspect;
-        (target_x, target_y)
-    };
+        let boundary_aspect = horizontal_extent / vertical_extent;
+        let screen_aspect = bounds.half_extent_x / bounds.half_extent_y;
 
-    (
-        bounds.half_extent_x - target_edge_x,
-        bounds.half_extent_y - target_edge_y,
-    )
+        // If boundary is wider (relative to height) than screen, width constrains.
+        let width_constrains = boundary_aspect > screen_aspect;
+
+        let (target_edge_x, target_edge_y) = if width_constrains {
+            let target_x = bounds.half_extent_x / zoom_multiplier;
+            let target_y = target_x / boundary_aspect;
+            (target_x, target_y)
+        } else {
+            let target_y = bounds.half_extent_y / zoom_multiplier;
+            let target_x = target_y * boundary_aspect;
+            (target_x, target_y)
+        };
+
+        (
+            bounds.half_extent_x - target_edge_x,
+            bounds.half_extent_y - target_edge_y,
+        )
+    }
 }
 
 // ============================================================================
@@ -126,7 +128,7 @@ struct FitParams {
     rot:                  Quat,
     aspect_ratio:         f32,
     ortho_fixed_distance: Option<f32>,
-    is_ortho:             bool,
+    projection_mode:      projection::ProjectionMode,
     zoom_multiplier:      f32,
 }
 
@@ -164,20 +166,27 @@ pub(crate) fn calculate_fit(
         );
     }
 
+    let mode_and_distance = match projection {
+        Projection::Perspective(_) => Some((projection::ProjectionMode::Perspective, None)),
+        Projection::Orthographic(o) => Some((
+            projection::ProjectionMode::Orthographic,
+            Some((o.near + o.far) * 0.5),
+        )),
+        Projection::Custom(_) => None,
+    };
+    let Some((projection_mode, ortho_fixed_distance)) = mode_and_distance else {
+        return Err(FitError::UnsupportedProjection);
+    };
+
     let aspect_ratio =
         projection::projection_aspect_ratio(projection, camera.logical_viewport_size())
             .ok_or(FitError::NoViewport)?;
-
-    let ortho_fixed_distance = match projection {
-        Projection::Orthographic(o) => Some((o.near + o.far) * 0.5),
-        _ => None,
-    };
 
     let params = FitParams {
         rot: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
         aspect_ratio,
         ortho_fixed_distance,
-        is_ortho: ortho_fixed_distance.is_some(),
+        projection_mode,
         zoom_multiplier: zoom_margin_multiplier(clamped_margin),
     };
 
@@ -364,7 +373,7 @@ fn refine_focus_centering(
     let rot = params.rot;
     let aspect_ratio = params.aspect_ratio;
     let ortho_fixed_distance = params.ortho_fixed_distance;
-    let is_ortho = params.is_ortho;
+    let projection_mode = params.projection_mode;
     let camera_right = rot * Vec3::X;
     let camera_up = rot * Vec3::Y;
 
@@ -387,13 +396,12 @@ fn refine_focus_centering(
 
         // Centering depths: perspective uses harmonic mean for perspective-correct
         // centering. Ortho uses 1.0 since projection is depth-independent.
-        let (centering_depth_x, centering_depth_y) = if is_ortho {
-            (1.0, 1.0)
-        } else {
-            (
+        let (centering_depth_x, centering_depth_y) = match projection_mode {
+            projection::ProjectionMode::Orthographic => (1.0, 1.0),
+            projection::ProjectionMode::Perspective => (
                 2.0 * depths.min_x * depths.max_x / (depths.min_x + depths.max_x),
                 2.0 * depths.min_y * depths.max_y / (depths.min_y + depths.max_y),
-            )
+            ),
         };
 
         focus += camera_right * cx * centering_depth_x + camera_up * cy * centering_depth_y;

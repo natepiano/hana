@@ -36,32 +36,46 @@ impl CameraBasis {
 
 /// Projection-derived parameters for screen-space normalization.
 /// Consolidates the extraction of half extents and projection type from a `Projection`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionMode {
+    Perspective,
+    Orthographic,
+}
+
 pub(crate) struct ProjectionParams {
     /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
     pub half_extent_x: f32,
     /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
     pub half_extent_y: f32,
-    /// Whether this uses orthographic projection
-    pub is_ortho:      bool,
+    /// Projection mode for the current camera.
+    pub mode:          ProjectionMode,
 }
 
 impl ProjectionParams {
     /// Extracts projection parameters from a `Projection` and viewport aspect ratio.
     /// Returns `None` for unsupported projection variants.
     pub(crate) fn from_projection(projection: &Projection, viewport_aspect: f32) -> Option<Self> {
-        let is_ortho = matches!(projection, Projection::Orthographic(_));
-        let (half_extent_x, half_extent_y) = match projection {
+        let projection_params = match projection {
             Projection::Perspective(p) => {
                 let half_tan_vfov = (p.fov * 0.5).tan();
-                (half_tan_vfov * viewport_aspect, half_tan_vfov)
+                Some((
+                    half_tan_vfov * viewport_aspect,
+                    half_tan_vfov,
+                    ProjectionMode::Perspective,
+                ))
             },
-            Projection::Orthographic(o) => (o.area.width() * 0.5, o.area.height() * 0.5),
-            Projection::Custom(_) => return None,
+            Projection::Orthographic(o) => Some((
+                o.area.width() * 0.5,
+                o.area.height() * 0.5,
+                ProjectionMode::Orthographic,
+            )),
+            Projection::Custom(_) => None,
         };
+        let (half_extent_x, half_extent_y, mode) = projection_params?;
         Some(Self {
             half_extent_x,
             half_extent_y,
-            is_ortho,
+            mode,
         })
     }
 }
@@ -73,19 +87,22 @@ impl ProjectionParams {
 pub(crate) fn project_point(
     point: Vec3,
     camera: &CameraBasis,
-    is_ortho: bool,
+    mode: ProjectionMode,
 ) -> Option<(f32, f32, f32)> {
     let relative = point - *camera.position;
     let depth = relative.dot(camera.forward);
-    if !is_ortho && depth <= MIN_VISIBLE_DEPTH {
+    let is_visible = match mode {
+        ProjectionMode::Perspective => depth > MIN_VISIBLE_DEPTH,
+        ProjectionMode::Orthographic => true,
+    };
+    if !is_visible {
         return None;
     }
     let x = relative.dot(camera.right);
     let y = relative.dot(camera.up);
-    let (norm_x, norm_y) = if is_ortho {
-        (x, y)
-    } else {
-        (x / depth, y / depth)
+    let (norm_x, norm_y) = match mode {
+        ProjectionMode::Orthographic => (x, y),
+        ProjectionMode::Perspective => (x / depth, y / depth),
     };
     Some((norm_x, norm_y, depth))
 }
@@ -173,7 +190,7 @@ impl ScreenSpaceBounds {
         let ProjectionParams {
             half_extent_x,
             half_extent_y,
-            is_ortho,
+            mode,
         } = ProjectionParams::from_projection(projection, viewport_aspect)?;
 
         let camera_basis = CameraBasis::from_global_transform(camera_global);
@@ -190,7 +207,7 @@ impl ScreenSpaceBounds {
         let mut sum = 0.0_f32;
 
         for point in points {
-            let (norm_x, norm_y, depth) = project_point(*point, &camera_basis, is_ortho)?;
+            let (norm_x, norm_y, depth) = project_point(*point, &camera_basis, mode)?;
 
             #[cfg(feature = "fit_overlay")]
             {

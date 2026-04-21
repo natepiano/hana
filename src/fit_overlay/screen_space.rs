@@ -3,6 +3,7 @@ use bevy_kana::ScreenPosition;
 
 use crate::fit::Edge;
 use crate::projection::CameraBasis;
+use crate::projection::ProjectionMode;
 use crate::projection::ScreenSpaceBounds;
 
 /// Returns true if horizontal margins are balanced.
@@ -91,12 +92,11 @@ pub(super) fn normalized_to_world(
     norm_y: f32,
     camera: &CameraBasis,
     avg_depth: f32,
-    is_ortho: bool,
+    projection_mode: ProjectionMode,
 ) -> Vec3 {
-    let (world_x, world_y) = if is_ortho {
-        (norm_x, norm_y)
-    } else {
-        (norm_x * avg_depth, norm_y * avg_depth)
+    let (world_x, world_y) = match projection_mode {
+        ProjectionMode::Orthographic => (norm_x, norm_y),
+        ProjectionMode::Perspective => (norm_x * avg_depth, norm_y * avg_depth),
     };
     *camera.position + camera.right * world_x + camera.up * world_y + camera.forward * avg_depth
 }
