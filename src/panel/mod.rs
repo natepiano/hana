@@ -15,6 +15,7 @@ use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
+pub(crate) use diegetic_panel::PanelFontUnit;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
 pub use modes::HueOffset;
@@ -40,6 +41,8 @@ pub use sizing::Percent;
 pub use sizing::Pixels;
 pub use sizing::Points;
 
+use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadePanelPlugin;
 use crate::layout::ShapedTextCache;
 
 /// System sets for ordering panel work and its cross-module dependencies.
@@ -75,8 +78,10 @@ pub struct HeadlessLayoutPlugin;
 impl Plugin for HeadlessLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(perf::DiagnosticsPlugin)
+            .add_plugins(CascadePanelPlugin::<PanelFontUnit>::default())
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
+            .init_resource::<CascadeDefaults>()
             .configure_sets(
                 Update,
                 PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),

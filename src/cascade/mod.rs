@@ -102,6 +102,4 @@ pub(crate) use resolved::CascadeTarget;
 pub(crate) use resolved::Resolved;
 pub use set::CascadeSet;
 pub(crate) use target::CascadeEntityPlugin;
-
-// `CascadePanelPlugin` is re-exported at `pub(crate)` when phase 4
-// (`PanelFontUnit`) adds a consumer.
+pub(crate) use target::CascadePanelPlugin;

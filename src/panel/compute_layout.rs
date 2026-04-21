@@ -11,8 +11,12 @@ use bevy::prelude::*;
 
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
+use super::diegetic_panel::PanelFontUnit;
 use super::modes::PanelMode;
 use super::perf::DiegeticPerfStats;
+use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeTarget;
+use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::LayoutEngine;
 use crate::layout::MeasureTextFn;
@@ -31,10 +35,12 @@ use crate::text::DiegeticTextMeasurer;
 pub(super) fn compute_panel_layouts(
     panels: Query<(Entity, Ref<DiegeticPanel>)>,
     mut computed_panels: Query<&mut ComputedDiegeticPanel>,
+    panel_font_units: Query<&Resolved<PanelFontUnit>>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
     unit_config: Res<UnitConfig>,
+    defaults: Res<CascadeDefaults>,
 ) {
     let changed_entities: Vec<Entity> = panels
         .iter()
@@ -79,7 +85,10 @@ pub(super) fn compute_panel_layouts(
         panel_count += 1;
 
         let layout_unit = panel_ref.layout_unit();
-        let font_unit = panel_ref.font_unit().unwrap_or(unit_config.font);
+        let font_unit = panel_font_units.get(*entity).map_or_else(
+            |_| PanelFontUnit::global_default(&defaults).0,
+            |resolved| resolved.0.0,
+        );
         let layout_to_pts = layout_unit.to_points();
         let font_to_pts = font_unit.to_points();
 

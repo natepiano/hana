@@ -9,6 +9,8 @@ use super::builder::World;
 use super::modes::PanelMode;
 use super::modes::RenderMode;
 use super::modes::SurfaceShadow;
+use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeTarget;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::InvalidSize;
@@ -60,7 +62,9 @@ pub struct DiegeticPanel {
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
     pub(super) layout_unit:     Unit,
-    /// Unit for font sizes in the layout tree. `None` inherits from [`UnitConfig::font`].
+    /// Unit for font sizes in the layout tree. `None` inherits from
+    /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults) via the
+    /// cascade framework.
     pub(super) font_unit:       Option<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
@@ -137,7 +141,8 @@ impl DiegeticPanel {
     #[must_use]
     pub const fn layout_unit(&self) -> Unit { self.layout_unit }
 
-    /// The font unit override, or `None` if inheriting from [`UnitConfig`].
+    /// The font unit override, or `None` if inheriting from
+    /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults).
     #[must_use]
     pub const fn font_unit(&self) -> Option<Unit> { self.font_unit }
 
@@ -240,11 +245,6 @@ impl DiegeticPanel {
     /// Returns the layout unit.
     pub(crate) const fn resolved_layout_unit(&self, _config: &UnitConfig) -> Unit {
         self.layout_unit
-    }
-
-    /// Resolves the font unit, falling back to the global [`UnitConfig`].
-    pub(crate) fn resolved_font_unit(&self, config: &UnitConfig) -> Unit {
-        self.font_unit.unwrap_or(config.font)
     }
 
     /// Physical width in meters before world scaling.
@@ -361,13 +361,36 @@ impl DiegeticPanel {
     /// Font-to-layout conversion factor for this panel.
     ///
     /// Multiply a font size by this value to convert from font units
-    /// to layout units.
+    /// to layout units. Callers pass the panel's resolved font unit —
+    /// usually read from [`Resolved<PanelFontUnit>`](crate::cascade::Resolved)
+    /// on the panel entity, falling back to
+    /// [`CascadeDefaults::panel_font_unit`].
     #[must_use]
-    pub fn font_scale(&self, config: &UnitConfig) -> f32 {
-        let font_mpu = self.resolved_font_unit(config).meters_per_unit();
-        let layout_mpu = self.resolved_layout_unit(config).meters_per_unit();
+    pub fn font_scale(&self, panel_font_unit: Unit) -> f32 {
+        let font_mpu = panel_font_unit.meters_per_unit();
+        let layout_mpu = self.layout_unit.meters_per_unit();
         font_mpu / layout_mpu
     }
+}
+
+/// Cascading attribute for panel-text font unit.
+///
+/// 2-tier cascade: [`DiegeticPanel::font_unit`] (panel override) →
+/// [`CascadeDefaults::panel_font_unit`] (global). The resolved value is
+/// cached in [`Resolved<PanelFontUnit>`](crate::cascade::Resolved) on the
+/// panel entity; [`compute_panel_layouts`](crate::panel::compute_layout)
+/// reads it to scale the layout tree's font sizes.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct PanelFontUnit(pub Unit);
+
+impl CascadeTarget for PanelFontUnit {
+    type Override = DiegeticPanel;
+
+    fn override_value(entity_override: &DiegeticPanel) -> Option<Self> {
+        entity_override.font_unit().map(Self)
+    }
+
+    fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.panel_font_unit) }
 }
 
 /// Computed layout result for a [`DiegeticPanel`].
