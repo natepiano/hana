@@ -39,6 +39,9 @@ use super::constants::METRIC_ARROW_Z_OFFSET;
 use super::constants::METRIC_LINE_Z_OFFSET;
 use super::constants::THIN_LINE_WIDTH;
 use crate::callouts;
+use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeTarget;
+use crate::cascade::Resolved;
 use crate::default_panel_material;
 use crate::layout::Anchor;
 use crate::layout::Border;
@@ -53,12 +56,12 @@ use crate::layout::ShapedTextCache;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::Unit;
-use crate::layout::UnitConfig;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::SurfaceShadow;
 use crate::render::ComputedWorldText;
 use crate::render::PendingGlyphs;
+use crate::render::WorldFontUnit;
 use crate::render::WorldText;
 use crate::text;
 use crate::text::FontId;
@@ -224,9 +227,10 @@ pub fn build_typography_overlay(
         ),
     >,
     containers: Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
+    resolved_units: Query<&Resolved<WorldFontUnit>>,
     font_registry: Res<FontRegistry>,
     mut cache: ResMut<ShapedTextCache>,
-    unit_config: Res<UnitConfig>,
+    defaults: Res<CascadeDefaults>,
     mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
@@ -269,10 +273,19 @@ pub fn build_typography_overlay(
         let font_size = style.size() * boost;
         let font_metrics = font.metrics(font_size);
 
-        let unit_scale = style
-            .world_scale()
-            .or_else(|| style.unit().map(Unit::meters_per_unit))
-            .unwrap_or_else(|| unit_config.world_font.meters_per_unit());
+        // `world_scale` is a raw meters-per-unit override that bypasses the
+        // cascade. Otherwise read the per-entity `Resolved<WorldFontUnit>`,
+        // falling back to `CascadeDefaults.world_font_unit`.
+        let unit_scale = style.world_scale().unwrap_or_else(|| {
+            resolved_units
+                .get(entity)
+                .map_or_else(
+                    |_| WorldFontUnit::global_default(&defaults),
+                    |resolved| resolved.0,
+                )
+                .0
+                .meters_per_unit()
+        });
         let scale = unit_scale * points_to_world;
         let anchor_x = if scale > 0.0 {
             computed.anchor_x / scale

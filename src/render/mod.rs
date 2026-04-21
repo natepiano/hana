@@ -26,6 +26,7 @@ pub use transparency::StableTransparency;
 pub use world_text::ComputedWorldText;
 pub use world_text::PanelTextChild;
 pub use world_text::PendingGlyphs;
+pub(crate) use world_text::WorldFontUnit;
 pub use world_text::WorldText;
 pub use world_text::WorldTextReady;
 

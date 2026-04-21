@@ -212,6 +212,7 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
         app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
+        app.add_plugins(CascadeEntityPlugin::<world_text::WorldFontUnit>::default());
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterials>();

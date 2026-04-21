@@ -28,7 +28,6 @@ use crate::layout::GlyphSidedness;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
-use crate::layout::UnitConfig;
 use crate::layout::WorldTextStyle;
 use crate::text::Font;
 use crate::text::FontId;
@@ -103,6 +102,28 @@ impl CascadeTarget for WorldTextAlpha {
     }
 
     fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.text_alpha) }
+}
+
+/// Cascading attribute for standalone-world-text font unit.
+///
+/// 2-tier cascade: [`WorldTextStyle::unit`] (entity) →
+/// [`CascadeDefaults::world_font_unit`] (global). Resolved on each
+/// standalone [`WorldText`] entity; readers multiply by
+/// `meters_per_unit()` to convert font sizes into world-space scale.
+/// A non-`None` [`WorldTextStyle::world_scale`] short-circuits this
+/// cascade (it is a raw meters-per-unit override that bypasses the
+/// [`Unit`] abstraction).
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct WorldFontUnit(pub Unit);
+
+impl CascadeTarget for WorldFontUnit {
+    type Override = WorldTextStyle;
+
+    fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
+        entity_override.unit().map(Self)
+    }
+
+    fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.world_font_unit) }
 }
 
 /// Marker for mesh entities spawned by the world text renderer.
@@ -185,6 +206,7 @@ pub(super) fn render_world_text(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
                 Changed<Resolved<WorldTextAlpha>>,
+                Changed<Resolved<WorldFontUnit>>,
             )>,
         ),
     >,
@@ -198,6 +220,7 @@ pub(super) fn render_world_text(
     >,
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
+    resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -207,7 +230,6 @@ pub(super) fn render_world_text(
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
     defaults: Res<CascadeDefaults>,
     mut commands: Commands,
-    unit_config: Res<UnitConfig>,
 ) {
     let to_process = collect_entities_to_process(&changed_texts, &pending_texts);
     if to_process.is_empty() {
@@ -235,10 +257,23 @@ pub(super) fn render_world_text(
             continue;
         }
 
+        // Tier-1 re-resolve: `WorldTextStyle.unit` may have changed since the
+        // cascade plugin's `On<Add>` observer fired, so recompute
+        // `Resolved<WorldFontUnit>` from the current style.
+        let resolved_unit = WorldFontUnit::override_value(style)
+            .unwrap_or_else(|| WorldFontUnit::global_default(&defaults));
+        if resolved_units
+            .get(entity)
+            .is_ok_and(|current| current.0 != resolved_unit)
+            || resolved_units.get(entity).is_err()
+        {
+            commands.entity(entity).insert(Resolved(resolved_unit));
+        }
+        // `WorldTextStyle.world_scale` is a raw meters-per-unit override
+        // that bypasses the cascade entirely.
         let scale = style
             .world_scale()
-            .or_else(|| style.unit().map(Unit::meters_per_unit))
-            .unwrap_or_else(|| unit_config.world_font.meters_per_unit());
+            .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
         // Shape text and build quads in entity-local coordinates.
         let shaped = shape_world_text(
@@ -345,6 +380,7 @@ fn collect_entities_to_process(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
                 Changed<Resolved<WorldTextAlpha>>,
+                Changed<Resolved<WorldFontUnit>>,
             )>,
         ),
     >,
