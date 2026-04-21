@@ -8,7 +8,6 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
-use super::StaleAlphaMode;
 use super::constants;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
@@ -17,7 +16,9 @@ use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer;
 use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
-use super::transparency::TextAlphaModeDefault;
+use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeTarget;
+use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
@@ -83,6 +84,25 @@ impl WorldText {
     /// Creates a new world text with the given string.
     #[must_use]
     pub fn new(text: impl Into<String>) -> Self { Self(text.into()) }
+}
+
+/// Cascading attribute for standalone-world-text alpha mode.
+///
+/// 2-tier cascade: [`WorldTextStyle::alpha_mode`] (entity) →
+/// [`CascadeDefaults::text_alpha`] (global). The resolved value is cached in
+/// [`Resolved<WorldTextAlpha>`] on each standalone [`WorldText`] entity;
+/// [`render_world_text`] reads it when spawning meshes.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub(super) struct WorldTextAlpha(pub AlphaMode);
+
+impl CascadeTarget for WorldTextAlpha {
+    type Override = WorldTextStyle;
+
+    fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
+        entity_override.alpha_mode().map(Self)
+    }
+
+    fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.text_alpha) }
 }
 
 /// Marker for mesh entities spawned by the world text renderer.
@@ -164,7 +184,7 @@ pub(super) fn render_world_text(
             Or<(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
-                With<StaleAlphaMode>,
+                Changed<Resolved<WorldTextAlpha>>,
             )>,
         ),
     >,
@@ -177,6 +197,7 @@ pub(super) fn render_world_text(
         ),
     >,
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
+    resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
     mut atlas: ResMut<MsdfAtlas>,
     font_registry: Res<FontRegistry>,
@@ -184,7 +205,7 @@ pub(super) fn render_world_text(
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MsdfTextMaterial>>,
-    alpha_default: Res<TextAlphaModeDefault>,
+    defaults: Res<CascadeDefaults>,
     mut commands: Commands,
     unit_config: Res<UnitConfig>,
 ) {
@@ -199,11 +220,6 @@ pub(super) fn render_world_text(
     let mut mesh_ms_total = 0.0_f32;
 
     for entity in to_process {
-        // Clear the stale-alpha marker on entry — reaching this entity in
-        // the loop satisfies its rebuild request, regardless of which
-        // branch below we take.
-        commands.entity(entity).remove::<StaleAlphaMode>();
-
         let Ok((world_text, style)) = texts.get(entity) else {
             continue;
         };
@@ -268,7 +284,21 @@ pub(super) fn render_world_text(
                 }
             }
 
-            let resolved_alpha = style.alpha_mode().unwrap_or(alpha_default.0);
+            // Tier-1 re-resolve: recompute `Resolved<WorldTextAlpha>` each
+            // mesh build so `WorldTextStyle.alpha_mode` mutations are picked
+            // up (the cascade plugin's `On<Add>` observer only fires the
+            // first time `WorldTextStyle` is inserted; subsequent field
+            // mutations are detected here via `Changed<WorldTextStyle>`).
+            let resolved_alpha = WorldTextAlpha::override_value(style)
+                .unwrap_or_else(|| WorldTextAlpha::global_default(&defaults));
+            if resolved_alphas
+                .get(entity)
+                .is_ok_and(|current| current.0 != resolved_alpha)
+                || resolved_alphas.get(entity).is_err()
+            {
+                commands.entity(entity).insert(Resolved(resolved_alpha));
+            }
+            let resolved_alpha = resolved_alpha.0;
             mesh_ms_total += spawn_world_text_meshes(
                 &page_quads,
                 entity,
@@ -314,7 +344,7 @@ fn collect_entities_to_process(
             Or<(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
-                With<StaleAlphaMode>,
+                Changed<Resolved<WorldTextAlpha>>,
             )>,
         ),
     >,

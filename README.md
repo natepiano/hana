@@ -91,7 +91,10 @@ commands.spawn((Camera3d::default(), StableTransparency));
 
 ```rust
 // MSAA-friendly alternative. Switch the app-wide default to A2C:
-commands.insert_resource(TextAlphaModeDefault(AlphaMode::AlphaToCoverage));
+commands.insert_resource(CascadeDefaults {
+    text_alpha: AlphaMode::AlphaToCoverage,
+    ..default()
+});
 commands.spawn((Camera3d::default(), Msaa::Sample4));
 ```
 

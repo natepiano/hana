@@ -414,16 +414,16 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     /// Returns the per-style alpha-mode override, if any.
     ///
     /// `None` means "inherit" — resolution falls through to panel-level
-    /// override, then to the app-wide `TextAlphaModeDefault` resource.
+    /// override (for panel text), then to
+    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
     #[must_use]
     pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
 
     /// Sets the per-style alpha-mode override.
     ///
     /// The library default is [`AlphaMode::Blend`] — see
-    /// [`TextAlphaModeDefault`](crate::TextAlphaModeDefault) for the full
-    /// guidance on when to use each mode, how
-    /// [`StableTransparency`](crate::StableTransparency) pairs with
+    /// [`StableTransparency`](crate::StableTransparency) for guidance on
+    /// when to use each mode, how `StableTransparency` pairs with
     /// [`AlphaMode::Blend`]/[`AlphaMode::Premultiplied`], and when
     /// [`AlphaMode::AlphaToCoverage`] + MSAA is the better path.
     #[must_use]

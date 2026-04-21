@@ -90,7 +90,8 @@ pub struct DiegeticPanel {
     #[reflect(ignore)]
     pub(super) text_material:   Option<StandardMaterial>,
     /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
-    /// falls through to the per-style setting and then to `TextAlphaModeDefault`.
+    /// falls through to the per-style setting and then to
+    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
     pub(super) text_alpha_mode: Option<AlphaMode>,
     /// Whether the panel is world-space or screen-space.
     pub(super) mode:            PanelMode,

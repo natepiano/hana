@@ -27,6 +27,7 @@ use super::world_text::PanelTextChild;
 use super::world_text::PendingGlyphs;
 use super::world_text::WorldText;
 use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeEntityPlugin;
 use crate::cascade::CascadePanelChild;
 use crate::cascade::CascadePanelChildPlugin;
 use crate::cascade::Resolved;
@@ -210,6 +211,7 @@ impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
         app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
+        app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterials>();

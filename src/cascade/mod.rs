@@ -98,9 +98,10 @@ mod target;
 pub use defaults::CascadeDefaults;
 pub(crate) use panel_child::CascadePanelChildPlugin;
 pub(crate) use resolved::CascadePanelChild;
+pub(crate) use resolved::CascadeTarget;
 pub(crate) use resolved::Resolved;
 pub use set::CascadeSet;
+pub(crate) use target::CascadeEntityPlugin;
 
-// The 2-tier plugins (`CascadePanelPlugin`, `CascadeEntityPlugin`) and
-// `CascadeTarget` are re-exported at `pub(crate)` when phases 3+ add
-// consumers — keeping the facade honest about what's in use.
+// `CascadePanelPlugin` is re-exported at `pub(crate)` when phase 4
+// (`PanelFontUnit`) adds a consumer.

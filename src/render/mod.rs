@@ -22,7 +22,6 @@ pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_shape_material;
 pub use transparency::StableTransparency;
-pub use transparency::TextAlphaModeDefault;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
 pub use world_text::PanelTextChild;
@@ -41,37 +40,7 @@ impl Plugin for RenderPlugin {
             panel_geometry::PanelGeometryPlugin,
             panel_rtt::PanelRttPlugin,
         ))
-        .init_resource::<TextAlphaModeDefault>()
         .add_observer(transparency::on_stable_transparency_added)
-        .add_observer(transparency::on_stable_transparency_removed)
-        .add_systems(Update, queue_alpha_default_refresh);
-    }
-}
-
-/// Marker: this standalone [`WorldText`] entity's cached alpha mode was
-/// resolved through an earlier [`TextAlphaModeDefault`] value that has since
-/// changed, so its rendered material is stale and must be rebuilt.
-///
-/// Inserted by [`queue_alpha_default_refresh`] when the resource changes;
-/// cleared unconditionally at the top of `render_world_text`. Panel-text
-/// entities went through the cascade framework in phase 2; this marker is
-/// removed entirely in phase 3 when [`WorldTextAlpha`] migrates standalone
-/// world text to [`Resolved<WorldTextAlpha>`].
-#[derive(Component)]
-pub(super) struct StaleAlphaMode;
-
-/// Queues standalone [`WorldText`] entities for an alpha-mode rebuild when
-/// [`TextAlphaModeDefault`] changes. Panel text is handled by the cascade
-/// framework and is not marked here. Removed entirely in phase 3.
-fn queue_alpha_default_refresh(
-    alpha_default: Res<TextAlphaModeDefault>,
-    world_texts: Query<Entity, (With<world_text::WorldText>, Without<PanelTextChild>)>,
-    mut commands: Commands,
-) {
-    if !alpha_default.is_changed() {
-        return;
-    }
-    for entity in &world_texts {
-        commands.entity(entity).insert(StaleAlphaMode);
+        .add_observer(transparency::on_stable_transparency_removed);
     }
 }

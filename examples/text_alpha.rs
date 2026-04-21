@@ -23,6 +23,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CascadeDefaults;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -36,7 +37,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
-use bevy_diegetic::TextAlphaModeDefault;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::CameraMove;
@@ -130,7 +130,7 @@ struct ControlsState {
 impl Default for ControlsState {
     fn default() -> Self {
         Self {
-            // Matches the library's `TextAlphaModeDefault::default()`.
+            // Matches `CascadeDefaults::default().text_alpha`.
             alpha_mode:   AlphaMode::Blend,
             // Launch with MSAA on; user presses C to see StableTransparency
             // fix the coplanar-text flicker on "GROUND".
@@ -396,7 +396,7 @@ fn handle_hotkeys(
 fn apply_state_and_rebuild_hud(
     state: Res<ControlsState>,
     mut commands: Commands,
-    mut alpha_default: ResMut<TextAlphaModeDefault>,
+    mut defaults: ResMut<CascadeDefaults>,
     cam: Query<(Entity, Option<&StableTransparency>), With<SceneCamera>>,
     all_cameras: Query<Entity, With<Camera3d>>,
     hud_panels: Query<Entity, With<HudPanel>>,
@@ -439,7 +439,7 @@ fn apply_state_and_rebuild_hud(
         },
     }
 
-    alpha_default.0 = state.alpha_mode;
+    defaults.text_alpha = state.alpha_mode;
 
     for e in &hud_panels {
         commands.entity(e).despawn();
