@@ -5,6 +5,7 @@ categories  = ["game-development", "gui"]
 keywords    = ["bevy", "diegetic", "layout", "ui"]
 edition.workspace     = true
 license.workspace     = true
+readme.workspace      = true
 repository.workspace  = true
 version.workspace     = true
 
