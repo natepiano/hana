@@ -253,13 +253,8 @@ pub(super) fn render_world_text(
             continue;
         }
 
-        let resolved_unit = re_resolve_world_font_unit(
-            entity,
-            style,
-            &resolved_units,
-            &defaults,
-            &mut commands,
-        );
+        let resolved_unit =
+            re_resolve_world_font_unit(entity, style, &resolved_units, &defaults, &mut commands);
         // `WorldTextStyle.world_scale` is a raw meters-per-unit override
         // that bypasses the cascade entirely.
         let scale = style
@@ -298,8 +293,13 @@ pub(super) fn render_world_text(
 
         if total_quads > 0 {
             despawn_mesh_children(entity, &old_meshes, &mut commands);
-            let resolved_alpha =
-                re_resolve_world_text_alpha(entity, style, &resolved_alphas, &defaults, &mut commands);
+            let resolved_alpha = re_resolve_world_text_alpha(
+                entity,
+                style,
+                &resolved_alphas,
+                &defaults,
+                &mut commands,
+            );
             mesh_ms_total += spawn_world_text_meshes(
                 &page_quads,
                 entity,
