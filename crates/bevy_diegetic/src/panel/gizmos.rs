@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
-use super::modes::RenderMode;
+use super::panel_mode::RenderMode;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::RenderCommand;

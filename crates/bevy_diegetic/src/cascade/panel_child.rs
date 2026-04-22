@@ -8,12 +8,12 @@ use std::marker::PhantomData;
 use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
 
+use super::cascade_set::CascadeSet;
 use super::defaults;
 use super::defaults::CascadeDefaults;
 use super::resolved;
 use super::resolved::CascadePanelChild;
 use super::resolved::Resolved;
-use super::set::CascadeSet;
 
 /// Plugin that wires every write path for a 3-tier cascade `A`.
 ///

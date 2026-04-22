@@ -231,7 +231,6 @@ pub fn build_typography_overlay(
     font_registry: Res<FontRegistry>,
     mut cache: ResMut<ShapedTextCache>,
     defaults: Res<CascadeDefaults>,
-    mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -318,7 +317,6 @@ pub fn build_typography_overlay(
                 anchor_y,
                 font_size,
                 scale,
-                &mut gizmo_assets,
                 &measure_text,
                 &mut cache,
                 &mut meshes,
@@ -344,7 +342,6 @@ pub fn build_typography_overlay(
                 anchor_y,
                 font_size,
                 scale,
-                &mut gizmo_assets,
                 &mut meshes,
                 &mut dot_materials,
             );
@@ -421,7 +418,6 @@ fn spawn_font_metric_gizmos(
     anchor_y: f32,
     font_size: f32,
     scale: f32,
-    _gizmo_assets: &mut Assets<GizmoAsset>,
     measure_text: &MeasureTextFn,
     cache: &mut ShapedTextCache,
     meshes: &mut Assets<Mesh>,
@@ -433,7 +429,7 @@ fn spawn_font_metric_gizmos(
         arrow_spacing: arrow_spacing(computed.first_advance),
     };
 
-    let (_lines_gizmo, _arrows_gizmo, metric_lines) = build_metric_gizmos(
+    let (_, _, metric_lines) = build_metric_gizmos(
         font_metrics,
         line_metrics,
         overlay,
@@ -487,7 +483,6 @@ fn spawn_font_metric_gizmos(
         commands,
         entity,
         font_name,
-        font_metrics,
         line_metrics,
         anchor_y,
         font_size,
@@ -577,7 +572,6 @@ fn spawn_glyph_metric_gizmos(
     anchor_y: f32,
     font_size: f32,
     scale: f32,
-    gizmo_assets: &mut Assets<GizmoAsset>,
     meshes: &mut Assets<Mesh>,
     dot_materials: &mut Assets<StandardMaterial>,
 ) {
@@ -599,7 +593,6 @@ fn spawn_glyph_metric_gizmos(
             font_size,
             scale,
             bbox_color,
-            gizmo_assets,
         );
     }
 
@@ -683,7 +676,6 @@ fn spawn_bounding_box_callout(
     font_size: f32,
     scale: f32,
     bbox_color: Color,
-    _gizmo_assets: &mut Assets<GizmoAsset>,
 ) {
     let label_size = font_scale(font_size, scale) * LABEL_SIZE_RATIO;
     let callout_thickness = font_scale(font_size, scale) * 0.0025;
@@ -1520,7 +1512,6 @@ fn spawn_overlay_bounds_target(
     commands: &mut Commands,
     parent: Entity,
     font_name: &str,
-    _font_metrics: &FontMetrics,
     line_metrics: &LineMetricsSnapshot,
     anchor_y: f32,
     font_size: f32,

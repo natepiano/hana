@@ -7,7 +7,7 @@ mod diegetic_panel;
 #[cfg(test)]
 mod fit_tests;
 mod gizmos;
-mod modes;
+mod panel_mode;
 mod perf;
 mod sizing;
 
@@ -18,11 +18,11 @@ pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::PanelFontUnit;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
-pub use modes::HueOffset;
-pub use modes::PanelMode;
-pub use modes::RenderMode;
-pub use modes::ScreenPosition;
-pub use modes::SurfaceShadow;
+pub use panel_mode::HueOffset;
+pub use panel_mode::PanelMode;
+pub use panel_mode::RenderMode;
+pub use panel_mode::ScreenPosition;
+pub use panel_mode::SurfaceShadow;
 pub use perf::AtlasPerfStats;
 pub use perf::DiegeticPerfStats;
 pub use perf::PanelTextPerfStats;

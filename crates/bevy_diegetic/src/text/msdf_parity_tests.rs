@@ -25,7 +25,6 @@ use msdfgen::FontExt;
 use msdfgen::MsdfGeneratorConfig;
 use msdfgen::Range;
 use msdfgen::Rgb;
-use ttf_parser_018 as ttf018;
 
 use super::msdf_rasterizer;
 
@@ -57,8 +56,8 @@ fn glyph_index_for(font_data: &[u8], ch: char) -> Option<u16> {
     face.glyph_index(ch).map(|id| id.0)
 }
 
-fn glyph_index_018_for(font_data: &[u8], ch: char) -> Option<ttf018::GlyphId> {
-    let face = ttf018::Face::parse(font_data, 0).ok()?;
+fn glyph_index_018_for(font_data: &[u8], ch: char) -> Option<ttf_parser_018::GlyphId> {
+    let face = ttf_parser_018::Face::parse(font_data, 0).ok()?;
     face.glyph_index(ch)
 }
 
@@ -102,7 +101,7 @@ fn fdsm_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
 
 /// Generate MSDF with msdfgen. Returns fill fraction.
 fn msdfgen_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
-    let face = ttf018::Face::parse(font_data, 0).ok()?;
+    let face = ttf_parser_018::Face::parse(font_data, 0).ok()?;
     let glyph_id = glyph_index_018_for(font_data, ch)?;
     let mut shape = face.glyph_shape(glyph_id)?;
 

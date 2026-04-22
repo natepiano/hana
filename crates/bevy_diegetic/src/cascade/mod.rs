@@ -89,17 +89,17 @@
 //!    fall through to the panel's `Resolved<A>` (3-tier) or [`CascadeDefaults`] (2-tier); otherwise
 //!    the reader retains the stale tier-1-winning value.
 
+mod cascade_set;
 mod defaults;
 mod panel_child;
 mod resolved;
-mod set;
 mod target;
 
+pub use cascade_set::CascadeSet;
 pub use defaults::CascadeDefaults;
 pub(crate) use panel_child::CascadePanelChildPlugin;
 pub(crate) use resolved::CascadePanelChild;
 pub(crate) use resolved::CascadeTarget;
 pub(crate) use resolved::Resolved;
-pub use set::CascadeSet;
 pub(crate) use target::CascadeEntityPlugin;
 pub(crate) use target::CascadePanelPlugin;

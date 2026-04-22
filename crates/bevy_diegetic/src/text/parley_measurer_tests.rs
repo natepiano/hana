@@ -14,10 +14,9 @@ use crate::LayoutTextStyle;
 use crate::MeasureTextFn;
 use crate::TextMeasure;
 
-fn measurer() -> (FontRegistry, MeasureTextFn) {
+fn measurer() -> MeasureTextFn {
     let registry = FontRegistry::new().unwrap();
-    let measure_fn = create_parley_measurer(registry.font_context(), registry.family_names());
-    (registry, measure_fn)
+    create_parley_measurer(registry.font_context(), registry.family_names())
 }
 
 fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_measure() }
@@ -26,7 +25,7 @@ fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_mea
 
 #[test]
 fn measures_nonzero_dimensions() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let dims = measure("Hello", &default_measure(16.0));
     assert!(
         dims.width > 0.0,
@@ -42,7 +41,7 @@ fn measures_nonzero_dimensions() {
 
 #[test]
 fn empty_string_is_narrower_than_content() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let m = default_measure(16.0);
     let empty = measure("", &m);
     let content = measure("Hello", &m);
@@ -56,7 +55,7 @@ fn empty_string_is_narrower_than_content() {
 
 #[test]
 fn longer_text_is_wider() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let m = default_measure(16.0);
     let short = measure("Hi", &m);
     let long = measure("Hello, world!", &m);
@@ -72,7 +71,7 @@ fn longer_text_is_wider() {
 
 #[test]
 fn larger_font_produces_wider_text() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let small = measure("Hello", &default_measure(10.0));
     let large = measure("Hello", &default_measure(20.0));
     assert!(
@@ -85,7 +84,7 @@ fn larger_font_produces_wider_text() {
 
 #[test]
 fn larger_font_produces_taller_text() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let small = measure("Hello", &default_measure(10.0));
     let large = measure("Hello", &default_measure(20.0));
     assert!(
@@ -98,7 +97,7 @@ fn larger_font_produces_taller_text() {
 
 #[test]
 fn width_scales_roughly_with_font_size() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let small = measure("Hello", &default_measure(10.0));
     let large = measure("Hello", &default_measure(20.0));
     let ratio = large.width / small.width;
@@ -112,7 +111,7 @@ fn width_scales_roughly_with_font_size() {
 
 #[test]
 fn monospace_equal_length_strings_have_similar_width() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let m = default_measure(16.0);
     let a = measure("iiiii", &m);
     let b = measure("MMMMM", &m);
@@ -128,7 +127,7 @@ fn monospace_equal_length_strings_have_similar_width() {
 
 #[test]
 fn bold_text_is_at_least_as_wide() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let normal = measure("Hello", &default_measure(16.0));
     let bold_measure = LayoutTextStyle::new(16.0).bold().as_measure();
     let bold = measure("Hello", &bold_measure);
@@ -147,7 +146,7 @@ fn bold_text_is_at_least_as_wide() {
 
 #[test]
 fn newline_increases_height() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let m = default_measure(16.0);
     let one_line = measure("Hello", &m);
     let two_lines = measure("Hello\nWorld", &m);
@@ -163,7 +162,7 @@ fn newline_increases_height() {
 
 #[test]
 fn unknown_font_id_still_measures() {
-    let (_registry, measure) = measurer();
+    let measure = measurer();
     let mut m = default_measure(16.0);
     m.font_id = 999; // No such font registered.
     let dims = measure("Hello", &m);

@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
 use super::diegetic_panel::PanelFontUnit;
-use super::modes::PanelMode;
+use super::panel_mode::PanelMode;
 use super::perf::DiegeticPerfStats;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;

@@ -247,7 +247,7 @@ impl AtlasConfig {
     }
 
     /// Logs warnings for out-of-range values and an info summary.
-    pub(crate) fn log_and_clamp(&self) {
+    pub(super) fn log_and_clamp(&self) {
         if let RasterQuality::Custom(size) = self.quality
             && !(MIN_CUSTOM_RASTER_SIZE..=MAX_CUSTOM_RASTER_SIZE).contains(&size)
         {
