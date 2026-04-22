@@ -57,6 +57,7 @@ mod render;
 mod screen_space;
 mod text;
 
+use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
@@ -203,6 +204,9 @@ pub struct DiegeticUiPlugin;
 
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "shaders/sdf_panel.wgsl");
+        embedded_asset!(app, "shaders/msdf_text.wgsl");
+
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((
             text::TextPlugin,

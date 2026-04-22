@@ -72,11 +72,11 @@ pub(crate) struct SdfPanelExtension {
 }
 
 impl MaterialExtension for SdfPanelExtension {
-    fn fragment_shader() -> ShaderRef { "shaders/sdf_panel.wgsl".into() }
+    fn fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/sdf_panel.wgsl".into() }
 
     /// Use the SDF shader for the depth/shadow prepass so that rounded
     /// shapes clip correctly in shadows.
-    fn prepass_fragment_shader() -> ShaderRef { "shaders/sdf_panel.wgsl".into() }
+    fn prepass_fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/sdf_panel.wgsl".into() }
 }
 
 /// Creates a new [`SdfPanelMaterial`] from a resolved base `StandardMaterial`.

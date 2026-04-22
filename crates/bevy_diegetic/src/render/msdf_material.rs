@@ -89,13 +89,13 @@ pub(super) struct MsdfExtension {
 }
 
 impl MaterialExtension for MsdfExtension {
-    fn fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
+    fn fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/msdf_text.wgsl".into() }
 
     /// Use the same MSDF shader for the depth/shadow prepass so that
     /// `AlphaMode::Mask` can do per-pixel alpha testing via the MSDF
     /// atlas. Without this, the prepass uses the default
     /// `StandardMaterial` behavior and all shadows are rectangular.
-    fn prepass_fragment_shader() -> ShaderRef { "shaders/msdf_text.wgsl".into() }
+    fn prepass_fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/msdf_text.wgsl".into() }
 }
 
 /// Creates a new [`MsdfTextMaterial`] from a resolved base `StandardMaterial`.
