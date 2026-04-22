@@ -95,7 +95,9 @@ impl MaterialExtension for MsdfExtension {
     /// `AlphaMode::Mask` can do per-pixel alpha testing via the MSDF
     /// atlas. Without this, the prepass uses the default
     /// `StandardMaterial` behavior and all shadows are rectangular.
-    fn prepass_fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/msdf_text.wgsl".into() }
+    fn prepass_fragment_shader() -> ShaderRef {
+        "embedded://bevy_diegetic/shaders/msdf_text.wgsl".into()
+    }
 }
 
 /// Creates a new [`MsdfTextMaterial`] from a resolved base `StandardMaterial`.

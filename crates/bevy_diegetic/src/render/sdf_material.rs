@@ -76,7 +76,9 @@ impl MaterialExtension for SdfPanelExtension {
 
     /// Use the SDF shader for the depth/shadow prepass so that rounded
     /// shapes clip correctly in shadows.
-    fn prepass_fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/sdf_panel.wgsl".into() }
+    fn prepass_fragment_shader() -> ShaderRef {
+        "embedded://bevy_diegetic/shaders/sdf_panel.wgsl".into()
+    }
 }
 
 /// Creates a new [`SdfPanelMaterial`] from a resolved base `StandardMaterial`.
