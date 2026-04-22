@@ -1,47 +1,22 @@
 [package]
-categories  = ["game-development", "gui"]
-description = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
-edition     = "2024"
-keywords    = ["bevy", "diegetic", "layout", "ui"]
-license     = "MIT OR Apache-2.0"
 name        = "bevy_diegetic"
-repository  = "https://github.com/natepiano/bevy_diegetic"
-version     = "0.0.1"
+description = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
+categories  = ["game-development", "gui"]
+keywords    = ["bevy", "diegetic", "layout", "ui"]
+edition.workspace     = true
+license.workspace     = true
+repository.workspace  = true
+version.workspace     = true
 
-[lints.clippy]
-# Our strict lints
-allow_attributes_without_reason = "deny"
-expect_used                     = "deny"
-panic                           = "deny"
-unreachable                     = "deny"
-unwrap_used                     = "deny"
-
-# Enable lint groups as errors (with lower priority so allows can override)
-all      = { level = "deny", priority = -1 }
-cargo    = { level = "deny", priority = -1 }
-nursery  = { level = "deny", priority = -1 }
-pedantic = { level = "deny", priority = -1 }
-
-# Universal allows
-multiple_crate_versions = "allow"
-redundant_pub_crate     = "allow"
-
-# Allow specific lints that conflict with Bevy patterns
-needless_pass_by_value = "allow"
-option_if_let_else     = "allow"
-too_many_arguments     = "allow"
-type_complexity        = "allow"
-wildcard_imports       = "allow"
-
-[lints.rust]
-missing_docs = "deny"
+[lints]
+workspace = true
 
 [features]
 default            = ["typography_overlay"]
 typography_overlay = []
 
 [dependencies]
-bevy = { version = "0.18.1", default-features = false, features = [
+bevy = { workspace = true, features = [
   "bevy_anti_alias",
   "bevy_asset",
   "bevy_core_pipeline",
@@ -53,30 +28,28 @@ bevy = { version = "0.18.1", default-features = false, features = [
   "bevy_render",
   "mesh_picking",
 ] }
-bevy_kana = "0.0.5"
-bitflags = "2"
-etagere = "0.3.0"
-fdsm = "0.8"
-fdsm-ttf-parser = "0.2"
-image = { version = "0.25", default-features = false }
-nalgebra = "0.34"
-parley = { version = "0.9.0", default-features = false, features = ["std"] }
-smallvec = "1"
-ttf-parser = "0.25"
+bevy_kana       = { workspace = true }
+bitflags        = { workspace = true }
+etagere         = { workspace = true }
+fdsm            = { workspace = true }
+fdsm-ttf-parser = { workspace = true }
+image           = { workspace = true }
+nalgebra        = { workspace = true }
+parley          = { workspace = true }
+smallvec        = { workspace = true }
+ttf-parser      = { workspace = true }
 
 [dev-dependencies]
 bevy                = { version = "0.18.1", features = ["default_font"] }
-bevy-inspector-egui = "0.36.0"
-bevy_brp_extras     = "0.19.0"
-bevy_lagrange       = { version = "0.0.3", features = ["fit_overlay"] }
-bevy_window_manager = "0.20.2"
-clay-layout         = { path = "./clay-layout" }
-criterion           = { version = "0.8.2", features = ["html_reports"] }
+bevy-inspector-egui = { workspace = true }
+bevy_brp_extras     = { workspace = true }
+bevy_lagrange       = { workspace = true, features = ["fit_overlay"] }
+bevy_window_manager = { workspace = true }
+clay-layout         = { workspace = true }
+criterion           = { workspace = true }
 image               = { version = "0.25", features = ["png"] }
-msdfgen             = "0.2"
-# msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
-# Renamed import so parity tests can use both versions side by side.
-ttf-parser_018 = { package = "ttf-parser", version = "0.18" }
+msdfgen             = { workspace = true }
+ttf-parser_018      = { workspace = true }
 
 [[example]]
 name = "hue_offset"
