@@ -1,14 +1,40 @@
-[package]
-categories  = ["game-development", "gui"]
-description = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
-edition     = "2024"
-keywords    = ["bevy", "diegetic", "layout", "ui"]
-license     = "MIT OR Apache-2.0"
-name        = "bevy_diegetic"
-repository  = "https://github.com/natepiano/bevy_diegetic"
-version     = "0.0.1"
+[workspace]
+members  = ["crates/*"]
+exclude  = ["vendor/clay-layout"]
+resolver = "3"
 
-[lints.clippy]
+[workspace.package]
+edition    = "2024"
+license    = "MIT OR Apache-2.0"
+repository = "https://github.com/natepiano/hana"
+version    = "0.0.1"
+
+[workspace.dependencies]
+bevy = { version = "0.18.1", default-features = false }
+bevy_kana = "0.0.5"
+bitflags = "2"
+etagere = "0.3.0"
+fdsm = "0.8"
+fdsm-ttf-parser = "0.2"
+image = { version = "0.25", default-features = false }
+nalgebra = "0.34"
+parley = { version = "0.9.0", default-features = false, features = ["std"] }
+smallvec = "1"
+ttf-parser = "0.25"
+
+# dev-dependencies
+bevy-inspector-egui = "0.36.0"
+bevy_brp_extras     = "0.19.0"
+bevy_lagrange       = "0.0.3"
+bevy_window_manager = "0.20.2"
+clay-layout         = { path = "vendor/clay-layout" }
+criterion           = { version = "0.8.2", features = ["html_reports"] }
+msdfgen             = "0.2"
+# msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
+# Renamed import so parity tests can use both versions side by side.
+ttf-parser_018 = { package = "ttf-parser", version = "0.18" }
+
+[workspace.lints.clippy]
 # Our strict lints
 allow_attributes_without_reason = "deny"
 expect_used                     = "deny"
@@ -33,101 +59,5 @@ too_many_arguments     = "allow"
 type_complexity        = "allow"
 wildcard_imports       = "allow"
 
-[lints.rust]
+[workspace.lints.rust]
 missing_docs = "deny"
-
-[features]
-default            = ["typography_overlay"]
-typography_overlay = []
-
-[dependencies]
-bevy = { version = "0.18.1", default-features = false, features = [
-  "bevy_anti_alias",
-  "bevy_asset",
-  "bevy_core_pipeline",
-  "bevy_gizmos",
-  "bevy_image",
-  "bevy_log",
-  "bevy_pbr",
-  "bevy_picking",
-  "bevy_render",
-  "mesh_picking",
-] }
-bevy_kana = "0.0.5"
-bitflags = "2"
-etagere = "0.3.0"
-fdsm = "0.8"
-fdsm-ttf-parser = "0.2"
-image = { version = "0.25", default-features = false }
-nalgebra = "0.34"
-parley = { version = "0.9.0", default-features = false, features = ["std"] }
-smallvec = "1"
-ttf-parser = "0.25"
-
-[dev-dependencies]
-bevy                = { version = "0.18.1", features = ["default_font"] }
-bevy-inspector-egui = "0.36.0"
-bevy_brp_extras     = "0.19.0"
-bevy_lagrange       = { version = "0.0.3", features = ["fit_overlay"] }
-bevy_window_manager = "0.20.2"
-clay-layout         = { path = "./clay-layout" }
-criterion           = { version = "0.8.2", features = ["html_reports"] }
-image               = { version = "0.25", features = ["png"] }
-msdfgen             = "0.2"
-# msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
-# Renamed import so parity tests can use both versions side by side.
-ttf-parser_018 = { package = "ttf-parser", version = "0.18" }
-
-[[example]]
-name = "hue_offset"
-
-[[example]]
-name = "side_by_side"
-
-[[bench]]
-harness = false
-name    = "layout_comparison"
-
-[[bench]]
-harness = false
-name    = "panel_perf"
-
-[[example]]
-name              = "typography"
-required-features = ["typography_overlay"]
-
-[[example]]
-name = "shadows"
-
-[[example]]
-name = "atlas_pages"
-
-[[example]]
-name = "font_loading"
-
-[[example]]
-name = "preload_text"
-
-[[example]]
-name = "font_features"
-
-[[example]]
-name = "units"
-
-[[example]]
-name = "sizes"
-
-[[example]]
-name = "dimensions"
-
-[[example]]
-name = "panel_rendering"
-
-[[example]]
-name = "paper_sizes"
-
-[[example]]
-name = "screen_space"
-
-[[example]]
-name = "taa_shimmer"
