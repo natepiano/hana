@@ -7,10 +7,10 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use super::diegetic_panel::DiegeticPanel;
-use super::modes::PanelMode;
-use super::modes::RenderMode;
-use super::modes::ScreenPosition;
-use super::modes::SurfaceShadow;
+use super::panel_mode::PanelMode;
+use super::panel_mode::RenderMode;
+use super::panel_mode::ScreenPosition;
+use super::panel_mode::SurfaceShadow;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
 use crate::layout;
@@ -124,15 +124,15 @@ pub(super) struct BuilderData {
 /// world `build()` path; release builds silently clamp to the resolved
 /// dimensions.
 pub struct DiegeticPanelBuilder<Mode, State> {
-    data:    BuilderData,
-    _marker: PhantomData<(Mode, State)>,
+    data:   BuilderData,
+    marker: PhantomData<(Mode, State)>,
 }
 
 impl DiegeticPanelBuilder<World, NeedsSize> {
     pub(super) fn new_world() -> Self {
         Self {
-            data:    BuilderData::default(),
-            _marker: PhantomData,
+            data:   BuilderData::default(),
+            marker: PhantomData,
         }
     }
 }
@@ -140,7 +140,7 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
 impl DiegeticPanelBuilder<Screen, NeedsSize> {
     pub(super) fn new_screen() -> Self {
         Self {
-            data:    BuilderData {
+            data:   BuilderData {
                 mode: PanelMode::Screen {
                     position:      ScreenPosition::default(),
                     // Placeholder — `.size()` overwrites both axes before build().
@@ -151,7 +151,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
                 },
                 ..BuilderData::default()
             },
-            _marker: PhantomData,
+            marker: PhantomData,
         }
     }
 }
@@ -273,8 +273,8 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
             height: h_sizing,
         };
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 
@@ -298,8 +298,8 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
             }),
         };
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 }
@@ -347,8 +347,8 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
             *height = h_sizing;
         }
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 
@@ -368,8 +368,8 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
             *height = Sizing::fixed(Px(h));
         }
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 }
@@ -467,8 +467,8 @@ impl DiegeticPanelBuilder<World, HasSize> {
         f(&mut builder);
         self.data.tree = Some(builder.build());
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 
@@ -477,8 +477,8 @@ impl DiegeticPanelBuilder<World, HasSize> {
     pub fn with_tree(mut self, tree: LayoutTree) -> DiegeticPanelBuilder<World, Ready> {
         self.data.tree = Some(tree);
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 }
@@ -495,8 +495,8 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
         f(&mut builder);
         self.data.tree = Some(builder.build());
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 
@@ -505,8 +505,8 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     pub fn with_tree(mut self, tree: LayoutTree) -> DiegeticPanelBuilder<Screen, Ready> {
         self.data.tree = Some(tree);
         DiegeticPanelBuilder {
-            data:    self.data,
-            _marker: PhantomData,
+            data:   self.data,
+            marker: PhantomData,
         }
     }
 }

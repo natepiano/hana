@@ -14,6 +14,7 @@ use super::glyph_quad::GlyphQuadData;
 use super::msdf_material;
 use super::msdf_material::MsdfTextMaterial;
 use super::text_renderer;
+use super::text_renderer::GlyphReadiness;
 use super::text_renderer::TextBuildStats;
 use super::text_renderer::TextShapingContext;
 use crate::cascade::CascadeDefaults;
@@ -272,11 +273,10 @@ pub(super) fn render_world_text(
         );
         text_stats.accumulate(&shaped.stats);
 
-        let all_ready = shaped.stats.glyphs > 0 && shaped.stats.ready_glyphs == shaped.stats.glyphs;
-        let has_pending = shaped.stats.pending_glyphs > 0 || shaped.stats.queued_glyphs > 0;
+        let readiness = GlyphReadiness::from_stats(&shaped.stats);
 
         #[cfg(feature = "typography_overlay")]
-        if all_ready {
+        if readiness == GlyphReadiness::Ready {
             commands.entity(entity).insert(ComputedWorldText {
                 anchor_x:      shaped.anchor_x,
                 anchor_y:      shaped.anchor_y,
@@ -312,11 +312,15 @@ pub(super) fn render_world_text(
             );
         }
 
-        if has_pending {
-            commands.entity(entity).insert_if_new(PendingGlyphs);
-        } else if all_ready {
-            commands.entity(entity).remove::<PendingGlyphs>();
-            commands.entity(entity).insert(AwaitingReady);
+        match readiness {
+            GlyphReadiness::Pending => {
+                commands.entity(entity).insert_if_new(PendingGlyphs);
+            },
+            GlyphReadiness::Ready => {
+                commands.entity(entity).remove::<PendingGlyphs>();
+                commands.entity(entity).insert(AwaitingReady);
+            },
+            GlyphReadiness::Idle => {},
         }
     }
 

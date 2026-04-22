@@ -242,7 +242,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     /// Per-style alpha-mode override. `None` = inherit from panel or resource default.
     alpha_mode:     Option<AlphaMode>,
     #[reflect(ignore)]
-    _context:       PhantomData<C>,
+    context:        PhantomData<C>,
 }
 
 impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
@@ -486,7 +486,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             world_scale: _,
             // Render-only — affects compositing, not shaping.
             alpha_mode: _,
-            _context: _,
+            context: _,
         } = self;
 
         font_id.hash(hasher);
@@ -554,7 +554,7 @@ impl TextProps<ForLayout> {
             unit:           font_size.unit,
             world_scale:    None,
             alpha_mode:     None,
-            _context:       PhantomData,
+            context:        PhantomData,
         }
     }
 
@@ -618,7 +618,7 @@ impl TextProps<ForLayout> {
             unit:           self.unit,
             world_scale:    None,
             alpha_mode:     self.alpha_mode,
-            _context:       PhantomData,
+            context:        PhantomData,
         }
     }
 }
@@ -660,7 +660,7 @@ impl TextProps<ForStandalone> {
             unit:           font_size.unit,
             world_scale:    None,
             alpha_mode:     None,
-            _context:       PhantomData,
+            context:        PhantomData,
         }
     }
 
@@ -763,7 +763,7 @@ impl TextProps<ForStandalone> {
             unit:           self.unit,
             world_scale:    self.world_scale,
             alpha_mode:     self.alpha_mode,
-            _context:       PhantomData,
+            context:        PhantomData,
         }
     }
 }

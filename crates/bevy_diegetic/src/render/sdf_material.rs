@@ -22,11 +22,11 @@ use bevy::shader::ShaderRef;
 
 /// The full SDF panel material type: `StandardMaterial` extended with
 /// SDF rounded rectangle rendering.
-pub(crate) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelExtension>;
+pub type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelExtension>;
 
 /// Uniform data for the SDF panel extension shader.
 #[derive(Clone, Debug, ShaderType)]
-pub(crate) struct SdfPanelUniform {
+pub struct SdfPanelUniform {
     /// Half-size of the SDF shape in world units (width/2, height/2).
     pub half_size:        Vec2,
     /// Half-size of the mesh quad in world units. Larger than `half_size`
@@ -65,7 +65,7 @@ pub(crate) struct SdfPanelUniform {
 /// The extension shader computes per-fragment alpha from the signed
 /// distance field and composites fill + border colors before lighting.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-pub(crate) struct SdfPanelExtension {
+pub struct SdfPanelExtension {
     /// SDF shader uniforms.
     #[uniform(100)]
     pub uniforms: SdfPanelUniform,
@@ -87,7 +87,7 @@ impl MaterialExtension for SdfPanelExtension {
 /// `base_color`) are preserved. `alpha_mode`, `double_sided`, and `cull_mode`
 /// are overridden for panel rendering.
 #[must_use]
-pub(crate) fn sdf_panel_material(
+pub fn sdf_panel_material(
     base: StandardMaterial,
     half_width: f32,
     half_height: f32,
@@ -117,7 +117,7 @@ pub(crate) fn sdf_panel_material(
 
 /// Creates a new [`SdfPanelMaterial`] with an explicit shape kind.
 #[must_use]
-pub(crate) fn sdf_shape_material(
+pub fn sdf_shape_material(
     mut base: StandardMaterial,
     half_width: f32,
     half_height: f32,

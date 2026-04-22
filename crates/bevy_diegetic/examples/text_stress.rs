@@ -561,7 +561,6 @@ fn update_panels(
         }
     }
 
-    let ww = MAX_LAYOUT_WIDTH;
     let wh = LAYOUT_HEIGHT;
 
     // Spawn missing.
@@ -587,7 +586,7 @@ fn update_panels(
                 };
                 panel
             },
-            panel_transform(idx, needed, ww, wh),
+            panel_transform(idx, needed, wh),
         ));
     }
     *last_panel_count = needed;
@@ -616,7 +615,7 @@ fn update_panels(
                 // handles color rotation with zero CPU cost.
                 panel.set_tree(build_panel_tree(&state, sp.0, rpp, &words));
             }
-            *transform = panel_transform(sp.0, needed, ww, wh);
+            *transform = panel_transform(sp.0, needed, wh);
         }
     }
 
@@ -654,12 +653,7 @@ fn resize_ground_plane(
 
 /// Panel position — aligned with the ground plane's X axis.
 /// Panel left edge = plane left edge. Older panels pushed backward along Z.
-fn panel_transform(
-    panel_idx: usize,
-    total: usize,
-    _world_width: f32,
-    world_height: f32,
-) -> Transform {
+fn panel_transform(panel_idx: usize, total: usize, world_height: f32) -> Transform {
     let depth_from_front = (total - 1 - panel_idx).to_f32();
     // Front panel at z=0 (forward edge of ground plane), older panels push back.
     let z = GROUND_SIZE.mul_add(0.5, -(depth_from_front * STACK_DEPTH));

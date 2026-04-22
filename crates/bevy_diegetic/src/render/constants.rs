@@ -11,14 +11,14 @@ use bevy::prelude::*;
 /// Controls the `Transparent3d` sort key so back-to-front submission
 /// order matches the painter's order. Also wins the depth test for
 /// coplanar fragments.
-pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
+pub const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Per-command OIT depth offset for coplanar fragment ordering.
 ///
 /// Added to `position.z` in the fragment shader before `oit_draw`
 /// stores the fragment. Pipeline `depth_bias` does NOT affect
 /// `in.position.z`, so we apply this offset manually.
 /// Reverse-Z: positive = closer to camera = composited in front.
-pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
+pub const OIT_DEPTH_STEP: f32 = 0.0001;
 /// Render layer offset — panel layers start here to avoid conflicts with
 /// user-defined layers.
 pub(super) const PANEL_LAYER_OFFSET: usize = 16;
@@ -45,7 +45,7 @@ pub(super) const MIN_TEXTURE_SIZE: u32 = 64;
 /// World-space padding added to each SDF quad mesh beyond the shape boundary.
 /// Gives the exterior anti-aliasing ramp room to render — without this, the
 /// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
-pub(crate) const SDF_AA_PADDING: f32 = 0.001;
+pub const SDF_AA_PADDING: f32 = 0.001;
 /// Internal-asset handle for the `sdf_stroke.wgsl` shader.
 pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");

@@ -187,6 +187,25 @@ pub(super) struct TextBuildStats {
     pub atlas_ms:       f32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GlyphReadiness {
+    Idle,
+    Pending,
+    Ready,
+}
+
+impl GlyphReadiness {
+    pub(super) const fn from_stats(stats: &TextBuildStats) -> Self {
+        if stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs {
+            Self::Ready
+        } else if stats.pending_glyphs > 0 || stats.queued_glyphs > 0 {
+            Self::Pending
+        } else {
+            Self::Idle
+        }
+    }
+}
+
 impl TextBuildStats {
     pub(super) fn accumulate(&mut self, other: &Self) {
         self.texts += other.texts;
@@ -669,31 +688,32 @@ fn shape_panel_text_children(
         agg.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
 
-        let all_ready = stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs;
-        let has_pending = stats.pending_glyphs > 0 || stats.queued_glyphs > 0;
-
-        if all_ready {
-            let ptq = PanelTextQuads {
-                quads,
-                render_mode: config.render_mode(),
-                shadow_mode: config.shadow_mode(),
-                alpha_mode: config.alpha_mode(),
-            };
-            // Tier-1 re-resolve: `PanelTextQuads.alpha_mode` is recomputed
-            // from `LayoutTextStyle` every shape pass, so write a fresh
-            // `Resolved<PanelTextAlpha>` alongside the quads. Falls through
-            // to the parent panel's `Resolved<PanelTextAlpha>` (or the
-            // global default if the parent lookup fails).
-            let panel_fallback = panel_alpha.get(child_of.parent()).map_or_else(
-                |_| PanelTextAlpha::global_default(&defaults),
-                |resolved| resolved.0,
-            );
-            let resolved = PanelTextAlpha::entity_value(&ptq).unwrap_or(panel_fallback);
-            commands.entity(entity).insert((ptq, Resolved(resolved)));
-            commands.entity(entity).remove::<PendingGlyphs>();
-            commands.entity(entity).insert(AwaitingReady);
-        } else if has_pending {
-            commands.entity(entity).insert_if_new(PendingGlyphs);
+        match GlyphReadiness::from_stats(&stats) {
+            GlyphReadiness::Ready => {
+                let ptq = PanelTextQuads {
+                    quads,
+                    render_mode: config.render_mode(),
+                    shadow_mode: config.shadow_mode(),
+                    alpha_mode: config.alpha_mode(),
+                };
+                // Tier-1 re-resolve: `PanelTextQuads.alpha_mode` is recomputed
+                // from `LayoutTextStyle` every shape pass, so write a fresh
+                // `Resolved<PanelTextAlpha>` alongside the quads. Falls through
+                // to the parent panel's `Resolved<PanelTextAlpha>` (or the
+                // global default if the parent lookup fails).
+                let panel_fallback = panel_alpha.get(child_of.parent()).map_or_else(
+                    |_| PanelTextAlpha::global_default(&defaults),
+                    |resolved| resolved.0,
+                );
+                let resolved = PanelTextAlpha::entity_value(&ptq).unwrap_or(panel_fallback);
+                commands.entity(entity).insert((ptq, Resolved(resolved)));
+                commands.entity(entity).remove::<PendingGlyphs>();
+                commands.entity(entity).insert(AwaitingReady);
+            },
+            GlyphReadiness::Pending => {
+                commands.entity(entity).insert_if_new(PendingGlyphs);
+            },
+            GlyphReadiness::Idle => {},
         }
     }
 
