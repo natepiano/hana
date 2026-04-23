@@ -71,10 +71,10 @@ const PLATFORM_SHORTCUT_MODE: PlatformShortcutMode = PlatformShortcutMode::curre
 /// }
 /// ```
 pub struct Keybindings<C: Component> {
-    all_modifiers:       Vec<Entity>,
-    non_shift_modifiers: Vec<Entity>,
-    action_settings:     ActionSettings,
-    phantom_data:        PhantomData<C>,
+    all:             Vec<Entity>,
+    non_shift:       Vec<Entity>,
+    action_settings: ActionSettings,
+    phantom_data:    PhantomData<C>,
 }
 
 impl<C: Component> Keybindings<C> {
@@ -121,8 +121,8 @@ impl<C: Component> Keybindings<C> {
             ))
             .id();
 
-        let mut all_modifiers = vec![shift, primary, alt];
-        let mut non_shift_modifiers = vec![primary, alt];
+        let mut all = vec![shift, primary, alt];
+        let mut non_shift = vec![primary, alt];
 
         match PLATFORM_SHORTCUT_MODE {
             PlatformShortcutMode::Command => {
@@ -134,15 +134,15 @@ impl<C: Component> Keybindings<C> {
                         bindings![KeyCode::ControlLeft, KeyCode::ControlRight],
                     ))
                     .id();
-                all_modifiers.push(control);
-                non_shift_modifiers.push(control);
+                all.push(control);
+                non_shift.push(control);
             },
             PlatformShortcutMode::Control => {},
         }
 
         Self {
-            all_modifiers,
-            non_shift_modifiers,
+            all,
+            non_shift,
             action_settings,
             phantom_data: PhantomData,
         }
@@ -153,7 +153,7 @@ impl<C: Component> Keybindings<C> {
         spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.all_modifiers.clone()),
+            BlockBy::new(self.all.clone()),
             bindings![key],
         ));
     }
@@ -163,7 +163,7 @@ impl<C: Component> Keybindings<C> {
         spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.non_shift_modifiers.clone()),
+            BlockBy::new(self.non_shift.clone()),
             bindings![key.with_mod_keys(ModKeys::SHIFT)],
         ));
     }
@@ -177,7 +177,7 @@ impl<C: Component> Keybindings<C> {
         spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.all_modifiers.clone()),
+            BlockBy::new(self.all.clone()),
             bindings,
         ));
     }
