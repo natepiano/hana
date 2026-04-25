@@ -14,9 +14,16 @@ struct PendingLogEntry {
     color: Color,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum EventLogState {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
 #[derive(Resource, Default)]
 pub(super) struct EventLog {
-    enabled: bool,
+    state:   EventLogState,
     pending: Vec<PendingLogEntry>,
 }
 
@@ -117,7 +124,7 @@ pub(super) fn enable_log_on_initial_fit(
         return;
     }
     commands.remove_resource::<EnableLogOnAnimationEnd>();
-    log.enabled = true;
+    log.state = EventLogState::Enabled;
     for mut visibility in &mut container_query {
         *visibility = Visibility::Inherited;
     }
@@ -144,9 +151,12 @@ pub(super) fn toggle_event_log(
         return;
     }
 
-    log.enabled = !log.enabled;
+    log.state = match log.state {
+        EventLogState::Disabled => EventLogState::Enabled,
+        EventLogState::Enabled => EventLogState::Disabled,
+    };
 
-    if log.enabled {
+    if log.state == EventLogState::Enabled {
         for (_, mut visibility, _) in &mut container_query {
             *visibility = Visibility::Inherited;
         }
@@ -173,7 +183,7 @@ pub(super) fn toggle_event_log(
 
 impl EventLog {
     pub(super) fn push(&mut self, text: String) {
-        if !self.enabled {
+        if self.state == EventLogState::Disabled {
             return;
         }
         self.pending.push(PendingLogEntry {
@@ -183,7 +193,7 @@ impl EventLog {
     }
 
     fn push_error(&mut self, text: String) {
-        if !self.enabled {
+        if self.state == EventLogState::Disabled {
             return;
         }
         self.pending.push(PendingLogEntry {
@@ -193,7 +203,7 @@ impl EventLog {
     }
 
     fn separator(&mut self) {
-        if !self.enabled {
+        if self.state == EventLogState::Disabled {
             return;
         }
         self.pending.push(PendingLogEntry {

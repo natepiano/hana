@@ -6,14 +6,31 @@ use crate::projection::CameraBasis;
 use crate::projection::ProjectionMode;
 use crate::projection::ScreenSpaceBounds;
 
-/// Returns true if horizontal margins are balanced.
-pub(super) const fn is_horizontally_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
-    (bounds.left_margin - bounds.right_margin).abs() < tolerance
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MarginBalance {
+    Balanced,
+    Unbalanced,
 }
 
-/// Returns true if vertical margins are balanced.
-pub(super) const fn is_vertically_balanced(bounds: &ScreenSpaceBounds, tolerance: f32) -> bool {
-    (bounds.top_margin - bounds.bottom_margin).abs() < tolerance
+/// Returns whether horizontal margins are balanced within the given tolerance.
+pub(super) const fn horizontal_balance(
+    bounds: &ScreenSpaceBounds,
+    tolerance: f32,
+) -> MarginBalance {
+    if (bounds.left_margin - bounds.right_margin).abs() < tolerance {
+        MarginBalance::Balanced
+    } else {
+        MarginBalance::Unbalanced
+    }
+}
+
+/// Returns whether vertical margins are balanced within the given tolerance.
+pub(super) const fn vertical_balance(bounds: &ScreenSpaceBounds, tolerance: f32) -> MarginBalance {
+    if (bounds.top_margin - bounds.bottom_margin).abs() < tolerance {
+        MarginBalance::Balanced
+    } else {
+        MarginBalance::Unbalanced
+    }
 }
 
 /// Returns the screen edges in normalized space: (left, right, top, bottom).

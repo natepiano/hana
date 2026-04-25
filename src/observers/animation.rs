@@ -25,10 +25,10 @@ fn stash_camera_state(
     commands: &mut Commands,
     entity: Entity,
     camera: &mut OrbitCam,
-    has_existing_stash: bool,
+    existing_stash: Option<&OrbitCamStash>,
     interrupt_behavior: CameraInputInterruptBehavior,
 ) {
-    if !has_existing_stash {
+    if existing_stash.is_none() {
         let stash = OrbitCamStash {
             zoom:    camera.zoom_smoothness,
             pan:     camera.pan_smoothness,
@@ -163,7 +163,7 @@ pub(super) fn on_play_animation(
         &mut commands,
         entity,
         &mut camera,
-        existing_stash.is_some(),
+        existing_stash,
         interrupt_behavior,
     );
 
@@ -196,7 +196,7 @@ pub(super) fn on_camera_move_list_added(
         &mut commands,
         entity,
         &mut camera,
-        existing_stash.is_some(),
+        existing_stash,
         interrupt_behavior,
     );
 }

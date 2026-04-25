@@ -4,8 +4,9 @@ use bevy::prelude::*;
 
 mod animation;
 mod fit;
+mod fit_request;
 mod look;
-mod shared;
+mod snap_orbit;
 
 /// Registers every observer in the `observers` domain.
 pub(crate) struct ObserverPlugin;

@@ -26,6 +26,7 @@ use super::input;
 use super::input::ButtonZoomAxis;
 use super::input::InputControl;
 use super::input::MouseKeyTracker;
+use super::input::OrbitButtonChange;
 use super::input::ZoomDirection;
 use super::orbital_math;
 use super::touch::TouchGestures;
@@ -508,11 +509,11 @@ pub(crate) fn active_viewport_data(
 
 /// Aggregated camera input for a single frame.
 struct CameraInput {
-    orbit:                Vec2,
-    pan:                  Vec2,
-    scroll_line:          f32,
-    scroll_pixel:         f32,
-    orbit_button_changed: bool,
+    orbit:               Vec2,
+    pan:                 Vec2,
+    scroll_line:         f32,
+    scroll_pixel:        f32,
+    orbit_button_change: OrbitButtonChange,
 }
 
 /// Initializes `OrbitCam` from the camera's current transform, applying all limits.
@@ -569,7 +570,7 @@ fn collect_camera_input(
     let mut pan = Vec2::ZERO;
     let mut scroll_line = 0.0;
     let mut scroll_pixel = 0.0;
-    let mut orbit_button_changed = false;
+    let mut orbit_button_change = OrbitButtonChange::Unchanged;
 
     // Only skip getting input if the camera is inactive/disabled — it might still
     // be lerping towards target values when the user is not actively controlling it.
@@ -585,7 +586,7 @@ fn collect_camera_input(
         pan = mouse_key_tracker.pan * orbit_cam.pan_sensitivity;
         scroll_line = mouse_key_tracker.scroll_line * zoom_sign * orbit_cam.zoom_sensitivity;
         scroll_pixel = mouse_key_tracker.scroll_pixel * zoom_sign * orbit_cam.zoom_sensitivity;
-        orbit_button_changed = mouse_key_tracker.orbit_button_changed;
+        orbit_button_change = mouse_key_tracker.orbit_button_change;
 
         if let Some(touch_input) = input_control.touch {
             let (touch_orbit, touch_pan, touch_zoom_pixel) = match touch_input {
@@ -624,7 +625,7 @@ fn collect_camera_input(
         pan,
         scroll_line,
         scroll_pixel,
-        orbit_button_changed,
+        orbit_button_change,
     }
 }
 
@@ -798,7 +799,7 @@ pub(crate) fn orbit_cam(
 
         // Only check for upside down when orbiting started or ended this frame,
         // so we don't reverse the yaw direction while the user is still dragging
-        if input.orbit_button_changed {
+        if input.orbit_button_change == OrbitButtonChange::Changed {
             let world_up = pan_orbit.axis[1];
             drag_state.orientation = if transform.up().dot(world_up) < 0.0 {
                 CameraOrientation::UpsideDown

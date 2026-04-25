@@ -112,7 +112,7 @@ fn setup(
     ));
 
     // The camera for the first pass cube that will be rendered to the texture. This is the camera
-    // that is controlled by OrbitCam.
+    // that is controlled by `OrbitCam`.
     let pan_orbit_id = commands
         .spawn((
             Camera {

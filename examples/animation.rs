@@ -38,9 +38,16 @@ const INSTRUCTIONS_FONT_SIZE: f32 = 18.0;
 #[derive(Component)]
 struct Target;
 
+#[derive(Default, PartialEq, Eq)]
+enum ManualAnimationMode {
+    #[default]
+    Inactive,
+    Active,
+}
+
 #[derive(Resource, Default)]
-struct ManualAnimationActive {
-    active:              bool,
+struct ManualAnimationState {
+    mode:                ManualAnimationMode,
     saved_input_control: Option<InputControl>,
 }
 
@@ -50,7 +57,7 @@ fn main() {
         .add_plugins(LagrangePlugin)
         .add_plugins(BrpExtrasPlugin::default())
         .add_plugins(WindowManagerPlugin)
-        .init_resource::<ManualAnimationActive>()
+        .init_resource::<ManualAnimationState>()
         .add_systems(Startup, setup)
         .add_systems(Update, (keyboard_input, manual_animate).chain())
         .add_observer(on_animation_begin)
@@ -112,9 +119,9 @@ fn setup(
     ));
 }
 
-fn stop_manual(manual: &mut ManualAnimationActive, cam: &mut OrbitCam) {
-    if manual.active {
-        manual.active = false;
+fn stop_manual(manual: &mut ManualAnimationState, cam: &mut OrbitCam) {
+    if manual.mode == ManualAnimationMode::Active {
+        manual.mode = ManualAnimationMode::Inactive;
         cam.input_control = manual
             .saved_input_control
             .take()
@@ -129,7 +136,7 @@ fn stop_manual(manual: &mut ManualAnimationActive, cam: &mut OrbitCam) {
 fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    mut manual: ResMut<ManualAnimationActive>,
+    mut manual: ResMut<ManualAnimationState>,
     camera_query: Query<Entity, With<OrbitCam>>,
     target_query: Query<Entity, With<Target>>,
     mut orbit_cam_query: Query<&mut OrbitCam>,
@@ -143,10 +150,10 @@ fn keyboard_input(
 
     // Toggle manual animation
     if keys.just_pressed(KeyCode::KeyM) {
-        if manual.active {
+        if manual.mode == ManualAnimationMode::Active {
             stop_manual(&mut manual, &mut cam);
         } else {
-            manual.active = true;
+            manual.mode = ManualAnimationMode::Active;
             manual.saved_input_control = cam.input_control;
             cam.input_control = None;
             cam.orbit_smoothness = 0.0;
@@ -244,10 +251,10 @@ fn keyboard_input(
 /// Per-frame manual animation — only runs when the resource flag is active.
 fn manual_animate(
     time: Res<Time>,
-    manual: Res<ManualAnimationActive>,
+    manual: Res<ManualAnimationState>,
     mut query: Query<&mut OrbitCam>,
 ) {
-    if !manual.active {
+    if manual.mode != ManualAnimationMode::Active {
         return;
     }
     for mut cam in &mut query {

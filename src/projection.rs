@@ -1,5 +1,6 @@
 //! Projection, screen-space, and mesh-extraction helpers.
 
+use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy_kana::Position;
 
@@ -309,7 +310,7 @@ pub(crate) fn extract_mesh_vertices(
         };
         let Some(positions) = mesh
             .attribute(Mesh::ATTRIBUTE_POSITION)
-            .and_then(|a| a.as_float3())
+            .and_then(VertexAttributeValues::as_float3)
         else {
             continue;
         };

@@ -3,9 +3,10 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 
-use super::shared;
-use super::shared::FitRequest;
-use super::shared::SnapOrbit;
+use super::fit_request;
+use super::fit_request::FitRequest;
+use super::snap_orbit;
+use super::snap_orbit::SnapOrbit;
 use crate::animation::CameraMove;
 use crate::components::CurrentFitTarget;
 use crate::events::AnimateToFit;
@@ -54,7 +55,7 @@ pub(super) fn on_zoom_to_fit(
         duration.as_secs_f32() * 1000.0,
     );
 
-    let Some(fit) = shared::prepare_fit_for_target(
+    let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
             context: "ZoomToFit",
             target,
@@ -95,7 +96,7 @@ pub(super) fn on_zoom_to_fit(
         // `ZoomAnimationMarker` insertion — all in one place after acceptance.
         commands.trigger(PlayAnimation::new(camera, camera_moves).zoom_context(ctx));
     } else {
-        shared::snap_to_orbit(
+        snap_orbit::snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
             SnapOrbit {
@@ -157,7 +158,7 @@ pub(super) fn on_animate_to_fit(
         return;
     };
 
-    let Some(fit) = shared::prepare_fit_for_target(
+    let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
             context: "AnimateToFit",
             target,
@@ -188,7 +189,7 @@ pub(super) fn on_animate_to_fit(
             PlayAnimation::new(camera, camera_moves).source(AnimationSource::AnimateToFit),
         );
     } else {
-        shared::snap_to_orbit(
+        snap_orbit::snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
             SnapOrbit {

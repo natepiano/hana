@@ -80,7 +80,7 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Camera — pitch=0 reproduces the edge-on degenerate case when ZoomToFit
+    // Camera — pitch=0 reproduces the edge-on degenerate case when `ZoomToFit`
     // targets the ground plane.
     commands.spawn((
         OrbitCam {

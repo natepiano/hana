@@ -113,13 +113,21 @@ pub enum ZoomDirection {
     Reversed,
 }
 
+/// Whether the orbit button changed state this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum OrbitButtonChange {
+    #[default]
+    Unchanged,
+    Changed,
+}
+
 #[derive(Resource, Default, Debug)]
 pub(crate) struct MouseKeyTracker {
-    pub orbit:                Vec2,
-    pub pan:                  Vec2,
-    pub scroll_line:          f32,
-    pub scroll_pixel:         f32,
-    pub orbit_button_changed: bool,
+    pub orbit:               Vec2,
+    pub pan:                 Vec2,
+    pub scroll_line:         f32,
+    pub scroll_pixel:        f32,
+    pub orbit_button_change: OrbitButtonChange,
 }
 
 pub(crate) fn mouse_key_tracker(
@@ -182,15 +190,20 @@ pub(crate) fn mouse_key_tracker(
     }
 
     // Track button state changes
-    let orbit_button_changed = orbit_just_pressed(pan_orbit, &mouse_input, &key_input)
-        || orbit_just_released(pan_orbit, &mouse_input, &key_input);
+    let orbit_button_change = if orbit_just_pressed(pan_orbit, &mouse_input, &key_input)
+        || orbit_just_released(pan_orbit, &mouse_input, &key_input)
+    {
+        OrbitButtonChange::Changed
+    } else {
+        OrbitButtonChange::Unchanged
+    };
 
     // Update the movement resource
     camera_movement.orbit = orbit;
     camera_movement.pan = pan;
     camera_movement.scroll_line = scroll_processing_result.scroll_line;
     camera_movement.scroll_pixel = scroll_processing_result.scroll_pixel + pinch_zoom + mouse_zoom;
-    camera_movement.orbit_button_changed = orbit_button_changed;
+    camera_movement.orbit_button_change = orbit_button_change;
 }
 
 #[derive(Default)]

@@ -93,7 +93,7 @@ fn cam_follow(mut orbit_cam_query: Query<&mut OrbitCam>, cube_q: Query<&Transfor
     {
         orbit_cam.target_focus = cube_tfm.translation;
         // Whenever changing properties manually like this, it's necessary to force
-        // OrbitCam to update this frame (by default it only updates when there are
+        // `OrbitCam` to update this frame (by default it only updates when there are
         // input events).
         orbit_cam.force_update = ForceUpdate::Pending;
     }

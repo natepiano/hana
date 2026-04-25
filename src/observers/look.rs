@@ -4,9 +4,10 @@ use bevy::prelude::*;
 use bevy_kana::Displacement;
 use bevy_kana::Position;
 
-use super::shared;
-use super::shared::FitRequest;
-use super::shared::SnapOrbit;
+use super::fit_request;
+use super::fit_request::FitRequest;
+use super::snap_orbit;
+use super::snap_orbit::SnapOrbit;
 use crate::animation;
 use crate::animation::CameraMove;
 use crate::events::AnimationBegin;
@@ -59,7 +60,7 @@ pub(super) fn on_look_at(
     } else {
         let (yaw, pitch, radius) =
             animation::orbital_params_from_offset(Displacement(camera_pos - target_pos));
-        shared::snap_to_orbit(
+        snap_orbit::snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
             SnapOrbit {
@@ -114,7 +115,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
     let (preliminary_yaw, preliminary_pitch, _) =
         animation::orbital_params_from_offset(Displacement(camera_pos - target_pos));
 
-    let Some(fit) = shared::prepare_fit_for_target(
+    let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
             context: "LookAtAndZoomToFit",
             target,
@@ -153,7 +154,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
             .source(AnimationSource::LookAtAndZoomToFit),
         );
     } else {
-        shared::snap_to_orbit(
+        snap_orbit::snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
             SnapOrbit {

@@ -93,7 +93,9 @@ fn ui_system(
     mut contexts: EguiContexts,
     query: Query<Option<&BlockOnEguiFocus>, With<OrbitCam>>,
 ) -> Result {
-    let blocking = query.iter().next().is_some_and(|b| b.is_some());
+    // Assumes a single `OrbitCam`; multi-camera apps need scoping by
+    // viewport/window/active-camera marker rather than this aggregate.
+    let blocking = query.iter().next().flatten().is_some();
     let status = if blocking { "ON" } else { "OFF" };
 
     egui::SidePanel::left("panel")

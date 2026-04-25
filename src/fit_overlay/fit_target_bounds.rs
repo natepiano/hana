@@ -8,6 +8,7 @@ use super::labels::BoundsLabel;
 use super::labels::MarginLabel;
 use super::labels::MarginLabelParams;
 use super::screen_space;
+use super::screen_space::MarginBalance;
 use crate::components::CurrentFitTarget;
 use crate::components::FitOverlay;
 use crate::constants::TOLERANCE;
@@ -82,25 +83,17 @@ impl From<&ScreenSpaceBounds> for FitMarginPercents {
 /// Calculates the color for an edge based on balance state.
 const fn calculate_edge_color(
     edge: Edge,
-    h_balanced: bool,
-    v_balanced: bool,
+    horizontal_balance: MarginBalance,
+    vertical_balance: MarginBalance,
     config: &FitTargetOverlayConfig,
 ) -> Color {
-    match edge {
-        Edge::Left | Edge::Right => {
-            if h_balanced {
-                config.balanced_color
-            } else {
-                config.unbalanced_color
-            }
-        },
-        Edge::Top | Edge::Bottom => {
-            if v_balanced {
-                config.balanced_color
-            } else {
-                config.unbalanced_color
-            }
-        },
+    let balance = match edge {
+        Edge::Left | Edge::Right => horizontal_balance,
+        Edge::Top | Edge::Bottom => vertical_balance,
+    };
+    match balance {
+        MarginBalance::Balanced => config.balanced_color,
+        MarginBalance::Unbalanced => config.unbalanced_color,
     }
 }
 
@@ -216,8 +209,8 @@ fn draw_margin_lines_and_labels(
     let avg_depth = ctx.avg_depth;
     let projection_mode = ctx.projection_mode;
     let viewport_size = ctx.viewport_size;
-    let h_balanced = screen_space::is_horizontally_balanced(bounds, TOLERANCE);
-    let v_balanced = screen_space::is_vertically_balanced(bounds, TOLERANCE);
+    let horizontal_balance = screen_space::horizontal_balance(bounds, TOLERANCE);
+    let vertical_balance = screen_space::vertical_balance(bounds, TOLERANCE);
 
     let mut visible_edges: Vec<Edge> = Vec::new();
 
@@ -244,7 +237,7 @@ fn draw_margin_lines_and_labels(
             projection_mode,
         );
 
-        let color = calculate_edge_color(edge, h_balanced, v_balanced, config);
+        let color = calculate_edge_color(edge, horizontal_balance, vertical_balance, config);
         gizmos.line(boundary_pos, screen_pos, color);
 
         let Some(vp) = viewport_size else {
