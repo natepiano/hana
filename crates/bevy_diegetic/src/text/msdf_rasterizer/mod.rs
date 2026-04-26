@@ -142,3 +142,9 @@ pub(super) fn rasterize_glyph(
         bearing_y,
     })
 }
+
+#[cfg(test)]
+mod parity;
+
+#[cfg(test)]
+mod tests;

@@ -4,6 +4,20 @@
 //! `bevy_diegetic`, then asserts that every rectangle/text bounding box matches.
 //! This is the source of truth — if Clay produces it, we should too.
 
+#![allow(
+    clippy::float_cmp,
+    reason = "tests compare exact expected layout values"
+)]
+#![allow(
+    clippy::needless_collect,
+    reason = "tests collect into named variables for readable assertions and index access"
+)]
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "tests use panic/unwrap for clearer failure messages"
+)]
+
 use std::sync::Arc;
 
 use bevy_kana::ToF32;
@@ -20,20 +34,20 @@ use clay_layout::layout::LayoutDirection;
 use clay_layout::math::Dimensions;
 use clay_layout::render_commands::RenderCommandConfig;
 
-use super::AlignX;
-use super::AlignY;
-use super::Direction;
-use super::El;
-use super::LayoutBuilder;
-use super::LayoutEngine;
-use super::LayoutResult;
-use super::LayoutTextStyle;
-use super::MeasureTextFn;
-use super::Padding;
-use super::RenderCommandKind;
-use super::Sizing;
-use super::TextDimensions;
-use super::TextMeasure;
+use crate::layout::AlignX;
+use crate::layout::AlignY;
+use crate::layout::Direction;
+use crate::layout::El;
+use crate::layout::LayoutBuilder;
+use crate::layout::LayoutEngine;
+use crate::layout::LayoutResult;
+use crate::layout::LayoutTextStyle;
+use crate::layout::MeasureTextFn;
+use crate::layout::Padding;
+use crate::layout::RenderCommandKind;
+use crate::layout::Sizing;
+use crate::layout::TextDimensions;
+use crate::layout::TextMeasure;
 
 // ── Shared measurement ────────────────────────────────────────────────────
 

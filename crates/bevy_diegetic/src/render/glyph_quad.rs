@@ -239,3 +239,280 @@ pub(super) fn build_glyph_mesh(quads: &[GlyphQuadData]) -> Mesh {
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests use expect for clearer failure messages"
+)]
+mod tests {
+    use bevy::prelude::Mesh;
+
+    use super::*;
+
+    #[test]
+    fn mesh_vertex_and_index_counts() {
+        let quads = vec![
+            GlyphQuadData {
+                position: [0.0, 1.0, 0.0],
+                size:     [0.5, 0.8],
+                uv_rect:  [0.0, 0.0, 0.1, 0.1],
+                color:    [1.0, 1.0, 1.0, 1.0],
+            },
+            GlyphQuadData {
+                position: [0.6, 1.0, 0.0],
+                size:     [0.5, 0.8],
+                uv_rect:  [0.1, 0.0, 0.2, 0.1],
+                color:    [1.0, 1.0, 1.0, 1.0],
+            },
+            GlyphQuadData {
+                position: [1.2, 1.0, 0.0],
+                size:     [0.5, 0.8],
+                uv_rect:  [0.2, 0.0, 0.3, 0.1],
+                color:    [1.0, 1.0, 1.0, 1.0],
+            },
+        ];
+
+        let mesh = build_glyph_mesh(&quads);
+
+        let vertex_count = mesh.count_vertices();
+        assert_eq!(vertex_count, 12, "expected 12 vertices for 3 glyphs");
+
+        let index_count = mesh.indices().map_or(0, bevy::mesh::Indices::len);
+        assert_eq!(index_count, 18, "expected 18 indices for 3 glyphs");
+    }
+
+    #[test]
+    fn mesh_single_quad_has_uvs() {
+        let quads = vec![GlyphQuadData {
+            position: [0.0, 1.0, 0.0],
+            size:     [1.0, 1.0],
+            uv_rect:  [0.25, 0.5, 0.75, 1.0],
+            color:    [1.0, 0.0, 0.0, 1.0],
+        }];
+
+        let mesh = build_glyph_mesh(&quads);
+
+        let uv = mesh
+            .attribute(Mesh::ATTRIBUTE_UV_0)
+            .expect("mesh should have UV_0");
+        assert_eq!(uv.len(), 4, "expected 4 UV entries for 1 quad");
+
+        let clip_uv = mesh
+            .attribute(Mesh::ATTRIBUTE_UV_1)
+            .expect("mesh should have UV_1");
+        assert_eq!(
+            clip_uv.len(),
+            4,
+            "expected 4 panel-local UV_1 entries for 1 quad"
+        );
+    }
+
+    #[test]
+    fn empty_quads_produce_empty_mesh() {
+        let mesh = build_glyph_mesh(&[]);
+
+        let vertex_count = mesh.count_vertices();
+        assert_eq!(vertex_count, 0);
+
+        let index_count = mesh.indices().map_or(0, bevy::mesh::Indices::len);
+        assert_eq!(index_count, 0);
+    }
+
+    fn make_quad(x: f32, y: f32, width: f32) -> GlyphQuadData {
+        GlyphQuadData {
+            position: [x, y, 0.0],
+            size:     [width, 0.8],
+            uv_rect:  [0.0, 0.0, 1.0, 1.0],
+            color:    [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn clip_same_line_overlap_trims_both_quads() {
+        let mut quads = vec![
+            (0_u32, make_quad(0.0, 1.0, 0.6)),
+            (0, make_quad(0.5, 1.0, 0.6)),
+        ];
+
+        clip_overlapping_quads(&mut quads);
+
+        let first_width = quads[0].1.size[0];
+        let second_width = quads[1].1.size[0];
+        assert!(
+            first_width < 0.6,
+            "first quad should be trimmed, got {first_width}"
+        );
+        assert!(
+            second_width < 0.6,
+            "second quad should be trimmed, got {second_width}"
+        );
+        assert!(first_width > 0.0, "first quad width must be positive");
+        assert!(second_width > 0.0, "second quad width must be positive");
+    }
+
+    #[test]
+    fn clip_skips_cross_line_pairs() {
+        let mut quads = vec![
+            (0_u32, make_quad(3.0, 1.0, 0.5)),
+            (0, make_quad(0.0, 0.0, 0.5)),
+        ];
+        let width_before_first = quads[0].1.size[0];
+        let width_before_second = quads[1].1.size[0];
+        let x_before_second = quads[1].1.position[0];
+
+        clip_overlapping_quads(&mut quads);
+
+        assert!(
+            (quads[0].1.size[0] - width_before_first).abs() < f32::EPSILON,
+            "line 1 last quad should be untouched"
+        );
+        assert!(
+            (quads[1].1.size[0] - width_before_second).abs() < f32::EPSILON,
+            "line 2 first quad width should be untouched"
+        );
+        assert!(
+            (quads[1].1.position[0] - x_before_second).abs() < f32::EPSILON,
+            "line 2 first quad X position should be untouched"
+        );
+    }
+
+    #[test]
+    fn clip_handles_multiline_with_intraline_overlap() {
+        let mut quads = vec![
+            (0_u32, make_quad(0.0, 1.0, 0.6)),
+            (0, make_quad(0.5, 1.0, 0.6)),
+            (0, make_quad(0.0, 0.0, 0.5)),
+            (0, make_quad(0.4, 0.0, 0.5)),
+        ];
+
+        clip_overlapping_quads(&mut quads);
+
+        assert!(quads[0].1.size[0] < 0.6, "A should be trimmed");
+        assert!(quads[1].1.size[0] < 0.6, "B should be trimmed");
+        assert!(quads[2].1.size[0] < 0.5, "C should be trimmed by D overlap");
+        assert!(quads[3].1.size[0] < 0.5, "D should be trimmed by C overlap");
+
+        for (i, (_, quad)) in quads.iter().enumerate() {
+            assert!(quad.size[0] > 0.0, "quad {i} width must be positive");
+        }
+    }
+
+    #[test]
+    fn clip_cross_line_prevents_negative_width() {
+        let mut quads = vec![
+            (0_u32, make_quad(10.0, 2.0, 0.5)),
+            (0, make_quad(0.0, 0.5, 0.5)),
+        ];
+
+        clip_overlapping_quads(&mut quads);
+
+        assert!(
+            quads[0].1.size[0] > 0.0,
+            "must not produce negative width: got {}",
+            quads[0].1.size[0]
+        );
+        assert!(
+            quads[1].1.size[0] > 0.0,
+            "must not produce negative width: got {}",
+            quads[1].1.size[0]
+        );
+    }
+
+    fn make_clip_quad(x: f32, y: f32, w: f32, h: f32) -> GlyphQuadData {
+        GlyphQuadData {
+            position: [x, y, 0.0],
+            size:     [w, h],
+            uv_rect:  [0.0, 0.0, 1.0, 1.0],
+            color:    [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn clip_quad_fully_inside() {
+        let quad = make_clip_quad(2.0, 8.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        let clipped = result.expect("should be inside");
+        assert!((clipped.position[0] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.size[0] - 4.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[0] - 0.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[2] - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clip_quad_fully_outside() {
+        let quad = make_clip_quad(20.0, 30.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn clip_quad_left_edge() {
+        let quad = make_clip_quad(-2.0, 5.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        let clipped = result.expect("should be partially visible");
+        assert!((clipped.position[0] - 0.0).abs() < f32::EPSILON);
+        assert!((clipped.size[0] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[0] - 0.5).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[2] - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clip_quad_right_edge() {
+        let quad = make_clip_quad(8.0, 5.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        let clipped = result.expect("should be partially visible");
+        assert!((clipped.size[0] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[2] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clip_quad_top_edge() {
+        let quad = make_clip_quad(2.0, 12.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        let clipped = result.expect("should be partially visible");
+        assert!((clipped.position[1] - 10.0).abs() < f32::EPSILON);
+        assert!((clipped.size[1] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[1] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clip_quad_bottom_edge() {
+        let quad = make_clip_quad(2.0, 2.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        let clipped = result.expect("should be partially visible");
+        assert!((clipped.size[1] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[3] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clip_quad_corner_two_edges() {
+        let quad = make_clip_quad(-2.0, 12.0, 4.0, 4.0);
+        let result = clip_quad_to_rect(&quad, [0.0, 0.0, 10.0, 10.0]);
+        let clipped = result.expect("should be partially visible");
+        assert!((clipped.position[0] - 0.0).abs() < f32::EPSILON);
+        assert!((clipped.position[1] - 10.0).abs() < f32::EPSILON);
+        assert!((clipped.size[0] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.size[1] - 2.0).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[0] - 0.5).abs() < f32::EPSILON);
+        assert!((clipped.uv_rect[1] - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clip_quad_uv_proportionality() {
+        let quad = GlyphQuadData {
+            position: [0.0, 10.0, 0.0],
+            size:     [8.0, 8.0],
+            uv_rect:  [0.25, 0.1, 0.75, 0.9],
+            color:    [1.0; 4],
+        };
+        let result = clip_quad_to_rect(&quad, [2.0, 4.0, 6.0, 8.0]);
+        let clipped = result.expect("should be partially visible");
+        let u_span = 0.75 - 0.25;
+        let v_span = 0.9 - 0.1;
+        assert!((clipped.uv_rect[0] - 0.25_f32.mul_add(u_span, 0.25)).abs() < 1e-6);
+        assert!((clipped.uv_rect[2] - 0.75_f32.mul_add(u_span, 0.25)).abs() < 1e-6);
+        assert!((clipped.uv_rect[1] - 0.25_f32.mul_add(v_span, 0.1)).abs() < 1e-6);
+        assert!((clipped.uv_rect[3] - 0.75_f32.mul_add(v_span, 0.1)).abs() < 1e-6);
+    }
+}

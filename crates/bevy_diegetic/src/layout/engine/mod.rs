@@ -662,10 +662,12 @@ fn size_along_axis(
                 parent_idx,
                 children,
                 axis,
-                parent_size,
-                padding,
-                border,
-                gap_total,
+                AxisMetrics {
+                    parent_size,
+                    padding,
+                    border,
+                    gap_total,
+                },
             );
         } else {
             size_children_cross_axis(tree, computed, children, axis, parent_size, padding, border);
@@ -680,6 +682,16 @@ fn size_along_axis(
     }
 }
 
+/// Parent-axis size budget: the parent's full size along the axis and the
+/// three deductions (padding, border, gap totals) that reduce what children
+/// can consume.
+struct AxisMetrics {
+    parent_size: f32,
+    padding:     f32,
+    border:      f32,
+    gap_total:   f32,
+}
+
 /// Size children that are laid out ALONG the parent's layout axis.
 fn size_children_along_axis(
     tree: &LayoutTree,
@@ -687,10 +699,7 @@ fn size_children_along_axis(
     parent_idx: usize,
     children: &[usize],
     axis: Axis,
-    parent_size: f32,
-    padding: f32,
-    border: f32,
-    gap_total: f32,
+    metrics: AxisMetrics,
 ) {
     let parent_element = &tree.elements[parent_idx];
 
@@ -706,7 +715,7 @@ fn size_children_along_axis(
         }
     }
 
-    let available = parent_size - padding - border - gap_total;
+    let available = metrics.parent_size - metrics.padding - metrics.border - metrics.gap_total;
     let mut to_distribute = available - content_size;
 
     // Overflow compression: largest-first heuristic.
@@ -1380,3 +1389,9 @@ const fn is_layout_axis(direction: Direction, axis: Axis) -> bool {
         (Direction::LeftToRight, Axis::Y) | (Direction::TopToBottom, Axis::X) => false,
     }
 }
+
+#[cfg(test)]
+mod clay_parity;
+
+#[cfg(test)]
+mod integration_tests;

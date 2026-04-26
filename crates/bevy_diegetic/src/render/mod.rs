@@ -2,8 +2,6 @@
 
 mod clip;
 mod constants;
-#[cfg(test)]
-mod glyph_mesh_tests;
 mod glyph_quad;
 mod msdf_material;
 mod panel_geometry;

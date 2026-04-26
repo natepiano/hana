@@ -300,15 +300,18 @@ pub(super) fn render_world_text(
                 &defaults,
                 &mut commands,
             );
+            let mut assets = MeshSpawnAssets {
+                meshes:    &mut meshes,
+                materials: &mut materials,
+                commands:  &mut commands,
+            };
             mesh_ms_total += spawn_world_text_meshes(
                 &page_quads,
                 entity,
                 style,
                 &atlas,
-                &mut meshes,
-                &mut materials,
                 resolved_alpha.0,
-                &mut commands,
+                &mut assets,
             );
         }
 
@@ -455,15 +458,19 @@ const fn apply_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness)
     }
 }
 
+struct MeshSpawnAssets<'a, 'w, 's> {
+    meshes:    &'a mut Assets<Mesh>,
+    materials: &'a mut Assets<MsdfTextMaterial>,
+    commands:  &'a mut Commands<'w, 's>,
+}
+
 fn spawn_world_text_meshes(
     page_quads: &HashMap<u32, Vec<GlyphQuadData>>,
     entity: Entity,
     style: &WorldTextStyle,
     atlas: &MsdfAtlas,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<MsdfTextMaterial>,
     alpha_mode: AlphaMode,
-    commands: &mut Commands,
+    assets: &mut MeshSpawnAssets<'_, '_, '_>,
 ) -> f32 {
     let is_invisible = style.render_mode() == GlyphRenderMode::Invisible;
     let needs_proxy = if is_invisible {
@@ -485,7 +492,7 @@ fn spawn_world_text_meshes(
 
         let mesh_start = Instant::now();
         let mesh = glyph_quad::build_glyph_mesh(pq);
-        let mesh_handle = meshes.add(mesh);
+        let mesh_handle = assets.meshes.add(mesh);
 
         // Spawn visible mesh (skip for Invisible render mode).
         if !is_invisible {
@@ -507,10 +514,10 @@ fn spawn_world_text_meshes(
                 alpha_mode,
             );
 
-            let material_handle = materials.add(mat);
+            let material_handle = assets.materials.add(mat);
 
             if suppress_shadow {
-                commands.entity(entity).with_child((
+                assets.commands.entity(entity).with_child((
                     WorldTextMesh,
                     NotShadowCaster,
                     Mesh3d(mesh_handle.clone()),
@@ -518,7 +525,7 @@ fn spawn_world_text_meshes(
                     Transform::IDENTITY,
                 ));
             } else {
-                commands.entity(entity).with_child((
+                assets.commands.entity(entity).with_child((
                     WorldTextMesh,
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material_handle),
@@ -540,19 +547,21 @@ fn spawn_world_text_meshes(
                 ..Default::default()
             };
             apply_sidedness(&mut proxy_base, style.sidedness());
-            let proxy_material = materials.add(msdf_material::msdf_shadow_proxy_material(
-                proxy_base,
-                MsdfAtlas::sdf_range().to_f32(),
-                atlas.width(),
-                atlas.height(),
-                page_image,
-                0.0,
-                shadow_render_mode,
-                constants::UNCLIPPED_TEXT_CLIP_RECT,
-                0.0,
-            ));
+            let proxy_material = assets
+                .materials
+                .add(msdf_material::msdf_shadow_proxy_material(
+                    proxy_base,
+                    MsdfAtlas::sdf_range().to_f32(),
+                    atlas.width(),
+                    atlas.height(),
+                    page_image,
+                    0.0,
+                    shadow_render_mode,
+                    constants::UNCLIPPED_TEXT_CLIP_RECT,
+                    0.0,
+                ));
 
-            commands.entity(entity).with_child((
+            assets.commands.entity(entity).with_child((
                 WorldTextShadowProxy,
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(proxy_material),
@@ -716,8 +725,7 @@ fn shape_world_text(
             boosted_size,
             sg.x,
             sg.baseline + sg.y,
-            anchor_x,
-            anchor_y,
+            Vec2::new(anchor_x, anchor_y),
             world_scale,
         ) {
             glyph_rects.push(rect);
@@ -819,8 +827,7 @@ fn ink_rect(
     font_size: f32,
     glyph_x: f32,
     baseline_offset: f32,
-    anchor_x: f32,
-    anchor_y: f32,
+    anchor: Vec2,
     scale: f32,
 ) -> Option<[f32; 4]> {
     let face = ttf_parser::Face::parse(font_data, 0).ok()?;
@@ -830,8 +837,8 @@ fn ink_rect(
 
     let ink_w = f32::from(bbox.x_max - bbox.x_min) * font_scale;
     let ink_h = f32::from(bbox.y_max - bbox.y_min) * font_scale;
-    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, glyph_x) - anchor_x;
-    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, baseline_offset) - anchor_y;
+    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, glyph_x) - anchor.x;
+    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, baseline_offset) - anchor.y;
 
     Some([
         ink_x * scale,

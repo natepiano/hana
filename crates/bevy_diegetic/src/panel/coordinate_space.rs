@@ -1,4 +1,4 @@
-//! Panel rendering modes and companion effects.
+//! Panel coordinate space and companion effects.
 
 #![allow(
     clippy::used_underscore_binding,
@@ -8,6 +8,7 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use crate::layout::Dimension;
 use crate::layout::Sizing;
 
 /// Where a screen-space panel is placed within the window.
@@ -61,7 +62,7 @@ pub enum SurfaceShadow {
 /// `World` panels are positioned and scaled in 3D space.
 /// `Screen` panels render via an orthographic overlay camera.
 #[derive(Clone, Debug, Reflect)]
-pub enum PanelMode {
+pub enum CoordinateSpace {
     /// Panel lives in 3D world space.
     World {
         /// Panel width, expressed with the layout engine's [`Sizing`] enum.
@@ -96,14 +97,14 @@ pub enum PanelMode {
     },
 }
 
-impl Default for PanelMode {
+impl Default for CoordinateSpace {
     fn default() -> Self {
         Self::World {
-            width:  Sizing::Fixed(crate::layout::Dimension {
+            width:  Sizing::Fixed(Dimension {
                 value: 0.0,
                 unit:  None,
             }),
-            height: Sizing::Fixed(crate::layout::Dimension {
+            height: Sizing::Fixed(Dimension {
                 value: 0.0,
                 unit:  None,
             }),
@@ -111,7 +112,7 @@ impl Default for PanelMode {
     }
 }
 
-impl PanelMode {
+impl CoordinateSpace {
     /// Returns `true` if this is a screen-space panel.
     #[must_use]
     pub const fn is_screen(&self) -> bool { matches!(self, Self::Screen { .. }) }

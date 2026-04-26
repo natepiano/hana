@@ -10,12 +10,14 @@ use bevy::render::render_resource::TextureUsages;
 
 use crate::layout::Sizing;
 use crate::panel::ComputedDiegeticPanel;
+use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
-use crate::panel::PanelMode;
 use crate::panel::PanelSystems;
 use crate::panel::ScreenPosition;
 
-/// Marker on overlay cameras spawned by the screen-space system.
+/// Marker on overlay cameras spawned by the screen-space system. Carries the
+/// `(camera_order, render_layers)` pair so observers can match panels against
+/// existing cameras without a side registry.
 #[derive(Component)]
 pub(crate) struct ScreenSpaceCamera {
     pub render_layers: RenderLayers,
@@ -32,20 +34,13 @@ pub(crate) struct ScreenSpacePlugin;
 
 impl Plugin for ScreenSpacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
+        app.add_observer(setup_screen_space_view)
+            .add_observer(cleanup_screen_space_view)
+            .add_systems(
+                Update,
                 position_screen_space_panels.before(PanelSystems::ComputeLayout),
-                setup_screen_space_cameras.after(PanelSystems::ComputeLayout),
-            ),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                propagate_screen_space_render_layers,
-                cleanup_screen_space_cameras,
-            ),
-        );
+            )
+            .add_systems(PostUpdate, propagate_screen_space_render_layers);
     }
 }
 
@@ -69,12 +64,12 @@ fn position_screen_space_panels(
     let half_h = win_h / 2.0;
 
     for (mut transform, mut panel, computed) in &mut panels {
-        let PanelMode::Screen {
+        let CoordinateSpace::Screen {
             position,
             width,
             height,
             ..
-        } = panel.mode()
+        } = panel.coordinate_space()
         else {
             continue;
         };
@@ -138,85 +133,81 @@ fn resolve_screen_axis(sizing: Sizing, window_axis: f32, content: f32, current: 
 /// orthographic camera is created with `ScalingMode::WindowSize`
 /// (1 world unit = 1 logical pixel). A directional light on the same
 /// render layers provides stable illumination for PBR text materials.
-fn setup_screen_space_cameras(
-    added_panels: Query<(Entity, &DiegeticPanel), Added<DiegeticPanel>>,
-    existing_cameras: Query<&ScreenSpaceCamera>,
+///
+/// Sharing is detected by querying existing cameras for a matching pair —
+/// no central registry is maintained.
+fn setup_screen_space_view(
+    trigger: On<Add, DiegeticPanel>,
+    panels: Query<&DiegeticPanel>,
+    cameras: Query<&ScreenSpaceCamera>,
     mut commands: Commands,
 ) {
-    let mut spawned_this_frame: Vec<(isize, RenderLayers)> = Vec::new();
+    let Ok(panel) = panels.get(trigger.entity) else {
+        return;
+    };
+    let CoordinateSpace::Screen {
+        camera_order,
+        ref render_layers,
+        ..
+    } = *panel.coordinate_space()
+    else {
+        return;
+    };
 
-    for (panel_entity, panel) in &added_panels {
-        let PanelMode::Screen {
-            camera_order,
-            ref render_layers,
-            ..
-        } = *panel.mode()
-        else {
-            continue;
-        };
+    commands
+        .entity(trigger.entity)
+        .insert(render_layers.clone());
 
-        let layers = render_layers;
-        let order = camera_order;
-
-        commands.entity(panel_entity).insert(layers.clone());
-
-        let camera_exists = existing_cameras
-            .iter()
-            .any(|cam| cam.render_layers == *layers && cam.camera_order == order)
-            || spawned_this_frame
-                .iter()
-                .any(|(o, l)| *o == order && *l == *layers);
-
-        if camera_exists {
-            continue;
-        }
-
-        spawned_this_frame.push((order, layers.clone()));
-
-        commands.spawn((
-            ScreenSpaceCamera {
-                render_layers: layers.clone(),
-                camera_order:  order,
-            },
-            Camera3d {
-                depth_texture_usages: Camera3dDepthTextureUsage(
-                    (TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING).bits(),
-                ),
-                ..default()
-            },
-            Camera {
-                order,
-                clear_color: ClearColorConfig::None,
-                ..default()
-            },
-            Projection::Orthographic(OrthographicProjection {
-                scaling_mode: ScalingMode::WindowSize,
-                far: 2000.0,
-                ..OrthographicProjection::default_3d()
-            }),
-            Transform::from_xyz(0.0, 0.0, 1000.0).looking_at(Vec3::ZERO, Vec3::Y),
-            bevy::render::view::Msaa::default(),
-            layers.clone(),
-        ));
-
-        commands.spawn((
-            ScreenSpaceLight {
-                render_layers: layers.clone(),
-            },
-            DirectionalLight {
-                illuminance: 5000.0,
-                shadows_enabled: false,
-                ..default()
-            },
-            Transform::from_rotation(Quat::from_euler(
-                EulerRot::XYZ,
-                -std::f32::consts::FRAC_PI_4,
-                std::f32::consts::FRAC_PI_4,
-                0.0,
-            )),
-            layers.clone(),
-        ));
+    let already_exists = cameras
+        .iter()
+        .any(|cam| cam.camera_order == camera_order && cam.render_layers == *render_layers);
+    if already_exists {
+        return;
     }
+
+    commands.spawn((
+        ScreenSpaceCamera {
+            render_layers: render_layers.clone(),
+            camera_order,
+        },
+        Camera3d {
+            depth_texture_usages: Camera3dDepthTextureUsage(
+                (TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING).bits(),
+            ),
+            ..default()
+        },
+        Camera {
+            order: camera_order,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        Projection::Orthographic(OrthographicProjection {
+            scaling_mode: ScalingMode::WindowSize,
+            far: 2000.0,
+            ..OrthographicProjection::default_3d()
+        }),
+        Transform::from_xyz(0.0, 0.0, 1000.0).looking_at(Vec3::ZERO, Vec3::Y),
+        bevy::render::view::Msaa::default(),
+        render_layers.clone(),
+    ));
+
+    commands.spawn((
+        ScreenSpaceLight {
+            render_layers: render_layers.clone(),
+        },
+        DirectionalLight {
+            illuminance: 5000.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(
+            EulerRot::XYZ,
+            -std::f32::consts::FRAC_PI_4,
+            std::f32::consts::FRAC_PI_4,
+            0.0,
+        )),
+        render_layers.clone(),
+    ));
 }
 
 /// Propagates [`RenderLayers`] from screen-space panel parents to their
@@ -231,7 +222,7 @@ fn propagate_screen_space_render_layers(
     mut commands: Commands,
 ) {
     for (panel_entity, panel_layers, panel) in &panels_with_layers {
-        if !panel.mode().is_screen() {
+        if !panel.coordinate_space().is_screen() {
             continue;
         }
         let Ok(children) = children_query.get(panel_entity) else {
@@ -270,60 +261,59 @@ fn propagate_layers_recursive(
     }
 }
 
-/// Despawns overlay cameras and lights when no screen-space panels
-/// reference their `(camera_order, render_layers)` pair.
-fn cleanup_screen_space_cameras(
-    panels: Query<&DiegeticPanel>,
+/// Despawns the overlay camera and light for a `(camera_order, render_layers)`
+/// pair when the last panel using it is removed.
+///
+/// Reads the removed panel's pair while the component is still live (`On<Remove>`
+/// fires before the component is dropped), then queries remaining panels to see
+/// if any others still need the same pair. If none do, finds the matching
+/// camera and light by their pair fields and despawns both.
+fn cleanup_screen_space_view(
+    trigger: On<Remove, DiegeticPanel>,
+    panels: Query<(Entity, &DiegeticPanel)>,
     cameras: Query<(Entity, &ScreenSpaceCamera)>,
     lights: Query<(Entity, &ScreenSpaceLight)>,
     mut commands: Commands,
-    mut prev_pairs: Local<Vec<(isize, RenderLayers)>>,
 ) {
-    let current_pairs: Vec<(isize, RenderLayers)> = panels
-        .iter()
-        .filter_map(|panel| {
-            if let PanelMode::Screen {
-                camera_order,
-                ref render_layers,
-                ..
-            } = *panel.mode()
-            {
-                Some((camera_order, render_layers.clone()))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let Ok((_, removed_panel)) = panels.get(trigger.entity) else {
+        return;
+    };
+    let CoordinateSpace::Screen {
+        camera_order,
+        ref render_layers,
+        ..
+    } = *removed_panel.coordinate_space()
+    else {
+        return;
+    };
 
-    if current_pairs.len() == prev_pairs.len()
-        && current_pairs
-            .iter()
-            .zip(prev_pairs.iter())
-            .all(|(a, b)| a.0 == b.0 && a.1 == b.1)
-    {
-        *prev_pairs = current_pairs;
+    let still_in_use = panels.iter().any(|(entity, panel)| {
+        if entity == trigger.entity {
+            return false;
+        }
+        match panel.coordinate_space() {
+            CoordinateSpace::Screen {
+                camera_order: other_order,
+                render_layers: other_layers,
+                ..
+            } => *other_order == camera_order && other_layers == render_layers,
+            CoordinateSpace::World { .. } => false,
+        }
+    });
+    if still_in_use {
         return;
     }
 
     for (entity, cam) in &cameras {
-        let still_active = current_pairs
-            .iter()
-            .any(|(order, layers)| *order == cam.camera_order && *layers == cam.render_layers);
-        if !still_active {
+        if cam.camera_order == camera_order && cam.render_layers == *render_layers {
             commands.entity(entity).despawn();
         }
     }
-
     for (entity, light) in &lights {
-        let still_active = current_pairs
-            .iter()
-            .any(|(_, layers)| *layers == light.render_layers);
-        if !still_active {
+        if light.render_layers == *render_layers {
             commands.entity(entity).despawn();
         }
     }
-
-    *prev_pairs = current_pairs;
 }
 
 #[cfg(test)]

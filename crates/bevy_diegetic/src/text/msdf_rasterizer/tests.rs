@@ -9,19 +9,22 @@
     reason = "tests use panic/unwrap for clearer failure messages"
 )]
 
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
+
 use bevy_kana::ToU16;
 use bevy_kana::ToUsize;
 
-use super::atlas::GlyphKey;
-use super::atlas::MsdfAtlas;
-use super::measurer;
-use super::msdf_rasterizer;
+use super::*;
 use crate::layout::FontSlant;
+use crate::layout::TextMeasure;
+use crate::text::atlas::GlyphKey;
+use crate::text::atlas::MsdfAtlas;
+use crate::text::measurer;
 
-/// Embedded font data for tests.
-const FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+const FONT_DATA: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
-/// Resolve a character to a glyph index via `ttf-parser`.
 fn glyph_index(ch: char) -> u16 {
     let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap_or_else(|e| panic!("parse: {e}"));
     face.glyph_index(ch)
@@ -34,7 +37,7 @@ fn glyph_index(ch: char) -> u16 {
 #[test]
 fn rasterize_letter_a_produces_nonzero_bitmap() {
     let idx = glyph_index('A');
-    let bitmap = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2)
+    let bitmap = rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'A' returned None"));
 
     assert!(bitmap.width > 0, "width should be positive");
@@ -48,7 +51,7 @@ fn rasterize_letter_a_produces_nonzero_bitmap() {
 #[test]
 fn rasterize_produces_varied_pixel_values() {
     let idx = glyph_index('A');
-    let bitmap = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2)
+    let bitmap = rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'A' returned None"));
 
     // An MSDF bitmap should have varied pixel values (not all zeros or all 128).
@@ -64,9 +67,9 @@ fn rasterize_produces_varied_pixel_values() {
 fn rasterize_different_glyphs_differ() {
     let a_idx = glyph_index('A');
     let o_idx = glyph_index('O');
-    let a = msdf_rasterizer::rasterize_glyph(FONT_DATA, a_idx, 32, 4.0, 2)
+    let a = rasterize_glyph(FONT_DATA, a_idx, 32, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'A' returned None"));
-    let o = msdf_rasterizer::rasterize_glyph(FONT_DATA, o_idx, 32, 4.0, 2)
+    let o = rasterize_glyph(FONT_DATA, o_idx, 32, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'O' returned None"));
 
     // At minimum, the data should differ (different glyph shapes).
@@ -79,9 +82,9 @@ fn rasterize_different_glyphs_differ() {
 #[test]
 fn rasterize_larger_size_produces_larger_bitmap() {
     let idx = glyph_index('W');
-    let small = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 16, 4.0, 2)
+    let small = rasterize_glyph(FONT_DATA, idx, 16, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'W' at 16px returned None"));
-    let large = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 48, 4.0, 2)
+    let large = rasterize_glyph(FONT_DATA, idx, 48, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'W' at 48px returned None"));
 
     assert!(
@@ -101,7 +104,7 @@ fn rasterize_larger_size_produces_larger_bitmap() {
 #[test]
 fn rasterize_space_returns_none() {
     let idx = glyph_index(' ');
-    let result = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2);
+    let result = rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2);
     assert!(result.is_none(), "space has no outline, should return None");
 }
 
@@ -228,7 +231,7 @@ fn colon_glyph_rasterizes_and_has_metrics() {
     let idx = glyph_index(':');
     println!("colon glyph index: {idx}");
 
-    let bitmap = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2);
+    let bitmap = rasterize_glyph(FONT_DATA, idx, 32, 4.0, 2);
     assert!(bitmap.is_some(), "colon should rasterize (has outline)");
 
     let bm = bitmap.unwrap();
@@ -260,8 +263,6 @@ fn colon_glyph_rasterizes_and_has_metrics() {
 
 #[test]
 fn parley_colon_glyph_ids_match_cmap() {
-    use std::sync::PoisonError;
-
     let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
     let cmap_colon = face.glyph_index(':').unwrap().0;
     println!("cmap colon glyph ID: {cmap_colon}");
@@ -329,7 +330,7 @@ fn parley_colon_glyph_ids_match_cmap() {
     // Check if the substituted glyph IDs can be rasterized.
     for &(gid, adv) in &glyph_ids {
         let gid16 = gid.to_u16();
-        let result = msdf_rasterizer::rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
+        let result = rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
         let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(gid16));
         let has_shape =
             fdsm_ttf_parser::load_shape_from_face(&face, ttf_parser::GlyphId(gid16)).is_some();
@@ -347,7 +348,7 @@ fn parley_colon_glyph_ids_match_cmap() {
     }
 
     // Also check the original cmap colon for comparison.
-    let cmap_result = msdf_rasterizer::rasterize_glyph(FONT_DATA, cmap_colon, 32, 4.0, 2);
+    let cmap_result = rasterize_glyph(FONT_DATA, cmap_colon, 32, 4.0, 2);
     let cmap_bbox = face.glyph_bounding_box(ttf_parser::GlyphId(cmap_colon));
     println!(
         "cmap colon (glyph {cmap_colon}): rasterize={}, bbox={cmap_bbox:?}",
@@ -361,7 +362,7 @@ fn parley_colon_glyph_ids_match_cmap() {
     }
 }
 
-const EB_GARAMOND: &[u8] = include_bytes!("../../assets/fonts/EBGaramond-Regular.ttf");
+const EB_GARAMOND: &[u8] = include_bytes!("../../../assets/fonts/EBGaramond-Regular.ttf");
 
 #[test]
 fn eb_garamond_rasterize_basic_glyphs() {
@@ -376,7 +377,7 @@ fn eb_garamond_rasterize_basic_glyphs() {
         let gid = face.glyph_index(ch).unwrap();
         let start = std::time::Instant::now();
         println!("Rasterizing '{ch}' (glyph {})...", gid.0);
-        let result = msdf_rasterizer::rasterize_glyph(EB_GARAMOND, gid.0, 32, 4.0, 2);
+        let result = rasterize_glyph(EB_GARAMOND, gid.0, 32, 4.0, 2);
         let elapsed = start.elapsed();
         println!("  result={}, took {:?}", result.is_some(), elapsed);
         if let Some(bm) = &result {
@@ -391,8 +392,6 @@ fn eb_garamond_rasterize_basic_glyphs() {
 
 #[test]
 fn eb_garamond_shape_and_rasterize() {
-    use std::sync::PoisonError;
-
     let mut font_cx = parley::FontContext::default();
     font_cx
         .collection
@@ -431,7 +430,7 @@ fn eb_garamond_shape_and_rasterize() {
                         let gid = glyph.id.to_u16();
                         print!("  glyph {gid}: ");
                         let start = std::time::Instant::now();
-                        let result = msdf_rasterizer::rasterize_glyph(EB_GARAMOND, gid, 32, 4.0, 2);
+                        let result = rasterize_glyph(EB_GARAMOND, gid, 32, 4.0, 2);
                         let elapsed = start.elapsed();
                         println!("rasterize={}, {:?}", result.is_some(), elapsed);
                         assert!(
@@ -449,9 +448,6 @@ fn eb_garamond_shape_and_rasterize() {
 /// codepath `DiegeticPanel` uses via `create_parley_measurer`.
 #[test]
 fn eb_garamond_measure_timing() {
-    use std::sync::Arc;
-    use std::sync::Mutex;
-
     let mut font_cx = parley::FontContext::default();
     font_cx
         .collection
@@ -488,7 +484,7 @@ fn eb_garamond_measure_timing() {
         "Font Features",
     ];
 
-    let measure = crate::layout::TextMeasure {
+    let measure = TextMeasure {
         font_id:        0,
         size:           36.0,
         weight:         crate::layout::FontWeight::NORMAL,
@@ -733,7 +729,7 @@ fn atlas_multi_page_no_uv_overlap_within_page() {
 #[test]
 fn dump_single_glyph_png() {
     let idx = glyph_index('A');
-    let bitmap = msdf_rasterizer::rasterize_glyph(FONT_DATA, idx, 64, 4.0, 2)
+    let bitmap = rasterize_glyph(FONT_DATA, idx, 64, 4.0, 2)
         .unwrap_or_else(|| panic!("rasterize 'A' returned None"));
 
     let path = std::env::temp_dir().join("bevy_diegetic_glyph_A.png");

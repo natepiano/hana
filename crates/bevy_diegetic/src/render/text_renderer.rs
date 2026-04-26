@@ -42,6 +42,7 @@ use crate::layout::RenderCommandKind;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
+use crate::layout::TextDimensions;
 use crate::layout::WorldTextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -670,20 +671,19 @@ fn shape_panel_text_children(
 
         let config = style.as_layout_config();
 
-        let (quads, stats) = shape_text_to_quads(
-            &world_text.0,
-            &config,
-            &ptc.bounds,
-            &font_registry,
-            &mut atlas,
-            &shaping_cx,
-            &mut cache,
-            ptc.scale_x,
-            ptc.scale_y,
-            ptc.anchor_x,
-            ptc.anchor_y,
-            ptc.clip_rect,
-        );
+        let placement = QuadPlacement {
+            bounds:    ptc.bounds,
+            scale:     Vec2::new(ptc.scale_x, ptc.scale_y),
+            anchor:    Vec2::new(ptc.anchor_x, ptc.anchor_y),
+            clip_rect: ptc.clip_rect,
+        };
+        let mut services = TextQuadServices {
+            font_registry: &font_registry,
+            atlas:         &mut atlas,
+            shaping_cx:    &shaping_cx,
+            cache:         &mut cache,
+        };
+        let (quads, stats) = shape_text_to_quads(&world_text.0, &config, &placement, &mut services);
 
         agg.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
@@ -1229,7 +1229,7 @@ pub(super) fn shape_text_cached(
     }
 
     // Store measurement alongside the shaped run.
-    let dims = crate::layout::TextDimensions {
+    let dims = TextDimensions {
         width:       layout.full_width(),
         height:      layout.height(),
         line_height: layout
@@ -1246,6 +1246,22 @@ pub(super) fn shape_text_cached(
     run
 }
 
+/// Shared text-shaping resources threaded through quad construction.
+struct TextQuadServices<'a> {
+    font_registry: &'a FontRegistry,
+    atlas:         &'a mut MsdfAtlas,
+    shaping_cx:    &'a TextShapingContext,
+    cache:         &'a mut ShapedTextCache,
+}
+
+/// Placement parameters that position shaped glyphs into panel-local space.
+struct QuadPlacement {
+    bounds:    BoundingBox,
+    scale:     Vec2,
+    anchor:    Vec2,
+    clip_rect: Option<BoundingBox>,
+}
+
 /// Shapes text and produces glyph quads in panel-local coordinates.
 ///
 /// Uses the [`ShapedTextCache`] to avoid redundant parley shaping. Quad
@@ -1253,17 +1269,21 @@ pub(super) fn shape_text_cached(
 fn shape_text_to_quads(
     text: &str,
     config: &LayoutTextStyle,
-    bounds: &BoundingBox,
-    font_registry: &FontRegistry,
-    atlas: &mut MsdfAtlas,
-    shaping_cx: &TextShapingContext,
-    cache: &mut ShapedTextCache,
-    scale_x: f32,
-    scale_y: f32,
-    anchor_x: f32,
-    anchor_y: f32,
-    clip_rect: Option<BoundingBox>,
+    placement: &QuadPlacement,
+    services: &mut TextQuadServices<'_>,
 ) -> (Vec<(u32, GlyphQuadData)>, TextBuildStats) {
+    let TextQuadServices {
+        font_registry,
+        atlas,
+        shaping_cx,
+        cache,
+    } = services;
+    let &QuadPlacement {
+        bounds,
+        scale,
+        anchor,
+        clip_rect,
+    } = placement;
     let mut stats = TextBuildStats {
         texts: 1,
         ..Default::default()
@@ -1345,14 +1365,14 @@ fn shape_text_to_quads(
         let quad_layout_y = (-metrics.bearing_y).mul_add(config.size(), glyph_y);
 
         // Convert to panel-local (anchor origin, Y-up).
-        let local_x = quad_layout_x.mul_add(scale_x, -anchor_x);
-        let local_y = (-quad_layout_y).mul_add(scale_y, anchor_y);
+        let local_x = quad_layout_x.mul_add(scale.x, -anchor.x);
+        let local_y = (-quad_layout_y).mul_add(scale.y, anchor.y);
 
         quads.push((
             metrics.page_index,
             GlyphQuadData {
                 position: [local_x, local_y, TEXT_Z_OFFSET],
-                size:     [quad_w * scale_x, quad_h * scale_y],
+                size:     [quad_w * scale.x, quad_h * scale.y],
                 uv_rect:  metrics.uv_rect,
                 color:    color_arr,
             },
@@ -1365,7 +1385,7 @@ fn shape_text_to_quads(
     // visible quads intact for shader-side clipping. Trimming CPU-side UVs
     // causes MSDF atlas bleed at clipped edges.
     if let Some(cr) = clip_rect {
-        let clip_local = panel_clip_rect_local(Some(cr), scale_x, scale_y, anchor_x, anchor_y);
+        let clip_local = panel_clip_rect_local(Some(cr), scale.x, scale.y, anchor.x, anchor.y);
         quads.retain(|(_, quad)| {
             glyph_quad::clip_quad_to_rect(quad, clip_local.to_array()).is_some()
         });
@@ -1424,6 +1444,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::layout::BoundingBox;
     use crate::render::msdf_material;
 
     /// Regression test for the panel-text reconciliation bug that double-rendered
@@ -1442,7 +1463,7 @@ mod tests {
                 let ptc = PanelTextChild {
                     element_idx:   7,
                     command_index: cmd,
-                    bounds:        crate::layout::BoundingBox {
+                    bounds:        BoundingBox {
                         x:      0.0,
                         y:      cmd.to_f32() * 10.0,
                         width:  100.0,

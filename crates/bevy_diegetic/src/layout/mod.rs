@@ -38,15 +38,11 @@
 //! - [`render`] — Render commands output by the engine.
 
 mod builder;
-#[cfg(test)]
-mod clay_parity_tests;
 mod constants;
 mod element;
 mod engine;
 mod font_features;
 mod geometry;
-#[cfg(test)]
-mod layout_tests;
 mod render;
 mod shape_cache;
 mod sizing;

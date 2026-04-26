@@ -1,5 +1,7 @@
 //! Constants for the typography overlay.
 
+use bevy::color::Color;
+
 // Dimension ratios
 /// Fraction of the first glyph's advance width used as the spacing
 /// unit between arrow columns.
@@ -74,3 +76,14 @@ pub(super) const CALLOUT_Z_OFFSET: f32 = 0.002;
 pub(super) const METRIC_LINE_Z_OFFSET: f32 = 0.001;
 /// Z offset for metric callout arrows rendered above the metric lines.
 pub(super) const METRIC_ARROW_Z_OFFSET: f32 = 0.0015;
+
+// Colors
+/// Highlight color for the typographic baseline metric line and the
+/// callouts that point at it. Reused for both the line itself and any
+/// arrows or labels that visually anchor to the baseline.
+pub(super) const BASELINE_COLOR: Color = Color::srgb(0.9, 0.2, 0.2);
+
+/// Tint for per-glyph bounding boxes and the bounding-box callout — a
+/// translucent warm yellow chosen to overlay glyph fills without
+/// obscuring them.
+pub(super) const BBOX_COLOR: Color = Color::srgba(1.0, 1.0, 0.6, 0.7);

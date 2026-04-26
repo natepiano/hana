@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use super::coordinate_space::RenderMode;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
-use super::panel_mode::RenderMode;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::RenderCommand;
@@ -137,7 +137,7 @@ pub(super) fn render_layout_gizmos(
     let screen_pixels_per_meter = pixels_per_meter(&cameras);
 
     for (panel_entity, panel, computed) in &changed_panels {
-        let is_screen_space = panel.mode().is_screen();
+        let is_screen_space = panel.coordinate_space().is_screen();
         if panel.render_mode() == RenderMode::Geometry {
             continue;
         }

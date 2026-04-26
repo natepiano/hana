@@ -94,8 +94,8 @@ pub(super) struct PanelRttPlugin;
 
 impl Plugin for PanelRttPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PanelRttRegistry>();
-        app.add_systems(PostUpdate, cleanup_removed_panels);
+        app.init_resource::<PanelRttRegistry>()
+            .add_observer(cleanup_removed_panel_rtt);
     }
 }
 
@@ -241,15 +241,12 @@ pub(super) fn setup_panel_rtt(
     }
 }
 
-/// Cleans up RTT resources when panel entities are removed.
-fn cleanup_removed_panels(
+/// Cleans up RTT layer assignments when panel entities are removed.
+fn cleanup_removed_panel_rtt(
+    trigger: On<Remove, DiegeticPanel>,
     mut registry: ResMut<PanelRttRegistry>,
-    panels: Query<Entity, With<DiegeticPanel>>,
 ) {
-    let active: Vec<Entity> = panels.iter().collect();
-    registry
-        .assignments
-        .retain(|entity, _| active.contains(entity));
+    registry.assignments.remove(&trigger.entity);
 }
 
 /// Builds the display quad `StandardMaterial` from the panel's material.

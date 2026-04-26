@@ -18,13 +18,7 @@ mod font;
 mod font_loader;
 mod font_registry;
 mod measurer;
-#[cfg(test)]
-mod msdf_parity_tests;
 mod msdf_rasterizer;
-#[cfg(test)]
-mod msdf_rasterizer_tests;
-#[cfg(test)]
-mod parley_measurer_tests;
 
 pub use atlas::GlyphKey;
 pub use atlas::GlyphLookup;

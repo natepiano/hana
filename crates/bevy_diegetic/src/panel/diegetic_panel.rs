@@ -6,9 +6,9 @@ use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
 use super::builder::Screen;
 use super::builder::World;
-use super::panel_mode::PanelMode;
-use super::panel_mode::RenderMode;
-use super::panel_mode::SurfaceShadow;
+use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::RenderMode;
+use super::coordinate_space::SurfaceShadow;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
 use crate::layout::Anchor;
@@ -51,72 +51,72 @@ use crate::layout::Unit;
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    pub(super) tree:            LayoutTree,
+    pub(super) tree:             LayoutTree,
     /// Panel width in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) width:           f32,
+    pub(super) width:            f32,
     /// Panel height in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) height:          f32,
+    pub(super) height:           f32,
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
-    pub(super) layout_unit:     Unit,
+    pub(super) layout_unit:      Unit,
     /// Unit for font sizes in the layout tree. `None` inherits from
     /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults) via the
     /// cascade framework.
-    pub(super) font_unit:       Option<Unit>,
+    pub(super) font_unit:        Option<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
-    pub(super) anchor:          Anchor,
+    pub(super) anchor:           Anchor,
     /// Target world width in meters. When set, the panel is uniformly scaled
     /// so its width matches this value (height follows aspect ratio).
     /// If both `world_width` and `world_height` are set, non-uniform scaling
     /// is applied.
-    pub(super) world_width:     Option<f32>,
+    pub(super) world_width:      Option<f32>,
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
-    pub(super) world_height:    Option<f32>,
+    pub(super) world_height:     Option<f32>,
     /// How the panel renders its content. Defaults to [`RenderMode::Geometry`].
-    pub(super) render_mode:     RenderMode,
+    pub(super) render_mode:      RenderMode,
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via `GlyphShadowMode`.
-    pub(super) surface_shadow:  SurfaceShadow,
+    pub(super) surface_shadow:   SurfaceShadow,
     /// Default PBR material for backgrounds and borders. When `None`, the
     /// library uses a matte default (roughness 0.95, reflectance 0.02).
     /// Individual elements can override via `El::material`.
     /// `base_color` is overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub(super) material:        Option<StandardMaterial>,
+    pub(super) material:         Option<StandardMaterial>,
     /// Default PBR material for text. When `None`, uses the same default as
     /// `material`. Individual text elements can override.
     /// `base_color` is overridden by `LayoutTextStyle::color` when set.
     #[reflect(ignore)]
-    pub(super) text_material:   Option<StandardMaterial>,
+    pub(super) text_material:    Option<StandardMaterial>,
     /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
     /// falls through to the per-style setting and then to
     /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
-    pub(super) text_alpha_mode: Option<AlphaMode>,
+    pub(super) text_alpha_mode:  Option<AlphaMode>,
     /// Whether the panel is world-space or screen-space.
-    pub(super) mode:            PanelMode,
+    pub(super) coordinate_space: CoordinateSpace,
 }
 
 impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
-            tree:            LayoutTree::default(),
-            width:           0.0,
-            height:          0.0,
-            layout_unit:     Unit::Meters,
-            font_unit:       None,
-            anchor:          Anchor::TopLeft,
-            world_width:     None,
-            world_height:    None,
-            render_mode:     RenderMode::Geometry,
-            surface_shadow:  SurfaceShadow::Off,
-            material:        None,
-            text_material:   None,
-            text_alpha_mode: None,
-            mode:            PanelMode::default(),
+            tree:             LayoutTree::default(),
+            width:            0.0,
+            height:           0.0,
+            layout_unit:      Unit::Meters,
+            font_unit:        None,
+            anchor:           Anchor::TopLeft,
+            world_width:      None,
+            world_height:     None,
+            render_mode:      RenderMode::Geometry,
+            surface_shadow:   SurfaceShadow::Off,
+            material:         None,
+            text_material:    None,
+            text_alpha_mode:  None,
+            coordinate_space: CoordinateSpace::default(),
         }
     }
 }
@@ -177,9 +177,9 @@ impl DiegeticPanel {
     #[must_use]
     pub const fn text_alpha_mode(&self) -> Option<AlphaMode> { self.text_alpha_mode }
 
-    /// The panel's mode (world or screen).
+    /// The panel's coordinate space (world or screen).
     #[must_use]
-    pub const fn mode(&self) -> &PanelMode { &self.mode }
+    pub const fn coordinate_space(&self) -> &CoordinateSpace { &self.coordinate_space }
 }
 
 // ── Public mutators ─────────────────────────────────────────────────────────
@@ -310,7 +310,7 @@ impl DiegeticPanel {
     #[must_use]
     pub fn anchor_offsets(&self) -> (f32, f32) {
         let (fx, fy) = self.anchor.offset_fraction();
-        if self.mode.is_screen() {
+        if self.coordinate_space.is_screen() {
             return (self.width * fx, self.height * fy);
         }
         (self.world_width() * fx, self.world_height() * fy)
@@ -330,7 +330,7 @@ impl DiegeticPanel {
         // independent of panel height. This keeps points_to_world stable
         // across dynamic `Sizing::Fit` / `Sizing::Grow` sizing where
         // `panel.height` is recomputed each frame.
-        if self.mode.is_screen() {
+        if self.coordinate_space.is_screen() {
             let to_pts = self.layout_unit.to_points();
             if to_pts > 0.0 {
                 return 1.0 / to_pts;

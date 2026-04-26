@@ -1,8 +1,8 @@
 //! Layout engine integration tests.
 //!
-//! Each test constructs a layout tree, runs the engine, and verifies the computed
-//! bounding boxes match expectations. A simple monospace text measurement function
-//! is used throughout: each character is `font_size * MONOSPACE_WIDTH_RATIO` wide, one line tall.
+//! Each test constructs a layout tree, runs the engine, and verifies the
+//! computed bounding boxes match expectations. A simple monospace text
+//! measurement function is used throughout.
 
 #![allow(
     clippy::float_cmp,
@@ -12,29 +12,34 @@
     clippy::needless_collect,
     reason = "tests collect into named variables for readable assertions and index access"
 )]
+#![allow(
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "tests use panic/unwrap for clearer failure messages"
+)]
 
 use std::sync::Arc;
 
 use bevy::color::Color;
 use bevy_kana::ToF32;
 
-use super::AlignX;
-use super::AlignY;
-use super::Border;
-use super::Direction;
-use super::El;
-use super::LayoutBuilder;
-use super::LayoutEngine;
-use super::LayoutTextStyle;
-use super::LayoutTree;
-use super::MeasureTextFn;
-use super::Padding;
-use super::RenderCommandKind;
-use super::Sizing;
-use super::TextDimensions;
-use super::TextMeasure;
-use super::TextWrap;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
+use crate::layout::AlignX;
+use crate::layout::AlignY;
+use crate::layout::Border;
+use crate::layout::Direction;
+use crate::layout::El;
+use crate::layout::LayoutBuilder;
+use crate::layout::LayoutEngine;
+use crate::layout::LayoutTextStyle;
+use crate::layout::LayoutTree;
+use crate::layout::MeasureTextFn;
+use crate::layout::Padding;
+use crate::layout::RenderCommandKind;
+use crate::layout::Sizing;
+use crate::layout::TextDimensions;
+use crate::layout::TextMeasure;
+use crate::layout::TextWrap;
 
 const VIEWPORT: f32 = 200.0;
 
@@ -1585,8 +1590,8 @@ fn grow_body_compression_20_rows() {
 #[test]
 #[ignore = "manual perf benchmark — run with --ignored"]
 fn perf_element_sizes() {
-    use super::element::Element;
-    use super::element::ElementContent;
+    use crate::layout::element::Element;
+    use crate::layout::element::ElementContent;
     println!("Element: {} bytes", std::mem::size_of::<Element>());
     println!(
         "ElementContent: {} bytes",

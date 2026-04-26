@@ -6,11 +6,11 @@ use std::marker::PhantomData;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::RenderMode;
+use super::coordinate_space::ScreenPosition;
+use super::coordinate_space::SurfaceShadow;
 use super::diegetic_panel::DiegeticPanel;
-use super::panel_mode::PanelMode;
-use super::panel_mode::RenderMode;
-use super::panel_mode::ScreenPosition;
-use super::panel_mode::SurfaceShadow;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
 use crate::layout;
@@ -52,20 +52,20 @@ pub struct Ready;
 
 #[derive(Default)]
 pub(super) struct BuilderData {
-    width:           f32,
-    height:          f32,
-    layout_unit:     Unit,
-    font_unit:       Option<Unit>,
-    anchor:          Option<Anchor>,
-    world_width:     Option<f32>,
-    world_height:    Option<f32>,
-    render_mode:     RenderMode,
-    surface_shadow:  SurfaceShadow,
-    material:        Option<StandardMaterial>,
-    text_material:   Option<StandardMaterial>,
-    text_alpha_mode: Option<AlphaMode>,
-    tree:            Option<LayoutTree>,
-    mode:            PanelMode,
+    width:            f32,
+    height:           f32,
+    layout_unit:      Unit,
+    font_unit:        Option<Unit>,
+    anchor:           Option<Anchor>,
+    world_width:      Option<f32>,
+    world_height:     Option<f32>,
+    render_mode:      RenderMode,
+    surface_shadow:   SurfaceShadow,
+    material:         Option<StandardMaterial>,
+    text_material:    Option<StandardMaterial>,
+    text_alpha_mode:  Option<AlphaMode>,
+    tree:             Option<LayoutTree>,
+    coordinate_space: CoordinateSpace,
 }
 
 /// Builder for [`DiegeticPanel`].
@@ -141,7 +141,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     pub(super) fn new_screen() -> Self {
         Self {
             data:   BuilderData {
-                mode: PanelMode::Screen {
+                coordinate_space: CoordinateSpace::Screen {
                     position:      ScreenPosition::default(),
                     // Placeholder — `.size()` overwrites both axes before build().
                     width:         Sizing::fixed(Px(0.0)),
@@ -209,8 +209,8 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
 
     /// Sets the rendering mode. Defaults to [`RenderMode::Geometry`].
     #[must_use]
-    pub const fn render_mode(mut self, mode: RenderMode) -> Self {
-        self.data.render_mode = mode;
+    pub const fn render_mode(mut self, render_mode: RenderMode) -> Self {
+        self.data.render_mode = render_mode;
         self
     }
 
@@ -268,7 +268,7 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
         self.data.width = initial_panel_size(w_sizing);
         self.data.height = initial_panel_size(h_sizing);
         self.data.layout_unit = unit;
-        self.data.mode = PanelMode::World {
+        self.data.coordinate_space = CoordinateSpace::World {
             width:  w_sizing,
             height: h_sizing,
         };
@@ -287,7 +287,7 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
         self.data.width = w;
         self.data.height = h;
         self.data.layout_unit = unit;
-        self.data.mode = PanelMode::World {
+        self.data.coordinate_space = CoordinateSpace::World {
             width:  Sizing::fixed(Dimension {
                 value: w,
                 unit:  Some(unit),
@@ -342,7 +342,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
         self.data.layout_unit = Unit::Pixels;
         self.data.width = initial_panel_size(w_sizing);
         self.data.height = initial_panel_size(h_sizing);
-        if let PanelMode::Screen { width, height, .. } = &mut self.data.mode {
+        if let CoordinateSpace::Screen { width, height, .. } = &mut self.data.coordinate_space {
             *width = w_sizing;
             *height = h_sizing;
         }
@@ -363,7 +363,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
         self.data.width = w;
         self.data.height = h;
         self.data.layout_unit = Unit::Pixels;
-        if let PanelMode::Screen { width, height, .. } = &mut self.data.mode {
+        if let CoordinateSpace::Screen { width, height, .. } = &mut self.data.coordinate_space {
             *width = Sizing::fixed(Px(w));
             *height = Sizing::fixed(Px(h));
         }
@@ -428,7 +428,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Places the panel at an explicit pixel position (top-left origin, y-down).
     #[must_use]
     pub const fn screen_position(mut self, x: f32, y: f32) -> Self {
-        if let PanelMode::Screen { position, .. } = &mut self.data.mode {
+        if let CoordinateSpace::Screen { position, .. } = &mut self.data.coordinate_space {
             *position = ScreenPosition::At(Vec2::new(x, y));
         }
         self
@@ -437,7 +437,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Sets the overlay camera render order. Default: `1`.
     #[must_use]
     pub const fn camera_order(mut self, order: isize) -> Self {
-        if let PanelMode::Screen { camera_order, .. } = &mut self.data.mode {
+        if let CoordinateSpace::Screen { camera_order, .. } = &mut self.data.coordinate_space {
             *camera_order = order;
         }
         self
@@ -446,7 +446,7 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
     /// Sets the render layers for camera isolation. Default: layer 31.
     #[must_use]
     pub fn render_layers(mut self, layers: RenderLayers) -> Self {
-        if let PanelMode::Screen { render_layers, .. } = &mut self.data.mode {
+        if let CoordinateSpace::Screen { render_layers, .. } = &mut self.data.coordinate_space {
             *render_layers = layers;
         }
         self
@@ -540,9 +540,9 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
     /// Returns [`InvalidSize`] if both axes are fixed-size and width or
     /// height is zero or negative.
     pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
-        let (w_sizing, h_sizing) = match self.data.mode {
-            PanelMode::World { width, height } => (width, height),
-            PanelMode::Screen { .. } => {
+        let (w_sizing, h_sizing) = match self.data.coordinate_space {
+            CoordinateSpace::World { width, height } => (width, height),
+            CoordinateSpace::Screen { .. } => {
                 return Err(InvalidSize {
                     width:  self.data.width,
                     height: self.data.height,
@@ -612,11 +612,11 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
     /// Returns [`InvalidSize`] if width or height is zero or negative
     /// and no dynamic sizing will fill it later.
     pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
-        let PanelMode::Screen {
+        let CoordinateSpace::Screen {
             width: w_sizing,
             height: h_sizing,
             ..
-        } = self.data.mode
+        } = self.data.coordinate_space
         else {
             return Err(InvalidSize {
                 width:  self.data.width,
@@ -707,19 +707,19 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
 
 fn build_panel(data: BuilderData) -> DiegeticPanel {
     DiegeticPanel {
-        tree:            data.tree.unwrap_or_default(),
-        width:           data.width,
-        height:          data.height,
-        layout_unit:     data.layout_unit,
-        font_unit:       data.font_unit,
-        anchor:          data.anchor.unwrap_or(Anchor::TopLeft),
-        world_width:     data.world_width,
-        world_height:    data.world_height,
-        render_mode:     data.render_mode,
-        surface_shadow:  data.surface_shadow,
-        material:        data.material,
-        text_material:   data.text_material,
-        text_alpha_mode: data.text_alpha_mode,
-        mode:            data.mode,
+        tree:             data.tree.unwrap_or_default(),
+        width:            data.width,
+        height:           data.height,
+        layout_unit:      data.layout_unit,
+        font_unit:        data.font_unit,
+        anchor:           data.anchor.unwrap_or(Anchor::TopLeft),
+        world_width:      data.world_width,
+        world_height:     data.world_height,
+        render_mode:      data.render_mode,
+        surface_shadow:   data.surface_shadow,
+        material:         data.material,
+        text_material:    data.text_material,
+        text_alpha_mode:  data.text_alpha_mode,
+        coordinate_space: data.coordinate_space,
     }
 }

@@ -3,26 +3,24 @@
 
 mod builder;
 mod compute_layout;
+mod coordinate_space;
 mod diegetic_panel;
-#[cfg(test)]
-mod fit_tests;
 mod gizmos;
-mod panel_mode;
 mod perf;
 mod sizing;
 
 use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
+pub use coordinate_space::CoordinateSpace;
+pub use coordinate_space::HueOffset;
+pub use coordinate_space::RenderMode;
+pub use coordinate_space::ScreenPosition;
+pub use coordinate_space::SurfaceShadow;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::PanelFontUnit;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
-pub use panel_mode::HueOffset;
-pub use panel_mode::PanelMode;
-pub use panel_mode::RenderMode;
-pub use panel_mode::ScreenPosition;
-pub use panel_mode::SurfaceShadow;
 pub use perf::AtlasPerfStats;
 pub use perf::DiegeticPerfStats;
 pub use perf::PanelTextPerfStats;
