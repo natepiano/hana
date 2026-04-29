@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn toggle_debug_overlay(
+pub(crate) fn toggle_debug_overlay(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -20,7 +20,7 @@ pub(super) fn toggle_debug_overlay(
     }
 }
 
-pub(super) fn animate_camera(
+pub(crate) fn animate_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -83,7 +83,7 @@ pub(super) fn animate_camera(
     commands.trigger(PlayAnimation::new(camera, camera_moves));
 }
 
-pub(super) fn randomize_easing(
+pub(crate) fn randomize_easing(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut easing: ResMut<ActiveEasing>,
     time: Res<Time>,
@@ -100,7 +100,7 @@ pub(super) fn randomize_easing(
     }
 }
 
-pub(super) fn animate_fit_to_scene(
+pub(crate) fn animate_fit_to_scene(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -128,7 +128,7 @@ pub(super) fn animate_fit_to_scene(
 /// The fit is deferred one frame via `pending_fit` because `OrbitCam` needs to
 /// process the projection change (syncing radius ↔ orthographic scale) before the
 /// fit calculation can produce correct results.
-pub(super) fn toggle_projection(
+pub(crate) fn toggle_projection(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -192,7 +192,7 @@ pub(super) fn toggle_projection(
     }
 }
 
-pub(super) fn interrupt_behavior_hint_text(behavior: CameraInputInterruptBehavior) -> String {
+pub(crate) fn interrupt_behavior_hint_text(behavior: CameraInputInterruptBehavior) -> String {
     match behavior {
         CameraInputInterruptBehavior::Ignore => {
             "CameraInputInterruptBehavior::Ignore - camera input during animation is ignored".into()
@@ -207,7 +207,7 @@ pub(super) fn interrupt_behavior_hint_text(behavior: CameraInputInterruptBehavio
     }
 }
 
-pub(super) fn toggle_interrupt_behavior(
+pub(crate) fn toggle_interrupt_behavior(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -247,7 +247,7 @@ pub(super) fn toggle_interrupt_behavior(
     log.push(format!("CameraInputInterruptBehavior: {new_behavior:?}"));
 }
 
-pub(super) fn conflict_policy_hint_text(policy: AnimationConflictPolicy) -> String {
+pub(crate) fn conflict_policy_hint_text(policy: AnimationConflictPolicy) -> String {
     match policy {
         AnimationConflictPolicy::LastWins => {
             "AnimationConflictPolicy::LastWins - new animation cancels current one".into()
@@ -259,7 +259,7 @@ pub(super) fn conflict_policy_hint_text(policy: AnimationConflictPolicy) -> Stri
     }
 }
 
-pub(super) fn toggle_animation_conflict_policy(
+pub(crate) fn toggle_animation_conflict_policy(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::used_underscore_binding,
+    reason = "false positive on enum variant fields"
+)]
+
 use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::MouseMotion;
 use bevy::input::mouse::MouseScrollUnit;

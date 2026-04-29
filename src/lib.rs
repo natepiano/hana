@@ -1,10 +1,6 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-#[allow(
-    clippy::used_underscore_binding,
-    reason = "false positive on enum variant fields"
-)]
 mod animation;
 mod components;
 mod constants;
@@ -14,10 +10,6 @@ mod events;
 mod fit;
 #[cfg(feature = "fit_overlay")]
 mod fit_overlay;
-#[allow(
-    clippy::used_underscore_binding,
-    reason = "false positive on enum variant fields"
-)]
 mod input;
 mod observers;
 mod orbit_cam;

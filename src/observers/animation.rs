@@ -3,13 +3,12 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
+use crate::animation::AnimationSourceMarker;
 use crate::animation::CameraMove;
 use crate::animation::CameraMoveList;
+use crate::animation::ZoomAnimationMarker;
 use crate::components::AnimationConflictPolicy;
-use crate::components::AnimationSourceMarker;
 use crate::components::CameraInputInterruptBehavior;
-use crate::components::OrbitCamStash;
-use crate::components::ZoomAnimationMarker;
 use crate::events::AnimationBegin;
 use crate::events::AnimationCancelled;
 use crate::events::AnimationRejected;
@@ -19,6 +18,20 @@ use crate::events::ZoomBegin;
 use crate::events::ZoomCancelled;
 use crate::events::ZoomContext;
 use crate::orbit_cam::OrbitCam;
+
+/// Component that stores camera runtime state values during animations.
+///
+/// When camera animations are active (via [`CameraMoveList`]), the smoothness values are
+/// temporarily set to `0.0` for instant movement. Depending on
+/// [`CameraInputInterruptBehavior`], camera input may also be temporarily disabled.
+/// Original values are stored here and restored when the animation completes.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub(crate) struct OrbitCamStash {
+    pub(crate) zoom:    f32,
+    pub(crate) pan:     f32,
+    pub(crate) orbit:   f32,
+    pub(crate) control: Option<crate::InputControl>,
+}
 
 /// Ensures camera runtime state is stashed once and animation overrides are applied.
 fn stash_camera_state(

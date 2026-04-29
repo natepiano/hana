@@ -17,7 +17,7 @@ pub use fit_target_bounds::FitTargetOverlayConfig;
 use super::components::FitOverlay;
 
 /// Plugin that enables fit target debug visualization.
-pub(super) struct ZoomOverlayPlugin;
+pub(crate) struct ZoomOverlayPlugin;
 
 impl Plugin for ZoomOverlayPlugin {
     fn build(&self, app: &mut App) {

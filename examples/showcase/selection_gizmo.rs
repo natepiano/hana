@@ -1,12 +1,12 @@
 use super::*;
 
 #[derive(Component)]
-pub(super) struct Selected;
+pub(crate) struct Selected;
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
-pub(super) struct SelectionGizmo;
+pub(crate) struct SelectionGizmo;
 
-pub(super) fn init_selection_gizmo(mut config_store: ResMut<GizmoConfigStore>) {
+pub(crate) fn init_selection_gizmo(mut config_store: ResMut<GizmoConfigStore>) {
     let (config, _) = config_store.config_mut::<SelectionGizmo>();
     config.depth_bias = GIZMO_DEPTH_BIAS;
     config.line.width = GIZMO_LINE_WIDTH;
@@ -48,7 +48,7 @@ fn draw_shape_gizmo(
     }
 }
 
-pub(super) fn draw_selection_gizmo(
+pub(crate) fn draw_selection_gizmo(
     mut gizmos: Gizmos<SelectionGizmo>,
     query: Query<(&Transform, &scene::MeshShape), With<Selected>>,
 ) {
@@ -58,7 +58,7 @@ pub(super) fn draw_selection_gizmo(
     }
 }
 
-pub(super) fn draw_hover_gizmo(
+pub(crate) fn draw_hover_gizmo(
     mut gizmos: Gizmos<SelectionGizmo>,
     hovered: Res<pointer::HoveredEntity>,
     query: Query<(&Transform, &scene::MeshShape), Without<Selected>>,
@@ -85,7 +85,7 @@ type GizmoLayerQuery<'w, 's> = Query<
 
 /// Cameras with `FitOverlay` lose the selection gizmo layer so the outline
 /// doesn't compete with the debug overlay. Cameras without it get the layer back.
-pub(super) fn sync_selection_gizmo_layers(mut commands: Commands, camera_query: GizmoLayerQuery) {
+pub(crate) fn sync_selection_gizmo_layers(mut commands: Commands, camera_query: GizmoLayerQuery) {
     let with_selection = RenderLayers::from_layers(&[0, SELECTION_GIZMO_LAYER]);
     let without_selection = RenderLayers::layer(0);
 

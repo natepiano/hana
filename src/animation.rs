@@ -1,5 +1,9 @@
 //! Camera movement queue and animation system.
 //! Allows for simple animation of camera movements with easing functions.
+#![allow(
+    clippy::used_underscore_binding,
+    reason = "false positive on enum variant fields"
+)]
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -12,9 +16,7 @@ use bevy_kana::Position;
 
 use super::ForceUpdate;
 use super::OrbitCam;
-use super::components::AnimationSourceMarker;
 use super::components::CameraInputInterruptBehavior;
-use super::components::ZoomAnimationMarker;
 use super::constants::EXTERNAL_INPUT_TOLERANCE;
 use super::events::AnimationCancelled;
 use super::events::AnimationEnd;
@@ -22,7 +24,42 @@ use super::events::AnimationSource;
 use super::events::CameraMoveBegin;
 use super::events::CameraMoveEnd;
 use super::events::ZoomCancelled;
+use super::events::ZoomContext;
 use super::events::ZoomEnd;
+
+/// Tracks a zoom-to-fit operation routed through the animation system.
+///
+/// When `AnimationEnd` fires on an entity with this marker, `ZoomEnd` is triggered and the
+/// marker is removed. Wraps the [`ZoomContext`] that originated the zoom.
+#[derive(Component, Clone)]
+pub(crate) struct ZoomAnimationMarker(pub(crate) ZoomContext);
+
+/// Tracks which trigger source started the current animation.
+///
+/// Records whether the animation was triggered by [`PlayAnimation`](crate::PlayAnimation),
+/// [`ZoomToFit`](crate::ZoomToFit), or [`AnimateToFit`](crate::AnimateToFit). Inserted alongside
+/// [`CameraMoveList`] and removed when the animation ends or is cancelled.
+#[derive(Component)]
+pub(crate) struct AnimationSourceMarker(pub(crate) AnimationSource);
+
+#[derive(Clone, Reflect, Debug)]
+struct OrbitSnapshot {
+    focus:  Position,
+    yaw:    f32,
+    pitch:  f32,
+    radius: f32,
+}
+
+impl OrbitSnapshot {
+    const fn new(focus: Position, yaw: f32, pitch: f32, radius: f32) -> Self {
+        Self {
+            focus,
+            yaw,
+            pitch,
+            radius,
+        }
+    }
+}
 
 /// Individual camera movement with target position and duration.
 ///
@@ -140,18 +177,12 @@ pub(crate) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32
 #[derive(Clone, Reflect, Default, Debug)]
 enum MoveState {
     InProgress {
-        elapsed_ms:          f32,
-        start_focus:         Position,
-        start_pitch:         f32,
-        start_radius:        f32,
-        start_yaw:           f32,
+        elapsed_ms:   f32,
+        start:        OrbitSnapshot,
         /// Values written by the animation last frame — if the camera's current
         /// values differ, external input occurred and the animation may interrupt
         /// depending on `CameraInputInterruptBehavior`.
-        last_written_focus:  Position,
-        last_written_yaw:    f32,
-        last_written_pitch:  f32,
-        last_written_radius: f32,
+        last_written: OrbitSnapshot,
     },
     #[default]
     Ready,
@@ -162,21 +193,15 @@ impl MoveState {
     /// something other than the animation system since the last frame.
     fn externally_modified(&self, camera: &OrbitCam) -> bool {
         match self {
-            Self::InProgress {
-                last_written_focus,
-                last_written_yaw,
-                last_written_pitch,
-                last_written_radius,
-                ..
-            } => {
+            Self::InProgress { last_written, .. } => {
                 let focus_changed =
-                    last_written_focus.distance(camera.target_focus) > EXTERNAL_INPUT_TOLERANCE;
+                    last_written.focus.distance(camera.target_focus) > EXTERNAL_INPUT_TOLERANCE;
                 let yaw_changed =
-                    (last_written_yaw - camera.target_yaw).abs() > EXTERNAL_INPUT_TOLERANCE;
+                    (last_written.yaw - camera.target_yaw).abs() > EXTERNAL_INPUT_TOLERANCE;
                 let pitch_changed =
-                    (last_written_pitch - camera.target_pitch).abs() > EXTERNAL_INPUT_TOLERANCE;
+                    (last_written.pitch - camera.target_pitch).abs() > EXTERNAL_INPUT_TOLERANCE;
                 let radius_changed =
-                    (last_written_radius - camera.target_radius).abs() > EXTERNAL_INPUT_TOLERANCE;
+                    (last_written.radius - camera.target_radius).abs() > EXTERNAL_INPUT_TOLERANCE;
                 focus_changed || yaw_changed || pitch_changed || radius_changed
             },
             Self::Ready => false,
@@ -376,16 +401,16 @@ fn handle_ready_state(
     }
 
     // Transition to `InProgress` with captured starting orbital parameters
+    let current_orbit = OrbitSnapshot::new(
+        Position(pan_orbit.target_focus),
+        pan_orbit.target_yaw,
+        pan_orbit.target_pitch,
+        pan_orbit.target_radius,
+    );
     queue.state = MoveState::InProgress {
-        elapsed_ms:          0.0,
-        start_focus:         Position(pan_orbit.target_focus),
-        start_radius:        pan_orbit.target_radius,
-        start_yaw:           pan_orbit.target_yaw,
-        start_pitch:         pan_orbit.target_pitch,
-        last_written_focus:  Position(pan_orbit.target_focus),
-        last_written_yaw:    pan_orbit.target_yaw,
-        last_written_pitch:  pan_orbit.target_pitch,
-        last_written_radius: pan_orbit.target_radius,
+        elapsed_ms:   0.0,
+        start:        current_orbit.clone(),
+        last_written: current_orbit,
     };
 
     commands.trigger(CameraMoveBegin {
@@ -408,14 +433,8 @@ fn handle_in_progress(
 ) {
     let MoveState::InProgress {
         elapsed_ms,
-        start_focus,
-        start_radius,
-        start_yaw,
-        start_pitch,
-        last_written_focus,
-        last_written_yaw,
-        last_written_pitch,
-        last_written_radius,
+        start,
+        last_written,
     } = &mut queue.state
     else {
         return;
@@ -445,33 +464,33 @@ fn handle_in_progress(
     // frame). Using canonical angles on the final frame causes yaw
     // snapping when the atan2 decomposition wraps to the opposite side
     // of the PI boundary.
-    let mut yaw_diff = canonical_yaw - *start_yaw;
+    let mut yaw_diff = canonical_yaw - start.yaw;
     yaw_diff = std::f32::consts::TAU.mul_add(
         -((yaw_diff + std::f32::consts::PI) / std::f32::consts::TAU).floor(),
         yaw_diff,
     );
 
     let mut pitch_target = canonical_pitch;
-    let pitch_diff_raw = pitch_target - *start_pitch;
+    let pitch_diff_raw = pitch_target - start.pitch;
     if pitch_diff_raw > std::f32::consts::PI {
         pitch_target -= std::f32::consts::TAU;
     } else if pitch_diff_raw < -std::f32::consts::PI {
         pitch_target += std::f32::consts::TAU;
     }
-    let pitch_diff = pitch_target - *start_pitch;
+    let pitch_diff = pitch_target - start.pitch;
 
     // `ToPosition` and `ToOrbit` are both normalized to orbital params above
-    pan_orbit.target_focus = Vec3::lerp(**start_focus, current_move.focus(), t_interp);
-    pan_orbit.target_radius = (canonical_radius - *start_radius).mul_add(t_interp, *start_radius);
-    pan_orbit.target_yaw = yaw_diff.mul_add(t_interp, *start_yaw);
-    pan_orbit.target_pitch = pitch_diff.mul_add(t_interp, *start_pitch);
+    pan_orbit.target_focus = Vec3::lerp(*start.focus, current_move.focus(), t_interp);
+    pan_orbit.target_radius = (canonical_radius - start.radius).mul_add(t_interp, start.radius);
+    pan_orbit.target_yaw = yaw_diff.mul_add(t_interp, start.yaw);
+    pan_orbit.target_pitch = pitch_diff.mul_add(t_interp, start.pitch);
     pan_orbit.force_update = ForceUpdate::Pending;
 
     // Save what we wrote so we can detect external changes next frame
-    *last_written_focus = Position(pan_orbit.target_focus);
-    *last_written_yaw = pan_orbit.target_yaw;
-    *last_written_pitch = pan_orbit.target_pitch;
-    *last_written_radius = pan_orbit.target_radius;
+    last_written.focus = Position(pan_orbit.target_focus);
+    last_written.yaw = pan_orbit.target_yaw;
+    last_written.pitch = pan_orbit.target_pitch;
+    last_written.radius = pan_orbit.target_radius;
 
     // Check if move complete and advance to next
     if is_final_frame {

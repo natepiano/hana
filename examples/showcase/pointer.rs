@@ -2,9 +2,9 @@ use super::*;
 
 /// Tracks the mesh entity currently under the cursor for `LookAt` / `LookAtAndZoomToFit`.
 #[derive(Resource, Default)]
-pub(super) struct HoveredEntity(pub(super) Option<Entity>);
+pub(crate) struct HoveredEntity(pub(crate) Option<Entity>);
 
-pub(super) fn on_mesh_clicked(
+pub(crate) fn on_mesh_clicked(
     click: On<Pointer<Click>>,
     mut commands: Commands,
     selected: Query<Entity, With<selection_gizmo::Selected>>,
@@ -34,7 +34,7 @@ pub(super) fn on_mesh_clicked(
     );
 }
 
-pub(super) fn on_ground_clicked(
+pub(crate) fn on_ground_clicked(
     click: On<Pointer<Click>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -63,7 +63,7 @@ pub(super) fn on_ground_clicked(
     );
 }
 
-pub(super) fn on_below_clicked(
+pub(crate) fn on_below_clicked(
     click: On<Pointer<Click>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -94,7 +94,7 @@ pub(super) fn on_below_clicked(
     );
 }
 
-pub(super) fn on_mesh_dragged(
+pub(crate) fn on_mesh_dragged(
     drag: On<Pointer<Drag>>,
     mut transforms: Query<&mut Transform>,
     time: Res<Time<Virtual>>,
@@ -108,17 +108,17 @@ pub(super) fn on_mesh_dragged(
     }
 }
 
-pub(super) fn on_mesh_hover(hover: On<Pointer<Over>>, mut hovered: ResMut<HoveredEntity>) {
+pub(crate) fn on_mesh_hover(hover: On<Pointer<Over>>, mut hovered: ResMut<HoveredEntity>) {
     hovered.0 = Some(hover.entity);
 }
 
-pub(super) fn on_mesh_unhover(hover: On<Pointer<Out>>, mut hovered: ResMut<HoveredEntity>) {
+pub(crate) fn on_mesh_unhover(hover: On<Pointer<Out>>, mut hovered: ResMut<HoveredEntity>) {
     if hovered.0 == Some(hover.entity) {
         hovered.0 = None;
     }
 }
 
-pub(super) fn look_at_hovered(
+pub(crate) fn look_at_hovered(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     hovered: Res<HoveredEntity>,
@@ -141,7 +141,7 @@ pub(super) fn look_at_hovered(
     );
 }
 
-pub(super) fn look_at_and_zoom_to_fit_hovered(
+pub(crate) fn look_at_and_zoom_to_fit_hovered(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     hovered: Res<HoveredEntity>,

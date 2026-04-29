@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Component)]
-pub(super) struct EventLogNode;
+pub(crate) struct EventLogNode;
 
 #[derive(Component)]
-pub(super) struct EventLogHint;
+pub(crate) struct EventLogHint;
 
 #[derive(Component)]
-pub(super) struct EventLogToggleHint;
+pub(crate) struct EventLogToggleHint;
 
 struct PendingLogEntry {
     text:  String,
@@ -22,12 +22,12 @@ enum EventLogState {
 }
 
 #[derive(Resource, Default)]
-pub(super) struct EventLog {
+pub(crate) struct EventLog {
     state:   EventLogState,
     pending: Vec<PendingLogEntry>,
 }
 
-pub(super) fn spawn_ui(commands: &mut Commands, camera: Entity) {
+pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     // Event log scroll container (right edge, scrollable, hidden until enabled)
     commands.spawn((
         Node {
@@ -90,7 +90,7 @@ pub(super) fn spawn_ui(commands: &mut Commands, camera: Entity) {
 }
 
 /// Enables the event log when the initial `AnimateToFit` animation completes.
-pub(super) fn enable_log_on_initial_fit(
+pub(crate) fn enable_log_on_initial_fit(
     _animation_end: On<AnimationEnd>,
     mut commands: Commands,
     marker: Option<Res<EnableLogOnAnimationEnd>>,
@@ -136,7 +136,7 @@ pub(super) fn enable_log_on_initial_fit(
     }
 }
 
-pub(super) fn toggle_event_log(
+pub(crate) fn toggle_event_log(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut log: ResMut<EventLog>,
@@ -182,7 +182,7 @@ pub(super) fn toggle_event_log(
 }
 
 impl EventLog {
-    pub(super) fn push(&mut self, text: String) {
+    pub(crate) fn push(&mut self, text: String) {
         if self.state == EventLogState::Disabled {
             return;
         }
@@ -217,18 +217,18 @@ fn fmt_vec3(vector: Vec3) -> String {
     format!("({:.1}, {:.1}, {:.1})", vector.x, vector.y, vector.z)
 }
 
-pub(super) fn log_animation_begin(event: On<AnimationBegin>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_animation_begin(event: On<AnimationBegin>, mut log: ResMut<EventLog>) {
     log.push(format!("AnimationBegin\n  source={:?}", event.source));
 }
 
-pub(super) fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLog>) {
     log.push(format!("AnimationEnd\n  source={:?}", event.source));
     if event.source != AnimationSource::ZoomToFit {
         log.separator();
     }
 }
 
-pub(super) fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
         "CameraMoveBegin\n  translation={}\n  focus={}\n  duration={:.0}ms\n  easing={:?}",
         fmt_vec3(event.camera_move.translation()),
@@ -238,11 +238,11 @@ pub(super) fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<
     ));
 }
 
-pub(super) fn log_camera_move_end(_camera_move_end: On<CameraMoveEnd>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_camera_move_end(_camera_move_end: On<CameraMoveEnd>, mut log: ResMut<EventLog>) {
     log.push("CameraMoveEnd".into());
 }
 
-pub(super) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
         "ZoomBegin\n  margin={:.2}\n  duration={:.0}ms\n  easing={:?}",
         event.margin,
@@ -251,12 +251,12 @@ pub(super) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
     ));
 }
 
-pub(super) fn log_zoom_end(_zoom_end: On<ZoomEnd>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_zoom_end(_zoom_end: On<ZoomEnd>, mut log: ResMut<EventLog>) {
     log.push("ZoomEnd".into());
     log.separator();
 }
 
-pub(super) fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: ResMut<EventLog>) {
     log.push_error(format!(
         "AnimationCancelled\n  source={:?}\n  move_translation={}\n  move_focus={}",
         event.source,
@@ -265,17 +265,17 @@ pub(super) fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: Re
     ));
 }
 
-pub(super) fn log_zoom_cancelled(_zoom_cancelled: On<ZoomCancelled>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_zoom_cancelled(_zoom_cancelled: On<ZoomCancelled>, mut log: ResMut<EventLog>) {
     log.push_error("ZoomCancelled".into());
 }
 
-pub(super) fn log_animation_rejected(event: On<AnimationRejected>, mut log: ResMut<EventLog>) {
+pub(crate) fn log_animation_rejected(event: On<AnimationRejected>, mut log: ResMut<EventLog>) {
     log.push_error(format!("AnimationRejected\n  source={:?}", event.source));
 }
 
 /// Spawns pending log entries as child `Text` nodes inside the scroll container
 /// and auto-scrolls to the bottom.
-pub(super) fn update_event_log_text(
+pub(crate) fn update_event_log_text(
     mut commands: Commands,
     mut log: ResMut<EventLog>,
     container_query: Query<(Entity, &ComputedNode), With<EventLogNode>>,
@@ -311,7 +311,7 @@ pub(super) fn update_event_log_text(
 }
 
 /// Scrolls the event log with Up/Down arrow keys, clears with `C`.
-pub(super) fn scroll_event_log(
+pub(crate) fn scroll_event_log(
     mut commands: Commands,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut scroll_query: Query<(Entity, &mut ScrollPosition, &ComputedNode), With<EventLogNode>>,

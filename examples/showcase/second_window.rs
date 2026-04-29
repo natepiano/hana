@@ -3,18 +3,18 @@ use bevy::window::WindowFocused;
 use super::*;
 
 #[derive(Resource)]
-pub(super) struct SecondWindowEntities {
-    pub(super) window: Entity,
-    pub(super) camera: Entity,
+pub(crate) struct SecondWindowEntities {
+    pub(crate) window: Entity,
+    pub(crate) camera: Entity,
 }
 
 #[derive(Component)]
 struct SecondWindowCamera;
 
 #[derive(Component)]
-pub(super) struct WindowLabel(Timer);
+pub(crate) struct WindowLabel(Timer);
 
-pub(super) fn all_cameras(
+pub(crate) fn all_cameras(
     scene: &SceneEntities,
     second: Option<&SecondWindowEntities>,
 ) -> Vec<Entity> {
@@ -26,7 +26,7 @@ pub(super) fn all_cameras(
 }
 
 /// Returns the camera entity whose window is currently focused.
-pub(super) fn focused_camera(
+pub(crate) fn focused_camera(
     scene: &SceneEntities,
     second: Option<&SecondWindowEntities>,
     windows: &Query<&Window>,
@@ -42,7 +42,7 @@ pub(super) fn focused_camera(
     }
 }
 
-pub(super) fn toggle_second_window(
+pub(crate) fn toggle_second_window(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
@@ -124,7 +124,7 @@ pub(super) fn toggle_second_window(
     log.push("Window 2: opened".into());
 }
 
-pub(super) fn log_window_focus(
+pub(crate) fn log_window_focus(
     second: Option<Res<SecondWindowEntities>>,
     mut focus_events: MessageReader<WindowFocused>,
     mut log: ResMut<event_log::EventLog>,
@@ -147,7 +147,7 @@ pub(super) fn log_window_focus(
     }
 }
 
-pub(super) fn on_second_window_removed(
+pub(crate) fn on_second_window_removed(
     trigger: On<Remove, Window>,
     mut commands: Commands,
     second: Option<Res<SecondWindowEntities>>,
@@ -165,7 +165,7 @@ pub(super) fn on_second_window_removed(
     log.push("Window 2: closed".into());
 }
 
-pub(super) fn despawn_window_labels(
+pub(crate) fn despawn_window_labels(
     mut commands: Commands,
     time: Res<Time>,
     mut query: Query<(Entity, &mut WindowLabel)>,

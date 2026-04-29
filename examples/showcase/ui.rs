@@ -1,15 +1,15 @@
 use super::*;
 
 #[derive(Component)]
-pub(super) struct CameraInputInterruptBehaviorLabel;
+pub(crate) struct CameraInputInterruptBehaviorLabel;
 
 #[derive(Component)]
-pub(super) struct AnimationConflictPolicyLabel;
+pub(crate) struct AnimationConflictPolicyLabel;
 
 #[derive(Component)]
-pub(super) struct PausedOverlay;
+pub(crate) struct PausedOverlay;
 
-pub(super) fn spawn_ui(commands: &mut Commands, camera: Entity) {
+pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     // Instructions
     commands.spawn((
         Text::new("Click a mesh to zoom-to-fit\nClick the ground to zoom back out\n\nPress:\n'Esc' pause / unpause\n'P' toggle projection\n'D' debug overlay\n'H' Home w/animate fit to scene\n'A' animate camera\n'F' look at hovered mesh\n'G' look at + zoom-to-fit hovered mesh\n'R' randomize easing\n'E' reset to 'CubicOut' easing\n'I' toggle interrupt behavior\n'Q' cycle conflict policy\n'W' toggle second window"),
@@ -89,7 +89,7 @@ pub(super) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     ));
 }
 
-pub(super) fn toggle_pause(
+pub(crate) fn toggle_pause(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut time: ResMut<Time<Virtual>>,
     mut overlay: Query<&mut Visibility, With<PausedOverlay>>,

@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Component)]
-pub(super) enum MeshShape {
+pub(crate) enum MeshShape {
     Cuboid(Vec3),
     Sphere(f32),
     Torus {
@@ -10,7 +10,7 @@ pub(super) enum MeshShape {
     },
 }
 
-pub(super) fn spawn_scene_objects(
+pub(crate) fn spawn_scene_objects(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
