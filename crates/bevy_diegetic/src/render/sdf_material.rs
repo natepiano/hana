@@ -81,6 +81,30 @@ impl MaterialExtension for SdfPanelExtension {
     }
 }
 
+/// Inputs for a rounded-rectangle panel material.
+pub struct SdfPanelMaterialInput {
+    pub half_size:        Vec2,
+    pub mesh_half_size:   Vec2,
+    pub corner_radii:     [f32; 4],
+    pub border_widths:    [f32; 4],
+    pub border_color:     Option<Color>,
+    pub clip_rect:        Vec4,
+    pub oit_depth_offset: f32,
+}
+
+/// Inputs for a shaped SDF material.
+pub struct SdfShapeMaterialInput {
+    pub half_size:        Vec2,
+    pub mesh_half_size:   Vec2,
+    pub corner_radii:     [f32; 4],
+    pub border_widths:    [f32; 4],
+    pub border_color:     Option<Color>,
+    pub shape_kind:       u32,
+    pub shape_params:     Vec4,
+    pub clip_rect:        Vec4,
+    pub oit_depth_offset: f32,
+}
+
 /// Creates a new [`SdfPanelMaterial`] from a resolved base `StandardMaterial`.
 ///
 /// The base material's PBR properties (roughness, metallic, reflectance,
@@ -89,29 +113,21 @@ impl MaterialExtension for SdfPanelExtension {
 #[must_use]
 pub fn sdf_panel_material(
     base: StandardMaterial,
-    half_width: f32,
-    half_height: f32,
-    mesh_half_width: f32,
-    mesh_half_height: f32,
-    corner_radii: [f32; 4],
-    border_widths: [f32; 4],
-    border_color: Option<Color>,
-    clip_rect: Vec4,
-    oit_depth_offset: f32,
+    input: SdfPanelMaterialInput,
 ) -> SdfPanelMaterial {
     sdf_shape_material(
         base,
-        half_width,
-        half_height,
-        mesh_half_width,
-        mesh_half_height,
-        corner_radii,
-        border_widths,
-        border_color,
-        0,
-        Vec4::ZERO,
-        clip_rect,
-        oit_depth_offset,
+        SdfShapeMaterialInput {
+            half_size:        input.half_size,
+            mesh_half_size:   input.mesh_half_size,
+            corner_radii:     input.corner_radii,
+            border_widths:    input.border_widths,
+            border_color:     input.border_color,
+            shape_kind:       0,
+            shape_params:     Vec4::ZERO,
+            clip_rect:        input.clip_rect,
+            oit_depth_offset: input.oit_depth_offset,
+        },
     )
 }
 
@@ -119,17 +135,7 @@ pub fn sdf_panel_material(
 #[must_use]
 pub fn sdf_shape_material(
     mut base: StandardMaterial,
-    half_width: f32,
-    half_height: f32,
-    mesh_half_width: f32,
-    mesh_half_height: f32,
-    corner_radii: [f32; 4],
-    border_widths: [f32; 4],
-    border_color: Option<Color>,
-    shape_kind: u32,
-    shape_params: Vec4,
-    clip_rect: Vec4,
-    oit_depth_offset: f32,
+    input: SdfShapeMaterialInput,
 ) -> SdfPanelMaterial {
     base.double_sided = true;
     base.cull_mode = None;
@@ -137,25 +143,25 @@ pub fn sdf_shape_material(
     base.alpha_mode = AlphaMode::Blend;
     let fill_alpha = base.base_color.alpha();
 
-    let border_linear: Vec4 = border_color.map_or(Vec4::ZERO, |c| {
-        let l: LinearRgba = c.into();
-        Vec4::new(l.red, l.green, l.blue, l.alpha)
+    let border_linear: Vec4 = input.border_color.map_or(Vec4::ZERO, |color| {
+        let linear: LinearRgba = color.into();
+        Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
     });
 
     ExtendedMaterial {
         base,
         extension: SdfPanelExtension {
             uniforms: SdfPanelUniform {
-                half_size: Vec2::new(half_width, half_height),
-                mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
-                corner_radii: Vec4::from_array(corner_radii),
-                border_widths: Vec4::from_array(border_widths),
+                half_size: input.half_size,
+                mesh_half_size: input.mesh_half_size,
+                corner_radii: Vec4::from_array(input.corner_radii),
+                border_widths: Vec4::from_array(input.border_widths),
                 border_color: border_linear,
-                shape_kind,
-                shape_params,
+                shape_kind: input.shape_kind,
+                shape_params: input.shape_params,
                 fill_alpha,
-                clip_rect,
-                oit_depth_offset,
+                clip_rect: input.clip_rect,
+                oit_depth_offset: input.oit_depth_offset,
             },
         },
     }

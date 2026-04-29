@@ -164,8 +164,8 @@ mod tests {
     use crate::text::FontRegistry;
 
     fn measurer() -> MeasureTextFn {
-        let registry = FontRegistry::new().unwrap();
-        create_parley_measurer(registry.font_context(), registry.family_names())
+        let font_registry = FontRegistry::new().unwrap();
+        create_parley_measurer(font_registry.font_context(), font_registry.family_names())
     }
 
     fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_measure() }

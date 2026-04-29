@@ -2,6 +2,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::color::Color;
 use bevy::light::NotShadowCaster;
 use bevy::math::Quat;
+use bevy::math::Vec2;
 use bevy::math::Vec3;
 use bevy::math::Vec4;
 use bevy::prelude::AlphaMode;
@@ -246,15 +247,15 @@ fn spawn_segment(
 
     let material = render::sdf_panel_material(
         base,
-        half_w,
-        half_h,
-        mesh_half_w,
-        mesh_half_h,
-        [0.0; 4],
-        [0.0, 0.0, thickness, 0.0],
-        Some(color),
-        Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
-        order.to_f32() * OIT_DEPTH_STEP,
+        render::SdfPanelMaterialInput {
+            half_size:        Vec2::new(half_w, half_h),
+            mesh_half_size:   Vec2::new(mesh_half_w, mesh_half_h),
+            corner_radii:     [0.0; 4],
+            border_widths:    [0.0, 0.0, thickness, 0.0],
+            border_color:     Some(color),
+            clip_rect:        Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+            oit_depth_offset: order.to_f32() * OIT_DEPTH_STEP,
+        },
     );
     let mesh = ctx
         .meshes
@@ -319,17 +320,17 @@ fn spawn_cap_shape(
 
     let material = render::sdf_shape_material(
         base,
-        half_w,
-        half_h,
-        mesh_half_w,
-        mesh_half_h,
-        [0.0; 4],
-        [0.0; 4],
-        None,
-        shape.sdf_kind(),
-        shape_params,
-        Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
-        order.to_f32() * OIT_DEPTH_STEP,
+        render::SdfShapeMaterialInput {
+            half_size: Vec2::new(half_w, half_h),
+            mesh_half_size: Vec2::new(mesh_half_w, mesh_half_h),
+            corner_radii: [0.0; 4],
+            border_widths: [0.0; 4],
+            border_color: None,
+            shape_kind: shape.sdf_kind(),
+            shape_params,
+            clip_rect: Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+            oit_depth_offset: order.to_f32() * OIT_DEPTH_STEP,
+        },
     );
     let mesh = ctx
         .meshes

@@ -454,12 +454,12 @@ impl MsdfAtlas {
     /// ```ignore
     /// app.add_observer(|trigger: On<FontRegistered>,
     ///                    mut atlas: ResMut<MsdfAtlas>,
-    ///                    registry: Res<FontRegistry>| {
-    ///     atlas.preload("ABCDEF...", trigger.id, &registry);
+    ///                    font_registry: Res<FontRegistry>| {
+    ///     atlas.preload("ABCDEF...", trigger.id, &font_registry);
     /// });
     /// ```
-    pub fn preload(&mut self, text: &str, font_id: FontId, registry: &FontRegistry) {
-        let Some(font_data) = registry.font(font_id).map(Font::data) else {
+    pub fn preload(&mut self, text: &str, font_id: FontId, font_registry: &FontRegistry) {
+        let Some(font_data) = font_registry.font(font_id).map(Font::data) else {
             return;
         };
         let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {

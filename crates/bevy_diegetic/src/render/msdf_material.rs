@@ -6,6 +6,7 @@
 
 use bevy::asset::Asset;
 use bevy::image::Image;
+use bevy::math::UVec2;
 use bevy::math::Vec4;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
@@ -21,9 +22,9 @@ use bevy_kana::ToF32;
 /// The full MSDF text material type: `StandardMaterial` extended with MSDF
 /// atlas decoding.
 ///
-/// Use `MsdfTextMaterial::new(...)` to create instances. The `base` field
-/// exposes all `StandardMaterial` properties (metallic, roughness, emissive,
-/// `double_sided`, etc.) for full PBR control.
+/// Use [`msdf_text_material`] or [`msdf_shadow_proxy_material`] to create
+/// instances. The `base` field exposes all `StandardMaterial` properties
+/// (metallic, roughness, emissive, `double_sided`, etc.) for full PBR control.
 pub(super) type MsdfTextMaterial = ExtendedMaterial<StandardMaterial, MsdfExtension>;
 
 /// Uniform data for the MSDF extension shader.
@@ -100,42 +101,61 @@ impl MaterialExtension for MsdfExtension {
     }
 }
 
+/// Inputs for a visible MSDF text material.
+pub(super) struct MsdfTextMaterialInput {
+    pub base:             StandardMaterial,
+    pub sdf_range:        f32,
+    pub atlas_dimensions: UVec2,
+    pub atlas_texture:    Handle<Image>,
+    pub hue_offset:       f32,
+    pub render_mode:      u32,
+    pub clip_rect:        Vec4,
+    pub oit_depth_offset: f32,
+    pub alpha_mode:       AlphaMode,
+}
+
+/// Inputs for a shadow-proxy MSDF text material.
+pub(super) struct MsdfShadowProxyMaterialInput {
+    pub base:             StandardMaterial,
+    pub sdf_range:        f32,
+    pub atlas_dimensions: UVec2,
+    pub atlas_texture:    Handle<Image>,
+    pub hue_offset:       f32,
+    pub render_mode:      u32,
+    pub clip_rect:        Vec4,
+    pub oit_depth_offset: f32,
+}
+
 /// Creates a new [`MsdfTextMaterial`] from a resolved base `StandardMaterial`.
 ///
 /// The base material's `alpha_mode` is overridden with the resolved
-/// [`AlphaMode`] passed by the caller. Other PBR properties, including
+/// [`AlphaMode`] from `input`. Other PBR properties, including
 /// sidedness/culling, are preserved from the caller.
 #[must_use]
-pub(super) fn msdf_text_material(
-    mut base: StandardMaterial,
-    sdf_range: f32,
-    atlas_width: u32,
-    atlas_height: u32,
-    atlas_texture: Handle<Image>,
-    hue_offset: f32,
-    render_mode: u32,
-    clip_rect: Vec4,
-    oit_depth_offset: f32,
-    alpha_mode: AlphaMode,
-) -> MsdfTextMaterial {
+pub(super) fn msdf_text_material(input: MsdfTextMaterialInput) -> MsdfTextMaterial {
+    let MsdfTextMaterialInput {
+        mut base,
+        sdf_range,
+        atlas_dimensions,
+        atlas_texture,
+        hue_offset,
+        render_mode,
+        clip_rect,
+        oit_depth_offset,
+        alpha_mode,
+    } = input;
     base.alpha_mode = alpha_mode;
-
-    ExtendedMaterial {
+    build_msdf_material(
         base,
-        extension: MsdfExtension {
-            uniforms: MsdfTextUniform {
-                sdf_range,
-                atlas_width: atlas_width.to_f32(),
-                atlas_height: atlas_height.to_f32(),
-                hue_offset,
-                render_mode,
-                is_shadow_proxy: 0,
-                clip_rect,
-                oit_depth_offset,
-            },
-            atlas_texture,
-        },
-    }
+        sdf_range,
+        atlas_dimensions,
+        atlas_texture,
+        hue_offset,
+        render_mode,
+        clip_rect,
+        oit_depth_offset,
+        0,
+    )
 }
 
 /// Creates a shadow proxy [`MsdfTextMaterial`] from a resolved base.
@@ -144,29 +164,52 @@ pub(super) fn msdf_text_material(
 /// - `alpha_mode: Mask(0.5)` so the shadow prepass runs the fragment shader
 /// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments
 #[must_use]
-pub(super) fn msdf_shadow_proxy_material(
-    mut base: StandardMaterial,
+pub(super) fn msdf_shadow_proxy_material(input: MsdfShadowProxyMaterialInput) -> MsdfTextMaterial {
+    let MsdfShadowProxyMaterialInput {
+        mut base,
+        sdf_range,
+        atlas_dimensions,
+        atlas_texture,
+        hue_offset,
+        render_mode,
+        clip_rect,
+        oit_depth_offset,
+    } = input;
+    base.alpha_mode = AlphaMode::Mask(0.5);
+    build_msdf_material(
+        base,
+        sdf_range,
+        atlas_dimensions,
+        atlas_texture,
+        hue_offset,
+        render_mode,
+        clip_rect,
+        oit_depth_offset,
+        1,
+    )
+}
+
+fn build_msdf_material(
+    base: StandardMaterial,
     sdf_range: f32,
-    atlas_width: u32,
-    atlas_height: u32,
+    atlas_dimensions: UVec2,
     atlas_texture: Handle<Image>,
     hue_offset: f32,
     render_mode: u32,
     clip_rect: Vec4,
     oit_depth_offset: f32,
+    is_shadow_proxy: u32,
 ) -> MsdfTextMaterial {
-    base.alpha_mode = AlphaMode::Mask(0.5);
-
     ExtendedMaterial {
         base,
         extension: MsdfExtension {
             uniforms: MsdfTextUniform {
                 sdf_range,
-                atlas_width: atlas_width.to_f32(),
-                atlas_height: atlas_height.to_f32(),
+                atlas_width: atlas_dimensions.x.to_f32(),
+                atlas_height: atlas_dimensions.y.to_f32(),
                 hue_offset,
                 render_mode,
-                is_shadow_proxy: 1,
+                is_shadow_proxy,
                 clip_rect,
                 oit_depth_offset,
             },

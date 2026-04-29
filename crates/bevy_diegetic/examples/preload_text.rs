@@ -170,7 +170,7 @@ fn setup(
 fn on_font_registered(
     trigger: On<FontRegistered>,
     mut atlas: ResMut<MsdfAtlas>,
-    registry: Res<FontRegistry>,
+    font_registry: Res<FontRegistry>,
     mut commands: Commands,
 ) {
     let font_id = trigger.id;
@@ -178,7 +178,7 @@ fn on_font_registered(
 
     let (label, color, y, policy) = if is_embedded {
         // Preload the embedded font's glyphs.
-        atlas.preload(SAMPLE_TEXT, font_id, &registry);
+        atlas.preload(SAMPLE_TEXT, font_id, &font_registry);
         (
             format!("preloaded ({}): {SAMPLE_TEXT}", trigger.name),
             Color::srgb(0.2, 0.8, 0.3),

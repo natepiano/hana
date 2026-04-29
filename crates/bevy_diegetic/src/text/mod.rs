@@ -52,15 +52,15 @@ impl Plugin for TextPlugin {
     fn build(&self, app: &mut App) {
         // Preserve the font-parse-failure gate: if the embedded font fails
         // to parse, skip text setup entirely (the plugin stack is disabled).
-        let Some(registry) = FontRegistry::new() else {
+        let Some(font_registry) = FontRegistry::new() else {
             warn!("bevy_diegetic: embedded font failed to parse — text plugin disabled");
             return;
         };
 
         let measurer = DiegeticTextMeasurer {
             measure_fn: measurer::create_parley_measurer(
-                registry.font_context(),
-                registry.family_names(),
+                font_registry.font_context(),
+                font_registry.family_names(),
             ),
         };
 
@@ -87,7 +87,7 @@ impl Plugin for TextPlugin {
             ));
         }
 
-        app.insert_resource(registry)
+        app.insert_resource(font_registry)
             .insert_resource(measurer)
             .init_asset::<Font>()
             .init_asset_loader::<FontLoader>()
@@ -117,17 +117,17 @@ fn init_atlas_and_embedded_font(
 fn consume_loaded_fonts(
     mut events: MessageReader<AssetEvent<Font>>,
     font_assets: Res<Assets<Font>>,
-    mut registry: ResMut<FontRegistry>,
+    mut font_registry: ResMut<FontRegistry>,
     mut commands: Commands,
 ) {
     for event in events.read() {
         if let AssetEvent::Added { id } = event
             && let Some(font) = font_assets.get(*id)
         {
-            if registry.font_id_by_name(font.name()).is_some() {
+            if font_registry.font_id_by_name(font.name()).is_some() {
                 continue;
             }
-            if let Some(font_id) = registry.register_font(font.name(), font.data()) {
+            if let Some(font_id) = font_registry.register_font(font.name(), font.data()) {
                 commands.trigger(FontRegistered {
                     id:     font_id,
                     name:   (*font.name()).to_string(),

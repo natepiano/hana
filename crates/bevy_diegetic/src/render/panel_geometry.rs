@@ -20,6 +20,7 @@ use super::panel_rtt;
 use super::panel_rtt::PanelRttRegistry;
 use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
+use super::sdf_material::SdfPanelMaterialInput;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
@@ -139,48 +140,37 @@ fn build_panel_geometry(
         let gathered = gather_surfaces(&result.commands);
 
         // ── Spawn SDF quads ─────────────────────────────────────────
-        for surface in gathered.surfaces.values() {
-            spawn_sdf_element(
+        {
+            let mut spawn_context = SdfElementSpawnContext {
                 panel,
-                surface,
                 render_style,
                 shadow_mode,
                 points_to_world,
                 anchor_x,
                 anchor_y,
-                &layer,
-                &mut meshes,
-                &mut sdf_materials,
-                &mut commands,
+                layer: &layer,
+                meshes: &mut meshes,
+                sdf_materials: &mut sdf_materials,
+                commands: &mut commands,
                 panel_entity,
-            );
-        }
-
-        // ── Spawn between-children dividers as SDF elements ─────────
-        for &(cmd_index, bounds, color, clip) in &gathered.dividers {
-            let divider_surface = ElementSurface {
-                element_idx: usize::MAX,
-                bounds,
-                fill_color: Some(color),
-                border_widths: [0.0; 4],
-                border_color: None,
-                command_index: cmd_index,
-                clip_rect: clip,
             };
-            spawn_sdf_element(
-                panel,
-                &divider_surface,
-                render_style,
-                shadow_mode,
-                points_to_world,
-                anchor_x,
-                anchor_y,
-                &layer,
-                &mut meshes,
-                &mut sdf_materials,
-                &mut commands,
-                panel_entity,
-            );
+            for surface in gathered.surfaces.values() {
+                spawn_sdf_element(surface, &mut spawn_context);
+            }
+
+            // ── Spawn between-children dividers as SDF elements ─────────
+            for &(cmd_index, bounds, color, clip) in &gathered.dividers {
+                let divider_surface = ElementSurface {
+                    element_idx: usize::MAX,
+                    bounds,
+                    fill_color: Some(color),
+                    border_widths: [0.0; 4],
+                    border_color: None,
+                    command_index: cmd_index,
+                    clip_rect: clip,
+                };
+                spawn_sdf_element(&divider_surface, &mut spawn_context);
+            }
         }
 
         // ── Interaction mesh (Geometry mode only) ───────────────────
@@ -280,22 +270,26 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
     GatheredCommands { surfaces, dividers }
 }
 
-fn spawn_sdf_element(
-    panel: &DiegeticPanel,
-    surface: &ElementSurface,
-    render_style: RenderStyle,
-    shadow_mode: ShadowMode,
+struct SdfElementSpawnContext<'a, 'w, 's> {
+    panel:           &'a DiegeticPanel,
+    render_style:    RenderStyle,
+    shadow_mode:     ShadowMode,
     points_to_world: f32,
-    anchor_x: f32,
-    anchor_y: f32,
-    layer: &RenderLayers,
-    meshes: &mut Assets<Mesh>,
-    sdf_materials: &mut Assets<SdfPanelMaterial>,
-    commands: &mut Commands,
-    panel_entity: Entity,
-) {
-    let element_mat = panel.tree().element_material(surface.element_idx);
-    let corner_radius = panel.tree().element_corner_radius(surface.element_idx);
+    anchor_x:        f32,
+    anchor_y:        f32,
+    layer:           &'a RenderLayers,
+    meshes:          &'a mut Assets<Mesh>,
+    sdf_materials:   &'a mut Assets<SdfPanelMaterial>,
+    commands:        &'a mut Commands<'w, 's>,
+    panel_entity:    Entity,
+}
+
+fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnContext<'_, '_, '_>) {
+    let element_mat = context.panel.tree().element_material(surface.element_idx);
+    let corner_radius = context
+        .panel
+        .tree()
+        .element_corner_radius(surface.element_idx);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -305,17 +299,22 @@ fn spawn_sdf_element(
             Some(Color::NONE)
         }
     });
-    let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
-    if render_style == RenderStyle::Texture {
+    let mut base =
+        constants::resolve_material(element_mat, context.panel.material(), effective_color);
+    if context.render_style == RenderStyle::Texture {
         base.unlit = true;
     } else {
         base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
     }
 
-    let world_w = surface.bounds.width * points_to_world;
-    let world_h = surface.bounds.height * points_to_world;
-    let world_radii = corner_radius.to_array().map(|r| r * points_to_world);
-    let world_borders = surface.border_widths.map(|w| w * points_to_world);
+    let world_w = surface.bounds.width * context.points_to_world;
+    let world_h = surface.bounds.height * context.points_to_world;
+    let world_radii = corner_radius
+        .to_array()
+        .map(|radius| radius * context.points_to_world);
+    let world_borders = surface
+        .border_widths
+        .map(|width| width * context.points_to_world);
 
     let half_w = world_w * 0.5;
     let half_h = world_h * 0.5;
@@ -329,50 +328,60 @@ fn spawn_sdf_element(
     // Convert layout-space clip rect to local quad coords (centered, Y-up).
     let clip_rect = surface.clip_rect.map_or_else(
         || bevy::math::Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
-        |cr| {
+        |clip_rect| {
             let (cx, cy) = surface.bounds.center();
-            let left = (cr.x - cx) * points_to_world;
-            let right = (cr.x + cr.width - cx) * points_to_world;
+            let left = (clip_rect.x - cx) * context.points_to_world;
+            let right = (clip_rect.x + clip_rect.width - cx) * context.points_to_world;
             // Layout Y-down → local Y-up.
-            let top = -(cr.y - cy) * points_to_world;
-            let bottom = -(cr.y + cr.height - cy) * points_to_world;
+            let top = -(clip_rect.y - cy) * context.points_to_world;
+            let bottom = -(clip_rect.y + clip_rect.height - cy) * context.points_to_world;
             bevy::math::Vec4::new(left, bottom.min(top), right, bottom.max(top))
         },
     );
 
-    let oit_depth_offset = surface.command_index.to_f32() * constants::OIT_DEPTH_STEP;
     let sdf_mat = sdf_material::sdf_panel_material(
         base,
-        half_w,
-        half_h,
-        mesh_half_w,
-        mesh_half_h,
-        world_radii,
-        world_borders,
-        surface.border_color,
-        clip_rect,
-        oit_depth_offset,
+        SdfPanelMaterialInput {
+            half_size: Vec2::new(half_w, half_h),
+            mesh_half_size: Vec2::new(mesh_half_w, mesh_half_h),
+            corner_radii: world_radii,
+            border_widths: world_borders,
+            border_color: surface.border_color,
+            clip_rect,
+            oit_depth_offset: surface.command_index.to_f32() * constants::OIT_DEPTH_STEP,
+        },
     );
 
-    let world_rect = bounds_to_world_rect(&surface.bounds, points_to_world, anchor_x, anchor_y);
+    let world_rect = bounds_to_world_rect(
+        &surface.bounds,
+        context.points_to_world,
+        context.anchor_x,
+        context.anchor_y,
+    );
 
-    let mesh = meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
-    let mat_handle = sdf_materials.add(sdf_mat);
+    let mesh = context
+        .meshes
+        .add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
+    let mat_handle = context.sdf_materials.add(sdf_mat);
     let base_components = (
         PanelSdfMesh,
         Mesh3d(mesh),
         MeshMaterial3d(mat_handle),
         Transform::from_xyz(world_rect.center_x, world_rect.center_y, 0.0),
-        layer.clone(),
+        context.layer.clone(),
     );
-    match shadow_mode {
+    match context.shadow_mode {
         ShadowMode::Suppressed => {
-            commands
-                .entity(panel_entity)
+            context
+                .commands
+                .entity(context.panel_entity)
                 .with_child((base_components, NotShadowCaster));
         },
         ShadowMode::Enabled => {
-            commands.entity(panel_entity).with_child(base_components);
+            context
+                .commands
+                .entity(context.panel_entity)
+                .with_child(base_components);
         },
     }
 }

@@ -12,11 +12,13 @@ use super::constants;
 use super::glyph_quad;
 use super::glyph_quad::GlyphQuadData;
 use super::msdf_material;
+use super::msdf_material::MsdfShadowProxyMaterialInput;
 use super::msdf_material::MsdfTextMaterial;
-use super::text_renderer;
-use super::text_renderer::GlyphReadiness;
-use super::text_renderer::TextBuildStats;
-use super::text_renderer::TextShapingContext;
+use super::msdf_material::MsdfTextMaterialInput;
+use super::text_shaping;
+use super::text_shaping::GlyphReadiness;
+use super::text_shaping::TextBuildStats;
+use super::text_shaping::TextShapingContext;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
 use crate::cascade::Resolved;
@@ -273,7 +275,7 @@ pub(super) fn render_world_text(
         );
         text_stats.accumulate(&shaped.stats);
 
-        let readiness = GlyphReadiness::from_stats(&shaped.stats);
+        let readiness = GlyphReadiness::from(&shaped.stats);
 
         #[cfg(feature = "typography_overlay")]
         if readiness == GlyphReadiness::Ready {
@@ -501,18 +503,17 @@ fn spawn_world_text_meshes(
                 ..Default::default()
             };
             apply_sidedness(&mut visible_base, style.sidedness());
-            let mat = msdf_material::msdf_text_material(
-                visible_base,
-                MsdfAtlas::sdf_range().to_f32(),
-                atlas.width(),
-                atlas.height(),
-                page_image.clone(),
-                0.0,
-                u32::from(style.render_mode()),
-                constants::UNCLIPPED_TEXT_CLIP_RECT,
-                constants::OIT_DEPTH_STEP,
+            let mat = msdf_material::msdf_text_material(MsdfTextMaterialInput {
+                base: visible_base,
+                sdf_range: MsdfAtlas::sdf_range().to_f32(),
+                atlas_dimensions: UVec2::new(atlas.width(), atlas.height()),
+                atlas_texture: page_image.clone(),
+                hue_offset: 0.0,
+                render_mode: u32::from(style.render_mode()),
+                clip_rect: constants::UNCLIPPED_TEXT_CLIP_RECT,
+                oit_depth_offset: constants::OIT_DEPTH_STEP,
                 alpha_mode,
-            );
+            });
 
             let material_handle = assets.materials.add(mat);
 
@@ -550,15 +551,16 @@ fn spawn_world_text_meshes(
             let proxy_material = assets
                 .materials
                 .add(msdf_material::msdf_shadow_proxy_material(
-                    proxy_base,
-                    MsdfAtlas::sdf_range().to_f32(),
-                    atlas.width(),
-                    atlas.height(),
-                    page_image,
-                    0.0,
-                    shadow_render_mode,
-                    constants::UNCLIPPED_TEXT_CLIP_RECT,
-                    0.0,
+                    MsdfShadowProxyMaterialInput {
+                        base:             proxy_base,
+                        sdf_range:        MsdfAtlas::sdf_range().to_f32(),
+                        atlas_dimensions: UVec2::new(atlas.width(), atlas.height()),
+                        atlas_texture:    page_image,
+                        hue_offset:       0.0,
+                        render_mode:      shadow_render_mode,
+                        clip_rect:        constants::UNCLIPPED_TEXT_CLIP_RECT,
+                        oit_depth_offset: 0.0,
+                    },
                 ));
 
             assets.commands.entity(entity).with_child((
@@ -636,7 +638,7 @@ fn shape_world_text(
         ..Default::default()
     };
     let shape_start = Instant::now();
-    let shaped = text_renderer::shape_text_cached(text, &config, font_registry, shaping_cx, cache);
+    let shaped = text_shaping::shape_text_cached(text, &config, font_registry, shaping_cx, cache);
     stats.shape_ms = shape_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     stats.glyphs = shaped.glyphs.len();
 

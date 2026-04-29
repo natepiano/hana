@@ -225,7 +225,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     mut font_handles: ResMut<FontHandles>,
-    registry: Res<FontRegistry>,
+    font_registry: Res<FontRegistry>,
 ) {
     load_fonts(&asset_server, &mut font_handles);
     // Ground plane — subtle, light gray.
@@ -269,7 +269,7 @@ fn setup(
     ));
 
     spawn_lights(&mut commands);
-    spawn_hud_panels(&mut commands, &registry);
+    spawn_hud_panels(&mut commands, &font_registry);
 
     // Camera
     commands.spawn((OrbitCam {
@@ -294,7 +294,7 @@ fn setup(
     },));
 }
 
-fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
+fn spawn_hud_panels(commands: &mut Commands, font_registry: &FontRegistry) {
     let unlit_material = bevy_diegetic::default_panel_material();
     let unlit = StandardMaterial {
         unlit: true,
@@ -323,7 +323,7 @@ fn spawn_hud_panels(commands: &mut Commands, registry: &FontRegistry) {
         .anchor(bevy_diegetic::Anchor::TopRight)
         .material(unlit.clone())
         .text_material(unlit.clone())
-        .with_tree(build_fonts_panel(registry, 0))
+        .with_tree(build_fonts_panel(font_registry, 0))
         .build();
     let Ok(fonts_panel) = fonts_panel else {
         error!("failed to build fonts HUD dimensions");
@@ -553,14 +553,14 @@ fn build_font_key_cells(selected_font: usize) -> Vec<ColumnCell<'static>> {
 }
 
 fn build_font_name_cells(
-    registry: &FontRegistry,
+    font_registry: &FontRegistry,
     selected_font: usize,
 ) -> Vec<ColumnCell<'static>> {
     FONT_KEYS
         .iter()
         .enumerate()
         .map(|(idx, (_, name, _))| {
-            let font_id = registry
+            let font_id = font_registry
                 .font_id_by_name(name)
                 .unwrap_or(FontId::MONOSPACE)
                 .0;
@@ -574,10 +574,13 @@ fn build_font_name_cells(
         .collect()
 }
 
-fn build_fonts_panel(registry: &FontRegistry, selected_font: usize) -> bevy_diegetic::LayoutTree {
+fn build_fonts_panel(
+    font_registry: &FontRegistry,
+    selected_font: usize,
+) -> bevy_diegetic::LayoutTree {
     let row_h = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
     let key_cells = build_font_key_cells(selected_font);
-    let name_cells = build_font_name_cells(registry, selected_font);
+    let name_cells = build_font_name_cells(font_registry, selected_font);
 
     let mut builder = LayoutBuilder::new(FONTS_PANEL_WIDTH, FONTS_PANEL_HEIGHT);
     builder.with(
@@ -791,7 +794,7 @@ fn column(b: &mut LayoutBuilder, align: AlignX, row_height: Sizing, cells: &[Col
 fn on_font_registered(
     trigger: On<FontRegistered>,
     mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
-    registry: Res<FontRegistry>,
+    font_registry: Res<FontRegistry>,
     selected_font: Res<SelectedFont>,
 ) {
     info!(
@@ -800,7 +803,7 @@ fn on_font_registered(
     );
     for mut panel in &mut panels {
         info!("Rebuilding fonts panel");
-        panel.set_tree(build_fonts_panel(&registry, selected_font.0));
+        panel.set_tree(build_fonts_panel(&font_registry, selected_font.0));
     }
 }
 
@@ -895,7 +898,7 @@ fn cycle_word(
 
 fn switch_font(
     keyboard: Res<ButtonInput<KeyCode>>,
-    registry: Res<FontRegistry>,
+    font_registry: Res<FontRegistry>,
     mut selected_font: ResMut<SelectedFont>,
     mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
     mut texts: Query<&mut WorldTextStyle, With<DisplayText>>,
@@ -908,7 +911,7 @@ fn switch_font(
         return;
     };
     selected_font.0 = idx;
-    let font_id = registry
+    let font_id = font_registry
         .font_id_by_name(name)
         .unwrap_or(FontId::MONOSPACE)
         .0;
@@ -918,6 +921,6 @@ fn switch_font(
             .with_color(Color::srgb(0.9, 0.9, 0.9));
     }
     for mut panel in &mut panels {
-        panel.set_tree(build_fonts_panel(&registry, selected_font.0));
+        panel.set_tree(build_fonts_panel(&font_registry, selected_font.0));
     }
 }
