@@ -31,16 +31,16 @@ fn main() {
     println!("position.x = {}", position.x);
     println!("velocity.length() = {}", velocity.length());
 
-    // Use Deref to access Vec3 methods like dot product
+    // Use `Deref` to access `Vec3` methods like dot product
     println!("dot(position, velocity) = {}", position.dot(*velocity));
 
     println!("\n=== into_inner / From / Into: Bevy API interop ===\n");
 
-    // Escape hatch for APIs that expect raw Vec3
+    // Escape hatch for APIs that expect raw `Vec3`
     let raw: Vec3 = position.into_inner();
     println!("into_inner: {raw:?}");
 
-    // From/Into conversions work both ways
+    // `From`/`Into` conversions work both ways
     let from_vec: Position = Vec3::new(1.0, 2.0, 3.0).into();
     let back_to_vec: Vec3 = from_vec.into();
     println!("roundtrip: {back_to_vec:?}");
