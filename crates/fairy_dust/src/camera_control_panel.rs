@@ -85,7 +85,7 @@ fn build_layout(b: &mut LayoutBuilder) {
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(FRAME_PAD))
-            .corner_radius(CornerRadius::new(RADIUS, Px(0.0), RADIUS, Px(0.0)))
+            .corner_radius(CornerRadius::all(RADIUS))
             .background(FRAME_BG)
             .border(Border::all(BORDER, BORDER_ACCENT)),
         |b| {
@@ -96,12 +96,7 @@ fn build_layout(b: &mut LayoutBuilder) {
                     .direction(Direction::TopToBottom)
                     .padding(Padding::all(Px(10.0)))
                     .child_gap(Px(6.0))
-                    .corner_radius(CornerRadius::new(
-                        INNER_RADIUS,
-                        Px(0.0),
-                        INNER_RADIUS,
-                        Px(0.0),
-                    ))
+                    .corner_radius(CornerRadius::all(INNER_RADIUS))
                     .background(INNER_BG)
                     .border(Border::all(Px(1.0), BORDER_DIM)),
                 |b| {
