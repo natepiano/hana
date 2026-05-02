@@ -124,7 +124,7 @@ mod tests {
     fn from_into_roundtrip() {
         let vec2 = Vec2::new(100.0, 200.0);
         let screen_position = ScreenPosition::from(vec2);
-        let back: Vec2 = screen_position.into();
-        assert_eq!(vec2, back);
+        let round_tripped_vec2: Vec2 = screen_position.into();
+        assert_eq!(vec2, round_tripped_vec2);
     }
 }

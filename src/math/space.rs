@@ -175,8 +175,8 @@ mod tests {
     fn displacement_from_into_roundtrip() {
         let vec3 = Vec3::new(1.0, 2.0, 3.0);
         let displacement = Displacement::from(vec3);
-        let back: Vec3 = displacement.into();
-        assert_eq!(vec3, back);
+        let round_tripped_vec3: Vec3 = displacement.into();
+        assert_eq!(vec3, round_tripped_vec3);
     }
 
     #[test]
@@ -189,8 +189,8 @@ mod tests {
     fn orientation_from_into_roundtrip() {
         let quat = Quat::from_rotation_y(FRAC_PI_2);
         let orientation = Orientation::from(quat);
-        let back: Quat = orientation.into();
-        assert_eq!(quat, back);
+        let round_tripped_quat: Quat = orientation.into();
+        assert_eq!(quat, round_tripped_quat);
     }
 
     #[test]
@@ -254,8 +254,8 @@ mod tests {
     fn position_from_into_roundtrip() {
         let vec3 = Vec3::new(1.0, 2.0, 3.0);
         let position = Position::from(vec3);
-        let back: Vec3 = position.into();
-        assert_eq!(vec3, back);
+        let round_tripped_vec3: Vec3 = position.into();
+        assert_eq!(vec3, round_tripped_vec3);
     }
 
     #[test]
