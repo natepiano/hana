@@ -29,7 +29,7 @@ pub(crate) fn on_mesh_clicked(
     commands.trigger(
         ZoomToFit::new(camera, clicked)
             .margin(ZOOM_MARGIN_MESH)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS))
+            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS))
             .easing(active_easing.0),
     );
 }
@@ -58,7 +58,7 @@ pub(crate) fn on_ground_clicked(
     commands.trigger(
         ZoomToFit::new(camera, scene.scene_bounds)
             .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS))
+            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS))
             .easing(active_easing.0),
     );
 }
@@ -89,7 +89,7 @@ pub(crate) fn on_below_clicked(
             .yaw(CAMERA_START_YAW)
             .pitch(CAMERA_START_PITCH)
             .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MS))
+            .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
             .easing(active_easing.0),
     );
 }
@@ -136,7 +136,7 @@ pub(crate) fn look_at_hovered(
     let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
     commands.trigger(
         LookAt::new(camera, target)
-            .duration(Duration::from_millis(LOOK_AT_DURATION_MS))
+            .duration(Duration::from_millis(LOOK_AT_DURATION_MILLIS))
             .easing(active_easing.0),
     );
 }
@@ -160,7 +160,7 @@ pub(crate) fn look_at_and_zoom_to_fit_hovered(
     commands.trigger(
         LookAtAndZoomToFit::new(camera, target)
             .margin(ZOOM_MARGIN_MESH)
-            .duration(Duration::from_millis(LOOK_AT_DURATION_MS))
+            .duration(Duration::from_millis(LOOK_AT_DURATION_MILLIS))
             .easing(active_easing.0),
     );
 }

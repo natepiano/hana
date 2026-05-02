@@ -11,6 +11,8 @@
 //! changes the orbit focus to the target, while `ZoomToFit` keeps the
 //! current focus and only adjusts radius.
 
+mod constants;
+
 use std::time::Duration;
 
 use bevy::prelude::*;
@@ -32,7 +34,7 @@ use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-const START_POS: Vec3 = Vec3::new(0.0, 1.5, 3.0);
+use crate::constants::START_POS;
 
 #[derive(Component)]
 struct Target;

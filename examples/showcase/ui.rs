@@ -19,8 +19,8 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
         },
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(UI_SCREEN_PADDING_PX),
-            left: Val::Px(UI_SCREEN_PADDING_PX),
+            top: Val::Px(UI_SCREEN_PADDING_PIXELS),
+            left: Val::Px(UI_SCREEN_PADDING_PIXELS),
             ..default()
         },
         UiTargetCamera(camera),
@@ -38,8 +38,8 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
         TextColor(Color::srgba(0.7, 0.7, 0.7, 0.7)),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(UI_SCREEN_PADDING_PX),
-            left: Val::Px(UI_SCREEN_PADDING_PX),
+            bottom: Val::Px(UI_SCREEN_PADDING_PIXELS),
+            left: Val::Px(UI_SCREEN_PADDING_PIXELS),
             ..default()
         },
         CameraInputInterruptBehaviorLabel,
@@ -58,8 +58,8 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
         TextColor(Color::srgba(0.7, 0.7, 0.7, 0.7)),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(CONFLICT_POLICY_HINT_BOTTOM_PX),
-            left: Val::Px(UI_SCREEN_PADDING_PX),
+            bottom: Val::Px(CONFLICT_POLICY_HINT_BOTTOM_PIXELS),
+            left: Val::Px(UI_SCREEN_PADDING_PIXELS),
             ..default()
         },
         AnimationConflictPolicyLabel,

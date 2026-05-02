@@ -12,6 +12,8 @@
 //!   A     — `AnimateToFit` the cube (event-driven)
 //!   R     — Reset camera
 
+mod constants;
+
 use std::f32::consts::TAU;
 use std::time::Duration;
 
@@ -32,8 +34,8 @@ use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
-const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
-const INSTRUCTIONS_FONT_SIZE: f32 = 18.0;
+use crate::constants::INSTRUCTIONS_FONT_SIZE;
+use crate::constants::START_POS;
 
 #[derive(Component)]
 struct Target;

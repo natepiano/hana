@@ -36,10 +36,10 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(UI_SCREEN_PADDING_PX),
-            right: Val::Px(UI_SCREEN_PADDING_PX),
+            top: Val::Px(UI_SCREEN_PADDING_PIXELS),
+            right: Val::Px(UI_SCREEN_PADDING_PIXELS),
             width: Val::Px(EVENT_LOG_WIDTH),
-            bottom: Val::Px(EVENT_LOG_PANEL_BOTTOM_PX),
+            bottom: Val::Px(EVENT_LOG_PANEL_BOTTOM_PIXELS),
             flex_direction: FlexDirection::Column,
             overflow: Overflow::scroll_y(),
             ..default()
@@ -61,8 +61,8 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
         TextLayout::new_with_justify(Justify::Left),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(UI_SCREEN_PADDING_PX),
-            right: Val::Px(UI_SCREEN_PADDING_PX),
+            bottom: Val::Px(UI_SCREEN_PADDING_PIXELS),
+            right: Val::Px(UI_SCREEN_PADDING_PIXELS),
             width: Val::Px(EVENT_LOG_WIDTH),
             ..default()
         },
@@ -82,8 +82,8 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
         TextLayout::new_with_justify(Justify::Left),
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(EVENT_LOG_HINT_BOTTOM_PX),
-            right: Val::Px(UI_SCREEN_PADDING_PX),
+            bottom: Val::Px(EVENT_LOG_HINT_BOTTOM_PIXELS),
+            right: Val::Px(UI_SCREEN_PADDING_PIXELS),
             width: Val::Px(EVENT_LOG_WIDTH),
             ..default()
         },

@@ -91,4 +91,4 @@ name = "animation"
 
 [[example]]
 name = "degenerate_angle_test"
-path = "examples/degenerate_angle_test.rs"
+path = "examples/degenerate_angle_test/main.rs"

@@ -51,7 +51,7 @@ pub(crate) fn animate_camera(
             yaw: yaw + half_pi,
             pitch,
             radius,
-            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MS),
+            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
         CameraMove::ToOrbit {
@@ -59,7 +59,7 @@ pub(crate) fn animate_camera(
             yaw: yaw + half_pi * 2.0,
             pitch,
             radius,
-            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MS),
+            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
         CameraMove::ToOrbit {
@@ -67,7 +67,7 @@ pub(crate) fn animate_camera(
             yaw: yaw + half_pi * 3.0,
             pitch,
             radius,
-            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MS),
+            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
         CameraMove::ToOrbit {
@@ -75,7 +75,7 @@ pub(crate) fn animate_camera(
             yaw: yaw + half_pi * 4.0,
             pitch,
             radius,
-            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MS),
+            duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
     ];
@@ -118,7 +118,7 @@ pub(crate) fn animate_fit_to_scene(
             .yaw(CAMERA_START_YAW)
             .pitch(CAMERA_START_PITCH)
             .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MS))
+            .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
             .easing(easing.0),
     );
 }
@@ -147,7 +147,7 @@ pub(crate) fn toggle_projection(
                     .yaw(CAMERA_START_YAW)
                     .pitch(CAMERA_START_PITCH)
                     .margin(ZOOM_MARGIN_SCENE)
-                    .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MS))
+                    .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
                     .easing(active_easing.0),
             );
         }

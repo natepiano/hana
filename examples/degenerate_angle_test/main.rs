@@ -4,6 +4,8 @@
 //! to trigger `ZoomToFit` — without the degenerate extent fix the radius
 //! blows up to ~425m instead of converging to ~15m.
 
+mod constants;
+
 use std::time::Duration;
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
@@ -17,9 +19,9 @@ use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-const ZOOM_MARGIN_MESH: f32 = 0.15;
-const ZOOM_MARGIN_SCENE: f32 = 0.08;
-const ZOOM_DURATION_MS: u64 = 1000;
+use crate::constants::ZOOM_DURATION_MILLIS;
+use crate::constants::ZOOM_MARGIN_MESH;
+use crate::constants::ZOOM_MARGIN_SCENE;
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -112,7 +114,7 @@ fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
     commands.trigger(
         ZoomToFit::new(camera, click.entity)
             .margin(ZOOM_MARGIN_MESH)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS)),
     );
 }
 
@@ -124,6 +126,6 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
     commands.trigger(
         ZoomToFit::new(camera, scene.0)
             .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
+            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS)),
     );
 }
