@@ -2884,6 +2884,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fairy_dust"
+version = "0.0.1"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_diegetic",
+ "bevy_lagrange",
+ "bevy_window_manager",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
