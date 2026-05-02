@@ -1,60 +1,36 @@
 //! Panel performance statistics and diagnostics publishing.
 
 use bevy::diagnostic::Diagnostic;
-use bevy::diagnostic::DiagnosticPath;
 use bevy::diagnostic::Diagnostics;
 use bevy::diagnostic::RegisterDiagnostic;
 use bevy::prelude::*;
 use bevy_kana::ToF64;
 
-const DIAG_ATLAS_ACTIVE_JOBS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/active_jobs");
-const DIAG_ATLAS_AVG_RASTER_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/avg_raster_ms");
-const DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/batch_max_active_jobs");
-const DIAG_ATLAS_COMPLETED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/completed_glyphs");
-const DIAG_ATLAS_DIRTY_PAGES: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/dirty_pages");
-const DIAG_ATLAS_IN_FLIGHT_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/in_flight_glyphs");
-const DIAG_ATLAS_INSERTED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/inserted_glyphs");
-const DIAG_ATLAS_INVISIBLE_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/invisible_glyphs");
-const DIAG_ATLAS_MAX_RASTER_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/max_raster_ms");
-const DIAG_ATLAS_PAGES_ADDED: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/pages_added");
-const DIAG_ATLAS_PEAK_ACTIVE_JOBS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/peak_active_jobs");
-const DIAG_ATLAS_POLL_MS: DiagnosticPath = DiagnosticPath::const_new("bevy_diegetic/atlas/poll_ms");
-const DIAG_ATLAS_SYNC_MS: DiagnosticPath = DiagnosticPath::const_new("bevy_diegetic/atlas/sync_ms");
-const DIAG_ATLAS_TOTAL_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/total_glyphs");
-const DIAG_ATLAS_WORKER_THREADS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/worker_threads");
-const DIAG_LAYOUT_COMPUTE_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/layout/compute_ms");
-const DIAG_LAYOUT_COMPUTE_PANELS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/layout/compute_panels");
-const DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/atlas_lookup_ms");
-const DIAG_PANEL_TEXT_MESH_BUILD_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/mesh_build_ms");
-const DIAG_PANEL_TEXT_PARLEY_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/parley_ms");
-const DIAG_PANEL_TEXT_PENDING_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/pending_glyphs");
-const DIAG_PANEL_TEXT_QUEUED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/queued_glyphs");
-const DIAG_PANEL_TEXT_SHAPE_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/shape_ms");
-const DIAG_PANEL_TEXT_SHAPED_PANELS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/shaped_panels");
-const DIAG_PANEL_TEXT_TOTAL_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/total_ms");
+use super::constants::DIAG_ATLAS_ACTIVE_JOBS;
+use super::constants::DIAG_ATLAS_AVG_RASTER_MS;
+use super::constants::DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS;
+use super::constants::DIAG_ATLAS_COMPLETED_GLYPHS;
+use super::constants::DIAG_ATLAS_DIRTY_PAGES;
+use super::constants::DIAG_ATLAS_IN_FLIGHT_GLYPHS;
+use super::constants::DIAG_ATLAS_INSERTED_GLYPHS;
+use super::constants::DIAG_ATLAS_INVISIBLE_GLYPHS;
+use super::constants::DIAG_ATLAS_MAX_RASTER_MS;
+use super::constants::DIAG_ATLAS_PAGES_ADDED;
+use super::constants::DIAG_ATLAS_PEAK_ACTIVE_JOBS;
+use super::constants::DIAG_ATLAS_POLL_MS;
+use super::constants::DIAG_ATLAS_SYNC_MS;
+use super::constants::DIAG_ATLAS_TOTAL_GLYPHS;
+use super::constants::DIAG_ATLAS_WORKER_THREADS;
+use super::constants::DIAG_LAYOUT_COMPUTE_MS;
+use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
+use super::constants::DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS;
+use super::constants::DIAG_PANEL_TEXT_MESH_BUILD_MS;
+use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
+use super::constants::DIAG_PANEL_TEXT_PENDING_GLYPHS;
+use super::constants::DIAG_PANEL_TEXT_QUEUED_GLYPHS;
+use super::constants::DIAG_PANEL_TEXT_SHAPE_MS;
+use super::constants::DIAG_PANEL_TEXT_SHAPED_PANELS;
+use super::constants::DIAG_PANEL_TEXT_TOTAL_MS;
 
 /// Lightweight timing data for diegetic UI systems.
 ///

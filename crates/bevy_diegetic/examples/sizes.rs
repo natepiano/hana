@@ -107,11 +107,11 @@ fn setup(
 
     // Three columns: demo panel | WorldText | commentary.
     // WorldText column is narrower than the panel — size to actual content.
-    let wt_col_w = (LABEL_COL + 28.0) * MILLIMETERS_PER_METER; // label col + "Hello" width
-    let total_w = panel_w + COLUMN_GAP + wt_col_w + COLUMN_GAP + note_w;
+    let world_text_column_width = (LABEL_COL + 28.0) * MILLIMETERS_PER_METER; // label col + "Hello" width
+    let total_w = panel_w + COLUMN_GAP + world_text_column_width + COLUMN_GAP + note_w;
     let left_x = -total_w / 2.0;
     let right_x = left_x + panel_w + COLUMN_GAP;
-    let note_x = right_x + wt_col_w + COLUMN_GAP;
+    let note_x = right_x + world_text_column_width + COLUMN_GAP;
 
     // All three headers top-align at this Y. Content sits below.
     let header_style = WorldTextStyle::new(Pt(9.0))

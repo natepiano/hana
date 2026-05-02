@@ -6,27 +6,16 @@ use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
-/// Average glyph coverage ratio — most glyphs use roughly this fraction of
-/// the canonical size.
-const AVERAGE_GLYPH_COVERAGE: f32 = 0.75;
-/// Default auto-selected glyph raster worker count on sufficiently parallel machines.
-const DEFAULT_AUTO_GLYPH_WORKER_THREADS: usize = 6;
-/// Default glyphs per atlas page.
-const DEFAULT_GLYPHS_PER_PAGE: u16 = 100;
-/// Glyph padding used during MSDF rasterization.
-const GLYPH_PADDING: u32 = 2;
-/// Maximum canonical rasterization size in pixels.
-const MAX_CUSTOM_RASTER_SIZE: u32 = 256;
-/// Maximum glyphs per atlas page.
-const MAX_GLYPHS_PER_PAGE: u16 = 2000;
-/// Minimum canonical rasterization size in pixels.
-const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
-/// Minimum glyphs per atlas page.
-const MIN_GLYPHS_PER_PAGE: u16 = 10;
-/// SDF distance range used during MSDF rasterization.
-const SDF_RANGE: u32 = 4;
-/// Estimated packing efficiency for a shelf-based atlas allocator.
-const SHELF_PACKING_EFFICIENCY: f32 = 0.80;
+use super::constants::AVERAGE_GLYPH_COVERAGE;
+use super::constants::DEFAULT_AUTO_GLYPH_WORKER_THREADS;
+use super::constants::DEFAULT_GLYPH_PADDING;
+use super::constants::DEFAULT_GLYPHS_PER_PAGE;
+use super::constants::MAX_CUSTOM_RASTER_SIZE;
+use super::constants::MAX_GLYPHS_PER_PAGE;
+use super::constants::MIN_CUSTOM_RASTER_SIZE;
+use super::constants::MIN_GLYPHS_PER_PAGE;
+use super::constants::SDF_RANGE;
+use super::constants::SHELF_PACKING_EFFICIENCY;
 
 /// Controls the pixel resolution of MSDF glyph rasterization.
 ///
@@ -231,7 +220,7 @@ impl AtlasConfig {
         // canonical size plus padding. This is tighter than worst-case
         // (which would over-allocate) but still safe because `etagere`
         // overflows to a new page if a glyph doesn't fit.
-        let total_pad = GLYPH_PADDING + SDF_RANGE;
+        let total_pad = DEFAULT_GLYPH_PADDING + SDF_RANGE;
         let avg_glyph = (canonical.to_f32() * AVERAGE_GLYPH_COVERAGE).to_u32() + 2 * total_pad;
         let glyphs = f32::from(self.clamped_glyphs_per_page());
         let area = glyphs * avg_glyph.to_f32() * avg_glyph.to_f32() / SHELF_PACKING_EFFICIENCY;

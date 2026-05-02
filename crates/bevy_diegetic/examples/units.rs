@@ -683,9 +683,9 @@ fn spawn_lights_and_camera(commands: &mut Commands, page_height: f32) {
 
 const PERSPECTIVE_FOV: f32 = std::f32::consts::FRAC_PI_4;
 
-fn persp_to_ortho_radius(r: f32) -> f32 { r * (PERSPECTIVE_FOV / 2.0).tan() * 2.0 }
+fn perspective_to_orthographic_radius(r: f32) -> f32 { r * (PERSPECTIVE_FOV / 2.0).tan() * 2.0 }
 
-fn ortho_to_persp_radius(r: f32) -> f32 { r / ((PERSPECTIVE_FOV / 2.0).tan() * 2.0) }
+fn orthographic_to_perspective_radius(r: f32) -> f32 { r / ((PERSPECTIVE_FOV / 2.0).tan() * 2.0) }
 
 /// P key: switch to perspective. O key: switch to orthographic.
 fn toggle_projection(
@@ -700,7 +700,7 @@ fn toggle_projection(
     for (mut proj, mut poc) in &mut cameras {
         if to_ortho && matches!(&*proj, Projection::Perspective(_)) {
             let r = poc.radius.unwrap_or(1.0);
-            let ortho_r = persp_to_ortho_radius(r);
+            let ortho_r = perspective_to_orthographic_radius(r);
             poc.radius = Some(ortho_r);
             poc.target_radius = ortho_r;
             *proj = Projection::Orthographic(OrthographicProjection {
@@ -713,7 +713,7 @@ fn toggle_projection(
             poc.force_update = ForceUpdate::Pending;
         } else if to_perspective && matches!(&*proj, Projection::Orthographic(_)) {
             let r = poc.radius.unwrap_or(1.0);
-            let persp_r = ortho_to_persp_radius(r);
+            let persp_r = orthographic_to_perspective_radius(r);
             poc.radius = Some(persp_r);
             poc.target_radius = persp_r;
             *proj = Projection::Perspective(PerspectiveProjection {
@@ -968,7 +968,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                                 1.0,
                                 AlignX::Right,
                                 ruler_color,
-                                mm_tick_size,
+                                millimeter_tick_size,
                             );
                         },
                     );
@@ -987,7 +987,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
     builder.build()
 }
 
-const fn mm_tick_size(mm: i32) -> (f32, f32) {
+const fn millimeter_tick_size(mm: i32) -> (f32, f32) {
     if mm % 10 == 0 {
         (PANEL_RULER_CM_TICK.0, PANEL_RULER_CM_LINE.0)
     } else if mm % 5 == 0 {
@@ -1156,7 +1156,13 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                             .direction(Direction::LeftToRight)
                             .child_align_y(AlignY::Top),
                         |b| {
-                            build_horizontal_ticks(b, width_mm, 1.0, ruler_color, mm_tick_size);
+                            build_horizontal_ticks(
+                                b,
+                                width_mm,
+                                1.0,
+                                ruler_color,
+                                millimeter_tick_size,
+                            );
                         },
                     );
                 },

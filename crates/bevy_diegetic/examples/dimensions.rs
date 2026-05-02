@@ -44,7 +44,7 @@ const DEMO_HEIGHT: f32 = 60.0; // mm
 const COLUMN_GAP: f32 = 0.008; // meters
 const HEADER_GAP: f32 = 0.003; // meters
 const MARGIN: f32 = 0.004; // meters
-const MM_TO_M: f32 = 0.001;
+const MILLIMETERS_TO_METERS: f32 = 0.001;
 
 // ── Commentary ───────────────────────────────────────────────────────
 const NOTE_WIDTH: f32 = 85.0; // mm
@@ -88,10 +88,10 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let demo_w = DEMO_WIDTH * MM_TO_M;
-    let demo_h = DEMO_HEIGHT * MM_TO_M;
-    let note_w = NOTE_WIDTH * MM_TO_M;
-    let note_h = NOTE_HEIGHT * MM_TO_M;
+    let demo_w = DEMO_WIDTH * MILLIMETERS_TO_METERS;
+    let demo_h = DEMO_HEIGHT * MILLIMETERS_TO_METERS;
+    let note_w = NOTE_WIDTH * MILLIMETERS_TO_METERS;
+    let note_h = NOTE_HEIGHT * MILLIMETERS_TO_METERS;
 
     let total_w = demo_w + COLUMN_GAP + note_w;
     let left_x = -total_w / 2.0;
