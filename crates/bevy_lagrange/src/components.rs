@@ -1,0 +1,76 @@
+//! Components used by the camera extension system.
+
+use bevy::prelude::*;
+
+/// Controls what happens when user input occurs during an in-flight animation.
+///
+/// Specifically, this governs **user input to the camera** (orbit, pan, zoom) while an
+/// animation is playing.
+///
+/// This is a required component on [`CameraMoveList`](crate::CameraMoveList) — if not
+/// explicitly inserted, it defaults to [`Ignore`](CameraInputInterruptBehavior::Ignore).
+///
+/// This component is orthogonal to [`AnimationConflictPolicy`] — `CameraInputInterruptBehavior`
+/// handles physical camera input during an animation, while `AnimationConflictPolicy`
+/// handles programmatic animation requests that arrive while one is already playing.
+///
+/// - [`Ignore`](CameraInputInterruptBehavior::Ignore) — disable camera input while animating and
+///   keep animating uninterrupted. No interrupt lifecycle events are emitted.
+/// - [`Cancel`](CameraInputInterruptBehavior::Cancel) — stop the camera where it is and fire
+///   `*Cancelled` events
+/// - [`Complete`](CameraInputInterruptBehavior::Complete) — jump to the final position of the
+///   entire queue and fire normal `*End` events
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component, Default)]
+pub enum CameraInputInterruptBehavior {
+    /// Disable camera input and keep animating uninterrupted.
+    #[default]
+    Ignore,
+    /// Stop the camera at its current position. Fires `AnimationCancelled` or `ZoomCancelled`.
+    Cancel,
+    /// Jump to the final queued position. Fires `AnimationEnd` or `ZoomEnd`.
+    Complete,
+}
+
+/// Controls what happens when a new animation request conflicts with an active one.
+///
+/// Insert this component on a camera entity to configure conflict resolution. If not
+/// present, defaults to [`LastWins`](AnimationConflictPolicy::LastWins).
+///
+/// This component is orthogonal to [`CameraInputInterruptBehavior`] — `AnimationConflictPolicy`
+/// handles programmatic animation requests (e.g. [`ZoomToFit`](crate::ZoomToFit),
+/// [`PlayAnimation`](crate::PlayAnimation)) that conflict with an active animation, while
+/// `CameraInputInterruptBehavior` handles physical user input interrupting an animation.
+///
+/// - [`LastWins`](AnimationConflictPolicy::LastWins) — cancel the current animation and start the
+///   new one. Fires appropriate `*Cancelled` events for the interrupted operation.
+/// - [`FirstWins`](AnimationConflictPolicy::FirstWins) — reject the incoming request. Fires
+///   [`AnimationRejected`](crate::AnimationRejected).
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component, Default)]
+pub enum AnimationConflictPolicy {
+    /// Cancel the current animation and start the new one.
+    #[default]
+    LastWins,
+    /// Reject the incoming request and keep the current animation.
+    FirstWins,
+}
+
+/// Marks the entity that the camera is currently fitted to.
+///
+/// Persists after fit completes to enable persistent debug overlay.
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+pub struct CurrentFitTarget(
+    /// The entity being fitted.
+    pub Entity,
+);
+
+/// Enables fit target debug overlay on a camera entity.
+///
+/// Insert this component to enable overlay, remove it to disable.
+/// The presence or absence of the component is the toggle — no boolean field needed.
+#[cfg(feature = "fit_overlay")]
+#[derive(Component, Reflect, Default)]
+#[reflect(Component, Default)]
+pub struct FitOverlay;

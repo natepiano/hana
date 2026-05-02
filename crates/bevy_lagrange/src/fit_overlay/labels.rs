@@ -1,0 +1,184 @@
+use bevy::prelude::*;
+use bevy::ui::UiTargetCamera;
+use bevy_kana::ScreenPosition;
+
+use super::constants::BOUNDS_LABEL_COLOR;
+use super::constants::LABEL_FONT_SIZE;
+use super::constants::LABEL_PIXEL_OFFSET;
+use super::screen_space;
+use crate::fit::Edge;
+use crate::projection::ScreenSpaceBounds;
+
+/// Component marking margin percentage labels, scoped to a specific camera entity.
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+pub(super) struct MarginLabel {
+    pub(super) edge:   Edge,
+    pub(super) camera: Entity,
+}
+
+/// Parameters for creating or updating a margin label.
+pub(super) struct MarginLabelParams {
+    pub(super) camera:        Entity,
+    pub(super) edge:          Edge,
+    pub(super) text:          String,
+    pub(super) color:         Color,
+    pub(super) screen_pos:    ScreenPosition,
+    pub(super) viewport_size: Vec2,
+}
+
+/// Component marking the "screen space bounds" label, scoped to a specific camera entity.
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+pub(super) struct BoundsLabel {
+    pub(super) camera: Entity,
+}
+
+/// Calculates the viewport pixel position for a margin label, offset by a fixed
+/// number of pixels from the screen-edge endpoint of the margin line.
+pub(super) fn calculate_label_pixel_position(
+    edge: Edge,
+    bounds: &ScreenSpaceBounds,
+    viewport_size: Vec2,
+) -> ScreenPosition {
+    let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
+    let px = screen_space::norm_to_viewport(
+        screen_x,
+        screen_y,
+        bounds.half_extent_x,
+        bounds.half_extent_y,
+        viewport_size,
+    );
+
+    // Left/Right labels sit above the horizontal line;
+    // Top/Bottom labels sit beside the vertical line with pixel offsets.
+    let above_line = px.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET;
+
+    match edge {
+        Edge::Left => ScreenPosition::new(LABEL_PIXEL_OFFSET, above_line),
+        Edge::Right => ScreenPosition::new(viewport_size.x - LABEL_PIXEL_OFFSET, above_line),
+        Edge::Top => ScreenPosition::new(px.x + LABEL_PIXEL_OFFSET, LABEL_PIXEL_OFFSET),
+        Edge::Bottom => ScreenPosition::new(
+            px.x + LABEL_PIXEL_OFFSET,
+            viewport_size.y - LABEL_PIXEL_OFFSET,
+        ),
+    }
+}
+
+/// Returns the final viewport position for the "screen space bounds" label.
+pub(super) fn bounds_label_position(upper_left: ScreenPosition) -> ScreenPosition {
+    ScreenPosition::new(
+        upper_left.x + LABEL_PIXEL_OFFSET,
+        upper_left.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET,
+    )
+}
+
+/// Applies anchored placement for a margin label node based on edge semantics.
+fn apply_margin_label_anchor(
+    node: &mut Node,
+    edge: Edge,
+    screen_pos: ScreenPosition,
+    viewport_size: Vec2,
+) {
+    match edge {
+        Edge::Left | Edge::Top => {
+            node.left = Val::Px(screen_pos.x);
+            node.top = Val::Px(screen_pos.y);
+            node.right = Val::Auto;
+            node.bottom = Val::Auto;
+        },
+        Edge::Right => {
+            node.right = Val::Px(viewport_size.x - screen_pos.x);
+            node.top = Val::Px(screen_pos.y);
+            node.left = Val::Auto;
+            node.bottom = Val::Auto;
+        },
+        Edge::Bottom => {
+            node.left = Val::Px(screen_pos.x);
+            node.bottom = Val::Px(viewport_size.y - screen_pos.y);
+            node.right = Val::Auto;
+            node.top = Val::Auto;
+        },
+    }
+}
+
+/// Builds an anchored node for a new margin label.
+fn margin_label_node(edge: Edge, screen_pos: ScreenPosition, viewport_size: Vec2) -> Node {
+    let mut node = Node {
+        position_type: PositionType::Absolute,
+        ..default()
+    };
+    apply_margin_label_anchor(&mut node, edge, screen_pos, viewport_size);
+    node
+}
+
+/// Updates an existing margin label or creates a new one.
+pub(super) fn update_or_create_margin_label(
+    commands: &mut Commands,
+    label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
+    params: MarginLabelParams,
+) {
+    let existing = label_query
+        .iter_mut()
+        .find(|(_, label, _, _, _)| label.camera == params.camera && label.edge == params.edge);
+
+    if let Some((_, _, mut label_text, mut node, mut text_color)) = existing {
+        (**label_text).clone_from(&params.text);
+        text_color.0 = params.color;
+        apply_margin_label_anchor(
+            &mut node,
+            params.edge,
+            params.screen_pos,
+            params.viewport_size,
+        );
+    } else {
+        commands.spawn((
+            Text::new(params.text),
+            TextFont {
+                font_size: LABEL_FONT_SIZE,
+                ..default()
+            },
+            TextColor(params.color),
+            margin_label_node(params.edge, params.screen_pos, params.viewport_size),
+            MarginLabel {
+                edge:   params.edge,
+                camera: params.camera,
+            },
+            UiTargetCamera(params.camera),
+        ));
+    }
+}
+
+/// Updates an existing bounds label position or creates a new one.
+pub(super) fn update_or_create_bounds_label(
+    commands: &mut Commands,
+    bounds_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
+    camera: Entity,
+    screen_pos: ScreenPosition,
+) {
+    let existing = bounds_query
+        .iter_mut()
+        .find(|(_, label, _)| label.camera == camera);
+
+    if let Some((_, _, mut node)) = existing {
+        node.left = Val::Px(screen_pos.x);
+        node.top = Val::Px(screen_pos.y);
+    } else {
+        commands.spawn((
+            Text::new("screen space bounds"),
+            TextFont {
+                font_size: LABEL_FONT_SIZE,
+                ..default()
+            },
+            TextColor(BOUNDS_LABEL_COLOR),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(screen_pos.x),
+                top: Val::Px(screen_pos.y),
+                ..default()
+            },
+            BoundsLabel { camera },
+            UiTargetCamera(camera),
+        ));
+    }
+}

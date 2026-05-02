@@ -1,0 +1,131 @@
+//! Reproduces the `ZoomToFit` edge-on degenerate case.
+//!
+//! Camera starts at pitch=0 looking straight ahead. Click the ground plane
+//! to trigger `ZoomToFit` — without the degenerate extent fix the radius
+//! blows up to ~425m instead of converging to ~15m.
+
+mod constants;
+
+use std::time::Duration;
+
+use bevy::picking::mesh_picking::MeshPickingPlugin;
+use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_lagrange::InputControl;
+use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::TrackpadBehavior;
+use bevy_lagrange::TrackpadInput;
+use bevy_lagrange::ZoomToFit;
+use bevy_window_manager::WindowManagerPlugin;
+
+use crate::constants::ZOOM_DURATION_MILLIS;
+use crate::constants::ZOOM_MARGIN_MESH;
+use crate::constants::ZOOM_MARGIN_SCENE;
+
+#[derive(Resource)]
+struct SceneBounds(Entity);
+
+fn main() {
+    App::new()
+        .add_plugins((
+            DefaultPlugins,
+            LagrangePlugin,
+            BrpExtrasPlugin::default(),
+            MeshPickingPlugin,
+            WindowManagerPlugin,
+        ))
+        .add_systems(Startup, setup)
+        .run();
+}
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Ground plane
+    let ground = commands
+        .spawn((
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(12.0, 12.0))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgba(0.3, 0.5, 0.3, 0.8),
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            })),
+        ))
+        .observe(on_ground_clicked)
+        .id();
+
+    commands.insert_resource(SceneBounds(ground));
+
+    // Cube
+    commands
+        .spawn((
+            Mesh3d(meshes.add(Cuboid::default())),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.8, 0.7, 0.6),
+                ..default()
+            })),
+            Transform::from_xyz(0.0, 1.0, 0.0),
+        ))
+        .observe(on_mesh_clicked);
+
+    // Light
+    commands.spawn((
+        DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    // Camera — pitch=0 reproduces the edge-on degenerate case when `ZoomToFit`
+    // targets the ground plane.
+    commands.spawn((
+        OrbitCam {
+            pitch: Some(0.0),
+            yaw: Some(0.0),
+            radius: Some(5.0),
+            focus: Vec3::new(0.0, 1.0, 0.0),
+            button_orbit: MouseButton::Middle,
+            button_pan: MouseButton::Middle,
+            modifier_pan: Some(KeyCode::ShiftLeft),
+            input_control: Some(InputControl {
+                trackpad: Some(TrackpadInput {
+                    behavior:    TrackpadBehavior::blender_default(),
+                    sensitivity: 0.5,
+                }),
+                ..default()
+            }),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 1.0, 5.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+    ));
+}
+
+fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
+    let camera = click.hit.camera;
+    commands.trigger(
+        ZoomToFit::new(camera, click.entity)
+            .margin(ZOOM_MARGIN_MESH)
+            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS)),
+    );
+}
+
+fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
+    let camera = click.hit.camera;
+    commands.trigger(
+        ZoomToFit::new(camera, scene.0)
+            .margin(ZOOM_MARGIN_SCENE)
+            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS)),
+    );
+}
