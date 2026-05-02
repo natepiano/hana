@@ -82,10 +82,6 @@ impl Default for ActiveEasing {
     fn default() -> Self { Self(EaseFunction::CubicOut) }
 }
 
-/// Marker resource: when present, the next `AnimationEnd` enables the event log.
-#[derive(Resource)]
-struct EnableLogOnAnimationEnd;
-
 // ============================================================================
 // App entry point
 // ============================================================================
@@ -204,7 +200,7 @@ fn initial_fit_to_scene(
     if meshes.get(&mesh3d.0).is_none() {
         return;
     }
-    commands.insert_resource(EnableLogOnAnimationEnd);
+    commands.insert_resource(event_log::EnableLogOnAnimationEnd);
     commands.trigger(
         AnimateToFit::new(scene.camera, scene.scene_bounds)
             .yaw(CAMERA_START_YAW)

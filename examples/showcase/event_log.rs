@@ -9,6 +9,10 @@ pub(crate) struct EventLogHint;
 #[derive(Component)]
 pub(crate) struct EventLogToggleHint;
 
+/// Marker resource: when present, the next `AnimationEnd` enables the event log.
+#[derive(Resource)]
+pub(super) struct EnableLogOnAnimationEnd;
+
 struct PendingLogEntry {
     text:  String,
     color: Color,
