@@ -1195,12 +1195,14 @@ dependencies = [
 
 [[package]]
 name = "bevy_lagrange"
-version = "0.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c31cfcf16c00e6ee255b1ea42d99ff763aec21d1acb1cf234064191782e5cae"
+version = "0.0.3-dev"
 dependencies = [
  "bevy",
+ "bevy_brp_extras",
+ "bevy_egui",
  "bevy_kana 0.0.5",
+ "bevy_window_manager",
+ "float-cmp",
 ]
 
 [[package]]
@@ -2976,6 +2978,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "float-cmp"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b09cf3155332e944990140d967ff5eceb70df778b34f77d8075db46e4704e6d8"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3248,7 +3259,7 @@ dependencies = [
  "vec_map",
  "wasm-bindgen",
  "web-sys",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]

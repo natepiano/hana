@@ -1,4 +1,5 @@
 [package]
+authors.workspace    = true
 categories           = ["development-tools", "game-development"]
 description          = "Workspace example helper — quiet logs and opt-in dev capabilities for bevy_hana examples"
 edition.workspace    = true

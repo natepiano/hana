@@ -1,4 +1,5 @@
 [package]
+authors.workspace    = true
 categories           = ["game-development", "gui"]
 description          = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
 edition.workspace    = true
