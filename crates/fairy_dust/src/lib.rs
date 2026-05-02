@@ -6,7 +6,7 @@
 //!
 //! ```ignore
 //! fairy_dust::sprinkle_example()
-//!     .with_orbit_cam()
+//!     .with_orbit_cam_configured(|cam| { cam.radius = 5.0; })
 //!     .with_save_window_position()
 //!     .with_brp_extras()
 //!     .with_camera_control_panel()
@@ -21,6 +21,7 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+pub use bevy_lagrange::OrbitCam;
 
 mod brp_extras;
 mod camera_control_panel;
@@ -56,8 +57,17 @@ pub fn sprinkle_example() -> App {
 ///   call in the example — is safe);
 /// - returns `&mut Self` so calls compose with native [`App`] methods.
 pub trait FairyDustExt {
-    /// Add a `bevy_lagrange` `LagrangePlugin` and configure orbit-camera input.
-    fn with_orbit_cam(&mut self) -> &mut Self;
+    /// Add a `bevy_lagrange` `LagrangePlugin` and spawn an `OrbitCam` entity
+    /// with `OrderIndependentTransparencySettings` and `Msaa::Off`.
+    ///
+    /// Defaults to MMB orbit, Shift+MMB pan, scroll zoom, and Blender-like
+    /// trackpad input (Shift+scroll pan, Ctrl+scroll zoom, pinch zoom). The
+    /// caller's `configure` closure runs after defaults so it can set
+    /// `focus`, `radius`, `yaw`, `pitch`, or override the default buttons.
+    fn with_orbit_cam_configured(
+        &mut self,
+        configure: impl FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    ) -> &mut Self;
 
     /// Add a `bevy_window_manager` `WindowManagerPlugin` so window position
     /// and size are persisted across runs.
@@ -71,14 +81,17 @@ pub trait FairyDustExt {
     /// `bevy_lagrange::OrbitCam` mouse and trackpad controls.
     ///
     /// Pulls in `DiegeticUiPlugin` and `MeshPickingPlugin` if not already
-    /// present. Pair with [`FairyDustExt::with_orbit_cam`] for the
-    /// described controls to actually do anything.
+    /// present. Pair with [`FairyDustExt::with_orbit_cam_configured`] for
+    /// the described controls to actually do anything.
     fn with_camera_control_panel(&mut self) -> &mut Self;
 }
 
 impl FairyDustExt for App {
-    fn with_orbit_cam(&mut self) -> &mut Self {
-        orbit_cam::install(self);
+    fn with_orbit_cam_configured(
+        &mut self,
+        configure: impl FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    ) -> &mut Self {
+        orbit_cam::install_with(self, configure);
         self
     }
 

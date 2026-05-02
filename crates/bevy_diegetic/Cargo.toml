@@ -48,6 +48,7 @@ bevy_lagrange       = { workspace = true, features = ["fit_overlay"] }
 bevy_window_manager = { workspace = true }
 clay-layout         = { workspace = true }
 criterion           = { workspace = true }
+fairy_dust          = { path = "../fairy_dust" }
 image               = { workspace = true, features = ["png"] }
 msdfgen             = { workspace = true }
 ttf-parser_018      = { workspace = true }

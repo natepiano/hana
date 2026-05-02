@@ -6,15 +6,10 @@
 
 use std::time::Duration;
 
-use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
-use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -29,14 +24,10 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::CameraMove;
-use bevy_lagrange::InputControl;
-use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
-use bevy_window_manager::WindowManagerPlugin;
+use fairy_dust::FairyDustExt;
 
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
@@ -56,20 +47,8 @@ const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
 const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
 const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
-const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
 const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
 const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
-
-const CAM_HELP_WIDTH: Px = Px(280.0);
-const CAM_HELP_HEIGHT: Px = Px(160.0);
-const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
-const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
-const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
-const CAM_HELP_RADIUS: Px = Px(15.0);
-const CAM_HELP_FRAME_PAD: Px = Px(2.0);
-const CAM_HELP_BORDER: Px = Px(2.0);
-const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
-const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
 
 #[derive(Resource)]
 struct SceneBounds(Entity);
@@ -96,15 +75,17 @@ struct AnchorRotation {
 struct DemoCube;
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            DiegeticUiPlugin,
-            LagrangePlugin,
-            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-            WindowManagerPlugin,
-            MeshPickingPlugin,
-        ))
+    fairy_dust::sprinkle_example()
+        .add_plugins(DiegeticUiPlugin)
+        .with_orbit_cam_configured(|cam| {
+            cam.focus = HOME_FOCUS;
+            cam.radius = Some(HOME_RADIUS);
+            cam.yaw = Some(HOME_YAW);
+            cam.pitch = Some(HOME_PITCH);
+        })
+        .with_save_window_position()
+        .with_brp_extras()
+        .with_camera_control_panel()
         .init_resource::<AnchorRotation>()
         .add_systems(Startup, setup)
         .add_systems(Update, (home_camera, rotate_anchor_demo))
@@ -124,7 +105,7 @@ fn setup(
     spawn_anchor_demo(&mut commands, &mut meshes, &mut materials);
     spawn_ground_text(&mut commands);
     spawn_hud_panels(&mut commands, &windows);
-    spawn_lighting_and_camera(&mut commands);
+    spawn_lighting(&mut commands);
 }
 
 fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
@@ -147,27 +128,6 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
     };
 
     commands.spawn((controls_panel, Transform::default()));
-
-    let cam_unlit = StandardMaterial {
-        unlit: true,
-        ..bevy_diegetic::default_panel_material()
-    };
-    let camera_help_panel = DiegeticPanel::screen()
-        .size(
-            Sizing::fixed(CAM_HELP_WIDTH),
-            Sizing::fixed(CAM_HELP_HEIGHT),
-        )
-        .anchor(Anchor::BottomRight)
-        .material(cam_unlit.clone())
-        .text_material(cam_unlit)
-        .layout(build_camera_help)
-        .build();
-    let Ok(camera_help_panel) = camera_help_panel else {
-        error!("failed to build camera help HUD dimensions");
-        return;
-    };
-
-    commands.spawn((camera_help_panel, Transform::default()));
 }
 
 /// Spawns the translucent ground plane.
@@ -381,8 +341,9 @@ fn spawn_ground_text(commands: &mut Commands) {
         .observe(on_text_clicked);
 }
 
-/// Spawns ambient light, directional light, and the orbit camera.
-fn spawn_lighting_and_camera(commands: &mut Commands) {
+/// Spawns ambient light and directional lights. The orbit camera is set up
+/// by `fairy_dust::with_orbit_cam_configured` in `main`.
+fn spawn_lighting(commands: &mut Commands) {
     commands.insert_resource(GlobalAmbientLight {
         color:                      Color::WHITE,
         brightness:                 1_000.0,
@@ -402,31 +363,6 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
             ..default()
         },
         Transform::from_xyz(-4.0, 8.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    commands.spawn((
-        OrbitCam {
-            focus: HOME_FOCUS,
-            radius: Some(HOME_RADIUS),
-            yaw: Some(HOME_YAW),
-            pitch: Some(HOME_PITCH),
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput {
-                    behavior:    TrackpadBehavior::BlenderLike {
-                        modifier_pan:  Some(KeyCode::ShiftLeft),
-                        modifier_zoom: Some(KeyCode::ControlLeft),
-                    },
-                    sensitivity: 0.5,
-                }),
-                ..default()
-            }),
-            ..default()
-        },
-        OrderIndependentTransparencySettings::default(),
-        bevy::render::view::Msaa::Off,
     ));
 }
 
@@ -457,91 +393,6 @@ fn build_controls_content(b: &mut LayoutBuilder) {
                     b.text("CONTROLS", title);
                     hud_separator(b);
                     b.text("H Home", hint);
-                },
-            );
-        },
-    );
-}
-
-fn build_camera_help(b: &mut LayoutBuilder) {
-    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
-    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
-
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(CAM_HELP_FRAME_PAD))
-            .corner_radius(CornerRadius::new(
-                CAM_HELP_RADIUS,
-                Px(0.0),
-                CAM_HELP_RADIUS,
-                Px(0.0),
-            ))
-            .background(HUD_FRAME_BACKGROUND)
-            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(6.0))
-                    .corner_radius(CornerRadius::new(
-                        CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
-                        CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
-                    ))
-                    .background(HUD_BACKGROUND)
-                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
-                |b| {
-                    b.text("CAMERA", title);
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(Px(12.0)),
-                        |b| {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Mouse", header.clone());
-                                    b.text("MMB drag \u{2192} Orbit", label.clone());
-                                    b.text("Shift+MMB \u{2192} Pan", label.clone());
-                                    b.text("Scroll \u{2192} Zoom", label.clone());
-                                },
-                            );
-
-                            b.with(
-                                El::new()
-                                    .width(Sizing::fixed(Px(1.0)))
-                                    .height(Sizing::GROW)
-                                    .background(HUD_DIVIDER_COLOR),
-                                |_| {},
-                            );
-
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Trackpad", header.clone());
-                                    b.text("Scroll \u{2192} Orbit", label.clone());
-                                    b.text("Shift+Scroll \u{2192} Pan", label.clone());
-                                    b.text("Ctrl+Scroll \u{2192} Zoom", label.clone());
-                                    b.text("Pinch \u{2192} Zoom", label.clone());
-                                },
-                            );
-                        },
-                    );
                 },
             );
         },

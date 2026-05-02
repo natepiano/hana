@@ -786,6 +786,7 @@ dependencies = [
  "clay-layout",
  "criterion",
  "etagere",
+ "fairy_dust",
  "fdsm",
  "fdsm-ttf-parser",
  "image",

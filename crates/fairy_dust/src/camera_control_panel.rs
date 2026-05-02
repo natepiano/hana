@@ -2,7 +2,7 @@
 //! that documents `bevy_lagrange::OrbitCam` mouse and trackpad controls.
 //!
 //! Pulls in `DiegeticUiPlugin` and `MeshPickingPlugin` deduplicated.
-//! Intended to pair with [`crate::FairyDustExt::with_orbit_cam`].
+//! Intended to pair with [`crate::FairyDustExt::with_orbit_cam_configured`].
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
@@ -13,6 +13,7 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
@@ -32,8 +33,6 @@ pub(crate) fn install(app: &mut App) {
 #[derive(Component)]
 struct CameraControlPanel;
 
-const WIDTH: Px = Px(280.0);
-const HEIGHT: Px = Px(160.0);
 const RADIUS: Px = Px(15.0);
 const FRAME_PAD: Px = Px(2.0);
 const BORDER: Px = Px(2.0);
@@ -59,7 +58,7 @@ fn spawn(mut commands: Commands) {
         ..default_panel_material()
     };
     let panel = DiegeticPanel::screen()
-        .size(Sizing::fixed(WIDTH), Sizing::fixed(HEIGHT))
+        .size(Fit, Fit)
         .anchor(Anchor::BottomRight)
         .material(unlit.clone())
         .text_material(unlit)
