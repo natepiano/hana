@@ -1,12 +1,10 @@
 //! Capability: orbit-camera input via `bevy_lagrange::LagrangePlugin`,
-//! plus a spawned `OrbitCam` entity with OIT + MSAA-off (the combination
-//! every `bevy_hana` example uses).
+//! plus a spawned `OrbitCam` entity tagged with [`FairyDustOrbitCam`] so
+//! camera-attached capabilities (e.g. stable-transparency) can find it.
 
 use std::sync::Mutex;
 
-use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
-use bevy::render::view::Msaa;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -14,6 +12,13 @@ use bevy_lagrange::TrackpadBehavior;
 use bevy_lagrange::TrackpadInput;
 
 use crate::ensure_plugin;
+
+/// Marker on the `OrbitCam` entity spawned by
+/// [`crate::SprinkleBuilder::with_orbit_cam_configured`]. Other capabilities use this to find the
+/// camera (e.g. via `On<Add, FairyDustOrbitCam>` observers) rather than scanning every
+/// `OrbitCam` in the world.
+#[derive(Component)]
+pub(crate) struct FairyDustOrbitCam;
 
 pub(crate) fn install_with(
     app: &mut App,
@@ -42,10 +47,6 @@ pub(crate) fn install_with(
         if let Some(f) = configure_fn {
             f(&mut cam);
         }
-        commands.spawn((
-            cam,
-            OrderIndependentTransparencySettings::default(),
-            Msaa::Off,
-        ));
+        commands.spawn((cam, FairyDustOrbitCam));
     });
 }

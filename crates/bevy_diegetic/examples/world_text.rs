@@ -27,7 +27,6 @@ use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::ZoomToFit;
-use fairy_dust::FairyDustExt;
 
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
@@ -83,6 +82,7 @@ fn main() {
             cam.yaw = Some(HOME_YAW);
             cam.pitch = Some(HOME_PITCH);
         })
+        .with_stable_transparency()
         .with_save_window_position()
         .with_brp_extras()
         .with_camera_control_panel()
