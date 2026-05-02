@@ -6,6 +6,8 @@ use std::marker::PhantomData;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
+use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::RenderMode;
 use super::coordinate_space::ScreenPosition;
@@ -25,11 +27,6 @@ use crate::layout::Pt;
 use crate::layout::Px;
 use crate::layout::Sizing;
 use crate::layout::Unit;
-
-/// Default camera render order for screen-space overlay panels.
-const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
-/// Default render layer for screen-space overlay panels.
-const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
 
 // ── Typestate marker types ──────────────────────────────────────────────────
 

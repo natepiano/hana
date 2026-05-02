@@ -357,7 +357,7 @@ impl Padding {
     ///
     /// Dimensions with an explicit unit convert via `unit.to_points()`.
     /// Dimensions without a unit (bare f32) use `default_scale` (typically
-    /// `layout_to_pts`).
+    /// `layout_to_points`).
     #[must_use]
     pub fn resolved(self, default_scale: f32) -> Self {
         Self {

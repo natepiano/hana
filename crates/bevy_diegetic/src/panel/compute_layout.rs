@@ -87,15 +87,15 @@ pub(super) fn compute_panel_layouts(
             |_| PanelFontUnit::global_default(&defaults).0,
             |resolved| resolved.0.0,
         );
-        let layout_to_pts = layout_unit.to_points();
-        let font_to_pts = font_unit.to_points();
+        let layout_to_points = layout_unit.to_points();
+        let font_to_points = font_unit.to_points();
 
-        let scaled_tree = panel_ref.tree().scaled(layout_to_pts, font_to_pts);
+        let scaled_tree = panel_ref.tree().scaled(layout_to_points, font_to_points);
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(
             &scaled_tree,
-            panel_ref.width() * layout_to_pts,
-            panel_ref.height() * layout_to_pts,
+            panel_ref.width() * layout_to_points,
+            panel_ref.height() * layout_to_points,
             1.0,
         );
 
@@ -133,12 +133,12 @@ pub(super) fn resolve_world_panel_fit(
         let Some(bounds) = computed.content_bounds() else {
             continue;
         };
-        let layout_to_pts = panel.layout_unit().to_points();
-        if layout_to_pts <= 0.0 {
+        let layout_to_points = panel.layout_unit().to_points();
+        if layout_to_points <= 0.0 {
             continue;
         }
-        let horizontal_content = bounds.width / layout_to_pts;
-        let vertical_content = bounds.height / layout_to_pts;
+        let horizontal_content = bounds.width / layout_to_points;
+        let vertical_content = bounds.height / layout_to_points;
 
         if let Sizing::Fit { min, max } = w_sizing {
             let clamped = horizontal_content.clamp(min.value, max.value);

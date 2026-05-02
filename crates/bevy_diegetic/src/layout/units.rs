@@ -98,7 +98,7 @@ impl Dimension {
     ///
     /// If the dimension carries an explicit unit, converts using that
     /// unit's `to_points()`. Otherwise multiplies by `default_scale`
-    /// (typically `layout_to_pts` or `font_to_pts`).
+    /// (typically `layout_to_points` or `font_to_points`).
     #[must_use]
     pub fn to_points(self, default_scale: f32) -> f32 {
         match self.unit {

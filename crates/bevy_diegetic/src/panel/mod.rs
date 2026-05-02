@@ -3,6 +3,7 @@
 
 mod builder;
 mod compute_layout;
+mod constants;
 mod coordinate_space;
 mod diegetic_panel;
 mod gizmos;

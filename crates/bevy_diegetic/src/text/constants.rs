@@ -1,5 +1,29 @@
 //! Constants shared across text loading, atlas packing, and MSDF rasterization.
 
+// Atlas configuration tuning
+/// Average glyph coverage ratio — most glyphs use roughly this fraction of
+/// the canonical size.
+pub(super) const AVERAGE_GLYPH_COVERAGE: f32 = 0.75;
+/// Default auto-selected glyph raster worker count on sufficiently parallel
+/// machines. Intentionally distinct from `DEFAULT_GLYPH_WORKER_THREADS`
+/// (the unconditional override default); same value today, but they answer
+/// different questions and may diverge.
+pub(super) const DEFAULT_AUTO_GLYPH_WORKER_THREADS: usize = 6;
+/// Default glyphs per atlas page.
+pub(super) const DEFAULT_GLYPHS_PER_PAGE: u16 = 100;
+/// Maximum canonical rasterization size in pixels.
+pub(super) const MAX_CUSTOM_RASTER_SIZE: u32 = 256;
+/// Maximum glyphs per atlas page.
+pub(super) const MAX_GLYPHS_PER_PAGE: u16 = 2000;
+/// Minimum canonical rasterization size in pixels.
+pub(super) const MIN_CUSTOM_RASTER_SIZE: u32 = 8;
+/// Minimum glyphs per atlas page.
+pub(super) const MIN_GLYPHS_PER_PAGE: u16 = 10;
+/// SDF distance range used during MSDF rasterization.
+pub(super) const SDF_RANGE: u32 = 4;
+/// Estimated packing efficiency for a shelf-based atlas allocator.
+pub(super) const SHELF_PACKING_EFFICIENCY: f32 = 0.80;
+
 // Atlas packing
 /// Texel gutter around each glyph in the atlas.
 ///
@@ -13,7 +37,10 @@ pub(super) const ATLAS_GUTTER: u32 = 1;
 pub(super) const BYTES_PER_PIXEL: u32 = 4;
 /// Default atlas page texture size in pixels.
 pub(super) const DEFAULT_ATLAS_SIZE: u32 = 1024;
-/// Default number of worker threads used by the atlas when no override is provided.
+/// Default number of worker threads used by the atlas when no override is
+/// provided. Intentionally distinct from `DEFAULT_AUTO_GLYPH_WORKER_THREADS`
+/// (the cap used by `Auto` worker selection); same value today, but they
+/// answer different questions and may diverge.
 pub(super) const DEFAULT_GLYPH_WORKER_THREADS: usize = 6;
 
 // Font defaults
