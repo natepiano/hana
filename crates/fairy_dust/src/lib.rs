@@ -57,8 +57,9 @@ pub const LOG_FILTER: &str = "info,wgpu=error,naga=error,bevy_winit=warn,bevy_re
 /// so calling them is a compile error.
 pub struct NoOrbitCam;
 
-/// Typestate marker: the builder has spawned an `OrbitCam` (via
-/// [`SprinkleBuilder::with_orbit_cam_configured`]). Camera-attached
+/// Typestate marker: the builder has spawned an `OrbitCam`.
+///
+/// Reached via [`SprinkleBuilder::with_orbit_cam_configured`]. Camera-attached
 /// capabilities like [`SprinkleBuilder::with_stable_transparency`] become
 /// callable in this state.
 pub struct WithOrbitCam;
@@ -73,6 +74,7 @@ pub struct SprinkleBuilder<S> {
 
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.
+#[must_use]
 pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(LogPlugin {
@@ -90,6 +92,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
 impl<S> SprinkleBuilder<S> {
     /// Add a `bevy_window_manager` `WindowManagerPlugin` so window position
     /// and size are persisted across runs.
+    #[must_use]
     pub fn with_save_window_position(mut self) -> Self {
         save_window_position::install(&mut self.app);
         self
@@ -97,6 +100,7 @@ impl<S> SprinkleBuilder<S> {
 
     /// Add a `bevy_brp_extras` `BrpExtrasPlugin` configured to display the
     /// BRP port in the window title when the port is non-default.
+    #[must_use]
     pub fn with_brp_extras(mut self) -> Self {
         brp_extras::install(&mut self.app);
         self
@@ -107,18 +111,21 @@ impl<S> SprinkleBuilder<S> {
     ///
     /// Pulls in `DiegeticUiPlugin` and `MeshPickingPlugin` if not already
     /// present.
+    #[must_use]
     pub fn with_camera_control_panel(mut self) -> Self {
         camera_control_panel::install(&mut self.app);
         self
     }
 
     /// Mirror of [`App::add_plugins`].
+    #[must_use]
     pub fn add_plugins<M>(mut self, plugins: impl Plugins<M>) -> Self {
         self.app.add_plugins(plugins);
         self
     }
 
     /// Mirror of [`App::add_systems`].
+    #[must_use]
     pub fn add_systems<M>(
         mut self,
         schedule: impl ScheduleLabel,
@@ -129,6 +136,7 @@ impl<S> SprinkleBuilder<S> {
     }
 
     /// Mirror of [`App::init_resource`].
+    #[must_use]
     pub fn init_resource<R: Resource + FromWorld>(mut self) -> Self {
         self.app.init_resource::<R>();
         self
@@ -139,7 +147,7 @@ impl<S> SprinkleBuilder<S> {
 
     /// Escape hatch: borrow the underlying [`App`] for capabilities not yet
     /// surfaced as `with_*` methods.
-    pub fn app_mut(&mut self) -> &mut App { &mut self.app }
+    pub const fn app_mut(&mut self) -> &mut App { &mut self.app }
 }
 
 // State transition: `NoOrbitCam` → `WithOrbitCam`.
@@ -174,6 +182,7 @@ impl SprinkleBuilder<WithOrbitCam> {
     /// depth compositing of text with other translucent primitives. Pair
     /// with `AlphaMode::Blend` on text. Inert without `DiegeticUiPlugin`,
     /// which is added deduplicated.
+    #[must_use]
     pub fn with_stable_transparency(mut self) -> Self {
         transparency::install(&mut self.app);
         self
