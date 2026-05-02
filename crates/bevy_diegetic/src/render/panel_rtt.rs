@@ -120,7 +120,7 @@ pub(super) fn setup_panel_rtt(
         Changed<ComputedDiegeticPanel>,
     >,
     existing_cameras: Query<&ChildOf, With<PanelRttCamera>>,
-    mut registry: ResMut<PanelRttRegistry>,
+    mut panel_rtt_registry: ResMut<PanelRttRegistry>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -146,7 +146,7 @@ pub(super) fn setup_panel_rtt(
         }
 
         // Assign a render layer (immediate, no commands).
-        let layer = registry.layer_for(panel_entity);
+        let layer = panel_rtt_registry.layer_for(panel_entity);
         let render_layers = RenderLayers::layer(layer);
 
         let world_w = panel.world_width();
@@ -244,9 +244,9 @@ pub(super) fn setup_panel_rtt(
 /// Cleans up RTT layer assignments when panel entities are removed.
 fn cleanup_removed_panel_rtt(
     trigger: On<Remove, DiegeticPanel>,
-    mut registry: ResMut<PanelRttRegistry>,
+    mut panel_rtt_registry: ResMut<PanelRttRegistry>,
 ) {
-    registry.assignments.remove(&trigger.entity);
+    panel_rtt_registry.assignments.remove(&trigger.entity);
 }
 
 /// Builds the display quad `StandardMaterial` from the panel's material.
