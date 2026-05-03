@@ -1,91 +1,87 @@
-# Phase 1: Ingest `bevy_lagrange` into the `bevy_hana` workspace
+# Ingest an external crate into the `bevy_hana` workspace
 
-**Status:** plan, not yet implemented.
-**Owner:** natepiano.
+A reusable recipe for moving a Cargo crate from a standalone git repo into `crates/<crate_name>/` alongside the existing workspace members. Pure relocation — no API changes, no version bump, no publishing.
 
-## Goal
-
-Move `bevy_lagrange` from `~/rust/bevy_lagrange` into `crates/bevy_lagrange/` alongside `crates/bevy_diegetic/`. Pure relocation — no API changes, no version bump, no publishing. Subsequent work happens in-tree.
+Throughout, `<crate_name>` is the name of the incoming crate (e.g. `bevy_lagrange`, `bevy_diegetic`) and `<source_repo_path>` is the path to its standalone git checkout (e.g. `~/rust/<crate_name>`).
 
 ## Steps
 
 ### 1. Pre-flight the source repo
 
-`cd ~/rust/bevy_lagrange`, confirm clean working tree on `main` and in sync with origin.
+`cd <source_repo_path>`, confirm clean working tree on `main` and in sync with origin.
 
 ### 2. Ingest with history preserved
 
 From `~/rust/bevy_hana`:
 
 ```bash
-git subtree add --prefix=crates/bevy_lagrange ~/rust/bevy_lagrange main
+git subtree add --prefix=crates/<crate_name> <source_repo_path> main
 ```
 
-No `--squash`. After ingest, `git log --follow crates/bevy_lagrange/src/lib.rs` shows the full original history; `git blame` works inside the moved files. Tags from the source repo do not transfer (intentional — many of them refer to a prior project's history).
+No `--squash`. After ingest, `git log --follow crates/<crate_name>/src/lib.rs` shows the full original history; `git blame` works inside the moved files. Tags from the source repo do not transfer (intentional — `git subtree add` doesn't import tags by default; new `<crate_name>-X.Y.Z` tags get created in the workspace repo at publish time if you ever publish from here).
 
 ### 3. Post-subtree cleanup
 
-The subtree pulls in files that conflict with workspace-level config. Delete:
+The subtree pulls in files that conflict with workspace-level config or are no longer relevant inside a sub-crate. Delete:
 
-- `crates/bevy_lagrange/Cargo.lock` (workspace has one root lock)
-- `crates/bevy_lagrange/taplo.toml` (workspace-level wins)
-- `crates/bevy_lagrange/rustfmt.toml` (workspace-level wins; diff first if you want to preserve any setting)
+- `crates/<crate_name>/Cargo.lock` — workspace has one root lock; per-crate locks inside a workspace are inert and confusing.
+- `crates/<crate_name>/taplo.toml` — workspace-level `taplo.toml` wins. Diff first if you want to preserve any setting.
+- `crates/<crate_name>/rustfmt.toml` — workspace-level `rustfmt.toml` wins. Diff first if you want to preserve any setting.
+- `crates/<crate_name>/.github/` — the standalone repo's CI workflows are inert inside a sub-crate. The workspace's root-level `.github/workflows/ci.yml` is the active CI; everything that used to run for the standalone crate now runs as part of the workspace CI.
 
-Keep `LICENSE-APACHE`, `LICENSE-MIT`, `README.md`, `CHANGELOG.md`, `NOTICE` — these are per-crate.
+Keep `LICENSE-APACHE`, `LICENSE-MIT`, `README.md`, `CHANGELOG.md`, `NOTICE` — these are per-crate files that crates.io shows.
 
-### 4. Restructure `crates/bevy_lagrange/Cargo.toml` to match `bevy_diegetic`
+### 4. Restructure `crates/<crate_name>/Cargo.toml` to match the workspace pattern
 
-Match the `bevy_diegetic` pattern: thin per-crate manifest, workspace-shared values via `*.workspace = true`, per-crate-distinct values stay declared per-crate. Concretely:
+Match the existing workspace-member pattern (e.g. `bevy_diegetic`): thin per-crate manifest, workspace-shared values via `*.workspace = true`, per-crate-distinct values stay declared per-crate. Concretely:
 
-- `edition.workspace = true`, `license.workspace = true`, `readme.workspace = true`, `[lints] workspace = true`.
-- `name`, `version`, `description`, `keywords`, `categories`, `authors`, `homepage`, `repository` stay per-crate (the workspace defaults don't match).
-- Move shared dep version declarations (`bevy`, `bevy_egui`, etc.) up into root `[workspace.dependencies]`; per-crate `Cargo.toml` then references them via `dep = { workspace = true, features = [...] }`.
-- Remove the dev-dep self-reference (`bevy_lagrange = { path = ".", ... }`) if present — examples and tests inside the crate access it by name automatically.
+- `edition.workspace = true`, `license.workspace = true`, `readme.workspace = true`, `[lints] workspace = true`, `authors.workspace = true`.
+- `name`, `version`, `description`, `keywords`, `categories`, `homepage`, `repository` stay per-crate (the workspace defaults don't match what each crate advertises on crates.io).
+- Move shared dep version declarations (`bevy`, etc.) up into root `[workspace.dependencies]`; per-crate `Cargo.toml` then references them via `dep = { workspace = true, features = [...] }`.
+- Remove the dev-dep self-reference (`<crate_name> = { path = ".", ... }`) if present — examples and tests inside the crate access it by name automatically once it's a workspace member.
 
 ### 5. Minimize the Bevy feature set on the production path
 
-Audit `rg "use bevy::" crates/bevy_lagrange/src` and translate the union into the smallest `features = [...]` list. Goal: workspace `cargo build` doesn't drag in Bevy's UI/audio/asset/sprite features unless bevy_lagrange uses them. Standalone `bevy_lagrange/Cargo.toml` already enables `bevy_camera`, `bevy_core_pipeline`, `bevy_log`, `bevy_window` — that's the starting list.
+Audit `rg "use bevy::" crates/<crate_name>/src` and translate the union into the smallest `features = [...]` list. Goal: workspace `cargo build` doesn't drag in Bevy's UI/audio/asset/sprite features unless the crate uses them. Compare against existing workspace members' feature lists as a starting point.
 
-### 6. Switch the workspace `bevy_lagrange` entry to a path dep
+### 6. Switch the workspace `<crate_name>` entry to a path dep
 
-In the workspace root `Cargo.toml`, replace the registry entry with a path dep:
+If the workspace had a registry entry for the crate (`<crate_name> = "X.Y.Z"` in `[workspace.dependencies]`), replace it with a path dep:
 
 ```toml
-bevy_lagrange = { path = "crates/bevy_lagrange" }
+<crate_name> = { path = "crates/<crate_name>" }
 ```
 
-Consumers (`bevy_diegetic` dev-dep, `fairy_dust` regular dep) keep `bevy_lagrange = { workspace = true }` unchanged.
+Existing consumers (other workspace crates that already declared `<crate_name> = { workspace = true }`) keep their dep lines unchanged and now resolve to the in-tree crate.
 
 ### 7. Verify
 
 - `cargo build --workspace` green.
-- `cargo build --workspace --examples` green (covers bevy_lagrange's own examples plus `bevy_diegetic`'s).
+- `cargo build --workspace --examples` green (covers the new crate's own examples plus existing workspace examples).
 - `cargo nextest run --workspace` green.
-- `world_text` example launches and orbits correctly (manual smoke test).
+- Smoke-test any example that exercises the new crate end-to-end.
 
 Regenerate `Cargo.lock` and commit.
 
 ### 8. Update nightly style config
 
-`~/.claude/scripts/nightly/nightly-rust.conf` currently has `bevy_diegetic=bevy_hana/crates/bevy_diegetic`. Add:
+`~/.claude/scripts/nightly/nightly-rust.conf` lists every workspace crate the nightly clean/build/style-eval/style-fix flow processes. Add an entry for the new crate, matching the existing `<name>=<workspace-path>` format:
 
 ```
-bevy_lagrange=bevy_hana/crates/bevy_lagrange
+<crate_name>=bevy_hana/crates/<crate_name>
 ```
-
-So nightly clean/build/style-eval/style-fix runs on both crates in parallel.
 
 ### 9. Archive the standalone repo
 
-- Push a final pointer commit on the standalone repo's `README.md`: "moved to `bevy_hana/crates/bevy_lagrange/`".
-- Archive `github.com/natepiano/bevy_lagrange` via the GitHub UI.
-- Stop pushing to `~/rust/bevy_lagrange`. Future commits land in `bevy_hana`.
+- Push a final pointer commit on the standalone repo's `README.md`: "moved to `bevy_hana/crates/<crate_name>/`".
+- Archive `github.com/<owner>/<crate_name>` via the GitHub UI.
+- Stop pushing to `<source_repo_path>`. Future commits land in `bevy_hana`.
 
 ## Definition of done
 
-- `crates/bevy_lagrange/` exists with full git history (`git log --follow` works).
-- Per-crate `Cargo.toml` matches the `bevy_diegetic` pattern; inner `Cargo.lock`/`taplo.toml`/`rustfmt.toml` removed.
+- `crates/<crate_name>/` exists with full git history (`git log --follow` works; `git blame` resolves through the move).
+- Per-crate `Cargo.toml` matches the workspace pattern; inner `Cargo.lock`/`taplo.toml`/`rustfmt.toml`/`.github/` removed.
 - Bevy feature set minimized; workspace builds + examples + tests all green.
-- Workspace dep entry is `{ path = "crates/bevy_lagrange" }`; consumers use `workspace = true`.
-- Nightly style config processes `bevy_lagrange` alongside `bevy_diegetic`.
+- Workspace dep entry is `{ path = "crates/<crate_name>" }`; consumers use `workspace = true`.
+- Nightly style config processes `<crate_name>` alongside the existing workspace crates.
 - Standalone GitHub repo archived with pointer commit on README.
