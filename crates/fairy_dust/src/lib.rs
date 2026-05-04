@@ -1,5 +1,6 @@
 //! Workspace example helper for `bevy_hana`.
 //!
+//!
 //! Use [`sprinkle_example`] to construct a [`SprinkleBuilder`] preloaded with
 //! `DefaultPlugins` configured for a quiet log filter, then chain capability
 //! methods to opt into specific dev conveniences:
