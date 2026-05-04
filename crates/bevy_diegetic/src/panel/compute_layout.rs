@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
+use super::constants::PANEL_RESIZE_EPSILON;
 use super::coordinate_space::CoordinateSpace;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
@@ -142,13 +143,13 @@ pub(super) fn resolve_world_panel_fit(
 
         if let Sizing::Fit { min, max } = w_sizing {
             let clamped = horizontal_content.clamp(min.value, max.value);
-            if (panel.width() - clamped).abs() > 0.001 {
+            if (panel.width() - clamped).abs() > PANEL_RESIZE_EPSILON {
                 panel.set_width(clamped);
             }
         }
         if let Sizing::Fit { min, max } = h_sizing {
             let clamped = vertical_content.clamp(min.value, max.value);
-            if (panel.height() - clamped).abs() > 0.001 {
+            if (panel.height() - clamped).abs() > PANEL_RESIZE_EPSILON {
                 panel.set_height(clamped);
             }
         }

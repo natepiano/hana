@@ -8,6 +8,7 @@ use bevy::prelude::*;
 
 use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
 use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
+use super::constants::MIN_PANEL_WORLD_HEIGHT;
 use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::RenderMode;
 use super::coordinate_space::ScreenPosition;
@@ -644,7 +645,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             && self.data.world_height.is_none()
             && self.data.world_width.is_none()
         {
-            self.data.world_height = Some(self.data.height.max(1.0));
+            self.data.world_height = Some(self.data.height.max(MIN_PANEL_WORLD_HEIGHT));
         }
 
         if let Some(ref mut tree) = self.data.tree {

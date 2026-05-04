@@ -4,6 +4,12 @@ use bevy::asset::uuid_handle;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
+// Glyph quads
+/// Two adjacent glyph quads are considered on different lines when their Y
+/// positions differ by more than this threshold. Cross-line pairs are skipped
+/// during overlap clipping.
+pub(super) const GLYPH_QUAD_LINE_TOLERANCE: f32 = 0.001;
+
 // Layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
 ///
@@ -40,6 +46,17 @@ pub(super) const DEFAULT_TEXELS_PER_METER: f32 = 10000.0;
 pub(super) const MAX_TEXTURE_SIZE: u32 = 4096;
 /// Minimum texture dimension in pixels.
 pub(super) const MIN_TEXTURE_SIZE: u32 = 64;
+/// Far plane of the per-panel orthographic RTT camera.
+pub(super) const RTT_CAMERA_FAR: f32 = 10.0;
+/// Near plane of the per-panel orthographic RTT camera. Negative so panel
+/// content slightly behind the panel-local Z=0 plane stays visible.
+pub(super) const RTT_CAMERA_NEAR: f32 = -1.0;
+/// Z position of the per-panel RTT camera (and matching directional light)
+/// looking at the panel-local Z=0 plane.
+pub(super) const RTT_CAMERA_Z: f32 = 5.0;
+/// Illuminance of the directional light that lights MSDF text in the per-panel
+/// RTT pass.
+pub(super) const RTT_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
 // SDF rendering
 /// World-space padding added to each SDF quad mesh beyond the shape boundary.
@@ -51,6 +68,9 @@ pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");
 
 // Text rendering
+/// Tolerance used when deduplicating glyph baselines during line-count
+/// estimation in world text.
+pub(super) const BASELINE_DEDUP_EPSILON: f32 = 0.01;
 /// Fixed panel-local Z for text and image meshes.
 ///
 /// Layering is handled by `StandardMaterial::depth_bias`, so panel-local
@@ -59,6 +79,9 @@ pub(super) const TEXT_Z_OFFSET: f32 = 0.0;
 /// Default clip rect for unclipped text: effectively infinite panel-local
 /// bounds so the shader clip test becomes a no-op.
 pub(super) const UNCLIPPED_TEXT_CLIP_RECT: Vec4 = Vec4::new(-1e6, -1e6, 1e6, 1e6);
+/// Slow-frame debug log threshold for `render_world_text` total time, in
+/// milliseconds.
+pub(super) const WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS: f32 = 5.0;
 
 /// Returns the library's default matte `StandardMaterial`.
 #[must_use]

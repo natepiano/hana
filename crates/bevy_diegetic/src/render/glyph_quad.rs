@@ -27,6 +27,8 @@ use bevy::prelude::Mesh;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy_kana::ToU32;
 
+use super::constants::GLYPH_QUAD_LINE_TOLERANCE;
+
 /// Per-glyph data used when building batched quad meshes.
 ///
 /// This struct is used on the CPU to build per-glyph quad vertices within
@@ -59,10 +61,6 @@ pub(super) struct GlyphQuadData {
 /// tolerance). Cross-line pairs are skipped to prevent the last glyph of
 /// one line from destroying the first glyph of the next line.
 pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
-    /// Two quads are considered on different lines when their Y positions
-    /// differ by more than this threshold.
-    const LINE_TOLERANCE: f32 = 0.001;
-
     if quads.len() < 2 {
         return;
     }
@@ -70,7 +68,7 @@ pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
     for i in 0..quads.len() - 1 {
         // Skip pairs on different lines — they cannot meaningfully overlap.
         let y_delta = (quads[i].1.position[1] - quads[i + 1].1.position[1]).abs();
-        if y_delta > LINE_TOLERANCE {
+        if y_delta > GLYPH_QUAD_LINE_TOLERANCE {
             continue;
         }
 
