@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_kana::ScreenPosition;
 
+use super::constants::PERCENT_MULTIPLIER;
 use crate::fit::Edge;
 use crate::projection::CameraBasis;
 use crate::projection::ProjectionMode;
@@ -125,10 +126,10 @@ pub(super) const fn margin_percentage(bounds: &ScreenSpaceBounds, edge: Edge) ->
     let screen_height = 2.0 * bounds.half_extent_y;
 
     match edge {
-        Edge::Left => (bounds.left_margin / screen_width) * 100.0,
-        Edge::Right => (bounds.right_margin / screen_width) * 100.0,
-        Edge::Top => (bounds.top_margin / screen_height) * 100.0,
-        Edge::Bottom => (bounds.bottom_margin / screen_height) * 100.0,
+        Edge::Left => (bounds.left_margin / screen_width) * PERCENT_MULTIPLIER,
+        Edge::Right => (bounds.right_margin / screen_width) * PERCENT_MULTIPLIER,
+        Edge::Top => (bounds.top_margin / screen_height) * PERCENT_MULTIPLIER,
+        Edge::Bottom => (bounds.bottom_margin / screen_height) * PERCENT_MULTIPLIER,
     }
 }
 

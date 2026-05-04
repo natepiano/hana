@@ -2,6 +2,9 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::constants::DEFAULT_OVERLAY_LINE_WIDTH;
+use super::constants::OVERLAY_GIZMO_DEPTH_BIAS;
+use super::constants::PERCENT_MULTIPLIER;
 use super::convex_hull;
 use super::labels;
 use super::labels::BoundsLabel;
@@ -46,7 +49,7 @@ impl Default for FitTargetOverlayConfig {
             silhouette_color: Color::srgb(1.0, 0.5, 0.0), // Orange
             balanced_color:   Color::srgb(0.0, 1.0, 0.0), // Green
             unbalanced_color: Color::srgb(1.0, 0.0, 0.0), // Red
-            line_width:       2.0,
+            line_width:       DEFAULT_OVERLAY_LINE_WIDTH,
         }
     }
 }
@@ -72,10 +75,10 @@ impl From<&ScreenSpaceBounds> for FitMarginPercents {
         let screen_width = 2.0 * bounds.half_extent_x;
         let screen_height = 2.0 * bounds.half_extent_y;
         Self {
-            left:   (bounds.left_margin / screen_width) * 100.0,
-            right:  (bounds.right_margin / screen_width) * 100.0,
-            top:    (bounds.top_margin / screen_height) * 100.0,
-            bottom: (bounds.bottom_margin / screen_height) * 100.0,
+            left:   (bounds.left_margin / screen_width) * PERCENT_MULTIPLIER,
+            right:  (bounds.right_margin / screen_width) * PERCENT_MULTIPLIER,
+            top:    (bounds.top_margin / screen_height) * PERCENT_MULTIPLIER,
+            bottom: (bounds.bottom_margin / screen_height) * PERCENT_MULTIPLIER,
         }
     }
 }
@@ -313,7 +316,7 @@ pub(super) fn sync_gizmo_render_layers(
 ) {
     let (gizmo_config, _) = config_store.config_mut::<FitTargetGizmo>();
     gizmo_config.line.width = viz_config.line_width;
-    gizmo_config.depth_bias = -1.0;
+    gizmo_config.depth_bias = OVERLAY_GIZMO_DEPTH_BIAS;
 
     // Apply render layers from the first visualization-enabled camera
     if let Some(Some(layers)) = camera_query.iter().next() {

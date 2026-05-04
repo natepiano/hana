@@ -3,6 +3,8 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
+use crate::constants::DEFAULT_FIT_MARGIN;
+
 /// Context for a zoom-to-fit operation routed through `PlayAnimation`.
 #[derive(Clone, Reflect)]
 pub struct ZoomContext {
@@ -40,7 +42,7 @@ impl ZoomToFit {
         Self {
             camera,
             target,
-            margin: 0.1,
+            margin: DEFAULT_FIT_MARGIN,
             duration: Duration::ZERO,
             easing: EaseFunction::CubicOut,
         }

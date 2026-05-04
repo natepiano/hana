@@ -3,6 +3,8 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
+use crate::constants::DEFAULT_FIT_MARGIN;
+
 /// Rotates the camera in place to face a target entity.
 #[derive(EntityEvent, Reflect)]
 #[reflect(Event, FromReflect)]
@@ -69,7 +71,7 @@ impl LookAtAndZoomToFit {
         Self {
             camera,
             target,
-            margin: 0.1,
+            margin: DEFAULT_FIT_MARGIN,
             duration: Duration::ZERO,
             easing: EaseFunction::CubicOut,
         }

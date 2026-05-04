@@ -2,12 +2,16 @@
 /// Tolerance for detecting external camera input during animations.
 /// Values within this threshold are considered unchanged (accounts for floating point noise).
 pub(crate) const EXTERNAL_INPUT_TOLERANCE: f32 = 1e-6;
+/// Conversion factor from seconds to milliseconds.
+pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
 
 // Fit constants
 /// Maximum centering iterations per candidate radius.
 pub(crate) const CENTERING_MAX_ITERATIONS: usize = 10;
 /// Normalized screen-space center offset tolerance.
 pub(crate) const CENTERING_TOLERANCE: f32 = 0.0001;
+/// Default fit margin applied by event constructors.
+pub(crate) const DEFAULT_FIT_MARGIN: f32 = 0.1;
 /// Minimum screen-space extent before treating a dimension as degenerate (edge-on).
 /// Below this threshold the dimension is ignored for fit purposes.
 pub(crate) const DEGENERATE_EXTENT_THRESHOLD: f32 = 1e-6;
