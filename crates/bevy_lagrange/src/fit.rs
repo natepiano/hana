@@ -125,7 +125,7 @@ const fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f
 
 /// Pre-computed parameters for the fit binary search.
 struct FitParams {
-    rot:                  Quat,
+    rotation:             Quat,
     aspect_ratio:         f32,
     ortho_fixed_distance: Option<f32>,
     projection_mode:      projection::ProjectionMode,
@@ -183,7 +183,7 @@ pub(crate) fn calculate_fit(
             .ok_or(FitError::NoViewport)?;
 
     let params = FitParams {
-        rot: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
+        rotation: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
         aspect_ratio,
         ortho_fixed_distance,
         projection_mode,
@@ -255,9 +255,10 @@ fn binary_search_for_fit(
         );
 
         let camera_distance = params.ortho_fixed_distance.unwrap_or(test_radius);
-        let camera_pos = centered_focus + params.rot * Vec3::new(0.0, 0.0, camera_distance);
+        let camera_position =
+            centered_focus + params.rotation * Vec3::new(0.0, 0.0, camera_distance);
         let camera_global = GlobalTransform::from(
-            Transform::from_translation(camera_pos).with_rotation(params.rot),
+            Transform::from_translation(camera_position).with_rotation(params.rotation),
         );
 
         let Some((bounds, _)) = ScreenSpaceBounds::from_points(
@@ -370,20 +371,21 @@ fn refine_focus_centering(
     projection: &Projection,
     params: &FitParams,
 ) -> Vec3 {
-    let rot = params.rot;
+    let rotation = params.rotation;
     let aspect_ratio = params.aspect_ratio;
     let ortho_fixed_distance = params.ortho_fixed_distance;
     let projection_mode = params.projection_mode;
-    let camera_right = rot * Vec3::X;
-    let camera_up = rot * Vec3::Y;
+    let camera_right = rotation * Vec3::X;
+    let camera_up = rotation * Vec3::Y;
 
     let camera_distance = ortho_fixed_distance.unwrap_or(radius);
 
     let mut focus = initial_focus;
     for _ in 0..CENTERING_MAX_ITERATIONS {
-        let camera_pos = focus + rot * Vec3::new(0.0, 0.0, camera_distance);
-        let camera_global =
-            GlobalTransform::from(Transform::from_translation(camera_pos).with_rotation(rot));
+        let camera_position = focus + rotation * Vec3::new(0.0, 0.0, camera_distance);
+        let camera_global = GlobalTransform::from(
+            Transform::from_translation(camera_position).with_rotation(rotation),
+        );
         let Some((bounds, depths)) =
             ScreenSpaceBounds::from_points(points, &camera_global, projection, aspect_ratio)
         else {

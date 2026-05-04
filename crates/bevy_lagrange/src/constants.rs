@@ -1,4 +1,4 @@
-// Animation constants
+// animation constants
 /// Tolerance for detecting external camera input during animations.
 /// Values within this threshold are considered unchanged (accounts for floating point noise).
 pub(crate) const EXTERNAL_INPUT_TOLERANCE: f32 = 1e-6;
@@ -7,7 +7,7 @@ pub(crate) const INSTANT_SMOOTHNESS: f32 = 0.0;
 /// Conversion factor from seconds to milliseconds.
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
 
-// Fit constants
+// fit constants
 /// Maximum centering iterations per candidate radius.
 pub(crate) const CENTERING_MAX_ITERATIONS: usize = 10;
 /// Normalized screen-space center offset tolerance.
@@ -32,7 +32,7 @@ pub(crate) const MIN_RADIUS_MULTIPLIER: f32 = 0.1;
 /// Convergence tolerance (0.1% of search range).
 pub(crate) const TOLERANCE: f32 = 0.001;
 
-// Input constants
+// input constants
 /// Conversion factor from mouse drag delta to scroll-equivalent zoom input.
 pub(crate) const BUTTON_ZOOM_SCALE: f32 = 0.03;
 /// Neutral sensitivity multiplier for user-controlled camera input.
@@ -42,7 +42,7 @@ pub(crate) const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
 /// Scale factor for converting pixel-based scroll events to zoom input.
 pub(crate) const PIXEL_SCROLL_SCALE: f32 = 0.005;
 
-// Orbit constants
+// orbit constants
 /// Approximate-equality threshold for floating-point convergence checks.
 pub(crate) const EPSILON: f32 = 0.001;
 /// Minimum orbit radius when camera and focus coincide.
@@ -54,7 +54,7 @@ pub(crate) const SMOOTHNESS_EXPONENT: i32 = 7;
 /// Conversion factor from two-finger touch pinch to zoom input.
 pub(crate) const TOUCH_PINCH_SCALE: f32 = 0.015;
 
-// Orbit defaults
+// orbit defaults
 /// Default yaw and pitch target when the camera faces forward.
 pub(crate) const DEFAULT_ORBIT_ANGLE: f32 = 0.0;
 /// Default smoothing factor for orbit motion.
@@ -68,7 +68,7 @@ pub(crate) const DEFAULT_ZOOM_LOWER_LIMIT: f32 = 1e-7;
 /// Default smoothing factor for zoom motion.
 pub(crate) const DEFAULT_ZOOM_SMOOTHNESS: f32 = 0.1;
 
-// Projection constants
+// projection constants
 /// Perspective near plane as a fraction of the current orbit radius.
 pub(crate) const PERSPECTIVE_NEAR_RADIUS_FACTOR: f32 = 0.001;
 /// Absolute minimum perspective near plane.

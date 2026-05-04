@@ -19,6 +19,29 @@ use bevy_lagrange::UpsideDownPolicy;
 use bevy_lagrange::ZoomDirection;
 use bevy_window_manager::WindowManagerPlugin;
 
+// camera
+const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+const CAMERA_ORBIT_SENSITIVITY: f32 = 1.5;
+const CAMERA_PAN_SENSITIVITY: f32 = 0.5;
+const CAMERA_PITCH: f32 = TAU / 8.0;
+const CAMERA_PITCH_LIMIT: f32 = TAU / 3.0;
+const CAMERA_RADIUS: f32 = 5.0;
+const CAMERA_YAW: f32 = TAU / 8.0;
+const CAMERA_YAW_LIMIT: f32 = TAU / 4.0;
+const CAMERA_ZOOM_LOWER_LIMIT: f32 = 1.0;
+const CAMERA_ZOOM_SENSITIVITY: f32 = 0.5;
+const CAMERA_ZOOM_UPPER_LIMIT: f32 = 5.0;
+
+// cube
+const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_SIZE: f32 = 1.0;
+const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 0.0);
+
+// scene
+const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
+const GROUND_SIZE: f32 = 5.0;
+const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -37,14 +60,14 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        MeshMaterial3d(materials.add(GROUND_COLOR)),
     ));
     // Cube
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(0.0, 0.5, 0.0),
+        Mesh3d(meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE))),
+        MeshMaterial3d(materials.add(CUBE_COLOR)),
+        Transform::from_translation(CUBE_TRANSLATION),
     ));
     // Light
     commands.spawn((
@@ -52,7 +75,7 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera
     commands.spawn((
@@ -60,22 +83,22 @@ fn setup(
         // we don't set transform on the camera.
         OrbitCam {
             // Set focal point (what the camera should look at)
-            focus: Vec3::new(0.0, 1.0, 0.0),
+            focus: CAMERA_FOCUS,
             // Set the starting position, relative to focus (overrides camera's transform).
-            yaw: Some(TAU / 8.0),
-            pitch: Some(TAU / 8.0),
-            radius: Some(5.0),
+            yaw: Some(CAMERA_YAW),
+            pitch: Some(CAMERA_PITCH),
+            radius: Some(CAMERA_RADIUS),
             // Set limits on rotation and zoom
-            yaw_upper_limit: Some(TAU / 4.0),
-            yaw_lower_limit: Some(-TAU / 4.0),
-            pitch_upper_limit: Some(TAU / 3.0),
-            pitch_lower_limit: Some(-TAU / 3.0),
-            zoom_upper_limit: Some(5.0),
-            zoom_lower_limit: 1.0,
+            yaw_upper_limit: Some(CAMERA_YAW_LIMIT),
+            yaw_lower_limit: Some(-CAMERA_YAW_LIMIT),
+            pitch_upper_limit: Some(CAMERA_PITCH_LIMIT),
+            pitch_lower_limit: Some(-CAMERA_PITCH_LIMIT),
+            zoom_upper_limit: Some(CAMERA_ZOOM_UPPER_LIMIT),
+            zoom_lower_limit: CAMERA_ZOOM_LOWER_LIMIT,
             // Adjust sensitivity of controls
-            orbit_sensitivity: 1.5,
-            pan_sensitivity: 0.5,
-            zoom_sensitivity: 0.5,
+            orbit_sensitivity: CAMERA_ORBIT_SENSITIVITY,
+            pan_sensitivity: CAMERA_PAN_SENSITIVITY,
+            zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
             // Allow the camera to go upside down
             upside_down_policy: UpsideDownPolicy::Allow,
             // Change the controls (these match Blender)

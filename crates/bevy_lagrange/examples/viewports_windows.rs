@@ -18,6 +18,29 @@ use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::ManagedWindow;
 use bevy_window_manager::WindowManagerPlugin;
 
+// camera
+const MINIMAP_CAMERA_ORDER: isize = 1;
+const MINIMAP_CAMERA_TRANSLATION: Vec3 = Vec3::new(1.0, 1.5, 4.0);
+const PRIMARY_CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 5.0);
+const SECOND_WINDOW_CAMERA_TRANSLATION: Vec3 = Vec3::new(5.0, 1.5, 7.0);
+
+// cube
+const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_SIZE: f32 = 1.0;
+const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 0.0);
+
+// scene
+const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
+const GROUND_SIZE: f32 = 5.0;
+const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+
+// viewport
+const MINIMAP_VIEWPORT_DIVISOR: u32 = 5;
+
+// window
+const SECOND_WINDOW_NAME: &str = "second_window";
+const SECOND_WINDOW_TITLE: &str = "Second window";
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -49,14 +72,14 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        MeshMaterial3d(materials.add(GROUND_COLOR)),
     ));
     // Cube
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(0.0, 0.5, 0.0),
+        Mesh3d(meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE))),
+        MeshMaterial3d(materials.add(CUBE_COLOR)),
+        Transform::from_translation(CUBE_TRANSLATION),
     ));
     // Light
     commands.spawn((
@@ -64,20 +87,20 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_translation(LIGHT_TRANSLATION),
     ));
 
     // --- Primary window: main camera ---
     commands.spawn((
-        Transform::from_translation(Vec3::new(0.0, 0.5, 5.0)),
+        Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
         pan_orbit_default(),
     ));
 
     // --- Primary window: minimap viewport overlay ---
     commands.spawn((
-        Transform::from_translation(Vec3::new(1.0, 1.5, 4.0)),
+        Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
         Camera {
-            order: 1,
+            order: MINIMAP_CAMERA_ORDER,
             clear_color: ClearColorConfig::None,
             ..default()
         },
@@ -89,17 +112,17 @@ fn setup(
     let second_window = commands
         .spawn((
             Window {
-                title: "Second window".to_owned(),
+                title: SECOND_WINDOW_TITLE.to_owned(),
                 ..default()
             },
             ManagedWindow {
-                name: "second_window".into(),
+                name: SECOND_WINDOW_NAME.into(),
             },
         ))
         .id();
 
     commands.spawn((
-        Transform::from_translation(Vec3::new(5.0, 1.5, 7.0)),
+        Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
         Camera::default(),
         RenderTarget::Window(WindowRef::Entity(second_window)),
         pan_orbit_default(),
@@ -116,11 +139,11 @@ fn cleanup_cameras_on_window_close(
     closing: Query<Entity, With<ClosingWindow>>,
     cameras: Query<(Entity, &RenderTarget)>,
 ) {
-    for (cam_entity, target) in &cameras {
+    for (camera_entity, target) in &cameras {
         if let RenderTarget::Window(WindowRef::Entity(window)) = target
             && closing.get(*window).is_ok()
         {
-            commands.entity(cam_entity).despawn();
+            commands.entity(camera_entity).despawn();
         }
     }
 }
@@ -134,7 +157,7 @@ fn set_camera_viewports(
         let Ok(window) = windows.get(resize_event.window) else {
             continue;
         };
-        let size = window.resolution.physical_width() / 5;
+        let size = window.resolution.physical_width() / MINIMAP_VIEWPORT_DIVISOR;
         right_camera.viewport = Some(Viewport {
             physical_position: UVec2::new(window.resolution.physical_width() - size, 0),
             physical_size: UVec2::new(size, size),

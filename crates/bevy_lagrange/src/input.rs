@@ -143,10 +143,10 @@ pub(crate) fn mouse_key_tracker(
     mut mouse_motion: MessageReader<MouseMotion>,
     mut pinch_events: MessageReader<PinchGesture>,
     mut scroll_events: MessageReader<MouseWheel>,
-    active_cam: Res<ActiveCameraData>,
+    active_camera: Res<ActiveCameraData>,
     orbit_cameras: Query<&OrbitCam>,
 ) {
-    let Some(active_entity) = active_cam.entity else {
+    let Some(active_entity) = active_camera.entity else {
         return;
     };
 

@@ -61,9 +61,9 @@ pub(crate) fn update_orbit_transform(
         Projection::Perspective(p) => sync_perspective_near_clip(p, radius),
         Projection::Custom(_) => {},
     }
-    let yaw_rot = Quat::from_axis_angle(axis[1], yaw);
-    let pitch_rot = Quat::from_axis_angle(axis[0], -pitch);
-    new_transform.rotation *= yaw_rot * pitch_rot;
+    let yaw_rotation = Quat::from_axis_angle(axis[1], yaw);
+    let pitch_rotation = Quat::from_axis_angle(axis[0], -pitch);
+    new_transform.rotation *= yaw_rotation * pitch_rotation;
     new_transform.translation += *focus + new_transform.rotation * Vec3::new(0.0, 0.0, radius);
     *transform = new_transform;
 }

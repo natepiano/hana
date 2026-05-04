@@ -28,6 +28,29 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
+// camera
+const FIRST_PASS_CAMERA_ORDER: isize = -1;
+const FIRST_PASS_CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 0.0, 15.0);
+const FIRST_PASS_LAYER_INDEX: usize = 1;
+const MAIN_PASS_CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 0.0, 15.0);
+
+// cube
+const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_REFLECTANCE: f32 = 0.02;
+const CUBE_SIZE: f32 = 4.0;
+const FIRST_PASS_CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+const MAIN_PASS_CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.0, 1.5);
+const OUTER_CUBE_ROTATION_SPEED_X: f32 = 1.0;
+const OUTER_CUBE_ROTATION_SPEED_Y: f32 = 0.7;
+const OUTER_CUBE_ROTATION_X: f32 = -PI / 5.0;
+
+// render target
+const RENDER_TARGET_HEIGHT: u32 = 512;
+const RENDER_TARGET_WIDTH: u32 = 512;
+
+// scene
+const LIGHT_TRANSLATION: Vec3 = Vec3::new(0.0, 0.0, 10.0);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -52,12 +75,12 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut active_cam: ResMut<ActiveCameraData>,
+    mut active_camera: ResMut<ActiveCameraData>,
     primary_window: Single<&Window, With<PrimaryWindow>>,
 ) {
     let size = Extent3d {
-        width: 512,
-        height: 512,
+        width: RENDER_TARGET_WIDTH,
+        height: RENDER_TARGET_HEIGHT,
         ..default()
     };
 
@@ -83,23 +106,23 @@ fn setup(
 
     let image_handle = images.add(image);
 
-    let cube_handle = meshes.add(Cuboid::new(4.0, 4.0, 4.0));
+    let cube_handle = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
     let cube_material_handle = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.8, 0.7, 0.6),
-        reflectance: 0.02,
+        base_color: CUBE_COLOR,
+        reflectance: CUBE_REFLECTANCE,
         unlit: false,
         ..default()
     });
 
     // This specifies the layer used for the first pass, which will be attached to the first pass
     // camera and cube.
-    let first_pass_layer = RenderLayers::layer(1);
+    let first_pass_layer = RenderLayers::layer(FIRST_PASS_LAYER_INDEX);
 
     // The cube that will be rendered to the texture.
     commands.spawn((
         Mesh3d(cube_handle),
         MeshMaterial3d(cube_material_handle),
-        Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+        Transform::from_translation(FIRST_PASS_CUBE_TRANSLATION),
         FirstPassCube,
         first_pass_layer.clone(),
     ));
@@ -108,7 +131,7 @@ fn setup(
     // NOTE: Currently lights are shared between passes - see https://github.com/bevyengine/bevy/issues/3462
     commands.spawn((
         PointLight::default(),
-        Transform::from_translation(Vec3::new(0.0, 0.0, 10.0)),
+        Transform::from_translation(LIGHT_TRANSLATION),
     ));
 
     // The camera for the first pass cube that will be rendered to the texture. This is the camera
@@ -118,11 +141,12 @@ fn setup(
             Camera {
                 // render before the "main pass" camera
                 clear_color: ClearColorConfig::Custom(Color::WHITE),
-                order: -1,
+                order: FIRST_PASS_CAMERA_ORDER,
                 ..default()
             },
             RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
-            Transform::from_translation(Vec3::new(0.0, 0.0, 15.0)).looking_at(Vec3::ZERO, Vec3::Y),
+            Transform::from_translation(FIRST_PASS_CAMERA_TRANSLATION)
+                .looking_at(Vec3::ZERO, Vec3::Y),
             OrbitCam {
                 input_control: Some(InputControl {
                     trackpad: Some(TrackpadInput::blender_default()),
@@ -134,13 +158,12 @@ fn setup(
         ))
         .id();
 
-    let cube_size = 4.0;
-    let cube_handle = meshes.add(Cuboid::new(cube_size, cube_size, cube_size));
+    let cube_handle = meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
 
     // This material has the texture that has been rendered.
     let material_handle = materials.add(StandardMaterial {
         base_color_texture: Some(image_handle),
-        reflectance: 0.02,
+        reflectance: CUBE_REFLECTANCE,
         unlit: false,
         ..default()
     });
@@ -149,14 +172,15 @@ fn setup(
     commands.spawn((
         Mesh3d(cube_handle),
         MeshMaterial3d(material_handle),
-        Transform::from_xyz(0.0, 0.0, 1.5).with_rotation(Quat::from_rotation_x(-PI / 5.0)),
+        Transform::from_translation(MAIN_PASS_CUBE_TRANSLATION)
+            .with_rotation(Quat::from_rotation_x(OUTER_CUBE_ROTATION_X)),
         MainPassCube,
     ));
 
     // The main pass camera.
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 0.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_translation(MAIN_PASS_CAMERA_TRANSLATION).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Set up manual override of OrbitCam. Note that this must run after OrbitCamPlugin
@@ -164,7 +188,7 @@ fn setup(
     // Note: you probably want to update the `viewport_size` and `window_size` whenever they change,
     // I haven't done this here for simplicity.
     let viewport_size = Some(Vec2::new(size.width.to_f32(), size.height.to_f32()));
-    active_cam.set_if_neq(ActiveCameraData {
+    active_camera.set_if_neq(ActiveCameraData {
         // Set the entity to the entity ID of the camera you want to control. In this case, it's
         // the inner (first pass) cube that is rendered to the texture/image.
         entity: Some(pan_orbit_id),
@@ -181,7 +205,7 @@ fn setup(
 /// Rotates the outer cube (main pass)
 fn cube_rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<MainPassCube>>) {
     for mut transform in &mut query {
-        transform.rotate_x(1.0 * time.delta_secs());
-        transform.rotate_y(0.7 * time.delta_secs());
+        transform.rotate_x(OUTER_CUBE_ROTATION_SPEED_X * time.delta_secs());
+        transform.rotate_y(OUTER_CUBE_ROTATION_SPEED_Y * time.delta_secs());
     }
 }

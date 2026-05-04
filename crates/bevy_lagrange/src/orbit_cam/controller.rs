@@ -76,7 +76,7 @@ fn initialize_orbit_cam(
 fn collect_camera_input(
     entity: Entity,
     orbit_cam: &OrbitCam,
-    active_cam: &ActiveCameraData,
+    active_camera: &ActiveCameraData,
     mouse_key_tracker: &MouseKeyTracker,
     touch_tracker: &TouchTracker,
 ) -> CameraInput {
@@ -89,7 +89,7 @@ fn collect_camera_input(
     // Only skip getting input if the camera is inactive/disabled — it might still
     // be lerping towards target values when the user is not actively controlling it.
     if let Some(input_control) = orbit_cam.input_control
-        && active_cam.entity == Some(entity)
+        && active_camera.entity == Some(entity)
     {
         let zoom_sign = match input_control.zoom {
             ZoomDirection::Normal => 1.0,
@@ -286,7 +286,7 @@ fn smooth_and_update_transform(
 
 /// Main system for processing input and converting to transformations
 pub fn orbit_cam(
-    active_cam: Res<ActiveCameraData>,
+    active_camera: Res<ActiveCameraData>,
     mouse_key_tracker: Res<MouseKeyTracker>,
     touch_tracker: Res<TouchTracker>,
     mut orbit_cameras: Query<(
@@ -308,7 +308,7 @@ pub fn orbit_cam(
         let input = collect_camera_input(
             entity,
             &orbit_cam,
-            &active_cam,
+            &active_camera,
             &mouse_key_tracker,
             &touch_tracker,
         );
@@ -328,12 +328,12 @@ pub fn orbit_cam(
             input.orbit,
             &mut orbit_cam,
             *drag_state,
-            active_cam.window_size,
+            active_camera.window_size,
         );
         has_moved |= apply_pan_input(
             input.pan,
             &mut orbit_cam,
-            active_cam.viewport_size,
+            active_camera.viewport_size,
             &transform,
             &projection,
         );

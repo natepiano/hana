@@ -56,8 +56,8 @@ impl PlayAnimation {
 
     /// Sets the zoom context and marks the source as `ZoomToFit`.
     #[must_use]
-    pub const fn zoom_context(mut self, ctx: ZoomContext) -> Self {
-        self.zoom_context = Some(ctx);
+    pub const fn zoom_context(mut self, zoom_context: ZoomContext) -> Self {
+        self.zoom_context = Some(zoom_context);
         self.source = AnimationSource::ZoomToFit;
         self
     }

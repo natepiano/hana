@@ -19,6 +19,26 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
+// camera
+const CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 1.5, 5.0);
+
+// cube
+const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_SIZE: f32 = 1.0;
+const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 0.0);
+
+// scene
+const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
+const GROUND_SIZE: f32 = 5.0;
+const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+
+// ui
+const BLOCKING_OFF_LABEL: &str = "OFF";
+const BLOCKING_ON_LABEL: &str = "ON";
+const PANEL_ID: &str = "panel";
+const TOGGLE_BLOCKING_LABEL: &str = "Press T to toggle blocking.";
+const UI_HELP_LABEL: &str = "Hover here and try to orbit.";
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
@@ -40,14 +60,14 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(5.0, 5.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        MeshMaterial3d(materials.add(GROUND_COLOR)),
     ));
     // Cube
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(0.0, 0.5, 0.0),
+        Mesh3d(meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE))),
+        MeshMaterial3d(materials.add(CUBE_COLOR)),
+        Transform::from_translation(CUBE_TRANSLATION),
     ));
     // Light
     commands.spawn((
@@ -55,11 +75,11 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera — starts with blocking enabled
     commands.spawn((
-        Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
+        Transform::from_translation(CAMERA_TRANSLATION),
         OrbitCam {
             input_control: Some(InputControl {
                 trackpad: Some(TrackpadInput::blender_default()),
@@ -96,16 +116,20 @@ fn ui_system(
     // Assumes a single `OrbitCam`; multi-camera apps need scoping by
     // viewport/window/active-camera marker rather than this aggregate.
     let blocking = query.iter().next().flatten().is_some();
-    let status = if blocking { "ON" } else { "OFF" };
+    let status = if blocking {
+        BLOCKING_ON_LABEL
+    } else {
+        BLOCKING_OFF_LABEL
+    };
 
-    egui::SidePanel::left("panel")
+    egui::SidePanel::left(PANEL_ID)
         .resizable(true)
         .show(contexts.ctx_mut()?, |ui| {
             ui.heading(format!("BlockOnEguiFocus: {status}"));
             ui.separator();
-            ui.label("Press T to toggle blocking.");
+            ui.label(TOGGLE_BLOCKING_LABEL);
             ui.separator();
-            ui.label("Hover here and try to orbit.");
+            ui.label(UI_HELP_LABEL);
         });
     Ok(())
 }

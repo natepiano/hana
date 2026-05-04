@@ -142,9 +142,9 @@ impl CameraMove {
                 radius,
                 ..
             } => {
-                let yaw_rot = Quat::from_axis_angle(Vec3::Y, *yaw);
-                let pitch_rot = Quat::from_axis_angle(Vec3::X, -*pitch);
-                let rotation = yaw_rot * pitch_rot;
+                let yaw_rotation = Quat::from_axis_angle(Vec3::Y, *yaw);
+                let pitch_rotation = Quat::from_axis_angle(Vec3::X, -*pitch);
+                let rotation = yaw_rotation * pitch_rotation;
                 *focus + rotation * Vec3::new(0.0, 0.0, *radius)
             },
         }
@@ -308,12 +308,12 @@ fn handle_camera_input_interrupt(
     commands: &mut Commands,
     entity: Entity,
     pan_orbit: &mut OrbitCam,
-    ctx: &InterruptContext,
+    interrupt_context: &InterruptContext,
 ) -> CameraInputInterruptBehavior {
-    let interrupt_behavior = ctx.interrupt_behavior;
-    let source = ctx.source;
-    let current_move = ctx.current_move;
-    let zoom_marker = ctx.zoom_marker;
+    let interrupt_behavior = interrupt_context.interrupt_behavior;
+    let source = interrupt_context.source;
+    let current_move = interrupt_context.current_move;
+    let zoom_marker = interrupt_context.zoom_marker;
     match interrupt_behavior {
         CameraInputInterruptBehavior::Ignore => CameraInputInterruptBehavior::Ignore,
         CameraInputInterruptBehavior::Cancel => {
@@ -340,7 +340,7 @@ fn handle_camera_input_interrupt(
         },
         CameraInputInterruptBehavior::Complete => {
             // Jump to the final position of the entire queue
-            if let Some(final_move) = ctx.queue.camera_moves.back() {
+            if let Some(final_move) = interrupt_context.queue.camera_moves.back() {
                 let (yaw, pitch, radius) = final_move.orbital_params();
                 pan_orbit.target_focus = final_move.focus();
                 pan_orbit.target_yaw = yaw;

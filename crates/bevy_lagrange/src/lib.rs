@@ -96,8 +96,8 @@ impl Plugin for LagrangePlugin {
                 (
                     (
                         orbit_cam::active_viewport_data.run_if(
-                            |active_cam: Res<ActiveCameraData>| {
-                                active_cam.detection == CameraInputDetection::Automatic
+                            |active_camera: Res<ActiveCameraData>| {
+                                active_camera.detection == CameraInputDetection::Automatic
                             },
                         ),
                         input::mouse_key_tracker,

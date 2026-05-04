@@ -19,12 +19,12 @@ pub(super) struct MarginLabel {
 
 /// Parameters for creating or updating a margin label.
 pub(super) struct MarginLabelParams {
-    pub(super) camera:        Entity,
-    pub(super) edge:          Edge,
-    pub(super) text:          String,
-    pub(super) color:         Color,
-    pub(super) screen_pos:    ScreenPosition,
-    pub(super) viewport_size: Vec2,
+    pub(super) camera:          Entity,
+    pub(super) edge:            Edge,
+    pub(super) text:            String,
+    pub(super) color:           Color,
+    pub(super) screen_position: ScreenPosition,
+    pub(super) viewport_size:   Vec2,
 }
 
 /// Component marking the "screen space bounds" label, scoped to a specific camera entity.
@@ -77,25 +77,25 @@ pub(super) fn bounds_label_position(upper_left: ScreenPosition) -> ScreenPositio
 fn apply_margin_label_anchor(
     node: &mut Node,
     edge: Edge,
-    screen_pos: ScreenPosition,
+    screen_position: ScreenPosition,
     viewport_size: Vec2,
 ) {
     match edge {
         Edge::Left | Edge::Top => {
-            node.left = Val::Px(screen_pos.x);
-            node.top = Val::Px(screen_pos.y);
+            node.left = Val::Px(screen_position.x);
+            node.top = Val::Px(screen_position.y);
             node.right = Val::Auto;
             node.bottom = Val::Auto;
         },
         Edge::Right => {
-            node.right = Val::Px(viewport_size.x - screen_pos.x);
-            node.top = Val::Px(screen_pos.y);
+            node.right = Val::Px(viewport_size.x - screen_position.x);
+            node.top = Val::Px(screen_position.y);
             node.left = Val::Auto;
             node.bottom = Val::Auto;
         },
         Edge::Bottom => {
-            node.left = Val::Px(screen_pos.x);
-            node.bottom = Val::Px(viewport_size.y - screen_pos.y);
+            node.left = Val::Px(screen_position.x);
+            node.bottom = Val::Px(viewport_size.y - screen_position.y);
             node.right = Val::Auto;
             node.top = Val::Auto;
         },
@@ -103,12 +103,12 @@ fn apply_margin_label_anchor(
 }
 
 /// Builds an anchored node for a new margin label.
-fn margin_label_node(edge: Edge, screen_pos: ScreenPosition, viewport_size: Vec2) -> Node {
+fn margin_label_node(edge: Edge, screen_position: ScreenPosition, viewport_size: Vec2) -> Node {
     let mut node = Node {
         position_type: PositionType::Absolute,
         ..default()
     };
-    apply_margin_label_anchor(&mut node, edge, screen_pos, viewport_size);
+    apply_margin_label_anchor(&mut node, edge, screen_position, viewport_size);
     node
 }
 
@@ -128,7 +128,7 @@ pub(super) fn update_or_create_margin_label(
         apply_margin_label_anchor(
             &mut node,
             params.edge,
-            params.screen_pos,
+            params.screen_position,
             params.viewport_size,
         );
     } else {
@@ -139,7 +139,7 @@ pub(super) fn update_or_create_margin_label(
                 ..default()
             },
             TextColor(params.color),
-            margin_label_node(params.edge, params.screen_pos, params.viewport_size),
+            margin_label_node(params.edge, params.screen_position, params.viewport_size),
             MarginLabel {
                 edge:   params.edge,
                 camera: params.camera,
@@ -154,15 +154,15 @@ pub(super) fn update_or_create_bounds_label(
     commands: &mut Commands,
     bounds_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
     camera: Entity,
-    screen_pos: ScreenPosition,
+    screen_position: ScreenPosition,
 ) {
     let existing = bounds_query
         .iter_mut()
         .find(|(_, label, _)| label.camera == camera);
 
     if let Some((_, _, mut node)) = existing {
-        node.left = Val::Px(screen_pos.x);
-        node.top = Val::Px(screen_pos.y);
+        node.left = Val::Px(screen_position.x);
+        node.top = Val::Px(screen_position.y);
     } else {
         commands.spawn((
             Text::new("screen space bounds"),
@@ -173,8 +173,8 @@ pub(super) fn update_or_create_bounds_label(
             TextColor(BOUNDS_LABEL_COLOR),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(screen_pos.x),
-                top: Val::Px(screen_pos.y),
+                left: Val::Px(screen_position.x),
+                top: Val::Px(screen_position.y),
                 ..default()
             },
             BoundsLabel { camera },

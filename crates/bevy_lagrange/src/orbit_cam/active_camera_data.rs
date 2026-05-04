@@ -56,7 +56,7 @@ pub enum CameraInputDetection {
 /// Gather data about the active viewport, i.e. the viewport the user is interacting with.
 /// Enables multiple viewports/windows.
 pub fn active_viewport_data(
-    mut active_cam: ResMut<ActiveCameraData>,
+    mut active_camera: ResMut<ActiveCameraData>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     key_input: Res<ButtonInput<KeyCode>>,
     pinch_events: MessageReader<PinchGesture>,
@@ -68,7 +68,7 @@ pub fn active_viewport_data(
     #[cfg(feature = "bevy_egui")] egui_wants_focus: Res<EguiWantsFocus>,
     #[cfg(feature = "bevy_egui")] block_on_egui_query: Query<&BlockOnEguiFocus>,
 ) {
-    let mut new_active_camera_data = ActiveCameraData::default();
+    let mut new_active_cameraera_data = ActiveCameraData::default();
     let mut max_camera_order = 0;
 
     let mut has_input = false;
@@ -132,7 +132,7 @@ pub fn active_viewport_data(
                     // value in the case the viewport is
                     // overlapping another viewport.
                     if cursor_in_viewport && camera.order >= max_camera_order {
-                        new_active_camera_data = ActiveCameraData {
+                        new_active_cameraera_data = ActiveCameraData {
                             entity:        Some(entity),
                             viewport_size: camera.logical_viewport_size(),
                             window_size:   Some(Vec2::new(window.width(), window.height())),
@@ -146,6 +146,6 @@ pub fn active_viewport_data(
     }
 
     if has_input {
-        active_cam.set_if_neq(new_active_camera_data);
+        active_camera.set_if_neq(new_active_cameraera_data);
     }
 }

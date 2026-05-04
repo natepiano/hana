@@ -70,17 +70,17 @@ fn begin_zoom_if_needed(
     entity: Entity,
     zoom_context: Option<&ZoomContext>,
 ) {
-    if let Some(ctx) = zoom_context {
+    if let Some(zoom_context) = zoom_context {
         commands.trigger(ZoomBegin {
             camera:   entity,
-            target:   ctx.target,
-            margin:   ctx.margin,
-            duration: ctx.duration,
-            easing:   ctx.easing,
+            target:   zoom_context.target,
+            margin:   zoom_context.margin,
+            duration: zoom_context.duration,
+            easing:   zoom_context.easing,
         });
         commands
             .entity(entity)
-            .insert(ZoomAnimationMarker(ctx.clone()));
+            .insert(ZoomAnimationMarker(zoom_context.clone()));
     }
 }
 

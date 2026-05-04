@@ -207,15 +207,15 @@ fn draw_margin_lines_and_labels(
     commands: &mut Commands,
     gizmos: &mut Gizmos<FitTargetGizmo>,
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
-    ctx: &DrawContext,
+    draw_context: &DrawContext,
     config: &FitTargetOverlayConfig,
 ) -> Vec<Edge> {
-    let camera = ctx.camera;
-    let bounds = ctx.bounds;
-    let camera_basis = ctx.camera_basis;
-    let avg_depth = ctx.avg_depth;
-    let projection_mode = ctx.projection_mode;
-    let viewport_size = ctx.viewport_size;
+    let camera = draw_context.camera;
+    let bounds = draw_context.bounds;
+    let camera_basis = draw_context.camera_basis;
+    let avg_depth = draw_context.avg_depth;
+    let projection_mode = draw_context.projection_mode;
+    let viewport_size = draw_context.viewport_size;
     let horizontal_balance = screen_space::horizontal_balance(bounds, TOLERANCE);
     let vertical_balance = screen_space::vertical_balance(bounds, TOLERANCE);
 
@@ -229,14 +229,14 @@ fn draw_margin_lines_and_labels(
         visible_edges.push(edge);
 
         let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
-        let boundary_pos = screen_space::normalized_to_world(
+        let boundary_position = screen_space::normalized_to_world(
             boundary_x,
             boundary_y,
             camera_basis,
             avg_depth,
             projection_mode,
         );
-        let screen_pos = screen_space::normalized_to_world(
+        let screen_position = screen_space::normalized_to_world(
             screen_x,
             screen_y,
             camera_basis,
@@ -245,14 +245,15 @@ fn draw_margin_lines_and_labels(
         );
 
         let color = calculate_edge_color(edge, horizontal_balance, vertical_balance, config);
-        gizmos.line(boundary_pos, screen_pos, color);
+        gizmos.line(boundary_position, screen_position, color);
 
         let Some(viewport_size) = viewport_size else {
             continue;
         };
         let percentage = screen_space::margin_percentage(bounds, edge);
         let text = format!("margin: {percentage:.3}%");
-        let label_screen_pos = labels::calculate_label_pixel_position(edge, bounds, viewport_size);
+        let label_screen_position =
+            labels::calculate_label_pixel_position(edge, bounds, viewport_size);
 
         labels::update_or_create_margin_label(
             commands,
@@ -262,7 +263,7 @@ fn draw_margin_lines_and_labels(
                 edge,
                 text,
                 color,
-                screen_pos: label_screen_pos,
+                screen_position: label_screen_position,
                 viewport_size,
             },
         );
@@ -465,7 +466,7 @@ fn draw_bounds_for_camera(
     }
 
     // Margin lines + labels
-    let draw_ctx = DrawContext {
+    let draw_context = DrawContext {
         camera,
         bounds: &bounds,
         camera_basis: &camera_basis,
@@ -474,7 +475,7 @@ fn draw_bounds_for_camera(
         viewport_size,
     };
     let visible_edges =
-        draw_margin_lines_and_labels(commands, gizmos, label_query, &draw_ctx, config);
+        draw_margin_lines_and_labels(commands, gizmos, label_query, &draw_context, config);
 
     // Remove stale margin labels for this camera
     cleanup_stale_margin_labels(commands, label_query, camera, &visible_edges);

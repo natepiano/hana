@@ -41,16 +41,16 @@ pub(super) fn on_look_at(
         return;
     };
 
-    let camera_pos = camera_transform.translation();
-    let target_pos = target_transform.translation();
+    let camera_position = camera_transform.translation();
+    let target_position = target_transform.translation();
 
     if duration > Duration::ZERO {
         commands.trigger(
             PlayAnimation::new(
                 camera,
                 [CameraMove::ToPosition {
-                    translation: camera_pos,
-                    focus: target_pos,
+                    translation: camera_position,
+                    focus: target_position,
                     duration,
                     easing,
                 }],
@@ -59,12 +59,12 @@ pub(super) fn on_look_at(
         );
     } else {
         let (yaw, pitch, radius) =
-            animation::orbital_params_from_offset(Displacement(camera_pos - target_pos));
+            animation::orbital_params_from_offset(Displacement(camera_position - target_position));
         snap_orbit::snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
             SnapOrbit {
-                focus: Position(target_pos),
+                focus: Position(target_position),
                 yaw: Some(yaw),
                 pitch: Some(pitch),
                 radius,
@@ -102,7 +102,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
         return;
     };
 
-    let camera_pos = camera_transform.translation();
+    let camera_position = camera_transform.translation();
 
     // Back-solve yaw/pitch from camera's current position relative to the target.
     // We need the target's bounds center for this, so we run the fit calculation
@@ -111,9 +111,9 @@ pub(super) fn on_look_at_and_zoom_to_fit(
         warn!("LookAtAndZoomToFit: target {target:?} has no GlobalTransform");
         return;
     };
-    let target_pos = target_global_transform.translation();
+    let target_position = target_global_transform.translation();
     let (preliminary_yaw, preliminary_pitch, _) =
-        animation::orbital_params_from_offset(Displacement(camera_pos - target_pos));
+        animation::orbital_params_from_offset(Displacement(camera_position - target_position));
 
     let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
@@ -136,7 +136,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
     // Recompute yaw/pitch relative to the fit's focus (bounds center), which may
     // differ slightly from the raw `GlobalTransform` translation.
     let (yaw, pitch, _) =
-        animation::orbital_params_from_offset(Displacement(camera_pos - *fit.focus));
+        animation::orbital_params_from_offset(Displacement(camera_position - *fit.focus));
 
     if duration > Duration::ZERO {
         commands.trigger(

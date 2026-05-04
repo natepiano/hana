@@ -86,7 +86,7 @@ pub(super) fn on_zoom_to_fit(
             easing,
         }]);
 
-        let ctx = ZoomContext {
+        let zoom_context = ZoomContext {
             target,
             margin,
             duration,
@@ -95,7 +95,7 @@ pub(super) fn on_zoom_to_fit(
 
         // `on_play_animation` handles conflict resolution, `ZoomBegin`, and
         // `ZoomAnimationMarker` insertion — all in one place after acceptance.
-        commands.trigger(PlayAnimation::new(camera, camera_moves).zoom_context(ctx));
+        commands.trigger(PlayAnimation::new(camera, camera_moves).zoom_context(zoom_context));
     } else {
         snap_orbit::snap_to_orbit(
             &mut commands,
