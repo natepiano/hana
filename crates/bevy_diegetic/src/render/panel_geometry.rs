@@ -175,10 +175,10 @@ fn build_panel_geometry(
 
         // ── Interaction mesh (Geometry mode only) ───────────────────
         if render_style == RenderStyle::Geometry {
-            let world_w = panel.world_width();
-            let world_h = panel.world_height();
-            let center_x = world_w.mul_add(0.5, -anchor_x);
-            let center_y = world_h.mul_add(-0.5, anchor_y);
+            let world_width = panel.world_width();
+            let world_height = panel.world_height();
+            let center_x = world_width.mul_add(0.5, -anchor_x);
+            let center_y = world_height.mul_add(-0.5, anchor_y);
 
             let interact_mat = standard_materials.add(StandardMaterial {
                 base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
@@ -193,7 +193,7 @@ fn build_panel_geometry(
                 PanelInteractionMesh,
                 RayCastBackfaces,
                 NotShadowCaster,
-                Mesh3d(meshes.add(Rectangle::new(world_w, world_h))),
+                Mesh3d(meshes.add(Rectangle::new(world_width, world_height))),
                 MeshMaterial3d(interact_mat),
                 Transform::from_xyz(center_x, center_y, 0.0),
                 layer,
@@ -307,8 +307,8 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
     }
 
-    let world_w = surface.bounds.width * context.points_to_world;
-    let world_h = surface.bounds.height * context.points_to_world;
+    let world_width = surface.bounds.width * context.points_to_world;
+    let world_height = surface.bounds.height * context.points_to_world;
     let world_radii = corner_radius
         .to_array()
         .map(|radius| radius * context.points_to_world);
@@ -316,18 +316,25 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         .border_widths
         .map(|width| width * context.points_to_world);
 
-    let half_w = world_w * 0.5;
-    let half_h = world_h * 0.5;
+    let half_width = world_width * 0.5;
+    let half_height = world_height * 0.5;
 
     // Mesh is slightly larger than the SDF shape so the exterior
     // anti-aliasing ramp has fragments to render on.
     let pad = constants::SDF_AA_PADDING;
-    let mesh_half_w = half_w + pad;
-    let mesh_half_h = half_h + pad;
+    let mesh_half_width = half_width + pad;
+    let mesh_half_height = half_height + pad;
 
     // Convert layout-space clip rect to local quad coords (centered, Y-up).
     let clip_rect = surface.clip_rect.map_or_else(
-        || bevy::math::Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+        || {
+            bevy::math::Vec4::new(
+                -mesh_half_width,
+                -mesh_half_height,
+                mesh_half_width,
+                mesh_half_height,
+            )
+        },
         |clip_rect| {
             let (cx, cy) = surface.bounds.center();
             let left = (clip_rect.x - cx) * context.points_to_world;
@@ -342,8 +349,8 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
     let sdf_mat = sdf_material::sdf_panel_material(
         base,
         SdfPanelMaterialInput {
-            half_size: Vec2::new(half_w, half_h),
-            mesh_half_size: Vec2::new(mesh_half_w, mesh_half_h),
+            half_size: Vec2::new(half_width, half_height),
+            mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
             corner_radii: world_radii,
             border_widths: world_borders,
             border_color: surface.border_color,
@@ -359,9 +366,10 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         context.anchor_y,
     );
 
-    let mesh = context
-        .meshes
-        .add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
+    let mesh = context.meshes.add(Rectangle::new(
+        mesh_half_width * 2.0,
+        mesh_half_height * 2.0,
+    ));
     let mat_handle = context.sdf_materials.add(sdf_mat);
     let base_components = (
         PanelSdfMesh,

@@ -65,21 +65,21 @@ pub(super) fn rasterize_glyph(
 
     // Compute bitmap dimensions with padding.
     let total_pad = f64::from(padding) + sdf_range;
-    let glyph_w = f64::from(bbox.x_max - bbox.x_min) * scale;
-    let glyph_h = f64::from(bbox.y_max - bbox.y_min) * scale;
+    let glyph_width = f64::from(bbox.x_max - bbox.x_min) * scale;
+    let glyph_height = f64::from(bbox.y_max - bbox.y_min) * scale;
 
-    let img_w = total_pad.mul_add(2.0, glyph_w).ceil().to_u32();
-    let img_h = total_pad.mul_add(2.0, glyph_h).ceil().to_u32();
+    let image_width = total_pad.mul_add(2.0, glyph_width).ceil().to_u32();
+    let image_height = total_pad.mul_add(2.0, glyph_height).ceil().to_u32();
 
-    if img_w == 0 || img_h == 0 {
+    if image_width == 0 || image_height == 0 {
         return None;
     }
 
     // The ceil() may add fractional pixels. Compute the actual padding
     // used on each side so the glyph outline is centered in the bitmap.
     // This ensures the bearing accounts for the ceiled bitmap size.
-    let actual_pad_x = (f64::from(img_w) - glyph_w) / 2.0;
-    let actual_pad_y = (f64::from(img_h) - glyph_h) / 2.0;
+    let actual_pad_x = (f64::from(image_width) - glyph_width) / 2.0;
+    let actual_pad_y = (f64::from(image_height) - glyph_height) / 2.0;
 
     // Color edges for multi-channel generation.
     let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
@@ -104,7 +104,7 @@ pub(super) fn rasterize_glyph(
     // convert to u8. Error correction fixes artifacts at sharp corners
     // where false edges in the multi-channel distance field produce
     // visible spikes.
-    let mut image_f32 = Rgb32FImage::new(img_w, img_h);
+    let mut image_f32 = Rgb32FImage::new(image_width, image_height);
     generate::generate_msdf(&prepared, sdf_range, &mut image_f32);
     render::correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
     {
@@ -119,7 +119,7 @@ pub(super) fn rasterize_glyph(
     }
 
     // Convert f32 [0.0, 1.0] to u8 [0, 255].
-    let image = RgbImage::from_fn(img_w, img_h, |x, y| {
+    let image = RgbImage::from_fn(image_width, image_height, |x, y| {
         let p = image_f32.get_pixel(x, y);
         image::Rgb([
             (p[0].clamp(0.0, 1.0) * 255.0).to_u8(),
@@ -136,8 +136,8 @@ pub(super) fn rasterize_glyph(
 
     Some(MsdfBitmap {
         data: image.into_raw(),
-        width: img_w,
-        height: img_h,
+        width: image_width,
+        height: image_height,
         bearing_x,
         bearing_y,
     })

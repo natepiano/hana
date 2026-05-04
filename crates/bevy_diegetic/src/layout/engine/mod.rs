@@ -771,8 +771,15 @@ fn size_children_cross_axis(
 }
 
 /// Returns true if the bounding box is entirely outside the viewport.
-const fn is_offscreen(x: f32, y: f32, w: f32, h: f32, vp_w: f32, vp_h: f32) -> bool {
-    x > vp_w || y > vp_h || x + w < 0.0 || y + h < 0.0
+const fn is_offscreen(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+) -> bool {
+    x > viewport_width || y > viewport_height || x + width < 0.0 || y + height < 0.0
 }
 
 /// Emits border and scissor-end commands during the up-traversal (second visit)
@@ -939,8 +946,8 @@ fn push_children_to_stack(
     }
 
     let parent_el = &tree.elements[index];
-    let parent_w = computed[index].width;
-    let parent_h = computed[index].height;
+    let parent_width = computed[index].width;
+    let parent_height = computed[index].height;
     let is_horizontal = parent_el.direction == Direction::LeftToRight;
 
     let mut children_main_size: f32 = 0.0;
@@ -964,9 +971,9 @@ fn push_children_to_stack(
     let border_top = border_leading(parent_el, Axis::Y);
 
     let main_available = if is_horizontal {
-        parent_w - parent_el.padding.horizontal() - border_x
+        parent_width - parent_el.padding.horizontal() - border_x
     } else {
-        parent_h - parent_el.padding.vertical() - border_y
+        parent_height - parent_el.padding.vertical() - border_y
     };
 
     let extra_main = (main_available - children_main_size - gap_total).max(0.0);
@@ -989,29 +996,33 @@ fn push_children_to_stack(
     // from the cursor to produce positions in stack-push order.
     let mut reverse_cursor = main_offset + children_main_size + gap_total;
     for &child_idx in children.iter().rev() {
-        let child_w = computed[child_idx].width;
-        let child_h = computed[child_idx].height;
-        let child_main = if is_horizontal { child_w } else { child_h };
+        let child_width = computed[child_idx].width;
+        let child_height = computed[child_idx].height;
+        let child_main = if is_horizontal {
+            child_width
+        } else {
+            child_height
+        };
 
         reverse_cursor -= child_main;
 
         let (cx, cy) = if is_horizontal {
-            let cross_available = parent_h - parent_el.padding.vertical() - border_y;
+            let cross_available = parent_height - parent_el.padding.vertical() - border_y;
             let cross_offset = match parent_el.child_align_y {
                 AlignY::Top => 0.0,
-                AlignY::Center => (cross_available - child_h).max(0.0) * 0.5,
-                AlignY::Bottom => (cross_available - child_h).max(0.0),
+                AlignY::Center => (cross_available - child_height).max(0.0) * 0.5,
+                AlignY::Bottom => (cross_available - child_height).max(0.0),
             };
             (
                 x + parent_el.padding.left.value + border_left + reverse_cursor,
                 y + parent_el.padding.top.value + border_top + cross_offset,
             )
         } else {
-            let cross_available = parent_w - parent_el.padding.horizontal() - border_x;
+            let cross_available = parent_width - parent_el.padding.horizontal() - border_x;
             let cross_offset = match parent_el.child_align_x {
                 AlignX::Left => 0.0,
-                AlignX::Center => (cross_available - child_w).max(0.0) * 0.5,
-                AlignX::Right => (cross_available - child_w).max(0.0),
+                AlignX::Center => (cross_available - child_width).max(0.0) * 0.5,
+                AlignX::Right => (cross_available - child_width).max(0.0),
             };
             (
                 x + parent_el.padding.left.value + border_left + cross_offset,

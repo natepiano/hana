@@ -136,8 +136,8 @@ pub(super) fn clip_quad_to_rect(quad: &GlyphQuadData, clip: [f32; 4]) -> Option<
     let new_top = quad_top.min(clip_top);
     let new_bottom = quad_bottom.max(clip_bottom);
 
-    let new_w = new_right - new_left;
-    let new_h = new_top - new_bottom;
+    let new_width = new_right - new_left;
+    let new_height = new_top - new_bottom;
 
     // Proportional UV adjustment.
     let [u_min, v_min, u_max, v_max] = quad.uv_rect;
@@ -151,7 +151,7 @@ pub(super) fn clip_quad_to_rect(quad: &GlyphQuadData, clip: [f32; 4]) -> Option<
 
     Some(GlyphQuadData {
         position: [new_left, new_top, qz],
-        size:     [new_w, new_h],
+        size:     [new_width, new_height],
         uv_rect:  [
             u_span.mul_add(left_fraction, u_min),
             v_span.mul_add(top_fraction, v_min),
@@ -417,10 +417,10 @@ mod tests {
         );
     }
 
-    fn make_clip_quad(x: f32, y: f32, w: f32, h: f32) -> GlyphQuadData {
+    fn make_clip_quad(x: f32, y: f32, width: f32, height: f32) -> GlyphQuadData {
         GlyphQuadData {
             position: [x, y, 0.0],
-            size:     [w, h],
+            size:     [width, height],
             uv_rect:  [0.0, 0.0, 1.0, 1.0],
             color:    [1.0, 1.0, 1.0, 1.0],
         }

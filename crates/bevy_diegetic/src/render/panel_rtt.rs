@@ -153,24 +153,24 @@ pub(super) fn setup_panel_rtt(
         let layer = panel_rtt_registry.layer_for(panel_entity);
         let render_layers = RenderLayers::layer(layer);
 
-        let world_w = panel.world_width();
-        let world_h = panel.world_height();
+        let world_width = panel.world_width();
+        let world_height = panel.world_height();
         let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         // Compute texture dimensions. Values are clamped to [64, 4096].
-        let tex_w = (world_w * DEFAULT_TEXELS_PER_METER)
+        let texture_width = (world_width * DEFAULT_TEXELS_PER_METER)
             .round()
             .clamp(MIN_TEXTURE_SIZE.to_f32(), MAX_TEXTURE_SIZE.to_f32())
             .to_u32();
-        let tex_h = (world_h * DEFAULT_TEXELS_PER_METER)
+        let texture_height = (world_height * DEFAULT_TEXELS_PER_METER)
             .round()
             .clamp(MIN_TEXTURE_SIZE.to_f32(), MAX_TEXTURE_SIZE.to_f32())
             .to_u32();
 
         // Create render target texture.
         let image = Image::new_target_texture(
-            tex_w,
-            tex_h,
+            texture_width,
+            texture_height,
             TextureFormat::Rgba8Unorm,
             Some(TextureFormat::Rgba8UnormSrgb),
         );
@@ -178,9 +178,9 @@ pub(super) fn setup_panel_rtt(
 
         // Camera center: the midpoint of the panel content area.
         // Content spans from (-anchor_x, anchor_y) [TL] to
-        // (world_w - anchor_x, anchor_y - world_h) [BR].
-        let cam_x = world_w.mul_add(0.5, -anchor_x);
-        let cam_y = world_h.mul_add(-0.5, anchor_y);
+        // (world_width - anchor_x, anchor_y - world_height) [BR].
+        let cam_x = world_width.mul_add(0.5, -anchor_x);
+        let cam_y = world_height.mul_add(-0.5, anchor_y);
 
         // Spawn orthographic camera targeting the render texture.
         commands.entity(panel_entity).with_child((
@@ -194,8 +194,8 @@ pub(super) fn setup_panel_rtt(
             RenderTarget::Image(image_handle.clone().into()),
             Projection::Orthographic(OrthographicProjection {
                 scaling_mode: ScalingMode::Fixed {
-                    width:  world_w,
-                    height: world_h,
+                    width:  world_width,
+                    height: world_height,
                 },
                 near: RTT_CAMERA_NEAR,
                 far: RTT_CAMERA_FAR,
@@ -223,7 +223,7 @@ pub(super) fn setup_panel_rtt(
 
         // Spawn display quad — visible to the panel's scene layer.
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let quad_mesh = meshes.add(Rectangle::new(world_w, world_h));
+        let quad_mesh = meshes.add(Rectangle::new(world_width, world_height));
         let quad_material = materials.add(display_quad_material(panel.material(), image_handle));
 
         // Position the quad at the center of the panel content area.

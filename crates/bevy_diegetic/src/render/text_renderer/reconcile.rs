@@ -235,12 +235,12 @@ pub(super) fn reconcile_panel_image_children(
         for (cmd_index, element_idx, handle, tint, bounds) in &image_commands {
             visited_indices.push(*element_idx);
 
-            let world_w = bounds.width * points_to_world;
-            let world_h = bounds.height * points_to_world;
-            let world_x = bounds.x.mul_add(points_to_world, world_w * 0.5) - anchor_x;
-            let world_y = -(bounds.y.mul_add(points_to_world, world_h * 0.5) - anchor_y);
+            let world_width = bounds.width * points_to_world;
+            let world_height = bounds.height * points_to_world;
+            let world_x = bounds.x.mul_add(points_to_world, world_width * 0.5) - anchor_x;
+            let world_y = -(bounds.y.mul_add(points_to_world, world_height * 0.5) - anchor_y);
 
-            let mesh_handle = meshes.add(Rectangle::new(world_w, world_h));
+            let mesh_handle = meshes.add(Rectangle::new(world_width, world_height));
             let material_handle = materials.add(StandardMaterial {
                 base_color: *tint,
                 base_color_texture: Some(handle.clone()),

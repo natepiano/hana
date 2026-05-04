@@ -589,7 +589,7 @@ struct ShapedWorldText {
     anchor_x:      f32,
     /// Anchor offset Y in layout units.
     anchor_y:      f32,
-    /// Per-glyph ink bounding boxes `[x, y, w, h]` in world units.
+    /// Per-glyph ink bounding boxes `[x, y, width, height]` in world units.
     glyph_rects:   Vec<[f32; 4]>,
     /// Advance width of the first glyph in world units.
     first_advance: f32,
@@ -708,8 +708,8 @@ fn shape_world_text(
             },
         };
 
-        let quad_w = metrics.pixel_width.to_f32() * em_scale;
-        let quad_h = metrics.pixel_height.to_f32() * em_scale;
+        let quad_width = metrics.pixel_width.to_f32() * em_scale;
+        let quad_height = metrics.pixel_height.to_f32() * em_scale;
 
         let quad_x = metrics.bearing_x.mul_add(boosted_size, sg.x) - anchor_x;
         let quad_y = -(metrics.bearing_y.mul_add(-boosted_size, sg.baseline + sg.y) - anchor_y);
@@ -718,7 +718,7 @@ fn shape_world_text(
             metrics.page_index,
             GlyphQuadData {
                 position: [quad_x * world_scale, quad_y * world_scale, 0.0],
-                size:     [quad_w * world_scale, quad_h * world_scale],
+                size:     [quad_width * world_scale, quad_height * world_scale],
                 uv_rect:  metrics.uv_rect,
                 color:    color_arr,
             },
@@ -824,7 +824,8 @@ fn measure_anchor_offset(
     style.anchor().offset(max_x, max_y)
 }
 
-/// Computes the ink bounding box for a single glyph, returned as `[x, y, w, h]`
+/// Computes the ink bounding box for a single glyph, returned as
+/// `[x, y, width, height]`
 /// in world units, or `None` if the font face or glyph bbox is unavailable.
 fn ink_rect(
     font_data: &[u8],
@@ -840,16 +841,16 @@ fn ink_rect(
     let upm = f32::from(face.units_per_em());
     let font_scale = font_size / upm;
 
-    let ink_w = f32::from(bbox.x_max - bbox.x_min) * font_scale;
-    let ink_h = f32::from(bbox.y_max - bbox.y_min) * font_scale;
+    let ink_width = f32::from(bbox.x_max - bbox.x_min) * font_scale;
+    let ink_height = f32::from(bbox.y_max - bbox.y_min) * font_scale;
     let ink_x = f32::from(bbox.x_min).mul_add(font_scale, glyph_x) - anchor.x;
     let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, baseline_offset) - anchor.y;
 
     Some([
         ink_x * scale,
         -ink_top * scale,
-        ink_w * scale,
-        ink_h * scale,
+        ink_width * scale,
+        ink_height * scale,
     ])
 }
 
