@@ -36,7 +36,7 @@ pub(crate) fn compensate_target_position(
     _: NonSendMarker,
 ) {
     for (entity, mut target) in &mut windows {
-        let Some(position) = target.physical_position else {
+        let Some(physical_position) = target.physical_position else {
             commands.entity(entity).insert(X11FrameCompensated);
             continue;
         };
@@ -45,11 +45,11 @@ pub(crate) fn compensate_target_position(
             continue;
         };
 
-        let compensated = IVec2::new(position.x, position.y - frame_top);
+        let physical_compensated = IVec2::new(physical_position.x, physical_position.y - frame_top);
         info!(
-            "[W6] Compensating position: {position:?} -> {compensated:?} (frame_top={frame_top})"
+            "[W6] Compensating position: {physical_position:?} -> {physical_compensated:?} (frame_top={frame_top})"
         );
-        target.physical_position = Some(compensated);
+        target.physical_position = Some(physical_compensated);
         commands.entity(entity).insert(X11FrameCompensated);
     }
 }

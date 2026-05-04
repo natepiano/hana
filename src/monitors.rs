@@ -74,14 +74,16 @@ impl std::ops::Deref for CurrentMonitor {
 }
 
 impl Monitors {
-    /// Find monitor containing position (x, y).
+    /// Find monitor containing position `(physical_x, physical_y)`.
+    ///
+    /// Coordinates are physical pixels — winit's monitor coordinate space.
     #[must_use]
-    pub fn at(&self, x: i32, y: i32) -> Option<&MonitorInfo> {
+    pub fn at(&self, physical_x: i32, physical_y: i32) -> Option<&MonitorInfo> {
         self.list.iter().find(|mon| {
-            x >= mon.physical_position.x
-                && x < mon.physical_position.x + mon.physical_size.x.to_i32()
-                && y >= mon.physical_position.y
-                && y < mon.physical_position.y + mon.physical_size.y.to_i32()
+            physical_x >= mon.physical_position.x
+                && physical_x < mon.physical_position.x + mon.physical_size.x.to_i32()
+                && physical_y >= mon.physical_position.y
+                && physical_y < mon.physical_position.y + mon.physical_size.y.to_i32()
         })
     }
 
@@ -115,17 +117,26 @@ impl Monitors {
     ///
     /// Uses the center point to correctly handle windows spanning monitor boundaries
     /// and to avoid Windows invisible border offset (winit #4107).
+    ///
+    /// All inputs are physical pixels — winit's monitor coordinate space.
     #[must_use]
-    pub fn monitor_for_window(&self, position: IVec2, width: u32, height: u32) -> &MonitorInfo {
-        let center_x = position.x + (width / 2).to_i32();
-        let center_y = position.y + (height / 2).to_i32();
-        self.closest_to(center_x, center_y)
+    pub fn monitor_for_window(
+        &self,
+        physical_position: IVec2,
+        physical_width: u32,
+        physical_height: u32,
+    ) -> &MonitorInfo {
+        let physical_center_x = physical_position.x + (physical_width / 2).to_i32();
+        let physical_center_y = physical_position.y + (physical_height / 2).to_i32();
+        self.closest_to(physical_center_x, physical_center_y)
     }
 
     /// Find the monitor at position, or the closest one if outside all bounds.
     ///
     /// Unlike [`at`](Self::at), this always returns a monitor by finding
     /// the closest monitor when position is outside all bounds.
+    ///
+    /// Coordinates are physical pixels — winit's monitor coordinate space.
     ///
     /// # Panics
     ///
@@ -135,9 +146,9 @@ impl Monitors {
         clippy::expect_used,
         reason = "fail fast - no monitors means unrecoverable state"
     )]
-    pub fn closest_to(&self, x: i32, y: i32) -> &MonitorInfo {
+    pub fn closest_to(&self, physical_x: i32, physical_y: i32) -> &MonitorInfo {
         // Try exact match first
-        if let Some(monitor) = self.at(x, y) {
+        if let Some(monitor) = self.at(physical_x, physical_y) {
             return monitor;
         }
 
@@ -148,18 +159,18 @@ impl Monitors {
                 let right = mon.physical_position.x + mon.physical_size.x.to_i32();
                 let bottom = mon.physical_position.y + mon.physical_size.y.to_i32();
 
-                let dx = if x < mon.physical_position.x {
-                    mon.physical_position.x - x
-                } else if x >= right {
-                    x - right + 1
+                let dx = if physical_x < mon.physical_position.x {
+                    mon.physical_position.x - physical_x
+                } else if physical_x >= right {
+                    physical_x - right + 1
                 } else {
                     0
                 };
 
-                let dy = if y < mon.physical_position.y {
-                    mon.physical_position.y - y
-                } else if y >= bottom {
-                    y - bottom + 1
+                let dy = if physical_y < mon.physical_position.y {
+                    mon.physical_position.y - physical_y
+                } else if physical_y >= bottom {
+                    physical_y - bottom + 1
                 } else {
                     0
                 };

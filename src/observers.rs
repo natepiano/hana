@@ -108,15 +108,17 @@ pub(crate) fn on_managed_window_added(
 
     if !already_saved && let Ok(window) = windows.get(entity) {
         let monitor = match window.position {
-            WindowPosition::At(pos) => {
-                *monitors.monitor_for_window(pos, window.physical_width(), window.physical_height())
-            },
+            WindowPosition::At(physical_pos) => *monitors.monitor_for_window(
+                physical_pos,
+                window.physical_width(),
+                window.physical_height(),
+            ),
             _ => *monitors.first(),
         };
         let logical_position = match window.position {
-            WindowPosition::At(pos) => {
-                let logical_x = (f64::from(pos.x) / monitor.scale).round().to_i32();
-                let logical_y = (f64::from(pos.y) / monitor.scale).round().to_i32();
+            WindowPosition::At(physical_pos) => {
+                let logical_x = (f64::from(physical_pos.x) / monitor.scale).round().to_i32();
+                let logical_y = (f64::from(physical_pos.y) / monitor.scale).round().to_i32();
                 Some((logical_x, logical_y))
             },
             _ => None,

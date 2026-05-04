@@ -48,10 +48,10 @@ This crate exposes several types for working with monitors and windows beyond th
 
 Query available monitors sorted by position:
 
-- `monitors.at(x, y)` – Find the monitor containing a position
+- `monitors.at(physical_x, physical_y)` – Find the monitor containing a position (physical pixels)
 - `monitors.by_index(index)` – Get monitor by sorted index
 - `monitors.first()` – Get the first monitor (index 0)
-- `monitors.closest_to(x, y)` – Find the closest monitor to a position
+- `monitors.closest_to(physical_x, physical_y)` – Find the closest monitor to a position (physical pixels)
 
 ### `MonitorInfo`
 

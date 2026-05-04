@@ -34,12 +34,12 @@ pub(crate) const RON_HEADER: &str = "\
 // unit conversions
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
 
-// Windows DPI fix
+// Windows dpi fix
 /// Win32 subclass identifier for DPI-change interception.
 #[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
 pub(crate) const SUBCLASS_ID: usize = 1;
 
-// X11 frame extents (`_NET_FRAME_EXTENTS`: left, right, top, bottom)
+// x11 frame extents (`_NET_FRAME_EXTENTS`: left, right, top, bottom)
 /// Number of values in `_NET_FRAME_EXTENTS` (left, right, top, bottom).
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 pub(crate) const FRAME_EXTENT_COUNT: u32 = 4;

@@ -60,7 +60,7 @@ fn build_actual_snapshot(
     current_monitor: Option<&CurrentMonitor>,
     platform: Platform,
 ) -> (SettleSnapshot, f64) {
-    let position = if platform.position_available() {
+    let physical_position = if platform.position_available() {
         match window.position {
             WindowPosition::At(p) => Some(IVec2::new(p.x, p.y)),
             _ => None,
@@ -68,16 +68,16 @@ fn build_actual_snapshot(
     } else {
         None
     };
-    let size = UVec2::new(
+    let physical_size = UVec2::new(
         window.resolution.physical_width(),
         window.resolution.physical_height(),
     );
     (
         SettleSnapshot {
-            physical_position: position,
-            physical_size:     size,
-            mode:              window.mode,
-            monitor:           current_monitor.map_or(0, |cm| cm.monitor.index),
+            physical_position,
+            physical_size,
+            mode: window.mode,
+            monitor: current_monitor.map_or(0, |cm| cm.monitor.index),
         },
         f64::from(window.resolution.scale_factor()),
     )

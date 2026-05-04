@@ -79,25 +79,25 @@ pub fn init_winit_info(
                 physical_height: outer.height.saturating_sub(inner.height),
             };
 
-            let position = winit_window.outer_position().map_or(
+            let physical_position = winit_window.outer_position().map_or(
                 IVec2::ZERO,
                 |position| IVec2::new(position.x, position.y),
             );
 
             debug!(
-                "[init_winit_info] outer_position={position:?} platform={:?}",
+                "[init_winit_info] outer_position={physical_position:?} platform={:?}",
                 Platform::detect()
             );
 
             let starting_monitor = winit_window
                 .current_monitor()
                 .and_then(|current_monitor| {
-                    let monitor_position = current_monitor.position();
-                    let info = monitors.at(monitor_position.x, monitor_position.y);
+                    let physical_monitor_position = current_monitor.position();
+                    let info = monitors.at(physical_monitor_position.x, physical_monitor_position.y);
                     debug!(
                         "[init_winit_info] current_monitor() position=({}, {}) -> index={:?}",
-                        monitor_position.x,
-                        monitor_position.y,
+                        physical_monitor_position.x,
+                        physical_monitor_position.y,
                         info.map(|monitor| monitor.index)
                     );
                     info.copied()
@@ -105,10 +105,10 @@ pub fn init_winit_info(
                 .unwrap_or_else(|| {
                     debug!(
                         "[init_winit_info] current_monitor() unavailable, falling back to closest_to({}, {})",
-                        position.x,
-                        position.y
+                        physical_position.x,
+                        physical_position.y
                     );
-                    *monitors.closest_to(position.x, position.y)
+                    *monitors.closest_to(physical_position.x, physical_position.y)
                 });
             let starting_monitor_index = starting_monitor.index;
 
@@ -116,8 +116,8 @@ pub fn init_winit_info(
                 "[init_winit_info] decoration={}x{} pos=({}, {}) starting_monitor={starting_monitor_index}",
                 decoration.physical_width,
                 decoration.physical_height,
-                position.x,
-                position.y,
+                physical_position.x,
+                physical_position.y,
             );
 
             commands.entity(*window_entity).insert(CurrentMonitor {

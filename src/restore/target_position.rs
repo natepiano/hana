@@ -312,25 +312,25 @@ fn clamp_position_to_monitor(
         let monitor_right = target_info.physical_position.x + target_info.physical_size.x.to_i32();
         let monitor_bottom = target_info.physical_position.y + target_info.physical_size.y.to_i32();
 
-        let mut x = physical_saved_x;
-        let mut y = physical_saved_y;
+        let mut physical_x = physical_saved_x;
+        let mut physical_y = physical_saved_y;
 
-        if x + physical_outer_width.to_i32() > monitor_right {
-            x = monitor_right - physical_outer_width.to_i32();
+        if physical_x + physical_outer_width.to_i32() > monitor_right {
+            physical_x = monitor_right - physical_outer_width.to_i32();
         }
-        if y + physical_outer_height.to_i32() > monitor_bottom {
-            y = monitor_bottom - physical_outer_height.to_i32();
+        if physical_y + physical_outer_height.to_i32() > monitor_bottom {
+            physical_y = monitor_bottom - physical_outer_height.to_i32();
         }
-        x = x.max(target_info.physical_position.x);
-        y = y.max(target_info.physical_position.y);
+        physical_x = physical_x.max(target_info.physical_position.x);
+        physical_y = physical_y.max(target_info.physical_position.y);
 
-        if x != physical_saved_x || y != physical_saved_y {
+        if physical_x != physical_saved_x || physical_y != physical_saved_y {
             debug!(
-                "[clamp_position_to_monitor] Clamped: ({physical_saved_x}, {physical_saved_y}) -> ({x}, {y}) for outer size {physical_outer_width}x{physical_outer_height}"
+                "[clamp_position_to_monitor] Clamped: ({physical_saved_x}, {physical_saved_y}) -> ({physical_x}, {physical_y}) for outer size {physical_outer_width}x{physical_outer_height}"
             );
         }
 
-        IVec2::new(x, y)
+        IVec2::new(physical_x, physical_y)
     } else {
         IVec2::new(physical_saved_x, physical_saved_y)
     }
@@ -339,12 +339,12 @@ fn clamp_position_to_monitor(
 /// Apply the initial window move to the target monitor.
 fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
     if target.mode.is_fullscreen() {
-        if let Some(position) = target.physical_position {
+        if let Some(physical_position) = target.physical_position {
             debug!(
                 "[apply_initial_move] Moving to target position {:?} for fullscreen mode {:?}",
-                position, target.mode
+                physical_position, target.mode
             );
-            window.position = WindowPosition::At(position);
+            window.position = WindowPosition::At(physical_position);
         } else {
             debug!(
                 "[apply_initial_move] No saved position, fullscreen mode {:?} targets monitor {} via WindowMode",
@@ -354,7 +354,7 @@ fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
         return;
     }
 
-    let Some(position) = target.physical_position else {
+    let Some(physical_position) = target.physical_position else {
         debug!(
             "[apply_initial_move] No saved position, centering on monitor {}",
             target.monitor_index
@@ -366,10 +366,10 @@ fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
     let (physical_move_position, physical_move_size) = match target.scale_strategy {
         MonitorScaleStrategy::HigherToLower(_) => {
             let ratio = target.ratio();
-            let physical_compensated_x = (f64::from(position.x) * ratio).to_i32();
-            let physical_compensated_y = (f64::from(position.y) * ratio).to_i32();
+            let physical_compensated_x = (f64::from(physical_position.x) * ratio).to_i32();
+            let physical_compensated_y = (f64::from(physical_position.y) * ratio).to_i32();
             debug!(
-                "[apply_initial_move] HigherToLower: compensating position {position:?} -> ({physical_compensated_x}, {physical_compensated_y}) (ratio={ratio})",
+                "[apply_initial_move] HigherToLower: compensating position {physical_position:?} -> ({physical_compensated_x}, {physical_compensated_y}) (ratio={ratio})",
             );
             (
                 IVec2::new(physical_compensated_x, physical_compensated_y),
@@ -380,14 +380,14 @@ fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
             let compensated_size = target.compensated_size();
             debug!(
                 "[apply_initial_move] CompensateSizeOnly: position={:?} compensated_size={}x{} (ratio={})",
-                position,
+                physical_position,
                 compensated_size.x,
                 compensated_size.y,
                 target.ratio()
             );
-            (position, compensated_size)
+            (physical_position, compensated_size)
         },
-        _ => (position, target.physical_size),
+        _ => (physical_position, target.physical_size),
     };
 
     debug!(

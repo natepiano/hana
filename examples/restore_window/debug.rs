@@ -36,9 +36,9 @@ pub(crate) fn debug_winit_monitor(
         let ww = ww.borrow();
         ww.get_window(window_entity).and_then(|winit_window| {
             winit_window.current_monitor().and_then(|current_monitor| {
-                let position = current_monitor.position();
+                let physical_position = current_monitor.position();
                 monitors
-                    .at(position.x, position.y)
+                    .at(physical_position.x, physical_position.y)
                     .map(|monitor| monitor.index)
             })
         })
@@ -55,11 +55,11 @@ pub(crate) fn debug_winit_monitor(
 
 #[derive(Default)]
 pub(crate) struct CachedWindowDebug {
-    position:        Option<WindowPosition>,
-    physical_width:  u32,
-    physical_height: u32,
-    mode:            Option<WindowMode>,
-    focus:           FocusState,
+    physical_position: Option<WindowPosition>,
+    physical_width:    u32,
+    physical_height:   u32,
+    mode:              Option<WindowMode>,
+    focus:             FocusState,
 }
 
 pub(crate) fn debug_window_changed(
@@ -68,7 +68,7 @@ pub(crate) fn debug_window_changed(
 ) {
     let window = *window;
 
-    let position_changed = cached.position.as_ref() != Some(&window.position);
+    let position_changed = cached.physical_position.as_ref() != Some(&window.position);
     let size_changed = cached.physical_width != window.physical_width()
         || cached.physical_height != window.physical_height();
     let mode_changed = cached.mode.as_ref() != Some(&window.mode);
@@ -79,7 +79,7 @@ pub(crate) fn debug_window_changed(
     if position_changed {
         changes.push(format!(
             "position: {:?} -> {:?}",
-            cached.position, window.position
+            cached.physical_position, window.position
         ));
     }
     if size_changed {
@@ -102,7 +102,7 @@ pub(crate) fn debug_window_changed(
         info!("[debug_window_changed] {}", changes.join(", "));
     }
 
-    cached.position = Some(window.position);
+    cached.physical_position = Some(window.position);
     cached.physical_width = window.physical_width();
     cached.physical_height = window.physical_height();
     cached.mode = Some(window.mode);
