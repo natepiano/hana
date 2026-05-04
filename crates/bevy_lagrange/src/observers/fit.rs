@@ -9,6 +9,7 @@ use super::snap_orbit;
 use super::snap_orbit::SnapOrbit;
 use crate::animation::CameraMove;
 use crate::components::CurrentFitTarget;
+use crate::constants::MILLIS_PER_SECOND;
 use crate::events::AnimateToFit;
 use crate::events::AnimationBegin;
 use crate::events::AnimationEnd;
@@ -52,7 +53,7 @@ pub(super) fn on_zoom_to_fit(
         orbit_cam.target_pitch,
         orbit_cam.target_focus,
         orbit_cam.target_radius,
-        duration.as_secs_f32() * 1000.0,
+        duration.as_secs_f32() * MILLIS_PER_SECOND,
     );
 
     let Some(fit) = fit_request::prepare_fit_for_target(

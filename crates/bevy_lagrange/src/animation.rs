@@ -18,6 +18,7 @@ use super::ForceUpdate;
 use super::OrbitCam;
 use super::components::CameraInputInterruptBehavior;
 use super::constants::EXTERNAL_INPUT_TOLERANCE;
+use super::constants::MILLIS_PER_SECOND;
 use super::events::AnimationCancelled;
 use super::events::AnimationEnd;
 use super::events::AnimationSource;
@@ -110,7 +111,7 @@ impl CameraMove {
 
     /// Returns the duration in milliseconds.
     #[must_use]
-    pub const fn duration_ms(&self) -> f32 { self.duration().as_secs_f32() * 1000.0 }
+    pub const fn duration_ms(&self) -> f32 { self.duration().as_secs_f32() * MILLIS_PER_SECOND }
 
     /// Returns the easing function for this movement step.
     #[must_use]
@@ -441,7 +442,7 @@ fn handle_in_progress(
     };
 
     // Update elapsed time
-    *elapsed_ms += delta_secs * 1000.0;
+    *elapsed_ms += delta_secs * MILLIS_PER_SECOND;
 
     // Calculate interpolation factor (0.0 to 1.0)
     let duration_ms = current_move.duration_ms();

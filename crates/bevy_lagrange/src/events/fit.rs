@@ -3,6 +3,8 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
+use crate::constants::DEFAULT_FIT_MARGIN;
+
 /// Animates the camera to a caller-specified orientation while framing a target entity.
 #[derive(EntityEvent, Reflect)]
 #[reflect(Event, FromReflect)]
@@ -33,7 +35,7 @@ impl AnimateToFit {
             target,
             yaw: 0.0,
             pitch: 0.0,
-            margin: 0.1,
+            margin: DEFAULT_FIT_MARGIN,
             duration: Duration::ZERO,
             easing: EaseFunction::CubicOut,
         }
