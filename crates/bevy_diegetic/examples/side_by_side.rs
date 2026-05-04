@@ -198,19 +198,19 @@ impl Default for ShowTextDebug {
 /// Dynamic row values updated on a timer.
 #[derive(Resource)]
 struct DynamicRows {
-    timer:    Timer,
-    radius:   String,
-    fps:      String,
-    frame_ms: String,
+    timer:              Timer,
+    radius:             String,
+    fps:                String,
+    frame_milliseconds: String,
 }
 
 impl Default for DynamicRows {
     fn default() -> Self {
         Self {
-            timer:    Timer::from_seconds(DYNAMIC_UPDATE_INTERVAL, TimerMode::Repeating),
-            radius:   "--".to_string(),
-            fps:      "--".to_string(),
-            frame_ms: "--".to_string(),
+            timer:              Timer::from_seconds(DYNAMIC_UPDATE_INTERVAL, TimerMode::Repeating),
+            radius:             "--".to_string(),
+            fps:                "--".to_string(),
+            frame_milliseconds: "--".to_string(),
         }
     }
 }
@@ -456,7 +456,8 @@ fn update_dynamic_rows(
             .and_then(bevy::diagnostic::Diagnostic::smoothed);
 
         dynamic.fps = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
-        dynamic.frame_ms = frame_time.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
+        dynamic.frame_milliseconds =
+            frame_time.map_or_else(|| "--".to_string(), |value| format!("{value:.0}"));
     }
 }
 
@@ -464,8 +465,8 @@ fn build_controls_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
     let cfg = LayoutTextStyle::new(CONTROL_FONT_SIZE);
-    let arrow_cfg = LayoutTextStyle::new(CONTROL_ARROW_SIZE);
-    let title_cfg = LayoutTextStyle::new(CONTROL_TITLE_FONT_SIZE);
+    let arrow_style = LayoutTextStyle::new(CONTROL_ARROW_SIZE);
+    let title_style = LayoutTextStyle::new(CONTROL_TITLE_FONT_SIZE);
     let row_h = Sizing::fixed(CONTROL_ROW_HEIGHT);
     let dim_color = Color::srgba(0.6, 0.6, 0.6, 0.8);
 
@@ -480,7 +481,10 @@ fn build_controls_panel() -> LayoutTree {
             .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
             .border(Border::all(0.0005, border_color)),
         |b| {
-            b.text("controls", title_cfg.with_color(Color::srgb(0.4, 0.5, 0.9)));
+            b.text(
+                "controls",
+                title_style.with_color(Color::srgb(0.4, 0.5, 0.9)),
+            );
             b.with(
                 El::new()
                     .width(Sizing::GROW)
@@ -516,10 +520,10 @@ fn build_controls_panel() -> LayoutTree {
                             .child_align_x(AlignX::Center),
                         |b| {
                             b.with(El::new().height(row_h), |b| {
-                                b.text("\u{2192}", arrow_cfg.clone().with_color(dim_color));
+                                b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
                             });
                             b.with(El::new().height(row_h), |b| {
-                                b.text("\u{2192}", arrow_cfg.clone().with_color(dim_color));
+                                b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
                             });
                         },
                     );
@@ -555,7 +559,7 @@ fn build_rows(
         ("renderer:".to_string(), renderer.to_string()),
         ("radius:".to_string(), dynamic.radius.clone()),
         ("fps:".to_string(), dynamic.fps.clone()),
-        ("frame ms:".to_string(), dynamic.frame_ms.clone()),
+        ("frame ms:".to_string(), dynamic.frame_milliseconds.clone()),
     ]
 }
 

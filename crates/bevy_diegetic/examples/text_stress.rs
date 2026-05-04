@@ -436,21 +436,23 @@ fn update_status_panel(
     if !timer.just_finished() {
         return;
     }
-    let fps = diagnostics
+    let frames_per_second = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
-    let frame_ms = diagnostics
+    let frame_milliseconds = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
-    let fps_str = fps.map_or_else(|| "--".to_string(), |v| format!("{v:.0}"));
-    let fps_value = fps.unwrap_or(0.0).to_f32();
-    let frame_ms_value = frame_ms.unwrap_or(0.0).to_f32();
-    let ms_str = frame_ms.map_or_else(|| "--".to_string(), |v| format!("{v:.1}"));
+    let frames_per_second_string =
+        frames_per_second.map_or_else(|| "--".to_string(), |value| format!("{value:.0}"));
+    let frames_per_second_value = frames_per_second.unwrap_or(0.0).to_f32();
+    let frame_milliseconds_value = frame_milliseconds.unwrap_or(0.0).to_f32();
+    let frame_milliseconds_string =
+        frame_milliseconds.map_or_else(|| "--".to_string(), |value| format!("{value:.1}"));
 
     history.push_back(PerfSnapshot {
         timestamp: time.elapsed_secs(),
-        fps:       fps_value,
-        frame_ms:  frame_ms_value,
+        fps:       frames_per_second_value,
+        frame_ms:  frame_milliseconds_value,
         update_ms: stress_perf.panel_update_ms,
         tree_ms:   stress_perf.tree_build_ms,
         layout_ms: diegetic_perf.compute_ms,
@@ -465,19 +467,19 @@ fn update_status_panel(
         history.pop_front();
     }
 
-    let mut max_fps = 0.0_f32;
-    let mut max_frame_ms = 0.0_f32;
-    let mut max_update_ms = 0.0_f32;
-    let mut max_tree_ms = 0.0_f32;
-    let mut max_layout_ms = 0.0_f32;
-    let mut max_text_ms = 0.0_f32;
+    let mut maximum_frames_per_second = 0.0_f32;
+    let mut maximum_frame_milliseconds = 0.0_f32;
+    let mut maximum_update_milliseconds = 0.0_f32;
+    let mut maximum_tree_milliseconds = 0.0_f32;
+    let mut maximum_layout_milliseconds = 0.0_f32;
+    let mut maximum_text_milliseconds = 0.0_f32;
     for sample in &history {
-        max_fps = max_fps.max(sample.fps);
-        max_frame_ms = max_frame_ms.max(sample.frame_ms);
-        max_update_ms = max_update_ms.max(sample.update_ms);
-        max_tree_ms = max_tree_ms.max(sample.tree_ms);
-        max_layout_ms = max_layout_ms.max(sample.layout_ms);
-        max_text_ms = max_text_ms.max(sample.text_ms);
+        maximum_frames_per_second = maximum_frames_per_second.max(sample.fps);
+        maximum_frame_milliseconds = maximum_frame_milliseconds.max(sample.frame_ms);
+        maximum_update_milliseconds = maximum_update_milliseconds.max(sample.update_ms);
+        maximum_tree_milliseconds = maximum_tree_milliseconds.max(sample.tree_ms);
+        maximum_layout_milliseconds = maximum_layout_milliseconds.max(sample.layout_ms);
+        maximum_text_milliseconds = maximum_text_milliseconds.max(sample.text_ms);
     }
 
     let new_text = format!(
@@ -486,18 +488,18 @@ fn update_status_panel(
         state.row_count,
         tag_now = "now",
         tag_max = "5s max",
-        fps = fps_str,
-        frame = ms_str,
+        fps = frames_per_second_string,
+        frame = frame_milliseconds_string,
         upd = format!("{:.1}", stress_perf.panel_update_ms),
         tree = format!("{:.1}", stress_perf.tree_build_ms),
         layout = format!("{:.1}", diegetic_perf.compute_ms),
         text_ms = format!("{:.1}", diegetic_perf.panel_text.total_ms),
-        max_fps = format!("{:.0}", max_fps),
-        max_frame = format!("{:.1}", max_frame_ms),
-        max_upd = format!("{:.1}", max_update_ms),
-        max_tree = format!("{:.1}", max_tree_ms),
-        max_layout = format!("{:.1}", max_layout_ms),
-        max_text = format!("{:.1}", max_text_ms),
+        max_fps = format!("{:.0}", maximum_frames_per_second),
+        max_frame = format!("{:.1}", maximum_frame_milliseconds),
+        max_upd = format!("{:.1}", maximum_update_milliseconds),
+        max_tree = format!("{:.1}", maximum_tree_milliseconds),
+        max_layout = format!("{:.1}", maximum_layout_milliseconds),
+        max_text = format!("{:.1}", maximum_text_milliseconds),
     );
 
     if new_text != last_displayed.text {

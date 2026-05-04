@@ -4,6 +4,9 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use super::constants::DEBUG_TEXT_GIZMO_COLOR;
+use super::constants::DEBUG_TEXT_GIZMO_LINE_WIDTH;
+use super::constants::LAYOUT_GIZMO_LINE_WIDTH;
 use super::coordinate_space::RenderMode;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
@@ -53,10 +56,10 @@ fn pixels_per_meter(cameras: &Query<(&Camera, &Projection)>) -> f32 {
         .iter()
         .next()
         .and_then(|(cam, proj)| {
-            let vp_height = cam.logical_viewport_size()?.y;
+            let viewport_height = cam.logical_viewport_size()?.y;
             match proj {
-                Projection::Perspective(p) => Some(vp_height / (2.0 * (p.fov / 2.0).tan())),
-                Projection::Orthographic(o) => Some(vp_height / o.scale),
+                Projection::Perspective(p) => Some(viewport_height / (2.0 * (p.fov / 2.0).tan())),
+                Projection::Orthographic(o) => Some(viewport_height / o.scale),
                 Projection::Custom(_) => None,
             }
         })
@@ -176,7 +179,7 @@ pub(super) fn render_layout_gizmos(
                             anchor_x,
                             anchor_y,
                             color: *color,
-                            line_width: 1.0,
+                            line_width: LAYOUT_GIZMO_LINE_WIDTH,
                             marker: GizmoChildMarker::Layout,
                         },
                     );
@@ -266,8 +269,8 @@ pub(super) fn render_debug_gizmos(
                         points_to_world,
                         anchor_x,
                         anchor_y,
-                        color: Color::srgba(0.9, 0.9, 0.2, 0.2),
-                        line_width: 1.0,
+                        color: DEBUG_TEXT_GIZMO_COLOR,
+                        line_width: DEBUG_TEXT_GIZMO_LINE_WIDTH,
                         marker: GizmoChildMarker::Debug,
                     },
                 );

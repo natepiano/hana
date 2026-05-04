@@ -42,7 +42,7 @@ pub(super) struct MetricLineSpec {
 pub(super) fn spawn_font_metric_gizmos(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_name: &str,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
     text_services: &mut TextServices<'_>,
     assets: &mut OverlayAssets<'_>,
@@ -54,8 +54,8 @@ pub(super) fn spawn_font_metric_gizmos(
     };
 
     let (_, _, metric_lines) = build_metric_gizmos(
-        font_ctx.font_metrics,
-        font_ctx.line_metrics,
+        font_context.font_metrics,
+        font_context.line_metrics,
         ctx.overlay,
         ctx.anchor_y,
         &extents,
@@ -63,25 +63,32 @@ pub(super) fn spawn_font_metric_gizmos(
         ctx.scale,
     );
 
-    spawn_metric_line_panel(ctx, font_ctx, &extents);
-    spawn_metric_arrow_callouts(ctx, font_ctx, &extents);
+    spawn_metric_line_panel(ctx, font_context, &extents);
+    spawn_metric_arrow_callouts(ctx, font_context, &extents);
 
     if ctx.overlay.labels == GlyphMetricVisibility::Shown {
-        labels::spawn_metric_labels(ctx, font_name, font_ctx, &metric_lines, &extents);
+        labels::spawn_metric_labels(ctx, font_name, font_context, &metric_lines, &extents);
     }
 
-    labels::spawn_overlay_bounds_target(ctx, font_name, font_ctx, &extents, text_services, assets)
+    labels::spawn_overlay_bounds_target(
+        ctx,
+        font_name,
+        font_context,
+        &extents,
+        text_services,
+        assets,
+    )
 }
 
 /// Spawns horizontal font metric lines as a single transparent world panel.
 fn spawn_metric_line_panel(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     extents: &GlyphExtents,
 ) {
     let line_specs = metric_line_specs(
-        font_ctx.font_metrics,
-        font_ctx.line_metrics,
+        font_context.font_metrics,
+        font_context.line_metrics,
         ctx.overlay,
         ctx.anchor_y,
         ctx.scale,
@@ -113,7 +120,7 @@ fn spawn_metric_line_panel(
     material.unlit = true;
 
     let x = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
-    let line_metrics = font_ctx.line_metrics;
+    let line_metrics = font_context.line_metrics;
     let top_layout =
         if (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5 {
             line_metrics.top
@@ -361,11 +368,11 @@ const fn solid_arrow_cap(head: f32, tint: Option<Color>) -> callouts::CalloutCap
 
 fn spawn_metric_arrow_callouts(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     extents: &GlyphExtents,
 ) {
-    let line_metrics = font_ctx.line_metrics;
-    let font_metrics = font_ctx.font_metrics;
+    let line_metrics = font_context.line_metrics;
+    let font_metrics = font_context.font_metrics;
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
     let descent_y = baseline_y + line_metrics.descent;

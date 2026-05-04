@@ -1,5 +1,6 @@
 //! Panel-domain constants: builder defaults and diagnostic paths.
 
+use bevy::color::Color;
 use bevy::diagnostic::DiagnosticPath;
 
 // builder defaults
@@ -14,6 +15,14 @@ pub(super) const MIN_PANEL_WORLD_HEIGHT: f32 = 1.0;
 /// a clamped width or height if it differs from the current value by less
 /// than this.
 pub(super) const PANEL_RESIZE_EPSILON: f32 = 0.001;
+
+// debug gizmos
+/// Color used for text-bound debug gizmos.
+pub(super) const DEBUG_TEXT_GIZMO_COLOR: Color = Color::srgba(0.9, 0.9, 0.2, 0.2);
+/// Line width for text-bound debug gizmos, in pixels.
+pub(super) const DEBUG_TEXT_GIZMO_LINE_WIDTH: f32 = 1.0;
+/// Line width for layout gizmos, in pixels.
+pub(super) const LAYOUT_GIZMO_LINE_WIDTH: f32 = 1.0;
 
 // diagnostic paths
 pub(super) const DIAG_ATLAS_ACTIVE_JOBS: DiagnosticPath =

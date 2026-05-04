@@ -10,6 +10,7 @@
 //! (spawned once, not redrawn every frame). Labels are spawned as
 //! [`WorldText`](crate::WorldText) children.
 
+mod constants;
 mod glyph;
 mod labels;
 mod lifecycle;
@@ -19,6 +20,8 @@ mod scaling;
 
 use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
+use constants::DEFAULT_OVERLAY_EXTEND;
+use constants::DEFAULT_OVERLAY_LABEL_SIZE;
 pub(super) use lifecycle::emit_typography_overlay_ready;
 pub(super) use lifecycle::on_overlay_added;
 pub(super) use lifecycle::on_overlay_removed;
@@ -84,8 +87,8 @@ impl Default for TypographyOverlay {
             labels:         GlyphMetricVisibility::Shown,
             color:          Color::from(WHITE),
             line_width:     DEFAULT_LINE_WIDTH,
-            label_size:     6.0,
-            extend:         8.0,
+            label_size:     DEFAULT_OVERLAY_LABEL_SIZE,
+            extend:         DEFAULT_OVERLAY_EXTEND,
             surface_shadow: SurfaceShadow::Off,
         }
     }

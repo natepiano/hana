@@ -67,6 +67,10 @@ pub const SDF_AA_PADDING: f32 = 0.001;
 pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");
 
+// shadow proxy
+/// Alpha threshold for shadow-only MSDF proxy materials.
+pub(super) const SHADOW_PROXY_ALPHA_MASK_THRESHOLD: f32 = 0.5;
+
 // text rendering
 /// Tolerance used when deduplicating glyph baselines during line-count
 /// estimation in world text.

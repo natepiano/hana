@@ -238,22 +238,29 @@ fn setup(
     let total_w = a4_width_m + gap + card_width_m;
     let group_left = -total_w / 2.0;
 
-    let a4_x = group_left + a4_width_m / 2.0;
-    let a4_y = a4_height_m / 2.0 + lift;
+    let a4_page_x = group_left + a4_width_m / 2.0;
+    let a4_page_y = a4_height_m / 2.0 + lift;
 
-    let a4_top = a4_y + a4_height_m / 2.0;
+    let a4_page_top = a4_page_y + a4_height_m / 2.0;
     let card_x = group_left + a4_width_m + gap + card_width_m / 2.0;
-    let card_y = a4_top - card_height_m / 2.0;
+    let card_y = a4_page_top - card_height_m / 2.0;
 
     let ruler_color = Color::WHITE;
 
-    spawn_a4_with_titles(&mut commands, a4_x, a4_y, a4_top, card_x, title_gap);
+    spawn_a4_with_titles(
+        &mut commands,
+        a4_page_x,
+        a4_page_y,
+        a4_page_top,
+        card_x,
+        title_gap,
+    );
 
     spawn_rulers(
         &mut commands,
         ruler_color,
-        a4_x,
-        a4_y,
+        a4_page_x,
+        a4_page_y,
         a4_width_m,
         a4_height_m,
         card_x,
@@ -268,8 +275,8 @@ fn setup(
     let index_height_m = f32::from(INDEX_H);
     let card_left = card_x - card_width_m / 2.0;
     let index_x = card_left + index_width_m / 2.0;
-    let a4_bottom = a4_y - a4_height_m / 2.0;
-    let index_y = a4_bottom + index_height_m / 2.0;
+    let a4_page_bottom = a4_page_y - a4_height_m / 2.0;
+    let index_y = a4_page_bottom + index_height_m / 2.0;
 
     spawn_photo_panel_with_title(&mut commands, index_x, index_y, index_height_m, title_gap);
     spawn_index_card_rulers(
@@ -298,9 +305,9 @@ fn setup(
 
 fn spawn_a4_with_titles(
     commands: &mut Commands,
-    a4_x: f32,
-    a4_y: f32,
-    a4_top: f32,
+    a4_page_x: f32,
+    a4_page_y: f32,
+    a4_page_top: f32,
     card_x: f32,
     title_gap: f32,
 ) {
@@ -317,7 +324,11 @@ fn spawn_a4_with_titles(
     };
 
     commands
-        .spawn((A4Panel, a4_panel, Transform::from_xyz(a4_x, a4_y, 0.0)))
+        .spawn((
+            A4Panel,
+            a4_panel,
+            Transform::from_xyz(a4_page_x, a4_page_y, 0.0),
+        ))
         .observe(on_panel_clicked);
 
     let title_style = WorldTextStyle::new(Pt(18.0))
@@ -326,12 +337,12 @@ fn spawn_a4_with_titles(
     commands.spawn((
         WorldText::new("A4 Paper — 210 × 297 mm"),
         title_style.clone(),
-        Transform::from_xyz(a4_x, a4_top + title_gap, 0.0),
+        Transform::from_xyz(a4_page_x, a4_page_top + title_gap, 0.0),
     ));
     commands.spawn((
         WorldText::new("US Business Card — 3½ × 2 in"),
         title_style,
-        Transform::from_xyz(card_x, a4_top + title_gap, 0.0),
+        Transform::from_xyz(card_x, a4_page_top + title_gap, 0.0),
     ));
 }
 
@@ -475,7 +486,7 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
 
     commands.spawn((ControlsPanel, controls_panel, Transform::default()));
 
-    let cam_unlit = StandardMaterial {
+    let camera_help_material = StandardMaterial {
         unlit: true,
         ..bevy_diegetic::default_panel_material()
     };
@@ -486,8 +497,8 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
                 Sizing::fixed(CAM_HELP_HEIGHT),
             )
             .anchor(Anchor::BottomRight)
-            .material(cam_unlit.clone())
-            .text_material(cam_unlit)
+            .material(camera_help_material.clone())
+            .text_material(camera_help_material)
             .layout(build_camera_help)
             .build(),
         "camera help HUD dimensions",
@@ -501,8 +512,8 @@ fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
 fn spawn_rulers(
     commands: &mut Commands,
     ruler_color: Color,
-    a4_x: f32,
-    a4_y: f32,
+    a4_page_x: f32,
+    a4_page_y: f32,
     a4_width_m: f32,
     a4_height_m: f32,
     card_x: f32,
@@ -511,8 +522,8 @@ fn spawn_rulers(
     card_height_m: f32,
 ) {
     // A4 vertical ruler (left side).
-    let a4_ruler_x = a4_x - a4_width_m / 2.0 - f32::from(RULER_GAP);
-    let a4_ruler_top = a4_y + a4_height_m / 2.0;
+    let a4_ruler_x = a4_page_x - a4_width_m / 2.0 - f32::from(RULER_GAP);
+    let a4_ruler_top = a4_page_y + a4_height_m / 2.0;
     let Some(a4_vertical_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(PANEL_RULER_WIDTH, A4_HEIGHT)
@@ -531,8 +542,8 @@ fn spawn_rulers(
     ));
 
     // A4 horizontal ruler (bottom).
-    let a4_bottom_ruler_x = a4_x - a4_width_m / 2.0;
-    let a4_bottom_ruler_y = a4_y - a4_height_m / 2.0 - f32::from(RULER_GAP);
+    let a4_bottom_ruler_x = a4_page_x - a4_width_m / 2.0;
+    let a4_bottom_ruler_y = a4_page_y - a4_height_m / 2.0 - f32::from(RULER_GAP);
     let Some(a4_horizontal_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(A4_WIDTH, PANEL_RULER_WIDTH)
@@ -888,12 +899,15 @@ fn build_horizontal_ticks(
     }
 }
 
-fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
-    let mut builder = LayoutBuilder::new(PANEL_RULER_WIDTH, Mm(height_mm.to_f32()));
+fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(PANEL_RULER_WIDTH, Mm(height_millimeters.to_f32()));
     let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
-    let last_cm = height_mm / 10;
+    let last_centimeter_mark = height_millimeters / 10;
     // Top spacer: distance from top of ruler to center of topmost cm block.
-    let top_spacer = last_cm.to_f32().mul_add(-10.0, height_mm.to_f32()) - 5.0;
+    let top_spacer = last_centimeter_mark
+        .to_f32()
+        .mul_add(-10.0, height_millimeters.to_f32())
+        - 5.0;
 
     builder.with(
         El::new()
@@ -925,7 +939,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                         );
                     }
                     // One 10mm block per cm, with text centered.
-                    for cm in (1..=last_cm).rev() {
+                    for centimeter in (1..=last_centimeter_mark).rev() {
                         b.with(
                             El::new()
                                 .height(Sizing::fixed(Mm(10.0)))
@@ -933,7 +947,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                                 .child_align_x(AlignX::Right)
                                 .child_align_y(AlignY::Center),
                             |b| {
-                                b.text(format!("{cm}"), label_style.clone());
+                                b.text(format!("{centimeter}"), label_style.clone());
                             },
                         );
                     }
@@ -951,7 +965,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                     .width(Sizing::fixed(Mm(
                         PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
                     )))
-                    .height(Sizing::fixed(Mm(height_mm.to_f32())))
+                    .height(Sizing::fixed(Mm(height_millimeters.to_f32())))
                     .direction(Direction::LeftToRight)
                     .child_align_x(AlignX::Right),
                 |b| {
@@ -964,7 +978,7 @@ fn build_metric_panel_ruler(height_mm: i32, ruler_color: Color) -> LayoutTree {
                         |b| {
                             build_vertical_ticks(
                                 b,
-                                height_mm,
+                                height_millimeters,
                                 1.0,
                                 AlignX::Right,
                                 ruler_color,
@@ -1116,15 +1130,16 @@ const fn sixteenth_tick_size(sixteenth: i32) -> (f32, f32) {
 }
 
 /// Horizontal metric ruler — spine on TOP, ticks extending DOWN, labels below.
-fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTree {
-    let mut builder = LayoutBuilder::new(Mm(width_mm.to_f32()), PANEL_RULER_WIDTH);
+fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(Mm(width_millimeters.to_f32()), PANEL_RULER_WIDTH);
     let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
-    // Labels go at cm 1..last_label_cm, each centered in a 10mm block.
+    // Labels go at centimeter 1 through the last label slot, each centered in
+    // a 10mm block.
     // Skip the cm at the exact edge (it's just a tick, no room for a label).
-    let last_label_cm = (width_mm - 5) / 10;
-    let right_spacer = last_label_cm
+    let last_label_centimeter = (width_millimeters - 5) / 10;
+    let right_spacer = last_label_centimeter
         .to_f32()
-        .mul_add(-10.0, width_mm.to_f32() - 5.0);
+        .mul_add(-10.0, width_millimeters.to_f32() - 5.0);
 
     builder.with(
         El::new()
@@ -1135,7 +1150,7 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
             // ── Top row: spine + ticks ──────────────────────────
             b.with(
                 El::new()
-                    .width(Sizing::fixed(Mm(width_mm.to_f32())))
+                    .width(Sizing::fixed(Mm(width_millimeters.to_f32())))
                     .height(Sizing::fixed(Mm(
                         PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
                     )))
@@ -1158,7 +1173,7 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                         |b| {
                             build_horizontal_ticks(
                                 b,
-                                width_mm,
+                                width_millimeters,
                                 1.0,
                                 ruler_color,
                                 millimeter_tick_size,
@@ -1187,7 +1202,7 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                         El::new().width(Sizing::fixed(Mm(5.0))).height(Sizing::GROW),
                         |_| {},
                     );
-                    for cm in 1..=last_label_cm {
+                    for centimeter in 1..=last_label_centimeter {
                         b.with(
                             El::new()
                                 .width(Sizing::fixed(Mm(10.0)))
@@ -1200,7 +1215,7 @@ fn build_metric_horizontal_ruler(width_mm: i32, ruler_color: Color) -> LayoutTre
                                         .direction(Direction::TopToBottom)
                                         .child_align_x(AlignX::Center),
                                     |b| {
-                                        b.text(format!("{cm}"), label_style.clone());
+                                        b.text(format!("{centimeter}"), label_style.clone());
                                     },
                                 );
                             },

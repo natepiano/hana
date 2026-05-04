@@ -57,7 +57,7 @@ struct DashedLine {
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.
 pub(super) fn spawn_glyph_metric_gizmos(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
     assets: &mut OverlayAssets<'_>,
 ) {
@@ -65,12 +65,12 @@ pub(super) fn spawn_glyph_metric_gizmos(
 
     // "Bounding Box" callout from the first glyph's bbox.
     if !computed.glyph_rects.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
-        spawn_bounding_box_callout(ctx, font_ctx, computed, BBOX_COLOR);
+        spawn_bounding_box_callout(ctx, font_context, computed, BBOX_COLOR);
     }
 
     // Origin dots + Advancement arrow below the first glyph.
     if !computed.glyph_rects.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
-        spawn_origin_and_advancement(ctx, font_ctx, computed, assets);
+        spawn_origin_and_advancement(ctx, font_context, computed, assets);
     }
 }
 
@@ -124,7 +124,7 @@ fn spawn_glyph_box_panels(
 /// Spawns the "Bounding Box" callout label with shelf and riser lines.
 fn spawn_bounding_box_callout(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
     bbox_color: Color,
 ) {
@@ -151,9 +151,9 @@ fn spawn_bounding_box_callout(
     let shelf_end_x = shelf_right_x + shelf_len;
 
     // Vertical line goes up to halfway between Cap Height and Ascent.
-    let baseline_y_layout = font_ctx.line_metrics.baseline;
-    let ascent_y_layout = baseline_y_layout - font_ctx.line_metrics.ascent;
-    let cap_height_y_layout = baseline_y_layout - font_ctx.font_metrics.cap_height;
+    let baseline_y_layout = font_context.line_metrics.baseline;
+    let ascent_y_layout = baseline_y_layout - font_context.line_metrics.ascent;
+    let cap_height_y_layout = baseline_y_layout - font_context.font_metrics.cap_height;
     let callout_top_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let callout_top_world = scaling::layout_to_world_y(callout_top_layout, ctx.anchor_y, ctx.scale);
 
@@ -200,7 +200,7 @@ fn spawn_bounding_box_callout(
 /// Spawns origin dots, origin label, advancement end dot, and advancement arrow.
 fn spawn_origin_and_advancement(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
     assets: &mut OverlayAssets<'_>,
 ) {
@@ -211,7 +211,7 @@ fn spawn_origin_and_advancement(
     let first = &computed.glyph_rects[0];
     let first_mid_x = first[0] + first[2] / 2.0;
 
-    let line_metrics = font_ctx.line_metrics;
+    let line_metrics = font_context.line_metrics;
     let baseline_world = scaling::layout_to_world_y(line_metrics.baseline, ctx.anchor_y, ctx.scale);
     let descent_world = scaling::layout_to_world_y(
         line_metrics.baseline + line_metrics.descent,

@@ -56,7 +56,7 @@ pub(super) struct MetricGuideYs {
 pub(super) fn spawn_metric_labels(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_name: &str,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     metric_lines: &[(&str, f32)],
     extents: &GlyphExtents,
 ) {
@@ -67,8 +67,8 @@ pub(super) fn spawn_metric_labels(
         label_gap:  scaling::label_gap(ctx.font_size, ctx.scale),
     };
 
-    let line_metrics = font_ctx.line_metrics;
-    let font_metrics = font_ctx.font_metrics;
+    let line_metrics = font_context.line_metrics;
+    let font_metrics = font_context.font_metrics;
     let guides = MetricGuideYs {
         baseline:   line_metrics.baseline,
         ascent:     line_metrics.baseline - line_metrics.ascent,
@@ -84,7 +84,15 @@ pub(super) fn spawn_metric_labels(
     let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
 
     spawn_line_edge_labels(ctx, metric_lines, &style, left_2);
-    spawn_left_arrow_labels(ctx, font_ctx, font_name, &style, &guides, left_1, left_2);
+    spawn_left_arrow_labels(
+        ctx,
+        font_context,
+        font_name,
+        &style,
+        &guides,
+        left_1,
+        left_2,
+    );
     spawn_right_arrow_labels(ctx, &style, &guides, right_1, right_2);
 }
 
@@ -119,7 +127,7 @@ fn measure_overlay_label(
 pub(super) fn spawn_overlay_bounds_target(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_name: &str,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     extents: &GlyphExtents,
     text_services: &mut TextServices<'_>,
     assets: &mut OverlayAssets<'_>,
@@ -157,7 +165,7 @@ pub(super) fn spawn_overlay_bounds_target(
         ctx.scale,
     );
 
-    let line_metrics = font_ctx.line_metrics;
+    let line_metrics = font_context.line_metrics;
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
     let top_y = line_metrics.top;
@@ -255,7 +263,7 @@ fn spawn_line_edge_labels(
 /// Spawns Ascent, Descent, Line Height, and optional "no line gap" labels.
 fn spawn_left_arrow_labels(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    font_ctx: &FontContext<'_>,
+    font_context: &FontContext<'_>,
     font_name: &str,
     style: &LabelStyle,
     guides: &MetricGuideYs,
@@ -295,7 +303,7 @@ fn spawn_left_arrow_labels(
 
     // Baseline label: offset down by half the label's descent so the visual
     // center of the text sits on the red line.
-    let line_metrics = font_ctx.line_metrics;
+    let line_metrics = font_context.line_metrics;
     let label_descent_offset = line_metrics.descent * LABEL_SIZE_RATIO * ctx.scale / 2.0;
     let baseline_label_world =
         scaling::layout_to_world_y(guides.baseline, ctx.anchor_y, ctx.scale) - label_descent_offset;

@@ -172,7 +172,7 @@ pub fn build_typography_overlay(
             font_size,
             scale,
         };
-        let font_ctx = FontContext {
+        let font_context = FontContext {
             font_metrics: &font_metrics,
             line_metrics: &line_metrics,
         };
@@ -189,7 +189,7 @@ pub fn build_typography_overlay(
             let bounds_target = metric_lines::spawn_font_metric_gizmos(
                 &mut ctx,
                 font.name(),
-                &font_ctx,
+                &font_context,
                 computed,
                 &mut text_services,
                 &mut assets,
@@ -203,7 +203,7 @@ pub fn build_typography_overlay(
         }
 
         if overlay.glyph_metrics == GlyphMetricVisibility::Shown {
-            glyph::spawn_glyph_metric_gizmos(&mut ctx, &font_ctx, computed, &mut assets);
+            glyph::spawn_glyph_metric_gizmos(&mut ctx, &font_context, computed, &mut assets);
         }
 
         if overlay.font_metrics != GlyphMetricVisibility::Shown {

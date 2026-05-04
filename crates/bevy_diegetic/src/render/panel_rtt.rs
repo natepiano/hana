@@ -179,8 +179,8 @@ pub(super) fn setup_panel_rtt(
         // Camera center: the midpoint of the panel content area.
         // Content spans from (-anchor_x, anchor_y) [TL] to
         // (world_width - anchor_x, anchor_y - world_height) [BR].
-        let cam_x = world_width.mul_add(0.5, -anchor_x);
-        let cam_y = world_height.mul_add(-0.5, anchor_y);
+        let camera_x = world_width.mul_add(0.5, -anchor_x);
+        let camera_y = world_height.mul_add(-0.5, anchor_y);
 
         // Spawn orthographic camera targeting the render texture.
         commands.entity(panel_entity).with_child((
@@ -202,8 +202,8 @@ pub(super) fn setup_panel_rtt(
                 ..OrthographicProjection::default_3d()
             }),
             render_layers.clone(),
-            Transform::from_xyz(cam_x, cam_y, RTT_CAMERA_Z)
-                .looking_at(Vec3::new(cam_x, cam_y, 0.0), Vec3::Y),
+            Transform::from_xyz(camera_x, camera_y, RTT_CAMERA_Z)
+                .looking_at(Vec3::new(camera_x, camera_y, 0.0), Vec3::Y),
         ));
 
         // The MSDF text material uses PBR lighting. A directional light
@@ -217,8 +217,8 @@ pub(super) fn setup_panel_rtt(
                 ..default()
             },
             render_layers.clone(),
-            Transform::from_xyz(cam_x, cam_y, RTT_CAMERA_Z)
-                .looking_at(Vec3::new(cam_x, cam_y, 0.0), Vec3::Y),
+            Transform::from_xyz(camera_x, camera_y, RTT_CAMERA_Z)
+                .looking_at(Vec3::new(camera_x, camera_y, 0.0), Vec3::Y),
         ));
 
         // Spawn display quad — visible to the panel's scene layer.
@@ -233,7 +233,7 @@ pub(super) fn setup_panel_rtt(
             Mesh3d(quad_mesh),
             MeshMaterial3d(quad_material),
             scene_layer,
-            Transform::from_xyz(cam_x, cam_y, 0.0),
+            Transform::from_xyz(camera_x, camera_y, 0.0),
         );
         if panel.surface_shadow() == SurfaceShadow::On {
             commands.entity(panel_entity).with_child(quad_base);

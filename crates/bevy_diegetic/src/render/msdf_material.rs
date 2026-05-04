@@ -19,6 +19,8 @@ use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
 use bevy_kana::ToF32;
 
+use super::constants::SHADOW_PROXY_ALPHA_MASK_THRESHOLD;
+
 /// The full MSDF text material type: `StandardMaterial` extended with MSDF
 /// atlas decoding.
 ///
@@ -161,7 +163,8 @@ pub(super) fn msdf_text_material(input: MsdfTextMaterialInput) -> MsdfTextMateri
 /// Creates a shadow proxy [`MsdfTextMaterial`] from a resolved base.
 ///
 /// Same as [`msdf_text_material`] but configured for shadow-only rendering:
-/// - `alpha_mode: Mask(0.5)` so the shadow prepass runs the fragment shader
+/// - `alpha_mode: Mask(SHADOW_PROXY_ALPHA_MASK_THRESHOLD)` so the shadow prepass runs the fragment
+///   shader
 /// - `is_shadow_proxy: 1` causes the main-pass fragment shader to discard all fragments
 #[must_use]
 pub(super) fn msdf_shadow_proxy_material(input: MsdfShadowProxyMaterialInput) -> MsdfTextMaterial {
@@ -175,7 +178,7 @@ pub(super) fn msdf_shadow_proxy_material(input: MsdfShadowProxyMaterialInput) ->
         clip_rect,
         oit_depth_offset,
     } = input;
-    base.alpha_mode = AlphaMode::Mask(0.5);
+    base.alpha_mode = AlphaMode::Mask(SHADOW_PROXY_ALPHA_MASK_THRESHOLD);
     build_msdf_material(
         base,
         sdf_range,

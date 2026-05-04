@@ -1,5 +1,7 @@
 //! Screen-space overlay support for diegetic panels.
 
+mod constants;
+
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;
 use bevy::camera::ClearColorConfig;
@@ -7,6 +9,10 @@ use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
+use constants::SCREEN_SPACE_CAMERA_FAR;
+use constants::SCREEN_SPACE_CAMERA_Z;
+use constants::SCREEN_SPACE_LIGHT_ILLUMINANCE;
+use constants::SCREEN_SPACE_PANEL_RESIZE_EPSILON;
 
 use crate::layout::Sizing;
 use crate::panel::ComputedDiegeticPanel;
@@ -79,11 +85,11 @@ fn position_screen_space_panels(
         let (content_width, content_height) = (computed.content_width(), computed.content_height());
 
         let new_width = resolve_screen_axis(width, window_width, content_width, panel.width());
-        if (panel.width() - new_width).abs() > 0.01 {
+        if (panel.width() - new_width).abs() > SCREEN_SPACE_PANEL_RESIZE_EPSILON {
             panel.set_width(new_width);
         }
         let new_height = resolve_screen_axis(height, window_height, content_height, panel.height());
-        if (panel.height() - new_height).abs() > 0.01 {
+        if (panel.height() - new_height).abs() > SCREEN_SPACE_PANEL_RESIZE_EPSILON {
             panel.set_height(new_height);
         }
 
@@ -183,10 +189,10 @@ fn setup_screen_space_view(
         },
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::WindowSize,
-            far: 2000.0,
+            far: SCREEN_SPACE_CAMERA_FAR,
             ..OrthographicProjection::default_3d()
         }),
-        Transform::from_xyz(0.0, 0.0, 1000.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 0.0, SCREEN_SPACE_CAMERA_Z).looking_at(Vec3::ZERO, Vec3::Y),
         bevy::render::view::Msaa::default(),
         render_layers.clone(),
     ));
@@ -196,7 +202,7 @@ fn setup_screen_space_view(
             render_layers: render_layers.clone(),
         },
         DirectionalLight {
-            illuminance: 5000.0,
+            illuminance: SCREEN_SPACE_LIGHT_ILLUMINANCE,
             shadows_enabled: false,
             ..default()
         },

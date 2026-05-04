@@ -181,7 +181,7 @@ fn build_panel_geometry(
             let center_y = world_height.mul_add(-0.5, anchor_y);
 
             let interact_mat = standard_materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+                base_color: Color::NONE,
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 double_sided: true,
