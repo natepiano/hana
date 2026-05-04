@@ -3,7 +3,7 @@
 //! All types `Deref` to their inner type for ergonomic field and method access.
 
 mod cast;
-mod screen;
+mod screen_position;
 mod space;
 
 pub use cast::ToF32;
@@ -13,7 +13,7 @@ pub use cast::ToU8;
 pub use cast::ToU16;
 pub use cast::ToU32;
 pub use cast::ToUsize;
-pub use screen::ScreenPosition;
+pub use screen_position::ScreenPosition;
 pub use space::Displacement;
 pub use space::Orientation;
 pub use space::Position;

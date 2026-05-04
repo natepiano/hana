@@ -313,18 +313,24 @@ impl<C: Component> Keybindings<C> {
 mod tests {
     use bevy::prelude::*;
 
+    // expectations
+    const EMPTY_EVENT_SIZE: usize = 0;
+    const PAYLOAD_VALUE: u32 = 42;
+
     event!(TestEvent);
     event!(TestPayloadEvent { value: u32 });
 
     #[test]
     fn payload_event_fields() {
-        let event = TestPayloadEvent { value: 42 };
-        assert_eq!(event.value, 42);
+        let event = TestPayloadEvent {
+            value: PAYLOAD_VALUE,
+        };
+        assert_eq!(event.value, PAYLOAD_VALUE);
     }
 
     #[test]
     fn unit_event_defaults() {
         let event = TestEvent;
-        assert_eq!(std::mem::size_of_val(&event), 0);
+        assert_eq!(std::mem::size_of_val(&event), EMPTY_EVENT_SIZE);
     }
 }

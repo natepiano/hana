@@ -3,7 +3,6 @@
 //! Run with: `cargo run --example basics`
 
 use bevy::math::Quat;
-use bevy::math::Vec2;
 use bevy::math::Vec3;
 use bevy_kana::Displacement;
 use bevy_kana::Orientation;
@@ -11,13 +10,27 @@ use bevy_kana::Position;
 use bevy_kana::ScreenPosition;
 use bevy_kana::Velocity;
 
+// demo fixtures
+const CENTROID_DIVISOR: f32 = 2.0;
+const CURSOR_POSITION: ScreenPosition = ScreenPosition::new(640.0, 480.0);
+const DEMO_DISPLACEMENT: Displacement = Displacement::new(5.0, 0.0, 0.0);
+const DEMO_POSITION: Position = Position::new(10.0, 0.0, 5.0);
+const DEMO_VELOCITY: Velocity = Velocity::new(1.0, 0.0, -0.5);
+const END_POSITION: Position = Position::new(3.0, 4.0, 0.0);
+const FRAME_TIME_DELTA: f32 = 0.016;
+const OFFSET_POSITION: ScreenPosition = ScreenPosition::new(10.0, -5.0);
+const ROUNDTRIP_POSITION: Vec3 = Vec3::new(1.0, 2.0, 3.0);
+const SLERP_FACTOR: f32 = 0.5;
+const START_POSITION: Position = Position::new(1.0, 0.0, 0.0);
+const STEP_VELOCITY: Velocity = Velocity::new(2.0, 0.0, 0.0);
+
 fn main() {
     println!("=== Semantic types: compile-time safety ===\n");
 
     // Same-type arithmetic works
-    let start_position = Position(Vec3::new(1.0, 0.0, 0.0));
-    let end_position = Position(Vec3::new(3.0, 4.0, 0.0));
-    let centroid = (start_position + end_position) / 2.0;
+    let start_position = START_POSITION;
+    let end_position = END_POSITION;
+    let centroid = (start_position + end_position) / CENTROID_DIVISOR;
     println!("Centroid of {start_position:?} and {end_position:?}: {centroid:?}");
 
     // Cross-type mixing is a compile error — uncomment to see:
@@ -26,8 +39,8 @@ fn main() {
 
     println!("\n=== Deref: transparent access to inner type ===\n");
 
-    let position = Position(Vec3::new(10.0, 0.0, 5.0));
-    let velocity = Velocity(Vec3::new(1.0, 0.0, -0.5));
+    let position = DEMO_POSITION;
+    let velocity = DEMO_VELOCITY;
     println!("position.x = {}", position.x);
     println!("velocity.length() = {}", velocity.length());
 
@@ -41,7 +54,7 @@ fn main() {
     println!("into_inner: {raw:?}");
 
     // `From`/`Into` conversions work both ways
-    let from_vec: Position = Vec3::new(1.0, 2.0, 3.0).into();
+    let from_vec: Position = ROUNDTRIP_POSITION.into();
     let back_to_vec: Vec3 = from_vec.into();
     println!("roundtrip: {back_to_vec:?}");
 
@@ -64,14 +77,14 @@ fn main() {
     // Interpolation
     let start_orientation = Orientation::from(Quat::IDENTITY);
     let end_orientation = Orientation::from(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
-    let halfway = start_orientation.slerp(end_orientation, 0.5);
+    let halfway = start_orientation.slerp(end_orientation, SLERP_FACTOR);
     let slerp_result = halfway * Vec3::X;
     println!("Slerp halfway (0° to 90°): {slerp_result:?}");
 
     println!("\n=== Displacement and Velocity ===\n");
 
-    let displacement = Displacement(Vec3::new(5.0, 0.0, 0.0));
-    let velocity = Velocity(Vec3::new(2.0, 0.0, 0.0));
+    let displacement = DEMO_DISPLACEMENT;
+    let velocity = STEP_VELOCITY;
 
     let total = displacement + displacement;
     let combined = velocity + velocity;
@@ -79,14 +92,14 @@ fn main() {
     println!("Combined velocity: {combined:?}");
 
     // Scale velocity by the frame time delta for per-frame movement
-    let time_delta = 0.016;
+    let time_delta = FRAME_TIME_DELTA;
     let frame_velocity = velocity * time_delta;
     println!("Velocity * time_delta({time_delta}): {frame_velocity:?}");
 
     println!("\n=== ScreenPosition: 2D pixel-space ===\n");
 
-    let cursor = ScreenPosition(Vec2::new(640.0, 480.0));
-    let offset = ScreenPosition(Vec2::new(10.0, -5.0));
+    let cursor = CURSOR_POSITION;
+    let offset = OFFSET_POSITION;
     let moved = cursor + offset;
     println!("Cursor {cursor:?} + offset {offset:?} = {moved:?}");
 }

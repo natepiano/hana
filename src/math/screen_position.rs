@@ -105,24 +105,31 @@ impl Neg for ScreenPosition {
 mod tests {
     use super::*;
 
+    // fixtures
+    const BASE_SCREEN_POSITION: ScreenPosition = ScreenPosition::new(BASE_SCREEN_X, BASE_SCREEN_Y);
+    const BASE_SCREEN_X: f32 = 100.0;
+    const BASE_SCREEN_Y: f32 = 200.0;
+    const OFFSET_SCREEN_POSITION: ScreenPosition = ScreenPosition::new(10.0, 20.0);
+    const SUMMED_SCREEN_POSITION: Vec2 = Vec2::new(110.0, 220.0);
+
     #[test]
     fn add_returns_self() {
-        let cursor_position = ScreenPosition(Vec2::new(100.0, 200.0));
-        let offset_position = ScreenPosition(Vec2::new(10.0, 20.0));
+        let cursor_position = BASE_SCREEN_POSITION;
+        let offset_position = OFFSET_SCREEN_POSITION;
         let result = cursor_position + offset_position;
-        assert_eq!(result.into_inner(), Vec2::new(110.0, 220.0));
+        assert_eq!(result.into_inner(), SUMMED_SCREEN_POSITION);
     }
 
     #[test]
     fn deref_provides_vec2_access() {
-        let screen_position = ScreenPosition(Vec2::new(100.0, 200.0));
-        assert!((screen_position.x - 100.0).abs() < f32::EPSILON);
-        assert!((screen_position.y - 200.0).abs() < f32::EPSILON);
+        let screen_position = BASE_SCREEN_POSITION;
+        assert!((screen_position.x - BASE_SCREEN_X).abs() < f32::EPSILON);
+        assert!((screen_position.y - BASE_SCREEN_Y).abs() < f32::EPSILON);
     }
 
     #[test]
     fn from_into_roundtrip() {
-        let vec2 = Vec2::new(100.0, 200.0);
+        let vec2 = BASE_SCREEN_POSITION.into_inner();
         let screen_position = ScreenPosition::from(vec2);
         let round_tripped_vec2: Vec2 = screen_position.into();
         assert_eq!(vec2, round_tripped_vec2);
