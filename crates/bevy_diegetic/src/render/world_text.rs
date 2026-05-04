@@ -330,7 +330,10 @@ pub(super) fn render_world_text(
     }
 
     let total_ms = total_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    if total_ms > 5.0 || text_stats.queued_glyphs > 0 || text_stats.pending_glyphs > 0 {
+    if total_ms > constants::WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS
+        || text_stats.queued_glyphs > 0
+        || text_stats.pending_glyphs > 0
+    {
         bevy::log::debug!(
             "render_world_text: total={total_ms:.1}ms texts={text_count} shape={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={}",
             text_stats.shape_ms,
@@ -499,7 +502,7 @@ fn spawn_world_text_meshes(
         // Spawn visible mesh (skip for Invisible render mode).
         if !is_invisible {
             let mut visible_base = StandardMaterial {
-                depth_bias: -1.0,
+                depth_bias: -constants::LAYER_DEPTH_BIAS,
                 ..Default::default()
             };
             apply_sidedness(&mut visible_base, style.sidedness());
@@ -808,7 +811,7 @@ fn measure_anchor_offset(
         }
     }
     let mut baselines: Vec<f32> = glyphs.iter().map(|g| g.baseline).collect();
-    baselines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+    baselines.dedup_by(|a, b| (*a - *b).abs() < constants::BASELINE_DEDUP_EPSILON);
     let line_count = baselines.len().max(1);
     let natural_line_height = if style.line_height_raw() > 0.0 {
         style.line_height_raw()

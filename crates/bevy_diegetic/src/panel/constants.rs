@@ -7,6 +7,13 @@ use bevy::diagnostic::DiagnosticPath;
 pub(super) const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
 /// Default render layer for screen-space overlay panels.
 pub(super) const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
+/// Minimum implicit world height assigned to fixed screen panels so that
+/// 1 layout pixel maps to at least 1 world unit under the ortho camera.
+pub(super) const MIN_PANEL_WORLD_HEIGHT: f32 = 1.0;
+/// Hysteresis tolerance for `Fit`-axis world panel resize: skip writing back
+/// a clamped width or height if it differs from the current value by less
+/// than this.
+pub(super) const PANEL_RESIZE_EPSILON: f32 = 0.001;
 
 // Diagnostic paths
 pub(super) const DIAG_ATLAS_ACTIVE_JOBS: DiagnosticPath =

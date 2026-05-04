@@ -23,6 +23,10 @@ use super::constants::DEFAULT_TEXELS_PER_METER;
 use super::constants::MAX_TEXTURE_SIZE;
 use super::constants::MIN_TEXTURE_SIZE;
 use super::constants::PANEL_LAYER_OFFSET;
+use super::constants::RTT_CAMERA_FAR;
+use super::constants::RTT_CAMERA_NEAR;
+use super::constants::RTT_CAMERA_Z;
+use super::constants::RTT_LIGHT_ILLUMINANCE;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::RenderMode;
@@ -193,12 +197,12 @@ pub(super) fn setup_panel_rtt(
                     width:  world_w,
                     height: world_h,
                 },
-                near: -1.0,
-                far: 10.0,
+                near: RTT_CAMERA_NEAR,
+                far: RTT_CAMERA_FAR,
                 ..OrthographicProjection::default_3d()
             }),
             render_layers.clone(),
-            Transform::from_xyz(cam_x, cam_y, 5.0)
+            Transform::from_xyz(cam_x, cam_y, RTT_CAMERA_Z)
                 .looking_at(Vec3::new(cam_x, cam_y, 0.0), Vec3::Y),
         ));
 
@@ -209,11 +213,11 @@ pub(super) fn setup_panel_rtt(
         commands.entity(panel_entity).with_child((
             DirectionalLight {
                 shadows_enabled: false,
-                illuminance: 10_000.0,
+                illuminance: RTT_LIGHT_ILLUMINANCE,
                 ..default()
             },
             render_layers.clone(),
-            Transform::from_xyz(cam_x, cam_y, 5.0)
+            Transform::from_xyz(cam_x, cam_y, RTT_CAMERA_Z)
                 .looking_at(Vec3::new(cam_x, cam_y, 0.0), Vec3::Y),
         ));
 
