@@ -20,23 +20,28 @@ pub(super) fn compute_rmf(points: &[Vec3], tangents: &[Vec3]) -> Vec<(Vec3, Vec3
         let prev_tangent = tangents[i - 1];
         let current_tangent = tangents[i];
 
-        let v1 = points[i] - points[i - 1];
-        let c1 = v1.dot(v1);
-        if c1 < f32::EPSILON {
+        let edge_vector = points[i] - points[i - 1];
+        let edge_length_squared = edge_vector.dot(edge_vector);
+        if edge_length_squared < f32::EPSILON {
             frames.push(frames[i - 1]);
             continue;
         }
 
-        let reflected_normal = prev_normal - (2.0 / c1) * v1.dot(prev_normal) * v1;
-        let reflected_tangent = prev_tangent - (2.0 / c1) * v1.dot(prev_tangent) * v1;
+        let reflected_normal =
+            prev_normal - (2.0 / edge_length_squared) * edge_vector.dot(prev_normal) * edge_vector;
+        let reflected_tangent = prev_tangent
+            - (2.0 / edge_length_squared) * edge_vector.dot(prev_tangent) * edge_vector;
 
-        let v2 = current_tangent - reflected_tangent;
-        let c2 = v2.dot(v2);
+        let tangent_delta = current_tangent - reflected_tangent;
+        let tangent_delta_length_squared = tangent_delta.dot(tangent_delta);
 
-        let next_normal = if c2 < f32::EPSILON {
+        let next_normal = if tangent_delta_length_squared < f32::EPSILON {
             reflected_normal
         } else {
-            reflected_normal - (2.0 / c2) * v2.dot(reflected_normal) * v2
+            reflected_normal
+                - (2.0 / tangent_delta_length_squared)
+                    * tangent_delta.dot(reflected_normal)
+                    * tangent_delta
         }
         .normalize_or_zero();
 

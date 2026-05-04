@@ -193,7 +193,7 @@ pub(super) fn insert_knee_rings(
             .to_u32();
 
         let fillet_base_arc = output_arc_lengths[output_arc_lengths.len() - 1];
-        let q1 = 0.125
+        let bezier_midpoint = 0.125
             * (metadata.fillet_start
                 + 3.0 * metadata.first_control_point
                 + 3.0 * metadata.second_control_point
@@ -201,8 +201,8 @@ pub(super) fn insert_knee_rings(
             - 0.0625 * (3.0 * metadata.fillet_start + metadata.fillet_end);
         let fillet_length = metadata
             .fillet_start
-            .distance(q1)
-            .mul_add(2.0, q1.distance(metadata.fillet_end) * 2.0);
+            .distance(bezier_midpoint)
+            .mul_add(2.0, bezier_midpoint.distance(metadata.fillet_end) * 2.0);
 
         for k in 1..=num_rings {
             let t = k.to_f32() / num_rings.to_f32();

@@ -12,6 +12,7 @@ use super::buffers::WindingOrder;
 use super::caps;
 use super::config::CableMeshConfig;
 use super::config::FaceSides;
+use super::constants::MIN_TUBE_SIDES;
 use super::elbows;
 use super::frames;
 use super::path;
@@ -150,7 +151,7 @@ fn apply_inside_normals(
 /// All segments are flattened into a single continuous polyline.
 #[must_use]
 pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) -> Mesh {
-    let sides = config.tube.sides.max(3);
+    let sides = config.tube.sides.max(MIN_TUBE_SIDES);
     let total_length = geometry.total_length.max(MIN_SEGMENT_LENGTH);
 
     let flat = path::flatten_geometry(geometry);

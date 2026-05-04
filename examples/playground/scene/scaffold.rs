@@ -31,6 +31,7 @@ use crate::constants::GROUND_WIDTH;
 use crate::constants::NODE_COLOR;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
+use crate::constants::SECTION_Z;
 use crate::detach_demo;
 use crate::input;
 use crate::sections;
@@ -52,7 +53,7 @@ pub(crate) struct SharedCableMaterial(pub(crate) Handle<StandardMaterial>);
 pub(crate) struct RadiusMultiplier(pub(crate) f32);
 
 pub(crate) fn setup_camera(mut commands: Commands) {
-    let focus = Vec3::new(SECTION_X[0], NODE_Y * CAMERA_FOCUS_Y_MULTIPLIER, 0.0);
+    let focus = Vec3::new(SECTION_X[0], NODE_Y * CAMERA_FOCUS_Y_MULTIPLIER, SECTION_Z);
     let camera = commands
         .spawn(OrbitCam {
             button_orbit: MouseButton::Middle,

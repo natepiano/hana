@@ -5,7 +5,14 @@ use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
 
 use super::constants::NODE_Y;
+use super::constants::SECTION_BOUNDS_CENTER_Y_MULTIPLIER;
+use super::constants::SECTION_BOUNDS_COLOR;
+use super::constants::SECTION_BOUNDS_DEPTH;
+use super::constants::SECTION_BOUNDS_HEIGHT_PADDING;
+use super::constants::SECTION_BOUNDS_SPAN_MULTIPLIER;
+use super::constants::SECTION_BOUNDS_WIDTH_PADDING;
 use super::constants::SECTION_X;
+use super::constants::SECTION_Z;
 use super::constants::SPAN_HALF_X;
 use super::navigation;
 use super::navigation::NavLabel;
@@ -29,16 +36,20 @@ pub(crate) fn spawn_section_bounds(
     commands
         .spawn((
             Mesh3d(meshes.add(Cuboid::new(
-                SPAN_HALF_X.mul_add(2.0, 2.0),
-                NODE_Y + 2.0,
-                5.0,
+                SPAN_HALF_X.mul_add(SECTION_BOUNDS_SPAN_MULTIPLIER, SECTION_BOUNDS_WIDTH_PADDING),
+                NODE_Y + SECTION_BOUNDS_HEIGHT_PADDING,
+                SECTION_BOUNDS_DEPTH,
             ))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+                base_color: SECTION_BOUNDS_COLOR,
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             })),
-            Transform::from_translation(Vec3::new(center_x, NODE_Y * 0.5, 0.0)),
+            Transform::from_translation(Vec3::new(
+                center_x,
+                NODE_Y * SECTION_BOUNDS_CENTER_Y_MULTIPLIER,
+                SECTION_Z,
+            )),
             Pickable::IGNORE,
         ))
         .id()
@@ -62,17 +73,17 @@ pub(crate) fn update_current_section_from_camera(
     mut current_section: ResMut<CurrentSection>,
     mut label_query: Query<&mut Text, With<NavLabel>>,
 ) {
-    let Ok(cam) = cameras.single() else {
+    let Ok(camera) = cameras.single() else {
         return;
     };
-    let cam_x = cam.focus.x;
+    let camera_x = camera.focus.x;
     let nearest = SECTION_X
         .iter()
         .enumerate()
         .min_by(|(_, a), (_, b)| {
-            (cam_x - *a)
+            (camera_x - *a)
                 .abs()
-                .partial_cmp(&(cam_x - *b).abs())
+                .partial_cmp(&(camera_x - *b).abs())
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map_or(0, |(i, _)| i);

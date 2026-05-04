@@ -23,3 +23,5 @@ pub(super) const PERPENDICULAR_AXIS_THRESHOLD: f32 = 0.9;
 // Tube defaults
 pub(super) const DEFAULT_TUBE_RADIUS: f32 = 0.06;
 pub(super) const DEFAULT_TUBE_SIDES: u32 = 32;
+/// Minimum polygon sides needed to form a closed tube cross-section.
+pub(super) const MIN_TUBE_SIDES: u32 = 3;

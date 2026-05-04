@@ -20,6 +20,7 @@ use super::constants::DEFAULT_GRAVITY;
 use super::constants::DEFAULT_RESOLUTION;
 use super::constants::DEFAULT_SLACK;
 use super::constants::MAX_NEWTON_ITERATIONS;
+use super::constants::MIN_CABLE_SAMPLE_POINTS;
 use super::constants::MIN_CATENARY_PARAM;
 use super::constants::MIN_SEGMENT_LENGTH;
 use super::constants::NEAR_TAUT_INITIAL_GUESS_MULTIPLIER;
@@ -119,7 +120,7 @@ pub fn sample_3d(
 ) -> CableSegment {
     let start: Vec3 = start.into();
     let end: Vec3 = end.into();
-    let n = resolution.max(2).to_usize();
+    let n = resolution.max(MIN_CABLE_SAMPLE_POINTS).to_usize();
     let chord = end - start;
     let chord_length = chord.length();
 

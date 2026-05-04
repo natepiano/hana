@@ -13,7 +13,21 @@ use super::constants::DEFAULT_ELBOW_ARM_MULTIPLIER;
 use super::constants::DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER;
 use super::constants::DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER;
 use super::constants::DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE;
+use super::constants::ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MAX;
+use super::constants::ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MIN;
+use super::constants::ELBOW_ARM_MULTIPLIER_SLIDER_MAX;
+use super::constants::ELBOW_ARM_MULTIPLIER_SLIDER_MIN;
+use super::constants::ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MAX;
+use super::constants::ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MIN;
+use super::constants::ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MAX;
+use super::constants::ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MIN;
+use super::constants::ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MAX;
+use super::constants::ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MIN;
 use super::constants::JOINT_RADIUS_MULTIPLIER;
+use super::constants::JOINT_RADIUS_MULTIPLIER_SLIDER_MAX;
+use super::constants::JOINT_RADIUS_MULTIPLIER_SLIDER_MIN;
+use super::constants::JOINT_SEGMENTS_SLIDER_MAX;
+use super::constants::JOINT_SEGMENTS_SLIDER_MIN;
 use super::constants::JOINT_SPHERE_SEGMENTS;
 use super::constants::OVERLAY_MARGIN;
 use super::constants::SECTION_INFO_BACKGROUND;
@@ -22,7 +36,11 @@ use super::constants::SECTION_INFO_TEXTS;
 use super::constants::SECTION_INFO_TOP;
 use super::constants::SECTION_INFO_WIDTH;
 use super::constants::TUBE_RADIUS;
+use super::constants::TUBE_RADIUS_SLIDER_MAX;
+use super::constants::TUBE_RADIUS_SLIDER_MIN;
 use super::constants::TUBE_SIDES;
+use super::constants::TUBE_SIDES_SLIDER_MAX;
+use super::constants::TUBE_SIDES_SLIDER_MIN;
 use super::constants::UI_FONT_SIZE;
 use super::navigation;
 use super::scene::RadiusMultiplier;
@@ -47,33 +65,69 @@ pub(crate) struct CableSettings {
 #[derive(Reflect, InspectorOptions)]
 #[reflect(InspectorOptions)]
 pub(crate) struct TubeSettings {
-    #[inspector(min = 0.01, max = 0.3, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = TUBE_RADIUS_SLIDER_MIN,
+        max = TUBE_RADIUS_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) radius: f32,
-    #[inspector(min = 1, max = 64, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = TUBE_SIDES_SLIDER_MIN,
+        max = TUBE_SIDES_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) sides:  u32,
 }
 
 #[derive(Reflect, InspectorOptions)]
 #[reflect(InspectorOptions)]
 pub(crate) struct JointSettings {
-    #[inspector(min = 1.0, max = 4.0, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = JOINT_RADIUS_MULTIPLIER_SLIDER_MIN,
+        max = JOINT_RADIUS_MULTIPLIER_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) radius_multiplier: f32,
-    #[inspector(min = 8, max = 32, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = JOINT_SEGMENTS_SLIDER_MIN,
+        max = JOINT_SEGMENTS_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) segments:          u32,
 }
 
 #[derive(Reflect, InspectorOptions)]
 #[reflect(InspectorOptions)]
 pub(crate) struct ElbowSettings {
-    #[inspector(min = 1.0, max = 20.0, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MIN,
+        max = ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) bend_radius_multiplier: f32,
-    #[inspector(min = 0.5, max = 5.0, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MIN,
+        max = ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) min_radius_multiplier:  f32,
-    #[inspector(min = 2, max = 32, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MIN,
+        max = ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) rings_per_right_angle:  u32,
-    #[inspector(min = 1.0, max = 90.0, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MIN,
+        max = ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) angle_threshold_deg:    f32,
-    #[inspector(min = 0.1, max = 3.0, display = NumberDisplay::Slider)]
+    #[inspector(
+        min = ELBOW_ARM_MULTIPLIER_SLIDER_MIN,
+        max = ELBOW_ARM_MULTIPLIER_SLIDER_MAX,
+        display = NumberDisplay::Slider
+    )]
     pub(crate) arm_multiplier:         f32,
 }
 

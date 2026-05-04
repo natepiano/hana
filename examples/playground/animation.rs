@@ -2,6 +2,12 @@
 
 use bevy::prelude::*;
 
+use super::constants::LIGHT_TRAVEL_CYCLE_SECONDS;
+use super::constants::LIGHT_TRAVEL_FORWARD_END_SECONDS;
+use super::constants::LIGHT_TRAVEL_HOLD_DURATION_SECONDS;
+use super::constants::LIGHT_TRAVEL_HOLD_END_SECONDS;
+use super::constants::LIGHT_TRAVEL_SEGMENT_DURATION_SECONDS;
+
 /// Animates a point light along a tube's center axis, oscillating front to back.
 #[derive(Component)]
 pub(crate) struct TubeLight {
@@ -31,9 +37,14 @@ impl LightTravelPhase {
     const fn sample_position(self, phase: f32) -> f32 {
         match self {
             Self::HoldStart => 0.0,
-            Self::MoveForward => (phase - 0.5) / 2.0,
+            Self::MoveForward => {
+                (phase - LIGHT_TRAVEL_HOLD_DURATION_SECONDS) / LIGHT_TRAVEL_SEGMENT_DURATION_SECONDS
+            },
             Self::HoldEnd => 1.0,
-            Self::MoveBackward => 1.0 - (phase - 3.0) / 2.0,
+            Self::MoveBackward => {
+                1.0 - (phase - LIGHT_TRAVEL_HOLD_END_SECONDS)
+                    / LIGHT_TRAVEL_SEGMENT_DURATION_SECONDS
+            },
         }
     }
 }
@@ -41,9 +52,9 @@ impl LightTravelPhase {
 impl From<f32> for LightTravelPhase {
     fn from(phase: f32) -> Self {
         match phase {
-            phase if phase < 0.5 => Self::HoldStart,
-            phase if phase < 2.5 => Self::MoveForward,
-            phase if phase < 3.0 => Self::HoldEnd,
+            phase if phase < LIGHT_TRAVEL_HOLD_DURATION_SECONDS => Self::HoldStart,
+            phase if phase < LIGHT_TRAVEL_FORWARD_END_SECONDS => Self::MoveForward,
+            phase if phase < LIGHT_TRAVEL_HOLD_END_SECONDS => Self::HoldEnd,
             _ => Self::MoveBackward,
         }
     }
@@ -72,7 +83,7 @@ pub(crate) fn animate_tube_light(
     };
 
     // 0.5s pause | 2s travel forward | 0.5s pause | 2s travel back = 5s cycle
-    let cycle = 5.0_f32;
+    let cycle = LIGHT_TRAVEL_CYCLE_SECONDS;
     let phase = elapsed % cycle;
 
     let light_phase = LightTravelPhase::from(phase);
