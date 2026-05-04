@@ -1,6 +1,6 @@
 //! Constants shared across text loading, atlas packing, and MSDF rasterization.
 
-// Atlas configuration tuning
+// atlas configuration tuning
 /// Average glyph coverage ratio — most glyphs use roughly this fraction of
 /// the canonical size.
 pub(super) const AVERAGE_GLYPH_COVERAGE: f32 = 0.75;
@@ -24,7 +24,7 @@ pub(super) const SDF_RANGE: u32 = 4;
 /// Estimated packing efficiency for a shelf-based atlas allocator.
 pub(super) const SHELF_PACKING_EFFICIENCY: f32 = 0.80;
 
-// Atlas packing
+// atlas packing
 /// Texel gutter around each glyph in the atlas.
 ///
 /// Prevents linear filtering from sampling into adjacent glyph regions,
@@ -43,13 +43,13 @@ pub(super) const DEFAULT_ATLAS_SIZE: u32 = 1024;
 /// answer different questions and may diverge.
 pub(super) const DEFAULT_GLYPH_WORKER_THREADS: usize = 6;
 
-// Font defaults
+// font defaults
 /// Default font family name.
 pub(super) const DEFAULT_FAMILY: &str = "JetBrains Mono";
 /// Embedded `JetBrains Mono` Regular font binary (SIL Open Font License).
 pub const EMBEDDED_FONT: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 
-// MSDF rasterization
+// msdf rasterization
 /// Default canonical pixel size for MSDF generation.
 ///
 /// MSDF is resolution-independent, so all glyphs are generated at this

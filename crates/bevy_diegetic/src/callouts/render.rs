@@ -233,11 +233,11 @@ fn spawn_segment(
         return;
     }
 
-    let half_w = length * 0.5;
-    let hidden_half_h = thickness * HIDDEN_HALF_HEIGHT_MULTIPLIER;
-    let half_h = thickness.mul_add(0.5, hidden_half_h);
-    let mesh_half_w = half_w + SDF_AA_PADDING;
-    let mesh_half_h = half_h + SDF_AA_PADDING;
+    let half_width = length * 0.5;
+    let hidden_half_height = thickness * HIDDEN_HALF_HEIGHT_MULTIPLIER;
+    let half_height = thickness.mul_add(0.5, hidden_half_height);
+    let mesh_half_width = half_width + SDF_AA_PADDING;
+    let mesh_half_height = half_height + SDF_AA_PADDING;
 
     let mut base = render::default_panel_material();
     base.base_color = Color::NONE;
@@ -248,23 +248,29 @@ fn spawn_segment(
     let material = render::sdf_panel_material(
         base,
         render::SdfPanelMaterialInput {
-            half_size:        Vec2::new(half_w, half_h),
-            mesh_half_size:   Vec2::new(mesh_half_w, mesh_half_h),
+            half_size:        Vec2::new(half_width, half_height),
+            mesh_half_size:   Vec2::new(mesh_half_width, mesh_half_height),
             corner_radii:     [0.0; 4],
             border_widths:    [0.0, 0.0, thickness, 0.0],
             border_color:     Some(color),
-            clip_rect:        Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+            clip_rect:        Vec4::new(
+                -mesh_half_width,
+                -mesh_half_height,
+                mesh_half_width,
+                mesh_half_height,
+            ),
             oit_depth_offset: order.to_f32() * OIT_DEPTH_STEP,
         },
     );
-    let mesh = ctx
-        .meshes
-        .add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
+    let mesh = ctx.meshes.add(Rectangle::new(
+        mesh_half_width * 2.0,
+        mesh_half_height * 2.0,
+    ));
     let material = ctx.sdf_materials.add(material);
 
     let mid = (start + end) * 0.5;
     let rotation = Quat::from_rotation_arc(Vec3::X, delta / length);
-    let line_center_offset = rotation * Vec3::Y * thickness.mul_add(-0.5, half_h);
+    let line_center_offset = rotation * Vec3::Y * thickness.mul_add(-0.5, half_height);
     let common = (
         CalloutVisual,
         Mesh3d(mesh),
@@ -298,14 +304,14 @@ fn spawn_cap_shape(
         return;
     }
 
-    let (half_w, half_h) = match shape {
+    let (half_width, half_height) = match shape {
         CapShape::Triangle => (cap_width, cap_height),
         CapShape::Circle | CapShape::Square | CapShape::Diamond => {
             (cap_width * 0.5, cap_height * 0.5)
         },
     };
-    let mesh_half_w = half_w + SDF_AA_PADDING;
-    let mesh_half_h = half_h + SDF_AA_PADDING;
+    let mesh_half_width = half_width + SDF_AA_PADDING;
+    let mesh_half_height = half_height + SDF_AA_PADDING;
 
     let mut base = render::default_panel_material();
     base.base_color = color;
@@ -321,23 +327,29 @@ fn spawn_cap_shape(
     let material = render::sdf_shape_material(
         base,
         render::SdfShapeMaterialInput {
-            half_size: Vec2::new(half_w, half_h),
-            mesh_half_size: Vec2::new(mesh_half_w, mesh_half_h),
+            half_size: Vec2::new(half_width, half_height),
+            mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
             corner_radii: [0.0; 4],
             border_widths: [0.0; 4],
             border_color: None,
             shape_kind: shape.sdf_kind(),
             shape_params,
-            clip_rect: Vec4::new(-mesh_half_w, -mesh_half_h, mesh_half_w, mesh_half_h),
+            clip_rect: Vec4::new(
+                -mesh_half_width,
+                -mesh_half_height,
+                mesh_half_width,
+                mesh_half_height,
+            ),
             oit_depth_offset: order.to_f32() * OIT_DEPTH_STEP,
         },
     );
-    let mesh = ctx
-        .meshes
-        .add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0));
+    let mesh = ctx.meshes.add(Rectangle::new(
+        mesh_half_width * 2.0,
+        mesh_half_height * 2.0,
+    ));
     let material = ctx.sdf_materials.add(material);
     let rotation = Quat::from_rotation_arc(Vec3::X, dir);
-    let center = tip - rotation * Vec3::X * half_w;
+    let center = tip - rotation * Vec3::X * half_width;
 
     let common = (
         CalloutVisual,

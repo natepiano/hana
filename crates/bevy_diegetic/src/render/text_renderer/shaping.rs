@@ -237,8 +237,8 @@ fn shape_text_to_quads(
 
         let glyph_x = bounds.x + shaped_glyph.x;
         let glyph_y = bounds.y + shaped_glyph.baseline + shaped_glyph.y;
-        let quad_w = metrics.pixel_width.to_f32() * em_scale;
-        let quad_h = metrics.pixel_height.to_f32() * em_scale;
+        let quad_width = metrics.pixel_width.to_f32() * em_scale;
+        let quad_height = metrics.pixel_height.to_f32() * em_scale;
         let quad_layout_x = metrics.bearing_x.mul_add(config.size(), glyph_x);
         let quad_layout_y = (-metrics.bearing_y).mul_add(config.size(), glyph_y);
         let local_x = quad_layout_x.mul_add(scale.x, -anchor.x);
@@ -248,7 +248,7 @@ fn shape_text_to_quads(
             metrics.page_index,
             GlyphQuadData {
                 position: [local_x, local_y, TEXT_Z_OFFSET],
-                size: [quad_w * scale.x, quad_h * scale.y],
+                size: [quad_width * scale.x, quad_height * scale.y],
                 uv_rect: metrics.uv_rect,
                 color,
             },

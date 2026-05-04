@@ -55,13 +55,13 @@ fn position_screen_space_panels(
     let Ok(window) = windows.single() else {
         return;
     };
-    let win_w = window.width();
-    let win_h = window.height();
-    if win_w <= 0.0 || win_h <= 0.0 {
+    let window_width = window.width();
+    let window_height = window.height();
+    if window_width <= 0.0 || window_height <= 0.0 {
         return;
     }
-    let half_w = win_w / 2.0;
-    let half_h = win_h / 2.0;
+    let half_width = window_width / 2.0;
+    let half_height = window_height / 2.0;
 
     for (mut transform, mut panel, computed) in &mut panels {
         let CoordinateSpace::Screen {
@@ -76,27 +76,27 @@ fn position_screen_space_panels(
         let position = *position;
         let width = *width;
         let height = *height;
-        let (content_w, content_h) = (computed.content_width(), computed.content_height());
+        let (content_width, content_height) = (computed.content_width(), computed.content_height());
 
-        let new_w = resolve_screen_axis(width, win_w, content_w, panel.width());
-        if (panel.width() - new_w).abs() > 0.01 {
-            panel.set_width(new_w);
+        let new_width = resolve_screen_axis(width, window_width, content_width, panel.width());
+        if (panel.width() - new_width).abs() > 0.01 {
+            panel.set_width(new_width);
         }
-        let new_h = resolve_screen_axis(height, win_h, content_h, panel.height());
-        if (panel.height() - new_h).abs() > 0.01 {
-            panel.set_height(new_h);
+        let new_height = resolve_screen_axis(height, window_height, content_height, panel.height());
+        if (panel.height() - new_height).abs() > 0.01 {
+            panel.set_height(new_height);
         }
 
         let (screen_x, screen_y) = match position {
             ScreenPosition::Screen => {
                 let (fx, fy) = panel.anchor().offset_fraction();
-                (fx * win_w, fy * win_h)
+                (fx * window_width, fy * window_height)
             },
             ScreenPosition::At(pos) => (pos.x, pos.y),
         };
 
-        transform.translation.x = screen_x - half_w;
-        transform.translation.y = half_h - screen_y;
+        transform.translation.x = screen_x - half_width;
+        transform.translation.y = half_height - screen_y;
     }
 }
 

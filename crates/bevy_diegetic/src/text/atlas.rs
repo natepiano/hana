@@ -553,9 +553,9 @@ impl MsdfAtlas {
     /// samples texel centers rather than edges.
     fn insert_bitmap(&mut self, key: GlyphKey, bitmap: &MsdfBitmap) -> Option<GlyphMetrics> {
         let g = ATLAS_GUTTER;
-        let padded_w = bitmap.width + 2 * g;
-        let padded_h = bitmap.height + 2 * g;
-        let alloc_size = size2(padded_w.to_i32(), padded_h.to_i32());
+        let padded_width = bitmap.width + 2 * g;
+        let padded_height = bitmap.height + 2 * g;
+        let alloc_size = size2(padded_width.to_i32(), padded_height.to_i32());
 
         // Try each existing page.
         let mut page_idx = None;
@@ -616,12 +616,12 @@ impl MsdfAtlas {
         // (replicated border texels) handles edge sampling — no half-texel
         // inset needed. Insetting would stretch the MSDF across the quad
         // and push the visible contour beyond the font metrics.
-        let atlas_w = self.width.to_f32();
-        let atlas_h = self.height.to_f32();
-        let u_min = x0.to_f32() / atlas_w;
-        let v_min = y0.to_f32() / atlas_h;
-        let u_max = (x0 + bitmap.width).to_f32() / atlas_w;
-        let v_max = (y0 + bitmap.height).to_f32() / atlas_h;
+        let atlas_width = self.width.to_f32();
+        let atlas_height = self.height.to_f32();
+        let u_min = x0.to_f32() / atlas_width;
+        let v_min = y0.to_f32() / atlas_height;
+        let u_max = (x0 + bitmap.width).to_f32() / atlas_width;
+        let v_max = (y0 + bitmap.height).to_f32() / atlas_height;
 
         let metrics = GlyphMetrics {
             uv_rect:      [u_min, v_min, u_max, v_max],
@@ -650,10 +650,9 @@ impl MsdfAtlas {
         gutter: u32,
     ) {
         // Helper to copy a texel from (sx, sy) to (dx, dy) in the page.
-        let w = atlas_width;
         let copy_texel = |pixels: &mut [u8], sx: u32, sy: u32, dx: u32, dy: u32| {
-            let src = ((sy * w + sx) * BYTES_PER_PIXEL).to_usize();
-            let dst = ((dy * w + dx) * BYTES_PER_PIXEL).to_usize();
+            let src = ((sy * atlas_width + sx) * BYTES_PER_PIXEL).to_usize();
+            let dst = ((dy * atlas_width + dx) * BYTES_PER_PIXEL).to_usize();
             pixels[dst] = pixels[src];
             pixels[dst + 1] = pixels[src + 1];
             pixels[dst + 2] = pixels[src + 2];

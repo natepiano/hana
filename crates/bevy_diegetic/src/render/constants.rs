@@ -4,13 +4,13 @@ use bevy::asset::uuid_handle;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
-// Glyph quads
+// glyph quads
 /// Two adjacent glyph quads are considered on different lines when their Y
 /// positions differ by more than this threshold. Cross-line pairs are skipped
 /// during overlap clipping.
 pub(super) const GLYPH_QUAD_LINE_TOLERANCE: f32 = 0.001;
 
-// Layer ordering
+// layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
 ///
 /// Bevy packs this through `i32` into `DepthBiasState.constant`.
@@ -29,7 +29,7 @@ pub const OIT_DEPTH_STEP: f32 = 0.0001;
 /// user-defined layers.
 pub(super) const PANEL_LAYER_OFFSET: usize = 16;
 
-// Material defaults
+// material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).
 pub(super) const DEFAULT_METALLIC: f32 = 0.0;
 /// Default reflectance for panel surfaces. Very low specular to avoid
@@ -38,7 +38,7 @@ pub(super) const DEFAULT_REFLECTANCE: f32 = 0.02;
 /// Default roughness for panel surfaces. Matte paper-like appearance.
 pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
 
-// Panel RTT
+// panel rtt
 /// Default texels per world-space meter for RTT resolution.
 /// ~200 DPI at arm's length.
 pub(super) const DEFAULT_TEXELS_PER_METER: f32 = 10000.0;
@@ -58,7 +58,7 @@ pub(super) const RTT_CAMERA_Z: f32 = 5.0;
 /// RTT pass.
 pub(super) const RTT_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
-// SDF rendering
+// sdf rendering
 /// World-space padding added to each SDF quad mesh beyond the shape boundary.
 /// Gives the exterior anti-aliasing ramp room to render — without this, the
 /// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
@@ -67,7 +67,7 @@ pub const SDF_AA_PADDING: f32 = 0.001;
 pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");
 
-// Text rendering
+// text rendering
 /// Tolerance used when deduplicating glyph baselines during line-count
 /// estimation in world text.
 pub(super) const BASELINE_DEDUP_EPSILON: f32 = 0.01;

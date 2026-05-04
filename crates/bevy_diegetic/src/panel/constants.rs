@@ -2,7 +2,7 @@
 
 use bevy::diagnostic::DiagnosticPath;
 
-// Builder defaults
+// builder defaults
 /// Default camera render order for screen-space overlay panels.
 pub(super) const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
 /// Default render layer for screen-space overlay panels.
@@ -15,7 +15,7 @@ pub(super) const MIN_PANEL_WORLD_HEIGHT: f32 = 1.0;
 /// than this.
 pub(super) const PANEL_RESIZE_EPSILON: f32 = 0.001;
 
-// Diagnostic paths
+// diagnostic paths
 pub(super) const DIAG_ATLAS_ACTIVE_JOBS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/atlas/active_jobs");
 pub(super) const DIAG_ATLAS_AVG_RASTER_MS: DiagnosticPath =
@@ -26,10 +26,10 @@ pub(super) const DIAG_ATLAS_COMPLETED_GLYPHS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/atlas/completed_glyphs");
 pub(super) const DIAG_ATLAS_DIRTY_PAGES: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/atlas/dirty_pages");
-pub(super) const DIAG_ATLAS_IN_FLIGHT_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/atlas/in_flight_glyphs");
 pub(super) const DIAG_ATLAS_INSERTED_GLYPHS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/atlas/inserted_glyphs");
+pub(super) const DIAG_ATLAS_IN_FLIGHT_GLYPHS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/atlas/in_flight_glyphs");
 pub(super) const DIAG_ATLAS_INVISIBLE_GLYPHS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/atlas/invisible_glyphs");
 pub(super) const DIAG_ATLAS_MAX_RASTER_MS: DiagnosticPath =
@@ -60,9 +60,9 @@ pub(super) const DIAG_PANEL_TEXT_PENDING_GLYPHS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/pending_glyphs");
 pub(super) const DIAG_PANEL_TEXT_QUEUED_GLYPHS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/queued_glyphs");
-pub(super) const DIAG_PANEL_TEXT_SHAPE_MS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/shape_ms");
 pub(super) const DIAG_PANEL_TEXT_SHAPED_PANELS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/shaped_panels");
+pub(super) const DIAG_PANEL_TEXT_SHAPE_MS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_text/shape_ms");
 pub(super) const DIAG_PANEL_TEXT_TOTAL_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/total_ms");

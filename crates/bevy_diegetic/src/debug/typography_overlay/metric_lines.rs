@@ -208,8 +208,8 @@ fn build_metric_line_tree(
     for (index, window) in line_specs.windows(2).enumerate() {
         let current = &window[0];
         let next = &window[1];
-        let segment_h = next.offset_y - current.offset_y;
-        if segment_h <= 0.0 {
+        let segment_height = next.offset_y - current.offset_y;
+        if segment_height <= 0.0 {
             continue;
         }
 
@@ -221,7 +221,7 @@ fn build_metric_line_tree(
         builder.with(
             El::new()
                 .width(Sizing::GROW)
-                .height(Sizing::fixed(segment_h))
+                .height(Sizing::fixed(segment_height))
                 .border(border),
             |_| {},
         );

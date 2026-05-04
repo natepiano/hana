@@ -87,12 +87,13 @@ fn spawn_glyph_box_panels(
 
     let border_width = scaling::bbox_border_width(ctx.overlay, ctx.font_size, ctx.scale);
 
-    for &[x, y, w, h] in &computed.glyph_rects {
-        if w <= 0.0 || h <= 0.0 {
+    for glyph_rect in &computed.glyph_rects {
+        let [x, y, width, height] = *glyph_rect;
+        if width <= 0.0 || height <= 0.0 {
             continue;
         }
 
-        let mut builder = LayoutBuilder::new(w, h);
+        let mut builder = LayoutBuilder::new(width, height);
         builder.with(
             El::new()
                 .width(Sizing::GROW)
@@ -103,7 +104,7 @@ fn spawn_glyph_box_panels(
         let tree = builder.build();
 
         let Ok(panel) = DiegeticPanel::world()
-            .size(w, h)
+            .size(width, height)
             .anchor(Anchor::Center)
             .surface_shadow(ctx.overlay.surface_shadow)
             .material(material.clone())
@@ -115,7 +116,7 @@ fn spawn_glyph_box_panels(
 
         ctx.commands.entity(ctx.entity).with_child((
             panel,
-            Transform::from_xyz(x + w / 2.0, y - h / 2.0, CALLOUT_Z_OFFSET),
+            Transform::from_xyz(x + width / 2.0, y - height / 2.0, CALLOUT_Z_OFFSET),
         ));
     }
 }
@@ -136,12 +137,12 @@ fn spawn_bounding_box_callout(
     };
     let last_x = last[0];
     let last_y = last[1];
-    let last_w = last[2];
-    let last_h = last[3];
+    let last_width = last[2];
+    let last_height = last[3];
 
     // Shelf starts at right edge of last bbox, at vertical midpoint.
-    let shelf_right_x = last_x + last_w;
-    let shelf_y = last_y - last_h / 2.0;
+    let shelf_right_x = last_x + last_width;
+    let shelf_y = last_y - last_height / 2.0;
 
     // Shelf extends rightward, then riser goes up. Label sits to the
     // left of the riser (CenterRight anchor) so it's always clear of
