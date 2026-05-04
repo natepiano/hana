@@ -2,6 +2,8 @@
 /// Tolerance for detecting external camera input during animations.
 /// Values within this threshold are considered unchanged (accounts for floating point noise).
 pub(crate) const EXTERNAL_INPUT_TOLERANCE: f32 = 1e-6;
+/// Smoothness value that disables interpolation and applies camera changes immediately.
+pub(crate) const INSTANT_SMOOTHNESS: f32 = 0.0;
 /// Conversion factor from seconds to milliseconds.
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
 
@@ -33,6 +35,8 @@ pub(crate) const TOLERANCE: f32 = 0.001;
 // Input constants
 /// Conversion factor from mouse drag delta to scroll-equivalent zoom input.
 pub(crate) const BUTTON_ZOOM_SCALE: f32 = 0.03;
+/// Neutral sensitivity multiplier for user-controlled camera input.
+pub(crate) const DEFAULT_INPUT_SENSITIVITY: f32 = 1.0;
 /// Amplification factor for trackpad pinch gesture input.
 pub(crate) const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
 /// Scale factor for converting pixel-based scroll events to zoom input.
@@ -51,6 +55,8 @@ pub(crate) const SMOOTHNESS_EXPONENT: i32 = 7;
 pub(crate) const TOUCH_PINCH_SCALE: f32 = 0.015;
 
 // Orbit defaults
+/// Default yaw and pitch target when the camera faces forward.
+pub(crate) const DEFAULT_ORBIT_ANGLE: f32 = 0.0;
 /// Default smoothing factor for orbit motion.
 pub(crate) const DEFAULT_ORBIT_SMOOTHNESS: f32 = 0.1;
 /// Default smoothing factor for pan motion.

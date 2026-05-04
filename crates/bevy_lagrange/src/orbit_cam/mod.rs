@@ -10,6 +10,8 @@ pub(crate) use active_camera_data::active_viewport_data;
 use bevy::prelude::*;
 pub(crate) use controller::orbit_cam;
 
+use super::constants::DEFAULT_INPUT_SENSITIVITY;
+use super::constants::DEFAULT_ORBIT_ANGLE;
 use super::constants::DEFAULT_ORBIT_SMOOTHNESS;
 use super::constants::DEFAULT_PAN_SMOOTHNESS;
 use super::constants::DEFAULT_TARGET_RADIUS;
@@ -288,11 +290,11 @@ impl Default for OrbitCam {
             target_focus:        Vec3::ZERO,
             radius:              None,
             upside_down_policy:  UpsideDownPolicy::Prevent,
-            orbit_sensitivity:   1.0,
+            orbit_sensitivity:   DEFAULT_INPUT_SENSITIVITY,
             orbit_smoothness:    DEFAULT_ORBIT_SMOOTHNESS,
-            pan_sensitivity:     1.0,
+            pan_sensitivity:     DEFAULT_INPUT_SENSITIVITY,
             pan_smoothness:      DEFAULT_PAN_SMOOTHNESS,
-            zoom_sensitivity:    1.0,
+            zoom_sensitivity:    DEFAULT_INPUT_SENSITIVITY,
             zoom_smoothness:     DEFAULT_ZOOM_SMOOTHNESS,
             button_orbit:        MouseButton::Left,
             button_pan:          MouseButton::Right,
@@ -303,8 +305,8 @@ impl Default for OrbitCam {
             input_control:       Some(InputControl::default()),
             yaw:                 None,
             pitch:               None,
-            target_yaw:          0.0,
-            target_pitch:        0.0,
+            target_yaw:          DEFAULT_ORBIT_ANGLE,
+            target_pitch:        DEFAULT_ORBIT_ANGLE,
             target_radius:       DEFAULT_TARGET_RADIUS,
             initialization:      InitializationState::Pending,
             yaw_upper_limit:     None,

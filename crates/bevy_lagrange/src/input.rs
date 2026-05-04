@@ -10,6 +10,7 @@ use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
 use super::constants::BUTTON_ZOOM_SCALE;
+use super::constants::DEFAULT_INPUT_SENSITIVITY;
 use super::constants::PINCH_GESTURE_AMPLIFICATION;
 use super::constants::PIXEL_SCROLL_SCALE;
 use super::orbit_cam::ActiveCameraData;
@@ -92,7 +93,7 @@ impl Default for TrackpadInput {
     fn default() -> Self {
         Self {
             behavior:    TrackpadBehavior::ZoomOnly,
-            sensitivity: 1.0,
+            sensitivity: DEFAULT_INPUT_SENSITIVITY,
         }
     }
 }
@@ -103,7 +104,7 @@ impl TrackpadInput {
     pub const fn blender_default() -> Self {
         Self {
             behavior:    TrackpadBehavior::blender_default(),
-            sensitivity: 1.0,
+            sensitivity: DEFAULT_INPUT_SENSITIVITY,
         }
     }
 }

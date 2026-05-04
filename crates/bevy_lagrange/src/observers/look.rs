@@ -107,11 +107,11 @@ pub(super) fn on_look_at_and_zoom_to_fit(
     // Back-solve yaw/pitch from camera's current position relative to the target.
     // We need the target's bounds center for this, so we run the fit calculation
     // with a preliminary yaw/pitch, then refine.
-    let Ok(target_gt) = global_transform_query.get(target) else {
+    let Ok(target_global_transform) = global_transform_query.get(target) else {
         warn!("LookAtAndZoomToFit: target {target:?} has no GlobalTransform");
         return;
     };
-    let target_pos = target_gt.translation();
+    let target_pos = target_global_transform.translation();
     let (preliminary_yaw, preliminary_pitch, _) =
         animation::orbital_params_from_offset(Displacement(camera_pos - target_pos));
 

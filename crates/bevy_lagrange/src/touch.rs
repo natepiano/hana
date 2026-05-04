@@ -74,49 +74,51 @@ impl TouchTracker {
         match (self.curr_pressed, self.prev_pressed) {
             // One finger
             ((Some(curr), None), (Some(prev), None)) => {
-                let curr_pos = curr.position();
-                let prev_pos = prev.position();
+                let current_position = curr.position();
+                let previous_position = prev.position();
 
-                let motion = curr_pos - prev_pos;
+                let motion = current_position - previous_position;
 
                 TouchGestures::OneFinger(OneFingerGestures { motion })
             },
             // Two fingers
             ((Some(curr1), Some(curr2)), (Some(prev1), Some(prev2))) => {
-                let curr1_pos = curr1.position();
-                let curr2_pos = curr2.position();
-                let prev1_pos = prev1.position();
-                let prev2_pos = prev2.position();
+                let current_first_position = curr1.position();
+                let current_second_position = curr2.position();
+                let previous_first_position = prev1.position();
+                let previous_second_position = prev2.position();
 
                 // Move
-                let curr_midpoint = curr1_pos.midpoint(curr2_pos);
-                let prev_midpoint = prev1_pos.midpoint(prev2_pos);
-                let motion = curr_midpoint - prev_midpoint;
+                let current_midpoint = current_first_position.midpoint(current_second_position);
+                let previous_midpoint = previous_first_position.midpoint(previous_second_position);
+                let motion = current_midpoint - previous_midpoint;
 
                 // Pinch
-                let curr_dist = curr1_pos.distance(curr2_pos);
-                let prev_dist = prev1_pos.distance(prev2_pos);
-                let pinch = curr_dist - prev_dist;
+                let current_distance = current_first_position.distance(current_second_position);
+                let previous_distance = previous_first_position.distance(previous_second_position);
+                let pinch = current_distance - previous_distance;
 
                 // Rotate
-                let prev_vec = prev2_pos - prev1_pos;
-                let curr_vec = curr2_pos - curr1_pos;
-                let prev_angle_negy = prev_vec.angle_to(Vec2::NEG_Y);
-                let curr_angle_negy = curr_vec.angle_to(Vec2::NEG_Y);
-                let prev_angle_posy = prev_vec.angle_to(Vec2::Y);
-                let curr_angle_posy = curr_vec.angle_to(Vec2::Y);
-                let rotate_angle_negy = curr_angle_negy - prev_angle_negy;
-                let rotate_angle_posy = curr_angle_posy - prev_angle_posy;
+                let previous_vector = previous_second_position - previous_first_position;
+                let current_vector = current_second_position - current_first_position;
+                let previous_angle_from_negative_y = previous_vector.angle_to(Vec2::NEG_Y);
+                let current_angle_from_negative_y = current_vector.angle_to(Vec2::NEG_Y);
+                let previous_angle_from_positive_y = previous_vector.angle_to(Vec2::Y);
+                let current_angle_from_positive_y = current_vector.angle_to(Vec2::Y);
+                let rotation_from_negative_y =
+                    current_angle_from_negative_y - previous_angle_from_negative_y;
+                let rotation_from_positive_y =
+                    current_angle_from_positive_y - previous_angle_from_positive_y;
                 // The angle between -1deg and +1deg is 358deg according to Vec2::angle_between,
                 // but we want the answer to be +2deg (or -2deg if swapped). Therefore, we calculate
                 // two angles - one from UP and one from DOWN, and use the one with the smallest
                 // absolute value. This is necessary to get a predictable result when the two
                 // touches swap sides (i.e. mobile 1's X position being less than
                 // the other, to the other way round).
-                let rotation = if rotate_angle_negy.abs() < rotate_angle_posy.abs() {
-                    rotate_angle_negy
+                let rotation = if rotation_from_negative_y.abs() < rotation_from_positive_y.abs() {
+                    rotation_from_negative_y
                 } else {
-                    rotate_angle_posy
+                    rotation_from_positive_y
                 };
 
                 TouchGestures::TwoFinger(TwoFingerGestures {

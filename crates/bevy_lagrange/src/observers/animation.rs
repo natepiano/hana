@@ -9,6 +9,9 @@ use crate::animation::CameraMoveList;
 use crate::animation::ZoomAnimationMarker;
 use crate::components::AnimationConflictPolicy;
 use crate::components::CameraInputInterruptBehavior;
+use crate::constants::DEFAULT_ORBIT_ANGLE;
+use crate::constants::DEFAULT_TARGET_RADIUS;
+use crate::constants::INSTANT_SMOOTHNESS;
 use crate::events::AnimationBegin;
 use crate::events::AnimationCancelled;
 use crate::events::AnimationRejected;
@@ -51,9 +54,9 @@ fn stash_camera_state(
         commands.entity(entity).insert(stash);
     }
 
-    camera.zoom_smoothness = 0.0;
-    camera.pan_smoothness = 0.0;
-    camera.orbit_smoothness = 0.0;
+    camera.zoom_smoothness = INSTANT_SMOOTHNESS;
+    camera.pan_smoothness = INSTANT_SMOOTHNESS;
+    camera.orbit_smoothness = INSTANT_SMOOTHNESS;
 
     if interrupt_behavior == CameraInputInterruptBehavior::Ignore {
         camera.input_control = None;
@@ -137,9 +140,9 @@ pub(super) fn on_play_animation(
                             .cloned()
                             .unwrap_or(CameraMove::ToOrbit {
                                 focus:    Vec3::ZERO,
-                                yaw:      0.0,
-                                pitch:    0.0,
-                                radius:   1.0,
+                                yaw:      DEFAULT_ORBIT_ANGLE,
+                                pitch:    DEFAULT_ORBIT_ANGLE,
+                                radius:   DEFAULT_TARGET_RADIUS,
                                 duration: Duration::ZERO,
                                 easing:   EaseFunction::Linear,
                             });

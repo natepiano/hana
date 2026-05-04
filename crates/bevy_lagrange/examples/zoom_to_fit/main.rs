@@ -195,8 +195,8 @@ fn toggle_debug_overlay(
     let Ok(target) = target_query.single() else {
         return;
     };
-    for (camera, viz) in &camera_query {
-        if viz.is_some() {
+    for (camera, debug_overlay) in &camera_query {
+        if debug_overlay.is_some() {
             commands.entity(camera).remove::<FitOverlay>();
             info!("Debug overlay OFF");
         } else {

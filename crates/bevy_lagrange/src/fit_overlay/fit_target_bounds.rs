@@ -3,7 +3,11 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::constants::DEFAULT_OVERLAY_LINE_WIDTH;
+use super::constants::OVERLAY_BALANCED_COLOR;
 use super::constants::OVERLAY_GIZMO_DEPTH_BIAS;
+use super::constants::OVERLAY_RECTANGLE_COLOR;
+use super::constants::OVERLAY_SILHOUETTE_COLOR;
+use super::constants::OVERLAY_UNBALANCED_COLOR;
 use super::constants::PERCENT_MULTIPLIER;
 use super::convex_hull;
 use super::labels;
@@ -45,10 +49,10 @@ pub struct FitTargetOverlayConfig {
 impl Default for FitTargetOverlayConfig {
     fn default() -> Self {
         Self {
-            rectangle_color:  Color::srgb(1.0, 1.0, 0.0), // Yellow
-            silhouette_color: Color::srgb(1.0, 0.5, 0.0), // Orange
-            balanced_color:   Color::srgb(0.0, 1.0, 0.0), // Green
-            unbalanced_color: Color::srgb(1.0, 0.0, 0.0), // Red
+            rectangle_color:  OVERLAY_RECTANGLE_COLOR,
+            silhouette_color: OVERLAY_SILHOUETTE_COLOR,
+            balanced_color:   OVERLAY_BALANCED_COLOR,
+            unbalanced_color: OVERLAY_UNBALANCED_COLOR,
             line_width:       DEFAULT_OVERLAY_LINE_WIDTH,
         }
     }
@@ -243,12 +247,12 @@ fn draw_margin_lines_and_labels(
         let color = calculate_edge_color(edge, horizontal_balance, vertical_balance, config);
         gizmos.line(boundary_pos, screen_pos, color);
 
-        let Some(vp) = viewport_size else {
+        let Some(viewport_size) = viewport_size else {
             continue;
         };
         let percentage = screen_space::margin_percentage(bounds, edge);
         let text = format!("margin: {percentage:.3}%");
-        let label_screen_pos = labels::calculate_label_pixel_position(edge, bounds, vp);
+        let label_screen_pos = labels::calculate_label_pixel_position(edge, bounds, viewport_size);
 
         labels::update_or_create_margin_label(
             commands,
@@ -259,7 +263,7 @@ fn draw_margin_lines_and_labels(
                 text,
                 color,
                 screen_pos: label_screen_pos,
-                viewport_size: vp,
+                viewport_size,
             },
         );
     }
@@ -444,13 +448,13 @@ fn draw_bounds_for_camera(
     );
 
     // "Screen space bounds" label
-    if let Some(vp) = viewport_size {
+    if let Some(viewport_size) = viewport_size {
         let upper_left = screen_space::norm_to_viewport(
             bounds.min_norm_x,
             bounds.max_norm_y,
             bounds.half_extent_x,
             bounds.half_extent_y,
-            vp,
+            viewport_size,
         );
         labels::update_or_create_bounds_label(
             commands,
