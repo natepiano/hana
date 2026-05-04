@@ -28,6 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Gates the `bench` job. Only crates with benches need to be listed here;
+      # currently only bevy_diegetic has them. Workspace Cargo.toml/Cargo.lock
+      # are included so dependency bumps still exercise benches, and ci.yml
+      # itself is included so changes to the bench job are validated.
       - uses: dorny/paths-filter@v3
         id: filter
         with:
