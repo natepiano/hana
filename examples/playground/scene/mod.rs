@@ -3,6 +3,7 @@
 mod astar;
 mod cap_styles;
 mod catenary;
+mod constants;
 mod entity_attachment;
 mod inside_view;
 mod scaffold;

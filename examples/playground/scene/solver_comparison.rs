@@ -4,6 +4,12 @@ use bevy_catenary::CurveKind;
 use bevy_catenary::PathStrategy;
 use bevy_catenary::Solver;
 
+use super::constants::SOLVER_COMPARISON_CATENARY_Z;
+use super::constants::SOLVER_COMPARISON_LINEAR_Z;
+use super::constants::SOLVER_COMPARISON_ROUTED_END_Y_OFFSET;
+use super::constants::SOLVER_COMPARISON_ROUTED_START_Y_OFFSET;
+use super::constants::SOLVER_COMPARISON_ROUTED_Z;
+use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SLACK_NORMAL;
@@ -17,10 +23,18 @@ pub(super) fn setup_section_solver_comparison(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[2];
+    let section_center_x = SECTION_X[2];
 
-    let start = Vec3::new(cx - SPAN_HALF_X, NODE_Y, -1.5);
-    let end = Vec3::new(cx + SPAN_HALF_X, NODE_Y, -1.5);
+    let start = Vec3::new(
+        section_center_x - SPAN_HALF_X,
+        NODE_Y,
+        SOLVER_COMPARISON_CATENARY_Z,
+    );
+    let end = Vec3::new(
+        section_center_x + SPAN_HALF_X,
+        NODE_Y,
+        SOLVER_COMPARISON_CATENARY_Z,
+    );
     entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
     entities::spawn_cable(
         commands,
@@ -31,13 +45,29 @@ pub(super) fn setup_section_solver_comparison(
         cable_mat,
     );
 
-    let start = Vec3::new(cx - SPAN_HALF_X, NODE_Y, 0.0);
-    let end = Vec3::new(cx + SPAN_HALF_X, NODE_Y, 0.0);
+    let start = Vec3::new(
+        section_center_x - SPAN_HALF_X,
+        NODE_Y,
+        SOLVER_COMPARISON_LINEAR_Z,
+    );
+    let end = Vec3::new(
+        section_center_x + SPAN_HALF_X,
+        NODE_Y,
+        SOLVER_COMPARISON_LINEAR_Z,
+    );
     entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
     entities::spawn_cable(commands, start, end, Solver::Linear, vec![], cable_mat);
 
-    let start = Vec3::new(cx - SPAN_HALF_X, NODE_Y - 0.5, 1.5);
-    let end = Vec3::new(cx + SPAN_HALF_X, NODE_Y + 0.5, 1.5);
+    let start = Vec3::new(
+        section_center_x - SPAN_HALF_X,
+        NODE_Y + SOLVER_COMPARISON_ROUTED_START_Y_OFFSET,
+        SOLVER_COMPARISON_ROUTED_Z,
+    );
+    let end = Vec3::new(
+        section_center_x + SPAN_HALF_X,
+        NODE_Y + SOLVER_COMPARISON_ROUTED_END_Y_OFFSET,
+        SOLVER_COMPARISON_ROUTED_Z,
+    );
     entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
     entities::spawn_cable(
         commands,
@@ -46,7 +76,7 @@ pub(super) fn setup_section_solver_comparison(
         Solver::Routed {
             path_strategy: PathStrategy::Orthogonal,
             curve_kind:    CurveKind::Linear,
-            resolution:    0,
+            resolution:    DEFAULT_CABLE_RESOLUTION,
         },
         vec![],
         cable_mat,

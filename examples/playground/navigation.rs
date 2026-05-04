@@ -7,8 +7,21 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_lagrange::ZoomToFit;
 
+use super::constants::NAV_BAR_BACKGROUND;
+use super::constants::NAV_BAR_BORDER_RADIUS;
+use super::constants::NAV_BAR_BOTTOM;
+use super::constants::NAV_BAR_CENTER_X_PERCENT;
+use super::constants::NAV_BAR_COLUMN_GAP;
+use super::constants::NAV_BAR_HORIZONTAL_OFFSET;
+use super::constants::NAV_BAR_HORIZONTAL_PADDING;
+use super::constants::NAV_BAR_VERTICAL_PADDING;
+use super::constants::NAV_BUTTON_BACKGROUND;
+use super::constants::NAV_BUTTON_BORDER_RADIUS;
+use super::constants::NAV_BUTTON_HORIZONTAL_PADDING;
+use super::constants::NAV_BUTTON_VERTICAL_PADDING;
 use super::constants::NAV_DURATION_MS;
 use super::constants::NAV_FONT_SIZE;
+use super::constants::NAV_LABEL_WIDTH;
 use super::constants::SECTION_COUNT;
 use super::constants::SECTION_TITLES;
 use super::constants::ZOOM_MARGIN_NAV;
@@ -122,17 +135,20 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(16.0),
-                left: Val::Percent(50.0),
-                margin: UiRect::left(Val::Px(-150.0)),
+                bottom: Val::Px(NAV_BAR_BOTTOM),
+                left: Val::Percent(NAV_BAR_CENTER_X_PERCENT),
+                margin: UiRect::left(Val::Px(NAV_BAR_HORIZONTAL_OFFSET)),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                column_gap: Val::Px(NAV_BAR_COLUMN_GAP),
+                padding: UiRect::axes(
+                    Val::Px(NAV_BAR_HORIZONTAL_PADDING),
+                    Val::Px(NAV_BAR_VERTICAL_PADDING),
+                ),
+                border_radius: BorderRadius::all(Val::Px(NAV_BAR_BORDER_RADIUS)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+            BackgroundColor(NAV_BAR_BACKGROUND),
             Pickable::IGNORE,
             UiTargetCamera(camera),
         ))
@@ -141,11 +157,14 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
                 .spawn((
                     Button,
                     Node {
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        padding: UiRect::axes(
+                            Val::Px(NAV_BUTTON_HORIZONTAL_PADDING),
+                            Val::Px(NAV_BUTTON_VERTICAL_PADDING),
+                        ),
+                        border_radius: BorderRadius::all(Val::Px(NAV_BUTTON_BORDER_RADIUS)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.15)),
+                    BackgroundColor(NAV_BUTTON_BACKGROUND),
                     NavButton(NavDirection::Left),
                 ))
                 .with_child((
@@ -159,7 +178,7 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
 
             parent
                 .spawn(Node {
-                    width: Val::Px(260.0),
+                    width: Val::Px(NAV_LABEL_WIDTH),
                     justify_content: JustifyContent::Center,
                     ..default()
                 })
@@ -177,11 +196,14 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
                 .spawn((
                     Button,
                     Node {
-                        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        padding: UiRect::axes(
+                            Val::Px(NAV_BUTTON_HORIZONTAL_PADDING),
+                            Val::Px(NAV_BUTTON_VERTICAL_PADDING),
+                        ),
+                        border_radius: BorderRadius::all(Val::Px(NAV_BUTTON_BORDER_RADIUS)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.15)),
+                    BackgroundColor(NAV_BUTTON_BACKGROUND),
                     NavButton(NavDirection::Right),
                 ))
                 .with_child((

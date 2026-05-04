@@ -8,8 +8,19 @@ use bevy_catenary::ComputedCableGeometry;
 use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
 use bevy_inspector_egui::prelude::*;
 
+use super::constants::DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG;
+use super::constants::DEFAULT_ELBOW_ARM_MULTIPLIER;
+use super::constants::DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER;
+use super::constants::DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER;
+use super::constants::DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE;
 use super::constants::JOINT_RADIUS_MULTIPLIER;
 use super::constants::JOINT_SPHERE_SEGMENTS;
+use super::constants::OVERLAY_MARGIN;
+use super::constants::SECTION_INFO_BACKGROUND;
+use super::constants::SECTION_INFO_LEFT_OFFSET;
+use super::constants::SECTION_INFO_TEXTS;
+use super::constants::SECTION_INFO_TOP;
+use super::constants::SECTION_INFO_WIDTH;
 use super::constants::TUBE_RADIUS;
 use super::constants::TUBE_SIDES;
 use super::constants::UI_FONT_SIZE;
@@ -78,11 +89,11 @@ impl Default for CableSettings {
                 segments:          JOINT_SPHERE_SEGMENTS,
             },
             elbow: ElbowSettings {
-                bend_radius_multiplier: 1.0,
-                min_radius_multiplier:  0.5,
-                rings_per_right_angle:  32,
-                angle_threshold_deg:    25.0,
-                arm_multiplier:         1.0,
+                bend_radius_multiplier: DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER,
+                min_radius_multiplier:  DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER,
+                rings_per_right_angle:  DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE,
+                angle_threshold_deg:    DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG,
+                arm_multiplier:         DEFAULT_ELBOW_ARM_MULTIPLIER,
             },
         }
     }
@@ -96,28 +107,7 @@ pub(crate) fn setup_ui(mut commands: Commands, scene_entities: Res<SceneEntities
 }
 
 fn spawn_section_infos(commands: &mut Commands, camera: Entity) {
-    let section_texts: [(usize, &str); 7] = [
-        (
-            1,
-            "Round (transparent) / Flat / None\nEnd caps are independent\nEsc - Pause lights",
-        ),
-        (2, "Catenary    Linear    Orthogonal"),
-        (3, "Drag blue boxes"),
-        (4, "Drag sphere"),
-        (
-            6,
-            "Click green sphere - cable freezes\n\
-             Click red sphere - cable disappears\n\
-             R - Reset",
-        ),
-        (7, "Look, it's a tube!"),
-        (
-            8,
-            "Front: Fixed (no roll)\nMiddle: AsSpawned (plug keeps its spawn orientation)\nBack: Rotating (follows twist)\nDrag the plugs to compare",
-        ),
-    ];
-
-    for (section, text) in section_texts {
+    for (section, text) in SECTION_INFO_TEXTS {
         commands.spawn((
             Text::new(text),
             TextFont {
@@ -128,14 +118,14 @@ fn spawn_section_infos(commands: &mut Commands, camera: Entity) {
             TextLayout::new_with_justify(Justify::Center),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(60.0),
+                top: Val::Px(SECTION_INFO_TOP),
                 left: Val::Percent(50.0),
-                margin: UiRect::left(Val::Px(-200.0)),
-                width: Val::Px(400.0),
+                margin: UiRect::left(Val::Px(SECTION_INFO_LEFT_OFFSET)),
+                width: Val::Px(SECTION_INFO_WIDTH),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+            BackgroundColor(SECTION_INFO_BACKGROUND),
             Pickable::IGNORE,
             UiTargetCamera(camera),
             SectionInfo(section),
@@ -157,8 +147,8 @@ fn spawn_help_text(commands: &mut Commands, camera: Entity) {
         },
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
+            top: Val::Px(OVERLAY_MARGIN),
+            left: Val::Px(OVERLAY_MARGIN),
             ..default()
         },
         Pickable::IGNORE,
@@ -180,8 +170,8 @@ fn spawn_keyboard_shortcuts(commands: &mut Commands, camera: Entity) {
         },
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
+            bottom: Val::Px(OVERLAY_MARGIN),
+            left: Val::Px(OVERLAY_MARGIN),
             ..default()
         },
         Pickable::IGNORE,

@@ -116,8 +116,8 @@ impl OrthogonalPlanner {
         // Find the maximum obstacle extent to route around
         let offset = self.margin.mul_add(
             2.0,
-            obstacles.iter().fold(0.0_f32, |acc, obs| {
-                let extent = obs.half_extents.max_element();
+            obstacles.iter().fold(0.0_f32, |acc, obstacle| {
+                let extent = obstacle.half_extents.max_element();
                 acc.max(extent)
             }),
         );

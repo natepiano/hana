@@ -10,9 +10,15 @@ use bevy_catenary::CatenarySolver;
 use bevy_catenary::OnDetach;
 use bevy_catenary::Solver;
 
+use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::DESPAWN_GREEN;
 use super::constants::DESPAWN_RED;
 use super::constants::DETACH_BUMP_BLUE;
+use super::constants::DETACH_DEMO_ENDPOINT_X_OFFSET;
+use super::constants::DETACH_DEMO_ROW_Z;
+use super::constants::DETACH_DEMO_SLACK_BUMP;
+use super::constants::DETACH_DEMO_SPHERE_RINGS;
+use super::constants::DETACH_DEMO_SPHERE_SECTORS;
 use super::constants::HUB_SPHERE_RADIUS;
 use super::constants::NODE_Y;
 use super::constants::SECTION_X;
@@ -47,9 +53,13 @@ pub(crate) fn spawn_detach_demo(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[6];
+    let section_center_x = SECTION_X[6];
     let assets = DetachDemoAssets {
-        sphere_mesh: meshes.add(Sphere::new(HUB_SPHERE_RADIUS).mesh().uv(16, 16)),
+        sphere_mesh: meshes.add(
+            Sphere::new(HUB_SPHERE_RADIUS)
+                .mesh()
+                .uv(DETACH_DEMO_SPHERE_SECTORS, DETACH_DEMO_SPHERE_RINGS),
+        ),
         node_mesh,
         node_mat,
         cable_mat,
@@ -57,21 +67,21 @@ pub(crate) fn spawn_detach_demo(
 
     let rows = [
         DetachDemoRow {
-            z:            -1.5,
+            z:            DETACH_DEMO_ROW_Z[0],
             sphere_color: DESPAWN_GREEN,
             solver:       CatenarySolver::new().with_slack(SLACK_NORMAL),
             on_detach:    OnDetach::Remain,
         },
         DetachDemoRow {
-            z:            0.0,
+            z:            DETACH_DEMO_ROW_Z[1],
             sphere_color: DETACH_BUMP_BLUE,
             solver:       CatenarySolver::new()
                 .with_slack(SLACK_NORMAL)
-                .with_detach_slack_bump(0.35),
+                .with_detach_slack_bump(DETACH_DEMO_SLACK_BUMP),
             on_detach:    OnDetach::Remain,
         },
         DetachDemoRow {
-            z:            1.5,
+            z:            DETACH_DEMO_ROW_Z[2],
             sphere_color: DESPAWN_RED,
             solver:       CatenarySolver::new().with_slack(SLACK_NORMAL),
             on_detach:    OnDetach::Despawn,
@@ -79,7 +89,7 @@ pub(crate) fn spawn_detach_demo(
     ];
 
     for row in rows {
-        spawn_detach_demo_row(commands, materials, &assets, cx, row);
+        spawn_detach_demo_row(commands, materials, &assets, section_center_x, row);
     }
 }
 
@@ -87,7 +97,7 @@ fn spawn_detach_demo_row(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
     assets: &DetachDemoAssets,
-    cx: f32,
+    section_center_x: f32,
     row: DetachDemoRow,
 ) {
     let sphere_mat = materials.add(StandardMaterial {
@@ -98,14 +108,22 @@ fn spawn_detach_demo_row(
         .spawn((
             Mesh3d(assets.sphere_mesh.clone()),
             MeshMaterial3d(sphere_mat),
-            Transform::from_translation(Vec3::new(cx - 2.0, NODE_Y, row.z)),
+            Transform::from_translation(Vec3::new(
+                section_center_x - DETACH_DEMO_ENDPOINT_X_OFFSET,
+                NODE_Y,
+                row.z,
+            )),
             Despawnable,
             DetachDemoEntity,
         ))
         .observe(input::on_despawnable_clicked)
         .id();
 
-    let anchor_pos = Vec3::new(cx + 2.0, NODE_Y, row.z);
+    let anchor_pos = Vec3::new(
+        section_center_x + DETACH_DEMO_ENDPOINT_X_OFFSET,
+        NODE_Y,
+        row.z,
+    );
     entities::spawn_node_cube(commands, assets.node_mesh, assets.node_mat, anchor_pos)
         .insert(DetachDemoEntity);
 
@@ -114,7 +132,7 @@ fn spawn_detach_demo_row(
             Cable {
                 solver:     Solver::Catenary(row.solver),
                 obstacles:  vec![],
-                resolution: 0,
+                resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
                 material: Some(assets.cable_mat.clone()),

@@ -15,9 +15,9 @@ pub(super) fn setup_section_catenary(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[0];
-    let start = Vec3::new(cx - SPAN_HALF_X, NODE_Y, 0.0);
-    let end = Vec3::new(cx + SPAN_HALF_X, NODE_Y, 0.0);
+    let section_center_x = SECTION_X[0];
+    let start = Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, 0.0);
+    let end = Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, 0.0);
     entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
     entities::spawn_cable(
         commands,

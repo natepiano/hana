@@ -9,6 +9,12 @@ use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
 
 use super::RadiusMultiplier;
+use super::constants::INSIDE_VIEW_END_Y_OFFSET;
+use super::constants::INSIDE_VIEW_ENDPOINT_X_OFFSET;
+use super::constants::INSIDE_VIEW_START_Y_OFFSET;
+use super::constants::INSIDE_VIEW_TUBE_SIDES;
+use super::constants::INSIDE_VIEW_Z_EXTENT;
+use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::INSIDE_VIEW_RADIUS_MULTIPLIER;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
@@ -19,20 +25,28 @@ pub(super) fn setup_section_inside_view(
     commands: &mut Commands,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[7];
-    let start = Vec3::new(cx + 0.8, NODE_Y + 0.8, 3.0);
-    let end = Vec3::new(cx - 0.8, NODE_Y - 1.5, -3.0);
+    let section_center_x = SECTION_X[7];
+    let start = Vec3::new(
+        section_center_x + INSIDE_VIEW_ENDPOINT_X_OFFSET,
+        NODE_Y + INSIDE_VIEW_START_Y_OFFSET,
+        INSIDE_VIEW_Z_EXTENT,
+    );
+    let end = Vec3::new(
+        section_center_x - INSIDE_VIEW_ENDPOINT_X_OFFSET,
+        NODE_Y + INSIDE_VIEW_END_Y_OFFSET,
+        -INSIDE_VIEW_Z_EXTENT,
+    );
     commands
         .spawn((
             Cable {
                 solver:     Solver::Linear,
                 obstacles:  vec![],
-                resolution: 0,
+                resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
                 tube: TubeConfig {
                     radius: TUBE_RADIUS * INSIDE_VIEW_RADIUS_MULTIPLIER,
-                    sides:  64,
+                    sides:  INSIDE_VIEW_TUBE_SIDES,
                     faces:  FaceSides::Both,
                 },
                 material: Some(cable_mat.clone()),

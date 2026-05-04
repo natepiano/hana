@@ -7,8 +7,10 @@ use bevy_catenary::CableMeshConfig;
 use bevy_catenary::CatenarySolver;
 use bevy_catenary::Solver;
 
+use super::constants::DRAGGABLE_CUBE_DIMENSION;
+use super::constants::ENTITY_ATTACHMENT_Z;
+use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::DRAGGABLE_COLOR;
-use crate::constants::DRAGGABLE_CUBE_SIZE;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SLACK_NORMAL;
@@ -24,11 +26,11 @@ pub(super) fn setup_section_entity_attachment(
     materials: &mut Assets<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[3];
+    let section_center_x = SECTION_X[3];
     let drag_mesh = meshes.add(Cuboid::new(
-        DRAGGABLE_CUBE_SIZE * 2.0,
-        DRAGGABLE_CUBE_SIZE * 2.0,
-        DRAGGABLE_CUBE_SIZE * 2.0,
+        DRAGGABLE_CUBE_DIMENSION,
+        DRAGGABLE_CUBE_DIMENSION,
+        DRAGGABLE_CUBE_DIMENSION,
     ));
     let drag_mat = materials.add(StandardMaterial {
         base_color: DRAGGABLE_COLOR,
@@ -39,7 +41,11 @@ pub(super) fn setup_section_entity_attachment(
         .spawn((
             Mesh3d(drag_mesh.clone()),
             MeshMaterial3d(drag_mat.clone()),
-            Transform::from_translation(Vec3::new(cx - SPAN_HALF_X, NODE_Y, 0.0)),
+            Transform::from_translation(Vec3::new(
+                section_center_x - SPAN_HALF_X,
+                NODE_Y,
+                ENTITY_ATTACHMENT_Z,
+            )),
             Draggable,
             NodeCube,
         ))
@@ -50,7 +56,11 @@ pub(super) fn setup_section_entity_attachment(
         .spawn((
             Mesh3d(drag_mesh),
             MeshMaterial3d(drag_mat),
-            Transform::from_translation(Vec3::new(cx + SPAN_HALF_X, NODE_Y, 0.0)),
+            Transform::from_translation(Vec3::new(
+                section_center_x + SPAN_HALF_X,
+                NODE_Y,
+                ENTITY_ATTACHMENT_Z,
+            )),
             Draggable,
             NodeCube,
         ))
@@ -62,7 +72,7 @@ pub(super) fn setup_section_entity_attachment(
             Cable {
                 solver:     Solver::Catenary(CatenarySolver::new().with_slack(SLACK_NORMAL)),
                 obstacles:  vec![],
-                resolution: 0,
+                resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
                 material: Some(cable_mat.clone()),

@@ -48,8 +48,8 @@ pub(crate) fn update_section_info_visibility(
     current_section: Res<CurrentSection>,
     mut infos: Query<(&SectionInfo, &mut Visibility)>,
 ) {
-    for (info, mut vis) in &mut infos {
-        *vis = if info.0 == current_section.0 {
+    for (info, mut visibility) in &mut infos {
+        *visibility = if info.0 == current_section.0 {
             Visibility::Inherited
         } else {
             Visibility::Hidden

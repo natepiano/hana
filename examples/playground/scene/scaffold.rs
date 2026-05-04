@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use bevy::prelude::*;
 use bevy_lagrange::InputControl;
 use bevy_lagrange::OrbitCam;
@@ -9,6 +7,18 @@ use bevy_lagrange::TrackpadInput;
 use super::astar;
 use super::cap_styles;
 use super::catenary;
+use super::constants::CAMERA_FOCUS_Y_MULTIPLIER;
+use super::constants::CAMERA_PITCH;
+use super::constants::CAMERA_RADIUS;
+use super::constants::CAMERA_TRACKPAD_SENSITIVITY;
+use super::constants::CAMERA_YAW;
+use super::constants::DIRECTIONAL_LIGHT_ROTATION;
+use super::constants::GROUND_COLOR;
+use super::constants::NODE_CUBE_DIMENSION;
+use super::constants::SCENE_SPOTLIGHT_INNER_ANGLE;
+use super::constants::SCENE_SPOTLIGHT_INTENSITY;
+use super::constants::SCENE_SPOTLIGHT_OUTER_ANGLE;
+use super::constants::SCENE_SPOTLIGHT_RANGE;
 use super::entity_attachment;
 use super::inside_view;
 use super::shared_hub;
@@ -19,7 +29,6 @@ use crate::constants::DIRECTIONAL_LIGHT_ILLUMINANCE;
 use crate::constants::GROUND_DEPTH;
 use crate::constants::GROUND_WIDTH;
 use crate::constants::NODE_COLOR;
-use crate::constants::NODE_CUBE_SIZE;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::detach_demo;
@@ -43,7 +52,7 @@ pub(crate) struct SharedCableMaterial(pub(crate) Handle<StandardMaterial>);
 pub(crate) struct RadiusMultiplier(pub(crate) f32);
 
 pub(crate) fn setup_camera(mut commands: Commands) {
-    let focus = Vec3::new(SECTION_X[0], NODE_Y * 0.5, 0.0);
+    let focus = Vec3::new(SECTION_X[0], NODE_Y * CAMERA_FOCUS_Y_MULTIPLIER, 0.0);
     let camera = commands
         .spawn(OrbitCam {
             button_orbit: MouseButton::Middle,
@@ -55,22 +64,22 @@ pub(crate) fn setup_camera(mut commands: Commands) {
                         modifier_pan:  Some(KeyCode::ShiftLeft),
                         modifier_zoom: Some(KeyCode::ControlLeft),
                     },
-                    sensitivity: 0.3,
+                    sensitivity: CAMERA_TRACKPAD_SENSITIVITY,
                 }),
                 ..Default::default()
             }),
             focus,
             target_focus: focus,
-            yaw: Some(0.0),
-            pitch: Some(0.45),
-            radius: Some(12.0),
+            yaw: Some(CAMERA_YAW),
+            pitch: Some(CAMERA_PITCH),
+            radius: Some(CAMERA_RADIUS),
             ..default()
         })
         .with_child(SpotLight {
-            intensity: 50_000.0,
-            range: 100.0,
-            outer_angle: 0.8,
-            inner_angle: 0.6,
+            intensity: SCENE_SPOTLIGHT_INTENSITY,
+            range: SCENE_SPOTLIGHT_RANGE,
+            outer_angle: SCENE_SPOTLIGHT_OUTER_ANGLE,
+            inner_angle: SCENE_SPOTLIGHT_INNER_ANGLE,
             shadows_enabled: false,
             ..default()
         })
@@ -92,7 +101,7 @@ pub(crate) fn setup_scene(
         .spawn((
             Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_WIDTH, GROUND_DEPTH))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.2, 0.9, 0.2, 0.09),
+                base_color: GROUND_COLOR,
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
@@ -109,7 +118,12 @@ pub(crate) fn setup_scene(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, PI / 4.0, -PI / 4.0)),
+        Transform::from_rotation(Quat::from_euler(
+            EulerRot::ZYX,
+            DIRECTIONAL_LIGHT_ROTATION.0,
+            DIRECTIONAL_LIGHT_ROTATION.1,
+            DIRECTIONAL_LIGHT_ROTATION.2,
+        )),
     ));
 }
 
@@ -126,9 +140,9 @@ pub(crate) fn setup_sections(
     commands.insert_resource(SharedCableMaterial(cable_mat.clone()));
 
     let node_mesh = meshes.add(Cuboid::new(
-        NODE_CUBE_SIZE * 2.0,
-        NODE_CUBE_SIZE * 2.0,
-        NODE_CUBE_SIZE * 2.0,
+        NODE_CUBE_DIMENSION,
+        NODE_CUBE_DIMENSION,
+        NODE_CUBE_DIMENSION,
     ));
     let node_mat = materials.add(StandardMaterial {
         base_color: NODE_COLOR,

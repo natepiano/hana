@@ -10,6 +10,10 @@ use bevy_catenary::Capping;
 use bevy_catenary::EndpointAlignment;
 use bevy_catenary::Solver;
 
+use super::constants::CONNECTOR_LANE_Z;
+use super::constants::CONNECTOR_MODEL_PATH;
+use super::constants::CONNECTOR_MODEL_SCALE;
+use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::NODE_Y;
 use super::constants::SECTION_X;
 use super::constants::SPAN_HALF_X;
@@ -36,23 +40,23 @@ pub(crate) fn setup_section_connector(
     cable_mat: &Handle<StandardMaterial>,
     asset_server: &AssetServer,
 ) {
-    let cx = SECTION_X[8];
-    let plug_scene: Handle<Scene> = asset_server.load("models/power_plug.glb#Scene0");
+    let section_center_x = SECTION_X[8];
+    let plug_scene: Handle<Scene> = asset_server.load(CONNECTOR_MODEL_PATH);
 
     let configs = [
         (
-            Vec3::new(cx - SPAN_HALF_X, NODE_Y, 1.5),
-            Vec3::new(cx + SPAN_HALF_X, NODE_Y, 1.5),
+            Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[0]),
+            Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[0]),
             EndpointAlignment::Fixed,
         ),
         (
-            Vec3::new(cx - SPAN_HALF_X, NODE_Y, 0.0),
-            Vec3::new(cx + SPAN_HALF_X, NODE_Y, 0.0),
+            Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[1]),
+            Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[1]),
             EndpointAlignment::AsSpawned,
         ),
         (
-            Vec3::new(cx - SPAN_HALF_X, NODE_Y, -1.5),
-            Vec3::new(cx + SPAN_HALF_X, NODE_Y, -1.5),
+            Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[2]),
+            Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[2]),
             EndpointAlignment::Rotating,
         ),
     ];
@@ -63,7 +67,7 @@ pub(crate) fn setup_section_connector(
                 Cable {
                     solver:     Solver::Linear,
                     obstacles:  vec![],
-                    resolution: 0,
+                    resolution: DEFAULT_CABLE_RESOLUTION,
                 },
                 CableMeshConfig {
                     material: Some(cable_mat.clone()),
@@ -75,7 +79,7 @@ pub(crate) fn setup_section_connector(
         let plug = commands
             .spawn((
                 SceneRoot(plug_scene.clone()),
-                Transform::from_translation(end).with_scale(Vec3::splat(15.0)),
+                Transform::from_translation(end).with_scale(Vec3::splat(CONNECTOR_MODEL_SCALE)),
                 Draggable,
             ))
             .observe(input::on_drag_start)

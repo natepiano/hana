@@ -2,36 +2,51 @@
 
 use bevy::prelude::*;
 
-// Cable
+// cable
+pub(crate) const DEFAULT_CABLE_RESOLUTION: u32 = 0;
 pub(crate) const OBSTACLE_HALF_EXTENTS: Vec3 = Vec3::new(0.8, 0.8, 0.8);
 pub(crate) const SLACK_NORMAL: f32 = 1.15;
 
-// Camera
+// camera
 pub(crate) const NAV_DURATION_MS: u64 = 1200;
 pub(crate) const ZOOM_DURATION_MS: u64 = 1000;
+pub(crate) const ZOOM_MARGIN_GROUND: f32 = 0.05;
 pub(crate) const ZOOM_MARGIN_MESH: f32 = 0.15;
 pub(crate) const ZOOM_MARGIN_NAV: f32 = 0.12;
 
-// Colors
+// colors
 pub(crate) const CABLE_COLOR: Color = Color::srgb(0.9, 0.5, 0.1);
 pub(crate) const DESPAWN_GREEN: Color = Color::srgb(0.3, 0.8, 0.3);
 pub(crate) const DESPAWN_RED: Color = Color::srgb(0.8, 0.3, 0.3);
 pub(crate) const DETACH_BUMP_BLUE: Color = Color::srgb(0.3, 0.5, 0.9);
 pub(crate) const DRAGGABLE_COLOR: Color = Color::srgb(0.2, 0.7, 0.7);
+pub(crate) const NAV_BAR_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
+pub(crate) const NAV_BUTTON_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.15);
 pub(crate) const NODE_COLOR: Color = Color::srgba(0.4, 0.6, 0.8, 0.4);
 pub(crate) const OBSTACLE_COLOR: Color = Color::srgba(0.8, 0.2, 0.2, 0.25);
 pub(crate) const POINT_LIGHT_COLOR: Color = Color::srgb(1.0, 0.95, 0.8);
+pub(crate) const SECTION_INFO_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.5);
 pub(crate) const TRANSPARENT_TUBE_COLOR: Color = Color::srgba(0.85, 0.55, 0.2, 0.2);
 
-// Ground
-pub(crate) const GROUND_DEPTH: f32 = 14.0;
-pub(crate) const GROUND_WIDTH: f32 = 160.0;
+// connector
+pub(crate) const CONNECTOR_LANE_Z: [f32; 3] = [1.5, 0.0, -1.5];
+pub(crate) const CONNECTOR_MODEL_PATH: &str = "models/power_plug.glb#Scene0";
+pub(crate) const CONNECTOR_MODEL_SCALE: f32 = 15.0;
 
-// Layout
+// detach demo
+pub(crate) const DETACH_DEMO_ENDPOINT_X_OFFSET: f32 = 2.0;
+pub(crate) const DETACH_DEMO_ROW_Z: [f32; 3] = [-1.5, 0.0, 1.5];
+pub(crate) const DETACH_DEMO_SLACK_BUMP: f32 = 0.35;
+pub(crate) const DETACH_DEMO_SPHERE_RINGS: u32 = 16;
+pub(crate) const DETACH_DEMO_SPHERE_SECTORS: u32 = 16;
+
+// layout
 pub(crate) const CAP_STYLE_RADIUS_MULTIPLIER: f32 = 5.0;
 pub(crate) const CAP_STYLE_TUBE_OFFSET: f32 = 0.8;
 pub(crate) const CAP_STYLE_TUBE_SPACING: f32 = 2.0;
 pub(crate) const DRAGGABLE_CUBE_SIZE: f32 = 0.45;
+pub(crate) const GROUND_DEPTH: f32 = 14.0;
+pub(crate) const GROUND_WIDTH: f32 = 160.0;
 pub(crate) const HUB_SPHERE_RADIUS: f32 = 0.35;
 pub(crate) const INSIDE_VIEW_RADIUS_MULTIPLIER: f32 = 25.0;
 pub(crate) const NODE_CUBE_SIZE: f32 = 0.3;
@@ -64,17 +79,59 @@ pub(crate) const SECTION_X: [f32; SECTION_COUNT] = [
 pub(crate) const SLACK_ADJUSTMENT_STEP: f32 = 0.01;
 pub(crate) const SPAN_HALF_X: f32 = 3.0;
 
-// Light
+// lighting
 pub(crate) const DIRECTIONAL_LIGHT_ILLUMINANCE: f32 = 3000.0;
 pub(crate) const POINT_LIGHT_INTENSITY: f32 = 20000.0;
 pub(crate) const POINT_LIGHT_RANGE: f32 = 2.0;
 
-// Tube mesh
+// navigation ui
+pub(crate) const NAV_BAR_BORDER_RADIUS: f32 = 6.0;
+pub(crate) const NAV_BAR_BOTTOM: f32 = 16.0;
+pub(crate) const NAV_BAR_CENTER_X_PERCENT: f32 = 50.0;
+pub(crate) const NAV_BAR_COLUMN_GAP: f32 = 12.0;
+pub(crate) const NAV_BAR_HORIZONTAL_OFFSET: f32 = -150.0;
+pub(crate) const NAV_BAR_HORIZONTAL_PADDING: f32 = 12.0;
+pub(crate) const NAV_BAR_VERTICAL_PADDING: f32 = 8.0;
+pub(crate) const NAV_BUTTON_BORDER_RADIUS: f32 = 4.0;
+pub(crate) const NAV_BUTTON_HORIZONTAL_PADDING: f32 = 10.0;
+pub(crate) const NAV_BUTTON_VERTICAL_PADDING: f32 = 4.0;
+pub(crate) const NAV_FONT_SIZE: f32 = 16.0;
+pub(crate) const NAV_LABEL_WIDTH: f32 = 260.0;
+
+// tube mesh
 pub(crate) const JOINT_RADIUS_MULTIPLIER: f32 = 1.5;
 pub(crate) const JOINT_SPHERE_SEGMENTS: u32 = 16;
 pub(crate) const TUBE_RADIUS: f32 = 0.06;
 pub(crate) const TUBE_SIDES: u32 = 32;
 
-// UI
-pub(crate) const NAV_FONT_SIZE: f32 = 16.0;
+// ui
+pub(crate) const DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG: f32 = 25.0;
+pub(crate) const DEFAULT_ELBOW_ARM_MULTIPLIER: f32 = 1.0;
+pub(crate) const DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER: f32 = 1.0;
+pub(crate) const DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER: f32 = 0.5;
+pub(crate) const DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE: u32 = 32;
+pub(crate) const OVERLAY_MARGIN: f32 = 12.0;
+pub(crate) const SECTION_INFO_LEFT_OFFSET: f32 = -200.0;
+pub(crate) const SECTION_INFO_TEXTS: [(usize, &str); 7] = [
+    (
+        1,
+        "Round (transparent) / Flat / None\nEnd caps are independent\nEsc - Pause lights",
+    ),
+    (2, "Catenary    Linear    Orthogonal"),
+    (3, "Drag blue boxes"),
+    (4, "Drag sphere"),
+    (
+        6,
+        "Click green sphere - cable freezes\n\
+         Click red sphere - cable disappears\n\
+         R - Reset",
+    ),
+    (7, "Look, it's a tube!"),
+    (
+        8,
+        "Front: Fixed (no roll)\nMiddle: AsSpawned (plug keeps its spawn orientation)\nBack: Rotating (follows twist)\nDrag the plugs to compare",
+    ),
+];
+pub(crate) const SECTION_INFO_TOP: f32 = 60.0;
+pub(crate) const SECTION_INFO_WIDTH: f32 = 400.0;
 pub(crate) const UI_FONT_SIZE: f32 = 14.0;

@@ -9,6 +9,7 @@ use bevy_catenary::CableMeshConfig;
 use bevy_catenary::Obstacle;
 use bevy_catenary::Solver;
 
+use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::input;
 
 #[derive(Component)]
@@ -40,7 +41,7 @@ pub(crate) fn spawn_cable(
             Cable {
                 solver,
                 obstacles,
-                resolution: 0,
+                resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
                 material: Some(material.clone()),
@@ -71,14 +72,14 @@ pub(crate) fn spawn_node_cube<'a>(
     material: &Handle<StandardMaterial>,
     pos: Vec3,
 ) -> EntityCommands<'a> {
-    let mut ec = commands.spawn((
+    let mut entity_commands = commands.spawn((
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
         Transform::from_translation(pos),
         NodeCube,
     ));
-    ec.observe(input::on_mesh_clicked);
-    ec
+    entity_commands.observe(input::on_mesh_clicked);
+    entity_commands
 }
 
 pub(crate) fn deselect_all(commands: &mut Commands, selected: &Query<Entity, With<Selected>>) {

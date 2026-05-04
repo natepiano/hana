@@ -15,6 +15,7 @@ use super::constants::NAV_DURATION_MS;
 use super::constants::RAY_EPSILON;
 use super::constants::SLACK_ADJUSTMENT_STEP;
 use super::constants::ZOOM_DURATION_MS;
+use super::constants::ZOOM_MARGIN_GROUND;
 use super::constants::ZOOM_MARGIN_MESH;
 use super::constants::ZOOM_MARGIN_NAV;
 use super::detach_demo;
@@ -136,11 +137,11 @@ pub(crate) fn on_drag_start(
         return;
     }
     let entity = click.entity;
-    let Ok(tf) = transforms.get(entity) else {
+    let Ok(transform) = transforms.get(entity) else {
         return;
     };
     drag_state.entity = Some(entity);
-    drag_state.y_height = tf.translation.y;
+    drag_state.y_height = transform.translation.y;
     drag_state.grab_offset = Vec2::ZERO;
 
     let Ok((camera, camera_transform)) = cameras.single() else {
@@ -149,10 +150,14 @@ pub(crate) fn on_drag_start(
     let Ok(window) = windows.single() else {
         return;
     };
-    let Some(hit) = cursor_ray_y_plane(camera, camera_transform, window, tf.translation.y) else {
+    let Some(hit) = cursor_ray_y_plane(camera, camera_transform, window, transform.translation.y)
+    else {
         return;
     };
-    drag_state.grab_offset = Vec2::new(tf.translation.x - hit.x, tf.translation.z - hit.z);
+    drag_state.grab_offset = Vec2::new(
+        transform.translation.x - hit.x,
+        transform.translation.z - hit.z,
+    );
 }
 
 pub(crate) fn on_despawnable_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
@@ -204,7 +209,7 @@ pub(crate) fn handle_keyboard(
     if keyboard.just_pressed(KeyCode::KeyF) {
         commands.trigger(
             ZoomToFit::new(scene_entities.camera, scene_entities.ground)
-                .margin(0.05)
+                .margin(ZOOM_MARGIN_GROUND)
                 .duration(Duration::from_millis(NAV_DURATION_MS))
                 .easing(EaseFunction::CubicOut),
         );
@@ -234,13 +239,13 @@ pub(crate) fn handle_keyboard(
             commands.entity(entity).despawn();
         }
 
-        if let (Some(nm), Some(nmat)) = (node_mesh, node_mat) {
+        if let (Some(node_mesh), Some(node_material)) = (node_mesh, node_mat) {
             detach_demo::spawn_detach_demo(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                &nm,
-                &nmat,
+                &node_mesh,
+                &node_material,
                 &shared_cable_mat.0,
             );
         }

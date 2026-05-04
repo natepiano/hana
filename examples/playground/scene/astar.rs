@@ -8,6 +8,9 @@ use bevy_catenary::PathStrategy;
 use bevy_catenary::Solver;
 use bevy_kana::Position;
 
+use super::constants::ASTAR_OBSTACLE_SIZE_MULTIPLIER;
+use super::constants::ASTAR_SECTION_Z;
+use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::NODE_Y;
 use crate::constants::OBSTACLE_COLOR;
 use crate::constants::OBSTACLE_HALF_EXTENTS;
@@ -25,10 +28,10 @@ pub(super) fn setup_section_astar(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[5];
-    let start = Vec3::new(cx - SPAN_HALF_X, NODE_Y, 0.0);
-    let end = Vec3::new(cx + SPAN_HALF_X, NODE_Y, 0.0);
-    let obstacle_position = Position::new(cx, NODE_Y, 0.0);
+    let section_center_x = SECTION_X[5];
+    let start = Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, ASTAR_SECTION_Z);
+    let end = Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, ASTAR_SECTION_Z);
+    let obstacle_position = Position::new(section_center_x, NODE_Y, ASTAR_SECTION_Z);
     let obstacle = Obstacle::new(OBSTACLE_HALF_EXTENTS, obstacle_position);
 
     entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
@@ -39,7 +42,7 @@ pub(super) fn setup_section_astar(
         Solver::Routed {
             path_strategy: PathStrategy::AStar,
             curve_kind:    CurveKind::Catenary(CatenarySolver::new().with_slack(DEFAULT_SLACK)),
-            resolution:    0,
+            resolution:    DEFAULT_CABLE_RESOLUTION,
         },
         vec![obstacle],
         cable_mat,
@@ -48,9 +51,9 @@ pub(super) fn setup_section_astar(
     commands
         .spawn((
             Mesh3d(meshes.add(Cuboid::new(
-                OBSTACLE_HALF_EXTENTS.x * 2.0,
-                OBSTACLE_HALF_EXTENTS.y * 2.0,
-                OBSTACLE_HALF_EXTENTS.z * 2.0,
+                OBSTACLE_HALF_EXTENTS.x * ASTAR_OBSTACLE_SIZE_MULTIPLIER,
+                OBSTACLE_HALF_EXTENTS.y * ASTAR_OBSTACLE_SIZE_MULTIPLIER,
+                OBSTACLE_HALF_EXTENTS.z * ASTAR_OBSTACLE_SIZE_MULTIPLIER,
             ))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: OBSTACLE_COLOR,

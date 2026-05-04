@@ -8,6 +8,13 @@ use bevy_catenary::CatenarySolver;
 use bevy_catenary::DEFAULT_SLACK;
 use bevy_catenary::Solver;
 
+use super::constants::SHARED_HUB_POSITION_Z;
+use super::constants::SHARED_HUB_SPHERE_RINGS;
+use super::constants::SHARED_HUB_SPHERE_SECTORS;
+use super::constants::SHARED_HUB_SPOKE_X_OFFSET;
+use super::constants::SHARED_HUB_SPOKE_Y_OFFSET;
+use super::constants::SHARED_HUB_SPOKE_Z;
+use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::DRAGGABLE_COLOR;
 use crate::constants::HUB_SPHERE_RADIUS;
 use crate::constants::NODE_Y;
@@ -26,8 +33,12 @@ pub(super) fn setup_section_shared_hub(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[4];
-    let drag_mesh = meshes.add(Sphere::new(HUB_SPHERE_RADIUS).mesh().uv(32, 32));
+    let section_center_x = SECTION_X[4];
+    let drag_mesh = meshes.add(
+        Sphere::new(HUB_SPHERE_RADIUS)
+            .mesh()
+            .uv(SHARED_HUB_SPHERE_SECTORS, SHARED_HUB_SPHERE_RINGS),
+    );
     let drag_mat = materials.add(StandardMaterial {
         base_color: DRAGGABLE_COLOR,
         ..default()
@@ -37,7 +48,7 @@ pub(super) fn setup_section_shared_hub(
         .spawn((
             Mesh3d(drag_mesh),
             MeshMaterial3d(drag_mat),
-            Transform::from_translation(Vec3::new(cx, NODE_Y, 0.0)),
+            Transform::from_translation(Vec3::new(section_center_x, NODE_Y, SHARED_HUB_POSITION_Z)),
             Draggable,
             NodeCube,
         ))
@@ -45,9 +56,21 @@ pub(super) fn setup_section_shared_hub(
         .id();
 
     let spokes = [
-        Vec3::new(cx - 3.0, NODE_Y + 0.5, -1.5),
-        Vec3::new(cx + 3.0, NODE_Y + 0.5, -1.5),
-        Vec3::new(cx, NODE_Y + 0.5, 2.0),
+        Vec3::new(
+            section_center_x - SHARED_HUB_SPOKE_X_OFFSET,
+            NODE_Y + SHARED_HUB_SPOKE_Y_OFFSET,
+            SHARED_HUB_SPOKE_Z[0],
+        ),
+        Vec3::new(
+            section_center_x + SHARED_HUB_SPOKE_X_OFFSET,
+            NODE_Y + SHARED_HUB_SPOKE_Y_OFFSET,
+            SHARED_HUB_SPOKE_Z[1],
+        ),
+        Vec3::new(
+            section_center_x,
+            NODE_Y + SHARED_HUB_SPOKE_Y_OFFSET,
+            SHARED_HUB_SPOKE_Z[2],
+        ),
     ];
 
     for spoke_pos in spokes {
@@ -57,7 +80,7 @@ pub(super) fn setup_section_shared_hub(
                 Cable {
                     solver:     Solver::Catenary(CatenarySolver::new().with_slack(DEFAULT_SLACK)),
                     obstacles:  vec![],
-                    resolution: 0,
+                    resolution: DEFAULT_CABLE_RESOLUTION,
                 },
                 CableMeshConfig {
                     material: Some(cable_mat.clone()),

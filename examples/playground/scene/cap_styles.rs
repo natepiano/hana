@@ -10,10 +10,13 @@ use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
 
 use super::RadiusMultiplier;
+use super::constants::CAP_STYLE_ENDPOINT_X_MULTIPLIERS;
+use super::constants::CAP_STYLE_LIGHT_PHASES;
 use crate::animation::TubeLight;
 use crate::constants::CAP_STYLE_RADIUS_MULTIPLIER;
 use crate::constants::CAP_STYLE_TUBE_OFFSET;
 use crate::constants::CAP_STYLE_TUBE_SPACING;
+use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::NODE_Y;
 use crate::constants::POINT_LIGHT_COLOR;
 use crate::constants::POINT_LIGHT_INTENSITY;
@@ -29,7 +32,7 @@ pub(super) fn setup_section_cap_styles(
     materials: &mut Assets<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let cx = SECTION_X[1];
+    let section_center_x = SECTION_X[1];
 
     let transparent_mat = materials.add(StandardMaterial {
         base_color: TRANSPARENT_TUBE_COLOR,
@@ -38,11 +41,15 @@ pub(super) fn setup_section_cap_styles(
     });
 
     let left_start = Vec3::new(
-        2.0f32.mul_add(-CAP_STYLE_TUBE_SPACING, cx),
+        CAP_STYLE_TUBE_SPACING.mul_add(CAP_STYLE_ENDPOINT_X_MULTIPLIERS[0].0, section_center_x),
         NODE_Y,
         -CAP_STYLE_TUBE_OFFSET,
     );
-    let left_end = Vec3::new(cx - CAP_STYLE_TUBE_SPACING, NODE_Y, CAP_STYLE_TUBE_OFFSET);
+    let left_end = Vec3::new(
+        CAP_STYLE_TUBE_SPACING.mul_add(CAP_STYLE_ENDPOINT_X_MULTIPLIERS[0].1, section_center_x),
+        NODE_Y,
+        CAP_STYLE_TUBE_OFFSET,
+    );
     spawn_cap_style_tube(
         commands,
         transparent_mat,
@@ -53,12 +60,12 @@ pub(super) fn setup_section_cap_styles(
     );
 
     let mid_start = Vec3::new(
-        cx - CAP_STYLE_TUBE_SPACING / 2.0,
+        CAP_STYLE_TUBE_SPACING.mul_add(CAP_STYLE_ENDPOINT_X_MULTIPLIERS[1].0, section_center_x),
         NODE_Y,
         -CAP_STYLE_TUBE_OFFSET,
     );
     let mid_end = Vec3::new(
-        cx + CAP_STYLE_TUBE_SPACING / 2.0,
+        CAP_STYLE_TUBE_SPACING.mul_add(CAP_STYLE_ENDPOINT_X_MULTIPLIERS[1].1, section_center_x),
         NODE_Y,
         CAP_STYLE_TUBE_OFFSET,
     );
@@ -71,9 +78,13 @@ pub(super) fn setup_section_cap_styles(
         Capping::flat(),
     );
 
-    let right_start = Vec3::new(cx + CAP_STYLE_TUBE_SPACING, NODE_Y, -CAP_STYLE_TUBE_OFFSET);
+    let right_start = Vec3::new(
+        CAP_STYLE_TUBE_SPACING.mul_add(CAP_STYLE_ENDPOINT_X_MULTIPLIERS[2].0, section_center_x),
+        NODE_Y,
+        -CAP_STYLE_TUBE_OFFSET,
+    );
     let right_end = Vec3::new(
-        2.0f32.mul_add(CAP_STYLE_TUBE_SPACING, cx),
+        CAP_STYLE_TUBE_SPACING.mul_add(CAP_STYLE_ENDPOINT_X_MULTIPLIERS[2].1, section_center_x),
         NODE_Y,
         CAP_STYLE_TUBE_OFFSET,
     );
@@ -87,9 +98,9 @@ pub(super) fn setup_section_cap_styles(
     );
 
     let tubes = [
-        (left_start, left_end, 0.3),
-        (mid_start, mid_end, 0.7),
-        (right_start, right_end, 0.0),
+        (left_start, left_end, CAP_STYLE_LIGHT_PHASES[0]),
+        (mid_start, mid_end, CAP_STYLE_LIGHT_PHASES[1]),
+        (right_start, right_end, CAP_STYLE_LIGHT_PHASES[2]),
     ];
     for (start, end, initial_t) in tubes {
         commands.spawn((
@@ -120,7 +131,7 @@ fn spawn_cap_style_tube(
             Cable {
                 solver:     Solver::Linear,
                 obstacles:  vec![],
-                resolution: 0,
+                resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
                 tube: TubeConfig {
