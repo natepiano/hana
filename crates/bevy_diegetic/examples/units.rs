@@ -65,8 +65,8 @@ const CARD_DETAIL_SIZE: Pt = Pt(11.0);
 const CARD_FOOTER_SIZE: Pt = Pt(6.0);
 
 // ── Index card ──────────────────────────────────────────────────────
-const INDEX_W: In = In(5.0);
-const INDEX_H: In = In(7.0);
+const INDEX_WIDTH: In = In(5.0);
+const INDEX_HEIGHT: In = In(7.0);
 const INDEX_BG: Color = Color::srgba(0.08, 0.10, 0.14, 1.0);
 const INDEX_HEADING_COLOR: Color = Color::srgb(0.4, 0.85, 0.75);
 const INDEX_LABEL_COLOR: Color = Color::srgba(0.7, 0.75, 0.85, 0.9);
@@ -271,8 +271,8 @@ fn setup(
 
     spawn_card_panel(&mut commands, card_x, card_y);
 
-    let index_width_m = f32::from(INDEX_W);
-    let index_height_m = f32::from(INDEX_H);
+    let index_width_m = f32::from(INDEX_WIDTH);
+    let index_height_m = f32::from(INDEX_HEIGHT);
     let card_left = card_x - card_width_m / 2.0;
     let index_x = card_left + index_width_m / 2.0;
     let a4_page_bottom = a4_page_y - a4_height_m / 2.0;
@@ -413,8 +413,8 @@ fn spawn_index_card_rulers(
 ) {
     // Vertical ruler (right side).
     let index_ruler_x = index_x + index_width_m / 2.0 + f32::from(RULER_GAP);
-    let index_sixteenths = (INDEX_H.0 * 16.0).round().to_i32();
-    let index_ruler_height = In(INDEX_H.0 + EDGE_LABEL_EXTRA.0);
+    let index_sixteenths = (INDEX_HEIGHT.0 * 16.0).round().to_i32();
+    let index_ruler_height = In(INDEX_HEIGHT.0 + EDGE_LABEL_EXTRA.0);
     let index_ruler_top = index_y + index_height_m / 2.0 + f32::from(EDGE_LABEL_EXTRA);
     let Some(index_vertical_ruler) = build_panel_or_log(
         DiegeticPanel::world()
@@ -440,13 +440,13 @@ fn spawn_index_card_rulers(
     // Horizontal ruler (bottom).
     let index_bottom_ruler_x = index_x - index_width_m / 2.0;
     let index_bottom_ruler_y = index_y - index_height_m / 2.0 - f32::from(RULER_GAP);
-    let index_w_sixteenths = (INDEX_W.0 * 16.0).round().to_i32();
+    let index_width_sixteenths = (INDEX_WIDTH.0 * 16.0).round().to_i32();
     let Some(index_horizontal_ruler) = build_panel_or_log(
         DiegeticPanel::world()
-            .size(INDEX_W, PANEL_RULER_INCH_WIDTH)
+            .size(INDEX_WIDTH, PANEL_RULER_INCH_WIDTH)
             .anchor(Anchor::TopLeft)
             .with_tree(build_imperial_horizontal_ruler(
-                index_w_sixteenths,
+                index_width_sixteenths,
                 ruler_color,
             ))
             .build(),
@@ -1623,7 +1623,7 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
 
 /// Builds a 5×7 index page layout tree (used by `toggle_debug_outlines` for runtime rebuild).
 fn build_index_page(debug: bool) -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(INDEX_W, INDEX_H);
+    let mut builder = LayoutBuilder::new(INDEX_WIDTH, INDEX_HEIGHT);
     build_index_content(&mut builder, debug);
     builder.build()
 }
@@ -1639,7 +1639,7 @@ fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
 
     builder.with(
         El::new()
-            .size(INDEX_W, INDEX_H)
+            .size(INDEX_WIDTH, INDEX_HEIGHT)
             .padding(Padding::all(In(0.2)))
             .direction(Direction::TopToBottom)
             .child_gap(In(0.08))
