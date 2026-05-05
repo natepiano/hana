@@ -48,12 +48,14 @@ pub use cable::AttachedTo;
 pub use cable::Cable;
 pub use cable::CableEnd;
 pub use cable::CableEndpoint;
+use cable::CablePlugin;
 pub use cable::ComputedCableGeometry;
 pub use cable::EndpointAlignment;
 pub use cable::OnDetach;
 // Gizmos
 pub use gizmos::CableGizmoGroup;
 pub use gizmos::DebugGizmos;
+use gizmos::GizmosPlugin;
 // Mesh
 pub use mesh::CableMeshChild;
 pub use mesh::CableMeshConfig;
@@ -63,6 +65,7 @@ pub use mesh::Capping;
 pub use mesh::ElbowConfig;
 pub use mesh::ElbowMetadata;
 pub use mesh::FaceSides;
+use mesh::MeshPlugin;
 pub use mesh::TrimConfig;
 pub use mesh::TubeConfig;
 pub use mesh::compute_elbow_metadata;
@@ -104,7 +107,5 @@ pub use routing::solve_parameter;
 pub struct CatenaryPlugin;
 
 impl Plugin for CatenaryPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((cable::CablePlugin, mesh::MeshPlugin, gizmos::GizmosPlugin));
-    }
+    fn build(&self, app: &mut App) { app.add_plugins((CablePlugin, MeshPlugin, GizmosPlugin)); }
 }

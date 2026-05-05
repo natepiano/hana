@@ -5,6 +5,7 @@ use bevy::math::Vec3;
 use super::constants::DEFAULT_OBSTACLE_MARGIN;
 use super::constants::ORTHOGONAL_SEGMENT_SAMPLE_STEPS;
 use super::obstacle;
+use super::obstacle::Blockage;
 use super::obstacle::Obstacle;
 use super::solver::PathPlanner;
 
@@ -64,12 +65,7 @@ impl OrthogonalPlanner {
     }
 
     /// Check if an axis-aligned segment between two points is blocked.
-    fn is_segment_blocked(
-        &self,
-        start: Vec3,
-        end: Vec3,
-        obstacles: &[Obstacle],
-    ) -> obstacle::Blockage {
+    fn is_segment_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
         obstacle::is_segment_blocked(
             start,
             end,
@@ -157,8 +153,8 @@ impl PathPlanner for OrthogonalPlanner {
             }
 
             match self.is_path_blocked(&path, obstacles) {
-                obstacle::Blockage::Clear => return path,
-                obstacle::Blockage::Blocked => {},
+                Blockage::Clear => return path,
+                Blockage::Blocked => {},
             }
         }
 
@@ -169,14 +165,14 @@ impl PathPlanner for OrthogonalPlanner {
 
 impl OrthogonalPlanner {
     /// Check if any segment of a multi-waypoint path is blocked.
-    fn is_path_blocked(&self, waypoints: &[Vec3], obstacles: &[Obstacle]) -> obstacle::Blockage {
+    fn is_path_blocked(&self, waypoints: &[Vec3], obstacles: &[Obstacle]) -> Blockage {
         for pair in waypoints.windows(2) {
             match self.is_segment_blocked(pair[0], pair[1], obstacles) {
-                obstacle::Blockage::Blocked => return obstacle::Blockage::Blocked,
-                obstacle::Blockage::Clear => {},
+                Blockage::Blocked => return Blockage::Blocked,
+                Blockage::Clear => {},
             }
         }
 
-        obstacle::Blockage::Clear
+        Blockage::Clear
     }
 }

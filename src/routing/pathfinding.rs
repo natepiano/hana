@@ -14,7 +14,9 @@ use super::constants::DEFAULT_ASTAR_MAX_CELLS;
 use super::constants::DEFAULT_GRID_SIZE;
 use super::constants::DEFAULT_OBSTACLE_MARGIN;
 use super::obstacle;
+use super::obstacle::Blockage;
 use super::obstacle::Obstacle;
+use super::obstacle::PointContainment;
 use super::solver::PathPlanner;
 
 /// 3D grid cell coordinate.
@@ -119,10 +121,10 @@ impl AStarPlanner {
     }
 
     /// Check if a world-space point is inside any obstacle (with margin).
-    fn is_blocked(&self, pos: Vec3, obstacles: &[Obstacle]) -> obstacle::Blockage {
+    fn is_blocked(&self, pos: Vec3, obstacles: &[Obstacle]) -> Blockage {
         match obstacle::is_point_in_any_obstacle(pos, obstacles, self.margin) {
-            obstacle::PointContainment::Inside => obstacle::Blockage::Blocked,
-            obstacle::PointContainment::Outside => obstacle::Blockage::Clear,
+            PointContainment::Inside => Blockage::Blocked,
+            PointContainment::Outside => Blockage::Clear,
         }
     }
 
@@ -191,8 +193,8 @@ impl AStarPlanner {
                 let neighbor_world = neighbor.to_world(origin, self.grid_size);
 
                 match self.is_blocked(neighbor_world, obstacles) {
-                    obstacle::Blockage::Blocked => continue,
-                    obstacle::Blockage::Clear => {},
+                    Blockage::Blocked => continue,
+                    Blockage::Clear => {},
                 }
 
                 let move_cost = Self::heuristic(current, neighbor) * self.grid_size;
@@ -225,8 +227,8 @@ impl PathPlanner for AStarPlanner {
         }
 
         match self.is_direct_path_blocked(start, end, obstacles) {
-            obstacle::Blockage::Clear => return vec![start, end],
-            obstacle::Blockage::Blocked => {},
+            Blockage::Clear => return vec![start, end],
+            Blockage::Blocked => {},
         }
 
         let origin = start;
@@ -260,12 +262,7 @@ impl PathPlanner for AStarPlanner {
 
 impl AStarPlanner {
     /// Check if any obstacle intersects the direct line from start to end.
-    fn is_direct_path_blocked(
-        &self,
-        start: Vec3,
-        end: Vec3,
-        obstacles: &[Obstacle],
-    ) -> obstacle::Blockage {
+    fn is_direct_path_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
         obstacle::is_segment_blocked(
             start,
             end,

@@ -6,7 +6,7 @@ use super::AttachedTo;
 use super::Cable;
 use super::CableEnd;
 use super::CableEndpoint;
-use super::endpoint;
+use super::endpoint::ResolvedEndpointPosition;
 use crate::routing::CableGeometry;
 use crate::routing::MIN_SEGMENT_LENGTH;
 use crate::routing::RouteRequest;
@@ -98,7 +98,7 @@ fn recompute_dirty_cables(
     mut endpoints: Query<(
         &CableEndpoint,
         Option<&AttachedTo>,
-        Option<&mut endpoint::ResolvedEndpointPosition>,
+        Option<&mut ResolvedEndpointPosition>,
     )>,
     transforms: Query<&GlobalTransform>,
 ) {
@@ -120,7 +120,7 @@ fn recompute_cable_route(
     endpoints: &mut Query<(
         &CableEndpoint,
         Option<&AttachedTo>,
-        Option<&mut endpoint::ResolvedEndpointPosition>,
+        Option<&mut ResolvedEndpointPosition>,
     )>,
     transforms: &Query<&GlobalTransform>,
 ) {
@@ -150,9 +150,7 @@ fn recompute_cable_route(
                 resolved.0 = pos;
             }
         } else {
-            commands
-                .entity(child)
-                .insert(endpoint::ResolvedEndpointPosition(pos));
+            commands.entity(child).insert(ResolvedEndpointPosition(pos));
         }
 
         match endpoint.end {

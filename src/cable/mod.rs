@@ -8,6 +8,7 @@ mod endpoint;
 
 use bevy::prelude::*;
 pub(crate) use compute::CableSystems;
+use compute::ComputePlugin;
 pub use compute::ComputedCableGeometry;
 pub use endpoint::AttachedEndpoints;
 pub use endpoint::AttachedTo;
@@ -24,7 +25,7 @@ pub(crate) struct CablePlugin;
 
 impl Plugin for CablePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(compute::ComputePlugin)
+        app.add_plugins(ComputePlugin)
             .add_observer(endpoint::on_endpoint_alignment_update)
             .add_observer(endpoint::on_endpoint_detached);
     }
