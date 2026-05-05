@@ -14,6 +14,7 @@ use bevy_window_manager::Platform;
 use super::constants::BACKWARD_SCROLL_OFFSET;
 use super::constants::FORWARD_SCROLL_OFFSET;
 use super::constants::MILLIHERTZ_PER_HERTZ;
+use super::constants::STATE_FILE;
 use super::constants::VIDEO_MODE_CENTER_PADDING;
 use super::constants::VISIBLE_VIDEO_MODE_COUNT;
 use super::events::ClearStateAndQuit;
@@ -69,7 +70,7 @@ pub(crate) fn get_state_file_path() -> Option<PathBuf> {
         .file_stem()?
         .to_str()?
         .to_string();
-    dirs::config_dir().map(|config_dir| config_dir.join(exe_name).join("windows.ron"))
+    dirs::config_dir().map(|config_dir| config_dir.join(exe_name).join(STATE_FILE))
 }
 
 pub(crate) fn handle_window_mode_input(

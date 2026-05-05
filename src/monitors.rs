@@ -3,6 +3,8 @@
 //! Provides a `Monitors` resource that maintains a sorted list of monitors,
 //! automatically updated when monitors are added or removed.
 
+use std::ops::Deref;
+
 use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
@@ -67,7 +69,7 @@ pub struct CurrentMonitor {
     pub effective_mode: WindowMode,
 }
 
-impl std::ops::Deref for CurrentMonitor {
+impl Deref for CurrentMonitor {
     type Target = MonitorInfo;
 
     fn deref(&self) -> &Self::Target { &self.monitor }

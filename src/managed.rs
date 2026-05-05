@@ -1,5 +1,8 @@
 //! Managed window types and registry.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 
 /// Marks a window entity as managed by the window manager plugin.
@@ -45,7 +48,7 @@ pub enum ManagedWindowPersistence {
 #[derive(Resource, Default)]
 pub(crate) struct ManagedWindowRegistry {
     /// Set of registered window names (for duplicate detection).
-    pub(crate) names:    std::collections::HashSet<String>,
+    pub(crate) names:    HashSet<String>,
     /// Map from entity to window name (for cleanup on removal).
-    pub(crate) entities: std::collections::HashMap<Entity, String>,
+    pub(crate) entities: HashMap<Entity, String>,
 }

@@ -1,5 +1,6 @@
 //! Restore configuration.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -15,5 +16,5 @@ pub(crate) struct RestoreWindowConfig {
     /// Snapshot of window states as loaded from the file at startup.
     /// Populated during restore so downstream code can compare intended vs actual state.
     /// Entries persist as a read-only snapshot for the example's File column.
-    pub loaded_states: std::collections::HashMap<WindowKey, WindowState>,
+    pub loaded_states: HashMap<WindowKey, WindowState>,
 }

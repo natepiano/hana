@@ -26,13 +26,13 @@ use super::state::SecondaryDisplay;
 use super::state::SelectedVideoModes;
 
 struct CurrentValues {
-    position_phys: String,
-    position_log:  String,
-    size_phys:     String,
-    size_log:      String,
-    scale:         String,
-    monitor:       String,
-    mode:          String,
+    physical_position: String,
+    logical_position:  String,
+    physical_size:     String,
+    logical_size:      String,
+    scale:             String,
+    monitor:           String,
+    mode:              String,
 }
 
 struct ComparisonMismatch {
@@ -113,11 +113,11 @@ fn build_comparison_spans(
     let scale = window.resolution.scale_factor();
 
     let current_values = CurrentValues {
-        position_phys: match window.position {
+        physical_position: match window.position {
             WindowPosition::At(pos) => format!("({}, {})", pos.x, pos.y),
             _ => "Automatic".to_string(),
         },
-        position_log:  match window.position {
+        logical_position:  match window.position {
             WindowPosition::At(pos) => {
                 let logical_x = (f64::from(pos.x) / f64::from(scale)).round().to_i32();
                 let logical_y = (f64::from(pos.y) / f64::from(scale)).round().to_i32();
@@ -125,15 +125,15 @@ fn build_comparison_spans(
             },
             _ => "Automatic".to_string(),
         },
-        size_phys:     format!("{}x{}", window.physical_width(), window.physical_height()),
-        size_log:      format!(
+        physical_size:     format!("{}x{}", window.physical_width(), window.physical_height()),
+        logical_size:      format!(
             "{}x{}",
             window.resolution.width().to_u32(),
             window.resolution.height().to_u32()
         ),
-        scale:         format!("{scale}"),
-        monitor:       format!("{}", monitor.index),
-        mode:          format!("{effective_mode:?}"),
+        scale:             format!("{scale}"),
+        monitor:           format!("{}", monitor.index),
+        mode:              format!("{effective_mode:?}"),
     };
 
     if let Some(cached_restored_state) = restored_state {
@@ -244,7 +244,7 @@ fn add_position_rows(
         &ComparisonRow {
             label:    "Position (physical):",
             restored: restored_values.physical_position.clone(),
-            current:  current_values.position_phys.clone(),
+            current:  current_values.physical_position.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
                 expected: mismatch.physical_position.expected.map_or_else(
                     || "None".to_string(),
@@ -264,7 +264,7 @@ fn add_position_rows(
         &ComparisonRow {
             label:    "Position (logical):",
             restored: restored_values.logical_position.clone(),
-            current:  current_values.position_log.clone(),
+            current:  current_values.logical_position.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
                 expected: mismatch.logical_position.expected.map_or_else(
                     || "None".to_string(),
@@ -294,7 +294,7 @@ fn add_size_rows(
         &ComparisonRow {
             label:    "Size (physical):",
             restored: restored_values.physical_size.clone(),
-            current:  current_values.size_phys.clone(),
+            current:  current_values.physical_size.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
@@ -314,7 +314,7 @@ fn add_size_rows(
         &ComparisonRow {
             label:    "Size (logical):",
             restored: restored_values.logical_size.clone(),
-            current:  current_values.size_log.clone(),
+            current:  current_values.logical_size.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
@@ -422,7 +422,7 @@ fn build_current_only_spans(
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Position (physical):", current_values.position_phys
+            "Position (physical):", current_values.physical_position
         ),
         DEFAULT_COLOR,
     );
@@ -431,7 +431,7 @@ fn build_current_only_spans(
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Position (logical):", current_values.position_log
+            "Position (logical):", current_values.logical_position
         ),
         DEFAULT_COLOR,
     );
@@ -440,7 +440,7 @@ fn build_current_only_spans(
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Size (physical):", current_values.size_phys
+            "Size (physical):", current_values.physical_size
         ),
         DEFAULT_COLOR,
     );
@@ -449,7 +449,7 @@ fn build_current_only_spans(
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Size (logical):", current_values.size_log
+            "Size (logical):", current_values.logical_size
         ),
         DEFAULT_COLOR,
     );

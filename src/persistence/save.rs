@@ -2,6 +2,9 @@
 //!
 //! Saves window position, size, and mode to the state file on change.
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -26,10 +29,7 @@ use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
 
 /// Save all window states to the given path.
-pub fn save_all_states(
-    path: &std::path::Path,
-    states: &std::collections::HashMap<WindowKey, WindowState>,
-) {
+pub fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {
     if let Some(parent) = path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
@@ -143,7 +143,7 @@ pub fn save_active_window_state(
 fn persist_remember_all(
     config: &RestoreWindowConfig,
     monitors: &Monitors,
-    cached: &std::collections::HashMap<Entity, CachedWindowState>,
+    cached: &HashMap<Entity, CachedWindowState>,
     all_windows: &Query<
         (
             Entity,
@@ -231,7 +231,7 @@ pub fn save_window_state(
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
     primary_q: Query<(), With<PrimaryWindow>>,
-    mut cached: Local<std::collections::HashMap<Entity, CachedWindowState>>,
+    mut cached: Local<HashMap<Entity, CachedWindowState>>,
     _: NonSendMarker,
 ) {
     // Can't save state if no monitors exist (e.g., laptop lid closed).

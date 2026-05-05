@@ -30,8 +30,11 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 use bevy::prelude::*;
+use ron::Error;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -51,8 +54,8 @@ pub enum WindowKey {
     Managed(String),
 }
 
-impl fmt::Display for WindowKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for WindowKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Primary => write!(f, "{PRIMARY_WINDOW_KEY}"),
             Self::Managed(name) => write!(f, "{name}"),
@@ -200,7 +203,7 @@ fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
 }
 
 /// Encode typed runtime state into persisted v1 text.
-pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String, ron::Error> {
+pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String, Error> {
     let mut entries: Vec<PersistedEntry> = states
         .iter()
         .map(|(key, state)| PersistedEntry {

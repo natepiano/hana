@@ -16,6 +16,9 @@ pub(crate) const MIN_COMPARISON_COLUMN_WIDTH: usize = 16;
 pub(crate) const SECONDARY_WINDOW_HEIGHT: u32 = 400;
 pub(crate) const SECONDARY_WINDOW_WIDTH: u32 = 600;
 
+// state file
+pub(crate) const STATE_FILE: &str = "windows.ron";
+
 // test mode
 pub(crate) const TEST_MODE_ENV_VAR: &str = "BWM_TEST_MODE";
 
