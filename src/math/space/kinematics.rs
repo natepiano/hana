@@ -261,37 +261,34 @@ mod tests {
     const DISPLACEMENT_LEFT: Displacement = Displacement::new(1.0, 0.0, 0.0);
     const DISPLACEMENT_RIGHT: Displacement = Displacement::new(0.0, 1.0, 0.0);
     const DISPLACEMENT_ROUNDTRIP_VECTOR: Vec3 = Vec3::new(1.0, 2.0, 3.0);
-    const DISPLACEMENT_SUM: Vec3 = Vec3::new(1.0, 1.0, 0.0);
 
     // position fixtures
-    const NEGATED_POSITION: Vec3 = Vec3::new(-1.0, 2.0, -3.0);
     const POSITION: Position = Position::new(POSITION_X, POSITION_Y, POSITION_Z);
     const POSITION_LEFT: Position = Position::new(1.0, 0.0, 0.0);
     const POSITION_NEGATED_INPUT: Position = Position::new(1.0, -2.0, 3.0);
     const POSITION_RIGHT: Position = Position::new(0.0, 1.0, 0.0);
-    const POSITION_SUM: Vec3 = Vec3::new(1.0, 1.0, 0.0);
     const POSITION_WITH_SCALE_INPUT: Position = Position::new(2.0, 4.0, 6.0);
     const POSITION_X: f32 = 1.0;
     const POSITION_Y: f32 = 2.0;
     const POSITION_Z: f32 = 3.0;
     const SCALE_FACTOR: f32 = 2.0;
-    const SCALED_POSITION: Vec3 = Vec3::new(2.0, 4.0, 6.0);
 
     // velocity fixtures
     const FRAME_TIME_DELTA: f32 = 0.016;
     const LEFT_VELOCITY: Velocity = Velocity::new(1.0, 0.0, 0.0);
     const RIGHT_VELOCITY: Velocity = Velocity::new(0.0, 1.0, 0.0);
     const SCALED_VELOCITY: Velocity = Velocity::new(10.0, 0.0, 0.0);
-    const SUMMED_VELOCITY: Vec3 = Vec3::new(1.0, 1.0, 0.0);
     const VELOCITY_PER_FRAME_TOLERANCE: f32 = 1e-6;
-    const VELOCITY_PER_FRAME_X: f32 = 0.16;
 
     #[test]
     fn displacement_add_returns_self() {
         let left_displacement = DISPLACEMENT_LEFT;
         let right_displacement = DISPLACEMENT_RIGHT;
         let result = left_displacement + right_displacement;
-        assert_eq!(result.into_inner(), DISPLACEMENT_SUM);
+        assert_eq!(
+            result.into_inner(),
+            DISPLACEMENT_LEFT.into_inner() + DISPLACEMENT_RIGHT.into_inner()
+        );
     }
 
     #[test]
@@ -306,7 +303,10 @@ mod tests {
     fn position_add_assign() {
         let mut position = POSITION_LEFT;
         position += POSITION_RIGHT;
-        assert_eq!(position.into_inner(), POSITION_SUM);
+        assert_eq!(
+            position.into_inner(),
+            POSITION_LEFT.into_inner() + POSITION_RIGHT.into_inner()
+        );
     }
 
     #[test]
@@ -314,7 +314,10 @@ mod tests {
         let left_position = POSITION_LEFT;
         let right_position = POSITION_RIGHT;
         let result = left_position + right_position;
-        assert_eq!(result.into_inner(), POSITION_SUM);
+        assert_eq!(
+            result.into_inner(),
+            POSITION_LEFT.into_inner() + POSITION_RIGHT.into_inner()
+        );
     }
 
     #[test]
@@ -339,7 +342,7 @@ mod tests {
     fn position_neg() {
         let position = POSITION_NEGATED_INPUT;
         let result = -position;
-        assert_eq!(result.into_inner(), NEGATED_POSITION);
+        assert_eq!(result.into_inner(), -POSITION_NEGATED_INPUT.into_inner());
     }
 
     #[test]
@@ -353,7 +356,7 @@ mod tests {
     fn position_scalar_mul() {
         let position = POSITION;
         let result = position * SCALE_FACTOR;
-        assert_eq!(result.into_inner(), SCALED_POSITION);
+        assert_eq!(result.into_inner(), POSITION.into_inner() * SCALE_FACTOR);
     }
 
     #[test]
@@ -361,13 +364,22 @@ mod tests {
         let left_velocity = LEFT_VELOCITY;
         let right_velocity = RIGHT_VELOCITY;
         let combined = left_velocity + right_velocity;
-        assert_eq!(combined.into_inner(), SUMMED_VELOCITY);
+        assert_eq!(
+            combined.into_inner(),
+            LEFT_VELOCITY.into_inner() + RIGHT_VELOCITY.into_inner()
+        );
     }
 
     #[test]
     fn velocity_scalar_mul_for_time_delta() {
         let velocity = SCALED_VELOCITY;
         let frame_velocity = velocity * FRAME_TIME_DELTA;
-        assert!((frame_velocity.x - VELOCITY_PER_FRAME_X).abs() < VELOCITY_PER_FRAME_TOLERANCE);
+        assert!(
+            SCALED_VELOCITY
+                .x
+                .mul_add(-FRAME_TIME_DELTA, frame_velocity.x)
+                .abs()
+                < VELOCITY_PER_FRAME_TOLERANCE
+        );
     }
 }

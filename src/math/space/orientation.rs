@@ -143,6 +143,6 @@ mod tests {
         let midpoint_orientation = start_orientation.slerp(end_orientation, SLERP_FACTOR);
         let result = midpoint_orientation * Vec3::X;
         let angle = result.angle_between(Vec3::X);
-        assert!((angle - std::f32::consts::FRAC_PI_4).abs() < HALF_TURN_ANGLE_TOLERANCE);
+        assert!(FRAC_PI_2.mul_add(-SLERP_FACTOR, angle).abs() < HALF_TURN_ANGLE_TOLERANCE);
     }
 }

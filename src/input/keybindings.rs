@@ -34,8 +34,6 @@ impl PlatformShortcutMode {
     }
 }
 
-const PLATFORM_SHORTCUT_MODE: PlatformShortcutMode = PlatformShortcutMode::current();
-
 /// Modifier-aware keybinding builder with platform-specific `Cmd`/`Ctrl` handling.
 ///
 /// Spawns modifier actions and provides methods to bind keys with automatic
@@ -92,7 +90,7 @@ impl<C: Component> Keybindings<C> {
             require_reset: true,
             ..default()
         };
-        let primary_modifier_bindings = match PLATFORM_SHORTCUT_MODE {
+        let primary_modifier_bindings = match PlatformShortcutMode::current() {
             PlatformShortcutMode::Command => bindings![KeyCode::SuperLeft, KeyCode::SuperRight],
             PlatformShortcutMode::Control => {
                 bindings![KeyCode::ControlLeft, KeyCode::ControlRight]
@@ -124,7 +122,7 @@ impl<C: Component> Keybindings<C> {
         let mut all_modifier_entities = vec![shift_entity, primary_entity, alt_entity];
         let mut non_shift_modifier_entities = vec![primary_entity, alt_entity];
 
-        match PLATFORM_SHORTCUT_MODE {
+        match PlatformShortcutMode::current() {
             PlatformShortcutMode::Command => {
                 // On macOS, `Ctrl` is a separate physical key from `Cmd`, so block it too.
                 let control_entity = spawner
@@ -185,7 +183,7 @@ impl<C: Component> Keybindings<C> {
     /// Spawns an action with the platform `Cmd`/`Ctrl` modifier. No `BlockBy`
     /// is needed because the modifier key itself is the disambiguator.
     pub fn spawn_platform_key<A: InputAction>(&self, spawner: &mut ActionSpawner<C>, key: KeyCode) {
-        let platform_bindings = match PLATFORM_SHORTCUT_MODE {
+        let platform_bindings = match PlatformShortcutMode::current() {
             PlatformShortcutMode::Command => bindings![key.with_mod_keys(ModKeys::SUPER)],
             PlatformShortcutMode::Control => bindings![key.with_mod_keys(ModKeys::CONTROL)],
         };

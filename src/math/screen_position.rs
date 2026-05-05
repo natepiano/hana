@@ -110,14 +110,16 @@ mod tests {
     const BASE_SCREEN_X: f32 = 100.0;
     const BASE_SCREEN_Y: f32 = 200.0;
     const OFFSET_SCREEN_POSITION: ScreenPosition = ScreenPosition::new(10.0, 20.0);
-    const SUMMED_SCREEN_POSITION: Vec2 = Vec2::new(110.0, 220.0);
 
     #[test]
     fn add_returns_self() {
         let cursor_position = BASE_SCREEN_POSITION;
         let offset_position = OFFSET_SCREEN_POSITION;
         let result = cursor_position + offset_position;
-        assert_eq!(result.into_inner(), SUMMED_SCREEN_POSITION);
+        assert_eq!(
+            result.into_inner(),
+            BASE_SCREEN_POSITION.into_inner() + OFFSET_SCREEN_POSITION.into_inner()
+        );
     }
 
     #[test]
