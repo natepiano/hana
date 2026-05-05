@@ -70,6 +70,7 @@ use render::HullOutlineBindGroup;
 use render::HullOutlineUniformBuffer;
 use render::OutlineBindGroup;
 use render::OutlineUniformBuffer;
+use shaders::ShaderPlugin;
 
 /// Bevy plugin that registers outline rendering systems, pipelines, and render graph nodes.
 pub struct LiminalPlugin;
@@ -77,7 +78,7 @@ pub struct LiminalPlugin;
 impl Plugin for LiminalPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            shaders::ShaderPlugin,
+            ShaderPlugin,
             ExtractComponentPlugin::<OutlineCamera>::default(),
         ));
 

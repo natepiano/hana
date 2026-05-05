@@ -120,7 +120,8 @@ pub enum OutlineMethod {
 /// produces merged outlines regardless of this setting.
 ///
 /// - [`Merged`](OverlapMode::Merged): Overlapping outlined meshes share a single unified silhouette
-///   outline. No outline is drawn where two outlined surfaces overlap — they merge into one shape.
+///   outline. No outline is drawn where two outlined surfaces overlap — they merge into a single
+///   silhouette.
 ///
 /// - [`Grouped`](OverlapMode::Grouped): All meshes within the same entity hierarchy (parent +
 ///   children sharing a `group_source`) merge into one outline, but that group is visually distinct

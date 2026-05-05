@@ -48,11 +48,11 @@ impl HullModeState for ScreenHullState {}
 /// Type-safe builder for constructing an `Outline` component.
 #[derive(Debug, Clone)]
 pub struct OutlineBuilder<M: OutlineModeState> {
-    width:     f32,
-    intensity: f32,
-    color:     Color,
-    overlap:   OverlapMode,
-    mode:      PhantomData<M>,
+    width:        f32,
+    intensity:    f32,
+    color:        Color,
+    overlap_mode: OverlapMode,
+    mode:         PhantomData<M>,
 }
 
 const fn defaults<M: OutlineModeState>(width: f32) -> OutlineBuilder<M> {
@@ -60,7 +60,7 @@ const fn defaults<M: OutlineModeState>(width: f32) -> OutlineBuilder<M> {
         width,
         intensity: DEFAULT_OUTLINE_INTENSITY,
         color: Color::BLACK,
-        overlap: OverlapMode::Merged,
+        overlap_mode: OverlapMode::Merged,
         mode: PhantomData,
     }
 }
@@ -126,8 +126,8 @@ impl<M: OutlineModeState> OutlineBuilder<M> {
 impl<M: HullModeState> OutlineBuilder<M> {
     /// Set the overlap mode for hull outlines.
     #[must_use]
-    pub const fn with_overlap(mut self, overlap: OverlapMode) -> Self {
-        self.overlap = overlap;
+    pub const fn with_overlap(mut self, overlap_mode: OverlapMode) -> Self {
+        self.overlap_mode = overlap_mode;
         self
     }
 
@@ -137,7 +137,7 @@ impl<M: HullModeState> OutlineBuilder<M> {
         Outline {
             intensity:    self.intensity,
             width:        self.width,
-            overlap:      self.overlap,
+            overlap:      self.overlap_mode,
             color:        self.color,
             mode:         M::MODE,
             style:        LineStyle::Solid,

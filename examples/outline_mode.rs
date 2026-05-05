@@ -90,7 +90,7 @@ fn main() {
         ))
         .init_resource::<OutlineModeToggle>()
         .init_resource::<OutlineWidthControl>()
-        .init_resource::<OverlapControl>()
+        .init_resource::<OverlapModes>()
         .add_systems(Startup, (setup, setup_ui))
         .add_systems(
             Update,
@@ -104,13 +104,13 @@ fn main() {
 
 #[derive(Resource)]
 struct OutlineModeToggle {
-    method: OutlineMethod,
+    outline_method: OutlineMethod,
 }
 
 impl Default for OutlineModeToggle {
     fn default() -> Self {
         Self {
-            method: OutlineMethod::WorldHull,
+            outline_method: OutlineMethod::WorldHull,
         }
     }
 }
@@ -133,16 +133,16 @@ impl Default for OutlineWidthControl {
 }
 
 #[derive(Resource)]
-struct OverlapControl {
-    hull:  OverlapMode,
-    shell: OverlapMode,
+struct OverlapModes {
+    world_hull_overlap_mode:  OverlapMode,
+    screen_hull_overlap_mode: OverlapMode,
 }
 
-impl Default for OverlapControl {
+impl Default for OverlapModes {
     fn default() -> Self {
         Self {
-            hull:  INITIAL_HULL_OVERLAP,
-            shell: INITIAL_SHELL_OVERLAP,
+            world_hull_overlap_mode:  INITIAL_HULL_OVERLAP,
+            screen_hull_overlap_mode: INITIAL_SHELL_OVERLAP,
         }
     }
 }
@@ -281,7 +281,7 @@ fn setup_ui(mut commands: Commands) {
 fn toggle_outline_mode(
     input: Res<ButtonInput<KeyCode>>,
     width_control: Res<OutlineWidthControl>,
-    overlap_control: Res<OverlapControl>,
+    overlap_modes: Res<OverlapModes>,
     mut mode_toggle: ResMut<OutlineModeToggle>,
     mut outline_query: Query<&mut Outline>,
 ) {
@@ -289,30 +289,37 @@ fn toggle_outline_mode(
         return;
     }
 
-    mode_toggle.method = match mode_toggle.method {
+    mode_toggle.outline_method = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => OutlineMethod::WorldHull,
         OutlineMethod::WorldHull => OutlineMethod::ScreenHull,
         OutlineMethod::ScreenHull => OutlineMethod::JumpFlood,
     };
 
-    let (width, overlap) = match mode_toggle.method {
+    let (width, overlap_mode) = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => (width_control.jump_flood_width_px, OverlapMode::Merged),
-        OutlineMethod::WorldHull => (width_control.hull_width_world, overlap_control.hull),
-        OutlineMethod::ScreenHull => (width_control.shell_width_px, overlap_control.shell),
+        OutlineMethod::WorldHull => (
+            width_control.hull_width_world,
+            overlap_modes.world_hull_overlap_mode,
+        ),
+        OutlineMethod::ScreenHull => (
+            width_control.shell_width_px,
+            overlap_modes.screen_hull_overlap_mode,
+        ),
     };
 
     for mut outline in &mut outline_query {
-        *outline = rebuilt_outline_for_mode(&outline, mode_toggle.method, width, overlap);
+        *outline =
+            rebuilt_outline_for_mode(&outline, mode_toggle.outline_method, width, overlap_mode);
     }
 }
 
 const fn rebuilt_outline_for_mode(
     current: &Outline,
-    mode: OutlineMethod,
+    outline_method: OutlineMethod,
     width: f32,
-    overlap: OverlapMode,
+    overlap_mode: OverlapMode,
 ) -> Outline {
-    match mode {
+    match outline_method {
         OutlineMethod::JumpFlood => Outline::jump_flood(width)
             .with_intensity(current.intensity)
             .with_color(current.color)
@@ -320,12 +327,12 @@ const fn rebuilt_outline_for_mode(
         OutlineMethod::WorldHull => Outline::world_hull(width)
             .with_intensity(current.intensity)
             .with_color(current.color)
-            .with_overlap(overlap)
+            .with_overlap(overlap_mode)
             .build(),
         OutlineMethod::ScreenHull => Outline::screen_hull(width)
             .with_intensity(current.intensity)
             .with_color(current.color)
-            .with_overlap(overlap)
+            .with_overlap(overlap_mode)
             .build(),
     }
 }
@@ -342,7 +349,7 @@ fn adjust_outline_width(
         return;
     }
 
-    match mode_toggle.method {
+    match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => {
             let mut next = width_control.jump_flood_width_px;
             if decrease {
@@ -388,7 +395,7 @@ fn adjust_outline_width(
 fn adjust_overlap(
     input: Res<ButtonInput<KeyCode>>,
     mode_toggle: Res<OutlineModeToggle>,
-    mut overlap_control: ResMut<OverlapControl>,
+    mut overlap_modes: ResMut<OverlapModes>,
     mut outline_query: Query<&mut Outline>,
 ) {
     let decrease = input.just_pressed(KeyCode::Minus);
@@ -397,9 +404,9 @@ fn adjust_overlap(
         return;
     }
 
-    let Some(current) = (match mode_toggle.method {
-        OutlineMethod::WorldHull => Some(&mut overlap_control.hull),
-        OutlineMethod::ScreenHull => Some(&mut overlap_control.shell),
+    let Some(current) = (match mode_toggle.outline_method {
+        OutlineMethod::WorldHull => Some(&mut overlap_modes.world_hull_overlap_mode),
+        OutlineMethod::ScreenHull => Some(&mut overlap_modes.screen_hull_overlap_mode),
         OutlineMethod::JumpFlood => None,
     }) else {
         return;
@@ -419,16 +426,16 @@ fn adjust_overlap(
 fn update_ui(
     mode_toggle: Res<OutlineModeToggle>,
     width_control: Res<OutlineWidthControl>,
-    overlap_control: Res<OverlapControl>,
+    overlap_modes: Res<OverlapModes>,
     mut text_query: Single<&mut Text, With<StatusText>>,
 ) {
-    let mode_line = match mode_toggle.method {
+    let mode_line = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => "Mode: JumpFlood (M)",
         OutlineMethod::WorldHull => "Mode: WorldHull (M)",
         OutlineMethod::ScreenHull => "Mode: ScreenHull (M)",
     };
 
-    let width_line = match mode_toggle.method {
+    let width_line = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => {
             format!(
                 "Width: {:.1} px (Left / Right)",
@@ -449,18 +456,18 @@ fn update_ui(
         },
     };
 
-    let overlap_line = match mode_toggle.method {
+    let overlap_line = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => String::new(),
         OutlineMethod::WorldHull => {
             format!(
                 "Overlap: {} (- / +)",
-                overlap_mode_label(overlap_control.hull)
+                overlap_mode_label(overlap_modes.world_hull_overlap_mode)
             )
         },
         OutlineMethod::ScreenHull => {
             format!(
                 "Overlap: {} (- / +)",
-                overlap_mode_label(overlap_control.shell)
+                overlap_mode_label(overlap_modes.screen_hull_overlap_mode)
             )
         },
     };
