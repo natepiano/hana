@@ -1,6 +1,6 @@
 //! Tuning thresholds for cable observers.
 
-// Alignment
+// alignment
 /// Dot-product threshold above which the alignment observer skips writing back
 /// to `Transform`. Prevents an infinite recompute cycle of geometry → alignment
 /// → geometry.
