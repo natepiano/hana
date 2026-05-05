@@ -17,14 +17,14 @@ pub(crate) fn calculate_from_translation_and_focus(
     let translation = translation.into();
     let focus = focus.into();
     let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
-    let comp_vec = *translation - *focus;
-    let mut radius = comp_vec.length();
+    let component_vector = *translation - *focus;
+    let mut radius = component_vector.length();
     if radius < f32::EPSILON {
         radius = MIN_ORBIT_RADIUS;
     }
-    let comp_vec = axis * comp_vec;
-    let yaw = comp_vec.x.atan2(comp_vec.z);
-    let pitch = (comp_vec.y / radius).asin();
+    let component_vector = axis * component_vector;
+    let yaw = component_vector.x.atan2(component_vector.z);
+    let pitch = (component_vector.y / radius).asin();
     (yaw, pitch, radius)
 }
 

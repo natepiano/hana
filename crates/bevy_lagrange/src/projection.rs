@@ -83,7 +83,7 @@ impl ProjectionParams {
 
 /// Projects a world-space point to normalized screen coordinates.
 ///
-/// Returns `(norm_x, norm_y, depth)` or `None` if the point is behind the camera
+/// Returns `(normalized_x, normalized_y, depth)` or `None` if the point is behind the camera
 /// (perspective only — orthographic points are always valid).
 pub(crate) fn project_point(
     point: Vec3,
@@ -101,11 +101,11 @@ pub(crate) fn project_point(
     }
     let x = relative.dot(camera.right);
     let y = relative.dot(camera.up);
-    let (norm_x, norm_y) = match mode {
+    let (normalized_x, normalized_y) = match mode {
         ProjectionMode::Orthographic => (x, y),
         ProjectionMode::Perspective => (x / depth, y / depth),
     };
-    Some((norm_x, norm_y, depth))
+    Some((normalized_x, normalized_y, depth))
 }
 
 /// Extracts the aspect ratio from a `Projection`, using `viewport_size` for
@@ -154,25 +154,25 @@ pub(crate) struct PointDepths {
 #[derive(Debug, Clone)]
 pub(crate) struct ScreenSpaceBounds {
     /// Distance from left edge (positive = inside, negative = outside)
-    pub left_margin:   f32,
+    pub left_margin:      f32,
     /// Distance from right edge (positive = inside, negative = outside)
-    pub right_margin:  f32,
+    pub right_margin:     f32,
     /// Distance from top edge (positive = inside, negative = outside)
-    pub top_margin:    f32,
+    pub top_margin:       f32,
     /// Distance from bottom edge (positive = inside, negative = outside)
-    pub bottom_margin: f32,
+    pub bottom_margin:    f32,
     /// Minimum normalized x coordinate in screen space
-    pub min_norm_x:    f32,
+    pub min_normalized_x: f32,
     /// Maximum normalized x coordinate in screen space
-    pub max_norm_x:    f32,
+    pub max_normalized_x: f32,
     /// Minimum normalized y coordinate in screen space
-    pub min_norm_y:    f32,
+    pub min_normalized_y: f32,
     /// Maximum normalized y coordinate in screen space
-    pub max_norm_y:    f32,
+    pub max_normalized_y: f32,
     /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
-    pub half_extent_x: f32,
+    pub half_extent_x:    f32,
     /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
-    pub half_extent_y: f32,
+    pub half_extent_y:    f32,
 }
 
 impl ScreenSpaceBounds {
@@ -196,10 +196,10 @@ impl ScreenSpaceBounds {
 
         let camera_basis = CameraBasis::from(camera_global);
 
-        let mut min_norm_x = f32::INFINITY;
-        let mut max_norm_x = f32::NEG_INFINITY;
-        let mut min_norm_y = f32::INFINITY;
-        let mut max_norm_y = f32::NEG_INFINITY;
+        let mut min_normalized_x = f32::INFINITY;
+        let mut max_normalized_x = f32::NEG_INFINITY;
+        let mut min_normalized_y = f32::INFINITY;
+        let mut max_normalized_y = f32::NEG_INFINITY;
         let mut min_x = 0.0_f32;
         let mut max_x = 0.0_f32;
         let mut min_y = 0.0_f32;
@@ -208,45 +208,45 @@ impl ScreenSpaceBounds {
         let mut sum = 0.0_f32;
 
         for point in points {
-            let (norm_x, norm_y, depth) = project_point(*point, &camera_basis, mode)?;
+            let (normalized_x, normalized_y, depth) = project_point(*point, &camera_basis, mode)?;
 
             #[cfg(feature = "fit_overlay")]
             {
                 sum += depth;
             }
 
-            if norm_x < min_norm_x {
-                min_norm_x = norm_x;
+            if normalized_x < min_normalized_x {
+                min_normalized_x = normalized_x;
                 min_x = depth;
             }
-            if norm_x > max_norm_x {
-                max_norm_x = norm_x;
+            if normalized_x > max_normalized_x {
+                max_normalized_x = normalized_x;
                 max_x = depth;
             }
-            if norm_y < min_norm_y {
-                min_norm_y = norm_y;
+            if normalized_y < min_normalized_y {
+                min_normalized_y = normalized_y;
                 min_y = depth;
             }
-            if norm_y > max_norm_y {
-                max_norm_y = norm_y;
+            if normalized_y > max_normalized_y {
+                max_normalized_y = normalized_y;
                 max_y = depth;
             }
         }
 
-        let left_margin = min_norm_x - (-half_extent_x);
-        let right_margin = half_extent_x - max_norm_x;
-        let bottom_margin = min_norm_y - (-half_extent_y);
-        let top_margin = half_extent_y - max_norm_y;
+        let left_margin = min_normalized_x - (-half_extent_x);
+        let right_margin = half_extent_x - max_normalized_x;
+        let bottom_margin = min_normalized_y - (-half_extent_y);
+        let top_margin = half_extent_y - max_normalized_y;
 
         let bounds = Self {
             left_margin,
             right_margin,
             top_margin,
             bottom_margin,
-            min_norm_x,
-            max_norm_x,
-            min_norm_y,
-            max_norm_y,
+            min_normalized_x,
+            max_normalized_x,
+            min_normalized_y,
+            max_normalized_y,
             half_extent_x,
             half_extent_y,
         };
@@ -267,8 +267,8 @@ impl ScreenSpaceBounds {
 
     /// Returns the center of the bounds in normalized screen space.
     pub(crate) const fn center(&self) -> (f32, f32) {
-        let center_x = (self.min_norm_x + self.max_norm_x) * 0.5;
-        let center_y = (self.min_norm_y + self.max_norm_y) * 0.5;
+        let center_x = (self.min_normalized_x + self.max_normalized_x) * 0.5;
+        let center_y = (self.min_normalized_y + self.max_normalized_y) * 0.5;
         (center_x, center_y)
     }
 }

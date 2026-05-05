@@ -54,12 +54,15 @@ pub use events::ZoomEnd;
 pub use events::ZoomToFit;
 #[cfg(feature = "fit_overlay")]
 pub use fit_overlay::FitTargetOverlayConfig;
+#[cfg(feature = "fit_overlay")]
+use fit_overlay::ZoomOverlayPlugin;
 pub use input::ButtonZoomAxis;
 pub use input::InputControl;
 use input::MouseKeyTracker;
 pub use input::TrackpadBehavior;
 pub use input::TrackpadInput;
 pub use input::ZoomDirection;
+use observers::ObserverPlugin;
 pub use orbit_cam::ActiveCameraData;
 pub use orbit_cam::CameraInputDetection;
 pub use orbit_cam::FocusBoundsShape;
@@ -123,10 +126,10 @@ impl Plugin for LagrangePlugin {
                 );
         }
 
-        app.add_plugins(observers::ObserverPlugin)
+        app.add_plugins(ObserverPlugin)
             .add_systems(Update, animation::process_camera_move_list);
 
         #[cfg(feature = "fit_overlay")]
-        app.add_plugins(fit_overlay::ZoomOverlayPlugin);
+        app.add_plugins(ZoomOverlayPlugin);
     }
 }

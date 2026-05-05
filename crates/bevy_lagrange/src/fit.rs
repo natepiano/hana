@@ -5,6 +5,8 @@
 //! with a specified margin.
 
 use core::fmt;
+use core::fmt::Display;
+use core::fmt::Formatter;
 
 use bevy::prelude::*;
 use bevy_kana::Position;
@@ -20,6 +22,7 @@ use super::constants::MIN_MARGIN;
 use super::constants::MIN_RADIUS_MULTIPLIER;
 use super::constants::TOLERANCE;
 use super::projection;
+use super::projection::ProjectionMode;
 use super::projection::ScreenSpaceBounds;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
@@ -63,8 +66,8 @@ pub(crate) enum FitError {
     UnsupportedProjection,
 }
 
-impl fmt::Display for FitError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for FitError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoViewport => write!(f, "camera viewport size is unavailable"),
             Self::PointsBehindCamera => {
@@ -82,8 +85,8 @@ impl fmt::Display for FitError {
 /// Computes the target margins for the constraining dimension based on aspect ratios.
 /// Returns `(target_margin_x, target_margin_y)`.
 const fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f32) -> (f32, f32) {
-    let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
-    let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
+    let horizontal_extent = bounds.max_normalized_x - bounds.min_normalized_x;
+    let vertical_extent = bounds.max_normalized_y - bounds.min_normalized_y;
 
     // Guard against degenerate screen-space extents (edge-on flat objects).
     // When one dimension is near-zero, fit based on the non-degenerate dimension only.
@@ -128,7 +131,7 @@ struct FitParams {
     rotation:             Quat,
     aspect_ratio:         f32,
     ortho_fixed_distance: Option<f32>,
-    projection_mode:      projection::ProjectionMode,
+    projection_mode:      ProjectionMode,
     zoom_multiplier:      f32,
 }
 
@@ -167,11 +170,10 @@ pub(crate) fn calculate_fit(
     }
 
     let mode_and_distance = match projection {
-        Projection::Perspective(_) => Some((projection::ProjectionMode::Perspective, None)),
-        Projection::Orthographic(o) => Some((
-            projection::ProjectionMode::Orthographic,
-            Some((o.near + o.far) * 0.5),
-        )),
+        Projection::Perspective(_) => Some((ProjectionMode::Perspective, None)),
+        Projection::Orthographic(o) => {
+            Some((ProjectionMode::Orthographic, Some((o.near + o.far) * 0.5)))
+        },
         Projection::Custom(_) => None,
     };
     let Some((projection_mode, ortho_fixed_distance)) = mode_and_distance else {
@@ -207,8 +209,8 @@ const fn find_constraining_margin(
 ) -> (f32, f32, &'static str) {
     let h_min = bounds.left_margin.min(bounds.right_margin);
     let v_min = bounds.top_margin.min(bounds.bottom_margin);
-    let vertical_extent = bounds.max_norm_y - bounds.min_norm_y;
-    let horizontal_extent = bounds.max_norm_x - bounds.min_norm_x;
+    let vertical_extent = bounds.max_normalized_y - bounds.min_normalized_y;
+    let horizontal_extent = bounds.max_normalized_x - bounds.min_normalized_x;
 
     if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
         (h_min, target_margin_x, "H")
@@ -399,8 +401,8 @@ fn refine_focus_centering(
         // Centering depths: perspective uses harmonic mean for perspective-correct
         // centering. Ortho uses 1.0 since projection is depth-independent.
         let (centering_depth_x, centering_depth_y) = match projection_mode {
-            projection::ProjectionMode::Orthographic => (1.0, 1.0),
-            projection::ProjectionMode::Perspective => (
+            ProjectionMode::Orthographic => (1.0, 1.0),
+            ProjectionMode::Perspective => (
                 2.0 * depths.min_x * depths.max_x / (depths.min_x + depths.max_x),
                 2.0 * depths.min_y * depths.max_y / (depths.min_y + depths.max_y),
             ),

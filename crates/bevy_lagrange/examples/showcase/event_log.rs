@@ -57,7 +57,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             font_size: UI_FONT_SIZE,
             ..default()
         },
-        TextColor(Color::srgba(0.7, 0.7, 0.7, 0.7)),
+        TextColor(HINT_TEXT_COLOR),
         TextLayout::new_with_justify(Justify::Left),
         Node {
             position_type: PositionType::Absolute,
@@ -78,7 +78,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             font_size: UI_FONT_SIZE,
             ..default()
         },
-        TextColor(Color::srgba(0.7, 0.7, 0.7, 0.7)),
+        TextColor(HINT_TEXT_COLOR),
         TextLayout::new_with_justify(Justify::Left),
         Node {
             position_type: PositionType::Absolute,

@@ -56,8 +56,9 @@ pub(super) fn project_vertices_to_2d(
     vertices
         .iter()
         .filter_map(|v| {
-            let (norm_x, norm_y, _) = projection::project_point(*v, camera, projection_mode)?;
-            Some((norm_x, norm_y))
+            let (normalized_x, normalized_y, _) =
+                projection::project_point(*v, camera, projection_mode)?;
+            Some((normalized_x, normalized_y))
         })
         .collect()
 }

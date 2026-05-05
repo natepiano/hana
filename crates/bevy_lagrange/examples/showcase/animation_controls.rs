@@ -166,9 +166,9 @@ pub(crate) fn toggle_projection(
             Projection::Perspective(_) => {
                 *projection = Projection::from(OrthographicProjection {
                     scaling_mode: ScalingMode::FixedVertical {
-                        viewport_height: 1.0,
+                        viewport_height: ORTHOGRAPHIC_VIEWPORT_HEIGHT,
                     },
-                    far: 40.0,
+                    far: ORTHOGRAPHIC_FAR_PLANE,
                     ..OrthographicProjection::default_3d()
                 });
                 if !logged {

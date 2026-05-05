@@ -105,12 +105,12 @@ pub(crate) fn toggle_second_window(
             font_size: PAUSED_OVERLAY_FONT_SIZE,
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.4)),
+        TextColor(OVERLAY_TEXT_COLOR),
         TextLayout::new_with_justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Percent(PAUSED_OVERLAY_TOP_PERCENT),
-            width: Val::Percent(100.0),
+            width: Val::Percent(FULL_WIDTH_PERCENT),
             ..default()
         },
         UiTargetCamera(camera),

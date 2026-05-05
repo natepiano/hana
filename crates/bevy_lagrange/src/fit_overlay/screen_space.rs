@@ -47,17 +47,17 @@ const fn screen_edges_normalized(bounds: &ScreenSpaceBounds) -> (f32, f32, f32, 
 /// Returns the clamped vertical center of the bounds within the screen edges.
 const fn clamped_center_y(bounds: &ScreenSpaceBounds, bottom_edge: f32, top_edge: f32) -> f32 {
     bounds
-        .min_norm_y
+        .min_normalized_y
         .max(bottom_edge)
-        .midpoint(bounds.max_norm_y.min(top_edge))
+        .midpoint(bounds.max_normalized_y.min(top_edge))
 }
 
 /// Returns the clamped horizontal center of the bounds within the screen edges.
 const fn clamped_center_x(bounds: &ScreenSpaceBounds, left_edge: f32, right_edge: f32) -> f32 {
     bounds
-        .min_norm_x
+        .min_normalized_x
         .max(left_edge)
-        .midpoint(bounds.max_norm_x.min(right_edge))
+        .midpoint(bounds.max_normalized_x.min(right_edge))
 }
 
 /// Returns the center of a boundary edge in normalized space.
@@ -68,21 +68,21 @@ pub(super) const fn boundary_edge_center(
     let (left_edge, right_edge, top_edge, bottom_edge) = screen_edges_normalized(bounds);
 
     match edge {
-        Edge::Left if bounds.min_norm_x > left_edge => Some((
-            bounds.min_norm_x,
+        Edge::Left if bounds.min_normalized_x > left_edge => Some((
+            bounds.min_normalized_x,
             clamped_center_y(bounds, bottom_edge, top_edge),
         )),
-        Edge::Right if bounds.max_norm_x < right_edge => Some((
-            bounds.max_norm_x,
+        Edge::Right if bounds.max_normalized_x < right_edge => Some((
+            bounds.max_normalized_x,
             clamped_center_y(bounds, bottom_edge, top_edge),
         )),
-        Edge::Top if bounds.max_norm_y < top_edge => Some((
+        Edge::Top if bounds.max_normalized_y < top_edge => Some((
             clamped_center_x(bounds, left_edge, right_edge),
-            bounds.max_norm_y,
+            bounds.max_normalized_y,
         )),
-        Edge::Bottom if bounds.min_norm_y > bottom_edge => Some((
+        Edge::Bottom if bounds.min_normalized_y > bottom_edge => Some((
             clamped_center_x(bounds, left_edge, right_edge),
-            bounds.min_norm_y,
+            bounds.min_normalized_y,
         )),
         _ => None,
     }
@@ -106,15 +106,15 @@ pub(super) const fn screen_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -
 /// For orthographic, coordinates are already in world units — `avg_depth` is only
 /// used for the forward component to position the gizmo plane.
 pub(super) fn normalized_to_world(
-    norm_x: f32,
-    norm_y: f32,
+    normalized_x: f32,
+    normalized_y: f32,
     camera: &CameraBasis,
     avg_depth: f32,
     projection_mode: ProjectionMode,
 ) -> Vec3 {
     let (world_x, world_y) = match projection_mode {
-        ProjectionMode::Orthographic => (norm_x, norm_y),
-        ProjectionMode::Perspective => (norm_x * avg_depth, norm_y * avg_depth),
+        ProjectionMode::Orthographic => (normalized_x, normalized_y),
+        ProjectionMode::Perspective => (normalized_x * avg_depth, normalized_y * avg_depth),
     };
     *camera.position + camera.right * world_x + camera.up * world_y + camera.forward * avg_depth
 }
@@ -135,14 +135,14 @@ pub(super) const fn margin_percentage(bounds: &ScreenSpaceBounds, edge: Edge) ->
 
 /// Converts a normalized screen-space coordinate to viewport pixels.
 pub(super) fn norm_to_viewport(
-    norm_x: f32,
-    norm_y: f32,
+    normalized_x: f32,
+    normalized_y: f32,
     half_extent_x: f32,
     half_extent_y: f32,
     viewport_size: Vec2,
 ) -> ScreenPosition {
     ScreenPosition::new(
-        (norm_x / half_extent_x + 1.0) * 0.5 * viewport_size.x,
-        (1.0 - norm_y / half_extent_y) * 0.5 * viewport_size.y,
+        (normalized_x / half_extent_x + 1.0) * 0.5 * viewport_size.x,
+        (1.0 - normalized_y / half_extent_y) * 0.5 * viewport_size.y,
     )
 }

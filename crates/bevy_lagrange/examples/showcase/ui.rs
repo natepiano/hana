@@ -35,7 +35,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             font_size: UI_FONT_SIZE,
             ..default()
         },
-        TextColor(Color::srgba(0.7, 0.7, 0.7, 0.7)),
+        TextColor(HINT_TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(UI_SCREEN_PADDING_PIXELS),
@@ -55,7 +55,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             font_size: UI_FONT_SIZE,
             ..default()
         },
-        TextColor(Color::srgba(0.7, 0.7, 0.7, 0.7)),
+        TextColor(HINT_TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(CONFLICT_POLICY_HINT_BOTTOM_PIXELS),
@@ -75,12 +75,12 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             font_size: PAUSED_OVERLAY_FONT_SIZE,
             ..default()
         },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.4)),
+        TextColor(OVERLAY_TEXT_COLOR),
         TextLayout::new_with_justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Percent(PAUSED_OVERLAY_TOP_PERCENT),
-            width: Val::Percent(100.0),
+            width: Val::Percent(FULL_WIDTH_PERCENT),
             ..default()
         },
         Visibility::Hidden,

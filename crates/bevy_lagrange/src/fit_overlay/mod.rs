@@ -10,6 +10,7 @@ mod fit_target_bounds;
 mod labels;
 mod screen_space;
 
+use bevy::gizmos::GizmoPlugin;
 use bevy::prelude::*;
 use fit_target_bounds::FitTargetGizmo;
 pub use fit_target_bounds::FitTargetOverlayConfig;
@@ -21,7 +22,7 @@ pub(crate) struct ZoomOverlayPlugin;
 
 impl Plugin for ZoomOverlayPlugin {
     fn build(&self, app: &mut App) {
-        if app.is_plugin_added::<bevy::gizmos::GizmoPlugin>() {
+        if app.is_plugin_added::<GizmoPlugin>() {
             app.init_gizmo_group::<FitTargetGizmo>();
         }
 

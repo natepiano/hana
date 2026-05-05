@@ -13,8 +13,6 @@
 
 mod constants;
 
-use std::time::Duration;
-
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimationBegin;
@@ -34,7 +32,19 @@ use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
+use crate::constants::FIT_DURATION;
+use crate::constants::FIT_MARGIN;
+use crate::constants::GROUND_COLOR;
+use crate::constants::GROUND_SIZE;
+use crate::constants::LIGHT_TRANSLATION;
+use crate::constants::LOOK_AT_DURATION;
+use crate::constants::REFERENCE_CUBE_COLOR;
+use crate::constants::REFERENCE_CUBE_SIZE;
+use crate::constants::REFERENCE_CUBE_TRANSLATION;
 use crate::constants::START_POS;
+use crate::constants::TARGET_COLOR;
+use crate::constants::TARGET_SIZE;
+use crate::constants::TARGET_TRANSLATION;
 
 #[derive(Component)]
 struct Target;
@@ -61,21 +71,25 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(10.0, 10.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        MeshMaterial3d(materials.add(GROUND_COLOR)),
     ));
     // Target cube — off to the right so it's barely in view
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(3.5, 0.5, 0.0),
+        Mesh3d(meshes.add(Cuboid::new(TARGET_SIZE.x, TARGET_SIZE.y, TARGET_SIZE.z))),
+        MeshMaterial3d(materials.add(TARGET_COLOR)),
+        Transform::from_translation(TARGET_TRANSLATION),
         Target,
     ));
     // Gray cube near origin — what the camera starts focused on
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.5, 0.5, 0.5))),
-        MeshMaterial3d(materials.add(Color::srgb(0.5, 0.5, 0.5))),
-        Transform::from_xyz(0.0, 0.25, 0.0),
+        Mesh3d(meshes.add(Cuboid::new(
+            REFERENCE_CUBE_SIZE.x,
+            REFERENCE_CUBE_SIZE.y,
+            REFERENCE_CUBE_SIZE.z,
+        ))),
+        MeshMaterial3d(materials.add(REFERENCE_CUBE_COLOR)),
+        Transform::from_translation(REFERENCE_CUBE_TRANSLATION),
     ));
     // Light
     commands.spawn((
@@ -83,7 +97,7 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera — close to the gray cube, target cube just visible on the right
     commands.spawn((
@@ -124,22 +138,22 @@ fn keyboard_input(
     if keys.just_pressed(KeyCode::Space) {
         commands.trigger(
             ZoomToFit::new(camera, target)
-                .margin(0.15)
-                .duration(Duration::from_millis(800)),
+                .margin(FIT_MARGIN)
+                .duration(FIT_DURATION),
         );
         info!("ZoomToFit triggered");
     }
 
     if keys.just_pressed(KeyCode::KeyL) {
-        commands.trigger(LookAt::new(camera, target).duration(Duration::from_millis(600)));
+        commands.trigger(LookAt::new(camera, target).duration(LOOK_AT_DURATION));
         info!("LookAt triggered");
     }
 
     if keys.just_pressed(KeyCode::KeyK) {
         commands.trigger(
             LookAtAndZoomToFit::new(camera, target)
-                .margin(0.15)
-                .duration(Duration::from_millis(800)),
+                .margin(FIT_MARGIN)
+                .duration(FIT_DURATION),
         );
         info!("LookAtAndZoomToFit triggered");
     }

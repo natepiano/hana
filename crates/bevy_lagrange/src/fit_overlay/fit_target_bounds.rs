@@ -113,29 +113,29 @@ fn create_screen_corners(
 ) -> [Vec3; 4] {
     [
         screen_space::normalized_to_world(
-            bounds.min_norm_x,
-            bounds.min_norm_y,
+            bounds.min_normalized_x,
+            bounds.min_normalized_y,
             camera,
             avg_depth,
             projection_mode,
         ),
         screen_space::normalized_to_world(
-            bounds.max_norm_x,
-            bounds.min_norm_y,
+            bounds.max_normalized_x,
+            bounds.min_normalized_y,
             camera,
             avg_depth,
             projection_mode,
         ),
         screen_space::normalized_to_world(
-            bounds.max_norm_x,
-            bounds.max_norm_y,
+            bounds.max_normalized_x,
+            bounds.max_normalized_y,
             camera,
             avg_depth,
             projection_mode,
         ),
         screen_space::normalized_to_world(
-            bounds.min_norm_x,
-            bounds.max_norm_y,
+            bounds.min_normalized_x,
+            bounds.max_normalized_y,
             camera,
             avg_depth,
             projection_mode,
@@ -451,8 +451,8 @@ fn draw_bounds_for_camera(
     // "Screen space bounds" label
     if let Some(viewport_size) = viewport_size {
         let upper_left = screen_space::norm_to_viewport(
-            bounds.min_norm_x,
-            bounds.max_norm_y,
+            bounds.min_normalized_x,
+            bounds.max_normalized_y,
             bounds.half_extent_x,
             bounds.half_extent_y,
             viewport_size,

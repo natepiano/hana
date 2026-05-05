@@ -6,8 +6,6 @@
 
 mod constants;
 
-use std::time::Duration;
-
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -19,7 +17,18 @@ use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-use crate::constants::ZOOM_DURATION_MILLIS;
+use crate::constants::CAMERA_FOCUS;
+use crate::constants::CAMERA_PITCH;
+use crate::constants::CAMERA_RADIUS;
+use crate::constants::CAMERA_TRACKPAD_SENSITIVITY;
+use crate::constants::CAMERA_TRANSLATION;
+use crate::constants::CAMERA_YAW;
+use crate::constants::CUBE_COLOR;
+use crate::constants::CUBE_TRANSLATION;
+use crate::constants::GROUND_COLOR;
+use crate::constants::GROUND_SIZE;
+use crate::constants::LIGHT_TRANSLATION;
+use crate::constants::ZOOM_DURATION;
 use crate::constants::ZOOM_MARGIN_MESH;
 use crate::constants::ZOOM_MARGIN_SCENE;
 
@@ -47,9 +56,9 @@ fn setup(
     // Ground plane
     let ground = commands
         .spawn((
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(12.0, 12.0))),
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgba(0.3, 0.5, 0.3, 0.8),
+                base_color: GROUND_COLOR,
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
@@ -66,10 +75,10 @@ fn setup(
         .spawn((
             Mesh3d(meshes.add(Cuboid::default())),
             MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.7, 0.6),
+                base_color: CUBE_COLOR,
                 ..default()
             })),
-            Transform::from_xyz(0.0, 1.0, 0.0),
+            Transform::from_translation(CUBE_TRANSLATION),
         ))
         .observe(on_mesh_clicked);
 
@@ -79,30 +88,30 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_translation(LIGHT_TRANSLATION).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
     // Camera — pitch=0 reproduces the edge-on degenerate case when `ZoomToFit`
     // targets the ground plane.
     commands.spawn((
         OrbitCam {
-            pitch: Some(0.0),
-            yaw: Some(0.0),
-            radius: Some(5.0),
-            focus: Vec3::new(0.0, 1.0, 0.0),
+            pitch: Some(CAMERA_PITCH),
+            yaw: Some(CAMERA_YAW),
+            radius: Some(CAMERA_RADIUS),
+            focus: CAMERA_FOCUS,
             button_orbit: MouseButton::Middle,
             button_pan: MouseButton::Middle,
             modifier_pan: Some(KeyCode::ShiftLeft),
             input_control: Some(InputControl {
                 trackpad: Some(TrackpadInput {
                     behavior:    TrackpadBehavior::blender_default(),
-                    sensitivity: 0.5,
+                    sensitivity: CAMERA_TRACKPAD_SENSITIVITY,
                 }),
                 ..default()
             }),
             ..default()
         },
-        Transform::from_xyz(0.0, 1.0, 5.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        Transform::from_translation(CAMERA_TRANSLATION).looking_at(CAMERA_FOCUS, Vec3::Y),
     ));
 }
 
@@ -114,7 +123,7 @@ fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
     commands.trigger(
         ZoomToFit::new(camera, click.entity)
             .margin(ZOOM_MARGIN_MESH)
-            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS)),
+            .duration(ZOOM_DURATION),
     );
 }
 
@@ -126,6 +135,6 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
     commands.trigger(
         ZoomToFit::new(camera, scene.0)
             .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ZOOM_DURATION_MILLIS)),
+            .duration(ZOOM_DURATION),
     );
 }

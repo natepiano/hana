@@ -14,10 +14,6 @@
 
 mod constants;
 
-use std::f32::consts::TAU;
-use std::time::Duration;
-
-use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimateToFit;
@@ -34,8 +30,27 @@ use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
+use crate::constants::ANIMATE_TO_FIT_DURATION;
+use crate::constants::ANIMATE_TO_FIT_MARGIN;
+use crate::constants::ANIMATE_TO_FIT_PITCH;
+use crate::constants::ANIMATE_TO_FIT_YAW;
+use crate::constants::GROUND_COLOR;
+use crate::constants::GROUND_SIZE;
 use crate::constants::INSTRUCTIONS_FONT_SIZE;
+use crate::constants::LIGHT_TRANSLATION;
+use crate::constants::MANUAL_MODE_SMOOTHNESS_ACTIVE;
+use crate::constants::MANUAL_MODE_SMOOTHNESS_INACTIVE;
+use crate::constants::MANUAL_ORBIT_PITCH_AMPLITUDE;
+use crate::constants::MANUAL_ORBIT_RADIUS_BASE;
+use crate::constants::MANUAL_ORBIT_RADIUS_DELTA;
+use crate::constants::MANUAL_ORBIT_RADIUS_FREQUENCY;
+use crate::constants::MANUAL_ORBIT_YAW_RADIANS_PER_SECOND;
+use crate::constants::PLAY_ANIMATION_FOCUS;
+use crate::constants::PLAY_ANIMATION_STEPS;
 use crate::constants::START_POS;
+use crate::constants::TARGET_COLOR;
+use crate::constants::TARGET_SIZE;
+use crate::constants::TARGET_TRANSLATION;
 
 #[derive(Component)]
 struct Target;
@@ -76,14 +91,14 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(10.0, 10.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        MeshMaterial3d(materials.add(GROUND_COLOR)),
     ));
     // Target cube
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.5, 1.5, 1.5))),
-        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-        Transform::from_xyz(0.0, 0.75, 0.0),
+        Mesh3d(meshes.add(Cuboid::new(TARGET_SIZE.x, TARGET_SIZE.y, TARGET_SIZE.z))),
+        MeshMaterial3d(materials.add(TARGET_COLOR)),
+        Transform::from_translation(TARGET_TRANSLATION),
         Target,
     ));
     // Light
@@ -92,7 +107,7 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera
     commands.spawn((
@@ -128,9 +143,9 @@ fn stop_manual(manual: &mut ManualAnimationState, cam: &mut OrbitCam) {
             .saved_input_control
             .take()
             .or_else(|| Some(InputControl::default()));
-        cam.orbit_smoothness = 0.8;
-        cam.zoom_smoothness = 0.8;
-        cam.pan_smoothness = 0.8;
+        cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
+        cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
+        cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
         info!("Manual animation OFF");
     }
 }
@@ -158,9 +173,9 @@ fn keyboard_input(
             manual.mode = ManualAnimationMode::Active;
             manual.saved_input_control = cam.input_control;
             cam.input_control = None;
-            cam.orbit_smoothness = 0.0;
-            cam.zoom_smoothness = 0.0;
-            cam.pan_smoothness = 0.0;
+            cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+            cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+            cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
             // Sync so there's no lerp gap
             if let (Some(yaw), Some(pitch)) = (cam.yaw, cam.pitch) {
                 cam.target_yaw = yaw;
@@ -178,10 +193,10 @@ fn keyboard_input(
         };
         commands.trigger(
             AnimateToFit::new(camera, target)
-                .yaw(TAU / 8.0)
-                .pitch(TAU / 12.0)
-                .margin(0.15)
-                .duration(Duration::from_millis(1200)),
+                .yaw(ANIMATE_TO_FIT_YAW)
+                .pitch(ANIMATE_TO_FIT_PITCH)
+                .margin(ANIMATE_TO_FIT_MARGIN)
+                .duration(ANIMATE_TO_FIT_DURATION),
         );
         info!("AnimateToFit triggered");
     }
@@ -189,49 +204,14 @@ fn keyboard_input(
     // PlayAnimation — event-driven multi-step sequence
     if keys.just_pressed(KeyCode::Space) {
         stop_manual(&mut manual, &mut cam);
-        let focus = Vec3::new(0.0, 0.75, 0.0);
-        let moves = [
-            CameraMove::ToOrbit {
-                focus,
-                yaw: 1.5,
-                pitch: 0.2,
-                radius: 4.0,
-                duration: Duration::from_millis(800),
-                easing: EaseFunction::CubicInOut,
-            },
-            CameraMove::ToOrbit {
-                focus,
-                yaw: 2.5,
-                pitch: 1.3,
-                radius: 20.0,
-                duration: Duration::from_millis(1200),
-                easing: EaseFunction::CubicIn,
-            },
-            CameraMove::ToOrbit {
-                focus,
-                yaw: 4.5,
-                pitch: 0.6,
-                radius: 14.0,
-                duration: Duration::from_millis(1200),
-                easing: EaseFunction::SineInOut,
-            },
-            CameraMove::ToOrbit {
-                focus,
-                yaw: 5.5,
-                pitch: 0.1,
-                radius: 2.0,
-                duration: Duration::from_secs(1),
-                easing: EaseFunction::CubicIn,
-            },
-            CameraMove::ToOrbit {
-                focus,
-                yaw: 0.0,
-                pitch: 0.3,
-                radius: 8.0,
-                duration: Duration::from_millis(1200),
-                easing: EaseFunction::BounceOut,
-            },
-        ];
+        let moves = PLAY_ANIMATION_STEPS.map(|step| CameraMove::ToOrbit {
+            focus:    PLAY_ANIMATION_FOCUS,
+            yaw:      step.yaw,
+            pitch:    step.pitch,
+            radius:   step.radius,
+            duration: step.duration,
+            easing:   step.easing,
+        });
 
         commands.trigger(PlayAnimation::new(camera, moves));
         info!("PlayAnimation triggered (5 steps)");
@@ -260,10 +240,12 @@ fn manual_animate(
         return;
     }
     for mut cam in &mut query {
-        cam.target_yaw += 15f32.to_radians() * time.delta_secs();
-        cam.target_pitch = time.elapsed_secs_wrapped().sin() * TAU * 0.1;
-        cam.radius =
-            Some((((time.elapsed_secs_wrapped() * 2.0).cos() + 1.0) * 0.5).mul_add(2.0, 4.0));
+        cam.target_yaw += MANUAL_ORBIT_YAW_RADIANS_PER_SECOND * time.delta_secs();
+        cam.target_pitch = time.elapsed_secs_wrapped().sin() * MANUAL_ORBIT_PITCH_AMPLITUDE;
+        cam.radius = Some(
+            (((time.elapsed_secs_wrapped() * MANUAL_ORBIT_RADIUS_FREQUENCY).cos() + 1.0) * 0.5)
+                .mul_add(MANUAL_ORBIT_RADIUS_DELTA, MANUAL_ORBIT_RADIUS_BASE),
+        );
         cam.force_update = ForceUpdate::Pending;
     }
 }

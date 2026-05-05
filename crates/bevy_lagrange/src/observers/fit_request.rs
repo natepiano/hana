@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::fit;
+use crate::fit::FitSolution;
 use crate::projection;
 
 /// Parameters for a fit calculation request.
@@ -23,7 +24,7 @@ pub(super) fn prepare_fit_for_target(
     children_query: &Query<&Children>,
     global_transform_query: &Query<&GlobalTransform>,
     meshes: &Assets<Mesh>,
-) -> Option<fit::FitSolution> {
+) -> Option<FitSolution> {
     let context = request.context;
     let target = request.target;
     let Some((vertices, geometric_center)) = projection::extract_mesh_vertices(
