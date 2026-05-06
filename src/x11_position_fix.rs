@@ -22,6 +22,7 @@ use x11rb::xcb_ffi::XCBConnection;
 
 use crate::constants::FRAME_EXTENT_COUNT;
 use crate::constants::FRAME_EXTENT_TOP_INDEX;
+use crate::constants::FRAME_EXTENTS_ATOM_NAME;
 use crate::restore::TargetPosition;
 use crate::restore::X11FrameCompensated;
 
@@ -67,7 +68,7 @@ fn query_frame_top_for_entity(entity: Entity) -> Option<i32> {
 fn query_frame_top(window_id: u32) -> Option<i32> {
     let (conn, _) = XCBConnection::connect(None).ok()?;
 
-    let atom_cookie = conn.intern_atom(false, b"_NET_FRAME_EXTENTS").ok()?;
+    let atom_cookie = conn.intern_atom(false, FRAME_EXTENTS_ATOM_NAME).ok()?;
     let atom = atom_cookie.reply().ok()?.atom;
 
     let property_cookie = conn

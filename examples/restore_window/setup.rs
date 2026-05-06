@@ -7,6 +7,8 @@ use bevy::window::WindowResolution;
 use bevy_window_manager::ManagedWindow;
 
 use super::constants::FONT_SIZE;
+use super::constants::MANAGED_WINDOW_NAME_PREFIX;
+use super::constants::MANAGED_WINDOW_TITLE_PREFIX;
 use super::constants::MARGIN;
 use super::constants::SECONDARY_WINDOW_HEIGHT;
 use super::constants::SECONDARY_WINDOW_WIDTH;
@@ -40,8 +42,8 @@ pub(crate) fn on_spawn_managed_window(
     mut counter: ResMut<WindowCounter>,
 ) {
     counter.next += 1;
-    let name = format!("window-{}", counter.next);
-    let title = format!("Managed: {name}");
+    let name = format!("{MANAGED_WINDOW_NAME_PREFIX}{}", counter.next);
+    let title = format!("{MANAGED_WINDOW_TITLE_PREFIX}{name}");
 
     commands.spawn((
         Window {

@@ -19,9 +19,13 @@ use bevy::window::PrimaryWindow;
 use bevy_window_manager::CurrentMonitor;
 use bevy_window_manager::WindowManagerPlugin;
 
+use self::constants::APP_DIRECTORY_NAME;
 use self::constants::FONT_SIZE;
 use self::constants::MARGIN;
 use self::constants::MILLIHERTZ_PER_HERTZ;
+use self::constants::NOT_AVAILABLE_TEXT;
+use self::constants::PRIMARY_WINDOW_TITLE;
+use self::constants::STATE_FILE_NAME;
 
 #[expect(
     clippy::expect_used,
@@ -31,13 +35,13 @@ fn main() {
     // Construct a cross-platform config path manually.
     let config_path = dirs::config_dir()
         .expect("Could not find config directory")
-        .join("my_custom_app")
-        .join("window_state.ron");
+        .join(APP_DIRECTORY_NAME)
+        .join(STATE_FILE_NAME);
 
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Custom Path Example".to_string(),
+                title: PRIMARY_WINDOW_TITLE.to_string(),
                 ..default()
             }),
             ..default()
@@ -85,7 +89,8 @@ fn update_info_text(
         .and_then(|m| m.refresh_rate_millihertz)
         .map(|r| r / MILLIHERTZ_PER_HERTZ);
 
-    let refresh_display = refresh_rate.map_or_else(|| "N/A".into(), |hz| format!("{hz}Hz"));
+    let refresh_display =
+        refresh_rate.map_or_else(|| NOT_AVAILABLE_TEXT.into(), |hz| format!("{hz}Hz"));
 
     text.0 = format!(
         "Window Position: {:?}\n\

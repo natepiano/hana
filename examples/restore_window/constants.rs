@@ -12,7 +12,12 @@ pub(crate) const LABEL_WIDTH: usize = 22;
 pub(crate) const MARGIN: Val = Val::Px(20.0);
 pub(crate) const MIN_COMPARISON_COLUMN_WIDTH: usize = 16;
 
+// primary window
+pub(crate) const PRIMARY_WINDOW_TITLE: &str = "Window Restore - Primary Window";
+
 // secondary window
+pub(crate) const MANAGED_WINDOW_NAME_PREFIX: &str = "window-";
+pub(crate) const MANAGED_WINDOW_TITLE_PREFIX: &str = "Managed: ";
 pub(crate) const SECONDARY_WINDOW_HEIGHT: u32 = 400;
 pub(crate) const SECONDARY_WINDOW_WIDTH: u32 = 600;
 
@@ -21,6 +26,38 @@ pub(crate) const STATE_FILE: &str = "windows.ron";
 
 // test mode
 pub(crate) const TEST_MODE_ENV_VAR: &str = "BWM_TEST_MODE";
+
+// text
+pub(crate) const ACTIVE_VIDEO_MODE_SUFFIX: &str = " <- active";
+pub(crate) const ACTUAL_COLUMN_TITLE: &str = "Actual";
+pub(crate) const AUTOMATIC_TEXT: &str = "Automatic";
+pub(crate) const CURRENT_COLUMN_TITLE: &str = "Current";
+pub(crate) const EFFECTIVE_MODE_LABEL: &str = "Effective Mode:";
+pub(crate) const EXPECTED_COLUMN_TITLE: &str = "Expected";
+pub(crate) const MANAGED_WINDOWS_HEADER: &str = "\nManaged Windows:\n";
+pub(crate) const MODE_LABEL: &str = "Mode:";
+pub(crate) const MONITOR_LABEL: &str = "Monitor:";
+pub(crate) const NO_MANAGED_WINDOWS_TEXT: &str = "  (none)\n";
+pub(crate) const NO_RESTORE_DATA_TEXT: &str = "State: No restore data\n\n";
+pub(crate) const NO_VIDEO_MODES_TEXT: &str = "  (no video modes available)";
+pub(crate) const NONE_TEXT: &str = "None";
+pub(crate) const NON_PRIMARY_MONITOR_MARKER: &str = " -";
+pub(crate) const NOT_AVAILABLE_TEXT: &str = "N/A";
+pub(crate) const POSITION_LOGICAL_LABEL: &str = "Position (logical):";
+pub(crate) const POSITION_PHYSICAL_LABEL: &str = "Position (physical):";
+pub(crate) const PRIMARY_MONITOR_MARKER: &str = " Primary Monitor -";
+pub(crate) const REFRESH_RATE_LABEL: &str = "Refresh Rate:";
+pub(crate) const RESTORED_COLUMN_TITLE: &str = "Restored";
+pub(crate) const SCALE_LABEL: &str = "Scale:";
+pub(crate) const SECONDARY_WINDOW_NAME_LABEL: &str = "Window:";
+pub(crate) const SIZE_LOGICAL_LABEL: &str = "Size (logical):";
+pub(crate) const SIZE_PHYSICAL_LABEL: &str = "Size (physical):";
+pub(crate) const UNKNOWN_MANAGED_WINDOW_NAME: &str = "unknown";
+pub(crate) const VIDEO_MODES_HEADER: &str = "\nVideo Modes (Up/Down to select):\n";
+#[cfg(target_os = "linux")]
+pub(crate) const WAYLAND_PLATFORM_SUFFIX: &str = " (Wayland)";
+#[cfg(target_os = "linux")]
+pub(crate) const X11_PLATFORM_SUFFIX: &str = " (X11)";
 
 // video mode list
 /// When the selected video mode falls below the visible window, scroll down so

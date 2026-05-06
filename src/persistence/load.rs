@@ -5,6 +5,8 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+use super::constants::EXAMPLES_DIRECTORY_NAME;
+use super::constants::RON_EXTENSION;
 use super::format;
 use super::format::WindowKey;
 #[cfg(test)]
@@ -21,12 +23,13 @@ use crate::constants::STATE_FILE;
 pub(crate) fn get_default_state_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe_name = exe.file_stem()?.to_str()?;
-    let is_cargo_example = exe.parent().and_then(Path::file_name) == Some("examples".as_ref());
+    let is_cargo_example =
+        exe.parent().and_then(Path::file_name) == Some(EXAMPLES_DIRECTORY_NAME.as_ref());
 
     if is_cargo_example {
         dirs::config_dir().map(|d| {
             d.join(env!("CARGO_PKG_NAME"))
-                .join(format!("{exe_name}.ron"))
+                .join(format!("{exe_name}{RON_EXTENSION}"))
         })
     } else {
         dirs::config_dir().map(|d| d.join(exe_name).join(STATE_FILE))

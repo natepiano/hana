@@ -11,6 +11,8 @@ use bevy::prelude::*;
 use bevy::window::WindowMode;
 
 use super::constants::SCALE_FACTOR_EPSILON;
+#[cfg(target_os = "linux")]
+use super::constants::WAYLAND_DISPLAY_ENV_VAR;
 use super::restore::FullscreenRestoreState;
 use super::restore::MonitorScaleStrategy;
 use super::restore::WindowRestoreState;
@@ -51,7 +53,7 @@ impl Platform {
     #[must_use]
     #[cfg(target_os = "linux")]
     pub fn detect() -> Self {
-        if std::env::var("WAYLAND_DISPLAY").is_ok_and(|value| !value.is_empty()) {
+        if std::env::var(WAYLAND_DISPLAY_ENV_VAR).is_ok_and(|value| !value.is_empty()) {
             Self::Wayland
         } else {
             Self::X11

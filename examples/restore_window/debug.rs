@@ -32,16 +32,18 @@ pub(crate) fn debug_winit_monitor(
 ) {
     let window_entity = *window;
 
-    let winit_monitor_index: Option<usize> = WINIT_WINDOWS.with(|ww| {
-        let ww = ww.borrow();
-        ww.get_window(window_entity).and_then(|winit_window| {
-            winit_window.current_monitor().and_then(|current_monitor| {
-                let physical_position = current_monitor.position();
-                monitors
-                    .at(physical_position.x, physical_position.y)
-                    .map(|monitor| monitor.index)
+    let winit_monitor_index: Option<usize> = WINIT_WINDOWS.with(|winit_windows| {
+        let winit_windows = winit_windows.borrow();
+        winit_windows
+            .get_window(window_entity)
+            .and_then(|winit_window| {
+                winit_window.current_monitor().and_then(|current_monitor| {
+                    let physical_position = current_monitor.position();
+                    monitors
+                        .at(physical_position.x, physical_position.y)
+                        .map(|monitor| monitor.index)
+                })
             })
-        })
     });
 
     if *cached_monitor != winit_monitor_index {

@@ -81,11 +81,11 @@ impl Monitors {
     /// Coordinates are physical pixels — winit's monitor coordinate space.
     #[must_use]
     pub fn at(&self, physical_x: i32, physical_y: i32) -> Option<&MonitorInfo> {
-        self.list.iter().find(|mon| {
-            physical_x >= mon.physical_position.x
-                && physical_x < mon.physical_position.x + mon.physical_size.x.to_i32()
-                && physical_y >= mon.physical_position.y
-                && physical_y < mon.physical_position.y + mon.physical_size.y.to_i32()
+        self.list.iter().find(|monitor| {
+            physical_x >= monitor.physical_position.x
+                && physical_x < monitor.physical_position.x + monitor.physical_size.x.to_i32()
+                && physical_y >= monitor.physical_position.y
+                && physical_y < monitor.physical_position.y + monitor.physical_size.y.to_i32()
         })
     }
 
@@ -157,20 +157,20 @@ impl Monitors {
         // Find closest monitor by distance to bounding box
         self.list
             .iter()
-            .min_by_key(|mon| {
-                let right = mon.physical_position.x + mon.physical_size.x.to_i32();
-                let bottom = mon.physical_position.y + mon.physical_size.y.to_i32();
+            .min_by_key(|monitor| {
+                let right = monitor.physical_position.x + monitor.physical_size.x.to_i32();
+                let bottom = monitor.physical_position.y + monitor.physical_size.y.to_i32();
 
-                let dx = if physical_x < mon.physical_position.x {
-                    mon.physical_position.x - physical_x
+                let dx = if physical_x < monitor.physical_position.x {
+                    monitor.physical_position.x - physical_x
                 } else if physical_x >= right {
                     physical_x - right + 1
                 } else {
                     0
                 };
 
-                let dy = if physical_y < mon.physical_position.y {
-                    mon.physical_position.y - physical_y
+                let dy = if physical_y < monitor.physical_position.y {
+                    monitor.physical_position.y - physical_y
                 } else if physical_y >= bottom {
                     physical_y - bottom + 1
                 } else {
@@ -188,11 +188,11 @@ fn build_monitors(monitors: &Query<&Monitor>) -> Monitors {
     let list: Vec<_> = monitors
         .iter()
         .enumerate()
-        .map(|(idx, mon)| MonitorInfo {
+        .map(|(idx, monitor)| MonitorInfo {
             index:             idx,
-            scale:             mon.scale_factor,
-            physical_position: mon.physical_position,
-            physical_size:     mon.physical_size(),
+            scale:             monitor.scale_factor,
+            physical_position: monitor.physical_position,
+            physical_size:     monitor.physical_size(),
         })
         .collect();
 
@@ -206,15 +206,15 @@ pub(crate) fn init_monitors(mut commands: Commands, monitors: Query<&Monitor>) {
         "[init_monitors] Found {} monitors",
         monitors_resource.list.len()
     );
-    for mon in &monitors_resource.list {
+    for monitor in &monitors_resource.list {
         debug!(
             "[init_monitors] Monitor {}: pos=({}, {}) size={}x{} scale={}",
-            mon.index,
-            mon.physical_position.x,
-            mon.physical_position.y,
-            mon.physical_size.x,
-            mon.physical_size.y,
-            mon.scale
+            monitor.index,
+            monitor.physical_position.x,
+            monitor.physical_position.y,
+            monitor.physical_size.x,
+            monitor.physical_size.y,
+            monitor.scale
         );
     }
     commands.insert_resource(monitors_resource);
@@ -234,13 +234,13 @@ fn update_monitors(
     if has_changes {
         let monitors_resource = build_monitors(&monitors);
         let current = current_monitor_q.iter().next().flatten();
-        if let Some(cm) = current {
+        if let Some(current_monitor) = current {
             debug!(
                 "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
                 frame_count.0,
                 monitors_resource.list.len(),
-                cm.monitor.index,
-                cm.monitor.scale,
+                current_monitor.monitor.index,
+                current_monitor.monitor.scale,
             );
         } else {
             debug!(

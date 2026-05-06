@@ -1,5 +1,6 @@
 //! Window state persistence: state types, serialization format, and I/O.
 
+mod constants;
 mod format;
 mod load;
 mod save;

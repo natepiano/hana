@@ -11,6 +11,7 @@ use super::WindowKey;
 use super::config::RestoreWindowConfig;
 use super::constants::DEFAULT_SCALE_FACTOR;
 use super::constants::FIRST_DUPLICATE_SUFFIX;
+use super::constants::MANAGED_WINDOW_NAME_SEPARATOR;
 use super::constants::PRIMARY_WINDOW_KEY;
 use super::managed::ManagedWindowRegistry;
 use super::monitors::CurrentMonitor;
@@ -77,7 +78,7 @@ pub(crate) fn on_managed_window_added(
         debug_assert!(false, "Duplicate ManagedWindow name: \"{name}\"");
         let mut suffix = FIRST_DUPLICATE_SUFFIX;
         loop {
-            let candidate = format!("{name}-{suffix}");
+            let candidate = format!("{name}{MANAGED_WINDOW_NAME_SEPARATOR}{suffix}");
             if !registry.names.contains(&candidate) {
                 break candidate;
             }
@@ -274,7 +275,9 @@ pub(crate) fn on_managed_window_load(
     let primary_scale = primary_monitor
         .iter()
         .next()
-        .map_or(DEFAULT_SCALE_FACTOR, |cm| cm.scale);
+        .map_or(DEFAULT_SCALE_FACTOR, |current_monitor| {
+            current_monitor.scale
+        });
 
     restore_managed_window(
         entity,

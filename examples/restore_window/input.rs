@@ -11,12 +11,24 @@ use bevy_window_manager::Monitors;
 #[cfg(target_os = "linux")]
 use bevy_window_manager::Platform;
 
+use super::constants::ACTIVE_VIDEO_MODE_SUFFIX;
 use super::constants::BACKWARD_SCROLL_OFFSET;
 use super::constants::FORWARD_SCROLL_OFFSET;
 use super::constants::MILLIHERTZ_PER_HERTZ;
+use super::constants::MONITOR_LABEL;
+use super::constants::NO_VIDEO_MODES_TEXT;
+use super::constants::NON_PRIMARY_MONITOR_MARKER;
+use super::constants::NOT_AVAILABLE_TEXT;
+use super::constants::PRIMARY_MONITOR_MARKER;
+use super::constants::REFRESH_RATE_LABEL;
+use super::constants::SCALE_LABEL;
 use super::constants::STATE_FILE;
 use super::constants::VIDEO_MODE_CENTER_PADDING;
 use super::constants::VISIBLE_VIDEO_MODE_COUNT;
+#[cfg(target_os = "linux")]
+use super::constants::WAYLAND_PLATFORM_SUFFIX;
+#[cfg(target_os = "linux")]
+use super::constants::X11_PLATFORM_SUFFIX;
 use super::events::ClearStateAndQuit;
 use super::events::QuitApp;
 use super::events::RestoredStates;
@@ -150,7 +162,7 @@ pub(crate) fn format_refresh_rate(window: &Window, monitor_refresh: Option<u32>)
         },
         _ => monitor_refresh,
     };
-    active_refresh.map_or_else(|| "N/A".into(), |hz| format!("{hz}Hz"))
+    active_refresh.map_or_else(|| NOT_AVAILABLE_TEXT.into(), |hz| format!("{hz}Hz"))
 }
 
 pub(crate) fn find_active_video_mode_index(
@@ -190,9 +202,9 @@ pub(crate) fn sync_selected_to_active(
 #[cfg(target_os = "linux")]
 pub(crate) fn platform_suffix() -> &'static str {
     if Platform::detect().is_wayland() {
-        " (Wayland)"
+        WAYLAND_PLATFORM_SUFFIX
     } else {
-        " (X11)"
+        X11_PLATFORM_SUFFIX
     }
 }
 
@@ -201,12 +213,12 @@ pub(crate) const fn platform_suffix() -> &'static str { "" }
 
 pub(crate) fn format_monitor_row(monitor: &CurrentMonitor, refresh_display: &str) -> String {
     let primary_marker = if monitor.index == 0 {
-        " Primary Monitor -"
+        PRIMARY_MONITOR_MARKER
     } else {
-        " -"
+        NON_PRIMARY_MONITOR_MARKER
     };
     format!(
-        "Monitor: {}{primary_marker} Scale: {} - Refresh Rate: {refresh_display}{}",
+        "{MONITOR_LABEL} {}{primary_marker} {SCALE_LABEL} {} - {REFRESH_RATE_LABEL} {refresh_display}{}",
         monitor.index,
         monitor.scale,
         platform_suffix()
@@ -219,7 +231,7 @@ pub(crate) fn build_video_modes_display(
     active_mode_idx: Option<usize>,
 ) -> String {
     if video_modes.is_empty() {
-        return "  (no video modes available)".into();
+        return NO_VIDEO_MODES_TEXT.into();
     }
 
     let selected_idx = selected_idx.min(video_modes.len().saturating_sub(1));
@@ -250,7 +262,7 @@ pub(crate) fn build_video_modes_display(
             let actual_idx = start + i;
             let left_marker = if actual_idx == selected_idx { ">" } else { " " };
             let right_marker = if Some(actual_idx) == active_mode_idx {
-                " <- active"
+                ACTIVE_VIDEO_MODE_SUFFIX
             } else {
                 ""
             };

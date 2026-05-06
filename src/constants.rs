@@ -3,11 +3,16 @@
 // managed window naming
 /// First numeric suffix appended to deduplicate a managed window name (e.g. `name-2`).
 pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
+pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
 
 // persistence
 pub(crate) const CURRENT_STATE_VERSION: u8 = 2;
 pub(crate) const PRIMARY_WINDOW_KEY: &str = "primary";
 pub(crate) const STATE_FILE: &str = "windows.ron";
+
+// platform
+#[cfg(target_os = "linux")]
+pub(crate) const WAYLAND_DISPLAY_ENV_VAR: &str = "WAYLAND_DISPLAY";
 
 // scale factor
 /// Fallback scale factor when the monitor cannot be determined.
@@ -43,6 +48,8 @@ pub(crate) const SUBCLASS_ID: usize = 1;
 /// Number of values in `_NET_FRAME_EXTENTS` (left, right, top, bottom).
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 pub(crate) const FRAME_EXTENT_COUNT: u32 = 4;
+#[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
+pub(crate) const FRAME_EXTENTS_ATOM_NAME: &[u8] = b"_NET_FRAME_EXTENTS";
 /// Index of the "top" extent in `_NET_FRAME_EXTENTS`.
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 pub(crate) const FRAME_EXTENT_TOP_INDEX: usize = 2;

@@ -21,20 +21,23 @@ use bevy::window::PrimaryWindow;
 use bevy_window_manager::CurrentMonitor;
 use bevy_window_manager::WindowManagerPlugin;
 
+use self::constants::APP_NAME;
 use self::constants::FONT_SIZE;
 use self::constants::MARGIN;
 use self::constants::MILLIHERTZ_PER_HERTZ;
+use self::constants::NOT_AVAILABLE_TEXT;
+use self::constants::PRIMARY_WINDOW_TITLE;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Custom App Name Example".to_string(),
+                title: PRIMARY_WINDOW_TITLE.to_string(),
                 ..default()
             }),
             ..default()
         }))
-        .add_plugins(WindowManagerPlugin::with_app_name("my_awesome_game"))
+        .add_plugins(WindowManagerPlugin::with_app_name(APP_NAME))
         .add_systems(Startup, setup)
         .add_systems(Update, update_info_text)
         .run();
@@ -77,7 +80,8 @@ fn update_info_text(
         .and_then(|m| m.refresh_rate_millihertz)
         .map(|r| r / MILLIHERTZ_PER_HERTZ);
 
-    let refresh_display = refresh_rate.map_or_else(|| "N/A".into(), |hz| format!("{hz}Hz"));
+    let refresh_display =
+        refresh_rate.map_or_else(|| NOT_AVAILABLE_TEXT.into(), |hz| format!("{hz}Hz"));
 
     text.0 = format!(
         "Window Position: {:?}\n\

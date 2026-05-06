@@ -49,7 +49,7 @@ pub(crate) fn update_current_monitor(
         let (monitor_info, source) = match (winit_result, position_result, existing) {
             (Some(info), _, _) => (info, "winit"),
             (_, Some(info), _) => (info, "position"),
-            (_, _, Some(cm)) => (cm.monitor, "existing"),
+            (_, _, Some(current_monitor)) => (current_monitor.monitor, "existing"),
             _ => (*monitors.first(), "fallback"),
         };
 
@@ -62,9 +62,9 @@ pub(crate) fn update_current_monitor(
         };
 
         // Only insert if changed to avoid unnecessary change detection triggers
-        let changed = existing.is_none_or(|cm| {
-            cm.monitor.index != new_current.monitor.index
-                || cm.effective_mode != new_current.effective_mode
+        let changed = existing.is_none_or(|current_monitor| {
+            current_monitor.monitor.index != new_current.monitor.index
+                || current_monitor.effective_mode != new_current.effective_mode
         });
 
         if changed {
@@ -174,15 +174,15 @@ mod tests {
 
     #[test]
     fn effective_mode_fullscreen_when_window_fills_monitor() {
-        let mon = monitor_0();
-        let monitors = monitors_with(mon);
+        let monitor = monitor_0();
+        let monitors = monitors_with(monitor);
         let window = window_at(
-            mon.physical_position,
-            mon.physical_size.x,
-            mon.physical_size.y,
+            monitor.physical_position,
+            monitor.physical_size.x,
+            monitor.physical_size.y,
         );
 
-        let mode = compute_effective_mode(&window, &mon, &monitors);
+        let mode = compute_effective_mode(&window, &monitor, &monitors);
         assert_eq!(
             mode,
             WindowMode::BorderlessFullscreen(MonitorSelection::Index(0))
@@ -191,58 +191,66 @@ mod tests {
 
     #[test]
     fn effective_mode_windowed_when_window_smaller_than_monitor() {
-        let mon = monitor_0();
-        let monitors = monitors_with(mon);
+        let monitor = monitor_0();
+        let monitors = monitors_with(monitor);
         let window = window_at(IVec2::new(100, 100), 1600, 1200);
 
-        let mode = compute_effective_mode(&window, &mon, &monitors);
+        let mode = compute_effective_mode(&window, &monitor, &monitors);
         assert_eq!(mode, WindowMode::Windowed);
     }
 
     #[test]
     fn effective_mode_windowed_when_not_left_aligned() {
-        let mon = monitor_0();
-        let monitors = monitors_with(mon);
+        let monitor = monitor_0();
+        let monitors = monitors_with(monitor);
         // Full width + reaches bottom, but offset from left edge
-        let window = window_at(IVec2::new(1, 0), mon.physical_size.x, mon.physical_size.y);
+        let window = window_at(
+            IVec2::new(1, 0),
+            monitor.physical_size.x,
+            monitor.physical_size.y,
+        );
 
-        let mode = compute_effective_mode(&window, &mon, &monitors);
+        let mode = compute_effective_mode(&window, &monitor, &monitors);
         assert_eq!(mode, WindowMode::Windowed);
     }
 
     #[test]
     fn effective_mode_trusts_exclusive_fullscreen() {
-        let mon = monitor_0();
-        let monitors = monitors_with(mon);
+        let monitor = monitor_0();
+        let monitors = monitors_with(monitor);
         let mut window = window_at(IVec2::ZERO, 800, 600);
         window.mode =
             WindowMode::Fullscreen(MonitorSelection::Index(0), VideoModeSelection::Current);
 
-        let mode = compute_effective_mode(&window, &mon, &monitors);
+        let mode = compute_effective_mode(&window, &monitor, &monitors);
         assert!(matches!(mode, WindowMode::Fullscreen(_, _)));
     }
 
     #[test]
     fn effective_mode_returns_mode_when_no_position() {
-        let mon = monitor_0();
-        let monitors = monitors_with(mon);
+        let monitor = monitor_0();
+        let monitors = monitors_with(monitor);
         let mut window = Window::default();
         window
             .resolution
-            .set_physical_resolution(mon.physical_size.x, mon.physical_size.y);
+            .set_physical_resolution(monitor.physical_size.x, monitor.physical_size.y);
         // position is Automatic (no position available, like Wayland)
 
-        let mode = compute_effective_mode(&window, &mon, &monitors);
+        let mode = compute_effective_mode(&window, &monitor, &monitors);
         assert_eq!(mode, WindowMode::Windowed);
     }
 
     #[test]
     fn effective_mode_returns_mode_when_no_monitors() {
-        let mon = monitor_0();
+        let monitor = monitor_0();
         let empty = Monitors { list: vec![] };
-        let window = window_at(IVec2::ZERO, mon.physical_size.x, mon.physical_size.y);
+        let window = window_at(
+            IVec2::ZERO,
+            monitor.physical_size.x,
+            monitor.physical_size.y,
+        );
 
-        let mode = compute_effective_mode(&window, &mon, &empty);
+        let mode = compute_effective_mode(&window, &monitor, &empty);
         assert_eq!(mode, WindowMode::Windowed);
     }
 }

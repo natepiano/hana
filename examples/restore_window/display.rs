@@ -9,13 +9,33 @@ use bevy_window_manager::ManagedWindow;
 use bevy_window_manager::ManagedWindowPersistence;
 use bevy_window_manager::Monitors;
 
+use super::constants::ACTUAL_COLUMN_TITLE;
+use super::constants::AUTOMATIC_TEXT;
 use super::constants::COMPARISON_COLUMN_PADDING;
+use super::constants::CURRENT_COLUMN_TITLE;
 use super::constants::DEFAULT_COLOR;
+use super::constants::EFFECTIVE_MODE_LABEL;
+use super::constants::EXPECTED_COLUMN_TITLE;
 use super::constants::FONT_SIZE;
 use super::constants::LABEL_WIDTH;
+use super::constants::MANAGED_WINDOWS_HEADER;
 use super::constants::MIN_COMPARISON_COLUMN_WIDTH;
 use super::constants::MISMATCH_COLOR;
 use super::constants::MISMATCH_WARN_COLOR;
+use super::constants::MODE_LABEL;
+use super::constants::MONITOR_LABEL;
+use super::constants::NO_MANAGED_WINDOWS_TEXT;
+use super::constants::NO_RESTORE_DATA_TEXT;
+use super::constants::NONE_TEXT;
+use super::constants::POSITION_LOGICAL_LABEL;
+use super::constants::POSITION_PHYSICAL_LABEL;
+use super::constants::RESTORED_COLUMN_TITLE;
+use super::constants::SCALE_LABEL;
+use super::constants::SECONDARY_WINDOW_NAME_LABEL;
+use super::constants::SIZE_LOGICAL_LABEL;
+use super::constants::SIZE_PHYSICAL_LABEL;
+use super::constants::UNKNOWN_MANAGED_WINDOW_NAME;
+use super::constants::VIDEO_MODES_HEADER;
 use super::events::CachedMismatchState;
 use super::events::CachedRestoredState;
 use super::events::MismatchStates;
@@ -68,11 +88,11 @@ impl From<&CachedRestoredState> for RestoredValues {
         let logical_size = cached_restored_state.logical_size;
         Self {
             physical_position: cached_restored_state.physical_position.map_or_else(
-                || "None".to_string(),
+                || NONE_TEXT.to_string(),
                 |position| format!("({}, {})", position.x, position.y),
             ),
             logical_position:  cached_restored_state.logical_position.map_or_else(
-                || "None".to_string(),
+                || NONE_TEXT.to_string(),
                 |position| format!("({}, {})", position.x, position.y),
             ),
             physical_size:     format!("{}x{}", physical_size.x, physical_size.y),
@@ -102,7 +122,7 @@ impl RestoredValues {
 
 /// Build comparison spans (restored vs current) for a window and add them as `TextSpan` children.
 fn build_comparison_spans(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     restored_state: Option<&CachedRestoredState>,
     mismatch_state: Option<&CachedMismatchState>,
     window: &Window,
@@ -115,7 +135,7 @@ fn build_comparison_spans(
     let current_values = CurrentValues {
         physical_position: match window.position {
             WindowPosition::At(pos) => format!("({}, {})", pos.x, pos.y),
-            _ => "Automatic".to_string(),
+            _ => AUTOMATIC_TEXT.to_string(),
         },
         logical_position:  match window.position {
             WindowPosition::At(pos) => {
@@ -123,7 +143,7 @@ fn build_comparison_spans(
                 let logical_y = (f64::from(pos.y) / f64::from(scale)).round().to_i32();
                 format!("({logical_x}, {logical_y})")
             },
-            _ => "Automatic".to_string(),
+            _ => AUTOMATIC_TEXT.to_string(),
         },
         physical_size:     format!("{}x{}", window.physical_width(), window.physical_height()),
         logical_size:      format!(
@@ -138,27 +158,27 @@ fn build_comparison_spans(
 
     if let Some(cached_restored_state) = restored_state {
         build_restored_spans(
-            cb,
+            child_spawner,
             cached_restored_state,
             mismatch_state,
             &current_values,
             font,
         );
     } else {
-        build_current_only_spans(cb, &current_values, font);
+        build_current_only_spans(child_spawner, &current_values, font);
     }
 
     add_span(
-        cb,
+        child_spawner,
         font,
-        &format!("\nEffective Mode: {effective_mode:?}\n"),
+        &format!("\n{EFFECTIVE_MODE_LABEL} {effective_mode:?}\n"),
         DEFAULT_COLOR,
     );
 }
 
 /// Render comparison rows when restore data is available.
 fn build_restored_spans(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     cached_restored_state: &CachedRestoredState,
     mismatch_state: Option<&CachedMismatchState>,
     current_values: &CurrentValues,
@@ -174,9 +194,9 @@ fn build_restored_spans(
         ComparisonLayout::CurrentOnly
     };
 
-    add_restored_header(cb, font, layout, col_width);
+    add_restored_header(child_spawner, font, layout, col_width);
     add_position_rows(
-        cb,
+        child_spawner,
         font,
         &restored_values,
         current_values,
@@ -184,16 +204,22 @@ fn build_restored_spans(
         col_width,
     );
     add_size_rows(
-        cb,
+        child_spawner,
         font,
         &restored_values,
         current_values,
         mismatch_state,
         col_width,
     );
-    add_scale_row(cb, font, current_values, mismatch_state, col_width);
+    add_scale_row(
+        child_spawner,
+        font,
+        current_values,
+        mismatch_state,
+        col_width,
+    );
     add_monitor_row(
-        cb,
+        child_spawner,
         font,
         &restored_values,
         current_values,
@@ -201,7 +227,7 @@ fn build_restored_spans(
         col_width,
     );
     add_mode_row(
-        cb,
+        child_spawner,
         font,
         &restored_values,
         current_values,
@@ -211,7 +237,7 @@ fn build_restored_spans(
 }
 
 fn add_restored_header(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     layout: ComparisonLayout,
     col_width: usize,
@@ -219,19 +245,23 @@ fn add_restored_header(
     let header = if matches!(layout, ComparisonLayout::WithMismatchColumns) {
         format!(
             "{:LABEL_WIDTH$}{:<col_width$}{:<col_width$}{:<col_width$}{}\n",
-            "", "Restored", "Current", "Expected", "Actual"
+            "",
+            RESTORED_COLUMN_TITLE,
+            CURRENT_COLUMN_TITLE,
+            EXPECTED_COLUMN_TITLE,
+            ACTUAL_COLUMN_TITLE
         )
     } else {
         format!(
             "{:LABEL_WIDTH$}{:<col_width$}{}\n",
-            "", "Restored", "Current"
+            "", RESTORED_COLUMN_TITLE, CURRENT_COLUMN_TITLE
         )
     };
-    add_span(cb, font, &header, DEFAULT_COLOR);
+    add_span(child_spawner, font, &header, DEFAULT_COLOR);
 }
 
 fn add_position_rows(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
@@ -239,19 +269,19 @@ fn add_position_rows(
     col_width: usize,
 ) {
     add_row(
-        cb,
+        child_spawner,
         font,
         &ComparisonRow {
-            label:    "Position (physical):",
+            label:    POSITION_PHYSICAL_LABEL,
             restored: restored_values.physical_position.clone(),
             current:  current_values.physical_position.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
                 expected: mismatch.physical_position.expected.map_or_else(
-                    || "None".to_string(),
+                    || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
                 actual:   mismatch.physical_position.actual.map_or_else(
-                    || "None".to_string(),
+                    || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
             }),
@@ -259,19 +289,19 @@ fn add_position_rows(
         col_width,
     );
     add_row(
-        cb,
+        child_spawner,
         font,
         &ComparisonRow {
-            label:    "Position (logical):",
+            label:    POSITION_LOGICAL_LABEL,
             restored: restored_values.logical_position.clone(),
             current:  current_values.logical_position.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
                 expected: mismatch.logical_position.expected.map_or_else(
-                    || "None".to_string(),
+                    || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
                 actual:   mismatch.logical_position.actual.map_or_else(
-                    || "None".to_string(),
+                    || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
             }),
@@ -281,7 +311,7 @@ fn add_position_rows(
 }
 
 fn add_size_rows(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
@@ -289,10 +319,10 @@ fn add_size_rows(
     col_width: usize,
 ) {
     add_row(
-        cb,
+        child_spawner,
         font,
         &ComparisonRow {
-            label:    "Size (physical):",
+            label:    SIZE_PHYSICAL_LABEL,
             restored: restored_values.physical_size.clone(),
             current:  current_values.physical_size.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
@@ -309,10 +339,10 @@ fn add_size_rows(
         col_width,
     );
     add_row(
-        cb,
+        child_spawner,
         font,
         &ComparisonRow {
-            label:    "Size (logical):",
+            label:    SIZE_LOGICAL_LABEL,
             restored: restored_values.logical_size.clone(),
             current:  current_values.logical_size.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
@@ -331,7 +361,7 @@ fn add_size_rows(
 }
 
 fn add_scale_row(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     current_values: &CurrentValues,
     mismatch_state: Option<&CachedMismatchState>,
@@ -339,11 +369,11 @@ fn add_scale_row(
 ) {
     if mismatch_state.is_none() {
         add_span(
-            cb,
+            child_spawner,
             font,
             &format!(
                 "{:<LABEL_WIDTH$}{:<col_width$}{}\n",
-                "Scale:", "", current_values.scale
+                SCALE_LABEL, "", current_values.scale
             ),
             DEFAULT_COLOR,
         );
@@ -351,7 +381,7 @@ fn add_scale_row(
     }
 
     let row = ComparisonRow {
-        label:    "Scale:",
+        label:    SCALE_LABEL,
         restored: String::new(),
         current:  current_values.scale.clone(),
         mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
@@ -359,11 +389,11 @@ fn add_scale_row(
             actual:   mismatch.scale.actual.to_string(),
         }),
     };
-    add_row(cb, font, &row, col_width);
+    add_row(child_spawner, font, &row, col_width);
 }
 
 fn add_monitor_row(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
@@ -371,10 +401,10 @@ fn add_monitor_row(
     col_width: usize,
 ) {
     add_row(
-        cb,
+        child_spawner,
         font,
         &ComparisonRow {
-            label:    "Monitor:",
+            label:    MONITOR_LABEL,
             restored: restored_values.monitor.clone(),
             current:  current_values.monitor.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
@@ -387,7 +417,7 @@ fn add_monitor_row(
 }
 
 fn add_mode_row(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
@@ -395,10 +425,10 @@ fn add_mode_row(
     col_width: usize,
 ) {
     add_row(
-        cb,
+        child_spawner,
         font,
         &ComparisonRow {
-            label:    "Mode:",
+            label:    MODE_LABEL,
             restored: restored_values.mode.clone(),
             current:  current_values.mode.clone(),
             mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
@@ -412,84 +442,87 @@ fn add_mode_row(
 
 /// Render current-only values when no restore data exists.
 fn build_current_only_spans(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     current_values: &CurrentValues,
     font: &TextFont,
 ) {
-    add_span(cb, font, "State: No restore data\n\n", MISMATCH_COLOR);
+    add_span(child_spawner, font, NO_RESTORE_DATA_TEXT, MISMATCH_COLOR);
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Position (physical):", current_values.physical_position
+            POSITION_PHYSICAL_LABEL, current_values.physical_position
         ),
         DEFAULT_COLOR,
     );
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Position (logical):", current_values.logical_position
+            POSITION_LOGICAL_LABEL, current_values.logical_position
         ),
         DEFAULT_COLOR,
     );
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Size (physical):", current_values.physical_size
+            SIZE_PHYSICAL_LABEL, current_values.physical_size
         ),
         DEFAULT_COLOR,
     );
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            "Size (logical):", current_values.logical_size
+            SIZE_LOGICAL_LABEL, current_values.logical_size
         ),
         DEFAULT_COLOR,
     );
     add_span(
-        cb,
+        child_spawner,
         font,
-        &format!("{:<LABEL_WIDTH$}{}\n", "Scale:", current_values.scale),
+        &format!("{:<LABEL_WIDTH$}{}\n", SCALE_LABEL, current_values.scale),
         DEFAULT_COLOR,
     );
     add_span(
-        cb,
+        child_spawner,
         font,
-        &format!("{:<LABEL_WIDTH$}{}\n", "Monitor:", current_values.monitor),
+        &format!(
+            "{:<LABEL_WIDTH$}{}\n",
+            MONITOR_LABEL, current_values.monitor
+        ),
         DEFAULT_COLOR,
     );
     add_span(
-        cb,
+        child_spawner,
         font,
-        &format!("{:<LABEL_WIDTH$}{}\n", "Mode:", current_values.mode),
+        &format!("{:<LABEL_WIDTH$}{}\n", MODE_LABEL, current_values.mode),
         DEFAULT_COLOR,
     );
 }
 
 /// Add a comparison row, dispatching to 3-column or 5-column layout based on mismatch data.
 fn add_row(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     row: &ComparisonRow<'_>,
     col_width: usize,
 ) {
     if let Some(mismatch) = row.mismatch.as_ref() {
-        add_extended_comparison_row(cb, font, row, mismatch, col_width);
+        add_extended_comparison_row(child_spawner, font, row, mismatch, col_width);
     } else {
-        add_standard_comparison_row(cb, font, row, col_width);
+        add_standard_comparison_row(child_spawner, font, row, col_width);
     }
 }
 
 /// Add a comparison row: label + file value (white) + current value (white or red if mismatch).
 fn add_standard_comparison_row(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     row: &ComparisonRow<'_>,
     col_width: usize,
@@ -502,7 +535,7 @@ fn add_standard_comparison_row(
 
     // Label + file value (always white)
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!(
             "{label:<LABEL_WIDTH$}{restored:<col_width$}",
@@ -512,13 +545,13 @@ fn add_standard_comparison_row(
         DEFAULT_COLOR,
     );
     // Current value (colored)
-    add_span(cb, font, &format!("{}\n", row.current), color);
+    add_span(child_spawner, font, &format!("{}\n", row.current), color);
 }
 
 /// Add a 5-column comparison row: label + restored + current + expected + actual.
 /// Expected/actual columns use warning color when they differ.
 fn add_extended_comparison_row(
-    cb: &mut ChildSpawnerCommands,
+    child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     row: &ComparisonRow<'_>,
     mismatch: &ComparisonMismatch,
@@ -537,7 +570,7 @@ fn add_extended_comparison_row(
 
     // Label + restored value (always white)
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!(
             "{label:<LABEL_WIDTH$}{restored:<col_width$}",
@@ -548,25 +581,30 @@ fn add_extended_comparison_row(
     );
     // Current value
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!("{current:<col_width$}", current = row.current),
         current_color,
     );
     // Expected value (always white)
     add_span(
-        cb,
+        child_spawner,
         font,
         &format!("{expected:<col_width$}", expected = mismatch.expected),
         DEFAULT_COLOR,
     );
     // Actual value (warning color if mismatch)
-    add_span(cb, font, &format!("{}\n", mismatch.actual), mismatch_color);
+    add_span(
+        child_spawner,
+        font,
+        &format!("{}\n", mismatch.actual),
+        mismatch_color,
+    );
 }
 
 /// Add a single `TextSpan` child.
-fn add_span(cb: &mut ChildSpawnerCommands, font: &TextFont, text: &str, color: Color) {
-    cb.spawn((TextSpan(text.to_string()), font.clone(), TextColor(color)));
+fn add_span(child_spawner: &mut ChildSpawnerCommands, font: &TextFont, text: &str, color: Color) {
+    child_spawner.spawn((TextSpan(text.to_string()), font.clone(), TextColor(color)));
 }
 
 // --- Primary Window Display ---
@@ -607,28 +645,42 @@ pub(crate) fn update_primary_display(
     };
 
     commands.entity(display_entity).despawn_children();
-    commands.entity(display_entity).with_children(|cb| {
-        // Monitor header
-        let monitor_row = input::format_monitor_row(monitor, &refresh_display);
-        add_span(cb, &font, &format!("{monitor_row}\n\n"), DEFAULT_COLOR);
+    commands
+        .entity(display_entity)
+        .with_children(|child_spawner| {
+            // Monitor header
+            let monitor_row = input::format_monitor_row(monitor, &refresh_display);
+            add_span(
+                child_spawner,
+                &font,
+                &format!("{monitor_row}\n\n"),
+                DEFAULT_COLOR,
+            );
 
-        // Comparison table
-        build_comparison_spans(cb, restored_state, mismatch_state, window, monitor, &font);
+            // Comparison table
+            build_comparison_spans(
+                child_spawner,
+                restored_state,
+                mismatch_state,
+                window,
+                monitor,
+                &font,
+            );
 
-        // Video modes
-        add_span(
-            cb,
-            &font,
-            &format!("\nVideo Modes (Up/Down to select):\n{video_modes_display}\n"),
-            DEFAULT_COLOR,
-        );
+            // Video modes
+            add_span(
+                child_spawner,
+                &font,
+                &format!("{VIDEO_MODES_HEADER}{video_modes_display}\n"),
+                DEFAULT_COLOR,
+            );
 
-        // Controls
-        add_span(
-            cb,
-            &font,
-            &format!(
-                "\nControls:\n\
+            // Controls
+            add_span(
+                child_spawner,
+                &font,
+                &format!(
+                    "\nControls:\n\
                  [Enter] Exclusive Fullscreen\n\
                  [B] Borderless Fullscreen\n\
                  [W] Windowed\n\
@@ -636,39 +688,41 @@ pub(crate) fn update_primary_display(
                  [P] Toggle persistence ({persistence:?})\n\
                  [Ctrl+Shift+Backspace] Clear state and quit\n\
                  [Q] Quit\n"
-            ),
-            DEFAULT_COLOR,
-        );
+                ),
+                DEFAULT_COLOR,
+            );
 
-        // Managed windows list
-        let mut managed_lines = Vec::new();
-        for (mw, managed, current_monitor) in &managed_q {
-            let mon = current_monitor.map_or_else(|| *monitors_res.first(), |cm| cm.monitor);
-            let pos = match mw.position {
-                WindowPosition::At(p) => format!("({}, {})", p.x, p.y),
-                _ => "Automatic".to_string(),
-            };
-            managed_lines.push(format!(
-                "  {}: pos={pos} phys={}x{} log={}x{} scale={} monitor={}\n",
-                managed.name,
-                mw.physical_width(),
-                mw.physical_height(),
-                mw.resolution.width().to_u32(),
-                mw.resolution.height().to_u32(),
-                mw.resolution.scale_factor(),
-                mon.index,
-            ));
-        }
-        let managed_header = "\nManaged Windows:\n";
-        add_span(cb, &font, managed_header, DEFAULT_COLOR);
-        if managed_lines.is_empty() {
-            add_span(cb, &font, "  (none)\n", DEFAULT_COLOR);
-        } else {
-            for line in &managed_lines {
-                add_span(cb, &font, line, DEFAULT_COLOR);
+            // Managed windows list
+            let mut managed_lines = Vec::new();
+            for (managed_window, managed, current_monitor) in &managed_q {
+                let monitor = current_monitor.map_or_else(
+                    || *monitors_res.first(),
+                    |current_monitor| current_monitor.monitor,
+                );
+                let pos = match managed_window.position {
+                    WindowPosition::At(p) => format!("({}, {})", p.x, p.y),
+                    _ => AUTOMATIC_TEXT.to_string(),
+                };
+                managed_lines.push(format!(
+                    "  {}: pos={pos} phys={}x{} log={}x{} {SCALE_LABEL} {} {MONITOR_LABEL} {}\n",
+                    managed.name,
+                    managed_window.physical_width(),
+                    managed_window.physical_height(),
+                    managed_window.resolution.width().to_u32(),
+                    managed_window.resolution.height().to_u32(),
+                    managed_window.resolution.scale_factor(),
+                    monitor.index,
+                ));
             }
-        }
-    });
+            add_span(child_spawner, &font, MANAGED_WINDOWS_HEADER, DEFAULT_COLOR);
+            if managed_lines.is_empty() {
+                add_span(child_spawner, &font, NO_MANAGED_WINDOWS_TEXT, DEFAULT_COLOR);
+            } else {
+                for line in &managed_lines {
+                    add_span(child_spawner, &font, line, DEFAULT_COLOR);
+                }
+            }
+        });
 }
 
 // --- Secondary Window Displays ---
@@ -697,7 +751,11 @@ pub(crate) fn update_secondary_displays(
             effective_mode: window.mode,
         });
 
-        let name = managed_q.get(display.0).map_or("unknown", |m| &m.name);
+        let name = managed_q
+            .get(display.0)
+            .map_or(UNKNOWN_MANAGED_WINDOW_NAME, |managed_window| {
+                &managed_window.name
+            });
         let restored_state = restored_states.states.get(&display.0);
         let mismatch_state = mismatch_states.states.get(&display.0);
 
@@ -716,39 +774,41 @@ pub(crate) fn update_secondary_displays(
         };
 
         commands.entity(display_entity).despawn_children();
-        commands.entity(display_entity).with_children(|cb| {
-            // Window name + monitor header
-            let monitor_row = input::format_monitor_row(&monitor_info, &refresh_display);
-            add_span(
-                cb,
-                &font,
-                &format!("Window: {name}\n{monitor_row}\n\n"),
-                DEFAULT_COLOR,
-            );
+        commands
+            .entity(display_entity)
+            .with_children(|child_spawner| {
+                // Window name + monitor header
+                let monitor_row = input::format_monitor_row(&monitor_info, &refresh_display);
+                add_span(
+                    child_spawner,
+                    &font,
+                    &format!("{SECONDARY_WINDOW_NAME_LABEL} {name}\n{monitor_row}\n\n"),
+                    DEFAULT_COLOR,
+                );
 
-            // Comparison table
-            build_comparison_spans(
-                cb,
-                restored_state,
-                mismatch_state,
-                window,
-                &monitor_info,
-                &font,
-            );
+                // Comparison table
+                build_comparison_spans(
+                    child_spawner,
+                    restored_state,
+                    mismatch_state,
+                    window,
+                    &monitor_info,
+                    &font,
+                );
 
-            // Video modes
-            add_span(
-                cb,
-                &font,
-                &format!("\nVideo Modes (Up/Down to select):\n{video_modes_display}\n"),
-                DEFAULT_COLOR,
-            );
+                // Video modes
+                add_span(
+                    child_spawner,
+                    &font,
+                    &format!("{VIDEO_MODES_HEADER}{video_modes_display}\n"),
+                    DEFAULT_COLOR,
+                );
 
-            // Controls
-            add_span(
-                cb,
-                &font,
-                "\nControls:\n\
+                // Controls
+                add_span(
+                    child_spawner,
+                    &font,
+                    "\nControls:\n\
                  [Enter] Exclusive Fullscreen\n\
                  [B] Borderless Fullscreen\n\
                  [W] Windowed\n\
@@ -756,8 +816,8 @@ pub(crate) fn update_secondary_displays(
                  [P] Toggle persistence\n\
                  [Ctrl+Shift+Backspace] Clear state and quit\n\
                  [Q] Quit\n",
-                DEFAULT_COLOR,
-            );
-        });
+                    DEFAULT_COLOR,
+                );
+            });
     }
 }

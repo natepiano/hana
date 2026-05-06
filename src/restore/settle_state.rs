@@ -77,7 +77,7 @@ fn build_actual_snapshot(
             physical_position,
             physical_size,
             mode: window.mode,
-            monitor: current_monitor.map_or(0, |cm| cm.monitor.index),
+            monitor: current_monitor.map_or(0, |current_monitor| current_monitor.monitor.index),
         },
         f64::from(window.resolution.scale_factor()),
     )

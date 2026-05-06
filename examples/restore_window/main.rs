@@ -25,6 +25,7 @@ mod state;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_window_manager::WindowManagerPlugin;
+use constants::PRIMARY_WINDOW_TITLE;
 use constants::TEST_MODE_ENV_VAR;
 use events::MismatchStates;
 use events::RestoredStates;
@@ -37,7 +38,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Window Restore - Primary Window".into(),
+                title: PRIMARY_WINDOW_TITLE.into(),
                 ..default()
             }),
             ..default()
