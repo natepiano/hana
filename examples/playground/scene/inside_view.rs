@@ -16,6 +16,7 @@ use super::constants::INSIDE_VIEW_TUBE_SIDES;
 use super::constants::INSIDE_VIEW_Z_EXTENT;
 use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::INSIDE_VIEW_RADIUS_MULTIPLIER;
+use crate::constants::INSIDE_VIEW_SECTION_INDEX;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::TUBE_RADIUS;
@@ -25,7 +26,7 @@ pub(super) fn setup_section_inside_view(
     commands: &mut Commands,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[7];
+    let section_center_x = SECTION_X[INSIDE_VIEW_SECTION_INDEX];
     let start = Vec3::new(
         section_center_x + INSIDE_VIEW_ENDPOINT_X_OFFSET,
         NODE_Y + INSIDE_VIEW_START_Y_OFFSET,

@@ -10,6 +10,7 @@ use bevy_kana::Position;
 
 use super::constants::ASTAR_OBSTACLE_SIZE_MULTIPLIER;
 use super::constants::ASTAR_SECTION_Z;
+use crate::constants::ASTAR_SECTION_INDEX;
 use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::NODE_Y;
 use crate::constants::OBSTACLE_COLOR;
@@ -28,7 +29,7 @@ pub(super) fn setup_section_astar(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[5];
+    let section_center_x = SECTION_X[ASTAR_SECTION_INDEX];
     let start = Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, ASTAR_SECTION_Z);
     let end = Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, ASTAR_SECTION_Z);
     let obstacle_position = Position::new(section_center_x, NODE_Y, ASTAR_SECTION_Z);

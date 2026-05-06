@@ -15,7 +15,11 @@ use super::constants::DESPAWN_GREEN;
 use super::constants::DESPAWN_RED;
 use super::constants::DETACH_BUMP_BLUE;
 use super::constants::DETACH_DEMO_ENDPOINT_X_OFFSET;
+use super::constants::DETACH_DEMO_ROW_DESPAWN_INDEX;
+use super::constants::DETACH_DEMO_ROW_FREEZE_INDEX;
+use super::constants::DETACH_DEMO_ROW_SLACK_BUMP_INDEX;
 use super::constants::DETACH_DEMO_ROW_Z;
+use super::constants::DETACH_DEMO_SECTION_INDEX;
 use super::constants::DETACH_DEMO_SLACK_BUMP;
 use super::constants::DETACH_DEMO_SPHERE_RINGS;
 use super::constants::DETACH_DEMO_SPHERE_SECTORS;
@@ -53,7 +57,7 @@ pub(crate) fn spawn_detach_demo(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[6];
+    let section_center_x = SECTION_X[DETACH_DEMO_SECTION_INDEX];
     let assets = DetachDemoAssets {
         sphere_mesh: meshes.add(
             Sphere::new(HUB_SPHERE_RADIUS)
@@ -67,13 +71,13 @@ pub(crate) fn spawn_detach_demo(
 
     let rows = [
         DetachDemoRow {
-            z:            DETACH_DEMO_ROW_Z[0],
+            z:            DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_FREEZE_INDEX],
             sphere_color: DESPAWN_GREEN,
             solver:       CatenarySolver::new().with_slack(SLACK_NORMAL),
             on_detach:    OnDetach::Remain,
         },
         DetachDemoRow {
-            z:            DETACH_DEMO_ROW_Z[1],
+            z:            DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_SLACK_BUMP_INDEX],
             sphere_color: DETACH_BUMP_BLUE,
             solver:       CatenarySolver::new()
                 .with_slack(SLACK_NORMAL)
@@ -81,7 +85,7 @@ pub(crate) fn spawn_detach_demo(
             on_detach:    OnDetach::Remain,
         },
         DetachDemoRow {
-            z:            DETACH_DEMO_ROW_Z[2],
+            z:            DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_DESPAWN_INDEX],
             sphere_color: DESPAWN_RED,
             solver:       CatenarySolver::new().with_slack(SLACK_NORMAL),
             on_detach:    OnDetach::Despawn,

@@ -10,9 +10,13 @@ use bevy_catenary::Capping;
 use bevy_catenary::EndpointAlignment;
 use bevy_catenary::Solver;
 
+use super::constants::CONNECTOR_LANE_AS_SPAWNED_INDEX;
+use super::constants::CONNECTOR_LANE_FIXED_INDEX;
+use super::constants::CONNECTOR_LANE_ROTATING_INDEX;
 use super::constants::CONNECTOR_LANE_Z;
 use super::constants::CONNECTOR_MODEL_PATH;
 use super::constants::CONNECTOR_MODEL_SCALE;
+use super::constants::CONNECTOR_SECTION_INDEX;
 use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::NODE_Y;
 use super::constants::SECTION_X;
@@ -40,23 +44,47 @@ pub(crate) fn setup_section_connector(
     cable_mat: &Handle<StandardMaterial>,
     asset_server: &AssetServer,
 ) {
-    let section_center_x = SECTION_X[8];
+    let section_center_x = SECTION_X[CONNECTOR_SECTION_INDEX];
     let plug_scene: Handle<Scene> = asset_server.load(CONNECTOR_MODEL_PATH);
 
     let configs = [
         (
-            Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[0]),
-            Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[0]),
+            Vec3::new(
+                section_center_x - SPAN_HALF_X,
+                NODE_Y,
+                CONNECTOR_LANE_Z[CONNECTOR_LANE_FIXED_INDEX],
+            ),
+            Vec3::new(
+                section_center_x + SPAN_HALF_X,
+                NODE_Y,
+                CONNECTOR_LANE_Z[CONNECTOR_LANE_FIXED_INDEX],
+            ),
             EndpointAlignment::Fixed,
         ),
         (
-            Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[1]),
-            Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[1]),
+            Vec3::new(
+                section_center_x - SPAN_HALF_X,
+                NODE_Y,
+                CONNECTOR_LANE_Z[CONNECTOR_LANE_AS_SPAWNED_INDEX],
+            ),
+            Vec3::new(
+                section_center_x + SPAN_HALF_X,
+                NODE_Y,
+                CONNECTOR_LANE_Z[CONNECTOR_LANE_AS_SPAWNED_INDEX],
+            ),
             EndpointAlignment::AsSpawned,
         ),
         (
-            Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[2]),
-            Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, CONNECTOR_LANE_Z[2]),
+            Vec3::new(
+                section_center_x - SPAN_HALF_X,
+                NODE_Y,
+                CONNECTOR_LANE_Z[CONNECTOR_LANE_ROTATING_INDEX],
+            ),
+            Vec3::new(
+                section_center_x + SPAN_HALF_X,
+                NODE_Y,
+                CONNECTOR_LANE_Z[CONNECTOR_LANE_ROTATING_INDEX],
+            ),
             EndpointAlignment::Rotating,
         ),
     ];

@@ -11,6 +11,7 @@ use super::constants::DRAGGABLE_CUBE_DIMENSION;
 use super::constants::ENTITY_ATTACHMENT_Z;
 use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::DRAGGABLE_COLOR;
+use crate::constants::ENTITY_ATTACHMENT_SECTION_INDEX;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SLACK_NORMAL;
@@ -26,7 +27,7 @@ pub(super) fn setup_section_entity_attachment(
     materials: &mut Assets<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[3];
+    let section_center_x = SECTION_X[ENTITY_ATTACHMENT_SECTION_INDEX];
     let drag_mesh = meshes.add(Cuboid::new(
         DRAGGABLE_CUBE_DIMENSION,
         DRAGGABLE_CUBE_DIMENSION,

@@ -13,6 +13,7 @@ use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SLACK_NORMAL;
+use crate::constants::SOLVER_COMPARISON_SECTION_INDEX;
 use crate::constants::SPAN_HALF_X;
 use crate::entities;
 
@@ -23,7 +24,7 @@ pub(super) fn setup_section_solver_comparison(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[2];
+    let section_center_x = SECTION_X[SOLVER_COMPARISON_SECTION_INDEX];
 
     let start = Vec3::new(
         section_center_x - SPAN_HALF_X,

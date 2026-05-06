@@ -11,6 +11,9 @@ use bevy_catenary::Solver;
 use super::constants::SHARED_HUB_POSITION_Z;
 use super::constants::SHARED_HUB_SPHERE_RINGS;
 use super::constants::SHARED_HUB_SPHERE_SECTORS;
+use super::constants::SHARED_HUB_SPOKE_CENTER_INDEX;
+use super::constants::SHARED_HUB_SPOKE_LEFT_INDEX;
+use super::constants::SHARED_HUB_SPOKE_RIGHT_INDEX;
 use super::constants::SHARED_HUB_SPOKE_X_OFFSET;
 use super::constants::SHARED_HUB_SPOKE_Y_OFFSET;
 use super::constants::SHARED_HUB_SPOKE_Z;
@@ -19,6 +22,7 @@ use crate::constants::DRAGGABLE_COLOR;
 use crate::constants::HUB_SPHERE_RADIUS;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
+use crate::constants::SHARED_HUB_SECTION_INDEX;
 use crate::entities;
 use crate::entities::Draggable;
 use crate::entities::NodeCube;
@@ -33,7 +37,7 @@ pub(super) fn setup_section_shared_hub(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[4];
+    let section_center_x = SECTION_X[SHARED_HUB_SECTION_INDEX];
     let drag_mesh = meshes.add(
         Sphere::new(HUB_SPHERE_RADIUS)
             .mesh()
@@ -59,17 +63,17 @@ pub(super) fn setup_section_shared_hub(
         Vec3::new(
             section_center_x - SHARED_HUB_SPOKE_X_OFFSET,
             NODE_Y + SHARED_HUB_SPOKE_Y_OFFSET,
-            SHARED_HUB_SPOKE_Z[0],
+            SHARED_HUB_SPOKE_Z[SHARED_HUB_SPOKE_LEFT_INDEX],
         ),
         Vec3::new(
             section_center_x + SHARED_HUB_SPOKE_X_OFFSET,
             NODE_Y + SHARED_HUB_SPOKE_Y_OFFSET,
-            SHARED_HUB_SPOKE_Z[1],
+            SHARED_HUB_SPOKE_Z[SHARED_HUB_SPOKE_RIGHT_INDEX],
         ),
         Vec3::new(
             section_center_x,
             NODE_Y + SHARED_HUB_SPOKE_Y_OFFSET,
-            SHARED_HUB_SPOKE_Z[2],
+            SHARED_HUB_SPOKE_Z[SHARED_HUB_SPOKE_CENTER_INDEX],
         ),
     ];
 

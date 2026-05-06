@@ -24,14 +24,23 @@ use super::inside_view;
 use super::shared_hub;
 use super::solver_comparison;
 use crate::connector;
+use crate::constants::ASTAR_SECTION_INDEX;
 use crate::constants::CABLE_COLOR;
+use crate::constants::CAP_STYLES_SECTION_INDEX;
+use crate::constants::CATENARY_SECTION_INDEX;
+use crate::constants::CONNECTOR_SECTION_INDEX;
+use crate::constants::DETACH_DEMO_SECTION_INDEX;
 use crate::constants::DIRECTIONAL_LIGHT_ILLUMINANCE;
+use crate::constants::ENTITY_ATTACHMENT_SECTION_INDEX;
 use crate::constants::GROUND_DEPTH;
 use crate::constants::GROUND_WIDTH;
+use crate::constants::INSIDE_VIEW_SECTION_INDEX;
 use crate::constants::NODE_COLOR;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SECTION_Z;
+use crate::constants::SHARED_HUB_SECTION_INDEX;
+use crate::constants::SOLVER_COMPARISON_SECTION_INDEX;
 use crate::detach_demo;
 use crate::input;
 use crate::sections;
@@ -53,7 +62,11 @@ pub(crate) struct SharedCableMaterial(pub(crate) Handle<StandardMaterial>);
 pub(crate) struct RadiusMultiplier(pub(crate) f32);
 
 pub(crate) fn setup_camera(mut commands: Commands) {
-    let focus = Vec3::new(SECTION_X[0], NODE_Y * CAMERA_FOCUS_Y_MULTIPLIER, SECTION_Z);
+    let focus = Vec3::new(
+        SECTION_X[CATENARY_SECTION_INDEX],
+        NODE_Y * CAMERA_FOCUS_Y_MULTIPLIER,
+        SECTION_Z,
+    );
     let camera = commands
         .spawn(OrbitCam {
             button_orbit: MouseButton::Middle,
@@ -178,7 +191,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[0],
+        SECTION_X[CATENARY_SECTION_INDEX],
     ));
     catenary::setup_section_catenary(commands, node_mesh, node_mat, cable_mat);
 
@@ -186,7 +199,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[1],
+        SECTION_X[CAP_STYLES_SECTION_INDEX],
     ));
     cap_styles::setup_section_cap_styles(commands, materials, cable_mat);
 
@@ -194,7 +207,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[2],
+        SECTION_X[SOLVER_COMPARISON_SECTION_INDEX],
     ));
     solver_comparison::setup_section_solver_comparison(commands, node_mesh, node_mat, cable_mat);
 
@@ -202,7 +215,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[3],
+        SECTION_X[ENTITY_ATTACHMENT_SECTION_INDEX],
     ));
     entity_attachment::setup_section_entity_attachment(commands, meshes, materials, cable_mat);
 
@@ -210,7 +223,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[4],
+        SECTION_X[SHARED_HUB_SECTION_INDEX],
     ));
     shared_hub::setup_section_shared_hub(
         commands, meshes, materials, node_mesh, node_mat, cable_mat,
@@ -220,7 +233,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[5],
+        SECTION_X[ASTAR_SECTION_INDEX],
     ));
     astar::setup_section_astar(commands, meshes, materials, node_mesh, node_mat, cable_mat);
 
@@ -228,7 +241,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[6],
+        SECTION_X[DETACH_DEMO_SECTION_INDEX],
     ));
     detach_demo::spawn_detach_demo(commands, meshes, materials, node_mesh, node_mat, cable_mat);
 
@@ -236,7 +249,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[7],
+        SECTION_X[INSIDE_VIEW_SECTION_INDEX],
     ));
     inside_view::setup_section_inside_view(commands, cable_mat);
 
@@ -244,7 +257,7 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[8],
+        SECTION_X[CONNECTOR_SECTION_INDEX],
     ));
     connector::setup_section_connector(commands, cable_mat, asset_server);
 

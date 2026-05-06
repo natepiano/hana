@@ -826,16 +826,6 @@ fn cable_geometry_total_length_is_sum_of_segments() {
 // ─────────────────────────────────────────────────────────────────────
 
 #[test]
-fn obstacle_aabb_bounds_are_correct() {
-    let obs = Obstacle::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(10.0, 20.0, 30.0));
-    let min = obs.aabb_min();
-    let max = obs.aabb_max();
-
-    assert_vec3_approx(min, Vec3::new(9.0, 18.0, 27.0), "obstacle AABB min");
-    assert_vec3_approx(max, Vec3::new(11.0, 22.0, 33.0), "obstacle AABB max");
-}
-
-#[test]
 fn anchor_constructors() {
     let a = Anchor::from(Vec3::new(1.0, 2.0, 3.0));
     assert_vec3_approx(a.position, Vec3::new(1.0, 2.0, 3.0), "anchor position");

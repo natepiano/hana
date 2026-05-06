@@ -19,7 +19,10 @@ pub(super) const CAMERA_YAW: f32 = 0.0;
 // cap styles
 pub(super) const CAP_STYLE_ENDPOINT_X_MULTIPLIERS: [(f32, f32); 3] =
     [(-2.0, -1.0), (-0.5, 0.5), (1.0, 2.0)];
+pub(super) const CAP_STYLE_LEFT_TUBE_INDEX: usize = 0;
 pub(super) const CAP_STYLE_LIGHT_PHASES: [f32; 3] = [0.3, 0.7, 0.0];
+pub(super) const CAP_STYLE_MIDDLE_TUBE_INDEX: usize = 1;
+pub(super) const CAP_STYLE_RIGHT_TUBE_INDEX: usize = 2;
 
 // entity attachment
 pub(super) const DRAGGABLE_CUBE_DIMENSION: f32 = DRAGGABLE_CUBE_SIZE * 2.0;
@@ -49,6 +52,9 @@ pub(super) const NODE_CUBE_DIMENSION: f32 = NODE_CUBE_SIZE * 2.0;
 pub(super) const SHARED_HUB_POSITION_Z: f32 = 0.0;
 pub(super) const SHARED_HUB_SPHERE_RINGS: u32 = 32;
 pub(super) const SHARED_HUB_SPHERE_SECTORS: u32 = 32;
+pub(super) const SHARED_HUB_SPOKE_CENTER_INDEX: usize = 2;
+pub(super) const SHARED_HUB_SPOKE_LEFT_INDEX: usize = 0;
+pub(super) const SHARED_HUB_SPOKE_RIGHT_INDEX: usize = 1;
 pub(super) const SHARED_HUB_SPOKE_X_OFFSET: f32 = 3.0;
 pub(super) const SHARED_HUB_SPOKE_Y_OFFSET: f32 = 0.5;
 pub(super) const SHARED_HUB_SPOKE_Z: [f32; 3] = [-1.5, -1.5, 2.0];

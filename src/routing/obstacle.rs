@@ -1,6 +1,5 @@
 //! `Obstacle` `AABB` type and the point/segment blocking helpers that operate on it.
 
-use bevy::math::Quat;
 use bevy::math::Vec3;
 use bevy::reflect::Reflect;
 use bevy_kana::ToF32;
@@ -17,49 +16,26 @@ pub(super) enum Blockage {
     Blocked,
 }
 
-/// An axis-aligned bounding box with a world transform, used as a routing obstacle.
+/// An axis-aligned bounding box used as a routing obstacle.
 #[derive(Clone, Copy, Debug, Reflect)]
 pub struct Obstacle {
-    /// Half-extents of the `AABB` in local space.
-    pub half_extents: Vec3,
-    /// World-space position of the obstacle center.
-    pub position:     Vec3,
-    /// World-space rotation of the obstacle.
-    pub rotation:     Quat,
+    pub(crate) half_extents: Vec3,
+    position:                Vec3,
 }
 
 impl Obstacle {
-    /// Create an axis-aligned obstacle (no rotation).
+    /// Create an axis-aligned obstacle.
     #[must_use]
     pub fn new(half_extents: Vec3, position: impl Into<Vec3>) -> Self {
         Self {
             half_extents,
             position: position.into(),
-            rotation: Quat::IDENTITY,
         }
     }
-
-    /// Create a rotated obstacle.
-    #[must_use]
-    pub fn with_rotation(half_extents: Vec3, position: impl Into<Vec3>, rotation: Quat) -> Self {
-        Self {
-            half_extents,
-            position: position.into(),
-            rotation,
-        }
-    }
-
-    /// World-space `AABB` minimum corner (ignoring rotation for axis-aligned tests).
-    #[must_use]
-    pub fn aabb_min(&self) -> Vec3 { self.position - self.half_extents }
-
-    /// World-space `AABB` maximum corner (ignoring rotation for axis-aligned tests).
-    #[must_use]
-    pub fn aabb_max(&self) -> Vec3 { self.position + self.half_extents }
 
     fn point_containment(&self, pos: Vec3, margin: f32) -> PointContainment {
-        let min = self.aabb_min() - Vec3::splat(margin);
-        let max = self.aabb_max() + Vec3::splat(margin);
+        let min = self.position - self.half_extents - Vec3::splat(margin);
+        let max = self.position + self.half_extents + Vec3::splat(margin);
         if pos.x >= min.x
             && pos.x <= max.x
             && pos.y >= min.y
@@ -71,15 +47,6 @@ impl Obstacle {
         } else {
             PointContainment::Outside
         }
-    }
-
-    /// Check if a point is inside this obstacle's `AABB`, expanded by `margin`.
-    #[must_use]
-    pub fn contains_point(&self, pos: impl Into<Vec3>, margin: f32) -> bool {
-        matches!(
-            self.point_containment(pos.into(), margin),
-            PointContainment::Inside
-        )
     }
 }
 

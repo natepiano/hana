@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_catenary::CatenarySolver;
 use bevy_catenary::Solver;
 
+use crate::constants::CATENARY_SECTION_INDEX;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SECTION_Z;
@@ -16,7 +17,7 @@ pub(super) fn setup_section_catenary(
     node_mat: &Handle<StandardMaterial>,
     cable_mat: &Handle<StandardMaterial>,
 ) {
-    let section_center_x = SECTION_X[0];
+    let section_center_x = SECTION_X[CATENARY_SECTION_INDEX];
     let start = Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, SECTION_Z);
     let end = Vec3::new(section_center_x + SPAN_HALF_X, NODE_Y, SECTION_Z);
     entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);

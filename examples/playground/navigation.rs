@@ -7,6 +7,7 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_lagrange::ZoomToFit;
 
+use super::constants::CATENARY_SECTION_INDEX;
 use super::constants::NAV_BAR_BACKGROUND;
 use super::constants::NAV_BAR_BORDER_RADIUS;
 use super::constants::NAV_BAR_BOTTOM;
@@ -131,6 +132,8 @@ pub(crate) fn handle_nav_buttons(
 }
 
 pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
+    let initial_section_number = CATENARY_SECTION_INDEX + 1;
+    let initial_section_title = SECTION_TITLES[CATENARY_SECTION_INDEX];
     commands
         .spawn((
             Node {
@@ -183,7 +186,9 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
                     ..default()
                 })
                 .with_child((
-                    Text::new(format!("1 / {SECTION_COUNT} - {}", SECTION_TITLES[0])),
+                    Text::new(format!(
+                        "{initial_section_number} / {SECTION_COUNT} - {initial_section_title}"
+                    )),
                     TextFont {
                         font_size: NAV_FONT_SIZE,
                         ..default()

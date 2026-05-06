@@ -39,26 +39,39 @@ pub(crate) const SECTION_INFO_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.
 pub(crate) const TRANSPARENT_TUBE_COLOR: Color = Color::srgba(0.85, 0.55, 0.2, 0.2);
 
 // connector
+pub(crate) const CONNECTOR_LANE_AS_SPAWNED_INDEX: usize = 1;
+pub(crate) const CONNECTOR_LANE_FIXED_INDEX: usize = 0;
+pub(crate) const CONNECTOR_LANE_ROTATING_INDEX: usize = 2;
 pub(crate) const CONNECTOR_LANE_Z: [f32; 3] = [1.5, 0.0, -1.5];
 pub(crate) const CONNECTOR_MODEL_PATH: &str = "models/power_plug.glb#Scene0";
 pub(crate) const CONNECTOR_MODEL_SCALE: f32 = 15.0;
 
 // detach demo
 pub(crate) const DETACH_DEMO_ENDPOINT_X_OFFSET: f32 = 2.0;
+pub(crate) const DETACH_DEMO_ROW_DESPAWN_INDEX: usize = 2;
+pub(crate) const DETACH_DEMO_ROW_FREEZE_INDEX: usize = 0;
+pub(crate) const DETACH_DEMO_ROW_SLACK_BUMP_INDEX: usize = 1;
 pub(crate) const DETACH_DEMO_ROW_Z: [f32; 3] = [-1.5, 0.0, 1.5];
 pub(crate) const DETACH_DEMO_SLACK_BUMP: f32 = 0.35;
 pub(crate) const DETACH_DEMO_SPHERE_RINGS: u32 = 16;
 pub(crate) const DETACH_DEMO_SPHERE_SECTORS: u32 = 16;
 
 // layout
+pub(crate) const ASTAR_SECTION_INDEX: usize = 5;
+pub(crate) const CAP_STYLES_SECTION_INDEX: usize = 1;
 pub(crate) const CAP_STYLE_RADIUS_MULTIPLIER: f32 = 5.0;
 pub(crate) const CAP_STYLE_TUBE_OFFSET: f32 = 0.8;
 pub(crate) const CAP_STYLE_TUBE_SPACING: f32 = 2.0;
+pub(crate) const CATENARY_SECTION_INDEX: usize = 0;
+pub(crate) const CONNECTOR_SECTION_INDEX: usize = 8;
+pub(crate) const DETACH_DEMO_SECTION_INDEX: usize = 6;
 pub(crate) const DRAGGABLE_CUBE_SIZE: f32 = 0.45;
+pub(crate) const ENTITY_ATTACHMENT_SECTION_INDEX: usize = 3;
 pub(crate) const GROUND_DEPTH: f32 = 14.0;
 pub(crate) const GROUND_WIDTH: f32 = 160.0;
 pub(crate) const HUB_SPHERE_RADIUS: f32 = 0.35;
 pub(crate) const INSIDE_VIEW_RADIUS_MULTIPLIER: f32 = 25.0;
+pub(crate) const INSIDE_VIEW_SECTION_INDEX: usize = 7;
 pub(crate) const NODE_CUBE_SIZE: f32 = 0.3;
 pub(crate) const NODE_Y: f32 = 2.0;
 pub(crate) const RAY_EPSILON: f32 = 1e-6;
@@ -87,7 +100,9 @@ pub(crate) const SECTION_X: [f32; SECTION_COUNT] = [
     4.0 * SECTION_SPACING,
 ];
 pub(crate) const SECTION_Z: f32 = 0.0;
+pub(crate) const SHARED_HUB_SECTION_INDEX: usize = 4;
 pub(crate) const SLACK_ADJUSTMENT_STEP: f32 = 0.01;
+pub(crate) const SOLVER_COMPARISON_SECTION_INDEX: usize = 2;
 pub(crate) const SPAN_HALF_X: f32 = 3.0;
 
 // lighting
