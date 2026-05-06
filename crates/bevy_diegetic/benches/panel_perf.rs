@@ -44,7 +44,7 @@ use criterion::criterion_main;
 
 const FONT_SIZE: f32 = 7.0;
 const LAYOUT_SIZE: f32 = 160.0;
-const LAYOUT_MPU: f32 = 1.0 / LAYOUT_SIZE;
+const LAYOUT_METERS_PER_UNIT: f32 = 1.0 / LAYOUT_SIZE;
 
 fn monospace_measurer() -> DiegeticTextMeasurer {
     DiegeticTextMeasurer {
@@ -156,14 +156,14 @@ fn create_bench_app() -> App {
 fn bench_panel(tree: bevy_diegetic::LayoutTree) -> DiegeticPanel {
     let dim = bevy_diegetic::Dimension {
         value: LAYOUT_SIZE,
-        unit:  Some(Unit::Custom(LAYOUT_MPU)),
+        unit:  Some(Unit::Custom(LAYOUT_METERS_PER_UNIT)),
     };
     DiegeticPanel::world()
         .size(
             bevy_diegetic::Sizing::Fixed(dim),
             bevy_diegetic::Sizing::Fixed(dim),
         )
-        .font_unit(Unit::Custom(LAYOUT_MPU))
+        .font_unit(Unit::Custom(LAYOUT_METERS_PER_UNIT))
         .with_tree(tree)
         .build()
         .expect("bench panel dimensions must be valid")

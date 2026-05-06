@@ -10,6 +10,7 @@ use super::pipeline::OverlayContext;
 use super::pipeline::TextServices;
 use super::scaling;
 use crate::callouts;
+use crate::callouts::CalloutCap;
 use crate::debug::constants::BASELINE_COLOR;
 use crate::debug::constants::LABEL_ASCENT;
 use crate::debug::constants::LABEL_BASELINE;
@@ -354,7 +355,7 @@ fn build_metric_gizmos(
     (lines_gizmo, arrows_gizmo, metric_lines)
 }
 
-const fn solid_arrow_cap(head: f32, tint: Option<Color>) -> callouts::CalloutCap {
+const fn solid_arrow_cap(head: f32, tint: Option<Color>) -> CalloutCap {
     let cap = callouts::CalloutCap::arrow()
         .solid()
         .length(head)

@@ -6,18 +6,18 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
-use super::super::constants;
-use super::super::glyph_quad;
-use super::super::glyph_quad::GlyphQuadData;
-use super::super::msdf_material;
-use super::super::msdf_material::MsdfShadowProxyMaterialInput;
-use super::super::msdf_material::MsdfTextMaterial;
-use super::super::msdf_material::MsdfTextMaterialInput;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
 use crate::layout::WorldTextStyle;
+use crate::render::constants;
+use crate::render::glyph_quad;
+use crate::render::glyph_quad::GlyphQuadData;
+use crate::render::msdf_material;
+use crate::render::msdf_material::MsdfShadowProxyMaterialInput;
+use crate::render::msdf_material::MsdfTextMaterial;
+use crate::render::msdf_material::MsdfTextMaterialInput;
 use crate::text::MsdfAtlas;
 
 /// Marker for mesh entities spawned by the world text renderer.

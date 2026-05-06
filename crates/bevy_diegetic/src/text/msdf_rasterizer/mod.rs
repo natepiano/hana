@@ -9,6 +9,7 @@ use fdsm::generate;
 use fdsm::render;
 use fdsm::shape::Shape;
 use fdsm::transform::Transform;
+use image::Rgb;
 use image::Rgb32FImage;
 use image::RgbImage;
 use nalgebra::Affine2;
@@ -121,7 +122,7 @@ pub(super) fn rasterize_glyph(
     // Convert f32 [0.0, 1.0] to u8 [0, 255].
     let image = RgbImage::from_fn(image_width, image_height, |x, y| {
         let p = image_f32.get_pixel(x, y);
-        image::Rgb([
+        Rgb([
             (p[0].clamp(0.0, 1.0) * 255.0).to_u8(),
             (p[1].clamp(0.0, 1.0) * 255.0).to_u8(),
             (p[2].clamp(0.0, 1.0) * 255.0).to_u8(),
@@ -159,12 +160,16 @@ mod tests {
         reason = "tests use panic/unwrap for clearer failure messages"
     )]
 
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::PoisonError;
 
     use bevy_kana::ToU16;
     use bevy_kana::ToUsize;
+    use parley::layout::PositionedLayoutItem;
+    use parley::style::StyleProperty;
+    use ttf_parser::GlyphId;
 
     use super::*;
     use crate::layout::FontSlant;
@@ -432,10 +437,10 @@ mod tests {
 
         let text = "A::B";
         let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, true);
-        builder.push_default(parley::style::StyleProperty::FontSize(16.0));
-        builder.push_default(parley::style::StyleProperty::FontFamily(
-            parley::style::FontFamily::named("JetBrains Mono"),
-        ));
+        builder.push_default(StyleProperty::FontSize(16.0));
+        builder.push_default(StyleProperty::FontFamily(parley::style::FontFamily::named(
+            "JetBrains Mono",
+        )));
         builder.build_into(&mut layout, text);
         layout.break_all_lines(None);
 
@@ -445,7 +450,7 @@ mod tests {
         let mut glyph_ids = Vec::new();
         for line in layout.lines() {
             for item in line.items() {
-                let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
+                let PositionedLayoutItem::GlyphRun(run) = item else {
                     continue;
                 };
                 let glyph_run = run.run();
@@ -481,7 +486,7 @@ mod tests {
         for &(gid, adv) in &glyph_ids {
             let gid16 = gid.to_u16();
             let result = rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
-            let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(gid16));
+            let bbox = face.glyph_bounding_box(GlyphId(gid16));
             let has_shape =
                 fdsm_ttf_parser::load_shape_from_face(&face, ttf_parser::GlyphId(gid16)).is_some();
             println!(
@@ -499,7 +504,7 @@ mod tests {
 
         // Also check the original cmap colon for comparison.
         let cmap_result = rasterize_glyph(FONT_DATA, cmap_colon, 32, 4.0, 2);
-        let cmap_bbox = face.glyph_bounding_box(ttf_parser::GlyphId(cmap_colon));
+        let cmap_bbox = face.glyph_bounding_box(GlyphId(cmap_colon));
         println!(
             "cmap colon (glyph {cmap_colon}): rasterize={}, bbox={cmap_bbox:?}",
             cmap_result.is_some(),
@@ -557,10 +562,10 @@ mod tests {
             let mut lcx = layout_cx.lock().unwrap_or_else(PoisonError::into_inner);
 
             let mut builder = lcx.ranged_builder(&mut fcx, text, 1.0, true);
-            builder.push_default(parley::style::StyleProperty::FontSize(36.0));
-            builder.push_default(parley::style::StyleProperty::FontFamily(
-                parley::style::FontFamily::named("EB Garamond"),
-            ));
+            builder.push_default(StyleProperty::FontSize(36.0));
+            builder.push_default(StyleProperty::FontFamily(parley::style::FontFamily::named(
+                "EB Garamond",
+            )));
             builder.build_into(&mut layout, text);
             layout.break_all_lines(None);
             drop(fcx);
@@ -569,7 +574,7 @@ mod tests {
             println!("\nShaped \"{text}\":");
             for line in layout.lines() {
                 for item in line.items() {
-                    let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
+                    let PositionedLayoutItem::GlyphRun(run) = item else {
                         continue;
                     };
                     let glyph_run = run.run();
@@ -854,8 +859,7 @@ mod tests {
         }
 
         // Group metrics by page and check for UV overlap within each page.
-        let mut by_page: std::collections::HashMap<u32, Vec<[f32; 4]>> =
-            std::collections::HashMap::new();
+        let mut by_page: HashMap<u32, Vec<[f32; 4]>> = std::collections::HashMap::new();
         for key in &keys {
             if let Some(m) = atlas.get(*key) {
                 by_page.entry(m.page_index).or_default().push(m.uv_rect);

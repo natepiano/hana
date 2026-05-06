@@ -1,5 +1,6 @@
 //! Parley-backed text measurement and the [`DiegeticTextMeasurer`] resource.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -10,11 +11,13 @@ use parley::FontContext;
 use parley::Layout;
 use parley::LayoutContext;
 use parley::style::FontFamily;
+use parley::style::FontFeatures;
 use parley::style::FontStyle;
 use parley::style::FontWeight;
 use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
+use super::constants::DEFAULT_FAMILY;
 use crate::FontSlant;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::MeasureTextFn;
@@ -84,7 +87,7 @@ pub fn create_parley_measurer(
     Arc::new(move |text: &str, measure: &TextMeasure| {
         let family_name = families
             .get(usize::from(measure.font_id))
-            .map_or("JetBrains Mono", String::as_str);
+            .map_or(DEFAULT_FAMILY, String::as_str);
 
         let mut font_cx = font_cx.lock().unwrap_or_else(PoisonError::into_inner);
         let mut layout_cx = layout_cx.lock().unwrap_or_else(PoisonError::into_inner);
@@ -126,9 +129,9 @@ pub fn create_parley_measurer(
                     value,
                 })
                 .collect();
-            builder.push_default(StyleProperty::FontFeatures(
-                parley::style::FontFeatures::List(std::borrow::Cow::Owned(parley_features)),
-            ));
+            builder.push_default(StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(
+                parley_features,
+            ))));
         }
 
         builder.build_into(&mut layout, text);

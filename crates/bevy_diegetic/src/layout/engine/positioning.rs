@@ -1,22 +1,21 @@
 use bevy_kana::ToF32;
 
-use super::super::AlignX;
-use super::super::AlignY;
-use super::super::Border;
-use super::super::BoundingBox;
-use super::super::Direction;
-use super::super::LayoutTextStyle;
-use super::super::element::Element;
-use super::super::element::ElementContent;
-use super::super::element::LayoutTree;
-use super::super::render::RectangleSource;
-use super::super::render::RenderCommand;
-use super::super::render::RenderCommandKind;
 use super::layout_engine::ComputedLayout;
+use super::sizing;
 use super::sizing::Axis;
-use super::sizing::border_inset;
-use super::sizing::border_leading;
 use super::wrapping::WrappedText;
+use crate::layout::AlignX;
+use crate::layout::AlignY;
+use crate::layout::Border;
+use crate::layout::BoundingBox;
+use crate::layout::Direction;
+use crate::layout::LayoutTextStyle;
+use crate::layout::element::Element;
+use crate::layout::element::ElementContent;
+use crate::layout::element::LayoutTree;
+use crate::layout::render::RectangleSource;
+use crate::layout::render::RenderCommand;
+use crate::layout::render::RenderCommandKind;
 
 /// Returns true if the bounding box is entirely outside the viewport.
 const fn is_offscreen(
@@ -213,10 +212,10 @@ fn push_children_to_stack(
         0.0
     };
 
-    let border_x = border_inset(parent_el, Axis::X);
-    let border_y = border_inset(parent_el, Axis::Y);
-    let border_left = border_leading(parent_el, Axis::X);
-    let border_top = border_leading(parent_el, Axis::Y);
+    let border_x = sizing::border_inset(parent_el, Axis::X);
+    let border_y = sizing::border_inset(parent_el, Axis::Y);
+    let border_left = sizing::border_leading(parent_el, Axis::X);
+    let border_top = sizing::border_leading(parent_el, Axis::Y);
 
     let main_available = if is_horizontal {
         parent_width - parent_el.padding.horizontal() - border_x

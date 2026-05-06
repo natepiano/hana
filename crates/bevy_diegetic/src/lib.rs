@@ -62,6 +62,7 @@ use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
 pub use callouts::CalloutLine;
+use callouts::CalloutPlugin;
 pub use cascade::CascadeDefaults;
 pub use cascade::CascadeSet;
 #[cfg(feature = "typography_overlay")]
@@ -70,6 +71,7 @@ pub use debug::GlyphMetricVisibility;
 pub use debug::OverlayBoundingBox;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
+use debug::TypographyOverlayPlugin;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlayReady;
 pub use layout::AlignX;
@@ -141,6 +143,7 @@ pub use panel::HeadlessLayoutPlugin;
 pub use panel::HueOffset;
 pub use panel::Inches;
 pub use panel::Millimeters;
+use panel::PanelPlugin;
 pub use panel::PanelSizing;
 pub use panel::PanelTextPerfStats;
 pub use panel::Percent;
@@ -152,10 +155,12 @@ pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
 pub use render::PanelTextChild;
 pub use render::PendingGlyphs;
+use render::RenderPlugin;
 pub use render::StableTransparency;
 pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
+use screen_space::ScreenSpacePlugin;
 pub use text::AtlasConfig;
 pub use text::DiegeticTextMeasurer;
 pub use text::Font;
@@ -174,6 +179,7 @@ pub use text::GlyphTypographyMetrics;
 pub use text::GlyphWorkerThreads;
 pub use text::MsdfAtlas;
 pub use text::RasterQuality;
+use text::TextPlugin;
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///
@@ -209,13 +215,13 @@ impl Plugin for DiegeticUiPlugin {
 
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((
-            text::TextPlugin,
-            panel::PanelPlugin,
-            screen_space::ScreenSpacePlugin,
-            render::RenderPlugin,
-            callouts::CalloutPlugin,
+            TextPlugin,
+            PanelPlugin,
+            ScreenSpacePlugin,
+            RenderPlugin,
+            CalloutPlugin,
             #[cfg(feature = "typography_overlay")]
-            debug::TypographyOverlayPlugin,
+            TypographyOverlayPlugin,
         ));
     }
 }

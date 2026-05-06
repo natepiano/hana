@@ -235,8 +235,8 @@ fn setup(
     let lift = f32::from(LIFT);
     let title_gap = f32::from(TITLE_GAP);
 
-    let total_w = a4_width_m + gap + card_width_m;
-    let group_left = -total_w / 2.0;
+    let total_width = a4_width_m + gap + card_width_m;
+    let group_left = -total_width / 2.0;
 
     let a4_page_x = group_left + a4_width_m / 2.0;
     let a4_page_y = a4_height_m / 2.0 + lift;
@@ -295,7 +295,7 @@ fn setup(
         &mut commands,
         &mut meshes,
         &mut materials,
-        total_w,
+        total_width,
         a4_height_m,
     );
 
@@ -1023,7 +1023,7 @@ fn build_imperial_panel_ruler(
     let top_spacer = panel_height.0 - last_label_inch.to_f32() - 0.5;
     let mut builder = LayoutBuilder::new(PANEL_RULER_INCH_WIDTH, panel_height);
     let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
-    let sixteenth_h = 1.0 / 16.0;
+    let sixteenth_height = 1.0 / 16.0;
 
     builder.with(
         El::new()
@@ -1059,7 +1059,7 @@ fn build_imperial_panel_ruler(
                             build_vertical_ticks(
                                 b,
                                 height_sixteenths,
-                                sixteenth_h,
+                                sixteenth_height,
                                 AlignX::Left,
                                 ruler_color,
                                 sixteenth_tick_size,
@@ -1244,7 +1244,7 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
     let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
     let last_label_inch = width_sixteenths / 16;
     let right_spacer = width_in - 0.5 - last_label_inch.to_f32();
-    let sixteenth_w = 1.0 / 16.0;
+    let sixteenth_width = 1.0 / 16.0;
 
     builder.with(
         El::new()
@@ -1280,7 +1280,7 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
                             build_horizontal_ticks(
                                 b,
                                 width_sixteenths,
-                                sixteenth_w,
+                                sixteenth_width,
                                 ruler_color,
                                 sixteenth_tick_size,
                             );

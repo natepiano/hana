@@ -1,17 +1,18 @@
 use bevy::prelude::*;
 use bevy_kana::ToF32;
+use ttf_parser::GlyphId;
 
-use super::super::constants;
-use super::super::glyph_quad;
-use super::super::glyph_quad::GlyphQuadData;
-use super::super::text_shaping;
-use super::super::text_shaping::TextBuildStats;
-use super::super::text_shaping::TextShapingContext;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
+use crate::render::constants;
+use crate::render::glyph_quad;
+use crate::render::glyph_quad::GlyphQuadData;
+use crate::render::text_shaping;
+use crate::render::text_shaping::TextBuildStats;
+use crate::render::text_shaping::TextShapingContext;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -343,7 +344,7 @@ fn ink_rect(
     scale: f32,
 ) -> Option<[f32; 4]> {
     let face = ttf_parser::Face::parse(font_data, 0).ok()?;
-    let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(glyph_id))?;
+    let bbox = face.glyph_bounding_box(GlyphId(glyph_id))?;
     let upm = f32::from(face.units_per_em());
     let font_scale = font_size / upm;
 
@@ -366,7 +367,7 @@ fn glyph_advance(font_data: &[u8], glyph_id: u16, font_size: f32, scale: f32) ->
     ttf_parser::Face::parse(font_data, 0)
         .ok()
         .and_then(|face| {
-            let glyph_id = ttf_parser::GlyphId(glyph_id);
+            let glyph_id = GlyphId(glyph_id);
             face.glyph_hor_advance(glyph_id).map(|advance| {
                 let upm = f32::from(face.units_per_em());
                 f32::from(advance) * font_size / upm * scale

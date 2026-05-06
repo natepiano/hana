@@ -9,6 +9,7 @@ use std::sync::Arc;
 use bevy::asset::Asset;
 use bevy::reflect::TypePath;
 use ttf_parser::Face;
+use ttf_parser::GlyphId;
 
 /// Pre-parsed font with design-unit metrics.
 ///
@@ -267,7 +268,7 @@ impl Font {
     #[must_use]
     pub fn glyph_metrics_by_id(&self, glyph_id: u16, size: f32) -> Option<GlyphTypographyMetrics> {
         let face = Face::parse(&self.data, 0).ok()?;
-        let gid = ttf_parser::GlyphId(glyph_id);
+        let gid = GlyphId(glyph_id);
 
         let scale = size / f32::from(self.units_per_em);
 

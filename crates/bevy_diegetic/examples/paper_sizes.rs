@@ -108,15 +108,15 @@ const GROUPS: &[PaperGroup] = &[
 
 /// Computes a uniform scale factor for a group so all papers in the
 /// group use the same scale and relative sizes are correct.
-fn group_scale(sizes: &[(PaperSize, &str)], max_pair_w: f32) -> f32 {
-    let max_h = 120.0; // pt — cap row height
+fn group_scale(sizes: &[(PaperSize, &str)], max_pair_width: f32) -> f32 {
+    let max_height = 120.0; // pt — cap row height
     let mut scale = 1.0_f32;
     for (size, _) in sizes {
         let (pw, ph) = size.portrait();
         let (lw, lh) = size.landscape();
-        let natural_w = pw.0 + PAIR_GAP + lw.0;
-        let natural_h = ph.0.max(lh.0);
-        let s = (max_pair_w / natural_w).min(max_h / natural_h);
+        let natural_width = pw.0 + PAIR_GAP + lw.0;
+        let natural_height = ph.0.max(lh.0);
+        let s = (max_pair_width / natural_width).min(max_height / natural_height);
         scale = scale.min(s);
     }
     scale.min(1.0)
@@ -163,14 +163,14 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let world_h = WORLD_WIDTH * PANEL_HEIGHT / PANEL_WIDTH;
+    let world_height = WORLD_WIDTH * PANEL_HEIGHT / PANEL_WIDTH;
 
     // ── Backdrop ─────────────────────────────────────────────────────
     let backdrop = commands
         .spawn((
             Mesh3d(meshes.add(Plane3d::new(
                 Vec3::Z,
-                Vec2::new(WORLD_WIDTH / 2.0 + 0.03, world_h / 2.0 + 0.03),
+                Vec2::new(WORLD_WIDTH / 2.0 + 0.03, world_height / 2.0 + 0.03),
             ))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgba(0.12, 0.12, 0.14, 0.0),
@@ -178,7 +178,7 @@ fn setup(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_xyz(0.0, world_h / 2.0, -0.001),
+            Transform::from_xyz(0.0, world_height / 2.0, -0.001),
         ))
         .id();
     commands.insert_resource(Backdrop(backdrop));
@@ -189,7 +189,7 @@ fn setup(
         WorldTextStyle::new(0.04)
             .with_color(HEADER_COLOR)
             .with_anchor(Anchor::BottomCenter),
-        Transform::from_xyz(0.0, world_h + 0.02, 0.0),
+        Transform::from_xyz(0.0, world_height + 0.02, 0.0),
     ));
 
     // ── Main panel ───────────────────────────────────────────────────
@@ -204,7 +204,7 @@ fn setup(
         return;
     };
 
-    commands.spawn((panel, Transform::from_xyz(0.0, world_h, 0.0)));
+    commands.spawn((panel, Transform::from_xyz(0.0, world_height, 0.0)));
 
     // ── Lighting ─────────────────────────────────────────────────────
     commands.spawn((
@@ -225,7 +225,7 @@ fn setup(
     // ── Camera ───────────────────────────────────────────────────────
     commands.spawn((
         OrbitCam {
-            focus: Vec3::new(0.0, world_h / 2.0, 0.0),
+            focus: Vec3::new(0.0, world_height / 2.0, 0.0),
             radius: Some(3.5),
             yaw: Some(0.0),
             pitch: Some(0.0),
@@ -279,9 +279,11 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
     let code_style = LayoutTextStyle::new(8.0).with_color(CODE_COLOR);
 
     // Column content width = (PANEL_WIDTH - padding*2 - gaps) / 5.
-    let col_content_w = OUTER_PADDING.mul_add(-2.0, COLUMN_GAP.mul_add(-4.0, PANEL_WIDTH)) / 5.0;
-    // Each paper pair (portrait + gap + landscape) must fit in col_content_w - some margin.
-    let pair_max_w = col_content_w - 8.0; // leave room for column padding
+    let column_content_width =
+        OUTER_PADDING.mul_add(-2.0, COLUMN_GAP.mul_add(-4.0, PANEL_WIDTH)) / 5.0;
+    // Each paper pair (portrait + gap + landscape) must fit in
+    // column_content_width - some margin.
+    let max_pair_width = column_content_width - 8.0; // leave room for column padding
 
     let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
     builder.with(
@@ -295,20 +297,20 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
         |b| {
             // 4 paper size columns.
             for (group_name, inches, sizes) in GROUPS {
-                let scale = group_scale(sizes, pair_max_w);
+                let scale = group_scale(sizes, max_pair_width);
                 let portrait_slot = max_portrait_width(sizes) * scale;
                 let landscape_slot = max_landscape_width(sizes) * scale;
                 // Equal spacing: left = gap = right. Three equal gaps.
-                // col_content_w = 3*gap + portrait_slot + landscape_slot
+                // column_content_width = 3*gap + portrait_slot + landscape_slot
                 let spacing =
-                    ((col_content_w - portrait_slot - landscape_slot) / 3.0).max(PAIR_GAP);
+                    ((column_content_width - portrait_slot - landscape_slot) / 3.0).max(PAIR_GAP);
                 b.with(
                     El::new()
                         .direction(Direction::TopToBottom)
                         .child_gap(ROW_SPACING)
                         .border(Border::all(Pt(0.5), BORDER_COLOR))
                         .padding(Padding::xy(0.0, 6.0))
-                        .width(Sizing::fixed(col_content_w))
+                        .width(Sizing::fixed(column_content_width))
                         .height(Sizing::grow_min(0.0)),
                     |b| {
                         // Column title.
@@ -349,7 +351,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                     .child_gap(8.0)
                     .border(Border::all(Pt(0.5), BORDER_COLOR))
                     .padding(Padding::all(6.0))
-                    .width(Sizing::fixed(col_content_w))
+                    .width(Sizing::fixed(column_content_width))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
                     b.text("PaperSize", col_header);

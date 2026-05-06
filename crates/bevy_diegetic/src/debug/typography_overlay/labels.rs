@@ -3,6 +3,8 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 
 use super::OverlayBoundingBox;
+use super::constants::NO_LINE_GAP_LABEL_PREFIX;
+use super::constants::OVERLAY_BOUNDING_BOX_NAME;
 use super::pipeline::FontContext;
 use super::pipeline::GlyphExtents;
 use super::pipeline::OverlayAssets;
@@ -188,7 +190,7 @@ pub(super) fn spawn_overlay_bounds_target(
     let top_line_y = if has_line_gap { top_y } else { ascent_y };
     let mut top_extent = scaling::layout_to_world_y(top_line_y, ctx.anchor_y, ctx.scale);
     if !has_line_gap {
-        let no_gap_label = format!("no line gap for {font_name}");
+        let no_gap_label = format!("{NO_LINE_GAP_LABEL_PREFIX}{font_name}");
         let no_gap_dims = measure_overlay_label(
             text_services.cache,
             text_services.measure_text,
@@ -224,7 +226,7 @@ pub(super) fn spawn_overlay_bounds_target(
 
     ctx.commands
         .spawn((
-            Name::new("OverlayBoundingBox"),
+            Name::new(OVERLAY_BOUNDING_BOX_NAME),
             OverlayBoundingBox,
             Pickable::IGNORE,
             NotShadowCaster,
@@ -320,7 +322,7 @@ fn spawn_left_arrow_labels(
         (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5;
     if !has_line_gap {
         let ascent_world = scaling::layout_to_world_y(guides.ascent, ctx.anchor_y, ctx.scale);
-        let no_gap_label = format!("no line gap for {font_name}");
+        let no_gap_label = format!("{NO_LINE_GAP_LABEL_PREFIX}{font_name}");
         ctx.commands.entity(ctx.entity).with_child((
             WorldText::new(no_gap_label),
             WorldTextStyle::new(style.label_size)

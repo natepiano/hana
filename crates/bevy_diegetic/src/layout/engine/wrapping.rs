@@ -1,11 +1,11 @@
 use bevy_kana::ToF32;
 
-use super::super::LayoutTextStyle;
-use super::super::TextWrap;
-use super::super::element::ElementContent;
-use super::super::element::LayoutTree;
 use super::layout_engine::ComputedLayout;
 use super::layout_engine::MeasureTextFn;
+use crate::layout::LayoutTextStyle;
+use crate::layout::TextWrap;
+use crate::layout::element::ElementContent;
+use crate::layout::element::LayoutTree;
 
 /// A single line of wrapped text with its measured width.
 pub(super) struct WrappedLine {

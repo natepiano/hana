@@ -464,10 +464,10 @@ fn update_dynamic_rows(
 fn build_controls_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let cfg = LayoutTextStyle::new(CONTROL_FONT_SIZE);
+    let control_text_style = LayoutTextStyle::new(CONTROL_FONT_SIZE);
     let arrow_style = LayoutTextStyle::new(CONTROL_ARROW_SIZE);
     let title_style = LayoutTextStyle::new(CONTROL_TITLE_FONT_SIZE);
-    let row_h = Sizing::fixed(CONTROL_ROW_HEIGHT);
+    let row_height = Sizing::fixed(CONTROL_ROW_HEIGHT);
     let dim_color = Color::srgba(0.6, 0.6, 0.6, 0.8);
 
     let mut builder = LayoutBuilder::new(CONTROL_LAYOUT_WIDTH, CONTROL_LAYOUT_HEIGHT);
@@ -505,11 +505,11 @@ fn build_controls_panel() -> LayoutTree {
                             .direction(Direction::TopToBottom)
                             .child_align_x(AlignX::Center),
                         |b| {
-                            b.with(El::new().height(row_h), |b| {
-                                b.text("d", cfg.clone());
+                            b.with(El::new().height(row_height), |b| {
+                                b.text("d", control_text_style.clone());
                             });
-                            b.with(El::new().height(row_h), |b| {
-                                b.text("s", cfg.clone());
+                            b.with(El::new().height(row_height), |b| {
+                                b.text("s", control_text_style.clone());
                             });
                         },
                     );
@@ -519,10 +519,10 @@ fn build_controls_panel() -> LayoutTree {
                             .direction(Direction::TopToBottom)
                             .child_align_x(AlignX::Center),
                         |b| {
-                            b.with(El::new().height(row_h), |b| {
+                            b.with(El::new().height(row_height), |b| {
                                 b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
                             });
-                            b.with(El::new().height(row_h), |b| {
+                            b.with(El::new().height(row_height), |b| {
                                 b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
                             });
                         },
@@ -533,11 +533,11 @@ fn build_controls_panel() -> LayoutTree {
                             .direction(Direction::TopToBottom)
                             .child_align_x(AlignX::Left),
                         |b| {
-                            b.with(El::new().height(row_h), |b| {
-                                b.text("toggle debug", cfg.clone());
+                            b.with(El::new().height(row_height), |b| {
+                                b.text("toggle debug", control_text_style.clone());
                             });
-                            b.with(El::new().height(row_h), |b| {
-                                b.text("cycle size", cfg.clone());
+                            b.with(El::new().height(row_height), |b| {
+                                b.text("cycle size", control_text_style.clone());
                             });
                         },
                     );
@@ -625,8 +625,8 @@ fn spawn_clay_text(
     }
 
     let scale = sizing.scale();
-    let half_w = sizing.world_size * 0.5;
-    let half_h = sizing.world_size * PANEL_ASPECT * 0.5;
+    let half_width = sizing.world_size * 0.5;
+    let half_height = sizing.world_size * PANEL_ASPECT * 0.5;
 
     // Scale factor: WorldText uses 0.01, panel uses `scale`.
     let text_entity_scale = scale / WORLD_TEXT_SCALE;
@@ -641,8 +641,8 @@ fn spawn_clay_text(
             // Convert layout coords to panel-local world coords.
             // Layout: top-left origin, Y-down.
             // Panel-local: center origin, Y-up.
-            let local_x = rect.x.mul_add(scale, -half_w);
-            let local_y = (-rect.y).mul_add(scale, half_h);
+            let local_x = rect.x.mul_add(scale, -half_width);
+            let local_y = (-rect.y).mul_add(scale, half_height);
 
             // Transform to world space.
             let world_pos = panel_gt.transform_point(Vec3::new(local_x, local_y, 0.001));
@@ -1047,14 +1047,14 @@ fn draw_rect_on_panel(
     color: Color,
     sizing: &PanelSizing,
 ) {
-    let half_w = sizing.world_size * 0.5;
-    let half_h = sizing.world_size * PANEL_ASPECT * 0.5;
+    let half_width = sizing.world_size * 0.5;
+    let half_height = sizing.world_size * PANEL_ASPECT * 0.5;
     let scale = sizing.scale();
 
-    let left = bounds_x.mul_add(scale, -half_w);
-    let right = (bounds_x + bounds_w).mul_add(scale, -half_w);
-    let top = (-bounds_y).mul_add(scale, half_h);
-    let bottom = (-(bounds_y + bounds_h)).mul_add(scale, half_h);
+    let left = bounds_x.mul_add(scale, -half_width);
+    let right = (bounds_x + bounds_w).mul_add(scale, -half_width);
+    let top = (-bounds_y).mul_add(scale, half_height);
+    let bottom = (-(bounds_y + bounds_h)).mul_add(scale, half_height);
 
     let tl = panel_transform.transform_point(Vec3::new(left, top, 0.0));
     let tr = panel_transform.transform_point(Vec3::new(right, top, 0.0));

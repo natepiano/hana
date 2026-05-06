@@ -299,8 +299,8 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Backdrop sized for max grid; panel grows dynamically.
-    let grid_w = COLUMN_WORLD_WIDTH * GRID_COLUMNS.to_f32();
-    let grid_h = ROW_WORLD_HEIGHT * GRID_ROWS.to_f32();
+    let grid_width = COLUMN_WORLD_WIDTH * GRID_COLUMNS.to_f32();
+    let grid_height = ROW_WORLD_HEIGHT * GRID_ROWS.to_f32();
 
     // Tilted root — Star Wars crawl angle.
     let tilt_radians = TILT_DEGREES.to_radians();
@@ -312,11 +312,11 @@ fn setup(
     commands.insert_resource(TiltRoot(tilt_root));
 
     // Visible backdrop — opaque dark panel behind the grid.
-    let backdrop_w = grid_w * (1.0 + BACK_PLANE_OVERFLOW);
-    let backdrop_h = grid_h * (1.0 + BACK_PLANE_OVERFLOW);
+    let backdrop_width = grid_width * (1.0 + BACK_PLANE_OVERFLOW);
+    let backdrop_height = grid_height * (1.0 + BACK_PLANE_OVERFLOW);
     let ground = commands
         .spawn((
-            Mesh3d(meshes.add(Rectangle::new(backdrop_w, backdrop_h))),
+            Mesh3d(meshes.add(Rectangle::new(backdrop_width, backdrop_height))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.08, 0.08, 0.08),
                 alpha_mode: AlphaMode::Opaque,

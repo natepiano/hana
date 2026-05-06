@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use sealed::CanBuild;
 
 use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
 use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
@@ -515,8 +516,8 @@ mod sealed {
     pub trait CanBuild {}
 }
 
-impl sealed::CanBuild for HasSize {}
-impl sealed::CanBuild for Ready {}
+impl CanBuild for HasSize {}
+impl CanBuild for Ready {}
 
 // ── Build (on HasSize or Ready, either mode) ────────────────────────────────
 

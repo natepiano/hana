@@ -681,21 +681,24 @@ fn spawn_line_with_shape(
     // so `fwidth(local.y)` has breathing room. Pad the length direction
     // by the same absolute amount (which is generous since the line is
     // long already).
-    let mesh_half_w = half_length + half_thickness * (MESH_THICKNESS_MULTIPLIER - 1.0);
-    let mesh_half_h = half_thickness * MESH_THICKNESS_MULTIPLIER;
+    let mesh_half_width = half_length + half_thickness * (MESH_THICKNESS_MULTIPLIER - 1.0);
+    let mesh_half_height = half_thickness * MESH_THICKNESS_MULTIPLIER;
     let material = materials.add(example_sdf_material(
         color,
         half_length,
         half_thickness,
-        mesh_half_w,
-        mesh_half_h,
+        mesh_half_width,
+        mesh_half_height,
         [0.0; 4],
         [0.0; 4],
         None,
         shape_kind,
     ));
     commands.entity(parent).with_child((
-        Mesh3d(meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0))),
+        Mesh3d(meshes.add(Rectangle::new(
+            mesh_half_width * 2.0,
+            mesh_half_height * 2.0,
+        ))),
         MeshMaterial3d(material),
         Transform::from_xyz(x, y, ROW_Z).with_rotation(rotate_vertical()),
     ));
@@ -723,8 +726,8 @@ fn spawn_border_edge(
     // strokes (e.g. 28pt) still get enough pixels of breathing room at
     // oblique viewing angles.
     let outer_thickness_pad = SDF_AA_PADDING + stroke_half;
-    let mesh_half_w = half_length + stroke_half * (MESH_THICKNESS_MULTIPLIER - 1.0);
-    let mesh_half_h = half_thickness + outer_thickness_pad;
+    let mesh_half_width = half_length + stroke_half * (MESH_THICKNESS_MULTIPLIER - 1.0);
+    let mesh_half_height = half_thickness + outer_thickness_pad;
 
     // Border widths are [top, right, bottom, left] — draw the bottom
     // edge. After the -90° Z rotation that edge becomes the left side
@@ -734,8 +737,8 @@ fn spawn_border_edge(
         Color::NONE,
         half_length,
         half_thickness,
-        mesh_half_w,
-        mesh_half_h,
+        mesh_half_width,
+        mesh_half_height,
         [0.0; 4],
         [0.0, 0.0, width, 0.0],
         Some(REF_COLOR),
@@ -743,7 +746,10 @@ fn spawn_border_edge(
     ));
     let visible_edge_offset = Vec3::X * width.mul_add(-0.5, half_thickness);
     commands.entity(parent).with_child((
-        Mesh3d(meshes.add(Rectangle::new(mesh_half_w * 2.0, mesh_half_h * 2.0))),
+        Mesh3d(meshes.add(Rectangle::new(
+            mesh_half_width * 2.0,
+            mesh_half_height * 2.0,
+        ))),
         MeshMaterial3d(material),
         Transform::from_translation(Vec3::new(x, y, ROW_Z) + visible_edge_offset)
             .with_rotation(rotate_vertical()),

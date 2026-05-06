@@ -29,6 +29,7 @@ pub use atlas_config::GlyphWorkerThreads;
 pub use atlas_config::RasterQuality;
 use bevy::asset::AssetLoadFailedEvent;
 use bevy::prelude::*;
+pub(crate) use constants::DEFAULT_FAMILY;
 pub use constants::EMBEDDED_FONT;
 pub use font::Font;
 pub use font::FontMetrics;
@@ -106,7 +107,7 @@ fn init_atlas_and_embedded_font(
     atlas.upload_to_gpu(&mut images);
     commands.trigger(FontRegistered {
         id:     FontId::MONOSPACE,
-        name:   "JetBrains Mono".to_string(),
+        name:   DEFAULT_FAMILY.to_string(),
         source: FontSource::Embedded,
     });
 }

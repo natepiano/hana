@@ -1,10 +1,17 @@
 //! Shared text shaping support used by panel and world text rendering.
 
+use std::borrow::Cow;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
 use bevy::prelude::*;
 use bevy_kana::ToU16;
+use parley::Layout;
+use parley::LayoutContext;
+use parley::layout::PositionedLayoutItem;
+use parley::style::FontFeatures;
+use parley::style::LineHeight;
+use parley::style::StyleProperty;
 
 use crate::layout::LayoutTextStyle;
 use crate::layout::LineMetricsSnapshot;
@@ -12,6 +19,7 @@ use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
 use crate::layout::TextDimensions;
+use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 
@@ -21,8 +29,8 @@ use crate::text::FontRegistry;
 /// shaping call. Wrapped in `Mutex` for `Send + Sync`.
 #[derive(Resource)]
 pub(super) struct TextShapingContext {
-    layout_cx: Mutex<parley::LayoutContext<()>>,
-    layout:    Mutex<parley::Layout<()>>,
+    layout_cx: Mutex<LayoutContext<()>>,
+    layout:    Mutex<Layout<()>>,
 }
 
 impl Default for TextShapingContext {
@@ -106,17 +114,17 @@ pub(super) fn shape_text_cached(
 
     let family_name = font_registry
         .family_name(FontId(config.font_id()))
-        .unwrap_or("JetBrains Mono");
+        .unwrap_or(DEFAULT_FAMILY);
 
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, true);
-    builder.push_default(parley::style::StyleProperty::FontSize(config.size()));
-    builder.push_default(parley::style::StyleProperty::FontFamily(
-        parley::style::FontFamily::named(family_name),
-    ));
+    builder.push_default(StyleProperty::FontSize(config.size()));
+    builder.push_default(StyleProperty::FontFamily(parley::style::FontFamily::named(
+        family_name,
+    )));
     if config.line_height_raw() > 0.0 {
-        builder.push_default(parley::style::StyleProperty::LineHeight(
-            parley::style::LineHeight::Absolute(config.line_height_raw()),
-        ));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+            config.line_height_raw(),
+        )));
     }
 
     let font_features = config.font_features();
@@ -129,9 +137,9 @@ pub(super) fn shape_text_cached(
                 value,
             })
             .collect();
-        builder.push_default(parley::style::StyleProperty::FontFeatures(
-            parley::style::FontFeatures::List(std::borrow::Cow::Owned(parley_features)),
-        ));
+        builder.push_default(StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(
+            parley_features,
+        ))));
     }
 
     builder.build_into(&mut layout, text);
@@ -152,7 +160,7 @@ pub(super) fn shape_text_cached(
             bottom:   line_metrics_snapshot.block_max_coord,
         });
         for item in line.items() {
-            let parley::layout::PositionedLayoutItem::GlyphRun(run) = item else {
+            let PositionedLayoutItem::GlyphRun(run) = item else {
                 continue;
             };
             let glyph_run = run.run();

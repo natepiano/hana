@@ -578,7 +578,7 @@ fn build_fonts_panel(
     font_registry: &FontRegistry,
     selected_font: usize,
 ) -> bevy_diegetic::LayoutTree {
-    let row_h = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
+    let row_height = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
     let key_cells = build_font_key_cells(selected_font);
     let name_cells = build_font_name_cells(font_registry, selected_font);
 
@@ -643,7 +643,7 @@ fn build_fonts_panel(
                                                 b.with(
                                                     El::new()
                                                         .width(Sizing::GROW)
-                                                        .height(row_h)
+                                                        .height(row_height)
                                                         .child_align_x(AlignX::Center)
                                                         .child_align_y(AlignY::Center),
                                                     |b| {
@@ -653,7 +653,7 @@ fn build_fonts_panel(
                                             }
                                         },
                                     );
-                                    column(b, AlignX::Left, row_h, &name_cells);
+                                    column(b, AlignX::Left, row_height, &name_cells);
                                 },
                             );
                         },

@@ -1,12 +1,12 @@
 use bevy_kana::ToF32;
 
-use super::super::Direction;
-use super::super::Sizing;
-use super::super::constants::LAYOUT_EPSILON;
-use super::super::element::Element;
-use super::super::element::ElementContent;
-use super::super::element::LayoutTree;
 use super::layout_engine::ComputedLayout;
+use crate::layout::Direction;
+use crate::layout::Sizing;
+use crate::layout::constants::LAYOUT_EPSILON;
+use crate::layout::element::Element;
+use crate::layout::element::ElementContent;
+use crate::layout::element::LayoutTree;
 
 /// Selects which layout axis a sizing or positioning operation targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

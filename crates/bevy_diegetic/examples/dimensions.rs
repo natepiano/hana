@@ -88,39 +88,45 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let demo_w = DEMO_WIDTH * MILLIMETERS_TO_METERS;
-    let demo_h = DEMO_HEIGHT * MILLIMETERS_TO_METERS;
-    let note_w = NOTE_WIDTH * MILLIMETERS_TO_METERS;
-    let note_h = NOTE_HEIGHT * MILLIMETERS_TO_METERS;
+    let demo_width = DEMO_WIDTH * MILLIMETERS_TO_METERS;
+    let demo_height = DEMO_HEIGHT * MILLIMETERS_TO_METERS;
+    let note_width = NOTE_WIDTH * MILLIMETERS_TO_METERS;
+    let note_height = NOTE_HEIGHT * MILLIMETERS_TO_METERS;
 
-    let total_w = demo_w + COLUMN_GAP + note_w;
-    let left_x = -total_w / 2.0;
-    let note_x = left_x + demo_w + COLUMN_GAP;
-    let max_h = demo_h.max(note_h);
-    let header_y = max_h + HEADER_GAP;
+    let total_width = demo_width + COLUMN_GAP + note_width;
+    let left_x = -total_width / 2.0;
+    let note_x = left_x + demo_width + COLUMN_GAP;
+    let max_height = demo_height.max(note_height);
+    let header_y = max_height + HEADER_GAP;
     let content_top = Pt(9.0)
         .0
         .mul_add(-Unit::Points.meters_per_unit(), header_y - HEADER_GAP);
 
-    let total_h = header_y;
-    spawn_backdrop(&mut commands, &mut meshes, &mut materials, total_w, total_h);
+    let total_height = header_y;
+    spawn_backdrop(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        total_width,
+        total_height,
+    );
     spawn_headers(&mut commands, left_x, note_x, header_y);
     spawn_panels(&mut commands, left_x, note_x, content_top);
-    spawn_lighting_and_camera(&mut commands, total_h);
+    spawn_lighting_and_camera(&mut commands, total_height);
 }
 
 fn spawn_backdrop(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    total_w: f32,
-    total_h: f32,
+    total_width: f32,
+    total_height: f32,
 ) {
     let backdrop = commands
         .spawn((
             Mesh3d(meshes.add(Plane3d::new(
                 Vec3::Z,
-                Vec2::new(total_w / 2.0 + MARGIN, total_h / 2.0 + MARGIN),
+                Vec2::new(total_width / 2.0 + MARGIN, total_height / 2.0 + MARGIN),
             ))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgba(0.12, 0.12, 0.14, 0.0),
@@ -128,7 +134,7 @@ fn spawn_backdrop(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_xyz(0.0, total_h / 2.0, -0.001),
+            Transform::from_xyz(0.0, total_height / 2.0, -0.001),
         ))
         .id();
     commands.insert_resource(Backdrop(backdrop));
@@ -177,7 +183,7 @@ fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: 
     commands.spawn((note_panel, Transform::from_xyz(note_x, content_top, 0.0)));
 }
 
-fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
+fn spawn_lighting_and_camera(commands: &mut Commands, total_height: f32) {
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
@@ -195,7 +201,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
 
     commands.spawn((
         OrbitCam {
-            focus: Vec3::new(0.0, total_h / 2.0, 0.0),
+            focus: Vec3::new(0.0, total_height / 2.0, 0.0),
             radius: Some(0.25),
             yaw: Some(0.0),
             pitch: Some(0.0),

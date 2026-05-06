@@ -36,6 +36,7 @@ use crate::render::LAYER_DEPTH_BIAS;
 use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
 use crate::render::SdfPanelMaterial;
+use crate::render::SdfPanelMaterialInput;
 
 /// Shared rendering parameters that every callout spawn helper threads through.
 /// Exists to keep helper argument lists under the "context struct when > 7
@@ -247,7 +248,7 @@ fn spawn_segment(
 
     let material = render::sdf_panel_material(
         base,
-        render::SdfPanelMaterialInput {
+        SdfPanelMaterialInput {
             half_size:        Vec2::new(half_width, half_height),
             mesh_half_size:   Vec2::new(mesh_half_width, mesh_half_height),
             corner_radii:     [0.0; 4],

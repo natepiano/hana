@@ -4,6 +4,7 @@ mod batching;
 mod reconcile;
 mod shaping;
 
+use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
 use self::batching::PanelTextAlpha;
@@ -56,8 +57,7 @@ impl Plugin for TextRenderPlugin {
                 build_panel_batched_meshes.after(shape_panel_text_children),
                 sync_panel_hue_offset.after(build_panel_batched_meshes),
                 world_text::render_world_text.after(poll_atlas_glyphs),
-                world_text::emit_world_text_ready
-                    .after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
+                world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );
     }

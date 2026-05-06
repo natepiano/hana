@@ -1,10 +1,14 @@
 //! Asset loader for `.ttf` and `.otf` font files.
 
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use bevy::asset::AssetLoader;
 use bevy::asset::LoadContext;
 use bevy::asset::io::Reader;
 use bevy::reflect::TypePath;
 
+use super::constants::FONT_FILE_EXTENSIONS;
 use super::font::Font;
 
 /// Loads `.ttf` and `.otf` font files into [`Font`] assets.
@@ -51,7 +55,7 @@ impl AssetLoader for FontLoader {
         Font::from_bytes(&name, &bytes).ok_or(FontLoaderError::ParseFailed)
     }
 
-    fn extensions(&self) -> &[&str] { &["ttf", "otf"] }
+    fn extensions(&self) -> &[&str] { FONT_FILE_EXTENSIONS }
 }
 
 /// Errors that can occur when loading a font file.
@@ -67,8 +71,8 @@ impl From<std::io::Error> for FontLoaderError {
     fn from(err: std::io::Error) -> Self { Self::Io(err) }
 }
 
-impl std::fmt::Display for FontLoaderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FontLoaderError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(err) => write!(f, "failed to read font file: {err}"),
             Self::ParseFailed => write!(f, "failed to parse font data"),

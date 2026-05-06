@@ -263,10 +263,10 @@ impl AtlasConfig {
 
         let page_size = self.page_size();
         let bytes = self.estimated_page_bytes();
-        let kb = bytes / 1024;
+        let kilobytes = bytes / 1024;
         let worker_threads = self.clamped_glyph_worker_threads();
         info!(
-            "Atlas config: {:?}, ~{} glyphs/page (estimate), {page_size}x{page_size}px pages (~{kb}KB each), {worker_threads} glyph workers",
+            "Atlas config: {:?}, ~{} glyphs/page (estimate), {page_size}x{page_size}px pages (~{kilobytes}KB each), {worker_threads} glyph workers",
             self.quality,
             self.clamped_glyphs_per_page()
         );

@@ -8,6 +8,8 @@ use std::sync::PoisonError;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use std::time::Instant;
 
 use bevy::image::Image;
@@ -30,6 +32,7 @@ use super::constants::ATLAS_GUTTER;
 use super::constants::BYTES_PER_PIXEL;
 use super::constants::DEFAULT_ATLAS_SIZE;
 use super::constants::DEFAULT_GLYPH_WORKER_THREADS;
+use super::constants::GLYPH_WORKER_THREAD_NAME;
 use super::font::Font;
 use super::font_registry::FontId;
 use super::font_registry::FontRegistry;
@@ -175,9 +178,9 @@ pub struct MsdfAtlas {
     /// Glyph keys currently being rasterized asynchronously.
     in_flight:         HashSet<GlyphKey>,
     /// Receiver for completed async rasterizations (Mutex for Sync).
-    rx:                Mutex<mpsc::Receiver<RasterizedGlyph>>,
+    rx:                Mutex<Receiver<RasterizedGlyph>>,
     /// Sender cloned into each async task.
-    tx:                mpsc::Sender<RasterizedGlyph>,
+    tx:                Sender<RasterizedGlyph>,
     /// Number of raster jobs currently executing on worker threads.
     active_jobs:       Arc<AtomicUsize>,
     /// Peak concurrently executing raster jobs observed so far.
@@ -236,7 +239,7 @@ impl MsdfAtlas {
             glyph_worker_pool: Arc::new(
                 TaskPoolBuilder::new()
                     .num_threads(glyph_worker_threads)
-                    .thread_name("Diegetic Glyph Raster".to_string())
+                    .thread_name(GLYPH_WORKER_THREAD_NAME.to_string())
                     .build(),
             ),
         }

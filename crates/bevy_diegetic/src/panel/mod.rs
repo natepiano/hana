@@ -23,6 +23,7 @@ pub(crate) use diegetic_panel::PanelFontUnit;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
 pub use perf::AtlasPerfStats;
+use perf::DiagnosticsPlugin;
 pub use perf::DiegeticPerfStats;
 pub use perf::PanelTextPerfStats;
 pub use sizing::AnyUnit;
@@ -76,7 +77,7 @@ pub struct HeadlessLayoutPlugin;
 
 impl Plugin for HeadlessLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(perf::DiagnosticsPlugin)
+        app.add_plugins(DiagnosticsPlugin)
             .add_plugins(CascadePanelPlugin::<PanelFontUnit>::default())
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()

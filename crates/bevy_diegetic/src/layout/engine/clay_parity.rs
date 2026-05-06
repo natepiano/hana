@@ -32,7 +32,9 @@ use clay_layout::layout::LayoutAlignmentX;
 use clay_layout::layout::LayoutAlignmentY;
 use clay_layout::layout::LayoutDirection;
 use clay_layout::math::Dimensions;
+use clay_layout::render_commands::RenderCommand;
 use clay_layout::render_commands::RenderCommandConfig;
+use clay_layout::text::TextConfig;
 
 use crate::layout::AlignX;
 use crate::layout::AlignY;
@@ -78,11 +80,7 @@ fn monospace_measure() -> MeasureTextFn {
 }
 
 /// Same measurement logic for Clay's callback.
-fn clay_monospace_measure(
-    text: &str,
-    config: &clay_layout::text::TextConfig,
-    _: &mut (),
-) -> Dimensions {
+fn clay_monospace_measure(text: &str, config: &TextConfig, _: &mut ()) -> Dimensions {
     let font_size = f32::from(config.font_size);
     let char_width = font_size * CHAR_WIDTH_FACTOR;
     let line_height = if config.line_height == 0 {
@@ -170,7 +168,7 @@ fn new_clay(size: f32) -> Clay {
 }
 
 fn collect_clay_bboxes<'a>(
-    commands: impl IntoIterator<Item = clay_layout::render_commands::RenderCommand<'a, (), ()>>,
+    commands: impl IntoIterator<Item = RenderCommand<'a, (), ()>>,
 ) -> Vec<Bbox> {
     let mut out = Vec::new();
     for cmd in commands {

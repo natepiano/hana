@@ -240,7 +240,7 @@ fn rotate_hue(panels: Query<Entity, With<RotatingPanel>>, mut commands: Commands
 fn build_info_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let cfg = LayoutTextStyle::new(INFO_FONT_SIZE);
+    let info_text_style = LayoutTextStyle::new(INFO_FONT_SIZE);
     let title_style = LayoutTextStyle::new(INFO_TITLE_FONT_SIZE);
 
     let mut builder = LayoutBuilder::new(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT);
@@ -267,7 +267,7 @@ fn build_info_panel() -> LayoutTree {
             );
             b.text(
                 "Left panel rotates independently - materials are not shared",
-                cfg,
+                info_text_style,
             );
         },
     );

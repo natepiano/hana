@@ -16,8 +16,8 @@ pub enum FontSource {
     Loaded,
 }
 
-impl std::fmt::Display for FontSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FontSource {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Embedded => write!(f, "embedded"),
             Self::Loaded => write!(f, "loaded"),
@@ -63,6 +63,9 @@ pub struct FontLoadFailed {
     /// Human-readable error description.
     pub error: String,
 }
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use parley::FontContext;
 use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;

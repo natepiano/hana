@@ -185,11 +185,11 @@ fn spawn_ground_and_backdrop(
 
     commands.insert_resource(SceneBounds(ground));
 
-    let panel_w = grid.grid_width + 3.0;
-    let panel_h = grid.grid_height + 3.0;
+    let panel_width = grid.grid_width + 3.0;
+    let panel_height = grid.grid_height + 3.0;
     let backdrop = commands
         .spawn((
-            Mesh3d(meshes.add(Rectangle::new(panel_w, panel_h))),
+            Mesh3d(meshes.add(Rectangle::new(panel_width, panel_height))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.85, 0.85, 0.85),
                 double_sided: true,
@@ -338,7 +338,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands) {
 fn build_info_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let cfg = LayoutTextStyle::new(INFO_FONT_SIZE);
+    let info_text_style = LayoutTextStyle::new(INFO_FONT_SIZE);
     let title_style = LayoutTextStyle::new(INFO_TITLE_FONT_SIZE);
 
     let mut builder = LayoutBuilder::new(INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT);
@@ -363,7 +363,10 @@ fn build_info_panel() -> LayoutTree {
                     .background(divider_color),
                 |_| {},
             );
-            b.text("rows: GlyphRenderMode, columns: GlyphShadowMode", cfg);
+            b.text(
+                "rows: GlyphRenderMode, columns: GlyphShadowMode",
+                info_text_style,
+            );
         },
     );
     builder.build()

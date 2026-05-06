@@ -128,9 +128,9 @@ fn setup(
         return;
     };
     let (layout_w, layout_h) = layout_dimensions(window);
-    let world_h = PANEL_WORLD_HEIGHT;
-    let world_w = world_h * (layout_w / layout_h);
-    let (ground_w, ground_d) = ground_dimensions(world_w);
+    let world_height = PANEL_WORLD_HEIGHT;
+    let world_width = world_height * (layout_w / layout_h);
+    let (ground_w, ground_d) = ground_dimensions(world_width);
     let ground_z = ground_center_z();
 
     commands.spawn((
@@ -162,7 +162,7 @@ fn setup(
     commands.spawn((
         ShowcasePanel,
         showcase_panel,
-        panel_transform(world_w, world_h),
+        panel_transform(world_width, world_height),
     ));
 
     commands.spawn((
@@ -208,9 +208,9 @@ fn layout_dimensions(window: &Window) -> (f32, f32) {
     (LAYOUT_HEIGHT * aspect, LAYOUT_HEIGHT)
 }
 
-fn ground_dimensions(world_w: f32) -> (f32, f32) {
+fn ground_dimensions(world_width: f32) -> (f32, f32) {
     (
-        GROUND_SIDE_MARGIN.mul_add(2.0, world_w),
+        GROUND_SIDE_MARGIN.mul_add(2.0, world_width),
         GROUND_FRONT_MARGIN + GROUND_BACK_MARGIN + 2.0,
     )
 }
@@ -224,8 +224,12 @@ fn panel_z() -> f32 {
     ground_d.mul_add(0.5 - PANEL_FRONT_DEPTH_FRACTION, ground_center_z())
 }
 
-fn panel_transform(world_w: f32, world_h: f32) -> Transform {
-    Transform::from_xyz(-world_w * 0.5, world_h + PANEL_GROUND_CLEARANCE, panel_z())
+fn panel_transform(world_width: f32, world_height: f32) -> Transform {
+    Transform::from_xyz(
+        -world_width * 0.5,
+        world_height + PANEL_GROUND_CLEARANCE,
+        panel_z(),
+    )
 }
 
 fn resize_panel(
@@ -242,9 +246,9 @@ fn resize_panel(
         return;
     };
     let (layout_w, layout_h) = layout_dimensions(window);
-    let world_h = PANEL_WORLD_HEIGHT;
-    let world_w = world_h * (layout_w / layout_h);
-    let (ground_w, ground_d) = ground_dimensions(world_w);
+    let world_height = PANEL_WORLD_HEIGHT;
+    let world_width = world_height * (layout_w / layout_h);
+    let (ground_w, ground_d) = ground_dimensions(world_width);
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
@@ -267,7 +271,7 @@ fn resize_panel(
             return;
         };
         *panel = new;
-        *transform = panel_transform(world_w, world_h);
+        *transform = panel_transform(world_width, world_height);
     }
 
     for (mut mesh3d, mut transform) in &mut ground {

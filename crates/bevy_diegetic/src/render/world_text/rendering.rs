@@ -3,22 +3,15 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
-use super::super::constants;
-use super::super::glyph_quad::GlyphQuadData;
-use super::super::msdf_material::MsdfTextMaterial;
-use super::super::text_shaping::GlyphReadiness;
-use super::super::text_shaping::TextBuildStats;
-use super::super::text_shaping::TextShapingContext;
 use super::ComputedWorldText;
 use super::PanelTextChild;
 use super::WorldFontUnit;
 use super::WorldText;
 use super::WorldTextAlpha;
+use super::mesh_spawning;
 use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::mesh_spawning::WorldTextShadowProxy;
-use super::mesh_spawning::despawn_mesh_children;
-use super::mesh_spawning::spawn_world_text_meshes;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
 use super::shaping::shape_world_text;
@@ -28,6 +21,12 @@ use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
+use crate::render::constants;
+use crate::render::glyph_quad::GlyphQuadData;
+use crate::render::msdf_material::MsdfTextMaterial;
+use crate::render::text_shaping::GlyphReadiness;
+use crate::render::text_shaping::TextBuildStats;
+use crate::render::text_shaping::TextShapingContext;
 use crate::text::FontRegistry;
 use crate::text::MsdfAtlas;
 
@@ -91,7 +90,7 @@ pub fn render_world_text(
         text_count += 1;
 
         if world_text.0.is_empty() {
-            despawn_mesh_children(entity, &old_meshes, &mut commands);
+            mesh_spawning::despawn_mesh_children(entity, &old_meshes, &mut commands);
             commands.entity(entity).remove::<PendingGlyphs>();
             continue;
         }
@@ -134,7 +133,7 @@ pub fn render_world_text(
         let total_quads: usize = page_quads.values().map(Vec::len).sum();
 
         if total_quads > 0 {
-            despawn_mesh_children(entity, &old_meshes, &mut commands);
+            mesh_spawning::despawn_mesh_children(entity, &old_meshes, &mut commands);
             let resolved_alpha = re_resolve_world_text_alpha(
                 entity,
                 style,
@@ -147,7 +146,7 @@ pub fn render_world_text(
                 materials: &mut materials,
                 commands:  &mut commands,
             };
-            mesh_ms_total += spawn_world_text_meshes(
+            mesh_ms_total += mesh_spawning::spawn_world_text_meshes(
                 &page_quads,
                 entity,
                 style,

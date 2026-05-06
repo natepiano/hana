@@ -100,50 +100,56 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let panel_w = PANEL_WIDTH * MILLIMETERS_PER_METER;
-    let panel_h = PANEL_HEIGHT * MILLIMETERS_PER_METER;
-    let note_w = NOTE_WIDTH * MILLIMETERS_PER_METER;
-    let note_h = NOTE_HEIGHT * MILLIMETERS_PER_METER;
+    let panel_width = PANEL_WIDTH * MILLIMETERS_PER_METER;
+    let panel_height = PANEL_HEIGHT * MILLIMETERS_PER_METER;
+    let note_width = NOTE_WIDTH * MILLIMETERS_PER_METER;
+    let note_height = NOTE_HEIGHT * MILLIMETERS_PER_METER;
 
     // Three columns: demo panel | WorldText | commentary.
     // WorldText column is narrower than the panel — size to actual content.
     let world_text_column_width = (LABEL_COL + 28.0) * MILLIMETERS_PER_METER; // label col + "Hello" width
-    let total_w = panel_w + COLUMN_GAP + world_text_column_width + COLUMN_GAP + note_w;
-    let left_x = -total_w / 2.0;
-    let right_x = left_x + panel_w + COLUMN_GAP;
+    let total_width = panel_width + COLUMN_GAP + world_text_column_width + COLUMN_GAP + note_width;
+    let left_x = -total_width / 2.0;
+    let right_x = left_x + panel_width + COLUMN_GAP;
     let note_x = right_x + world_text_column_width + COLUMN_GAP;
 
     // All three headers top-align at this Y. Content sits below.
     let header_style = WorldTextStyle::new(Pt(9.0))
         .with_color(HEADER_COLOR)
         .with_anchor(Anchor::TopLeft);
-    let max_content_h = panel_h.max(note_h);
-    let lift = max_content_h * 0.10; // shift everything up 10%
-    let header_y = max_content_h + HEADER_GAP + lift;
+    let max_content_height = panel_height.max(note_height);
+    let lift = max_content_height * 0.10; // shift everything up 10%
+    let header_y = max_content_height + HEADER_GAP + lift;
     let content_top = Pt(9.0)
         .0
         .mul_add(-Unit::Points.meters_per_unit(), header_y - HEADER_GAP);
 
-    let total_h = header_y;
-    spawn_backdrop(&mut commands, &mut meshes, &mut materials, total_w, total_h);
+    let total_height = header_y;
+    spawn_backdrop(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        total_width,
+        total_height,
+    );
     spawn_headers(&mut commands, &header_style, left_x, note_x, header_y);
     spawn_panels(&mut commands, left_x, note_x, content_top);
     spawn_world_text_column(&mut commands, header_style, right_x, header_y);
-    spawn_lighting_and_camera(&mut commands, total_h);
+    spawn_lighting_and_camera(&mut commands, total_height);
 }
 
 fn spawn_backdrop(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    total_w: f32,
-    total_h: f32,
+    total_width: f32,
+    total_height: f32,
 ) {
     let backdrop = commands
         .spawn((
             Mesh3d(meshes.add(Plane3d::new(
                 Vec3::Z,
-                Vec2::new(total_w / 2.0 + MARGIN, total_h / 2.0 + MARGIN),
+                Vec2::new(total_width / 2.0 + MARGIN, total_height / 2.0 + MARGIN),
             ))),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgba(0.12, 0.12, 0.14, 0.0),
@@ -151,7 +157,7 @@ fn spawn_backdrop(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_xyz(0.0, total_h / 2.0, -0.001),
+            Transform::from_xyz(0.0, total_height / 2.0, -0.001),
         ))
         .id();
     commands.insert_resource(Backdrop(backdrop));
@@ -248,7 +254,7 @@ fn spawn_world_text_column(
     }
 }
 
-fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
+fn spawn_lighting_and_camera(commands: &mut Commands, total_height: f32) {
     commands.spawn((
         DirectionalLight {
             shadows_enabled: true,
@@ -266,7 +272,7 @@ fn spawn_lighting_and_camera(commands: &mut Commands, total_h: f32) {
 
     commands.spawn((
         OrbitCam {
-            focus: Vec3::new(0.0, total_h / 2.0, 0.0),
+            focus: Vec3::new(0.0, total_height / 2.0, 0.0),
             radius: Some(0.25),
             yaw: Some(0.0),
             pitch: Some(0.0),

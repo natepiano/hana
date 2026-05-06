@@ -48,6 +48,10 @@
 //! let _ = DiegeticPanel::world().build();
 //! ```
 
+use sealed::Mode;
+use sealed::PhysicalUnit;
+use sealed::Unit;
+
 use crate::layout::Dimension;
 use crate::layout::In;
 use crate::layout::Mm;
@@ -67,8 +71,8 @@ mod sealed {
     pub trait PhysicalUnit: Unit {}
 }
 
-impl sealed::Mode for super::builder::Screen {}
-impl sealed::Mode for super::builder::World {}
+impl Mode for super::builder::Screen {}
+impl Mode for super::builder::World {}
 
 // ── Unit markers ─────────────────────────────────────────────────────────────
 
@@ -91,15 +95,15 @@ pub struct Pixels;
 #[derive(Clone, Copy, Debug)]
 pub struct AnyUnit;
 
-impl sealed::Unit for Millimeters {}
-impl sealed::PhysicalUnit for Millimeters {}
-impl sealed::Unit for Inches {}
-impl sealed::PhysicalUnit for Inches {}
-impl sealed::Unit for Points {}
-impl sealed::PhysicalUnit for Points {}
-impl sealed::Unit for Pixels {}
-impl sealed::PhysicalUnit for Pixels {}
-impl sealed::Unit for AnyUnit {}
+impl Unit for Millimeters {}
+impl PhysicalUnit for Millimeters {}
+impl Unit for Inches {}
+impl PhysicalUnit for Inches {}
+impl Unit for Points {}
+impl PhysicalUnit for Points {}
+impl Unit for Pixels {}
+impl PhysicalUnit for Pixels {}
+impl Unit for AnyUnit {}
 // AnyUnit is deliberately NOT `PhysicalUnit` — keeps `CompatibleUnits`
 // impls disjoint.
 

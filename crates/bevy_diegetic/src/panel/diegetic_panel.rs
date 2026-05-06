@@ -336,10 +336,10 @@ impl DiegeticPanel {
                 return 1.0 / to_pts;
             }
         }
-        let viewport_pts_h = self.height * self.layout_unit.to_points();
-        let wh = self.world_height();
-        if viewport_pts_h > 0.0 {
-            wh / viewport_pts_h
+        let viewport_points_height = self.height * self.layout_unit.to_points();
+        let world_height = self.world_height();
+        if viewport_points_height > 0.0 {
+            world_height / viewport_points_height
         } else {
             Unit::Points.meters_per_unit()
         }
@@ -354,9 +354,9 @@ impl DiegeticPanel {
     /// [`CascadeDefaults::panel_font_unit`].
     #[must_use]
     pub fn font_scale(&self, panel_font_unit: Unit) -> f32 {
-        let font_mpu = panel_font_unit.meters_per_unit();
-        let layout_mpu = self.layout_unit.meters_per_unit();
-        font_mpu / layout_mpu
+        let font_meters_per_unit = panel_font_unit.meters_per_unit();
+        let layout_meters_per_unit = self.layout_unit.meters_per_unit();
+        font_meters_per_unit / layout_meters_per_unit
     }
 }
 

@@ -20,6 +20,8 @@ use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
 
+use crate::constants::EMBEDDED_SDF_PANEL_SHADER_PATH;
+
 /// The full SDF panel material type: `StandardMaterial` extended with
 /// SDF rounded rectangle rendering.
 pub type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelExtension>;
@@ -72,13 +74,11 @@ pub struct SdfPanelExtension {
 }
 
 impl MaterialExtension for SdfPanelExtension {
-    fn fragment_shader() -> ShaderRef { "embedded://bevy_diegetic/shaders/sdf_panel.wgsl".into() }
+    fn fragment_shader() -> ShaderRef { EMBEDDED_SDF_PANEL_SHADER_PATH.into() }
 
     /// Use the SDF shader for the depth/shadow prepass so that rounded
     /// shapes clip correctly in shadows.
-    fn prepass_fragment_shader() -> ShaderRef {
-        "embedded://bevy_diegetic/shaders/sdf_panel.wgsl".into()
-    }
+    fn prepass_fragment_shader() -> ShaderRef { EMBEDDED_SDF_PANEL_SHADER_PATH.into() }
 }
 
 /// Inputs for a rounded-rectangle panel material.

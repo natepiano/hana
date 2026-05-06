@@ -1,17 +1,16 @@
 use std::sync::Arc;
 
-use super::super::BoundingBox;
-use super::super::Sizing;
-use super::super::TextDimensions;
-use super::super::TextMeasure;
-use super::super::element::ElementContent;
-use super::super::element::LayoutTree;
-use super::super::render::RenderCommand;
-use super::positioning::position_and_render;
+use super::positioning;
+use super::sizing;
 use super::sizing::Axis;
-use super::sizing::propagate_fit_sizes;
-use super::sizing::size_along_axis;
-use super::wrapping::rewrap_text_elements;
+use super::wrapping;
+use crate::layout::BoundingBox;
+use crate::layout::Sizing;
+use crate::layout::TextDimensions;
+use crate::layout::TextMeasure;
+use crate::layout::element::ElementContent;
+use crate::layout::element::LayoutTree;
+use crate::layout::render::RenderCommand;
 
 /// Callback type for measuring text dimensions.
 ///
@@ -98,26 +97,26 @@ impl LayoutEngine {
         self.initialize_leaf_sizes(tree, &mut computed, font_scale);
 
         // Propagate Fit container sizes bottom-up from their children.
-        propagate_fit_sizes(tree, &mut computed, root, Axis::X);
-        propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
+        sizing::propagate_fit_sizes(tree, &mut computed, root, Axis::X);
+        sizing::propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
 
         // Phase 1: Size along X axis (BFS top-down).
-        size_along_axis(tree, &mut computed, root, Axis::X, viewport_width);
+        sizing::size_along_axis(tree, &mut computed, root, Axis::X, viewport_width);
 
         // Phase 2: Re-wrap text elements within their resolved widths.
         // This may change text heights (more lines), so we re-propagate Y
         // and re-size along Y afterwards — but only if wrapping actually changed sizes.
         let (wrapped, text_sizes_changed) =
-            rewrap_text_elements(tree, &mut computed, &self.measure_text, font_scale);
+            wrapping::rewrap_text_elements(tree, &mut computed, &self.measure_text, font_scale);
         if text_sizes_changed {
-            propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
+            sizing::propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
         }
 
         // Phase 3: Size along Y axis (BFS top-down) with wrap-corrected heights.
-        size_along_axis(tree, &mut computed, root, Axis::Y, viewport_height);
+        sizing::size_along_axis(tree, &mut computed, root, Axis::Y, viewport_height);
 
         // Phase 4: Position elements and generate render commands (DFS).
-        let commands = position_and_render(
+        let commands = positioning::position_and_render(
             tree,
             &mut computed,
             root,

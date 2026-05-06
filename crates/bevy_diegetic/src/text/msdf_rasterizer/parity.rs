@@ -22,6 +22,7 @@ use msdfgen::FontExt;
 use msdfgen::MsdfGeneratorConfig;
 use msdfgen::Range;
 use msdfgen::Rgb;
+use ttf_parser_018::GlyphId;
 
 use super::*;
 
@@ -37,7 +38,7 @@ fn glyph_index_for(font_data: &[u8], ch: char) -> Option<u16> {
     face.glyph_index(ch).map(|id| id.0)
 }
 
-fn glyph_index_018_for(font_data: &[u8], ch: char) -> Option<ttf_parser_018::GlyphId> {
+fn glyph_index_018_for(font_data: &[u8], ch: char) -> Option<GlyphId> {
     let face = ttf_parser_018::Face::parse(font_data, 0).ok()?;
     face.glyph_index(ch)
 }

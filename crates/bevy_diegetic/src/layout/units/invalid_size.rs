@@ -1,3 +1,6 @@
+use core::error::Error;
+use core::fmt::Display;
+use core::fmt::Formatter;
 /// Error returned when panel dimensions are zero or negative.
 ///
 /// Emitted by
@@ -40,8 +43,8 @@ pub struct InvalidSize {
     pub height: f32,
 }
 
-impl core::fmt::Display for InvalidSize {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Display for InvalidSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "panel dimensions must be positive, got {}×{}",
@@ -50,4 +53,4 @@ impl core::fmt::Display for InvalidSize {
     }
 }
 
-impl core::error::Error for InvalidSize {}
+impl Error for InvalidSize {}
