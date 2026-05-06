@@ -487,8 +487,7 @@ mod tests {
             let gid16 = gid.to_u16();
             let result = rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
             let bbox = face.glyph_bounding_box(GlyphId(gid16));
-            let has_shape =
-                fdsm_ttf_parser::load_shape_from_face(&face, ttf_parser::GlyphId(gid16)).is_some();
+            let has_shape = fdsm_ttf_parser::load_shape_from_face(&face, GlyphId(gid16)).is_some();
             println!(
                 "  glyph {gid16}: rasterize={}, bbox={:?}, has_shape={has_shape}, advance={adv}",
                 result.is_some(),

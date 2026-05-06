@@ -14,7 +14,7 @@ use super::mesh_spawning::WorldTextMesh;
 use super::mesh_spawning::WorldTextShadowProxy;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
-use super::shaping::shape_world_text;
+use super::shaping;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
 use crate::cascade::Resolved;
@@ -103,7 +103,7 @@ pub fn render_world_text(
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
-        let shaped = shape_world_text(
+        let shaped = shaping::shape_world_text(
             &world_text.0,
             style,
             &font_registry,
