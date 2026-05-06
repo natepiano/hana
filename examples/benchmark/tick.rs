@@ -1,11 +1,18 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+use crate::constants::AUTO_BENCHMARK_COMPLETE_MESSAGE;
+use crate::constants::AUTO_BENCHMARK_START_MESSAGE;
 use crate::constants::AUTO_EXIT_DELAY_SECS;
 use crate::constants::AUTO_STARTUP_DELAY_SECS;
+use crate::constants::EXITING_MESSAGE;
 use crate::constants::MEASURE_FRAMES;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::constants::OUTLINE_PRESENCE_DISABLED_LABEL;
+use crate::constants::OUTLINE_PRESENCE_ENABLED_LABEL;
+use crate::constants::SCENARIO_SWITCH_MESSAGE;
 use crate::constants::SCENARIOS;
+use crate::constants::STARTUP_COMPLETE_MESSAGE;
 use crate::constants::WARMUP_FRAMES;
 use crate::grid::BenchmarkEntity;
 use crate::results::compute_statistics;
@@ -71,7 +78,7 @@ fn handle_startup_delay_phase(
     windows: &mut Query<&mut Window>,
     time: &Time<Real>,
 ) {
-    if state.startup_timer.elapsed_secs() == 0.0
+    if state.startup_timer.elapsed().is_zero()
         && let Ok(mut window) = windows.single_mut()
     {
         window.focused = true;
@@ -80,7 +87,7 @@ fn handle_startup_delay_phase(
 
     state.startup_timer.tick(time.delta());
     if state.startup_timer.just_finished() {
-        info!("Startup delay complete, beginning auto benchmark");
+        info!("{}", STARTUP_COMPLETE_MESSAGE);
         state.phase = BenchmarkPhase::Setup;
     }
 }
@@ -103,8 +110,8 @@ fn handle_setup_phase(
 
     let scenario = &SCENARIOS[state.current_scenario];
     let outline_label = match state.outline_presence {
-        OutlinePresence::Enabled => "on",
-        OutlinePresence::Disabled => "off",
+        OutlinePresence::Enabled => OUTLINE_PRESENCE_ENABLED_LABEL,
+        OutlinePresence::Disabled => OUTLINE_PRESENCE_DISABLED_LABEL,
     };
     info!(
         "Setting up scenario: {} [outline {outline_label}] ({}/{})",
@@ -196,7 +203,7 @@ fn handle_analyze_phase(state: &mut BenchmarkState) {
             info!("Auto benchmark complete, exiting in {AUTO_EXIT_DELAY_SECS}s");
             state.phase = BenchmarkPhase::ExitDelay;
         } else {
-            info!("Auto benchmark complete");
+            info!("{}", AUTO_BENCHMARK_COMPLETE_MESSAGE);
             state.mode = BenchmarkMode::Interactive;
             state.phase = BenchmarkPhase::Idle;
         }
@@ -208,7 +215,7 @@ fn handle_analyze_phase(state: &mut BenchmarkState) {
 fn handle_exit_delay_phase(state: &mut BenchmarkState, time: &Time<Real>) {
     state.exit_timer.tick(time.delta());
     if state.exit_timer.just_finished() {
-        info!("Exiting");
+        info!("{}", EXITING_MESSAGE);
         std::process::exit(0);
     }
 }
@@ -220,7 +227,7 @@ pub(super) fn handle_input(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<B
     }
 
     if input.just_pressed(KeyCode::KeyR) {
-        info!("Starting auto benchmark run");
+        info!("{}", AUTO_BENCHMARK_START_MESSAGE);
         state.mode = BenchmarkMode::Auto;
         state.current_scenario = 0;
         state.outline_presence = OutlinePresence::Disabled;
@@ -241,7 +248,7 @@ pub(super) fn handle_input(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<B
 
     for (index, scenario) in SCENARIOS.iter().enumerate() {
         if input.just_pressed(scenario.key) {
-            info!("Switching to scenario: {}", scenario.name);
+            info!(SCENARIO_SWITCH_MESSAGE, scenario.name);
             state.mode = BenchmarkMode::Interactive;
             state.current_scenario = index;
             state.outline_presence = OutlinePresence::Disabled;

@@ -4,8 +4,14 @@ use bevy_liminal::OutlineMethod;
 
 use crate::constants::AUTO_EXIT_DELAY_SECS;
 use crate::constants::AUTO_MODE_ENV_VAR;
+use crate::constants::AUTO_MODE_ENV_VAR_ENABLED_VALUE;
 use crate::constants::AUTO_STARTUP_DELAY_SECS;
 use crate::constants::MEASURE_FRAMES;
+use crate::constants::OUTLINE_METHOD_JUMP_FLOOD_LABEL;
+use crate::constants::OUTLINE_METHOD_SCREEN_HULL_LABEL;
+use crate::constants::OUTLINE_METHOD_WORLD_HULL_LABEL;
+use crate::constants::OUTLINE_PRESENCE_DISABLED_LABEL;
+use crate::constants::OUTLINE_PRESENCE_ENABLED_LABEL;
 use crate::constants::SCENARIOS;
 use crate::results::ScenarioResult;
 
@@ -54,7 +60,9 @@ pub(super) struct BenchmarkState {
 
 impl BenchmarkState {
     pub(super) fn new() -> Self {
-        let exit_behavior = if std::env::var(AUTO_MODE_ENV_VAR).is_ok_and(|v| v == "1") {
+        let exit_behavior = if std::env::var(AUTO_MODE_ENV_VAR)
+            .is_ok_and(|value| value == AUTO_MODE_ENV_VAR_ENABLED_VALUE)
+        {
             ExitBehavior::OnComplete
         } else {
             ExitBehavior::KeepRunning
@@ -83,8 +91,8 @@ impl BenchmarkState {
     pub(super) fn result_name(&self) -> String {
         let scenario = &SCENARIOS[self.current_scenario];
         let suffix = match self.outline_presence {
-            OutlinePresence::Enabled => "on",
-            OutlinePresence::Disabled => "off",
+            OutlinePresence::Enabled => OUTLINE_PRESENCE_ENABLED_LABEL,
+            OutlinePresence::Disabled => OUTLINE_PRESENCE_DISABLED_LABEL,
         };
         let mode_label = outline_method_label(self.outline_method);
         format!("{} {suffix} ({mode_label})", scenario.name)
@@ -93,9 +101,9 @@ impl BenchmarkState {
 
 pub(super) const fn outline_method_label(outline_method: OutlineMethod) -> &'static str {
     match outline_method {
-        OutlineMethod::JumpFlood => "JumpFlood",
-        OutlineMethod::WorldHull => "WorldHull",
-        OutlineMethod::ScreenHull => "ScreenHull",
+        OutlineMethod::JumpFlood => OUTLINE_METHOD_JUMP_FLOOD_LABEL,
+        OutlineMethod::WorldHull => OUTLINE_METHOD_WORLD_HULL_LABEL,
+        OutlineMethod::ScreenHull => OUTLINE_METHOD_SCREEN_HULL_LABEL,
     }
 }
 

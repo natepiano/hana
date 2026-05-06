@@ -6,6 +6,7 @@ use crate::scenarios::ScenarioKind;
 // auto-mode
 pub(super) const AUTO_EXIT_DELAY_SECS: f32 = 2.0;
 pub(super) const AUTO_MODE_ENV_VAR: &str = "BENCHMARK_AUTO";
+pub(super) const AUTO_MODE_ENV_VAR_ENABLED_VALUE: &str = "1";
 pub(super) const AUTO_STARTUP_DELAY_SECS: f32 = 5.0;
 
 // camera
@@ -38,6 +39,15 @@ pub(super) const VIEWPORT_HEIGHT_MULTIPLIER: f32 = 2.0;
 pub(super) const HEADS_UP_DISPLAY_FONT_SIZE: f32 = 18.0;
 pub(super) const HEADS_UP_DISPLAY_PADDING: f32 = 10.0;
 pub(super) const HEADS_UP_DISPLAY_UPDATE_INTERVAL: f32 = 0.25;
+pub(super) const BENCHMARK_LABEL: &str = "Bench:";
+pub(super) const BENCHMARK_MODE_AUTO_LABEL: &str = "Auto";
+pub(super) const BENCHMARK_MODE_INTERACTIVE_LABEL: &str = "Interactive";
+pub(super) const BENCHMARK_PHASE_ANALYZE_LABEL: &str = "Analyzing...";
+pub(super) const BENCHMARK_PHASE_IDLE_LABEL: &str = "Idle";
+pub(super) const BENCHMARK_PHASE_SETUP_LABEL: &str = "Setting up...";
+pub(super) const HEADS_UP_DISPLAY_RESULTS_HEADER: &str = "\n\n--- Results ---";
+pub(super) const HEADS_UP_DISPLAY_CONTROLS: &str =
+    "\n\n#: Switch scenario  M: Cycle mode  R: Auto run  L: Log results";
 
 // lighting
 pub(super) const AMBIENT_LIGHT_BRIGHTNESS: f32 = 200.0;
@@ -48,7 +58,47 @@ pub(super) const LIGHT_RANGE: f32 = 100.0;
 // measurement
 pub(super) const MEASURE_FRAMES: u32 = 600;
 pub(super) const MILLISECONDS_PER_SECOND: f64 = 1000.0;
+pub(super) const NINETY_FIFTH_PERCENTILE: f64 = 95.0;
+pub(super) const NINETY_NINTH_PERCENTILE: f64 = 99.0;
 pub(super) const WARMUP_FRAMES: u32 = 120;
+
+// outline labels
+pub(super) const OUTLINE_METHOD_JUMP_FLOOD_LABEL: &str = "JumpFlood";
+pub(super) const OUTLINE_METHOD_SCREEN_HULL_LABEL: &str = "ScreenHull";
+pub(super) const OUTLINE_METHOD_WORLD_HULL_LABEL: &str = "WorldHull";
+pub(super) const OUTLINE_PRESENCE_DISABLED_LABEL: &str = "off";
+pub(super) const OUTLINE_PRESENCE_ENABLED_LABEL: &str = "on";
+
+// results
+pub(super) const BENCHMARK_CSV_HEADER: &str = "scenario,frames,average_ms,median_ms,percentile_95_ms,percentile_99_ms,min_ms,max_ms,average_frames_per_second";
+pub(super) const BENCHMARK_RESULTS_BANNER: &str = "\n=== bevy_liminal Benchmark Results ===\n";
+pub(super) const BENCHMARK_RESULTS_FILE_PREFIX: &str = "benchmark_";
+pub(super) const BENCHMARK_RESULTS_FILE_SUFFIX: &str = ".csv";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE: &str = "Average(ms)";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_FPS: &str = "FPS";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_FRAMES: &str = "Frames";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_MAX: &str = "Max(ms)";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_MEDIAN: &str = "Median(ms)";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_MIN: &str = "Min(ms)";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_95: &str = "95th(ms)";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_99: &str = "99th(ms)";
+pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO: &str = "Scenario";
+pub(super) const DATE_COMMAND: &str = "date";
+pub(super) const DATE_COMMAND_ARG_FORMAT: &str = "+%Y_%m_%d_%H_%M";
+pub(super) const DATE_COMMAND_ARG_REFERENCE_TIME: &str = "-r";
+pub(super) const RESULTS_DIRECTORY_NAME: &str = "results";
+
+// startup
+pub(super) const BENCHMARK_WINDOW_TITLE: &str = "bevy_liminal benchmark";
+pub(super) const INITIALIZING_BENCHMARK_TEXT: &str = "Initializing benchmark...";
+
+// tick
+pub(super) const AUTO_BENCHMARK_COMPLETE_MESSAGE: &str = "Auto benchmark complete";
+pub(super) const AUTO_BENCHMARK_START_MESSAGE: &str = "Starting auto benchmark run";
+pub(super) const EXITING_MESSAGE: &str = "Exiting";
+pub(super) const SCENARIO_SWITCH_MESSAGE: &str = "Switching to scenario: {}";
+pub(super) const STARTUP_COMPLETE_MESSAGE: &str =
+    "Startup delay complete, beginning auto benchmark";
 
 // outline defaults
 pub(super) const DEFAULT_OUTLINE_INTENSITY: f32 = 1.0;

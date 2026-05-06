@@ -78,6 +78,26 @@ const UI_TEXT_FONT_SIZE: f32 = 16.0;
 const ZOOM_DURATION_MS: u64 = 1000;
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
+const COLUMN_LABELS: &[(OutlineMethod, &str)] = &[
+    (OutlineMethod::WorldHull, "WorldHull"),
+    (OutlineMethod::ScreenHull, "ScreenHull"),
+    (OutlineMethod::JumpFlood, "JumpFlood"),
+];
+const CUBE_NAME_PREFIX: &str = "Cube (";
+const GROUNDED_OVERLAP_LABEL: &str = "Overlap: Merged";
+const GROUND_CLICK_LOG_MESSAGE: &str = "Ground clicked, zooming to scene bounds";
+const GROUND_CLICK_UI_TEXT: &str = "Click a mesh to zoom-to-fit\nClick the ground to zoom back out\nPress 'O' to toggle overlap mode\n\nColumns: WorldHull | ScreenHull | JumpFlood\nRows: Torus | Cube | Spaceship";
+const MESH_CLICK_LOG_PREFIX: &str = "Mesh clicked: ";
+const OVERLAP_LABEL_PREFIX: &str = "Overlap: ";
+const OVERLAP_MODE_GROUPED_LABEL: &str = "Grouped";
+const OVERLAP_MODE_MERGED_LABEL: &str = "Merged";
+const OVERLAP_MODE_PER_MESH_LABEL: &str = "PerMesh";
+const SCENE_ASSET_PATH: &str = "spaceship.glb#Scene0";
+const SPHERE_NEGATIVE_X_NAME: &str = "Sphere -X";
+const SPHERE_POSITIVE_X_NAME: &str = "Sphere +X";
+const NAME_SUFFIX: &str = ")";
+const SPACESHIP_NAME_PREFIX: &str = "Spaceship (";
+const TORUS_NAME_PREFIX: &str = "Torus (";
 
 struct MeshAndMaterial {
     mesh:     Handle<Mesh>,
@@ -151,16 +171,10 @@ fn spawn_outline_grid(
     torus: &MeshAndMaterial,
     asset_server: &AssetServer,
 ) {
-    let modes: &[(OutlineMethod, &str)] = &[
-        (OutlineMethod::WorldHull, "WorldHull"),
-        (OutlineMethod::ScreenHull, "ScreenHull"),
-        (OutlineMethod::JumpFlood, "JumpFlood"),
-    ];
-
     let column_rotations = COLUMN_ROTATION_ANGLES
         .map(|(yaw, pitch, roll)| Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll));
 
-    for (col, &(mode, label)) in modes.iter().enumerate() {
+    for (col, &(mode, label)) in COLUMN_LABELS.iter().enumerate() {
         let x = (col.to_f32() - GRID_CENTER_COLUMN) * GRID_SPACING;
         let rotation = column_rotations[col];
         let outline = match mode {
@@ -180,7 +194,7 @@ fn spawn_outline_grid(
 
         commands
             .spawn((
-                Name::new(format!("Torus ({label})")),
+                Name::new(format!("{TORUS_NAME_PREFIX}{label}{NAME_SUFFIX}")),
                 Mesh3d(torus.mesh.clone()),
                 MeshMaterial3d(torus.material.clone()),
                 Transform {
@@ -194,7 +208,7 @@ fn spawn_outline_grid(
 
         commands
             .spawn((
-                Name::new(format!("Cube ({label})")),
+                Name::new(format!("{CUBE_NAME_PREFIX}{label}{NAME_SUFFIX}")),
                 Mesh3d(cube.mesh.clone()),
                 MeshMaterial3d(cube.material.clone()),
                 Transform {
@@ -207,13 +221,13 @@ fn spawn_outline_grid(
             .observe(on_mesh_clicked)
             .with_children(|parent| {
                 parent.spawn((
-                    Name::new("Sphere +X"),
+                    Name::new(SPHERE_POSITIVE_X_NAME),
                     Mesh3d(sphere.mesh.clone()),
                     MeshMaterial3d(sphere.material.clone()),
                     Transform::from_xyz(SPHERE_CHILD_OFFSET_X, 0.0, 0.0),
                 ));
                 parent.spawn((
-                    Name::new("Sphere -X"),
+                    Name::new(SPHERE_NEGATIVE_X_NAME),
                     Mesh3d(sphere.mesh.clone()),
                     MeshMaterial3d(sphere.material.clone()),
                     Transform::from_xyz(-SPHERE_CHILD_OFFSET_X, 0.0, 0.0),
@@ -222,8 +236,8 @@ fn spawn_outline_grid(
 
         commands
             .spawn((
-                Name::new(format!("Spaceship ({label})")),
-                SceneRoot(asset_server.load("spaceship.glb#Scene0")),
+                Name::new(format!("{SPACESHIP_NAME_PREFIX}{label}{NAME_SUFFIX}")),
+                SceneRoot(asset_server.load(SCENE_ASSET_PATH)),
                 Transform {
                     translation: Vec3::new(x, SPACESHIP_ROW_Y, SPACESHIP_ROW_Z),
                     rotation,
@@ -291,14 +305,7 @@ fn spawn_environment(
 
 fn spawn_ui(commands: &mut Commands) {
     commands.spawn((
-        Text::new(
-            "Click a mesh to zoom-to-fit\n\
-             Click the ground to zoom back out\n\
-             Press 'O' to toggle overlap mode\n\
-             \n\
-             Columns: WorldHull | ScreenHull | JumpFlood\n\
-             Rows: Torus | Cube | Spaceship",
-        ),
+        Text::new(GROUND_CLICK_UI_TEXT),
         TextFont {
             font_size: UI_TEXT_FONT_SIZE,
             ..default()
@@ -314,7 +321,7 @@ fn spawn_ui(commands: &mut Commands) {
 
     commands.spawn((
         OverlapLabel,
-        Text::new("Overlap: Merged"),
+        Text::new(GROUNDED_OVERLAP_LABEL),
         TextFont {
             font_size: UI_TEXT_FONT_SIZE,
             ..default()
@@ -333,7 +340,7 @@ fn on_mesh_clicked(click: On<Pointer<Click>>, mut commands: Commands) {
     if click.button != PointerButton::Primary {
         return;
     }
-    info!("Mesh clicked: {:?}", click.entity);
+    info!("{MESH_CLICK_LOG_PREFIX}{entity:?}", entity = click.entity);
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, click.entity)
@@ -346,7 +353,7 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
     if click.button != PointerButton::Primary {
         return;
     }
-    info!("Ground clicked, zooming to scene bounds");
+    info!(GROUND_CLICK_LOG_MESSAGE);
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, scene.0)
@@ -382,10 +389,10 @@ fn toggle_overlap(
         && let Ok(mut text) = label.single_mut()
     {
         let label_str = match mode {
-            OverlapMode::Merged => "Merged",
-            OverlapMode::Grouped => "Grouped",
-            OverlapMode::PerMesh => "PerMesh",
+            OverlapMode::Merged => OVERLAP_MODE_MERGED_LABEL,
+            OverlapMode::Grouped => OVERLAP_MODE_GROUPED_LABEL,
+            OverlapMode::PerMesh => OVERLAP_MODE_PER_MESH_LABEL,
         };
-        **text = format!("Overlap: {label_str}");
+        **text = format!("{OVERLAP_LABEL_PREFIX}{label_str}");
     }
 }

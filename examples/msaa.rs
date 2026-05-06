@@ -51,6 +51,15 @@ const OUTLINED_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 // UI
 const UI_FONT_SIZE: f32 = 16.0;
 const UI_PADDING: f32 = 10.0;
+const MSAA_LABEL_OFF: &str = "Off";
+const MSAA_LABEL_SAMPLE_2: &str = "2x";
+const MSAA_LABEL_SAMPLE_4: &str = "4x";
+const MSAA_LABEL_SAMPLE_8: &str = "8x";
+const POST_ANTI_ALIASING_LABEL_NONE: &str = "None";
+const POST_ANTI_ALIASING_LABEL_SMAA: &str = "SMAA";
+const POST_ANTI_ALIASING_LABEL_TAA: &str = "TAA";
+const MSAA_TEXT_HEADER: &str = "MSAA:\n1: Off\n2: 2x\n3: 4x (default)\n4: 8x\n\nPost AA:\nS: Toggle SMAA\nT: Toggle TAA\n\nCurrent MSAA: ";
+const CURRENT_POST_ANTI_ALIASING_LABEL: &str = "\nCurrent Post AA: ";
 
 fn main() {
     App::new()
@@ -93,9 +102,9 @@ enum PostAntiAliasing {
 impl PostAntiAliasing {
     const fn label(self) -> &'static str {
         match self {
-            Self::None => "None",
-            Self::Smaa => "SMAA",
-            Self::Taa => "TAA",
+            Self::None => POST_ANTI_ALIASING_LABEL_NONE,
+            Self::Smaa => POST_ANTI_ALIASING_LABEL_SMAA,
+            Self::Taa => POST_ANTI_ALIASING_LABEL_TAA,
         }
     }
 
@@ -269,16 +278,16 @@ fn setup_ui(mut commands: Commands) {
 
 const fn msaa_label(msaa: Msaa) -> &'static str {
     match msaa {
-        Msaa::Off => "Off",
-        Msaa::Sample2 => "2x",
-        Msaa::Sample4 => "4x",
-        Msaa::Sample8 => "8x",
+        Msaa::Off => MSAA_LABEL_OFF,
+        Msaa::Sample2 => MSAA_LABEL_SAMPLE_2,
+        Msaa::Sample4 => MSAA_LABEL_SAMPLE_4,
+        Msaa::Sample8 => MSAA_LABEL_SAMPLE_8,
     }
 }
 
 fn build_msaa_text(current_msaa: &str, post_anti_aliasing: PostAntiAliasing) -> String {
     let current_post_anti_aliasing = post_anti_aliasing.label();
     format!(
-        "MSAA:\n1: Off\n2: 2x\n3: 4x (default)\n4: 8x\n\nPost AA:\nS: Toggle SMAA\nT: Toggle TAA\n\nCurrent MSAA: {current_msaa}\nCurrent Post AA: {current_post_anti_aliasing}"
+        "{MSAA_TEXT_HEADER}{current_msaa}{CURRENT_POST_ANTI_ALIASING_LABEL}{current_post_anti_aliasing}"
     )
 }

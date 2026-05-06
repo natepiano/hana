@@ -7,7 +7,26 @@ use bevy_kana::ToF64;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
+use crate::constants::BENCHMARK_CSV_HEADER;
+use crate::constants::BENCHMARK_RESULTS_BANNER;
+use crate::constants::BENCHMARK_RESULTS_FILE_PREFIX;
+use crate::constants::BENCHMARK_RESULTS_FILE_SUFFIX;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_FPS;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_FRAMES;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_MAX;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_MEDIAN;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_MIN;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_95;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_99;
+use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO;
+use crate::constants::DATE_COMMAND;
+use crate::constants::DATE_COMMAND_ARG_FORMAT;
+use crate::constants::DATE_COMMAND_ARG_REFERENCE_TIME;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::constants::NINETY_FIFTH_PERCENTILE;
+use crate::constants::NINETY_NINTH_PERCENTILE;
+use crate::constants::RESULTS_DIRECTORY_NAME;
 
 #[derive(Clone)]
 pub(super) struct ScenarioResult {
@@ -38,8 +57,8 @@ pub(super) fn compute_statistics(name: &str, frame_times: &mut [f64]) -> Scenari
     let sum: f64 = frame_times.iter().sum();
     let average = sum / len.to_f64();
     let median = percentile(frame_times, 50.0);
-    let percentile_95 = percentile(frame_times, 95.0);
-    let percentile_99 = percentile(frame_times, 99.0);
+    let percentile_95 = percentile(frame_times, NINETY_FIFTH_PERCENTILE);
+    let percentile_99 = percentile(frame_times, NINETY_NINTH_PERCENTILE);
     let min = frame_times.first().copied().unwrap_or(0.0);
     let max = frame_times.last().copied().unwrap_or(0.0);
 
@@ -66,19 +85,10 @@ fn percentile(sorted: &[f64], pct: f64) -> f64 {
 
 pub(super) fn write_results(results: &[ScenarioResult]) {
     let mut table = String::new();
-    let _ = writeln!(table, "\n=== bevy_liminal Benchmark Results ===\n");
+    let _ = writeln!(table, "{BENCHMARK_RESULTS_BANNER}");
     let _ = writeln!(
         table,
-        "{:<18}| {:>6} | {:>11} | {:>11} | {:>11} | {:>11} | {:>11} | {:>11} | {:>6}",
-        "Scenario",
-        "Frames",
-        "Average(ms)",
-        "Median(ms)",
-        "95th(ms)",
-        "99th(ms)",
-        "Min(ms)",
-        "Max(ms)",
-        "FPS"
+        "{BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO:<18}| {BENCHMARK_RESULTS_TABLE_HEADER_FRAMES:>6} | {BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_MEDIAN:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_95:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_99:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_MIN:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_MAX:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_FPS:>6}"
     );
     let _ = writeln!(
         table,
@@ -89,16 +99,16 @@ pub(super) fn write_results(results: &[ScenarioResult]) {
     for result in results {
         let _ = writeln!(
             table,
-            "{:<18}| {:>6} | {:>11.2} | {:>11.2} | {:>11.2} | {:>11.2} | {:>11.2} | {:>11.2} | {:>6.0}",
-            result.name,
-            result.frames,
-            result.average,
-            result.median,
-            result.percentile_95,
-            result.percentile_99,
-            result.min,
-            result.max,
-            result.average_frames_per_second()
+            "{name:<18}| {frames:>6} | {average:>11.2} | {median:>11.2} | {percentile_95:>11.2} | {percentile_99:>11.2} | {min:>11.2} | {max:>11.2} | {average_frames_per_second:>6.0}",
+            name = result.name,
+            frames = result.frames,
+            average = result.average,
+            median = result.median,
+            percentile_95 = result.percentile_95,
+            percentile_99 = result.percentile_99,
+            min = result.min,
+            max = result.max,
+            average_frames_per_second = result.average_frames_per_second()
         );
     }
 
@@ -116,8 +126,12 @@ fn format_timestamp() -> String {
         .unwrap_or_default()
         .as_secs();
 
-    let output = std::process::Command::new("date")
-        .args(["-r", &now.to_string(), "+%Y_%m_%d_%H_%M"])
+    let output = std::process::Command::new(DATE_COMMAND)
+        .args([
+            DATE_COMMAND_ARG_REFERENCE_TIME,
+            &now.to_string(),
+            DATE_COMMAND_ARG_FORMAT,
+        ])
         .output();
 
     match output {
@@ -127,16 +141,15 @@ fn format_timestamp() -> String {
 }
 
 fn write_csv(results: &[ScenarioResult]) -> Result<String, std::io::Error> {
-    let results_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("results");
+    let results_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULTS_DIRECTORY_NAME);
     std::fs::create_dir_all(&results_dir)?;
 
     let timestamp = format_timestamp();
-    let path = results_dir.join(format!("benchmark_{timestamp}.csv"));
+    let path = results_dir.join(format!(
+        "{BENCHMARK_RESULTS_FILE_PREFIX}{timestamp}{BENCHMARK_RESULTS_FILE_SUFFIX}"
+    ));
     let mut file = File::create(&path)?;
-    writeln!(
-        file,
-        "scenario,frames,average_ms,median_ms,percentile_95_ms,percentile_99_ms,min_ms,max_ms,average_frames_per_second"
-    )?;
+    writeln!(file, "{BENCHMARK_CSV_HEADER}")?;
     for result in results {
         writeln!(
             file,

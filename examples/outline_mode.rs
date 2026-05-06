@@ -70,6 +70,13 @@ const SCREEN_HULL_WIDTH_STEP: f32 = 0.5;
 const WORLD_HULL_WIDTH_MAX: f32 = 10.0;
 const WORLD_HULL_WIDTH_MIN: f32 = 0.0001;
 const WORLD_HULL_WIDTH_SCALE_FACTOR: f32 = 1.2;
+const WINDOW_TITLE: &str = "outline_mode - outline mode comparison";
+const MODE_LINE_JUMP_FLOOD: &str = "Mode: JumpFlood (M)";
+const MODE_LINE_WORLD_HULL: &str = "Mode: WorldHull (M)";
+const MODE_LINE_SCREEN_HULL: &str = "Mode: ScreenHull (M)";
+const OVERLAP_LABEL_GROUPED: &str = "Grouped";
+const OVERLAP_LABEL_MERGED: &str = "Merged";
+const OVERLAP_LABEL_PER_MESH: &str = "PerMesh";
 
 fn main() {
     App::new()
@@ -78,7 +85,7 @@ fn main() {
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "outline_mode - outline mode comparison".into(),
+                        title: WINDOW_TITLE.into(),
                         ..default()
                     }),
                     ..default()
@@ -430,9 +437,9 @@ fn update_ui(
     mut text_query: Single<&mut Text, With<StatusText>>,
 ) {
     let mode_line = match mode_toggle.outline_method {
-        OutlineMethod::JumpFlood => "Mode: JumpFlood (M)",
-        OutlineMethod::WorldHull => "Mode: WorldHull (M)",
-        OutlineMethod::ScreenHull => "Mode: ScreenHull (M)",
+        OutlineMethod::JumpFlood => MODE_LINE_JUMP_FLOOD,
+        OutlineMethod::WorldHull => MODE_LINE_WORLD_HULL,
+        OutlineMethod::ScreenHull => MODE_LINE_SCREEN_HULL,
     };
 
     let width_line = match mode_toggle.outline_method {
@@ -477,8 +484,8 @@ fn update_ui(
 
 const fn overlap_mode_label(overlap_mode: OverlapMode) -> &'static str {
     match overlap_mode {
-        OverlapMode::Merged => "Merged",
-        OverlapMode::Grouped => "Grouped",
-        OverlapMode::PerMesh => "PerMesh",
+        OverlapMode::Merged => OVERLAP_LABEL_MERGED,
+        OverlapMode::Grouped => OVERLAP_LABEL_GROUPED,
+        OverlapMode::PerMesh => OVERLAP_LABEL_PER_MESH,
     }
 }

@@ -24,6 +24,7 @@ use bevy_liminal::LiminalPlugin;
 use bevy_liminal::OutlineCamera;
 use bevy_window_manager::WindowManagerPlugin;
 use constants::AMBIENT_LIGHT_BRIGHTNESS;
+use constants::BENCHMARK_WINDOW_TITLE;
 use constants::CAMERA_LOOK_AT;
 use constants::CAMERA_POSITION;
 use constants::GROUND_PLANE_SIZE;
@@ -32,6 +33,7 @@ use constants::GROUND_PLANE_Y;
 use constants::HEADS_UP_DISPLAY_FONT_SIZE;
 use constants::HEADS_UP_DISPLAY_PADDING;
 use constants::HEADS_UP_DISPLAY_UPDATE_INTERVAL;
+use constants::INITIALIZING_BENCHMARK_TEXT;
 use constants::LIGHT_INTENSITY;
 use constants::LIGHT_POSITION;
 use constants::LIGHT_RANGE;
@@ -46,7 +48,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "bevy_liminal benchmark".into(),
+                title: BENCHMARK_WINDOW_TITLE.into(),
                 present_mode: PresentMode::AutoNoVsync,
                 ..default()
             }),
@@ -124,7 +126,7 @@ fn setup_benchmark(
     ));
 
     commands.spawn((
-        Text::new("Initializing benchmark..."),
+        Text::new(INITIALIZING_BENCHMARK_TEXT),
         TextFont {
             font_size: HEADS_UP_DISPLAY_FONT_SIZE,
             ..default()
