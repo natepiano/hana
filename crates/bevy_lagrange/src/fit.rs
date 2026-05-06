@@ -128,11 +128,11 @@ const fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f
 
 /// Pre-computed parameters for the fit binary search.
 struct FitParams {
-    rotation:             Quat,
-    aspect_ratio:         f32,
-    ortho_fixed_distance: Option<f32>,
-    projection_mode:      ProjectionMode,
-    zoom_multiplier:      f32,
+    rotation:                    Quat,
+    aspect_ratio:                f32,
+    orthographic_fixed_distance: Option<f32>,
+    projection_mode:             ProjectionMode,
+    zoom_multiplier:             f32,
 }
 
 /// Calculates the optimal radius and centered focus to fit pre-extracted vertices in the camera
@@ -176,7 +176,7 @@ pub(crate) fn calculate_fit(
         },
         Projection::Custom(_) => None,
     };
-    let Some((projection_mode, ortho_fixed_distance)) = mode_and_distance else {
+    let Some((projection_mode, orthographic_fixed_distance)) = mode_and_distance else {
         return Err(FitError::UnsupportedProjection);
     };
 
@@ -187,7 +187,7 @@ pub(crate) fn calculate_fit(
     let params = FitParams {
         rotation: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
         aspect_ratio,
-        ortho_fixed_distance,
+        orthographic_fixed_distance,
         projection_mode,
         zoom_multiplier: zoom_margin_multiplier(clamped_margin),
     };
@@ -207,19 +207,19 @@ const fn find_constraining_margin(
     target_margin_x: f32,
     target_margin_y: f32,
 ) -> (f32, f32, &'static str) {
-    let h_min = bounds.left_margin.min(bounds.right_margin);
-    let v_min = bounds.top_margin.min(bounds.bottom_margin);
+    let horizontal_min_margin = bounds.left_margin.min(bounds.right_margin);
+    let vertical_min_margin = bounds.top_margin.min(bounds.bottom_margin);
     let vertical_extent = bounds.max_normalized_y - bounds.min_normalized_y;
     let horizontal_extent = bounds.max_normalized_x - bounds.min_normalized_x;
 
     if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
-        (h_min, target_margin_x, "H")
+        (horizontal_min_margin, target_margin_x, "horizontal")
     } else if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
-        (v_min, target_margin_y, "V")
-    } else if h_min < v_min {
-        (h_min, target_margin_x, "H")
+        (vertical_min_margin, target_margin_y, "vertical")
+    } else if horizontal_min_margin < vertical_min_margin {
+        (horizontal_min_margin, target_margin_x, "horizontal")
     } else {
-        (v_min, target_margin_y, "V")
+        (vertical_min_margin, target_margin_y, "vertical")
     }
 }
 
@@ -256,7 +256,7 @@ fn binary_search_for_fit(
             params,
         );
 
-        let camera_distance = params.ortho_fixed_distance.unwrap_or(test_radius);
+        let camera_distance = params.orthographic_fixed_distance.unwrap_or(test_radius);
         let camera_position =
             centered_focus + params.rotation * Vec3::new(0.0, 0.0, camera_distance);
         let camera_global = GlobalTransform::from(
@@ -375,12 +375,12 @@ fn refine_focus_centering(
 ) -> Vec3 {
     let rotation = params.rotation;
     let aspect_ratio = params.aspect_ratio;
-    let ortho_fixed_distance = params.ortho_fixed_distance;
+    let orthographic_fixed_distance = params.orthographic_fixed_distance;
     let projection_mode = params.projection_mode;
     let camera_right = rotation * Vec3::X;
     let camera_up = rotation * Vec3::Y;
 
-    let camera_distance = ortho_fixed_distance.unwrap_or(radius);
+    let camera_distance = orthographic_fixed_distance.unwrap_or(radius);
 
     let mut focus = initial_focus;
     for _ in 0..CENTERING_MAX_ITERATIONS {

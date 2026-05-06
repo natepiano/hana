@@ -108,7 +108,7 @@ const fn calculate_edge_color(
 fn create_screen_corners(
     bounds: &ScreenSpaceBounds,
     camera: &CameraBasis,
-    avg_depth: f32,
+    average_depth: f32,
     projection_mode: ProjectionMode,
 ) -> [Vec3; 4] {
     [
@@ -116,28 +116,28 @@ fn create_screen_corners(
             bounds.min_normalized_x,
             bounds.min_normalized_y,
             camera,
-            avg_depth,
+            average_depth,
             projection_mode,
         ),
         screen_space::normalized_to_world(
             bounds.max_normalized_x,
             bounds.min_normalized_y,
             camera,
-            avg_depth,
+            average_depth,
             projection_mode,
         ),
         screen_space::normalized_to_world(
             bounds.max_normalized_x,
             bounds.max_normalized_y,
             camera,
-            avg_depth,
+            average_depth,
             projection_mode,
         ),
         screen_space::normalized_to_world(
             bounds.min_normalized_x,
             bounds.max_normalized_y,
             camera,
-            avg_depth,
+            average_depth,
             projection_mode,
         ),
     ]
@@ -160,7 +160,7 @@ fn draw_silhouette(
     gizmos: &mut Gizmos<FitTargetGizmo>,
     vertices: &[Vec3],
     camera: &CameraBasis,
-    avg_depth: f32,
+    average_depth: f32,
     projection_mode: ProjectionMode,
     color: Color,
 ) {
@@ -177,14 +177,14 @@ fn draw_silhouette(
             hull[i].0,
             hull[i].1,
             camera,
-            avg_depth,
+            average_depth,
             projection_mode,
         );
         let end = screen_space::normalized_to_world(
             hull[next].0,
             hull[next].1,
             camera,
-            avg_depth,
+            average_depth,
             projection_mode,
         );
         gizmos.line(start, end, color);
@@ -196,7 +196,7 @@ struct DrawContext<'a> {
     camera:          Entity,
     bounds:          &'a ScreenSpaceBounds,
     camera_basis:    &'a CameraBasis,
-    avg_depth:       f32,
+    average_depth:   f32,
     projection_mode: ProjectionMode,
     viewport_size:   Option<Vec2>,
 }
@@ -213,7 +213,7 @@ fn draw_margin_lines_and_labels(
     let camera = draw_context.camera;
     let bounds = draw_context.bounds;
     let camera_basis = draw_context.camera_basis;
-    let avg_depth = draw_context.avg_depth;
+    let average_depth = draw_context.average_depth;
     let projection_mode = draw_context.projection_mode;
     let viewport_size = draw_context.viewport_size;
     let horizontal_balance = screen_space::horizontal_balance(bounds, TOLERANCE);
@@ -233,14 +233,14 @@ fn draw_margin_lines_and_labels(
             boundary_x,
             boundary_y,
             camera_basis,
-            avg_depth,
+            average_depth,
             projection_mode,
         );
         let screen_position = screen_space::normalized_to_world(
             screen_x,
             screen_y,
             camera_basis,
-            avg_depth,
+            average_depth,
             projection_mode,
         );
 
@@ -416,7 +416,7 @@ fn draw_bounds_for_camera(
         return;
     };
 
-    let avg_depth = depths.sum / depths.count.to_f32();
+    let average_depth = depths.sum / depths.count.to_f32();
     let projection_mode = match projection {
         Projection::Perspective(_) => Some(ProjectionMode::Perspective),
         Projection::Orthographic(_) => Some(ProjectionMode::Orthographic),
@@ -435,7 +435,7 @@ fn draw_bounds_for_camera(
         .try_insert(FitMarginPercents::from(&bounds));
 
     // Bounding rectangle
-    let corners = create_screen_corners(&bounds, &camera_basis, avg_depth, projection_mode);
+    let corners = create_screen_corners(&bounds, &camera_basis, average_depth, projection_mode);
     draw_rectangle(gizmos, &corners, config);
 
     // Silhouette convex hull
@@ -443,7 +443,7 @@ fn draw_bounds_for_camera(
         gizmos,
         vertices,
         &camera_basis,
-        avg_depth,
+        average_depth,
         projection_mode,
         config.silhouette_color,
     );
@@ -470,7 +470,7 @@ fn draw_bounds_for_camera(
         camera,
         bounds: &bounds,
         camera_basis: &camera_basis,
-        avg_depth,
+        average_depth,
         projection_mode,
         viewport_size,
     };

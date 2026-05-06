@@ -15,7 +15,6 @@ mod second_window;
 mod selection_gizmo;
 mod ui;
 
-use std::f32::consts::PI;
 use std::time::Duration;
 
 use bevy::camera::RenderTarget;
@@ -91,7 +90,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "extras - window 1".into(),
+                    title: PRIMARY_WINDOW_TITLE.into(),
                     ..default()
                 }),
                 ..default()

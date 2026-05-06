@@ -60,8 +60,8 @@ pub(crate) struct TwoFingerGestures {
 /// Stores current and previous frame mobile data, and provides a method to get mobile gestures
 #[derive(Resource, Default, Debug)]
 pub(crate) struct TouchTracker {
-    curr_pressed: (Option<Touch>, Option<Touch>),
-    prev_pressed: (Option<Touch>, Option<Touch>),
+    current_pressed:  (Option<Touch>, Option<Touch>),
+    previous_pressed: (Option<Touch>, Option<Touch>),
 }
 
 impl TouchTracker {
@@ -71,7 +71,7 @@ impl TouchTracker {
         // of touches. This means that when the number of touches changes, there's one frame
         // where this will return `TouchGestures::None`. From my testing, this does not result
         // in any adverse effects.
-        match (self.curr_pressed, self.prev_pressed) {
+        match (self.current_pressed, self.previous_pressed) {
             // One finger
             ((Some(curr), None), (Some(prev), None)) => {
                 let current_position = curr.position();
@@ -139,16 +139,16 @@ pub(crate) fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<Tou
 
     match pressed.len() {
         0 => {
-            touch_tracker.curr_pressed = (None, None);
-            touch_tracker.prev_pressed = (None, None);
+            touch_tracker.current_pressed = (None, None);
+            touch_tracker.previous_pressed = (None, None);
         },
         1 => {
-            touch_tracker.prev_pressed = touch_tracker.curr_pressed;
-            touch_tracker.curr_pressed = (Some(*pressed[0]), None);
+            touch_tracker.previous_pressed = touch_tracker.current_pressed;
+            touch_tracker.current_pressed = (Some(*pressed[0]), None);
         },
         2 => {
-            touch_tracker.prev_pressed = touch_tracker.curr_pressed;
-            touch_tracker.curr_pressed = (Some(*pressed[0]), Some(*pressed[1]));
+            touch_tracker.previous_pressed = touch_tracker.current_pressed;
+            touch_tracker.current_pressed = (Some(*pressed[0]), Some(*pressed[1]));
         },
         _ => {},
     }

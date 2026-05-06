@@ -3,6 +3,7 @@ use bevy::ui::UiTargetCamera;
 use bevy_kana::ScreenPosition;
 
 use super::constants::BOUNDS_LABEL_COLOR;
+use super::constants::BOUNDS_LABEL_TEXT;
 use super::constants::LABEL_FONT_SIZE;
 use super::constants::LABEL_PIXEL_OFFSET;
 use super::screen_space;
@@ -42,7 +43,7 @@ pub(super) fn calculate_label_pixel_position(
     viewport_size: Vec2,
 ) -> ScreenPosition {
     let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
-    let px = screen_space::norm_to_viewport(
+    let pixel_position = screen_space::norm_to_viewport(
         screen_x,
         screen_y,
         bounds.half_extent_x,
@@ -52,14 +53,14 @@ pub(super) fn calculate_label_pixel_position(
 
     // Left/Right labels sit above the horizontal line;
     // Top/Bottom labels sit beside the vertical line with pixel offsets.
-    let above_line = px.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET;
+    let above_line = pixel_position.y - LABEL_FONT_SIZE - LABEL_PIXEL_OFFSET;
 
     match edge {
         Edge::Left => ScreenPosition::new(LABEL_PIXEL_OFFSET, above_line),
         Edge::Right => ScreenPosition::new(viewport_size.x - LABEL_PIXEL_OFFSET, above_line),
-        Edge::Top => ScreenPosition::new(px.x + LABEL_PIXEL_OFFSET, LABEL_PIXEL_OFFSET),
+        Edge::Top => ScreenPosition::new(pixel_position.x + LABEL_PIXEL_OFFSET, LABEL_PIXEL_OFFSET),
         Edge::Bottom => ScreenPosition::new(
-            px.x + LABEL_PIXEL_OFFSET,
+            pixel_position.x + LABEL_PIXEL_OFFSET,
             viewport_size.y - LABEL_PIXEL_OFFSET,
         ),
     }
@@ -165,7 +166,7 @@ pub(super) fn update_or_create_bounds_label(
         node.top = Val::Px(screen_position.y);
     } else {
         commands.spawn((
-            Text::new("screen space bounds"),
+            Text::new(BOUNDS_LABEL_TEXT),
             TextFont {
                 font_size: LABEL_FONT_SIZE,
                 ..default()

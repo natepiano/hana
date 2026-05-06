@@ -44,9 +44,9 @@ pub(crate) enum ProjectionMode {
 }
 
 pub(crate) struct ProjectionParams {
-    /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
+    /// Half visible extent in x (perspective: `half_tan_horizontal_fov`, ortho: `area.width()/2`)
     pub half_extent_x: f32,
-    /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
+    /// Half visible extent in y (perspective: `half_tan_vertical_fov`, ortho: `area.height()/2`)
     pub half_extent_y: f32,
     /// Projection mode for the current camera.
     pub mode:          ProjectionMode,
@@ -58,10 +58,10 @@ impl ProjectionParams {
     pub(crate) fn from_projection(projection: &Projection, viewport_aspect: f32) -> Option<Self> {
         let projection_params = match projection {
             Projection::Perspective(p) => {
-                let half_tan_vfov = (p.fov * 0.5).tan();
+                let half_tan_vertical_fov = (p.fov * 0.5).tan();
                 Some((
-                    half_tan_vfov * viewport_aspect,
-                    half_tan_vfov,
+                    half_tan_vertical_fov * viewport_aspect,
+                    half_tan_vertical_fov,
                     ProjectionMode::Perspective,
                 ))
             },
@@ -169,9 +169,9 @@ pub(crate) struct ScreenSpaceBounds {
     pub min_normalized_y: f32,
     /// Maximum normalized y coordinate in screen space
     pub max_normalized_y: f32,
-    /// Half visible extent in x (perspective: `half_tan_hfov`, ortho: `area.width()/2`)
+    /// Half visible extent in x (perspective: `half_tan_horizontal_fov`, ortho: `area.width()/2`)
     pub half_extent_x:    f32,
-    /// Half visible extent in y (perspective: `half_tan_vfov`, ortho: `area.height()/2`)
+    /// Half visible extent in y (perspective: `half_tan_vertical_fov`, ortho: `area.height()/2`)
     pub half_extent_y:    f32,
 }
 

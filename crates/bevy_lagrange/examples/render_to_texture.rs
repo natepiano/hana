@@ -45,6 +45,8 @@ const OUTER_CUBE_ROTATION_SPEED_Y: f32 = 0.7;
 const OUTER_CUBE_ROTATION_X: f32 = -PI / 5.0;
 
 // render target
+const RENDER_TARGET_MIP_LEVEL_COUNT: u32 = 1;
+const RENDER_TARGET_SAMPLE_COUNT: u32 = 1;
 const RENDER_TARGET_HEIGHT: u32 = 512;
 const RENDER_TARGET_WIDTH: u32 = 512;
 
@@ -91,8 +93,8 @@ fn setup(
             size,
             dimension: TextureDimension::D2,
             format: TextureFormat::Bgra8UnormSrgb,
-            mip_level_count: 1,
-            sample_count: 1,
+            mip_level_count: RENDER_TARGET_MIP_LEVEL_COUNT,
+            sample_count: RENDER_TARGET_SAMPLE_COUNT,
             usage: TextureUsages::TEXTURE_BINDING
                 | TextureUsages::COPY_DST
                 | TextureUsages::RENDER_ATTACHMENT,

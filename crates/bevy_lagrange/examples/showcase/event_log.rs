@@ -52,7 +52,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
 
     // Log toggle hint (bottom-right, always visible once initial animation completes)
     commands.spawn((
-        Text::new("'L' toggle log off and on"),
+        Text::new(LOG_TOGGLE_HINT_TEXT),
         TextFont {
             font_size: UI_FONT_SIZE,
             ..default()
@@ -73,7 +73,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
 
     // Log scroll/clear hints (bottom-right, hidden until log enabled)
     commands.spawn((
-        Text::new("Up/Down scroll log\n'C' clear log"),
+        Text::new(LOG_SCROLL_HINT_TEXT),
         TextFont {
             font_size: UI_FONT_SIZE,
             ..default()
@@ -250,7 +250,7 @@ pub(crate) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
         "ZoomBegin\n  margin={:.2}\n  duration={:.0}ms\n  easing={:?}",
         event.margin,
-        event.duration.as_secs_f32() * 1000.0,
+        event.duration.as_secs_f32() * SECONDS_TO_MILLIS,
         event.easing,
     ));
 }
@@ -310,7 +310,8 @@ pub(crate) fn update_event_log_text(
         let container_height = computed.size().y;
         let max_scroll =
             (content_height - container_height).max(0.0) * computed.inverse_scale_factor();
-        scroll.y = EVENT_LOG_SCROLL_SPEED.mul_add(4.0, max_scroll);
+        scroll.y =
+            EVENT_LOG_SCROLL_SPEED.mul_add(EVENT_LOG_AUTO_SCROLL_STEP_MULTIPLIER, max_scroll);
     }
 }
 

@@ -97,8 +97,8 @@ pub fn active_viewport_data(
                     true
                 }
             };
-            if should_get_input && let RenderTarget::Window(win_ref) = target {
-                let Some(window) = (match win_ref {
+            if should_get_input && let RenderTarget::Window(window_reference) = target {
+                let Some(window) = (match window_reference {
                     WindowRef::Primary => primary_windows.single().ok(),
                     WindowRef::Entity(entity) => other_windows.get(*entity).ok(),
                 }) else {

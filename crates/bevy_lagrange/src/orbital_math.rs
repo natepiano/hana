@@ -78,9 +78,9 @@ fn sync_perspective_near_clip(projection: &mut PerspectiveProjection, radius: f3
 
 pub(crate) const fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
 
-pub(crate) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, dt: f32) -> f32 {
+pub(crate) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, delta_secs: f32) -> f32 {
     let t = smoothness.powi(SMOOTHNESS_EXPONENT);
-    let mut new_value = from.lerp(to, 1.0 - t.powf(dt));
+    let mut new_value = from.lerp(to, 1.0 - t.powf(delta_secs));
     if smoothness < 1.0 && approx_equal(new_value, to) {
         new_value = to;
     }
@@ -91,12 +91,12 @@ pub(crate) fn lerp_and_snap_position(
     from: impl Into<Position>,
     to: impl Into<Position>,
     smoothness: f32,
-    dt: f32,
+    delta_secs: f32,
 ) -> Position {
     let from = from.into();
     let to = to.into();
     let t = smoothness.powi(SMOOTHNESS_EXPONENT);
-    let mut new_value = (*from).lerp(*to, 1.0 - t.powf(dt));
+    let mut new_value = (*from).lerp(*to, 1.0 - t.powf(delta_secs));
     if smoothness < 1.0 && approx_equal((new_value - *to).length(), 0.0) {
         new_value.x = to.x;
     }

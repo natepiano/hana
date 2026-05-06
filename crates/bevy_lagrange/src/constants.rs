@@ -49,7 +49,7 @@ pub(crate) const EPSILON: f32 = 0.001;
 pub(crate) const MIN_ORBIT_RADIUS: f32 = 0.05;
 /// Fraction of current radius applied per scroll unit.
 pub(crate) const SCROLL_ZOOM_FACTOR: f32 = 0.2;
-/// Exponent that shapes the smoothing response curve.
+/// Exponent applied to the smoothing response curve.
 pub(crate) const SMOOTHNESS_EXPONENT: i32 = 7;
 /// Conversion factor from two-finger touch pinch to zoom input.
 pub(crate) const TOUCH_PINCH_SCALE: f32 = 0.015;

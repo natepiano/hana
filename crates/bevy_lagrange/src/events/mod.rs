@@ -40,6 +40,7 @@
 //! | [`CameraMoveEnd`]        | yes      | no       | no       | no         | no       | no       | yes           |
 
 mod animation;
+mod constants;
 mod fit;
 mod look;
 mod zoom;

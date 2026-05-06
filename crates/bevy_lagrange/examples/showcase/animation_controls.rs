@@ -39,7 +39,6 @@ pub(crate) fn animate_camera(
     };
 
     let easing_function = easing.0;
-    let half_pi = PI / 2.0;
     let yaw = orbit_camera.target_yaw;
     let pitch = orbit_camera.target_pitch;
     let radius = orbit_camera.target_radius;
@@ -48,7 +47,7 @@ pub(crate) fn animate_camera(
     let camera_moves = [
         CameraMove::ToOrbit {
             focus,
-            yaw: yaw + half_pi,
+            yaw: yaw + QUARTER_TURN_RADIANS,
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -56,7 +55,7 @@ pub(crate) fn animate_camera(
         },
         CameraMove::ToOrbit {
             focus,
-            yaw: yaw + half_pi * 2.0,
+            yaw: QUARTER_TURN_RADIANS.mul_add(2.0, yaw),
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -64,7 +63,7 @@ pub(crate) fn animate_camera(
         },
         CameraMove::ToOrbit {
             focus,
-            yaw: yaw + half_pi * 3.0,
+            yaw: QUARTER_TURN_RADIANS.mul_add(3.0, yaw),
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -72,7 +71,7 @@ pub(crate) fn animate_camera(
         },
         CameraMove::ToOrbit {
             focus,
-            yaw: yaw + half_pi * 4.0,
+            yaw: QUARTER_TURN_RADIANS.mul_add(4.0, yaw),
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -90,7 +89,7 @@ pub(crate) fn randomize_easing(
     mut log: ResMut<event_log::EventLog>,
 ) {
     if keyboard.just_pressed(KeyCode::KeyR) {
-        let index = (time.elapsed_secs() * 1000.0).to_usize() % ALL_EASINGS.len();
+        let index = (time.elapsed_secs() * SECONDS_TO_MILLIS).to_usize() % ALL_EASINGS.len();
         easing.0 = ALL_EASINGS[index];
         log.push(format!("Easing: {:#?}", easing.0));
     }

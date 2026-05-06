@@ -102,21 +102,21 @@ pub(super) const fn screen_edge_center(bounds: &ScreenSpaceBounds, edge: Edge) -
 
 /// Converts normalized screen-space coordinates to world space.
 ///
-/// For perspective, reverses the perspective divide by multiplying by `avg_depth`.
-/// For orthographic, coordinates are already in world units — `avg_depth` is only
+/// For perspective, reverses the perspective divide by multiplying by `average_depth`.
+/// For orthographic, coordinates are already in world units — `average_depth` is only
 /// used for the forward component to position the gizmo plane.
 pub(super) fn normalized_to_world(
     normalized_x: f32,
     normalized_y: f32,
     camera: &CameraBasis,
-    avg_depth: f32,
+    average_depth: f32,
     projection_mode: ProjectionMode,
 ) -> Vec3 {
     let (world_x, world_y) = match projection_mode {
         ProjectionMode::Orthographic => (normalized_x, normalized_y),
-        ProjectionMode::Perspective => (normalized_x * avg_depth, normalized_y * avg_depth),
+        ProjectionMode::Perspective => (normalized_x * average_depth, normalized_y * average_depth),
     };
-    *camera.position + camera.right * world_x + camera.up * world_y + camera.forward * avg_depth
+    *camera.position + camera.right * world_x + camera.up * world_y + camera.forward * average_depth
 }
 
 /// Returns the margin percentage for a given edge.

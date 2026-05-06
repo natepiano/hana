@@ -178,12 +178,12 @@ pub(crate) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32
 #[derive(Clone, Reflect, Default, Debug)]
 enum MoveState {
     InProgress {
-        elapsed_ms:   f32,
-        start:        OrbitSnapshot,
+        elapsed_millis: f32,
+        start:          OrbitSnapshot,
         /// Values written by the animation last frame — if the camera's current
         /// values differ, external input occurred and the animation may interrupt
         /// depending on `CameraInputInterruptBehavior`.
-        last_written: OrbitSnapshot,
+        last_written:   OrbitSnapshot,
     },
     #[default]
     Ready,
@@ -241,9 +241,9 @@ impl CameraMoveList {
     pub fn remaining_time_ms(&self) -> f32 {
         // Get remaining time for current move
         let current_remaining = match &self.state {
-            MoveState::InProgress { elapsed_ms, .. } => {
+            MoveState::InProgress { elapsed_millis, .. } => {
                 self.camera_moves.front().map_or(0.0, |current_move| {
-                    (current_move.duration_ms() - elapsed_ms).max(0.0)
+                    (current_move.duration_ms() - elapsed_millis).max(0.0)
                 })
             },
             MoveState::Ready => self
@@ -409,9 +409,9 @@ fn handle_ready_state(
         pan_orbit.target_radius,
     );
     queue.state = MoveState::InProgress {
-        elapsed_ms:   0.0,
-        start:        current_orbit.clone(),
-        last_written: current_orbit,
+        elapsed_millis: 0.0,
+        start:          current_orbit.clone(),
+        last_written:   current_orbit,
     };
 
     commands.trigger(CameraMoveBegin {
@@ -433,7 +433,7 @@ fn handle_in_progress(
     delta_secs: f32,
 ) {
     let MoveState::InProgress {
-        elapsed_ms,
+        elapsed_millis,
         start,
         last_written,
     } = &mut queue.state
@@ -442,14 +442,14 @@ fn handle_in_progress(
     };
 
     // Update elapsed time
-    *elapsed_ms += delta_secs * MILLIS_PER_SECOND;
+    *elapsed_millis += delta_secs * MILLIS_PER_SECOND;
 
     // Calculate interpolation factor (0.0 to 1.0)
     let duration_ms = current_move.duration_ms();
     let t = if duration_ms <= 0.0 {
         1.0
     } else {
-        (*elapsed_ms / duration_ms).min(1.0)
+        (*elapsed_millis / duration_ms).min(1.0)
     };
 
     let is_final_frame = t >= 1.0;

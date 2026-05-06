@@ -65,11 +65,11 @@ pub(crate) fn toggle_second_window(
     let window = commands
         .spawn((
             Window {
-                title: "extras - window 2".into(),
+                title: SECOND_WINDOW_TITLE.into(),
                 ..default()
             },
             ManagedWindow {
-                name: "window_2".into(),
+                name: SECOND_WINDOW_MANAGED_NAME.into(),
             },
         ))
         .id();
@@ -100,7 +100,7 @@ pub(crate) fn toggle_second_window(
 
     // `Window 2` label centered in the second window, auto-despawns after a couple seconds.
     commands.spawn((
-        Text::new("Window 2"),
+        Text::new(SECOND_WINDOW_UI_LABEL),
         TextFont {
             font_size: PAUSED_OVERLAY_FONT_SIZE,
             ..default()
@@ -121,7 +121,7 @@ pub(crate) fn toggle_second_window(
     ));
 
     commands.insert_resource(SecondWindowEntities { window, camera });
-    log.push("Window 2: opened".into());
+    log.push(SECOND_WINDOW_LOG_OPENED.into());
 }
 
 pub(crate) fn log_window_focus(
@@ -139,9 +139,9 @@ pub(crate) fn log_window_focus(
             continue;
         }
         let label = if event.window == second_window.window {
-            "Window 2"
+            SECOND_WINDOW_FOCUSED_LABEL
         } else {
-            "Window 1"
+            PRIMARY_WINDOW_FOCUSED_LABEL
         };
         log.push(format!("{label} focused"));
     }
@@ -162,7 +162,7 @@ pub(crate) fn on_second_window_removed(
 
     commands.entity(second_window.camera).despawn();
     commands.remove_resource::<SecondWindowEntities>();
-    log.push("Window 2: closed".into());
+    log.push(SECOND_WINDOW_LOG_CLOSED.into());
 }
 
 pub(crate) fn despawn_window_labels(
