@@ -77,12 +77,12 @@ pub(crate) fn despawn_managed_and_exit(
 }
 
 pub(crate) fn get_state_file_path() -> Option<PathBuf> {
-    let exe_name = std::env::current_exe()
+    let executable_name = std::env::current_exe()
         .ok()?
         .file_stem()?
         .to_str()?
         .to_string();
-    dirs::config_dir().map(|config_dir| config_dir.join(exe_name).join(STATE_FILE))
+    dirs::config_dir().map(|config_dir| config_dir.join(executable_name).join(STATE_FILE))
 }
 
 pub(crate) fn handle_window_mode_input(

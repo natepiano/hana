@@ -83,8 +83,10 @@ fn winit_detect_monitor(entity: Entity, monitors: &Monitors) -> Option<MonitorIn
         let winit_windows = winit_windows.borrow();
         winit_windows.get_window(entity).and_then(|winit_window| {
             winit_window.current_monitor().and_then(|current_monitor| {
-                let physical_pos = current_monitor.position();
-                monitors.at(physical_pos.x, physical_pos.y).copied()
+                let physical_position = current_monitor.position();
+                monitors
+                    .at(physical_position.x, physical_position.y)
+                    .copied()
             })
         })
     })
@@ -92,9 +94,9 @@ fn winit_detect_monitor(entity: Entity, monitors: &Monitors) -> Option<MonitorIn
 
 /// Detect monitor from `window.position` using center-point logic.
 fn position_detect_monitor(window: &Window, monitors: &Monitors) -> Option<MonitorInfo> {
-    if let WindowPosition::At(physical_pos) = window.position {
+    if let WindowPosition::At(physical_position) = window.position {
         Some(*monitors.monitor_for_window(
-            physical_pos,
+            physical_position,
             window.physical_width(),
             window.physical_height(),
         ))
@@ -123,14 +125,14 @@ fn compute_effective_mode(
     }
 
     // On Wayland, position is unavailable so we can only trust self.mode
-    let WindowPosition::At(physical_pos) = window.position else {
+    let WindowPosition::At(physical_position) = window.position else {
         return window.mode;
     };
 
     // Check if window spans full width and reaches bottom of monitor
     let full_width = window.physical_width() == monitor_info.physical_size.x;
-    let left_aligned = physical_pos.x == monitor_info.physical_position.x;
-    let reaches_bottom = physical_pos.y + window.physical_height().to_i32()
+    let left_aligned = physical_position.x == monitor_info.physical_position.x;
+    let reaches_bottom = physical_position.y + window.physical_height().to_i32()
         == monitor_info.physical_position.y + monitor_info.physical_size.y.to_i32();
 
     if full_width && left_aligned && reaches_bottom {
@@ -160,9 +162,9 @@ mod tests {
 
     fn monitors_with(info: MonitorInfo) -> Monitors { Monitors { list: vec![info] } }
 
-    fn window_at(physical_pos: IVec2, physical_width: u32, physical_height: u32) -> Window {
+    fn window_at(physical_position: IVec2, physical_width: u32, physical_height: u32) -> Window {
         let mut window = Window {
-            position: WindowPosition::At(physical_pos),
+            position: WindowPosition::At(physical_position),
             mode: WindowMode::Windowed,
             ..Default::default()
         };

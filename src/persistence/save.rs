@@ -57,6 +57,13 @@ pub struct CachedWindowState {
     monitor:           Option<usize>,
 }
 
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum StateWrite {
+    #[default]
+    NotNeeded,
+    Needed,
+}
+
 /// Build state from all currently-active windows and write it to the state file.
 ///
 /// Iterates every primary and managed window, captures position/size/monitor/mode,
@@ -239,7 +246,7 @@ pub fn save_window_state(
         return;
     }
 
-    let mut any_changed = false;
+    let mut state_write = StateWrite::NotNeeded;
 
     for (window_entity, window, existing_monitor, managed) in &windows {
         // Determine the key for this window in the state file
@@ -254,10 +261,10 @@ pub fn save_window_state(
         // Get window position for saving state.
         let physical_position = get_window_position(window_entity, window);
 
-        let physical_w = window.resolution.physical_width();
-        let physical_h = window.resolution.physical_height();
-        let logical_w = window.resolution.width().to_u32();
-        let logical_h = window.resolution.height().to_u32();
+        let physical_width = window.resolution.physical_width();
+        let physical_height = window.resolution.physical_height();
+        let logical_width = window.resolution.width().to_u32();
+        let logical_height = window.resolution.height().to_u32();
         let res_scale = window.resolution.scale_factor();
 
         // Read monitor and effective mode from `CurrentMonitor` (maintained by
@@ -276,16 +283,15 @@ pub fn save_window_state(
 
         // Only save if position, size, or mode actually changed
         let position_changed = entry.physical_position != physical_position;
-        let size_changed = entry.logical_size != UVec2::new(logical_w, logical_h);
+        let size_changed = entry.logical_size != UVec2::new(logical_width, logical_height);
         let mode_changed = entry.mode.as_ref() != Some(&mode);
         let monitor_changed = entry.monitor != Some(monitor_index);
-
         if !position_changed && !size_changed && !mode_changed && !monitor_changed {
             continue;
         }
 
         debug!(
-            "[save_window_state] [{key}] SAVE DETAIL: pos={physical_position:?} physical={physical_w}x{physical_h} logical={logical_w}x{logical_h} res_scale={res_scale} monitor={monitor_index} mode={mode:?}",
+            "[save_window_state] [{key}] SAVE DETAIL: pos={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} res_scale={res_scale} monitor={monitor_index} mode={mode:?}",
         );
 
         // Log monitor transitions with detailed info
@@ -302,18 +308,18 @@ pub fn save_window_state(
 
         // Update cache
         entry.physical_position = physical_position;
-        entry.logical_size = UVec2::new(logical_w, logical_h);
+        entry.logical_size = UVec2::new(logical_width, logical_height);
         entry.mode = Some(mode.clone());
         entry.monitor = Some(monitor_index);
 
-        any_changed = true;
+        state_write = StateWrite::Needed;
 
         debug!(
-            "[save_window_state] [{key}] pos={physical_position:?} logical={logical_w}x{logical_h} physical={physical_w}x{physical_h} monitor={monitor_index} scale={monitor_scale} mode={mode:?}",
+            "[save_window_state] [{key}] pos={physical_position:?} logical={logical_width}x{logical_height} physical={physical_width}x{physical_height} monitor={monitor_index} scale={monitor_scale} mode={mode:?}",
         );
     }
 
-    if !any_changed {
+    if state_write == StateWrite::NotNeeded {
         return;
     }
 
@@ -342,9 +348,9 @@ pub(super) fn get_window_position(entity: Entity, window: &Window) -> Option<IVe
         let _ = window;
         WINIT_WINDOWS.with(|winit_windows| {
             let winit_windows = winit_windows.borrow();
-            let winit_win = winit_windows.get_window(entity)?;
-            let outer_pos = winit_win.outer_position().ok()?;
-            Some(IVec2::new(outer_pos.x, outer_pos.y))
+            let winit_window = winit_windows.get_window(entity)?;
+            let outer_position = winit_window.outer_position().ok()?;
+            Some(IVec2::new(outer_position.x, outer_position.y))
         })
     }
     #[cfg(not(any(

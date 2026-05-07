@@ -19,20 +19,20 @@ use crate::constants::STATE_FILE;
 /// When the executable lives in a Cargo `examples/` directory (the standard
 /// layout for `cargo run --example`), state is stored as
 /// `config_dir()/<crate>/<example>.ron` so that all examples for a crate are
-/// grouped together. Regular binaries use `config_dir()/<exe_name>/windows.ron`.
+/// grouped together. Regular binaries use `config_dir()/<executable_name>/windows.ron`.
 pub(crate) fn get_default_state_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let exe_name = exe.file_stem()?.to_str()?;
+    let executable_name = exe.file_stem()?.to_str()?;
     let is_cargo_example =
         exe.parent().and_then(Path::file_name) == Some(EXAMPLES_DIRECTORY_NAME.as_ref());
 
     if is_cargo_example {
         dirs::config_dir().map(|d| {
             d.join(env!("CARGO_PKG_NAME"))
-                .join(format!("{exe_name}{RON_EXTENSION}"))
+                .join(format!("{executable_name}{RON_EXTENSION}"))
         })
     } else {
-        dirs::config_dir().map(|d| d.join(exe_name).join(STATE_FILE))
+        dirs::config_dir().map(|d| d.join(executable_name).join(STATE_FILE))
     }
 }
 

@@ -69,9 +69,9 @@ pub use platform::Platform;
 /// The main plugin. See module docs for usage.
 ///
 /// Default state file locations:
-/// - macOS: `~/Library/Application Support/<exe_name>/windows.ron`
-/// - Linux: `~/.config/<exe_name>/windows.ron`
-/// - Windows: `C:\Users\<User>\AppData\Roaming\<exe_name>\windows.ron`
+/// - macOS: `~/Library/Application Support/<executable_name>/windows.ron`
+/// - Linux: `~/.config/<executable_name>/windows.ron`
+/// - Windows: `C:\Users\<User>\AppData\Roaming\<executable_name>\windows.ron`
 ///
 /// Unit struct version for convenience using `.add_plugins(WindowManagerPlugin)`.
 pub struct WindowManagerPlugin;
