@@ -65,6 +65,7 @@ const HEADER_SIZE: f32 = 0.14;
 
 /// The text to display.
 const SAMPLE_TEXT: &str = "The quick brown fox jumps over the lazy dog. 0123456789!?";
+const NOTO_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/NotoSans-Regular.ttf";
 
 /// Keeps the Noto Sans handle alive so Bevy doesn't unload it.
 #[derive(Resource, Default)]
@@ -99,7 +100,7 @@ fn setup(
     // Load Noto Sans asynchronously.
     font_handles
         .0
-        .push(asset_server.load("fonts/NotoSans-Regular.ttf"));
+        .push(asset_server.load(NOTO_SANS_REGULAR_FONT_ASSET_PATH));
 
     // Ground plane.
     let ground = commands

@@ -61,6 +61,8 @@ const PANEL_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
 
 /// Border color for panels.
 const PANEL_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
+const MISSING_FONT_ASSET_PATH: &str = "fonts/DoesNotExist.ttf";
+const NOTO_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/NotoSans-Regular.ttf";
 
 /// Tracks how many fonts have been registered (for vertical positioning).
 #[derive(Resource, Default)]
@@ -122,12 +124,12 @@ fn setup(
     // Load Noto Sans asynchronously from assets directory.
     font_handles
         .0
-        .push(asset_server.load("fonts/NotoSans-Regular.ttf"));
+        .push(asset_server.load(NOTO_SANS_REGULAR_FONT_ASSET_PATH));
 
     // Try loading a font that doesn't exist to test FontLoadFailed.
     font_handles
         .0
-        .push(asset_server.load("fonts/DoesNotExist.ttf"));
+        .push(asset_server.load(MISSING_FONT_ASSET_PATH));
 
     // Light.
     commands.spawn((

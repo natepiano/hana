@@ -227,22 +227,22 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     windows: Query<&Window>,
 ) {
-    let a4_width_m = f32::from(A4_WIDTH);
-    let a4_height_m = f32::from(A4_HEIGHT);
+    let a4_width_meters = f32::from(A4_WIDTH);
+    let a4_height_meters = f32::from(A4_HEIGHT);
     let card_width_m = f32::from(CARD_WIDTH);
     let card_height_m = f32::from(CARD_HEIGHT);
     let gap = f32::from(GAP);
     let lift = f32::from(LIFT);
     let title_gap = f32::from(TITLE_GAP);
 
-    let total_width = a4_width_m + gap + card_width_m;
+    let total_width = a4_width_meters + gap + card_width_m;
     let group_left = -total_width / 2.0;
 
-    let a4_page_x = group_left + a4_width_m / 2.0;
-    let a4_page_y = a4_height_m / 2.0 + lift;
+    let a4_page_x = group_left + a4_width_meters / 2.0;
+    let a4_page_y = a4_height_meters / 2.0 + lift;
 
-    let a4_page_top = a4_page_y + a4_height_m / 2.0;
-    let card_x = group_left + a4_width_m + gap + card_width_m / 2.0;
+    let a4_page_top = a4_page_y + a4_height_meters / 2.0;
+    let card_x = group_left + a4_width_meters + gap + card_width_m / 2.0;
     let card_y = a4_page_top - card_height_m / 2.0;
 
     let ruler_color = Color::WHITE;
@@ -261,8 +261,8 @@ fn setup(
         ruler_color,
         a4_page_x,
         a4_page_y,
-        a4_width_m,
-        a4_height_m,
+        a4_width_meters,
+        a4_height_meters,
         card_x,
         card_y,
         card_width_m,
@@ -275,7 +275,7 @@ fn setup(
     let index_height_m = f32::from(INDEX_HEIGHT);
     let card_left = card_x - card_width_m / 2.0;
     let index_x = card_left + index_width_m / 2.0;
-    let a4_page_bottom = a4_page_y - a4_height_m / 2.0;
+    let a4_page_bottom = a4_page_y - a4_height_meters / 2.0;
     let index_y = a4_page_bottom + index_height_m / 2.0;
 
     spawn_photo_panel_with_title(&mut commands, index_x, index_y, index_height_m, title_gap);
@@ -296,11 +296,11 @@ fn setup(
         &mut meshes,
         &mut materials,
         total_width,
-        a4_height_m,
+        a4_height_meters,
     );
 
     // ── Light + camera ───────────────────────────────────────────────
-    spawn_lights_and_camera(&mut commands, a4_height_m);
+    spawn_lights_and_camera(&mut commands, a4_height_meters);
 }
 
 fn spawn_a4_with_titles(
@@ -514,16 +514,16 @@ fn spawn_rulers(
     ruler_color: Color,
     a4_page_x: f32,
     a4_page_y: f32,
-    a4_width_m: f32,
-    a4_height_m: f32,
+    a4_width_meters: f32,
+    a4_height_meters: f32,
     card_x: f32,
     card_y: f32,
     card_width_m: f32,
     card_height_m: f32,
 ) {
     // A4 vertical ruler (left side).
-    let a4_ruler_x = a4_page_x - a4_width_m / 2.0 - f32::from(RULER_GAP);
-    let a4_ruler_top = a4_page_y + a4_height_m / 2.0;
+    let a4_ruler_x = a4_page_x - a4_width_meters / 2.0 - f32::from(RULER_GAP);
+    let a4_ruler_top = a4_page_y + a4_height_meters / 2.0;
     let Some(a4_vertical_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(PANEL_RULER_WIDTH, A4_HEIGHT)
@@ -542,8 +542,8 @@ fn spawn_rulers(
     ));
 
     // A4 horizontal ruler (bottom).
-    let a4_bottom_ruler_x = a4_page_x - a4_width_m / 2.0;
-    let a4_bottom_ruler_y = a4_page_y - a4_height_m / 2.0 - f32::from(RULER_GAP);
+    let a4_bottom_ruler_x = a4_page_x - a4_width_meters / 2.0;
+    let a4_bottom_ruler_y = a4_page_y - a4_height_meters / 2.0 - f32::from(RULER_GAP);
     let Some(a4_horizontal_ruler) = build_panel_or_log(
         DiegeticPanel::world()
             .size(A4_WIDTH, PANEL_RULER_WIDTH)
@@ -1018,7 +1018,7 @@ fn build_imperial_panel_ruler(
     panel_height: In,
     ruler_color: Color,
 ) -> LayoutTree {
-    let height_in = height_sixteenths.to_f32() / 16.0;
+    let height_inches = height_sixteenths.to_f32() / 16.0;
     let last_label_inch = height_sixteenths / 16;
     let top_spacer = panel_height.0 - last_label_inch.to_f32() - 0.5;
     let mut builder = LayoutBuilder::new(PANEL_RULER_INCH_WIDTH, panel_height);
@@ -1038,7 +1038,7 @@ fn build_imperial_panel_ruler(
                     .width(Sizing::fixed(In(
                         PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0
                     )))
-                    .height(Sizing::fixed(In(height_in)))
+                    .height(Sizing::fixed(In(height_inches)))
                     .direction(Direction::LeftToRight),
                 |b| {
                     // Spine.
@@ -1239,11 +1239,11 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
 
 /// Horizontal imperial ruler — spine on TOP, ticks extending DOWN, labels below.
 fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) -> LayoutTree {
-    let width_in = width_sixteenths.to_f32() / 16.0;
-    let mut builder = LayoutBuilder::new(In(width_in), PANEL_RULER_INCH_WIDTH);
+    let width_inches = width_sixteenths.to_f32() / 16.0;
+    let mut builder = LayoutBuilder::new(In(width_inches), PANEL_RULER_INCH_WIDTH);
     let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
     let last_label_inch = width_sixteenths / 16;
-    let right_spacer = width_in - 0.5 - last_label_inch.to_f32();
+    let right_spacer = width_inches - 0.5 - last_label_inch.to_f32();
     let sixteenth_width = 1.0 / 16.0;
 
     builder.with(
@@ -1255,7 +1255,7 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
             // ── Top row: spine + ticks ──────────────────────────
             b.with(
                 El::new()
-                    .width(Sizing::fixed(In(width_in)))
+                    .width(Sizing::fixed(In(width_inches)))
                     .height(Sizing::fixed(In(
                         PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0
                     )))

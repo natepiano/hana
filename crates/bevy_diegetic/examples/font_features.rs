@@ -65,6 +65,7 @@ const SECTION_SIZE: f32 = 18.0;
 
 /// Font size for the typeface label shown at the top-right of each cell (pt).
 const FONT_NAME_SIZE: f32 = 16.0;
+const EB_GARAMOND_REGULAR_FONT_ASSET_PATH: &str = "fonts/EBGaramond-Regular.ttf";
 
 /// Marker for the showcase panel.
 #[derive(Component)]
@@ -122,20 +123,20 @@ fn setup(
 ) {
     font_handles
         .0
-        .push(asset_server.load("fonts/EBGaramond-Regular.ttf"));
+        .push(asset_server.load(EB_GARAMOND_REGULAR_FONT_ASSET_PATH));
 
     let Ok(window) = windows.single() else {
         return;
     };
-    let (layout_w, layout_h) = layout_dimensions(window);
+    let (layout_width, layout_height) = layout_dimensions(window);
     let world_height = PANEL_WORLD_HEIGHT;
-    let world_width = world_height * (layout_w / layout_h);
-    let (ground_w, ground_d) = ground_dimensions(world_width);
+    let world_width = world_height * (layout_width / layout_height);
+    let (ground_width, ground_depth) = ground_dimensions(world_width);
     let ground_z = ground_center_z();
 
     commands.spawn((
         GroundPlane,
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(ground_w, ground_d))),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(ground_width, ground_depth))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.08, 0.08, 0.08),
             double_sided: true,
@@ -147,7 +148,7 @@ fn setup(
 
     let Some(showcase_panel) = build_panel_or_log(
         DiegeticPanel::world()
-            .size(Pt(layout_w), Pt(layout_h))
+            .size(Pt(layout_width), Pt(layout_height))
             .world_height(PANEL_WORLD_HEIGHT)
             .anchor(Anchor::TopLeft)
             .layout(|b| {
@@ -220,8 +221,8 @@ fn ground_center_z() -> f32 {
 }
 
 fn panel_z() -> f32 {
-    let (_, ground_d) = ground_dimensions(0.0);
-    ground_d.mul_add(0.5 - PANEL_FRONT_DEPTH_FRACTION, ground_center_z())
+    let (_, ground_depth) = ground_dimensions(0.0);
+    ground_depth.mul_add(0.5 - PANEL_FRONT_DEPTH_FRACTION, ground_center_z())
 }
 
 fn panel_transform(world_width: f32, world_height: f32) -> Transform {
@@ -245,21 +246,21 @@ fn resize_panel(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (layout_w, layout_h) = layout_dimensions(window);
+    let (layout_width, layout_height) = layout_dimensions(window);
     let world_height = PANEL_WORLD_HEIGHT;
-    let world_width = world_height * (layout_w / layout_h);
-    let (ground_w, ground_d) = ground_dimensions(world_width);
+    let world_width = world_height * (layout_width / layout_height);
+    let (ground_width, ground_depth) = ground_dimensions(world_width);
     let ground_z = ground_center_z();
 
     for (mut panel, mut transform) in &mut panels {
-        let width_matches = (panel.width() - layout_w).abs() <= f32::EPSILON;
-        let height_matches = (panel.height() - layout_h).abs() <= f32::EPSILON;
+        let width_matches = (panel.width() - layout_width).abs() <= f32::EPSILON;
+        let height_matches = (panel.height() - layout_height).abs() <= f32::EPSILON;
         if width_matches && height_matches {
             continue;
         }
         let Some(new) = build_panel_or_log(
             DiegeticPanel::world()
-                .size(Pt(layout_w), Pt(layout_h))
+                .size(Pt(layout_width), Pt(layout_height))
                 .world_height(PANEL_WORLD_HEIGHT)
                 .anchor(Anchor::TopLeft)
                 .layout(|b| {
@@ -275,7 +276,7 @@ fn resize_panel(
     }
 
     for (mut mesh3d, mut transform) in &mut ground {
-        mesh3d.0 = meshes.add(Plane3d::default().mesh().size(ground_w, ground_d));
+        mesh3d.0 = meshes.add(Plane3d::default().mesh().size(ground_width, ground_depth));
         transform.translation.z = ground_z;
     }
 }
@@ -295,11 +296,11 @@ fn on_font_registered(
     let Ok(window) = windows.single() else {
         return;
     };
-    let (layout_w, layout_h) = layout_dimensions(window);
+    let (layout_width, layout_height) = layout_dimensions(window);
     for mut panel in &mut panels {
         let Some(new) = build_panel_or_log(
             DiegeticPanel::world()
-                .size(Pt(layout_w), Pt(layout_h))
+                .size(Pt(layout_width), Pt(layout_height))
                 .world_height(PANEL_WORLD_HEIGHT)
                 .anchor(Anchor::TopLeft)
                 .layout(|b| {

@@ -120,6 +120,11 @@ const FONT_KEYS: &[(&str, &str, KeyCode)] = &[
     ("5", "Liberation Sans", KeyCode::Digit5),
     ("6", "Liberation Serif", KeyCode::Digit6),
 ];
+const CRIMSON_TEXT_REGULAR_FONT_ASSET_PATH: &str = "fonts/CrimsonText-Regular.ttf";
+const EB_GARAMOND_REGULAR_FONT_ASSET_PATH: &str = "fonts/EBGaramond-Regular.ttf";
+const LIBERATION_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/LiberationSans-Regular.ttf";
+const LIBERATION_SERIF_REGULAR_FONT_ASSET_PATH: &str = "fonts/LiberationSerif-Regular.ttf";
+const NOTO_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/NotoSans-Regular.ttf";
 
 const DISPLAY_WORDS: &[&str] = &[
     "Typography", // accented cap above ascent
@@ -384,11 +389,11 @@ fn spawn_lights(commands: &mut Commands) {
 
 fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
     for path in [
-        "fonts/NotoSans-Regular.ttf",
-        "fonts/EBGaramond-Regular.ttf",
-        "fonts/CrimsonText-Regular.ttf",
-        "fonts/LiberationSans-Regular.ttf",
-        "fonts/LiberationSerif-Regular.ttf",
+        NOTO_SANS_REGULAR_FONT_ASSET_PATH,
+        EB_GARAMOND_REGULAR_FONT_ASSET_PATH,
+        CRIMSON_TEXT_REGULAR_FONT_ASSET_PATH,
+        LIBERATION_SANS_REGULAR_FONT_ASSET_PATH,
+        LIBERATION_SERIF_REGULAR_FONT_ASSET_PATH,
     ] {
         font_handles.0.push(asset_server.load(path));
     }

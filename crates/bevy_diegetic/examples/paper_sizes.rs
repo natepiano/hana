@@ -406,9 +406,9 @@ fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &
     let landscape_height = lh.0 * params.scale;
 
     let label = if params.inches {
-        let w_in = pw.0 / 25.4;
-        let h_in = ph.0 / 25.4;
-        format!("{name} — {w_in:.1}x{h_in:.1}in")
+        let width_inches = pw.0 / 25.4;
+        let height_inches = ph.0 / 25.4;
+        format!("{name} — {width_inches:.1}x{height_inches:.1}in")
     } else {
         format!("{name} — {:.0}x{:.0}mm", pw.0, ph.0)
     };

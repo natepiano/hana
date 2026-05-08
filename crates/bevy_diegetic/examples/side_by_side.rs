@@ -1042,8 +1042,8 @@ fn draw_rect_on_panel(
     panel_transform: &GlobalTransform,
     bounds_x: f32,
     bounds_y: f32,
-    bounds_w: f32,
-    bounds_h: f32,
+    bounds_width: f32,
+    bounds_height: f32,
     color: Color,
     sizing: &PanelSizing,
 ) {
@@ -1052,9 +1052,9 @@ fn draw_rect_on_panel(
     let scale = sizing.scale();
 
     let left = bounds_x.mul_add(scale, -half_width);
-    let right = (bounds_x + bounds_w).mul_add(scale, -half_width);
+    let right = (bounds_x + bounds_width).mul_add(scale, -half_width);
     let top = (-bounds_y).mul_add(scale, half_height);
-    let bottom = (-(bounds_y + bounds_h)).mul_add(scale, half_height);
+    let bottom = (-(bounds_y + bounds_height)).mul_add(scale, half_height);
 
     let tl = panel_transform.transform_point(Vec3::new(left, top, 0.0));
     let tr = panel_transform.transform_point(Vec3::new(right, top, 0.0));

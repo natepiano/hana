@@ -105,6 +105,7 @@ const BORDER_EDGE_HIDDEN_HALVES: f32 = MESH_THICKNESS_MULTIPLIER - 1.0;
 // needs it explicitly — rows 1/2 already have ~10× stroke of implicit
 // padding from the thickness multiplier, which is plenty.
 const SDF_AA_PADDING: f32 = 0.002;
+const SDF_PANEL_SHADER_ASSET_PATH: &str = "shaders/sdf_panel.wgsl";
 
 const HOME_YAW: f32 = 0.0;
 const HOME_PITCH: f32 = 0.18;
@@ -174,9 +175,9 @@ struct ExampleSdfUniform {
 type ExampleSdfMaterial = ExtendedMaterial<StandardMaterial, ExampleSdfExtension>;
 
 impl MaterialExtension for ExampleSdfExtension {
-    fn fragment_shader() -> ShaderRef { "shaders/sdf_panel.wgsl".into() }
+    fn fragment_shader() -> ShaderRef { SDF_PANEL_SHADER_ASSET_PATH.into() }
 
-    fn prepass_fragment_shader() -> ShaderRef { "shaders/sdf_panel.wgsl".into() }
+    fn prepass_fragment_shader() -> ShaderRef { SDF_PANEL_SHADER_ASSET_PATH.into() }
 }
 
 fn main() {
