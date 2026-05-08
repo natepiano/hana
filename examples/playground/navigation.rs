@@ -23,6 +23,8 @@ use super::constants::NAV_BUTTON_VERTICAL_PADDING;
 use super::constants::NAV_DURATION_MS;
 use super::constants::NAV_FONT_SIZE;
 use super::constants::NAV_LABEL_WIDTH;
+use super::constants::NAV_NEXT_LABEL;
+use super::constants::NAV_PREVIOUS_LABEL;
 use super::constants::SECTION_COUNT;
 use super::constants::SECTION_TITLES;
 use super::constants::ZOOM_MARGIN_NAV;
@@ -171,7 +173,7 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
                     NavButton(NavDirection::Left),
                 ))
                 .with_child((
-                    Text::new("<"),
+                    Text::new(NAV_PREVIOUS_LABEL),
                     TextFont {
                         font_size: NAV_FONT_SIZE,
                         ..default()
@@ -212,7 +214,7 @@ pub(crate) fn spawn_nav_bar(commands: &mut Commands, camera: Entity) {
                     NavButton(NavDirection::Right),
                 ))
                 .with_child((
-                    Text::new(">"),
+                    Text::new(NAV_NEXT_LABEL),
                     TextFont {
                         font_size: NAV_FONT_SIZE,
                         ..default()

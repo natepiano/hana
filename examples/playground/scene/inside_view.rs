@@ -4,7 +4,7 @@ use bevy_catenary::CableEnd;
 use bevy_catenary::CableEndpoint;
 use bevy_catenary::CableMeshConfig;
 use bevy_catenary::Capping;
-use bevy_catenary::FaceSides;
+use bevy_catenary::Faces;
 use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
 
@@ -48,7 +48,7 @@ pub(super) fn setup_section_inside_view(
                 tube: TubeConfig {
                     radius: TUBE_RADIUS * INSIDE_VIEW_RADIUS_MULTIPLIER,
                     sides:  INSIDE_VIEW_TUBE_SIDES,
-                    faces:  FaceSides::Both,
+                    faces:  Faces::Both,
                 },
                 material: Some(cable_mat.clone()),
                 ..default()

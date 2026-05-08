@@ -5,7 +5,7 @@ use bevy_catenary::CableEnd;
 use bevy_catenary::CableEndpoint;
 use bevy_catenary::CableMeshConfig;
 use bevy_catenary::Capping;
-use bevy_catenary::FaceSides;
+use bevy_catenary::Faces;
 use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
 
@@ -142,7 +142,7 @@ fn spawn_cap_style_tube(
             CableMeshConfig {
                 tube: TubeConfig {
                     radius: TUBE_RADIUS * CAP_STYLE_RADIUS_MULTIPLIER,
-                    faces: FaceSides::Both,
+                    faces: Faces::Both,
                     ..default()
                 },
                 material: Some(material),

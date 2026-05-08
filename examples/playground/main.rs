@@ -37,6 +37,7 @@ mod sections;
 mod ui;
 
 use animation::LightAnimation;
+use constants::PLAYGROUND_WINDOW_TITLE;
 use sections::CurrentSection;
 use ui::CableSettings;
 use ui::InspectorVisibility;
@@ -46,7 +47,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Playground".into(),
+                    title: PLAYGROUND_WINDOW_TITLE.into(),
                     ..default()
                 }),
                 ..default()

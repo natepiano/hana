@@ -11,7 +11,7 @@ use super::buffers::TubeMeshBuffers;
 use super::buffers::WindingOrder;
 use super::caps;
 use super::config::CableMeshConfig;
-use super::config::FaceSides;
+use super::config::Faces;
 use super::constants::MIN_TUBE_SIDES;
 use super::elbows;
 use super::frames;
@@ -69,7 +69,7 @@ fn generate_tube_rings(
                 let upcoming_next = next_base + next;
 
                 match config.tube.faces {
-                    FaceSides::Outside => buffers::push_quad(
+                    Faces::Outside => buffers::push_quad(
                         out.buffers.indices,
                         current,
                         current_next,
@@ -77,7 +77,7 @@ fn generate_tube_rings(
                         upcoming_next,
                         WindingOrder::Standard,
                     ),
-                    FaceSides::Inside => buffers::push_quad(
+                    Faces::Inside => buffers::push_quad(
                         out.buffers.indices,
                         current,
                         current_next,
@@ -85,7 +85,7 @@ fn generate_tube_rings(
                         upcoming_next,
                         WindingOrder::Reversed,
                     ),
-                    FaceSides::Both => {
+                    Faces::Both => {
                         buffers::push_quad(
                             out.buffers.indices,
                             current,
@@ -111,7 +111,7 @@ fn generate_tube_rings(
 
 /// For `Inside` or `Both` face sides, adjust normals for interior lighting.
 fn apply_inside_normals(
-    faces: &FaceSides,
+    faces: &Faces,
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
     uvs: &mut Vec<[f32; 2]>,
@@ -119,15 +119,15 @@ fn apply_inside_normals(
     inside_indices: &mut Vec<u32>,
 ) {
     match faces {
-        FaceSides::Outside => {},
-        FaceSides::Inside => {
+        Faces::Outside => {},
+        Faces::Inside => {
             for normal in &mut *normals {
                 normal[0] = -normal[0];
                 normal[1] = -normal[1];
                 normal[2] = -normal[2];
             }
         },
-        FaceSides::Both => {
+        Faces::Both => {
             let original_vertex_count = positions.len().to_u32();
             let duplicated_positions = positions.clone();
             let duplicated_normals = normals

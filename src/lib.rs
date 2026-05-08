@@ -50,8 +50,8 @@ pub use cable::CableEnd;
 pub use cable::CableEndpoint;
 use cable::CablePlugin;
 pub use cable::ComputedCableGeometry;
+pub use cable::DetachPolicy;
 pub use cable::EndpointAlignment;
-pub use cable::OnDetach;
 // Gizmos
 pub use gizmos::CableGizmoGroup;
 pub use gizmos::DebugGizmos;
@@ -64,7 +64,7 @@ pub use mesh::CapConfig;
 pub use mesh::Capping;
 pub use mesh::ElbowConfig;
 pub use mesh::ElbowMetadata;
-pub use mesh::FaceSides;
+pub use mesh::Faces;
 use mesh::MeshPlugin;
 pub use mesh::TrimConfig;
 pub use mesh::TubeConfig;

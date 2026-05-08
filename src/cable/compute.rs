@@ -50,7 +50,7 @@ impl Plugin for ComputePlugin {
 #[derive(Component, Clone, Default)]
 pub struct ComputedCableGeometry {
     /// The computed geometry, or `None` if not yet computed.
-    pub geometry: Option<CableGeometry>,
+    pub cable_geometry: Option<CableGeometry>,
 }
 
 /// Queues cables whose own `Cable` component was inserted or mutated.
@@ -174,8 +174,8 @@ fn recompute_cable_route(
         resolution: cable.resolution,
     };
 
-    let geometry = cable.solver.solve(&request);
+    let cable_geometry = cable.solver.solve(&request);
     commands.entity(cable_entity).insert(ComputedCableGeometry {
-        geometry: Some(geometry),
+        cable_geometry: Some(cable_geometry),
     });
 }

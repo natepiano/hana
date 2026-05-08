@@ -14,8 +14,8 @@ pub use endpoint::AttachedEndpoints;
 pub use endpoint::AttachedTo;
 pub use endpoint::CableEnd;
 pub use endpoint::CableEndpoint;
+pub use endpoint::DetachPolicy;
 pub use endpoint::EndpointAlignment;
-pub use endpoint::OnDetach;
 
 use crate::mesh::CableMeshConfig;
 use crate::routing::Obstacle;

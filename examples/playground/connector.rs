@@ -118,7 +118,7 @@ pub(crate) fn setup_section_connector(
             parent.spawn((
                 CableEndpoint::new(CableEnd::End, Vec3::ZERO)
                     .with_cap(Capping::None)
-                    .with_alignment(endpoint_alignment),
+                    .with_endpoint_alignment(endpoint_alignment),
                 AttachedTo(plug),
             ));
         });

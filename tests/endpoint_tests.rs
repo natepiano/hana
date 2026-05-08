@@ -17,7 +17,7 @@ use bevy_catenary::CatenaryPlugin;
 use bevy_catenary::CatenarySolver;
 use bevy_catenary::ComputedCableGeometry;
 use bevy_catenary::DEFAULT_SLACK;
-use bevy_catenary::OnDetach;
+use bevy_catenary::DetachPolicy;
 use bevy_catenary::Solver;
 
 /// Spawn a world-attached cable and return the cable entity.
@@ -62,17 +62,17 @@ fn world_attached_cable_computes_geometry() {
 
     let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.geometry.is_some(),
+        computed.cable_geometry.is_some(),
         "Cable should have computed geometry after one update"
     );
 
-    let geometry = computed.geometry.as_ref().unwrap();
+    let cable_geometry = computed.cable_geometry.as_ref().unwrap();
     assert!(
-        !geometry.segments.is_empty(),
+        !cable_geometry.segments.is_empty(),
         "Geometry should have at least one segment"
     );
     assert!(
-        geometry.total_length > 0.0,
+        cable_geometry.total_length > 0.0,
         "Cable should have positive length"
     );
 }
@@ -112,7 +112,7 @@ fn entity_attached_cable_follows_target() {
 
     let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.geometry.is_some(),
+        computed.cable_geometry.is_some(),
         "Entity-attached cable should compute geometry"
     );
 
@@ -128,11 +128,11 @@ fn entity_attached_cable_follows_target() {
     app.update();
 
     let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
-    let geometry = computed.geometry.as_ref().unwrap();
+    let cable_geometry = computed.cable_geometry.as_ref().unwrap();
 
     // The cable should have been recomputed with the new target position.
     // Start point should be near (10.0 + 0.5, 0.0, 0.0) = (10.5, 0, 0)
-    let first_point = geometry.segments[0].points[0];
+    let first_point = cable_geometry.segments[0].points[0];
     assert!(
         (first_point.x - 10.5).abs() < 1.0,
         "Start point should follow moved target, got {first_point}"
@@ -167,7 +167,7 @@ fn zero_length_cable_does_not_panic() {
 
     let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.geometry.is_none(),
+        computed.cable_geometry.is_none(),
         "Zero-length cable should skip computation"
     );
 }
@@ -209,7 +209,7 @@ fn missing_target_does_not_panic() {
 
     let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.geometry.is_some(),
+        computed.cable_geometry.is_some(),
         "Cable with despawned target should still compute (using fallback offset)"
     );
 }
@@ -234,7 +234,7 @@ fn detach_policy_despawn_removes_cable() {
 
     app.world_mut().spawn((
         CableEndpoint::new(CableEnd::Start, Vec3::new(0.5, 0.0, 0.0))
-            .with_detach_policy(OnDetach::Despawn),
+            .with_detach_policy(DetachPolicy::Despawn),
         AttachedTo(target),
         ChildOf(cable),
     ));
@@ -258,7 +258,7 @@ fn detach_policy_despawn_removes_cable() {
 
     assert!(
         app.world().get_entity(cable).is_err(),
-        "Cable should be despawned after target despawn with OnDetach::Despawn"
+        "Cable should be despawned after target despawn with DetachPolicy::Despawn"
     );
 }
 
@@ -300,12 +300,12 @@ fn detach_policy_remain_keeps_cable() {
     // Cable should still exist (Remain is the default)
     assert!(
         app.world().get_entity(cable).is_ok(),
-        "Cable should survive target despawn with OnDetach::Remain"
+        "Cable should survive target despawn with DetachPolicy::Remain"
     );
 
     let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.geometry.is_some(),
+        computed.cable_geometry.is_some(),
         "Cable should retain its last computed geometry"
     );
 }

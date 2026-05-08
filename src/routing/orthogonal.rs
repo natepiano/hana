@@ -3,7 +3,9 @@
 use bevy::math::Vec3;
 
 use super::constants::DEFAULT_OBSTACLE_MARGIN;
+use super::constants::HORIZONTAL_FIRST_AXIS_ORDERS;
 use super::constants::ORTHOGONAL_SEGMENT_SAMPLE_STEPS;
+use super::constants::VERTICAL_FIRST_AXIS_ORDERS;
 use super::obstacle;
 use super::obstacle::Blockage;
 use super::obstacle::Obstacle;
@@ -26,16 +28,16 @@ pub enum AxisOrder {
 #[derive(Clone, Debug)]
 pub struct OrthogonalPlanner {
     /// Clearance around obstacles.
-    pub margin:   f32,
-    /// Axis routing priority.
-    pub priority: AxisOrder,
+    pub margin:     f32,
+    /// Axis routing order.
+    pub axis_order: AxisOrder,
 }
 
 impl Default for OrthogonalPlanner {
     fn default() -> Self {
         Self {
-            margin:   DEFAULT_OBSTACLE_MARGIN,
-            priority: AxisOrder::default(),
+            margin:     DEFAULT_OBSTACLE_MARGIN,
+            axis_order: AxisOrder::default(),
         }
     }
 }
@@ -45,8 +47,8 @@ impl OrthogonalPlanner {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            margin:   DEFAULT_OBSTACLE_MARGIN,
-            priority: AxisOrder::HorizontalFirst,
+            margin:     DEFAULT_OBSTACLE_MARGIN,
+            axis_order: AxisOrder::HorizontalFirst,
         }
     }
 
@@ -60,7 +62,7 @@ impl OrthogonalPlanner {
     /// Prefer vertical-first routing.
     #[must_use]
     pub const fn vertical_first(mut self) -> Self {
-        self.priority = AxisOrder::VerticalFirst;
+        self.axis_order = AxisOrder::VerticalFirst;
         self
     }
 
@@ -79,15 +81,16 @@ impl OrthogonalPlanner {
     /// Each step changes exactly one of X, Y, Z.
     fn axis_path(start: Vec3, end: Vec3, order: &[usize]) -> Vec<Vec3> {
         let delta = end - start;
+        let axis_steps = [
+            Vec3::new(delta.x, 0.0, 0.0),
+            Vec3::new(0.0, delta.y, 0.0),
+            Vec3::new(0.0, 0.0, delta.z),
+        ];
         let mut current = start;
         let mut waypoints = vec![start];
 
         for &axis in order {
-            let step = match axis {
-                0 => Vec3::new(delta.x, 0.0, 0.0),
-                1 => Vec3::new(0.0, delta.y, 0.0),
-                _ => Vec3::new(0.0, 0.0, delta.z),
-            };
+            let step = axis_steps[axis];
 
             if step.length_squared() > f32::EPSILON {
                 current += step;
@@ -130,20 +133,10 @@ impl OrthogonalPlanner {
 impl PathPlanner for OrthogonalPlanner {
     fn plan(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
         // Axis orders to try: preferred first, then alternatives
-        let orders: &[&[usize]] = if matches!(self.priority, AxisOrder::VerticalFirst) {
-            &[
-                &[1, 0, 2], // Y, X, Z
-                &[0, 1, 2], // X, Y, Z
-                &[0, 2, 1], // X, Z, Y
-                &[2, 0, 1], // Z, X, Y
-            ]
+        let orders = if matches!(self.axis_order, AxisOrder::VerticalFirst) {
+            &VERTICAL_FIRST_AXIS_ORDERS
         } else {
-            &[
-                &[0, 2, 1], // X, Z, Y
-                &[0, 1, 2], // X, Y, Z
-                &[1, 0, 2], // Y, X, Z
-                &[2, 1, 0], // Z, Y, X
-            ]
+            &HORIZONTAL_FIRST_AXIS_ORDERS
         };
 
         for order in orders {

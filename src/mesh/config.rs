@@ -47,7 +47,7 @@ impl Capping {
 
 /// Which sides of the tube surface to render.
 #[derive(Clone, Debug, Default, Reflect)]
-pub enum FaceSides {
+pub enum Faces {
     /// Render only the outside.
     #[default]
     Outside,
@@ -81,7 +81,7 @@ pub struct TubeConfig {
     /// Number of vertices around the cross-section circle.
     pub sides:  u32,
     /// Which sides of the tube surface to render.
-    pub faces:  FaceSides,
+    pub faces:  Faces,
 }
 
 impl Default for TubeConfig {
@@ -89,7 +89,7 @@ impl Default for TubeConfig {
         Self {
             radius: DEFAULT_TUBE_RADIUS,
             sides:  DEFAULT_TUBE_SIDES,
-            faces:  FaceSides::default(),
+            faces:  Faces::default(),
         }
     }
 }

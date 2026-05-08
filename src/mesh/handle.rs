@@ -47,7 +47,7 @@ pub(super) fn on_geometry_computed(
         return;
     };
 
-    let Some(geometry) = &computed.geometry else {
+    let Some(cable_geometry) = &computed.cable_geometry else {
         return;
     };
 
@@ -68,7 +68,7 @@ pub(super) fn on_geometry_computed(
     mesh_config.caps.start = cap_start;
     mesh_config.caps.end = cap_end;
 
-    let new_mesh = tube::generate_tube_mesh(geometry, &mesh_config);
+    let new_mesh = tube::generate_tube_mesh(cable_geometry, &mesh_config);
 
     if let Some(handle) = mesh_handle {
         // Update existing mesh asset in place

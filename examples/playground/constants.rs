@@ -12,6 +12,9 @@ pub(crate) const LIGHT_TRAVEL_HOLD_END_SECONDS: f32 =
     LIGHT_TRAVEL_FORWARD_END_SECONDS + LIGHT_TRAVEL_HOLD_DURATION_SECONDS;
 pub(crate) const LIGHT_TRAVEL_SEGMENT_DURATION_SECONDS: f32 = 2.0;
 
+// app
+pub(crate) const PLAYGROUND_WINDOW_TITLE: &str = "Playground";
+
 // cable
 pub(crate) const DEFAULT_CABLE_RESOLUTION: u32 = 0;
 pub(crate) const OBSTACLE_HALF_EXTENTS: Vec3 = Vec3::new(0.8, 0.8, 0.8);
@@ -123,6 +126,8 @@ pub(crate) const NAV_BUTTON_HORIZONTAL_PADDING: f32 = 10.0;
 pub(crate) const NAV_BUTTON_VERTICAL_PADDING: f32 = 4.0;
 pub(crate) const NAV_FONT_SIZE: f32 = 16.0;
 pub(crate) const NAV_LABEL_WIDTH: f32 = 260.0;
+pub(crate) const NAV_NEXT_LABEL: &str = ">";
+pub(crate) const NAV_PREVIOUS_LABEL: &str = "<";
 
 // section bounds
 pub(crate) const SECTION_BOUNDS_CENTER_Y_MULTIPLIER: f32 = 0.5;
@@ -159,6 +164,7 @@ pub(crate) const JOINT_RADIUS_MULTIPLIER_SLIDER_MIN: f32 = 1.0;
 pub(crate) const JOINT_SEGMENTS_SLIDER_MAX: u32 = 32;
 pub(crate) const JOINT_SEGMENTS_SLIDER_MIN: u32 = 8;
 pub(crate) const OVERLAY_MARGIN: f32 = 12.0;
+pub(crate) const SECTION_INFO_CENTER_X_PERCENT: f32 = 50.0;
 pub(crate) const SECTION_INFO_LEFT_OFFSET: f32 = -200.0;
 pub(crate) const SECTION_INFO_TEXTS: [(usize, &str); 7] = [
     (

@@ -178,7 +178,7 @@ pub(crate) fn on_cable_mesh_child_added(
 pub(crate) fn handle_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    mut debug_enabled: ResMut<DebugGizmos>,
+    mut debug_gizmos: ResMut<DebugGizmos>,
     mut inspector_visible: ResMut<InspectorVisibility>,
     scene_entities: Res<SceneEntities>,
     mut cables: Query<&mut Cable, Without<SlackLocked>>,
@@ -193,7 +193,7 @@ pub(crate) fn handle_keyboard(
     >,
 ) {
     if keyboard.just_pressed(KeyCode::KeyD) {
-        *debug_enabled = match *debug_enabled {
+        *debug_gizmos = match *debug_gizmos {
             DebugGizmos::Enabled => DebugGizmos::Disabled,
             DebugGizmos::Disabled => DebugGizmos::Enabled,
         };

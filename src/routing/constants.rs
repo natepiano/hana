@@ -31,4 +31,21 @@ pub const DEFAULT_SLACK: f32 = 1.2;
 pub(super) const ASTAR_SEGMENT_SAMPLE_STEPS: u32 = 20;
 pub(super) const COLLINEARITY_THRESHOLD: f32 = 0.999;
 pub(super) const DEFAULT_ASTAR_MAX_CELLS: usize = 10_000;
+
+// orthogonal routing
+pub(super) const AXIS_X_INDEX: usize = 0;
+pub(super) const AXIS_Y_INDEX: usize = 1;
+pub(super) const AXIS_Z_INDEX: usize = 2;
+pub(super) const HORIZONTAL_FIRST_AXIS_ORDERS: [[usize; 3]; 4] = [
+    [AXIS_X_INDEX, AXIS_Z_INDEX, AXIS_Y_INDEX],
+    [AXIS_X_INDEX, AXIS_Y_INDEX, AXIS_Z_INDEX],
+    [AXIS_Y_INDEX, AXIS_X_INDEX, AXIS_Z_INDEX],
+    [AXIS_Z_INDEX, AXIS_Y_INDEX, AXIS_X_INDEX],
+];
 pub(super) const ORTHOGONAL_SEGMENT_SAMPLE_STEPS: u32 = 10;
+pub(super) const VERTICAL_FIRST_AXIS_ORDERS: [[usize; 3]; 4] = [
+    [AXIS_Y_INDEX, AXIS_X_INDEX, AXIS_Z_INDEX],
+    [AXIS_X_INDEX, AXIS_Y_INDEX, AXIS_Z_INDEX],
+    [AXIS_X_INDEX, AXIS_Z_INDEX, AXIS_Y_INDEX],
+    [AXIS_Z_INDEX, AXIS_X_INDEX, AXIS_Y_INDEX],
+];

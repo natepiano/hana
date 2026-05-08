@@ -29,15 +29,15 @@ pub enum CableEnd {
 #[reflect(Component)]
 pub struct CableEndpoint {
     /// Which end of the cable this represents.
-    pub end:           CableEnd,
+    pub end:                CableEnd,
     /// Position offset. World-space for world-attached, local-space for entity-attached.
-    pub offset:        Vec3,
+    pub offset:             Vec3,
     /// How to cap this end of the tube mesh.
-    pub cap_style:     Capping,
+    pub cap_style:          Capping,
     /// What happens when the target entity is despawned.
-    pub detach_policy: OnDetach,
+    pub detach_policy:      DetachPolicy,
     /// How the endpoint's [`AttachedTo`] target rotates to follow the cable's tangent.
-    pub alignment:     EndpointAlignment,
+    pub endpoint_alignment: EndpointAlignment,
 }
 
 impl CableEndpoint {
@@ -49,8 +49,8 @@ impl CableEndpoint {
             end,
             offset: offset.into(),
             cap_style: Capping::Round,
-            detach_policy: OnDetach::Remain,
-            alignment: EndpointAlignment::AsSpawned,
+            detach_policy: DetachPolicy::Remain,
+            endpoint_alignment: EndpointAlignment::AsSpawned,
         }
     }
 
@@ -63,15 +63,15 @@ impl CableEndpoint {
 
     /// Set the detach policy for this endpoint.
     #[must_use]
-    pub const fn with_detach_policy(mut self, policy: OnDetach) -> Self {
-        self.detach_policy = policy;
+    pub const fn with_detach_policy(mut self, detach_policy: DetachPolicy) -> Self {
+        self.detach_policy = detach_policy;
         self
     }
 
     /// Set the alignment mode for this endpoint's attached target.
     #[must_use]
-    pub const fn with_alignment(mut self, alignment: EndpointAlignment) -> Self {
-        self.alignment = alignment;
+    pub const fn with_endpoint_alignment(mut self, endpoint_alignment: EndpointAlignment) -> Self {
+        self.endpoint_alignment = endpoint_alignment;
         self
     }
 }
@@ -103,7 +103,7 @@ pub enum EndpointAlignment {
 /// How the curve itself reacts to detachment (e.g. increasing slack on a catenary) is a
 /// per-solver concern — see `CatenarySolver::with_detach_slack_bump`.
 #[derive(Clone, Debug, Default, Reflect)]
-pub enum OnDetach {
+pub enum DetachPolicy {
     /// Convert to world-attached at the last resolved position. Cable keeps its shape.
     #[default]
     Remain,
@@ -117,7 +117,7 @@ pub enum OnDetach {
 /// as a local-space offset from the target's [`GlobalTransform`]. The cable recomputes
 /// reactively when the target's transform changes.
 ///
-/// If the target entity is despawned, the endpoint's [`OnDetach`] determines behavior.
+/// If the target entity is despawned, the endpoint's [`DetachPolicy`] determines behavior.
 #[derive(Component)]
 #[relationship(relationship_target = AttachedEndpoints)]
 pub struct AttachedTo(pub Entity);
@@ -148,7 +148,7 @@ pub(super) fn on_endpoint_alignment_update(
     let Ok((computed, children)) = cables.get(cable) else {
         return;
     };
-    let Some(geometry) = &computed.geometry else {
+    let Some(cable_geometry) = &computed.cable_geometry else {
         return;
     };
 
@@ -162,11 +162,11 @@ pub(super) fn on_endpoint_alignment_update(
 
         // Tangent at this endpoint's end of the geometry.
         let tangent = match endpoint.end {
-            CableEnd::Start => geometry
+            CableEnd::Start => cable_geometry
                 .segments
                 .first()
                 .and_then(|s| s.tangents.first().copied()),
-            CableEnd::End => geometry
+            CableEnd::End => cable_geometry
                 .segments
                 .last()
                 .and_then(|s| s.tangents.last().copied()),
@@ -179,7 +179,7 @@ pub(super) fn on_endpoint_alignment_update(
         // Negate so the cable enters from the target's -Y side.
         let direction = -tangent;
 
-        let new_rotation = match endpoint.alignment {
+        let new_rotation = match endpoint.endpoint_alignment {
             EndpointAlignment::AsSpawned => continue,
             EndpointAlignment::Fixed => {
                 // `looking_to` orients -Z toward `direction` with Y up, so no roll.
@@ -205,7 +205,7 @@ pub(super) fn on_endpoint_alignment_update(
 ///
 /// Bevy auto-removes `AttachedTo` when the target entity is despawned, which
 /// triggers `OnRemove<AttachedTo>`. This observer reads the endpoint's
-/// [`OnDetach`] and acts accordingly.
+/// [`DetachPolicy`] and acts accordingly.
 pub(super) fn on_endpoint_detached(
     trigger: On<Remove, AttachedTo>,
     mut endpoints: Query<(
@@ -225,7 +225,7 @@ pub(super) fn on_endpoint_detached(
     };
 
     match endpoint.detach_policy {
-        OnDetach::Remain => {
+        DetachPolicy::Remain => {
             preserve_resolved_world_position(&mut endpoint, resolved_endpoint_position);
 
             if let Ok(mut cable) = cables.get_mut(child_of.parent()) {
@@ -234,7 +234,7 @@ pub(super) fn on_endpoint_detached(
 
             dirty_cables.0.insert(child_of.parent());
         },
-        OnDetach::Despawn => {
+        DetachPolicy::Despawn => {
             let cable_entity = child_of.parent();
             commands.entity(cable_entity).despawn();
         },

@@ -16,17 +16,17 @@ use crate::cable::ComputedCableGeometry;
 pub(super) fn render_cable_gizmos(
     cables: Query<&ComputedCableGeometry>,
     mut gizmos: Gizmos<CableGizmoGroup>,
-    debug_enabled: Res<DebugGizmos>,
+    debug_gizmos: Res<DebugGizmos>,
 ) {
-    if *debug_enabled == DebugGizmos::Disabled {
+    if *debug_gizmos == DebugGizmos::Disabled {
         return;
     }
     for computed in &cables {
-        let Some(geometry) = &computed.geometry else {
+        let Some(cable_geometry) = &computed.cable_geometry else {
             continue;
         };
 
-        for segment in &geometry.segments {
+        for segment in &cable_geometry.segments {
             if segment.points.len() < 2 {
                 continue;
             }
@@ -36,7 +36,7 @@ pub(super) fn render_cable_gizmos(
             }
         }
 
-        for &waypoint in &geometry.waypoints {
+        for &waypoint in &cable_geometry.waypoints {
             draw_dot(&mut gizmos, waypoint, WAYPOINT_DOT_SIZE, WAYPOINT_DOT_COLOR);
         }
     }
@@ -46,18 +46,18 @@ pub(super) fn render_cable_gizmos(
 pub(super) fn render_debug_gizmos(
     cables: Query<&ComputedCableGeometry>,
     mut gizmos: Gizmos<CableGizmoGroup>,
-    debug_enabled: Res<DebugGizmos>,
+    debug_gizmos: Res<DebugGizmos>,
 ) {
-    if *debug_enabled == DebugGizmos::Disabled {
+    if *debug_gizmos == DebugGizmos::Disabled {
         return;
     }
 
     for computed in &cables {
-        let Some(geometry) = &computed.geometry else {
+        let Some(cable_geometry) = &computed.cable_geometry else {
             continue;
         };
 
-        for segment in &geometry.segments {
+        for segment in &cable_geometry.segments {
             for (i, (point, tangent)) in segment.points.iter().zip(&segment.tangents).enumerate() {
                 if i % TANGENT_SAMPLING_INTERVAL == 0 {
                     gizmos.line(

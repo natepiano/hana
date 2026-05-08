@@ -15,7 +15,7 @@ pub use config::CableMeshConfig;
 pub use config::CapConfig;
 pub use config::Capping;
 pub use config::ElbowConfig;
-pub use config::FaceSides;
+pub use config::Faces;
 pub use config::TrimConfig;
 pub use config::TubeConfig;
 pub use elbows::ElbowMetadata;

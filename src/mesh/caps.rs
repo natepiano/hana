@@ -8,7 +8,7 @@ use super::buffers::MeshBuffers;
 use super::buffers::WindingOrder;
 use super::config::CableMeshConfig;
 use super::config::Capping;
-use super::config::FaceSides;
+use super::config::Faces;
 use super::constants::MIN_CAP_RINGS;
 
 /// Which side of a cap to generate.
@@ -26,7 +26,7 @@ struct CapContext<'a> {
     radius:    f32,
     sides:     u32,
     ring_base: u32,
-    faces:     &'a FaceSides,
+    faces:     &'a Faces,
     winding:   WindingOrder,
 }
 
@@ -44,7 +44,7 @@ pub(super) fn add_end_caps(
         return;
     }
 
-    let render_inside = matches!(config.tube.faces, FaceSides::Inside);
+    let render_inside = matches!(config.tube.faces, Faces::Inside);
     let start_winding = if render_inside {
         WindingOrder::Standard
     } else {
@@ -83,8 +83,8 @@ pub(super) fn add_end_caps(
 
 /// Dispatch a single cap (start or end) based on style.
 fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffers) {
-    let needs_outside = matches!(context.faces, FaceSides::Outside | FaceSides::Both);
-    let needs_inside = matches!(context.faces, FaceSides::Inside | FaceSides::Both);
+    let needs_outside = matches!(context.faces, Faces::Outside | Faces::Both);
+    let needs_inside = matches!(context.faces, Faces::Inside | Faces::Both);
     let cap_rings = context.sides.max(MIN_CAP_RINGS);
 
     match style {
