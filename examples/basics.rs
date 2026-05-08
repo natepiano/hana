@@ -2,6 +2,8 @@
 //!
 //! Run with: `cargo run --example basics`
 
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::math::Quat;
 use bevy::math::Vec3;
 use bevy_kana::Displacement;
@@ -60,7 +62,7 @@ fn main() {
 
     println!("\n=== Orientation: rotation wrapper ===\n");
 
-    let rotation = Orientation::from(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+    let rotation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
     let rotated = rotation * Vec3::X;
     println!("X rotated 90° around Y: {rotated:?}");
 
@@ -76,7 +78,7 @@ fn main() {
 
     // Interpolation
     let start_orientation = Orientation::from(Quat::IDENTITY);
-    let end_orientation = Orientation::from(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+    let end_orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
     let halfway = start_orientation.slerp(end_orientation, SLERP_FACTOR);
     let slerp_result = halfway * Vec3::X;
     println!("Slerp halfway (0° to 90°): {slerp_result:?}");

@@ -41,6 +41,8 @@ macro_rules! event {
 
 #[cfg(test)]
 mod tests {
+    use std::mem::size_of_val;
+
     use bevy::prelude::*;
 
     // expectations
@@ -61,6 +63,6 @@ mod tests {
     #[test]
     fn unit_event_defaults() {
         let event = TestEvent;
-        assert_eq!(std::mem::size_of_val(&event), EMPTY_EVENT_SIZE);
+        assert_eq!(size_of_val(&event), EMPTY_EVENT_SIZE);
     }
 }
