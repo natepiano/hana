@@ -27,8 +27,12 @@ use bevy_render::view::ViewTarget;
 use super::compose::ComposeOutputPipeline;
 use super::compose::ComposeVariant;
 use super::compose::SampleMode;
-use super::constants::JFA_NO_SEED_CLEAR_COLOR;
+use super::constants::COMPOSE_OUTPUT_BIND_GROUP_LABEL;
+use super::constants::HULL_OUTLINE_PASS_LABEL;
+use super::constants::JUMP_FLOOD_NO_SEED_CLEAR_COLOR;
 use super::constants::OUTLINE_DEPTH_FAR_PLANE_CLEAR;
+use super::constants::OUTLINE_FLOOD_INIT_PASS_LABEL;
+use super::constants::POST_PROCESS_PASS_LABEL;
 use super::extract::ActiveOutlineModes;
 use super::flood;
 use super::flood::FloodSettings;
@@ -36,7 +40,7 @@ use super::flood::JumpFloodPass;
 use super::flood::JumpFloodStep;
 use super::hull_pipeline::DynamicRange;
 use super::mask::HullOutlinePhase;
-use super::mask::JfaOutlinePhase;
+use super::mask::JumpFloodOutlinePhase;
 use super::texture::FloodTextures;
 
 /// Render graph label for the outline pass.
@@ -79,7 +83,8 @@ impl ViewNode for OutlineNode {
         ): QueryItem<'w, '_, Self::ViewQuery>,
         world: &'w World,
     ) -> Result<(), NodeRunError> {
-        let Some(outline_phases) = world.get_resource::<ViewBinnedRenderPhases<JfaOutlinePhase>>()
+        let Some(outline_phases) =
+            world.get_resource::<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>()
         else {
             return Ok(());
         };
@@ -136,11 +141,11 @@ impl ViewNode for OutlineNode {
             );
         }
 
-        run_jfa_composite(
+        run_jump_flood_composite(
             render_context,
             world,
             &jump_flood_pass,
-            JfaCompositeContext {
+            JumpFloodCompositeContext {
                 flood_textures: &mut flood_textures,
                 outline_depth_view: &outline_depth_view,
                 global_depth,
@@ -159,7 +164,7 @@ struct MaskInitPassContext<'a> {
     flood_textures:     &'a FloodTextures,
     outline_depth_view: &'a TextureView,
     camera:             &'a ExtractedCamera,
-    outline_phase:      Option<&'a BinnedRenderPhase<JfaOutlinePhase>>,
+    outline_phase:      Option<&'a BinnedRenderPhase<JumpFloodOutlinePhase>>,
     world:              &'a World,
     view_entity:        Entity,
 }
@@ -180,7 +185,7 @@ fn run_mask_init_pass(
         view:           &flood_textures.output.default_view,
         resolve_target: None,
         ops:            Operations {
-            load:  LoadOp::Clear(JFA_NO_SEED_CLEAR_COLOR.into()),
+            load:  LoadOp::Clear(JUMP_FLOOD_NO_SEED_CLEAR_COLOR.into()),
             store: StoreOp::Store,
         },
         depth_slice:    None,
@@ -218,7 +223,7 @@ fn run_mask_init_pass(
     }
 
     let mut init_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-        label:                    Some("outline_flood_init"),
+        label:                    Some(OUTLINE_FLOOD_INIT_PASS_LABEL),
         color_attachments:        &color_attachments,
         depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
             view:        outline_depth_view,
@@ -262,7 +267,7 @@ fn run_hull_pass(render_context: &mut RenderContext<'_>, hull_pass_context: Hull
         view_entity,
     } = hull_pass_context;
     let mut hull_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-        label:                    Some("hull_outline_pass"),
+        label:                    Some(HULL_OUTLINE_PASS_LABEL),
         color_attachments:        &[Some(view_target.get_color_attachment())],
         depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
             view:        view_depth_texture.view(),
@@ -285,7 +290,7 @@ fn run_hull_pass(render_context: &mut RenderContext<'_>, hull_pass_context: Hull
     }
 }
 
-struct JfaCompositeContext<'a> {
+struct JumpFloodCompositeContext<'a> {
     flood_textures:     &'a mut FloodTextures,
     outline_depth_view: &'a TextureView,
     global_depth:       &'a ColorAttachment,
@@ -294,21 +299,21 @@ struct JfaCompositeContext<'a> {
     msaa:               Msaa,
 }
 
-fn run_jfa_composite(
+fn run_jump_flood_composite(
     render_context: &mut RenderContext<'_>,
     world: &World,
     jump_flood_pass: &JumpFloodPass<'_>,
-    jfa_composite_context: JfaCompositeContext<'_>,
+    jump_flood_composite_context: JumpFloodCompositeContext<'_>,
     flood_settings: &FloodSettings,
 ) {
-    let JfaCompositeContext {
+    let JumpFloodCompositeContext {
         flood_textures,
         outline_depth_view,
         global_depth,
         view_target,
         view_depth_texture,
         msaa,
-    } = jfa_composite_context;
+    } = jump_flood_composite_context;
     let Some(active) = world.get_resource::<ActiveOutlineModes>() else {
         return;
     };
@@ -333,7 +338,7 @@ fn run_jfa_composite(
 
     let post_process = view_target.post_process_write();
 
-    let passes = flood::jfa_pass_count(flood_settings.width);
+    let passes = flood::jump_flood_pass_count(flood_settings.width);
 
     for size in (0..passes).rev() {
         flood_textures.swap_ping_pong();
@@ -350,7 +355,7 @@ fn run_jfa_composite(
     }
 
     let bind_group = render_context.render_device().create_bind_group(
-        "compose_output_bind_group",
+        COMPOSE_OUTPUT_BIND_GROUP_LABEL,
         &pipeline_cache.get_bind_group_layout(compose_pipeline.layout_for(variant)),
         &BindGroupEntries::sequential((
             post_process.source,
@@ -368,7 +373,7 @@ fn run_jfa_composite(
     // main texture when MSAA is enabled, which would require the pipeline to match
     // the MSAA sample count. The post-process destination is always single-sample.
     let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-        label:                    Some("post_process_pass"),
+        label:                    Some(POST_PROCESS_PASS_LABEL),
         color_attachments:        &[Some(RenderPassColorAttachment {
             view:           post_process.destination,
             resolve_target: None,

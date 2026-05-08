@@ -40,7 +40,7 @@ pub struct NoOutline;
 /// # use bevy::prelude::*;
 /// # use bevy_liminal::Outline;
 /// # use bevy_liminal::OverlapMode;
-/// // JFA — screen-space silhouette, works on all geometry
+/// // `JumpFlood` — screen-space silhouette, works on all geometry
 /// Outline::jump_flood(4.0).with_color(Color::WHITE).build();
 ///
 /// // `ScreenHull` — pixel-width vertex extrusion for 3D meshes
@@ -76,7 +76,7 @@ pub struct Outline {
 }
 
 impl Outline {
-    /// Create a JFA outline builder. Width is in pixels.
+    /// Create a `JumpFlood` outline builder. Width is in pixels.
     #[must_use]
     pub const fn jump_flood(width: f32) -> OutlineBuilder<JumpFloodState> {
         OutlineBuilder::jump_flood(width)
@@ -116,8 +116,8 @@ pub enum OutlineMethod {
 
 /// How overlapping outlines from different entities interact.
 ///
-/// **Note:** `OverlapMode` only affects hull methods (`WorldHull`/`ScreenHull`). JFA always
-/// produces merged outlines regardless of this setting.
+/// **Note:** `OverlapMode` only affects hull methods (`WorldHull`/`ScreenHull`).
+/// `JumpFlood` always produces merged outlines regardless of this setting.
 ///
 /// - [`Merged`](OverlapMode::Merged): Overlapping outlined meshes share a single unified silhouette
 ///   outline. No outline is drawn where two outlined surfaces overlap — they merge into a single

@@ -12,6 +12,7 @@ use bevy_render::texture::CachedTexture;
 use bevy_render::texture::TextureCache;
 
 use super::camera::OutlineCamera;
+use super::constants::OUTLINE_DEPTH_TEXTURE_LABEL;
 use super::extract::ActiveOutlineModes;
 
 #[derive(Clone, Component)]
@@ -89,7 +90,7 @@ pub(crate) fn prepare_flood_textures(
 
         // Create the depth texture
         let depth_texture = render_device.create_texture(&TextureDescriptor {
-            label: Some("outline depth texture"),
+            label: Some(OUTLINE_DEPTH_TEXTURE_LABEL),
             size,
             mip_level_count: 1,
             sample_count: 1,

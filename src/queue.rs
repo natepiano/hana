@@ -20,13 +20,18 @@ use super::DrawHull;
 use super::DrawOutline;
 use super::camera::OutlineCamera;
 use super::constants::ATTRIBUTE_OUTLINE_NORMAL;
+use super::constants::FAILED_TO_SPECIALIZE_HULL_MESH_PIPELINE_WARNING;
+use super::constants::FAILED_TO_SPECIALIZE_MESH_PIPELINE_WARNING;
+use super::constants::LIMINAL_TRACING_TARGET;
+use super::constants::NO_MESH_FOUND_WARNING;
+use super::constants::NO_MESH_INSTANCE_FOUND_WARNING;
 use super::extract::ActiveOutlineModes;
 use super::extract::ExtractedOutlineUniforms;
 use super::hull_pipeline::HullPipeline;
 use super::hull_pipeline::HullPipelineKey;
 use super::hull_pipeline::OutlineNormalPresence;
 use super::mask::HullOutlinePhase;
-use super::mask::JfaOutlinePhase;
+use super::mask::JumpFloodOutlinePhase;
 use super::mask::OutlineBatchSetKey;
 use super::mask::OutlineBinKey;
 use super::mask_pipeline::HullPresence;
@@ -36,8 +41,8 @@ use super::outline::OutlineMethod;
 
 pub(crate) fn queue_outline(
     extracted_outlines: Res<ExtractedOutlineUniforms>,
-    draw_functions: Res<DrawFunctions<JfaOutlinePhase>>,
-    mut outline_phases: ResMut<ViewBinnedRenderPhases<JfaOutlinePhase>>,
+    draw_functions: Res<DrawFunctions<JumpFloodOutlinePhase>>,
+    mut outline_phases: ResMut<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>,
     mesh_outline_pipeline: Res<MeshMaskPipeline>,
     mut mesh_outline_pipelines: ResMut<SpecializedMeshPipelines<MeshMaskPipeline>>,
     pipeline_cache: Res<PipelineCache>,
@@ -85,14 +90,20 @@ pub(crate) fn queue_outline(
             }
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(main_entity)
             else {
-                tracing::warn!(target: "bevy_liminal", "No mesh instance found for entity {main_entity:?}");
+                tracing::warn!(
+                    target: LIMINAL_TRACING_TARGET,
+                    "{NO_MESH_INSTANCE_FOUND_WARNING} {main_entity:?}"
+                );
                 continue;
             };
 
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
 
             let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
-                tracing::warn!(target: "bevy_liminal", "No mesh found for entity {main_entity:?}");
+                tracing::warn!(
+                    target: LIMINAL_TRACING_TARGET,
+                    "{NO_MESH_FOUND_WARNING} {main_entity:?}"
+                );
                 continue;
             };
 
@@ -113,7 +124,10 @@ pub(crate) fn queue_outline(
                 },
                 &mesh.layout,
             ) else {
-                tracing::warn!(target: "bevy_liminal", "Failed to specialize mesh pipeline");
+                tracing::warn!(
+                    target: LIMINAL_TRACING_TARGET,
+                    "{FAILED_TO_SPECIALIZE_MESH_PIPELINE_WARNING}"
+                );
                 continue;
             };
 
@@ -199,14 +213,20 @@ pub(crate) fn queue_hull_outline(
 
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(main_entity)
             else {
-                tracing::warn!(target: "bevy_liminal", "No mesh instance found for entity {main_entity:?}");
+                tracing::warn!(
+                    target: LIMINAL_TRACING_TARGET,
+                    "{NO_MESH_INSTANCE_FOUND_WARNING} {main_entity:?}"
+                );
                 continue;
             };
 
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
 
             let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
-                tracing::warn!(target: "bevy_liminal", "No mesh found for entity {main_entity:?}");
+                tracing::warn!(
+                    target: LIMINAL_TRACING_TARGET,
+                    "{NO_MESH_FOUND_WARNING} {main_entity:?}"
+                );
                 continue;
             };
 
@@ -228,7 +248,10 @@ pub(crate) fn queue_hull_outline(
                 },
                 &mesh.layout,
             ) else {
-                tracing::warn!(target: "bevy_liminal", "Failed to specialize hull mesh pipeline");
+                tracing::warn!(
+                    target: LIMINAL_TRACING_TARGET,
+                    "{FAILED_TO_SPECIALIZE_HULL_MESH_PIPELINE_WARNING}"
+                );
                 continue;
             };
 

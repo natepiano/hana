@@ -47,7 +47,7 @@ use extract::ExtractedOutlineUniforms;
 use flood::JumpFloodPipeline;
 use hull_pipeline::HullPipeline;
 use mask::HullOutlinePhase;
-use mask::JfaOutlinePhase;
+use mask::JumpFloodOutlinePhase;
 use mask_pipeline::MeshMaskPipeline;
 use node::OutlineNode;
 use node::OutlineRenderGraphNode;
@@ -101,7 +101,7 @@ impl Plugin for LiminalPlugin {
         app.add_observer(camera::configure_outline_camera_depth_texture);
 
         app.add_plugins((
-            BinnedRenderPhasePlugin::<JfaOutlinePhase, MeshMaskPipeline>::new(
+            BinnedRenderPhasePlugin::<JumpFloodOutlinePhase, MeshMaskPipeline>::new(
                 RenderDebugFlags::default(),
             ),
             BinnedRenderPhasePlugin::<HullOutlinePhase, HullPipeline>::new(
@@ -110,11 +110,11 @@ impl Plugin for LiminalPlugin {
         ));
 
         app.sub_app_mut(RenderApp)
-            .init_resource::<DrawFunctions<JfaOutlinePhase>>()
+            .init_resource::<DrawFunctions<JumpFloodOutlinePhase>>()
             .init_resource::<DrawFunctions<HullOutlinePhase>>()
             .init_resource::<SpecializedMeshPipelines<MeshMaskPipeline>>()
             .init_resource::<SpecializedMeshPipelines<HullPipeline>>()
-            .init_resource::<ViewBinnedRenderPhases<JfaOutlinePhase>>()
+            .init_resource::<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>()
             .init_resource::<ViewBinnedRenderPhases<HullOutlinePhase>>()
             .init_resource::<OutlineBindGroup>()
             .init_resource::<HullOutlineBindGroup>()
@@ -148,7 +148,7 @@ impl Plugin for LiminalPlugin {
                         .in_set(RenderSystems::PrepareBindGroups),
                 ),
             )
-            .add_render_command::<JfaOutlinePhase, DrawOutline>()
+            .add_render_command::<JumpFloodOutlinePhase, DrawOutline>()
             .add_render_command::<HullOutlinePhase, DrawHull>()
             .add_render_graph_node::<ViewNodeRunner<OutlineNode>>(
                 Core3d,

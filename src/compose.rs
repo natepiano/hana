@@ -18,6 +18,12 @@ use bevy::render::render_resource::binding_types;
 use bevy::shader::ShaderDefVal;
 
 use super::constants::COMPOSE_SHADER_HANDLE;
+use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::MULTISAMPLED_SHADER_DEF;
+use super::constants::OUTLINE_COMPOSE_OUTPUT_BIND_GROUP_LAYOUT_LABEL;
+use super::constants::OUTLINE_COMPOSE_OUTPUT_MSAA_BIND_GROUP_LAYOUT_LABEL;
+use super::constants::OUTLINE_COMPOSE_OUTPUT_MSAA_PIPELINE_LABEL;
+use super::constants::OUTLINE_COMPOSE_OUTPUT_PIPELINE_LABEL;
 use super::hull_pipeline::DynamicRange;
 
 /// Whether the view uses multi-sample anti-aliasing.
@@ -102,7 +108,7 @@ impl ComposeOutputPipeline {
 impl FromWorld for ComposeOutputPipeline {
     fn from_world(world: &mut World) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
-            "outline_compose_output_bind_group_layout",
+            OUTLINE_COMPOSE_OUTPUT_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
                 (
@@ -118,7 +124,7 @@ impl FromWorld for ComposeOutputPipeline {
         );
 
         let msaa_layout = BindGroupLayoutDescriptor::new(
-            "outline_compose_output_bind_group_layout_msaa",
+            OUTLINE_COMPOSE_OUTPUT_MSAA_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
                 (
@@ -145,7 +151,7 @@ impl FromWorld for ComposeOutputPipeline {
         });
 
         let descriptor = RenderPipelineDescriptor {
-            label:                            Some("outline_compose_output_pipeline".into()),
+            label:                            Some(OUTLINE_COMPOSE_OUTPUT_PIPELINE_LABEL.into()),
             layout:                           vec![layout.clone()],
             vertex:                           world
                 .resource::<FullscreenShader>()
@@ -154,7 +160,7 @@ impl FromWorld for ComposeOutputPipeline {
             fragment:                         Some(FragmentState {
                 shader:      COMPOSE_SHADER_HANDLE,
                 shader_defs: vec![],
-                entry_point: Some("fragment".into()),
+                entry_point: Some(FRAGMENT_SHADER_ENTRY_POINT.into()),
                 targets:     vec![target],
             }),
             primitive:                        PrimitiveState::default(),
@@ -169,10 +175,10 @@ impl FromWorld for ComposeOutputPipeline {
             fragment.targets = vec![hdr_target.clone()];
         }
 
-        let multisampled_def = ShaderDefVal::Bool("MULTISAMPLED".into(), true);
+        let multisampled_def = ShaderDefVal::Bool(MULTISAMPLED_SHADER_DEF.into(), true);
 
         let mut msaa_descriptor = descriptor.clone();
-        msaa_descriptor.label = Some("outline_compose_output_pipeline_msaa".into());
+        msaa_descriptor.label = Some(OUTLINE_COMPOSE_OUTPUT_MSAA_PIPELINE_LABEL.into());
         msaa_descriptor.layout = vec![msaa_layout.clone()];
         if let Some(fragment) = msaa_descriptor.fragment.as_mut() {
             fragment.shader_defs.push(multisampled_def);

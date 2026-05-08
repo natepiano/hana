@@ -23,11 +23,14 @@ use bevy_render::renderer::RenderDevice;
 use bevy_render::renderer::RenderQueue;
 use bytemuck::Zeroable;
 
+use super::constants::HULL_DEPTH_BIND_GROUP_LABEL;
+use super::constants::HULL_OUTLINE_BIND_GROUP_LABEL;
+use super::constants::OUTLINE_BIND_GROUP_LABEL;
 use super::extract::ActiveOutlineModes;
 use super::extract::ExtractedOutlineUniforms;
 use super::hull_pipeline::HullPipeline;
 use super::mask::HullOutlinePhase;
-use super::mask::JfaOutlinePhase;
+use super::mask::JumpFloodOutlinePhase;
 use super::mask_pipeline::MeshMaskPipeline;
 use super::texture::FloodTextures;
 use super::uniforms::OutlineUniform;
@@ -100,7 +103,7 @@ pub(crate) struct HullOutlineBindGroup(pub(crate) Option<BindGroup>);
 pub(crate) fn prepare_outline_buffer(
     render_mesh_instances: Res<RenderMeshInstances>,
     extracted_outlines: Res<ExtractedOutlineUniforms>,
-    outline_phases: Res<ViewBinnedRenderPhases<JfaOutlinePhase>>,
+    outline_phases: Res<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>,
     mut outline_buffer: ResMut<OutlineUniformBuffer>,
 ) {
     outline_buffer.0.clear();
@@ -177,7 +180,7 @@ pub(crate) fn prepare_outline_bind_group(
 
     if let Some(binding) = outline_buffer.0.binding() {
         let bind_group = render_device.create_bind_group(
-            Some("outline_bind_group"),
+            Some(OUTLINE_BIND_GROUP_LABEL),
             &pipeline_cache.get_bind_group_layout(&outline_pipeline.outline_bind_group_layout),
             &[BindGroupEntry {
                 binding:  0,
@@ -261,7 +264,7 @@ pub(crate) fn prepare_hull_depth_view_bind_groups(
         let owner_view = &owner_texture.default_view;
 
         let bind_group = render_device.create_bind_group(
-            Some("hull_depth_bind_group"),
+            Some(HULL_DEPTH_BIND_GROUP_LABEL),
             &pipeline_cache.get_bind_group_layout(&pipeline.depth_bind_group_layout),
             &BindGroupEntries::sequential((
                 &pipeline.occlusion_sampler,
@@ -359,7 +362,7 @@ pub(crate) fn prepare_hull_outline_bind_group(
 
     if let Some(binding) = outline_buffer.0.binding() {
         let bind_group = render_device.create_bind_group(
-            Some("hull_outline_bind_group"),
+            Some(HULL_OUTLINE_BIND_GROUP_LABEL),
             &pipeline_cache.get_bind_group_layout(&outline_pipeline.outline_bind_group_layout),
             &[BindGroupEntry {
                 binding:  0,

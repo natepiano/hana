@@ -36,7 +36,12 @@ use bevy_render::renderer::RenderDevice;
 use bevy_render::sync_world::MainEntity;
 use nonmax::NonMaxU32;
 
+use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::HULL_OUTLINES_SHADER_DEF;
 use super::constants::MASK_SHADER_HANDLE;
+use super::constants::OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL;
+use super::constants::OUTLINE_PIPELINE_LABEL;
+use super::constants::PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF;
 use super::indexing_mode::IndexingMode;
 use super::uniforms::OutlineUniform;
 
@@ -66,7 +71,7 @@ impl FromWorld for MeshMaskPipeline {
         let render_device = world.resource::<RenderDevice>();
 
         let outline_instance_bind_group_layout = BindGroupLayoutDescriptor::new(
-            "OutlineInstance",
+            OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::VERTEX_FRAGMENT,
                 (GpuArrayBuffer::<OutlineUniform>::binding_layout(
@@ -114,12 +119,12 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
         let mut shader_defs = vec![];
         if let Some(per_object_buffer_batch_size) = self.per_object_buffer_batch_size {
             shader_defs.push(ShaderDefVal::UInt(
-                "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+                PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF.into(),
                 per_object_buffer_batch_size,
             ));
         }
         if key.hull_presence.is_present() {
-            shader_defs.push(ShaderDefVal::Bool("HULL_OUTLINES".into(), true));
+            shader_defs.push(ShaderDefVal::Bool(HULL_OUTLINES_SHADER_DEF.into(), true));
         }
 
         descriptor.vertex.shader_defs.extend(shader_defs.clone());
@@ -150,7 +155,7 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
         descriptor.fragment = Some(FragmentState {
             shader: MASK_SHADER_HANDLE,
             shader_defs,
-            entry_point: Some("fragment".into()),
+            entry_point: Some(FRAGMENT_SHADER_ENTRY_POINT.into()),
             targets,
         });
 
@@ -161,7 +166,7 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
             stencil:             default(),
             bias:                default(),
         });
-        descriptor.label = Some("outline_pipeline".into());
+        descriptor.label = Some(OUTLINE_PIPELINE_LABEL.into());
         descriptor
             .layout
             .push(self.outline_bind_group_layout.clone());

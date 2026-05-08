@@ -36,7 +36,7 @@ pub(crate) struct OutlineBinKey {
     pub(crate) main_entity: MainEntity,
 }
 
-pub(crate) struct JfaOutlinePhase {
+pub(super) struct JumpFloodOutlinePhase {
     pub(crate) batch_set_key: OutlineBatchSetKey,
     pub(crate) entity:        Entity,
     pub(crate) main_entity:   MainEntity,
@@ -44,7 +44,7 @@ pub(crate) struct JfaOutlinePhase {
     pub(crate) extra_index:   PhaseItemExtraIndex,
 }
 
-impl PhaseItem for JfaOutlinePhase {
+impl PhaseItem for JumpFloodOutlinePhase {
     #[inline]
     fn entity(&self) -> Entity { self.entity }
 
@@ -63,7 +63,7 @@ impl PhaseItem for JfaOutlinePhase {
     }
 }
 
-impl BinnedPhaseItem for JfaOutlinePhase {
+impl BinnedPhaseItem for JumpFloodOutlinePhase {
     type BinKey = OutlineBinKey;
     type BatchSetKey = OutlineBatchSetKey;
 
@@ -84,7 +84,7 @@ impl BinnedPhaseItem for JfaOutlinePhase {
     }
 }
 
-impl CachedRenderPipelinePhaseItem for JfaOutlinePhase {
+impl CachedRenderPipelinePhaseItem for JumpFloodOutlinePhase {
     #[inline]
     fn cached_pipeline(&self) -> CachedRenderPipelineId { self.batch_set_key.pipeline }
 }

@@ -45,8 +45,14 @@ use bevy_render::view::ViewTarget;
 use nonmax::NonMaxU32;
 
 use super::constants::ATTRIBUTE_OUTLINE_NORMAL;
+use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::HAS_OUTLINE_NORMALS_SHADER_DEF;
+use super::constants::HULL_DEPTH_BIND_GROUP_LAYOUT_LABEL;
+use super::constants::HULL_OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL;
+use super::constants::HULL_OUTLINE_PIPELINE_LABEL;
 use super::constants::HULL_SHADER_HANDLE;
 use super::constants::OUTLINE_NORMAL_SHADER_LOCATION;
+use super::constants::PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF;
 use super::indexing_mode::IndexingMode;
 use super::uniforms::OutlineUniform;
 
@@ -91,7 +97,7 @@ impl FromWorld for HullPipeline {
         let render_device = world.resource::<RenderDevice>().clone();
 
         let outline_instance_bind_group_layout = BindGroupLayoutDescriptor::new(
-            "HullOutlineInstance",
+            HULL_OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::VERTEX_FRAGMENT,
                 (GpuArrayBuffer::<OutlineUniform>::binding_layout(
@@ -100,7 +106,7 @@ impl FromWorld for HullPipeline {
             ),
         );
         let depth_bind_group_layout = BindGroupLayoutDescriptor::new(
-            "HullDepth",
+            HULL_DEPTH_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
                 (
@@ -138,13 +144,16 @@ impl SpecializedMeshPipeline for HullPipeline {
         let mut shader_defs = vec![];
         if let Some(per_object_buffer_batch_size) = self.per_object_buffer_batch_size {
             shader_defs.push(ShaderDefVal::UInt(
-                "PER_OBJECT_BUFFER_BATCH_SIZE".into(),
+                PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF.into(),
                 per_object_buffer_batch_size,
             ));
         }
 
         if matches!(key.outline_normal_presence, OutlineNormalPresence::Present) {
-            shader_defs.push(ShaderDefVal::Bool("HAS_OUTLINE_NORMALS".into(), true));
+            shader_defs.push(ShaderDefVal::Bool(
+                HAS_OUTLINE_NORMALS_SHADER_DEF.into(),
+                true,
+            ));
 
             if let Some(index) = layout
                 .0
@@ -175,7 +184,7 @@ impl SpecializedMeshPipeline for HullPipeline {
         descriptor.fragment = Some(FragmentState {
             shader: HULL_SHADER_HANDLE,
             shader_defs,
-            entry_point: Some("fragment".into()),
+            entry_point: Some(FRAGMENT_SHADER_ENTRY_POINT.into()),
             targets: vec![Some(ColorTargetState {
                 format:     color_format,
                 blend:      Some(BlendState::ALPHA_BLENDING),
@@ -192,7 +201,7 @@ impl SpecializedMeshPipeline for HullPipeline {
                 clamp:       0.0,
             };
         }
-        descriptor.label = Some("hull_outline_pipeline".into());
+        descriptor.label = Some(HULL_OUTLINE_PIPELINE_LABEL.into());
         descriptor
             .layout
             .push(self.outline_bind_group_layout.clone());

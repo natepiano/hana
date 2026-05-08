@@ -35,6 +35,11 @@ use bevy_render::render_resource::TextureView;
 
 use super::camera::OutlineCamera;
 use super::constants::FLOOD_SHADER_HANDLE;
+use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::JUMP_FLOOD_BIND_GROUP_LABEL;
+use super::constants::JUMP_FLOOD_BIND_GROUP_LAYOUT_LABEL;
+use super::constants::OUTLINE_JUMP_FLOOD_PASS_LABEL;
+use super::constants::OUTLINE_JUMP_FLOOD_PIPELINE_LABEL;
 use super::extract::ExtractedOutlineUniforms;
 
 #[derive(ShaderType)]
@@ -62,10 +67,11 @@ pub(crate) fn prepare_flood_settings(
 }
 
 /// Number of jump-flood passes required to cover an outline of the given
-/// pixel width. Derived from the JFA radius: convert width → diameter,
+/// pixel width. Derived from the `JumpFlood` radius: convert width ->
+/// diameter,
 /// diameter → next-power-of-two radius, plus one final compose pass.
 /// Returns 0 when no flood is needed.
-pub(crate) fn jfa_pass_count(width: f32) -> u32 {
+pub(super) fn jump_flood_pass_count(width: f32) -> u32 {
     if width <= 0.0 {
         return 0;
     }
@@ -89,7 +95,7 @@ impl FromWorld for JumpFloodPipeline {
         let render_device = world.resource::<RenderDevice>().clone();
 
         let layout = BindGroupLayoutDescriptor::new(
-            "outline_jump_flood_bind_group_layout",
+            JUMP_FLOOD_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
                 (
@@ -113,13 +119,15 @@ impl FromWorld for JumpFloodPipeline {
             world
                 .resource_mut::<PipelineCache>()
                 .queue_render_pipeline(RenderPipelineDescriptor {
-                    label:                            Some("outline_jump_flood_pipeline".into()),
+                    label:                            Some(
+                        OUTLINE_JUMP_FLOOD_PIPELINE_LABEL.into(),
+                    ),
                     layout:                           vec![layout.clone()],
                     vertex:                           fullscreen_shader.to_vertex_state(),
                     fragment:                         Some(FragmentState {
                         shader:      FLOOD_SHADER_HANDLE,
                         shader_defs: vec![],
-                        entry_point: Some("fragment".into()),
+                        entry_point: Some(FRAGMENT_SHADER_ENTRY_POINT.into()),
                         targets:     vec![Some(ColorTargetState {
                             format:     TextureFormat::Rgba32Float,
                             blend:      None,
@@ -194,7 +202,7 @@ impl<'w> JumpFloodPass<'w> {
             return;
         };
         let bind_group = render_context.render_device().create_bind_group(
-            "outline_jump_flood_bind_group",
+            JUMP_FLOOD_BIND_GROUP_LABEL,
             &self
                 .pipeline_cache
                 .get_bind_group_layout(&self.pipeline.layout),
@@ -208,7 +216,7 @@ impl<'w> JumpFloodPass<'w> {
         );
 
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label:                    Some("outline_jump_flood_pass"),
+            label:                    Some(OUTLINE_JUMP_FLOOD_PASS_LABEL),
             color_attachments:        &[Some(RenderPassColorAttachment {
                 view:           &output.default_view,
                 resolve_target: None,

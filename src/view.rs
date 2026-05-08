@@ -6,10 +6,10 @@ use bevy_render::render_phase::ViewBinnedRenderPhases;
 use bevy_render::view::RetainedViewEntity;
 
 use super::mask::HullOutlinePhase;
-use super::mask::JfaOutlinePhase;
+use super::mask::JumpFloodOutlinePhase;
 
 pub(crate) fn update_views(
-    mut outline_phases: ResMut<ViewBinnedRenderPhases<JfaOutlinePhase>>,
+    mut outline_phases: ResMut<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>,
     mut hull_outline_phases: ResMut<ViewBinnedRenderPhases<HullOutlinePhase>>,
     camera_query: Extract<Query<(Entity, &Camera), With<Camera3d>>>,
     gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
