@@ -217,7 +217,7 @@ impl EventLog {
     }
 }
 
-fn fmt_vec3(vector: Vec3) -> String {
+fn format_vec3(vector: Vec3) -> String {
     format!("({:.1}, {:.1}, {:.1})", vector.x, vector.y, vector.z)
 }
 
@@ -235,8 +235,8 @@ pub(crate) fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLo
 pub(crate) fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
         "CameraMoveBegin\n  translation={}\n  focus={}\n  duration={:.0}ms\n  easing={:?}",
-        fmt_vec3(event.camera_move.translation()),
-        fmt_vec3(event.camera_move.focus()),
+        format_vec3(event.camera_move.translation()),
+        format_vec3(event.camera_move.focus()),
         event.camera_move.duration_ms(),
         event.camera_move.easing(),
     ));
@@ -264,8 +264,8 @@ pub(crate) fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: Re
     log.push_error(format!(
         "AnimationCancelled\n  source={:?}\n  move_translation={}\n  move_focus={}",
         event.source,
-        fmt_vec3(event.camera_move.translation()),
-        fmt_vec3(event.camera_move.focus()),
+        format_vec3(event.camera_move.translation()),
+        format_vec3(event.camera_move.focus()),
     ));
 }
 

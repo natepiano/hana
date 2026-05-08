@@ -316,11 +316,11 @@ pub(super) fn on_remove_fit_visualization(
 /// Syncs the gizmo render layers and line width with visualization-enabled cameras.
 pub(super) fn sync_gizmo_render_layers(
     mut config_store: ResMut<GizmoConfigStore>,
-    viz_config: Res<FitTargetOverlayConfig>,
+    visualization_config: Res<FitTargetOverlayConfig>,
     camera_query: Query<Option<&RenderLayers>, With<FitOverlay>>,
 ) {
     let (gizmo_config, _) = config_store.config_mut::<FitTargetGizmo>();
-    gizmo_config.line.width = viz_config.line_width;
+    gizmo_config.line.width = visualization_config.line_width;
     gizmo_config.depth_bias = OVERLAY_GIZMO_DEPTH_BIAS;
 
     // Apply render layers from the first visualization-enabled camera

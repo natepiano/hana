@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy_kana::Displacement;
 use bevy_kana::Position;
 
+use super::constants::LOOK_AT_AND_ZOOM_TO_FIT_CONTEXT;
 use super::fit_request;
 use super::fit_request::FitRequest;
 use super::snap_orbit;
@@ -117,7 +118,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 
     let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
-            context: "LookAtAndZoomToFit",
+            context: LOOK_AT_AND_ZOOM_TO_FIT_CONTEXT,
             target,
             yaw: preliminary_yaw,
             pitch: preliminary_pitch,

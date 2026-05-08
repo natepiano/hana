@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 mod animation;
+mod constants;
 mod fit;
 mod fit_request;
 mod look;

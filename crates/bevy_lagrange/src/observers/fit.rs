@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 
+use super::constants::ANIMATE_TO_FIT_CONTEXT;
+use super::constants::ZOOM_TO_FIT_CONTEXT;
 use super::fit_request;
 use super::fit_request::FitRequest;
 use super::snap_orbit;
@@ -58,7 +60,7 @@ pub(super) fn on_zoom_to_fit(
 
     let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
-            context: "ZoomToFit",
+            context: ZOOM_TO_FIT_CONTEXT,
             target,
             yaw: orbit_cam.target_yaw,
             pitch: orbit_cam.target_pitch,
@@ -161,7 +163,7 @@ pub(super) fn on_animate_to_fit(
 
     let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
-            context: "AnimateToFit",
+            context: ANIMATE_TO_FIT_CONTEXT,
             target,
             yaw,
             pitch,

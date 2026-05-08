@@ -5,7 +5,7 @@ pub(crate) fn toggle_debug_overlay(
     mut commands: Commands,
     scene: Res<SceneEntities>,
     second: Option<Res<second_window::SecondWindowEntities>>,
-    viz_query: Query<(), With<FitOverlay>>,
+    visualization_query: Query<(), With<FitOverlay>>,
     windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyD) {
@@ -13,7 +13,7 @@ pub(crate) fn toggle_debug_overlay(
     }
 
     let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
-    if viz_query.get(camera).is_ok() {
+    if visualization_query.get(camera).is_ok() {
         commands.entity(camera).remove::<FitOverlay>();
     } else {
         commands.entity(camera).insert(FitOverlay);
