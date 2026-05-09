@@ -9,7 +9,7 @@ use super::constants::HULL_SHADER_HANDLE;
 use super::constants::MASK_SHADER_HANDLE;
 use super::constants::VIEW_HELPERS_SHADER_HANDLE;
 
-pub(crate) struct ShaderPlugin;
+pub(super) struct ShaderPlugin;
 
 macro_rules! load_shader {
     ($app:ident, $handle:expr, $path:literal $(,)?) => {{

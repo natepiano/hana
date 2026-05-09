@@ -141,15 +141,15 @@ impl Default for OutlineWidthControl {
 
 #[derive(Resource)]
 struct OverlapModes {
-    world_hull_overlap_mode:  OverlapMode,
-    screen_hull_overlap_mode: OverlapMode,
+    world_hull:  OverlapMode,
+    screen_hull: OverlapMode,
 }
 
 impl Default for OverlapModes {
     fn default() -> Self {
         Self {
-            world_hull_overlap_mode:  INITIAL_HULL_OVERLAP,
-            screen_hull_overlap_mode: INITIAL_SHELL_OVERLAP,
+            world_hull:  INITIAL_HULL_OVERLAP,
+            screen_hull: INITIAL_SHELL_OVERLAP,
         }
     }
 }
@@ -306,11 +306,11 @@ fn toggle_outline_mode(
         OutlineMethod::JumpFlood => (width_control.jump_flood_width_px, OverlapMode::Merged),
         OutlineMethod::WorldHull => (
             width_control.hull_width_world,
-            overlap_modes.world_hull_overlap_mode,
+            overlap_modes.world_hull,
         ),
         OutlineMethod::ScreenHull => (
             width_control.shell_width_px,
-            overlap_modes.screen_hull_overlap_mode,
+            overlap_modes.screen_hull,
         ),
     };
 
@@ -412,8 +412,8 @@ fn adjust_overlap(
     }
 
     let Some(current) = (match mode_toggle.outline_method {
-        OutlineMethod::WorldHull => Some(&mut overlap_modes.world_hull_overlap_mode),
-        OutlineMethod::ScreenHull => Some(&mut overlap_modes.screen_hull_overlap_mode),
+        OutlineMethod::WorldHull => Some(&mut overlap_modes.world_hull),
+        OutlineMethod::ScreenHull => Some(&mut overlap_modes.screen_hull),
         OutlineMethod::JumpFlood => None,
     }) else {
         return;
@@ -468,13 +468,13 @@ fn update_ui(
         OutlineMethod::WorldHull => {
             format!(
                 "Overlap: {} (- / +)",
-                overlap_mode_label(overlap_modes.world_hull_overlap_mode)
+                overlap_mode_label(overlap_modes.world_hull)
             )
         },
         OutlineMethod::ScreenHull => {
             format!(
                 "Overlap: {} (- / +)",
-                overlap_mode_label(overlap_modes.screen_hull_overlap_mode)
+                overlap_mode_label(overlap_modes.screen_hull)
             )
         },
     };
