@@ -4,6 +4,7 @@ use bevy::math::Vec3;
 
 use super::constants::DEFAULT_OBSTACLE_MARGIN;
 use super::constants::HORIZONTAL_FIRST_AXIS_ORDERS;
+use super::constants::OBSTACLE_CLEARANCE_MULTIPLIER;
 use super::constants::ORTHOGONAL_SEGMENT_SAMPLE_STEPS;
 use super::constants::VERTICAL_FIRST_AXIS_ORDERS;
 use super::obstacle;
@@ -114,7 +115,7 @@ impl OrthogonalPlanner {
     fn u_path(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
         // Find the maximum obstacle extent to route around
         let offset = self.margin.mul_add(
-            2.0,
+            OBSTACLE_CLEARANCE_MULTIPLIER,
             obstacles.iter().fold(0.0_f32, |acc, obstacle| {
                 let extent = obstacle.half_extents.max_element();
                 acc.max(extent)

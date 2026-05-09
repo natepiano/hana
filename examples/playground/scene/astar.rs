@@ -26,8 +26,8 @@ pub(super) fn setup_section_astar(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     node_mesh: &Handle<Mesh>,
-    node_mat: &Handle<StandardMaterial>,
-    cable_mat: &Handle<StandardMaterial>,
+    node_material: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[ASTAR_SECTION_INDEX];
     let start = Vec3::new(section_center_x - SPAN_HALF_X, NODE_Y, ASTAR_SECTION_Z);
@@ -35,7 +35,7 @@ pub(super) fn setup_section_astar(
     let obstacle_position = Position::new(section_center_x, NODE_Y, ASTAR_SECTION_Z);
     let obstacle = Obstacle::new(OBSTACLE_HALF_EXTENTS, obstacle_position);
 
-    entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
+    entities::spawn_node_pair(commands, node_mesh, node_material, start, end);
     entities::spawn_cable(
         commands,
         start,
@@ -46,7 +46,7 @@ pub(super) fn setup_section_astar(
             resolution:    DEFAULT_CABLE_RESOLUTION,
         },
         vec![obstacle],
-        cable_mat,
+        cable_material,
     );
 
     commands

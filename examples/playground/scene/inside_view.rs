@@ -24,7 +24,7 @@ use crate::constants::TUBE_RADIUS;
 /// Section 7: Inside view — large tube rendered inside-only.
 pub(super) fn setup_section_inside_view(
     commands: &mut Commands,
-    cable_mat: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[INSIDE_VIEW_SECTION_INDEX];
     let start = Vec3::new(
@@ -50,7 +50,7 @@ pub(super) fn setup_section_inside_view(
                     sides:  INSIDE_VIEW_TUBE_SIDES,
                     faces:  Faces::Both,
                 },
-                material: Some(cable_mat.clone()),
+                material: Some(cable_material.clone()),
                 ..default()
             },
             RadiusMultiplier(INSIDE_VIEW_RADIUS_MULTIPLIER),

@@ -8,6 +8,7 @@ use bevy_catenary::ComputedCableGeometry;
 use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
 use bevy_inspector_egui::prelude::*;
 
+use super::constants::CAMERA_HELP;
 use super::constants::DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG;
 use super::constants::DEFAULT_ELBOW_ARM_MULTIPLIER;
 use super::constants::DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER;
@@ -29,6 +30,7 @@ use super::constants::JOINT_RADIUS_MULTIPLIER_SLIDER_MIN;
 use super::constants::JOINT_SEGMENTS_SLIDER_MAX;
 use super::constants::JOINT_SEGMENTS_SLIDER_MIN;
 use super::constants::JOINT_SPHERE_SEGMENTS;
+use super::constants::KEYBOARD_SHORTCUTS_HELP;
 use super::constants::OVERLAY_MARGIN;
 use super::constants::SECTION_INFO_BACKGROUND;
 use super::constants::SECTION_INFO_CENTER_X_PERCENT;
@@ -191,11 +193,7 @@ fn spawn_section_infos(commands: &mut Commands, camera: Entity) {
 
 fn spawn_help_text(commands: &mut Commands, camera: Entity) {
     commands.spawn((
-        Text::new(
-            "Orbit: Middle-mouse (or trackpad)\n\
-             Pan: Shift + middle-mouse\n\
-             Zoom: Scroll wheel (or pinch)",
-        ),
+        Text::new(CAMERA_HELP),
         TextFont {
             font_size: UI_FONT_SIZE,
             ..default()
@@ -213,12 +211,7 @@ fn spawn_help_text(commands: &mut Commands, camera: Entity) {
 
 fn spawn_keyboard_shortcuts(commands: &mut Commands, camera: Entity) {
     commands.spawn((
-        Text::new(
-            "D - Debug gizmos\n\
-             F - Full scene\n\
-             I - Inspector\n\
-             +/- Slack",
-        ),
+        Text::new(KEYBOARD_SHORTCUTS_HELP),
         TextFont {
             font_size: UI_FONT_SIZE,
             ..default()

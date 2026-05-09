@@ -34,11 +34,11 @@ use crate::constants::TUBE_RADIUS;
 pub(super) fn setup_section_cap_styles(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
-    cable_mat: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[CAP_STYLES_SECTION_INDEX];
 
-    let transparent_mat = materials.add(StandardMaterial {
+    let transparent_material = materials.add(StandardMaterial {
         base_color: TRANSPARENT_TUBE_COLOR,
         alpha_mode: AlphaMode::Blend,
         ..default()
@@ -47,7 +47,7 @@ pub(super) fn setup_section_cap_styles(
     let (left_start, left_end) = cap_style_endpoints(section_center_x, CAP_STYLE_LEFT_TUBE_INDEX);
     spawn_cap_style_tube(
         commands,
-        transparent_mat,
+        transparent_material,
         left_start,
         left_end,
         Capping::Round,
@@ -57,7 +57,7 @@ pub(super) fn setup_section_cap_styles(
     let (mid_start, mid_end) = cap_style_endpoints(section_center_x, CAP_STYLE_MIDDLE_TUBE_INDEX);
     spawn_cap_style_tube(
         commands,
-        cable_mat.clone(),
+        cable_material.clone(),
         mid_start,
         mid_end,
         Capping::None,
@@ -68,7 +68,7 @@ pub(super) fn setup_section_cap_styles(
         cap_style_endpoints(section_center_x, CAP_STYLE_RIGHT_TUBE_INDEX);
     spawn_cap_style_tube(
         commands,
-        cable_mat.clone(),
+        cable_material.clone(),
         right_start,
         right_end,
         Capping::Round,

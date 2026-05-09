@@ -44,9 +44,13 @@ pub fn evaluate(x: f32, a: f32) -> f32 { a * (x / a).cosh() }
 ///
 /// Returns `None` if the problem is degenerate or Newton's method fails to converge.
 #[must_use]
-pub fn solve_parameter(horizontal_dist: f32, vertical_dist: f32, cable_length: f32) -> Option<f32> {
-    let horizontal = horizontal_dist.abs();
-    let vertical = vertical_dist;
+pub fn solve_parameter(
+    horizontal_distance: f32,
+    vertical_distance: f32,
+    cable_length: f32,
+) -> Option<f32> {
+    let horizontal = horizontal_distance.abs();
+    let vertical = vertical_distance;
     let length = cable_length;
 
     // Cable must be longer than straight-line distance
@@ -82,12 +86,12 @@ pub fn solve_parameter(horizontal_dist: f32, vertical_dist: f32, cable_length: f
         }
 
         let half_horizontal_over_a = horizontal / (2.0 * param);
-        let sinh_val = half_horizontal_over_a.sinh();
-        let cosh_val = half_horizontal_over_a.cosh();
+        let sinh = half_horizontal_over_a.sinh();
+        let cosh = half_horizontal_over_a.cosh();
 
-        let residual = (2.0 * param).mul_add(sinh_val, -target);
+        let residual = (2.0 * param).mul_add(sinh, -target);
         // f'(a) = 2*sinh(h/(2a)) - (h/a)*cosh(h/(2a))
-        let f_prime = 2.0f32.mul_add(sinh_val, -(horizontal / param) * cosh_val);
+        let f_prime = 2.0f32.mul_add(sinh, -(horizontal / param) * cosh);
 
         if f_prime.abs() < f32::EPSILON {
             break;
@@ -107,7 +111,7 @@ pub fn solve_parameter(horizontal_dist: f32, vertical_dist: f32, cable_length: f
 
 /// Sample points along a 3D catenary curve between `start` and `end`.
 ///
-/// The curve sags in the direction of `gravity_dir` (should be normalized).
+/// The curve sags in the direction of `gravity_direction` (should be normalized).
 /// `slack` is the ratio of cable length to straight-line distance (1.0 = taut).
 /// `resolution` is the number of sample points (minimum 2).
 #[must_use]
@@ -115,7 +119,7 @@ pub fn sample_3d(
     start: impl Into<Vec3>,
     end: impl Into<Vec3>,
     slack: f32,
-    gravity_dir: Vec3,
+    gravity_direction: Vec3,
     resolution: u32,
 ) -> CableSegment {
     let start: Vec3 = start.into();
@@ -131,7 +135,7 @@ pub fn sample_3d(
 
     let clamped_slack = slack.max(1.0);
     let cable_length = chord_length * clamped_slack;
-    let gravity_norm = gravity_dir.normalize_or_zero();
+    let gravity_norm = gravity_direction.normalize_or_zero();
 
     // Near-taut cables degrade gracefully to a straight line
     if clamped_slack < STRAIGHT_LINE_THRESHOLD {
@@ -151,17 +155,17 @@ pub fn sample_3d(
     // Decompose chord into horizontal and vertical components
     let vertical_component = chord.dot(gravity_norm);
     let horizontal_vec = chord - vertical_component * gravity_norm;
-    let horizontal_dist = horizontal_vec.length();
+    let horizontal_distance = horizontal_vec.length();
 
     // If cable is purely vertical, handle as a special case
-    if horizontal_dist < MIN_SEGMENT_LENGTH {
+    if horizontal_distance < MIN_SEGMENT_LENGTH {
         return sample_vertical_hang(start, end, gravity_norm, cable_length, n);
     }
 
-    let horizontal_axis = horizontal_vec / horizontal_dist;
+    let horizontal_axis = horizontal_vec / horizontal_distance;
 
     // Solve for catenary parameter
-    let Some(catenary_a) = solve_parameter(horizontal_dist, vertical_component, cable_length)
+    let Some(catenary_a) = solve_parameter(horizontal_distance, vertical_component, cable_length)
     else {
         return sample_parabolic_fallback(start, end, gravity_norm, clamped_slack, n);
     };
@@ -171,11 +175,11 @@ pub fn sample_3d(
 
     // Find the horizontal offset of the catenary's lowest point
     // x_offset = h/2 - a * arcsinh(v / (2a * sinh(h/(2a))))
-    let half_horizontal = horizontal_dist / 2.0;
-    let sinh_half_h_a = (half_horizontal / catenary_a).sinh();
-    let x_offset = if sinh_half_h_a.abs() > f32::EPSILON {
+    let half_horizontal = horizontal_distance / 2.0;
+    let sinh_half_horizontal_over_a = (half_horizontal / catenary_a).sinh();
+    let x_offset = if sinh_half_horizontal_over_a.abs() > f32::EPSILON {
         catenary_a.mul_add(
-            -(vertical_component / (2.0 * catenary_a * sinh_half_h_a)).asinh(),
+            -(vertical_component / (2.0 * catenary_a * sinh_half_horizontal_over_a)).asinh(),
             half_horizontal,
         )
     } else {
@@ -187,13 +191,16 @@ pub fn sample_3d(
     let y_offset = -y_at_start;
 
     // y_2d at the end point — needed to separate the linear height change from sag
-    let y_2d_end = catenary_a.mul_add(((horizontal_dist - x_offset) / catenary_a).cosh(), y_offset);
+    let y_2d_end = catenary_a.mul_add(
+        ((horizontal_distance - x_offset) / catenary_a).cosh(),
+        y_offset,
+    );
 
     // Sample points along the 2D catenary and map back to 3D
     let points: Vec<Vec3> = (0..n)
         .map(|i| {
             let t = i.to_f32() / (n - 1).to_f32();
-            let x_2d = t * horizontal_dist;
+            let x_2d = t * horizontal_distance;
             let y_2d = catenary_a.mul_add(((x_2d - x_offset) / catenary_a).cosh(), y_offset);
 
             // `y_2d` encodes two things: the linear height change between endpoints
@@ -222,8 +229,8 @@ fn sample_vertical_hang(
     cable_length: f32,
     n: usize,
 ) -> CableSegment {
-    let vertical_dist = (end - start).dot(gravity_norm);
-    let excess = cable_length - vertical_dist.abs();
+    let vertical_distance = (end - start).dot(gravity_norm);
+    let excess = cable_length - vertical_distance.abs();
 
     if excess < MIN_SEGMENT_LENGTH {
         return sample_straight_line(start, end, n);
@@ -343,8 +350,8 @@ impl CatenarySolver {
 
 impl CurveSolver for CatenarySolver {
     fn solve_segment(&self, start: Vec3, end: Vec3, resolution: u32) -> CableSegment {
-        let gravity_dir = self.gravity.normalize_or_zero();
-        sample_3d(start, end, self.slack, gravity_dir, resolution)
+        let gravity_direction = self.gravity.normalize_or_zero();
+        sample_3d(start, end, self.slack, gravity_direction, resolution)
     }
 }
 

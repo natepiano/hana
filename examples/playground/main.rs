@@ -37,6 +37,7 @@ mod sections;
 mod ui;
 
 use animation::LightAnimation;
+use constants::CATENARY_SECTION_INDEX;
 use constants::PLAYGROUND_WINDOW_TITLE;
 use sections::CurrentSection;
 use ui::CableSettings;
@@ -67,7 +68,7 @@ fn main() {
         .init_resource::<InspectorVisibility>()
         .init_resource::<input::DragState>()
         .init_resource::<LightAnimation>()
-        .insert_resource(CurrentSection(0))
+        .insert_resource(CurrentSection(CATENARY_SECTION_INDEX))
         .add_systems(
             Startup,
             (

@@ -13,6 +13,7 @@ use bevy::reflect::Reflect;
 
 use super::catenary::CatenarySolver;
 use super::constants::DEFAULT_RESOLUTION;
+use super::constants::DEFAULT_RESOLUTION_SENTINEL;
 use super::geometry::CableGeometry;
 use super::geometry::CableSegment;
 use super::geometry::RouteRequest;
@@ -76,12 +77,12 @@ impl Solver {
                 resolution,
             } => {
                 let waypoints = path_strategy.plan(request.start, request.end, request.obstacles);
-                let default_res = if *resolution > 0 {
-                    *resolution
-                } else {
+                let default_resolution = if *resolution == DEFAULT_RESOLUTION_SENTINEL {
                     DEFAULT_RESOLUTION
+                } else {
+                    *resolution
                 };
-                let resolution = request.effective_resolution(default_res);
+                let resolution = request.effective_resolution(default_resolution);
 
                 let segments: Vec<CableSegment> = waypoints
                     .windows(2)

@@ -128,8 +128,8 @@ fn recompute_cable_route(
         return;
     };
 
-    let mut start_pos = None;
-    let mut end_pos = None;
+    let mut start_position = None;
+    let mut end_position = None;
 
     for child in children.iter() {
         let Ok((endpoint, attached_to, resolved_endpoint_position)) = endpoints.get_mut(child)
@@ -154,12 +154,12 @@ fn recompute_cable_route(
         }
 
         match endpoint.end {
-            CableEnd::Start => start_pos = Some(pos),
-            CableEnd::End => end_pos = Some(pos),
+            CableEnd::Start => start_position = Some(pos),
+            CableEnd::End => end_position = Some(pos),
         }
     }
 
-    let (Some(start), Some(end)) = (start_pos, end_pos) else {
+    let (Some(start), Some(end)) = (start_position, end_position) else {
         return;
     };
 

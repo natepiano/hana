@@ -36,10 +36,10 @@ use super::input;
 pub(crate) struct DetachDemoEntity;
 
 struct DetachDemoAssets<'a> {
-    sphere_mesh: Handle<Mesh>,
-    node_mesh:   &'a Handle<Mesh>,
-    node_mat:    &'a Handle<StandardMaterial>,
-    cable_mat:   &'a Handle<StandardMaterial>,
+    sphere_mesh:    Handle<Mesh>,
+    node_mesh:      &'a Handle<Mesh>,
+    node_material:  &'a Handle<StandardMaterial>,
+    cable_material: &'a Handle<StandardMaterial>,
 }
 
 struct DetachDemoRow {
@@ -54,8 +54,8 @@ pub(crate) fn spawn_detach_demo(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     node_mesh: &Handle<Mesh>,
-    node_mat: &Handle<StandardMaterial>,
-    cable_mat: &Handle<StandardMaterial>,
+    node_material: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[DETACH_DEMO_SECTION_INDEX];
     let assets = DetachDemoAssets {
@@ -65,8 +65,8 @@ pub(crate) fn spawn_detach_demo(
                 .uv(DETACH_DEMO_SPHERE_SECTORS, DETACH_DEMO_SPHERE_RINGS),
         ),
         node_mesh,
-        node_mat,
-        cable_mat,
+        node_material,
+        cable_material,
     };
 
     let rows = [
@@ -104,14 +104,14 @@ fn spawn_detach_demo_row(
     section_center_x: f32,
     row: DetachDemoRow,
 ) {
-    let sphere_mat = materials.add(StandardMaterial {
+    let sphere_material = materials.add(StandardMaterial {
         base_color: row.sphere_color,
         ..default()
     });
     let sphere = commands
         .spawn((
             Mesh3d(assets.sphere_mesh.clone()),
-            MeshMaterial3d(sphere_mat),
+            MeshMaterial3d(sphere_material),
             Transform::from_translation(Vec3::new(
                 section_center_x - DETACH_DEMO_ENDPOINT_X_OFFSET,
                 NODE_Y,
@@ -123,13 +123,18 @@ fn spawn_detach_demo_row(
         .observe(input::on_despawnable_clicked)
         .id();
 
-    let anchor_pos = Vec3::new(
+    let anchor_position = Vec3::new(
         section_center_x + DETACH_DEMO_ENDPOINT_X_OFFSET,
         NODE_Y,
         row.z,
     );
-    entities::spawn_node_cube(commands, assets.node_mesh, assets.node_mat, anchor_pos)
-        .insert(DetachDemoEntity);
+    entities::spawn_node_cube(
+        commands,
+        assets.node_mesh,
+        assets.node_material,
+        anchor_position,
+    )
+    .insert(DetachDemoEntity);
 
     commands
         .spawn((
@@ -139,7 +144,7 @@ fn spawn_detach_demo_row(
                 resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
-                material: Some(assets.cable_mat.clone()),
+                material: Some(assets.cable_material.clone()),
                 ..default()
             },
             DetachDemoEntity,
@@ -150,6 +155,6 @@ fn spawn_detach_demo_row(
                     .with_detach_policy(row.detach_policy),
                 AttachedTo(sphere),
             ));
-            parent.spawn(CableEndpoint::new(CableEnd::End, anchor_pos));
+            parent.spawn(CableEndpoint::new(CableEnd::End, anchor_position));
         });
 }

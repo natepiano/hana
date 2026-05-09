@@ -21,8 +21,8 @@ use crate::entities;
 pub(super) fn setup_section_solver_comparison(
     commands: &mut Commands,
     node_mesh: &Handle<Mesh>,
-    node_mat: &Handle<StandardMaterial>,
-    cable_mat: &Handle<StandardMaterial>,
+    node_material: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[SOLVER_COMPARISON_SECTION_INDEX];
 
@@ -36,14 +36,14 @@ pub(super) fn setup_section_solver_comparison(
         NODE_Y,
         SOLVER_COMPARISON_CATENARY_Z,
     );
-    entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
+    entities::spawn_node_pair(commands, node_mesh, node_material, start, end);
     entities::spawn_cable(
         commands,
         start,
         end,
         Solver::Catenary(CatenarySolver::new().with_slack(SLACK_NORMAL)),
         vec![],
-        cable_mat,
+        cable_material,
     );
 
     let start = Vec3::new(
@@ -56,8 +56,8 @@ pub(super) fn setup_section_solver_comparison(
         NODE_Y,
         SOLVER_COMPARISON_LINEAR_Z,
     );
-    entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
-    entities::spawn_cable(commands, start, end, Solver::Linear, vec![], cable_mat);
+    entities::spawn_node_pair(commands, node_mesh, node_material, start, end);
+    entities::spawn_cable(commands, start, end, Solver::Linear, vec![], cable_material);
 
     let start = Vec3::new(
         section_center_x - SPAN_HALF_X,
@@ -69,7 +69,7 @@ pub(super) fn setup_section_solver_comparison(
         NODE_Y + SOLVER_COMPARISON_ROUTED_END_Y_OFFSET,
         SOLVER_COMPARISON_ROUTED_Z,
     );
-    entities::spawn_node_pair(commands, node_mesh, node_mat, start, end);
+    entities::spawn_node_pair(commands, node_mesh, node_material, start, end);
     entities::spawn_cable(
         commands,
         start,
@@ -80,6 +80,6 @@ pub(super) fn setup_section_solver_comparison(
             resolution:    DEFAULT_CABLE_RESOLUTION,
         },
         vec![],
-        cable_mat,
+        cable_material,
     );
 }

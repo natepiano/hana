@@ -182,12 +182,12 @@ pub(crate) fn handle_keyboard(
     mut inspector_visible: ResMut<InspectorVisibility>,
     scene_entities: Res<SceneEntities>,
     mut cables: Query<&mut Cable, Without<SlackLocked>>,
-    shared_cable_mat: Res<SharedCableMaterial>,
+    shared_cable_material: Res<SharedCableMaterial>,
     detach_entities: Query<Entity, With<DetachDemoEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     node_mesh_query: Query<&Mesh3d, (With<NodeCube>, Without<Draggable>, Without<Despawnable>)>,
-    node_mat_query: Query<
+    node_material_query: Query<
         &MeshMaterial3d<StandardMaterial>,
         (With<NodeCube>, Without<Draggable>, Without<Despawnable>),
     >,
@@ -233,20 +233,20 @@ pub(crate) fn handle_keyboard(
 
     if keyboard.just_pressed(KeyCode::KeyR) {
         let node_mesh = node_mesh_query.iter().next().map(|m| m.0.clone());
-        let node_mat = node_mat_query.iter().next().map(|m| m.0.clone());
+        let node_material = node_material_query.iter().next().map(|m| m.0.clone());
 
         for entity in &detach_entities {
             commands.entity(entity).despawn();
         }
 
-        if let (Some(node_mesh), Some(node_material)) = (node_mesh, node_mat) {
+        if let (Some(node_mesh), Some(node_material)) = (node_mesh, node_material) {
             detach_demo::spawn_detach_demo(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
                 &node_mesh,
                 &node_material,
-                &shared_cable_mat.0,
+                &shared_cable_material.0,
             );
         }
     }

@@ -41,7 +41,7 @@ use super::input;
 /// to match the cable tangent.
 pub(crate) fn setup_section_connector(
     commands: &mut Commands,
-    cable_mat: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
     asset_server: &AssetServer,
 ) {
     let section_center_x = SECTION_X[CONNECTOR_SECTION_INDEX];
@@ -98,7 +98,7 @@ pub(crate) fn setup_section_connector(
                     resolution: DEFAULT_CABLE_RESOLUTION,
                 },
                 CableMeshConfig {
-                    material: Some(cable_mat.clone()),
+                    material: Some(cable_material.clone()),
                     ..default()
                 },
             ))

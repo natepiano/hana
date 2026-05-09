@@ -25,7 +25,7 @@ pub(super) fn setup_section_entity_attachment(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    cable_mat: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[ENTITY_ATTACHMENT_SECTION_INDEX];
     let drag_mesh = meshes.add(Cuboid::new(
@@ -33,7 +33,7 @@ pub(super) fn setup_section_entity_attachment(
         DRAGGABLE_CUBE_DIMENSION,
         DRAGGABLE_CUBE_DIMENSION,
     ));
-    let drag_mat = materials.add(StandardMaterial {
+    let drag_material = materials.add(StandardMaterial {
         base_color: DRAGGABLE_COLOR,
         ..default()
     });
@@ -41,7 +41,7 @@ pub(super) fn setup_section_entity_attachment(
     let left_cube = commands
         .spawn((
             Mesh3d(drag_mesh.clone()),
-            MeshMaterial3d(drag_mat.clone()),
+            MeshMaterial3d(drag_material.clone()),
             Transform::from_translation(Vec3::new(
                 section_center_x - SPAN_HALF_X,
                 NODE_Y,
@@ -56,7 +56,7 @@ pub(super) fn setup_section_entity_attachment(
     let right_cube = commands
         .spawn((
             Mesh3d(drag_mesh),
-            MeshMaterial3d(drag_mat),
+            MeshMaterial3d(drag_material),
             Transform::from_translation(Vec3::new(
                 section_center_x + SPAN_HALF_X,
                 NODE_Y,
@@ -76,7 +76,7 @@ pub(super) fn setup_section_entity_attachment(
                 resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
-                material: Some(cable_mat.clone()),
+                material: Some(cable_material.clone()),
                 ..default()
             },
         ))

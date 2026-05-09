@@ -4,6 +4,7 @@
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
 
+use super::constants::DEFAULT_RESOLUTION_SENTINEL;
 use super::obstacle::Obstacle;
 
 /// Where a cable connects to an object.
@@ -53,10 +54,10 @@ impl RouteRequest<'_> {
     /// Returns the request's resolution if set, otherwise falls back to `default`.
     #[must_use]
     pub const fn effective_resolution(&self, default: u32) -> u32 {
-        if self.resolution > 0 {
-            self.resolution
-        } else {
+        if self.resolution == DEFAULT_RESOLUTION_SENTINEL {
             default
+        } else {
+            self.resolution
         }
     }
 }

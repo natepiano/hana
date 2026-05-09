@@ -144,6 +144,9 @@ pub(crate) const TUBE_RADIUS: f32 = 0.06;
 pub(crate) const TUBE_SIDES: u32 = 32;
 
 // ui
+pub(crate) const CAMERA_HELP: &str = "Orbit: Middle-mouse (or trackpad)\n\
+                                      Pan: Shift + middle-mouse\n\
+                                      Zoom: Scroll wheel (or pinch)";
 pub(crate) const DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG: f32 = 25.0;
 pub(crate) const DEFAULT_ELBOW_ARM_MULTIPLIER: f32 = 1.0;
 pub(crate) const DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER: f32 = 1.0;
@@ -163,6 +166,10 @@ pub(crate) const JOINT_RADIUS_MULTIPLIER_SLIDER_MAX: f32 = 4.0;
 pub(crate) const JOINT_RADIUS_MULTIPLIER_SLIDER_MIN: f32 = 1.0;
 pub(crate) const JOINT_SEGMENTS_SLIDER_MAX: u32 = 32;
 pub(crate) const JOINT_SEGMENTS_SLIDER_MIN: u32 = 8;
+pub(crate) const KEYBOARD_SHORTCUTS_HELP: &str = "D - Debug gizmos\n\
+                                                  F - Full scene\n\
+                                                  I - Inspector\n\
+                                                  +/- Slack";
 pub(crate) const OVERLAY_MARGIN: f32 = 12.0;
 pub(crate) const SECTION_INFO_CENTER_X_PERCENT: f32 = 50.0;
 pub(crate) const SECTION_INFO_LEFT_OFFSET: f32 = -200.0;

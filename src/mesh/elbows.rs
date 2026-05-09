@@ -1,3 +1,5 @@
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
@@ -51,9 +53,9 @@ pub struct ElbowMetadata {
     /// Fillet end point (on outgoing straight section).
     pub fillet_end:           Vec3,
     /// Incoming segment direction at the elbow.
-    pub dir_in:               Vec3,
+    pub incoming_direction:   Vec3,
     /// Outgoing segment direction at the elbow.
-    pub dir_out:              Vec3,
+    pub outgoing_direction:   Vec3,
     /// Arm length for `first_control_point`.
     pub control1_arm:         f32,
     /// Arm length for `second_control_point`.
@@ -82,14 +84,14 @@ impl From<&CableMeshConfig> for ElbowParams {
 
 /// Compute `ElbowMetadata` for a single corner point, if the bend is sharp enough.
 fn compute_elbow_at_corner(
-    dir_in: Vec3,
-    dir_out: Vec3,
+    incoming_direction: Vec3,
+    outgoing_direction: Vec3,
     corner: Vec3,
     config: &CableMeshConfig,
     elbow_idx: usize,
     params: &ElbowParams,
 ) -> Option<ElbowMetadata> {
-    let cos_angle = dir_in.dot(dir_out).clamp(-1.0, 1.0);
+    let cos_angle = incoming_direction.dot(outgoing_direction).clamp(-1.0, 1.0);
     if cos_angle >= params.angle_threshold_cos {
         return None;
     }
@@ -102,21 +104,21 @@ fn compute_elbow_at_corner(
     let half_theta = theta * 0.5;
     let fillet_reach = params.bend_radius * half_theta.tan();
 
-    let fillet_start = corner - dir_in * fillet_reach;
-    let fillet_end = corner + dir_out * fillet_reach;
+    let fillet_start = corner - incoming_direction * fillet_reach;
+    let fillet_end = corner + outgoing_direction * fillet_reach;
     let max_arm = fillet_reach * MAX_ARM_RATIO;
     let (control1_arm, control2_arm) =
         resolve_elbow_arms(config, elbow_idx, fillet_start, fillet_end, max_arm);
-    let first_control_point = fillet_start + dir_in * control1_arm;
-    let second_control_point = fillet_end - dir_out * control2_arm;
+    let first_control_point = fillet_start + incoming_direction * control1_arm;
+    let second_control_point = fillet_end - outgoing_direction * control2_arm;
 
     Some(ElbowMetadata {
         fillet_start,
         first_control_point,
         second_control_point,
         fillet_end,
-        dir_in,
-        dir_out,
+        incoming_direction,
+        outgoing_direction,
         control1_arm,
         control2_arm,
         fillet_reach,
@@ -146,18 +148,23 @@ pub(super) fn insert_knee_rings(
     let mut elbow_idx = 0_usize;
     let mut i = 1;
     while i < point_count {
-        let dir_in = (points[i] - points[i - 1]).normalize_or_zero();
+        let incoming_direction = (points[i] - points[i - 1]).normalize_or_zero();
         let Some(next_point) = points.get(i + 1).copied() else {
             output_points.push(points[i]);
             output_arc_lengths.push(arc_lengths[i]);
             i += 1;
             continue;
         };
-        let dir_out = (next_point - points[i]).normalize_or_zero();
+        let outgoing_direction = (next_point - points[i]).normalize_or_zero();
 
-        let Some(metadata) =
-            compute_elbow_at_corner(dir_in, dir_out, points[i], config, elbow_idx, &params)
-        else {
+        let Some(metadata) = compute_elbow_at_corner(
+            incoming_direction,
+            outgoing_direction,
+            points[i],
+            config,
+            elbow_idx,
+            &params,
+        ) else {
             output_points.push(points[i]);
             output_arc_lengths.push(arc_lengths[i]);
             i += 1;
@@ -167,7 +174,7 @@ pub(super) fn insert_knee_rings(
 
         while output_points.len() > 1 {
             let last = output_points[output_points.len() - 1];
-            if (last - metadata.fillet_start).dot(dir_in) > 0.0 {
+            if (last - metadata.fillet_start).dot(incoming_direction) > 0.0 {
                 output_points.pop();
                 output_arc_lengths.pop();
             } else {
@@ -183,11 +190,11 @@ pub(super) fn insert_knee_rings(
         output_arc_lengths.push(base_arc + distance_to_fillet_start);
 
         let theta = metadata
-            .dir_in
-            .dot(metadata.dir_out)
+            .incoming_direction
+            .dot(metadata.outgoing_direction)
             .clamp(-1.0, 1.0)
             .acos();
-        let num_rings = ((theta / std::f32::consts::FRAC_PI_2) * rings_per_right_angle.to_f32())
+        let ring_count = ((theta / FRAC_PI_2) * rings_per_right_angle.to_f32())
             .ceil()
             .max(MIN_ELBOW_RINGS)
             .to_u32();
@@ -204,8 +211,8 @@ pub(super) fn insert_knee_rings(
             .distance(bezier_midpoint)
             .mul_add(2.0, bezier_midpoint.distance(metadata.fillet_end) * 2.0);
 
-        for k in 1..=num_rings {
-            let t = k.to_f32() / num_rings.to_f32();
+        for k in 1..=ring_count {
+            let t = k.to_f32() / ring_count.to_f32();
             let one_minus_t = 1.0 - t;
             let position = one_minus_t * one_minus_t * one_minus_t * metadata.fillet_start
                 + 3.0 * one_minus_t * one_minus_t * t * metadata.first_control_point
@@ -218,7 +225,7 @@ pub(super) fn insert_knee_rings(
 
         i += 1;
         while i < point_count {
-            if (points[i] - metadata.fillet_end).dot(dir_out) < 0.0 {
+            if (points[i] - metadata.fillet_end).dot(outgoing_direction) < 0.0 {
                 i += 1;
             } else {
                 break;
@@ -260,12 +267,17 @@ pub fn compute_elbow_metadata(
     let mut elbow_idx = 0_usize;
 
     for i in 1..points.len() - 1 {
-        let dir_in = (points[i] - points[i - 1]).normalize_or_zero();
-        let dir_out = (points[i + 1] - points[i]).normalize_or_zero();
+        let incoming_direction = (points[i] - points[i - 1]).normalize_or_zero();
+        let outgoing_direction = (points[i + 1] - points[i]).normalize_or_zero();
 
-        if let Some(metadata) =
-            compute_elbow_at_corner(dir_in, dir_out, points[i], config, elbow_idx, &params)
-        {
+        if let Some(metadata) = compute_elbow_at_corner(
+            incoming_direction,
+            outgoing_direction,
+            points[i],
+            config,
+            elbow_idx,
+            &params,
+        ) {
             elbows.push(metadata);
             elbow_idx += 1;
         }

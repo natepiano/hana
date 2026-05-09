@@ -111,9 +111,9 @@ pub(super) fn recompute_tangents(points: &[Vec3]) -> Vec<Vec3> {
     tangents.push((points[1] - points[0]).normalize_or_zero());
 
     for i in 1..point_count - 1 {
-        let dir_in = (points[i] - points[i - 1]).normalize_or_zero();
-        let dir_out = (points[i + 1] - points[i]).normalize_or_zero();
-        tangents.push((dir_in + dir_out).normalize_or_zero());
+        let incoming_direction = (points[i] - points[i - 1]).normalize_or_zero();
+        let outgoing_direction = (points[i + 1] - points[i]).normalize_or_zero();
+        tangents.push((incoming_direction + outgoing_direction).normalize_or_zero());
     }
 
     tangents.push((points[point_count - 1] - points[point_count - 2]).normalize_or_zero());

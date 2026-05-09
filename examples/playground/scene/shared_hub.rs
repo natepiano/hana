@@ -34,8 +34,8 @@ pub(super) fn setup_section_shared_hub(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     node_mesh: &Handle<Mesh>,
-    node_mat: &Handle<StandardMaterial>,
-    cable_mat: &Handle<StandardMaterial>,
+    node_material: &Handle<StandardMaterial>,
+    cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[SHARED_HUB_SECTION_INDEX];
     let drag_mesh = meshes.add(
@@ -43,7 +43,7 @@ pub(super) fn setup_section_shared_hub(
             .mesh()
             .uv(SHARED_HUB_SPHERE_SECTORS, SHARED_HUB_SPHERE_RINGS),
     );
-    let drag_mat = materials.add(StandardMaterial {
+    let drag_material = materials.add(StandardMaterial {
         base_color: DRAGGABLE_COLOR,
         ..default()
     });
@@ -51,7 +51,7 @@ pub(super) fn setup_section_shared_hub(
     let hub = commands
         .spawn((
             Mesh3d(drag_mesh),
-            MeshMaterial3d(drag_mat),
+            MeshMaterial3d(drag_material),
             Transform::from_translation(Vec3::new(section_center_x, NODE_Y, SHARED_HUB_POSITION_Z)),
             Draggable,
             NodeCube,
@@ -77,8 +77,8 @@ pub(super) fn setup_section_shared_hub(
         ),
     ];
 
-    for spoke_pos in spokes {
-        entities::spawn_node_cube(commands, node_mesh, node_mat, spoke_pos);
+    for spoke_position in spokes {
+        entities::spawn_node_cube(commands, node_mesh, node_material, spoke_position);
         commands
             .spawn((
                 Cable {
@@ -87,7 +87,7 @@ pub(super) fn setup_section_shared_hub(
                     resolution: DEFAULT_CABLE_RESOLUTION,
                 },
                 CableMeshConfig {
-                    material: Some(cable_mat.clone()),
+                    material: Some(cable_material.clone()),
                     ..default()
                 },
             ))
@@ -96,7 +96,7 @@ pub(super) fn setup_section_shared_hub(
                     CableEndpoint::new(CableEnd::Start, Vec3::ZERO),
                     AttachedTo(hub),
                 ));
-                parent.spawn(CableEndpoint::new(CableEnd::End, spoke_pos));
+                parent.spawn(CableEndpoint::new(CableEnd::End, spoke_position));
             });
     }
 }
