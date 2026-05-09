@@ -15,6 +15,7 @@ use crate::ManagedWindow;
 use crate::Platform;
 use crate::WindowKey;
 use crate::constants::MILLIS_PER_SECOND;
+use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::constants::SETTLE_STABILITY_SECS;
 use crate::constants::SETTLE_TIMEOUT_SECS;
 use crate::events::WindowRestoreMismatch;
@@ -77,7 +78,9 @@ fn build_actual_snapshot(
             physical_position,
             physical_size,
             mode: window.mode,
-            monitor: current_monitor.map_or(0, |current_monitor| current_monitor.monitor.index),
+            monitor: current_monitor.map_or(PRIMARY_MONITOR_INDEX, |current_monitor| {
+                current_monitor.monitor.index
+            }),
         },
         f64::from(window.resolution.scale_factor()),
     )
@@ -194,12 +197,12 @@ fn detect_settle_change(
 /// marker, otherwise the `ManagedWindow` name (falling back to `Primary`).
 fn resolve_window_key(
     entity: Entity,
-    primary_q: &Query<(), With<PrimaryWindow>>,
-    managed_q: &Query<&ManagedWindow>,
+    primary_query: &Query<(), With<PrimaryWindow>>,
+    managed_query: &Query<&ManagedWindow>,
 ) -> WindowKey {
-    if primary_q.get(entity).is_ok() {
+    if primary_query.get(entity).is_ok() {
         WindowKey::Primary
-    } else if let Ok(managed) = managed_q.get(entity) {
+    } else if let Ok(managed) = managed_query.get(entity) {
         WindowKey::Managed(managed.name.clone())
     } else {
         WindowKey::Primary
@@ -227,8 +230,8 @@ pub fn check_restore_settling(
         ),
         With<X11FrameCompensated>,
     >,
-    primary_q: Query<(), With<PrimaryWindow>>,
-    managed_q: Query<&ManagedWindow>,
+    primary_query: Query<(), With<PrimaryWindow>>,
+    managed_query: Query<&ManagedWindow>,
     platform: Res<Platform>,
 ) {
     for (entity, mut target, window, current_monitor) in &mut windows {
@@ -246,7 +249,7 @@ pub fn check_restore_settling(
             .position_available()
             .then_some(target.logical_position)
             .flatten();
-        let key = resolve_window_key(entity, &primary_q, &managed_q);
+        let key = resolve_window_key(entity, &primary_query, &managed_query);
         let (current_snapshot, actual_scale) =
             build_actual_snapshot(window, current_monitor, *platform);
 
@@ -288,7 +291,7 @@ pub fn check_restore_settling(
         );
         debug!(
             "[check_restore_settling] [{key}] {total_elapsed_ms:.0}ms (stable: {stability_elapsed_ms:.0}ms): \
-             pos={} size={} mode={} monitor={} | \
+             position={} size={} mode={} monitor={} | \
              size: {target_physical_size} vs {}, \
              mode: {target_mode:?} vs {:?}, \
              monitor: {target_monitor} vs {}, \
@@ -419,10 +422,10 @@ fn emit_settle_mismatch(
         target.scale,
         actual.scale,
     );
-    let actual_logical_position = actual.snapshot.physical_position.map(|pos| {
+    let actual_logical_position = actual.snapshot.physical_position.map(|position| {
         IVec2::new(
-            (f64::from(pos.x) / actual.scale).round().to_i32(),
-            (f64::from(pos.y) / actual.scale).round().to_i32(),
+            (f64::from(position.x) / actual.scale).round().to_i32(),
+            (f64::from(position.y) / actual.scale).round().to_i32(),
         )
     });
     commands

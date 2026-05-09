@@ -8,7 +8,7 @@
 //! at scale 2.0 and an external monitor at scale 1.0), Bevy's window positioning has issues:
 //!
 //! 1. **`Window.position` is unreliable at startup**: When a window is created, `Window.position`
-//!    is `Automatic` (not `At(pos)`), even though winit has placed the window at a specific
+//!    is `Automatic` (not `At(position)`), even though winit has placed the window at a specific
 //!    physical position.
 //!
 //! 2. **Scale factor conversion in `changed_windows`**: When you modify `Window.resolution`, Bevy's

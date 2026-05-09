@@ -60,10 +60,10 @@ pub(crate) fn on_spawn_managed_window(
 pub(crate) fn on_secondary_window_added(
     add: On<Add, ManagedWindow>,
     mut commands: Commands,
-    primary_q: Query<(), With<PrimaryWindow>>,
+    primary_query: Query<(), With<PrimaryWindow>>,
 ) {
     let entity = add.entity;
-    if primary_q.get(entity).is_ok() {
+    if primary_query.get(entity).is_ok() {
         return;
     }
 

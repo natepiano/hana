@@ -161,7 +161,7 @@ pub(crate) fn on_managed_window_removed(
         ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
-    primary_q: Query<(), With<PrimaryWindow>>,
+    primary_query: Query<(), With<PrimaryWindow>>,
 ) {
     let entity = remove.entity;
     if let Some(name) = registry.entities.remove(&entity) {
@@ -173,7 +173,7 @@ pub(crate) fn on_managed_window_removed(
                 &config,
                 &monitors,
                 &all_windows,
-                &primary_q,
+                &primary_query,
                 Some(entity),
             );
             debug!(
@@ -204,10 +204,16 @@ pub(crate) fn on_persistence_changed(
         ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
-    primary_q: Query<(), With<PrimaryWindow>>,
+    primary_query: Query<(), With<PrimaryWindow>>,
 ) {
     if *persistence == ManagedWindowPersistence::ActiveOnly {
-        persistence::save_active_window_state(&config, &monitors, &all_windows, &primary_q, None);
+        persistence::save_active_window_state(
+            &config,
+            &monitors,
+            &all_windows,
+            &primary_query,
+            None,
+        );
         debug!("[on_persistence_changed] Rebuilt state file for ActiveOnly mode");
     }
 }
@@ -340,7 +346,7 @@ fn restore_managed_window(
     );
 
     debug!(
-        "[restore_managed_window] saved_pos={:?} clamped_pos={:?} target_scale={} logical={}x{} physical={}x{} monitor={} mon_pos=({},{}) mon_size=({},{})",
+        "[restore_managed_window] saved_position={:?} clamped_position={:?} target_scale={} logical={}x{} physical={}x{} monitor={} monitor_position=({},{}) monitor_size=({},{})",
         saved_state.logical_position,
         target.physical_position,
         target.target_scale,
@@ -367,7 +373,11 @@ fn restore_managed_window(
 }
 
 /// Run condition: returns true if any entity has a `TargetPosition` component.
-pub(crate) fn has_restoring_windows(q: Query<(), With<TargetPosition>>) -> bool { !q.is_empty() }
+pub(crate) fn has_restoring_windows(query: Query<(), With<TargetPosition>>) -> bool {
+    !query.is_empty()
+}
 
 /// Run condition: returns true if no entity has a `TargetPosition` component.
-pub(crate) fn no_restoring_windows(q: Query<(), With<TargetPosition>>) -> bool { q.is_empty() }
+pub(crate) fn no_restoring_windows(query: Query<(), With<TargetPosition>>) -> bool {
+    query.is_empty()
+}

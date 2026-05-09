@@ -5,6 +5,9 @@
 pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
 pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
 
+// monitor selection
+pub(crate) const PRIMARY_MONITOR_INDEX: usize = 0;
+
 // persistence
 pub(crate) const CURRENT_STATE_VERSION: u8 = 2;
 pub(crate) const PRIMARY_WINDOW_KEY: &str = "primary";
@@ -39,10 +42,14 @@ pub(crate) const RON_HEADER: &str = "\
 // unit conversions
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
 
-// Windows dpi fix
+// windows dpi fix
+#[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
+pub(crate) const DPI_CHANGE_HANDLED_RESULT: isize = 0;
 /// Win32 subclass identifier for DPI-change interception.
 #[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
 pub(crate) const SUBCLASS_ID: usize = 1;
+#[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
+pub(crate) const SUBCLASS_REFERENCE_DATA: usize = 0;
 
 // x11 frame extents (`_NET_FRAME_EXTENTS`: left, right, top, bottom)
 /// Number of values in `_NET_FRAME_EXTENTS` (left, right, top, bottom).

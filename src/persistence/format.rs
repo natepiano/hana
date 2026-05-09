@@ -38,6 +38,7 @@ use ron::Error;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::constants::PERSISTED_STATE_VERSION_V1;
 #[cfg(test)]
 use super::state::SavedVideoMode;
 use super::state::SavedWindowMode;
@@ -92,8 +93,8 @@ pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> 
     // Probe the version field without requiring any particular entry shape.
     if let Ok(probe) = ron::from_str::<VersionProbe>(contents) {
         match probe.version {
-            1 => decode_v1(contents),
-            2 => decode_v2(contents),
+            PERSISTED_STATE_VERSION_V1 => decode_v1(contents),
+            CURRENT_STATE_VERSION => decode_v2(contents),
             unsupported => {
                 warn!(
                     "[decode] Unsupported persisted state version {unsupported} \
@@ -163,7 +164,7 @@ fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, Wind
 
 fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
     let v1 = ron::from_str::<PersistedStateV1>(contents).ok()?;
-    if v1.version != 1 {
+    if v1.version != PERSISTED_STATE_VERSION_V1 {
         warn!("[decode] Invalid v1 persisted state version {}", v1.version);
         return None;
     }

@@ -32,7 +32,9 @@ use windows::Win32::UI::WindowsAndMessaging::SetWindowPos;
 use windows::Win32::UI::WindowsAndMessaging::WM_DPICHANGED;
 
 use super::ManagedWindow;
+use super::constants::DPI_CHANGE_HANDLED_RESULT;
 use super::constants::SUBCLASS_ID;
+use super::constants::SUBCLASS_REFERENCE_DATA;
 
 /// Wrapper around `HWND` that implements `Send` + `Sync`.
 ///
@@ -85,7 +87,7 @@ fn handle_dpi_changed(hwnd: HWND, lparam: LPARAM) -> LRESULT {
         warn!("[windows_dpi_fix] SetWindowPos failed: {:?}", result);
     }
 
-    LRESULT(0)
+    LRESULT(DPI_CHANGE_HANDLED_RESULT)
 }
 
 /// Subclass window procedure that intercepts `WM_DPICHANGED`.
@@ -139,7 +141,14 @@ pub(crate) fn install_dpi_fix(
     };
 
     // SAFETY: `SetWindowSubclass` is safe with a valid `HWND`.
-    let result = unsafe { SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, 0) };
+    let result = unsafe {
+        SetWindowSubclass(
+            hwnd,
+            Some(subclass_proc),
+            SUBCLASS_ID,
+            SUBCLASS_REFERENCE_DATA,
+        )
+    };
 
     if result.as_bool() {
         debug!("[windows_dpi_fix] Installed DPI change workaround");
@@ -163,7 +172,14 @@ pub(crate) fn install_dpi_fix_on_managed(
         };
 
         // SAFETY: `SetWindowSubclass` is safe with a valid `HWND`.
-        let result = unsafe { SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, 0) };
+        let result = unsafe {
+            SetWindowSubclass(
+                hwnd,
+                Some(subclass_proc),
+                SUBCLASS_ID,
+                SUBCLASS_REFERENCE_DATA,
+            )
+        };
 
         if result.as_bool() {
             debug!(

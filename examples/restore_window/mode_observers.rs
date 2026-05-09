@@ -21,14 +21,14 @@ use super::state::SelectedVideoModes;
 pub(crate) fn on_set_borderless_fullscreen(
     _trigger: On<SetBorderlessFullscreen>,
     mut windows: Query<(&mut Window, Option<&CurrentMonitor>)>,
-    monitors_res: Res<Monitors>,
+    monitors: Res<Monitors>,
 ) {
     let Some((mut window, current_monitor)) = windows.iter_mut().find(|(window, _)| window.focused)
     else {
         return;
     };
     let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor:        *monitors_res.first(),
+        monitor:        *monitors.first(),
         effective_mode: window.mode,
     });
     window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Index(monitor.monitor.index));
@@ -44,7 +44,7 @@ pub(crate) fn on_set_windowed(_trigger: On<SetWindowed>, mut windows: Query<&mut
 pub(crate) fn on_set_exclusive_fullscreen(
     _trigger: On<SetExclusiveFullscreen>,
     mut windows: Query<(&mut Window, Option<&CurrentMonitor>)>,
-    monitors_res: Res<Monitors>,
+    monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
     selected: Res<SelectedVideoModes>,
 ) {
@@ -53,7 +53,7 @@ pub(crate) fn on_set_exclusive_fullscreen(
         return;
     };
     let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor:        *monitors_res.first(),
+        monitor:        *monitors.first(),
         effective_mode: window.mode,
     });
 

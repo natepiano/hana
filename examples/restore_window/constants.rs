@@ -12,6 +12,9 @@ pub(crate) const LABEL_WIDTH: usize = 22;
 pub(crate) const MARGIN: Val = Val::Px(20.0);
 pub(crate) const MIN_COMPARISON_COLUMN_WIDTH: usize = 16;
 
+// monitor selection
+pub(crate) const PRIMARY_MONITOR_INDEX: usize = 0;
+
 // primary window
 pub(crate) const PRIMARY_WINDOW_TITLE: &str = "Window Restore - Primary Window";
 
@@ -50,9 +53,11 @@ pub(crate) const REFRESH_RATE_LABEL: &str = "Refresh Rate:";
 pub(crate) const RESTORED_COLUMN_TITLE: &str = "Restored";
 pub(crate) const SCALE_LABEL: &str = "Scale:";
 pub(crate) const SECONDARY_WINDOW_NAME_LABEL: &str = "Window:";
+pub(crate) const SELECTED_VIDEO_MODE_MARKER: &str = ">";
 pub(crate) const SIZE_LOGICAL_LABEL: &str = "Size (logical):";
 pub(crate) const SIZE_PHYSICAL_LABEL: &str = "Size (physical):";
 pub(crate) const UNKNOWN_MANAGED_WINDOW_NAME: &str = "unknown";
+pub(crate) const UNSELECTED_VIDEO_MODE_MARKER: &str = " ";
 pub(crate) const VIDEO_MODES_HEADER: &str = "\nVideo Modes (Up/Down to select):\n";
 #[cfg(target_os = "linux")]
 pub(crate) const WAYLAND_PLATFORM_SUFFIX: &str = " (Wayland)";
@@ -66,6 +71,7 @@ pub(crate) const X11_PLATFORM_SUFFIX: &str = " (X11)";
 /// `selected + FORWARD_SCROLL_OFFSET - VISIBLE_VIDEO_MODE_COUNT
 ///  = selected - BACKWARD_SCROLL_OFFSET`.
 pub(crate) const BACKWARD_SCROLL_OFFSET: usize = 2;
+pub(crate) const DEFAULT_VIDEO_MODE_INDEX: usize = 0;
 /// Forward-scroll constant for the video-mode list. See `BACKWARD_SCROLL_OFFSET`.
 pub(crate) const FORWARD_SCROLL_OFFSET: usize = 3;
 pub(crate) const MILLIHERTZ_PER_HERTZ: u32 = 1000;

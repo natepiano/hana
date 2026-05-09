@@ -19,10 +19,13 @@ use super::constants::MONITOR_LABEL;
 use super::constants::NO_VIDEO_MODES_TEXT;
 use super::constants::NON_PRIMARY_MONITOR_MARKER;
 use super::constants::NOT_AVAILABLE_TEXT;
+use super::constants::PRIMARY_MONITOR_INDEX;
 use super::constants::PRIMARY_MONITOR_MARKER;
 use super::constants::REFRESH_RATE_LABEL;
 use super::constants::SCALE_LABEL;
+use super::constants::SELECTED_VIDEO_MODE_MARKER;
 use super::constants::STATE_FILE;
+use super::constants::UNSELECTED_VIDEO_MODE_MARKER;
 use super::constants::VIDEO_MODE_CENTER_PADDING;
 use super::constants::VISIBLE_VIDEO_MODE_COUNT;
 #[cfg(target_os = "linux")]
@@ -88,7 +91,7 @@ pub(crate) fn get_state_file_path() -> Option<PathBuf> {
 pub(crate) fn handle_window_mode_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut windows: Query<(Entity, &mut Window, Option<&CurrentMonitor>)>,
-    monitors_res: Res<Monitors>,
+    monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
     mut selected: ResMut<SelectedVideoModes>,
     restored_states: Res<RestoredStates>,
@@ -101,7 +104,7 @@ pub(crate) fn handle_window_mode_input(
     };
 
     let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor:        *monitors_res.first(),
+        monitor:        *monitors.first(),
         effective_mode: window.mode,
     });
 
@@ -212,7 +215,7 @@ pub(crate) fn platform_suffix() -> &'static str {
 pub(crate) const fn platform_suffix() -> &'static str { "" }
 
 pub(crate) fn format_monitor_row(monitor: &CurrentMonitor, refresh_display: &str) -> String {
-    let primary_marker = if monitor.index == 0 {
+    let primary_marker = if monitor.index == PRIMARY_MONITOR_INDEX {
         PRIMARY_MONITOR_MARKER
     } else {
         NON_PRIMARY_MONITOR_MARKER
@@ -260,7 +263,11 @@ pub(crate) fn build_video_modes_display(
         .enumerate()
         .map(|(i, mode)| {
             let actual_idx = start + i;
-            let left_marker = if actual_idx == selected_idx { ">" } else { " " };
+            let left_marker = if actual_idx == selected_idx {
+                SELECTED_VIDEO_MODE_MARKER
+            } else {
+                UNSELECTED_VIDEO_MODE_MARKER
+            };
             let right_marker = if Some(actual_idx) == active_mode_idx {
                 ACTIVE_VIDEO_MODE_SUFFIX
             } else {

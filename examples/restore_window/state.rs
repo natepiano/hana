@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use super::constants::DEFAULT_VIDEO_MODE_INDEX;
+
 #[derive(Resource, Clone, Copy)]
 pub(crate) enum KeyboardInputMode {
     Enabled,
@@ -35,7 +37,10 @@ pub(crate) struct SelectedVideoModes {
 
 impl SelectedVideoModes {
     pub(crate) fn get(&self, monitor_index: usize) -> usize {
-        self.indices.get(&monitor_index).copied().unwrap_or(0)
+        self.indices
+            .get(&monitor_index)
+            .copied()
+            .unwrap_or(DEFAULT_VIDEO_MODE_INDEX)
     }
 
     pub(crate) fn set(&mut self, monitor_index: usize, index: usize) {

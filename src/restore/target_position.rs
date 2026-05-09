@@ -220,10 +220,10 @@ impl TargetPosition {
     #[must_use]
     pub fn compensated_position(&self) -> Option<IVec2> {
         let ratio = self.ratio();
-        self.physical_position.map(|pos| {
+        self.physical_position.map(|position| {
             IVec2::new(
-                (f64::from(pos.x) * ratio).to_i32(),
-                (f64::from(pos.y) * ratio).to_i32(),
+                (f64::from(position.x) * ratio).to_i32(),
+                (f64::from(position.y) * ratio).to_i32(),
             )
         })
     }
@@ -630,7 +630,7 @@ fn try_apply_restore(
 ) -> RestoreStatus {
     if target.mode.is_fullscreen() {
         debug!(
-            "[try_apply_restore] fullscreen: mode={:?} target_monitor={} current_physical={}x{} current_mode={:?} current_pos={:?}",
+            "[try_apply_restore] fullscreen: mode={:?} target_monitor={} current_physical={}x{} current_mode={:?} current_position={:?}",
             target.mode,
             target.monitor_index,
             window.physical_width(),
@@ -644,7 +644,7 @@ fn try_apply_restore(
     }
 
     debug!(
-        "[Restore] target_pos={:?} target_scale={} strategy={:?}",
+        "[Restore] target_position={:?} target_scale={} strategy={:?}",
         target.physical_position, target.target_scale, target.scale_strategy
     );
 

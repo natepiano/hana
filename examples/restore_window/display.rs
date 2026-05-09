@@ -134,13 +134,13 @@ fn build_comparison_spans(
 
     let current_values = CurrentValues {
         physical_position: match window.position {
-            WindowPosition::At(pos) => format!("({}, {})", pos.x, pos.y),
+            WindowPosition::At(position) => format!("({}, {})", position.x, position.y),
             _ => AUTOMATIC_TEXT.to_string(),
         },
         logical_position:  match window.position {
-            WindowPosition::At(pos) => {
-                let logical_x = (f64::from(pos.x) / f64::from(scale)).round().to_i32();
-                let logical_y = (f64::from(pos.y) / f64::from(scale)).round().to_i32();
+            WindowPosition::At(position) => {
+                let logical_x = (f64::from(position.x) / f64::from(scale)).round().to_i32();
+                let logical_y = (f64::from(position.y) / f64::from(scale)).round().to_i32();
                 format!("({logical_x}, {logical_y})")
             },
             _ => AUTOMATIC_TEXT.to_string(),
@@ -616,11 +616,11 @@ fn add_span(child_spawner: &mut ChildSpawnerCommands, font: &TextFont, text: &st
 pub(crate) fn update_primary_display(
     primary_display: Single<Entity, With<PrimaryDisplay>>,
     window_query: Single<(Entity, &Window, &CurrentMonitor), With<PrimaryWindow>>,
-    monitors_res: Res<Monitors>,
+    monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
     mut selected: ResMut<SelectedVideoModes>,
     persistence: Res<ManagedWindowPersistence>,
-    managed_q: Query<(&Window, &ManagedWindow, Option<&CurrentMonitor>)>,
+    managed_query: Query<(&Window, &ManagedWindow, Option<&CurrentMonitor>)>,
     restored_states: Res<RestoredStates>,
     mismatch_states: Res<MismatchStates>,
     mut commands: Commands,
@@ -694,17 +694,19 @@ pub(crate) fn update_primary_display(
 
             // Managed windows list
             let mut managed_lines = Vec::new();
-            for (managed_window, managed, current_monitor) in &managed_q {
+            for (managed_window, managed, current_monitor) in &managed_query {
                 let monitor = current_monitor.map_or_else(
-                    || *monitors_res.first(),
+                    || *monitors.first(),
                     |current_monitor| current_monitor.monitor,
                 );
-                let pos = match managed_window.position {
-                    WindowPosition::At(p) => format!("({}, {})", p.x, p.y),
+                let position = match managed_window.position {
+                    WindowPosition::At(managed_position) => {
+                        format!("({}, {})", managed_position.x, managed_position.y)
+                    },
                     _ => AUTOMATIC_TEXT.to_string(),
                 };
                 managed_lines.push(format!(
-                    "  {}: pos={pos} phys={}x{} log={}x{} {SCALE_LABEL} {} {MONITOR_LABEL} {}\n",
+                    "  {}: position={position} physical={}x{} logical={}x{} {SCALE_LABEL} {} {MONITOR_LABEL} {}\n",
                     managed.name,
                     managed_window.physical_width(),
                     managed_window.physical_height(),
@@ -734,8 +736,8 @@ pub(crate) fn update_primary_display(
 pub(crate) fn update_secondary_displays(
     mut displays: Query<(Entity, &SecondaryDisplay)>,
     windows: Query<(&Window, Option<&CurrentMonitor>)>,
-    managed_q: Query<&ManagedWindow>,
-    monitors_res: Res<Monitors>,
+    managed_query: Query<&ManagedWindow>,
+    monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
     mut selected: ResMut<SelectedVideoModes>,
     restored_states: Res<RestoredStates>,
@@ -747,11 +749,11 @@ pub(crate) fn update_secondary_displays(
             continue;
         };
         let monitor_info = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-            monitor:        *monitors_res.first(),
+            monitor:        *monitors.first(),
             effective_mode: window.mode,
         });
 
-        let name = managed_q
+        let name = managed_query
             .get(display.0)
             .map_or(UNKNOWN_MANAGED_WINDOW_NAME, |managed_window| {
                 &managed_window.name

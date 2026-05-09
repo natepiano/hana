@@ -25,6 +25,7 @@ use crate::ManagedWindow;
 use crate::ManagedWindowPersistence;
 use crate::config::RestoreWindowConfig;
 use crate::constants::DEFAULT_SCALE_FACTOR;
+use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
 
@@ -85,7 +86,7 @@ pub fn save_active_window_state(
         ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
-    primary_q: &Query<(), With<PrimaryWindow>>,
+    primary_query: &Query<(), With<PrimaryWindow>>,
     exclude_entity: Option<Entity>,
 ) {
     if monitors.is_empty() {
@@ -104,7 +105,7 @@ pub fn save_active_window_state(
             continue;
         }
 
-        let key = if primary_q.get(entity).is_ok() {
+        let key = if primary_query.get(entity).is_ok() {
             WindowKey::Primary
         } else if let Some(m) = managed {
             WindowKey::Managed(m.name.clone())
@@ -160,7 +161,7 @@ fn persist_remember_all(
         ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
-    primary_q: &Query<(), With<PrimaryWindow>>,
+    primary_query: &Query<(), With<PrimaryWindow>>,
 ) {
     let app_name = std::env::current_exe()
         .ok()
@@ -171,7 +172,7 @@ fn persist_remember_all(
 
     // Update with current window states from cache
     for (entity, entry) in cached {
-        let key = if primary_q.get(*entity).is_ok() {
+        let key = if primary_query.get(*entity).is_ok() {
             WindowKey::Primary
         } else if let Ok((_, _, _, Some(managed))) = all_windows.get(*entity) {
             WindowKey::Managed(managed.name.clone())
@@ -181,7 +182,7 @@ fn persist_remember_all(
         };
 
         if let Some(mode) = &entry.mode {
-            let monitor_index = entry.monitor.unwrap_or(0);
+            let monitor_index = entry.monitor.unwrap_or(PRIMARY_MONITOR_INDEX);
             let monitor_scale = monitors
                 .by_index(monitor_index)
                 .map_or(DEFAULT_SCALE_FACTOR, |m| m.scale);
@@ -237,7 +238,7 @@ pub fn save_window_state(
         ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
-    primary_q: Query<(), With<PrimaryWindow>>,
+    primary_query: Query<(), With<PrimaryWindow>>,
     mut cached: Local<HashMap<Entity, CachedWindowState>>,
     _: NonSendMarker,
 ) {
@@ -250,7 +251,7 @@ pub fn save_window_state(
 
     for (window_entity, window, existing_monitor, managed) in &windows {
         // Determine the key for this window in the state file
-        let key = if primary_q.get(window_entity).is_ok() {
+        let key = if primary_query.get(window_entity).is_ok() {
             WindowKey::Primary
         } else if let Some(m) = managed {
             WindowKey::Managed(m.name.clone())
@@ -265,7 +266,7 @@ pub fn save_window_state(
         let physical_height = window.resolution.physical_height();
         let logical_width = window.resolution.width().to_u32();
         let logical_height = window.resolution.height().to_u32();
-        let res_scale = window.resolution.scale_factor();
+        let resolution_scale = window.resolution.scale_factor();
 
         // Read monitor and effective mode from `CurrentMonitor` (maintained by
         // `update_current_monitor`)
@@ -291,7 +292,7 @@ pub fn save_window_state(
         }
 
         debug!(
-            "[save_window_state] [{key}] SAVE DETAIL: pos={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} res_scale={res_scale} monitor={monitor_index} mode={mode:?}",
+            "[save_window_state] [{key}] SAVE DETAIL: position={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} resolution_scale={resolution_scale} monitor={monitor_index} mode={mode:?}",
         );
 
         // Log monitor transitions with detailed info
@@ -315,7 +316,7 @@ pub fn save_window_state(
         state_write = StateWrite::Needed;
 
         debug!(
-            "[save_window_state] [{key}] pos={physical_position:?} logical={logical_width}x{logical_height} physical={physical_width}x{physical_height} monitor={monitor_index} scale={monitor_scale} mode={mode:?}",
+            "[save_window_state] [{key}] position={physical_position:?} logical={logical_width}x{logical_height} physical={physical_width}x{physical_height} monitor={monitor_index} scale={monitor_scale} mode={mode:?}",
         );
     }
 
@@ -326,10 +327,10 @@ pub fn save_window_state(
     match *persistence {
         ManagedWindowPersistence::ActiveOnly => {
             // Build state from all active windows and write in one shot
-            save_active_window_state(&config, &monitors, &all_windows, &primary_q, None);
+            save_active_window_state(&config, &monitors, &all_windows, &primary_query, None);
         },
         ManagedWindowPersistence::RememberAll => {
-            persist_remember_all(&config, &monitors, &cached, &all_windows, &primary_q);
+            persist_remember_all(&config, &monitors, &cached, &all_windows, &primary_query);
         },
     }
 }

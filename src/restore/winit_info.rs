@@ -113,7 +113,7 @@ pub fn init_winit_info(
             let starting_monitor_index = starting_monitor.index;
 
             debug!(
-                "[init_winit_info] decoration={}x{} pos=({}, {}) starting_monitor={starting_monitor_index}",
+                "[init_winit_info] decoration={}x{} position=({}, {}) starting_monitor={starting_monitor_index}",
                 decoration.physical_width,
                 decoration.physical_height,
                 physical_position.x,

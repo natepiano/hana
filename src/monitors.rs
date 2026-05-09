@@ -55,8 +55,8 @@ pub struct Monitors {
 ///
 /// Derefs to [`MonitorInfo`] for convenient access to monitor fields:
 /// ```ignore
-/// fn my_system(q: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
-///     let (window, monitor) = q.single();
+/// fn my_system(query: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
+///     let (window, monitor) = query.single();
 ///     println!("Monitor {} at scale {}, mode: {:?}", monitor.index, monitor.scale, monitor.effective_mode);
 /// }
 /// ```
@@ -208,7 +208,7 @@ pub(crate) fn init_monitors(mut commands: Commands, monitors: Query<&Monitor>) {
     );
     for monitor in &monitors_resource.list {
         debug!(
-            "[init_monitors] Monitor {}: pos=({}, {}) size={}x{} scale={}",
+            "[init_monitors] Monitor {}: position=({}, {}) size={}x{} scale={}",
             monitor.index,
             monitor.physical_position.x,
             monitor.physical_position.y,
@@ -227,13 +227,13 @@ fn update_monitors(
     added: Query<Entity, Added<Monitor>>,
     mut removed: RemovedComponents<Monitor>,
     frame_count: Res<FrameCount>,
-    current_monitor_q: Query<Option<&CurrentMonitor>, With<PrimaryWindow>>,
+    current_monitor_query: Query<Option<&CurrentMonitor>, With<PrimaryWindow>>,
 ) {
     let has_changes = !added.is_empty() || removed.read().next().is_some();
 
     if has_changes {
         let monitors_resource = build_monitors(&monitors);
-        let current = current_monitor_q.iter().next().flatten();
+        let current = current_monitor_query.iter().next().flatten();
         if let Some(current_monitor) = current {
             debug!(
                 "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",

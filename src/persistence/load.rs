@@ -21,10 +21,10 @@ use crate::constants::STATE_FILE;
 /// `config_dir()/<crate>/<example>.ron` so that all examples for a crate are
 /// grouped together. Regular binaries use `config_dir()/<executable_name>/windows.ron`.
 pub(crate) fn get_default_state_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let executable_name = exe.file_stem()?.to_str()?;
+    let executable = std::env::current_exe().ok()?;
+    let executable_name = executable.file_stem()?.to_str()?;
     let is_cargo_example =
-        exe.parent().and_then(Path::file_name) == Some(EXAMPLES_DIRECTORY_NAME.as_ref());
+        executable.parent().and_then(Path::file_name) == Some(EXAMPLES_DIRECTORY_NAME.as_ref());
 
     if is_cargo_example {
         dirs::config_dir().map(|d| {
