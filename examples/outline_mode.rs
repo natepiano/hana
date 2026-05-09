@@ -304,14 +304,8 @@ fn toggle_outline_mode(
 
     let (width, overlap_mode) = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => (width_control.jump_flood_width_px, OverlapMode::Merged),
-        OutlineMethod::WorldHull => (
-            width_control.hull_width_world,
-            overlap_modes.world_hull,
-        ),
-        OutlineMethod::ScreenHull => (
-            width_control.shell_width_px,
-            overlap_modes.screen_hull,
-        ),
+        OutlineMethod::WorldHull => (width_control.hull_width_world, overlap_modes.world_hull),
+        OutlineMethod::ScreenHull => (width_control.shell_width_px, overlap_modes.screen_hull),
     };
 
     for mut outline in &mut outline_query {
