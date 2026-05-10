@@ -1,3 +1,5 @@
+use std::f32::consts::TAU;
+
 use bevy::mesh::Indices;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
@@ -45,7 +47,7 @@ fn generate_tube_rings(
         let arc_u = path.arc_lengths[i] / total_length;
 
         for j in 0..sides {
-            let angle = (j.to_f32() / sides.to_f32()) * std::f32::consts::TAU;
+            let angle = (j.to_f32() / sides.to_f32()) * TAU;
             let (sin_angle, cos_angle) = angle.sin_cos();
             let offset = *frame_normal * cos_angle * config.tube.radius
                 + *binormal * sin_angle * config.tube.radius;

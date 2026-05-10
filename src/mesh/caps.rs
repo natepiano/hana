@@ -1,3 +1,6 @@
+use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::TAU;
+
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
@@ -146,14 +149,14 @@ fn add_hemisphere_cap(
     };
 
     for k in 1..cap_rings {
-        let phi = (k.to_f32() / cap_rings.to_f32()) * std::f32::consts::FRAC_PI_2;
+        let phi = (k.to_f32() / cap_rings.to_f32()) * FRAC_PI_2;
         let ring_radius = phi.cos() * context.radius;
         let along_offset = phi.sin() * context.radius;
         let ring_center = *context.center + context.direction * along_offset;
         let ring_base = buffers.positions.len().to_u32();
 
         for j in 0..context.sides {
-            let angle = (j.to_f32() / context.sides.to_f32()) * std::f32::consts::TAU;
+            let angle = (j.to_f32() / context.sides.to_f32()) * TAU;
             let (sin_angle, cos_angle) = angle.sin_cos();
             let radial = frame_normal * cos_angle + binormal * sin_angle;
             let vertex_position = ring_center + radial * ring_radius;

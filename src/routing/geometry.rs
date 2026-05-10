@@ -1,6 +1,8 @@
 //! Route boundary types: `Anchor` connection points, `RouteRequest` inputs, and the
 //! `CableSegment` / `CableGeometry` outputs that bridge route computation and rendering.
 
+use std::iter;
+
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
 
@@ -102,7 +104,7 @@ impl CableSegment {
             .collect();
 
         let mut cumulative = 0.0_f32;
-        let arc_lengths: Vec<f32> = std::iter::once(0.0)
+        let arc_lengths: Vec<f32> = iter::once(0.0)
             .chain(points.windows(2).map(|pair| {
                 cumulative += pair[0].distance(pair[1]);
                 cumulative

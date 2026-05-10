@@ -1,5 +1,7 @@
 //! Section navigation state: bounds, current section, per-section info text.
 
+use std::cmp::Ordering;
+
 use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
@@ -84,7 +86,7 @@ pub(crate) fn update_current_section_from_camera(
             (camera_x - *a)
                 .abs()
                 .partial_cmp(&(camera_x - *b).abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(Ordering::Equal)
         })
         .map_or(0, |(i, _)| i);
 

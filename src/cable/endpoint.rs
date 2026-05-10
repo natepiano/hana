@@ -1,5 +1,7 @@
 //! [`CableEndpoint`] and the observers that align and detach it.
 
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::prelude::*;
 
 use super::Cable;
@@ -185,7 +187,7 @@ pub(super) fn on_endpoint_alignment_update(
                 // `looking_to` orients -Z toward `direction` with Y up, so no roll.
                 // Rotate -90° around X to remap the model's +Y to that -Z direction.
                 let look = Transform::IDENTITY.looking_to(direction, Vec3::Y);
-                look.rotation * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+                look.rotation * Quat::from_rotation_x(-FRAC_PI_2)
             },
             EndpointAlignment::Rotating => Quat::from_rotation_arc(Vec3::Y, direction),
         };
