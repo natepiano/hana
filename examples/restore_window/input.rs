@@ -82,11 +82,7 @@ pub(crate) fn despawn_managed_and_exit(
 }
 
 pub(crate) fn get_state_file_path() -> Option<PathBuf> {
-    let executable_name = current_exe()
-        .ok()?
-        .file_stem()?
-        .to_str()?
-        .to_string();
+    let executable_name = current_exe().ok()?.file_stem()?.to_str()?.to_string();
     config_dir().map(|config_dir| config_dir.join(executable_name).join(STATE_FILE))
 }
 
