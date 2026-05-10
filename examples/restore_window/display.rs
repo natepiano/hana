@@ -628,8 +628,8 @@ pub(crate) fn update_primary_display(
     let display_entity = *primary_display;
     let (window_entity, window, monitor) = *window_query;
 
-    let restored_state = restored_states.states.get(&window_entity);
-    let mismatch_state = mismatch_states.states.get(&window_entity);
+    let restored_state = restored_states.by_entity.get(&window_entity);
+    let mismatch_state = mismatch_states.by_entity.get(&window_entity);
 
     let (video_modes, refresh_rate) = input::get_video_modes_for_monitor(&bevy_monitors, monitor);
     let refresh_display = input::format_refresh_rate(window, refresh_rate);
@@ -758,8 +758,8 @@ pub(crate) fn update_secondary_displays(
             .map_or(UNKNOWN_MANAGED_WINDOW_NAME, |managed_window| {
                 &managed_window.name
             });
-        let restored_state = restored_states.states.get(&display.0);
-        let mismatch_state = mismatch_states.states.get(&display.0);
+        let restored_state = restored_states.by_entity.get(&display.0);
+        let mismatch_state = mismatch_states.by_entity.get(&display.0);
 
         let (video_modes, refresh_rate) =
             input::get_video_modes_for_monitor(&bevy_monitors, &monitor_info);

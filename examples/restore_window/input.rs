@@ -1,3 +1,4 @@
+use std::env::current_exe;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -10,6 +11,7 @@ use bevy_window_manager::ManagedWindow;
 use bevy_window_manager::Monitors;
 #[cfg(target_os = "linux")]
 use bevy_window_manager::Platform;
+use dirs::config_dir;
 
 use super::constants::ACTIVE_VIDEO_MODE_SUFFIX;
 use super::constants::BACKWARD_SCROLL_OFFSET;
@@ -80,12 +82,12 @@ pub(crate) fn despawn_managed_and_exit(
 }
 
 pub(crate) fn get_state_file_path() -> Option<PathBuf> {
-    let executable_name = std::env::current_exe()
+    let executable_name = current_exe()
         .ok()?
         .file_stem()?
         .to_str()?
         .to_string();
-    dirs::config_dir().map(|config_dir| config_dir.join(executable_name).join(STATE_FILE))
+    config_dir().map(|config_dir| config_dir.join(executable_name).join(STATE_FILE))
 }
 
 pub(crate) fn handle_window_mode_input(
@@ -109,7 +111,7 @@ pub(crate) fn handle_window_mode_input(
     });
 
     let is_fullscreen = !matches!(window.mode, WindowMode::Windowed);
-    let restore_complete = restored_states.states.contains_key(&entity);
+    let restore_complete = restored_states.by_entity.contains_key(&entity);
     let mode_desynced = window.mode != monitor.effective_mode;
     if restore_complete && !is_fullscreen && mode_desynced {
         window.mode = monitor.effective_mode;

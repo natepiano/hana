@@ -86,7 +86,7 @@ pub(crate) struct WindowRestoreMismatchReceived {
 #[derive(Resource, Debug, Default, Reflect)]
 #[reflect(Resource)]
 pub(crate) struct WindowsSettledCount {
-    pub(crate) count: usize,
+    pub(crate) value: usize,
 }
 
 #[derive(Clone)]
@@ -102,12 +102,12 @@ pub(crate) struct CachedMismatchState {
 
 #[derive(Resource, Default)]
 pub(crate) struct MismatchStates {
-    pub(crate) states: HashMap<Entity, CachedMismatchState>,
+    pub(crate) by_entity: HashMap<Entity, CachedMismatchState>,
 }
 
 #[derive(Resource, Default)]
 pub(crate) struct RestoredStates {
-    pub(crate) states: HashMap<Entity, CachedRestoredState>,
+    pub(crate) by_entity: HashMap<Entity, CachedRestoredState>,
 }
 
 pub(crate) struct CachedRestoredState {
@@ -138,7 +138,7 @@ pub(crate) fn on_window_restored(
         event.monitor_index
     );
 
-    restored_states.states.insert(
+    restored_states.by_entity.insert(
         event.entity,
         CachedRestoredState {
             physical_position: event.physical_position,
@@ -156,7 +156,7 @@ pub(crate) fn on_window_restored(
         mode:              event.mode,
         monitor:           event.monitor_index,
     });
-    settled_count.count += 1;
+    settled_count.value += 1;
 }
 
 pub(crate) fn on_window_restore_mismatch(
@@ -180,7 +180,7 @@ pub(crate) fn on_window_restore_mismatch(
         event.actual_mode,
     );
 
-    restored_states.states.insert(
+    restored_states.by_entity.insert(
         event.entity,
         CachedRestoredState {
             physical_position: event.expected_physical_position,
@@ -192,7 +192,7 @@ pub(crate) fn on_window_restore_mismatch(
         },
     );
 
-    mismatch_states.states.insert(
+    mismatch_states.by_entity.insert(
         event.entity,
         CachedMismatchState {
             physical_position: PositionMismatch {
@@ -240,5 +240,5 @@ pub(crate) fn on_window_restore_mismatch(
             actual:   event.actual_mode,
         },
     });
-    settled_count.count += 1;
+    settled_count.value += 1;
 }

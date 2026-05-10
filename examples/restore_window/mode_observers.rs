@@ -1,3 +1,5 @@
+use std::fs::remove_file;
+
 use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::MonitorSelection;
@@ -98,7 +100,7 @@ pub(crate) fn on_clear_state_and_quit(
     mut app_exit: MessageWriter<AppExit>,
 ) {
     if let Some(state_path) = input::get_state_file_path() {
-        if let Err(error) = std::fs::remove_file(&state_path) {
+        if let Err(error) = remove_file(&state_path) {
             warn!("[restore_window] Failed to remove state file: {error}");
         } else {
             info!("[restore_window] Cleared state file: {state_path:?}");

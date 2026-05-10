@@ -1,9 +1,12 @@
 //! Window state loading and path resolution.
 
 use std::collections::HashMap;
+use std::env::current_exe;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+
+use dirs::config_dir;
 
 use super::constants::EXAMPLES_DIRECTORY_NAME;
 use super::constants::RON_EXTENSION;
@@ -21,18 +24,18 @@ use crate::constants::STATE_FILE;
 /// `config_dir()/<crate>/<example>.ron` so that all examples for a crate are
 /// grouped together. Regular binaries use `config_dir()/<executable_name>/windows.ron`.
 pub(crate) fn get_default_state_path() -> Option<PathBuf> {
-    let executable = std::env::current_exe().ok()?;
+    let executable = current_exe().ok()?;
     let executable_name = executable.file_stem()?.to_str()?;
     let is_cargo_example =
         executable.parent().and_then(Path::file_name) == Some(EXAMPLES_DIRECTORY_NAME.as_ref());
 
     if is_cargo_example {
-        dirs::config_dir().map(|d| {
+        config_dir().map(|d| {
             d.join(env!("CARGO_PKG_NAME"))
                 .join(format!("{executable_name}{RON_EXTENSION}"))
         })
     } else {
-        dirs::config_dir().map(|d| d.join(executable_name).join(STATE_FILE))
+        config_dir().map(|d| d.join(executable_name).join(STATE_FILE))
     }
 }
 
@@ -40,7 +43,7 @@ pub(crate) fn get_default_state_path() -> Option<PathBuf> {
 ///
 /// Returns `config_dir()/<app_name>/windows.ron`
 pub(crate) fn get_state_path_for_app(app_name: &str) -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join(app_name).join(STATE_FILE))
+    config_dir().map(|d| d.join(app_name).join(STATE_FILE))
 }
 
 /// Load all window states from the given path.
@@ -55,6 +58,7 @@ pub(crate) fn load_all_states(path: &Path) -> Option<HashMap<WindowKey, WindowSt
 #[cfg(test)]
 #[allow(clippy::panic, reason = "tests should panic on unexpected values")]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
 
     use tempfile::NamedTempFile;
@@ -87,7 +91,7 @@ mod tests {
         };
         let path = file.path();
 
-        let states = std::collections::HashMap::from([
+        let states = HashMap::from([
             (WindowKey::Primary, sample_state()),
             (WindowKey::Managed("primary".to_string()), sample_state()),
         ]);

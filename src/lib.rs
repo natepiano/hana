@@ -49,6 +49,7 @@ mod windows_dpi_fix;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 mod x11_position_fix;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -189,7 +190,7 @@ impl Plugin for WindowManagerPluginCustomPath {
         app.add_plugins(MonitorPlugin)
             .insert_resource(RestoreWindowConfig {
                 path,
-                loaded_states: std::collections::HashMap::new(),
+                loaded_states: HashMap::new(),
             })
             .insert_resource(persistence)
             .init_resource::<ManagedWindowRegistry>()

@@ -7,6 +7,9 @@
 //! binary can run under either Wayland or X11, so the variant is detected
 //! at startup from the `WAYLAND_DISPLAY` environment variable.
 
+#[cfg(target_os = "linux")]
+use std::env::var;
+
 use bevy::prelude::*;
 use bevy::window::WindowMode;
 
@@ -53,7 +56,7 @@ impl Platform {
     #[must_use]
     #[cfg(target_os = "linux")]
     pub fn detect() -> Self {
-        if std::env::var(WAYLAND_DISPLAY_ENV_VAR).is_ok_and(|value| !value.is_empty()) {
+        if var(WAYLAND_DISPLAY_ENV_VAR).is_ok_and(|value| !value.is_empty()) {
             Self::Wayland
         } else {
             Self::X11

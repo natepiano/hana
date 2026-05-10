@@ -18,6 +18,7 @@ use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
 use bevy_window_manager::CurrentMonitor;
 use bevy_window_manager::WindowManagerPlugin;
+use dirs::config_dir;
 
 use self::constants::APP_DIRECTORY_NAME;
 use self::constants::FONT_SIZE;
@@ -33,7 +34,7 @@ use self::constants::STATE_FILE_NAME;
 )]
 fn main() {
     // Construct a cross-platform config path manually.
-    let config_path = dirs::config_dir()
+    let config_path = config_dir()
         .expect("Could not find config directory")
         .join(APP_DIRECTORY_NAME)
         .join(STATE_FILE_NAME);

@@ -22,6 +22,8 @@ mod mode_observers;
 mod setup;
 mod state;
 
+use std::env::var;
+
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_window_manager::WindowManagerPlugin;
@@ -56,9 +58,7 @@ fn main() {
         .add_observer(mode_observers::on_toggle_persistence)
         .add_observer(mode_observers::on_clear_state_and_quit)
         .add_observer(mode_observers::on_quit_app)
-        .insert_resource(KeyboardInputMode::from(
-            std::env::var(TEST_MODE_ENV_VAR).is_err(),
-        ))
+        .insert_resource(KeyboardInputMode::from(var(TEST_MODE_ENV_VAR).is_err()))
         .init_resource::<SelectedVideoModes>()
         .init_resource::<WindowCounter>()
         .init_resource::<RestoredStates>()

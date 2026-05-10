@@ -35,6 +35,9 @@ use std::fmt::Formatter;
 
 use bevy::prelude::*;
 use ron::Error;
+use ron::from_str;
+use ron::ser::PrettyConfig;
+use ron::ser::to_string_pretty;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -91,7 +94,7 @@ struct VersionProbe {
 /// docs for the full list of supported formats.
 pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
     // Probe the version field without requiring any particular entry shape.
-    if let Ok(probe) = ron::from_str::<VersionProbe>(contents) {
+    if let Ok(probe) = from_str::<VersionProbe>(contents) {
         match probe.version {
             PERSISTED_STATE_VERSION_V1 => decode_v1(contents),
             CURRENT_STATE_VERSION => decode_v2(contents),
@@ -157,13 +160,13 @@ struct PersistedStateV1 {
 }
 
 fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    let state = ron::from_str::<WindowStateV1>(contents).ok()?;
+    let state = from_str::<WindowStateV1>(contents).ok()?;
     debug!("[decode] Migrated legacy single-window format to v2");
     Some(HashMap::from([(WindowKey::Primary, state.into_current())]))
 }
 
 fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    let v1 = ron::from_str::<PersistedStateV1>(contents).ok()?;
+    let v1 = from_str::<PersistedStateV1>(contents).ok()?;
     if v1.version != PERSISTED_STATE_VERSION_V1 {
         warn!("[decode] Invalid v1 persisted state version {}", v1.version);
         return None;
@@ -188,7 +191,7 @@ fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
 }
 
 fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    let persisted = ron::from_str::<PersistedState>(contents).ok()?;
+    let persisted = from_str::<PersistedState>(contents).ok()?;
     let mut states = HashMap::with_capacity(persisted.entries.len());
     for entry in persisted.entries {
         if states.insert(entry.key.clone(), entry.state).is_some() {
@@ -218,7 +221,7 @@ pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String,
         version: CURRENT_STATE_VERSION,
         entries,
     };
-    let ron_body = ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default())?;
+    let ron_body = to_string_pretty(&persisted, PrettyConfig::default())?;
     Ok(format!("{RON_HEADER}{ron_body}"))
 }
 
@@ -228,6 +231,9 @@ mod tests {
     use std::collections::HashMap;
 
     use bevy::prelude::*;
+    use ron::from_str;
+    use ron::ser::PrettyConfig;
+    use ron::ser::to_string_pretty;
 
     use super::CURRENT_STATE_VERSION;
     use super::DEFAULT_SCALE_FACTOR;
@@ -269,11 +275,10 @@ mod tests {
                 },
             ],
         };
-        let contents =
-            match ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default()) {
-                Ok(contents) => contents,
-                Err(error) => panic!("failed to serialize test state: {error}"),
-            };
+        let contents = match to_string_pretty(&persisted, PrettyConfig::default()) {
+            Ok(contents) => contents,
+            Err(error) => panic!("failed to serialize test state: {error}"),
+        };
 
         let decoded = format::decode(&contents);
         assert!(decoded.is_some(), "expected v2 decode to succeed");
@@ -355,11 +360,10 @@ mod tests {
                 },
             ],
         };
-        let contents =
-            match ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default()) {
-                Ok(contents) => contents,
-                Err(error) => panic!("failed to serialize duplicate-key test state: {error}"),
-            };
+        let contents = match to_string_pretty(&persisted, PrettyConfig::default()) {
+            Ok(contents) => contents,
+            Err(error) => panic!("failed to serialize duplicate-key test state: {error}"),
+        };
 
         assert!(
             format::decode(&contents).is_none(),
@@ -483,7 +487,7 @@ mod tests {
             Ok(encoded) => encoded,
             Err(error) => panic!("failed to encode state: {error}"),
         };
-        let decoded = ron::from_str::<PersistedState>(&encoded);
+        let decoded = from_str::<PersistedState>(&encoded);
         assert!(decoded.is_ok(), "encoded text should parse as v2");
         let decoded = decoded.unwrap_or(PersistedState {
             version: 0,

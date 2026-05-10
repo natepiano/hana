@@ -3,6 +3,9 @@
 //! Saves window position, size, and mode to the state file on change.
 
 use std::collections::HashMap;
+use std::env::current_exe;
+use std::fs::create_dir_all;
+use std::fs::write;
 use std::path::Path;
 
 use bevy::ecs::system::NonSendMarker;
@@ -32,14 +35,14 @@ use crate::monitors::Monitors;
 /// Save all window states to the given path.
 pub fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {
     if let Some(parent) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(parent)
+        && let Err(e) = create_dir_all(parent)
     {
         warn!("[save_all_states] Failed to create directory {parent:?}: {e}");
         return;
     }
     match format::encode(states) {
         Ok(contents) => {
-            if let Err(e) = std::fs::write(path, &contents) {
+            if let Err(e) = write(path, &contents) {
                 warn!("[save_all_states] Failed to write state file {path:?}: {e}");
             }
         },
@@ -93,12 +96,12 @@ pub fn save_active_window_state(
         return;
     }
 
-    let app_name = std::env::current_exe()
+    let app_name = current_exe()
         .ok()
         .and_then(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
         .unwrap_or_default();
 
-    let mut states = std::collections::HashMap::new();
+    let mut states = HashMap::new();
 
     for (entity, window, existing_monitor, managed) in all_windows {
         if exclude_entity == Some(entity) {
@@ -163,7 +166,7 @@ fn persist_remember_all(
     >,
     primary_query: &Query<(), With<PrimaryWindow>>,
 ) {
-    let app_name = std::env::current_exe()
+    let app_name = current_exe()
         .ok()
         .and_then(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
         .unwrap_or_default();
