@@ -152,13 +152,13 @@ impl Plugin for LiminalPlugin {
             .add_render_command::<HullOutlinePhase, DrawHull>()
             .add_render_graph_node::<ViewNodeRunner<OutlineNode>>(
                 Core3d,
-                OutlineRenderGraphNode::OutlineNode,
+                OutlineRenderGraphNode::Main,
             )
             .add_render_graph_edges(
                 Core3d,
                 (
                     Node3d::EndMainPass,
-                    OutlineRenderGraphNode::OutlineNode,
+                    OutlineRenderGraphNode::Main,
                     Node3d::Bloom,
                 ),
             );

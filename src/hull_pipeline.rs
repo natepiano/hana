@@ -86,8 +86,8 @@ pub(crate) struct HullPipelineKey {
 #[derive(Resource)]
 pub(crate) struct HullPipeline {
     pub(crate) mesh:                         MeshPipeline,
-    pub(crate) outline_bind_group_layout:    BindGroupLayoutDescriptor,
-    pub(crate) depth_bind_group_layout:      BindGroupLayoutDescriptor,
+    pub(crate) outline_layout:               BindGroupLayoutDescriptor,
+    pub(crate) depth_layout:                 BindGroupLayoutDescriptor,
     pub(crate) per_object_buffer_batch_size: Option<u32>,
     pub(crate) occlusion_sampler:            Sampler,
 }
@@ -96,7 +96,7 @@ impl FromWorld for HullPipeline {
     fn from_world(world: &mut World) -> Self {
         let render_device = world.resource::<RenderDevice>().clone();
 
-        let outline_instance_bind_group_layout = BindGroupLayoutDescriptor::new(
+        let outline_layout = BindGroupLayoutDescriptor::new(
             HULL_OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::VERTEX_FRAGMENT,
@@ -105,7 +105,7 @@ impl FromWorld for HullPipeline {
                 ),),
             ),
         );
-        let depth_bind_group_layout = BindGroupLayoutDescriptor::new(
+        let depth_layout = BindGroupLayoutDescriptor::new(
             HULL_DEPTH_BIND_GROUP_LAYOUT_LABEL,
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::FRAGMENT,
@@ -121,8 +121,8 @@ impl FromWorld for HullPipeline {
 
         Self {
             mesh: MeshPipeline::from_world(world),
-            outline_bind_group_layout: outline_instance_bind_group_layout,
-            depth_bind_group_layout,
+            outline_layout,
+            depth_layout,
             per_object_buffer_batch_size,
             occlusion_sampler: render_device.create_sampler(&SamplerDescriptor::default()),
         }
@@ -202,10 +202,8 @@ impl SpecializedMeshPipeline for HullPipeline {
             };
         }
         descriptor.label = Some(HULL_OUTLINE_PIPELINE_LABEL.into());
-        descriptor
-            .layout
-            .push(self.outline_bind_group_layout.clone());
-        descriptor.layout.push(self.depth_bind_group_layout.clone());
+        descriptor.layout.push(self.outline_layout.clone());
+        descriptor.layout.push(self.depth_layout.clone());
         descriptor.primitive.cull_mode = Some(Face::Front);
 
         Ok(descriptor)

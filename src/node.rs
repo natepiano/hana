@@ -47,7 +47,7 @@ use super::texture::FloodTextures;
 #[derive(Copy, Clone, Debug, RenderLabel, Hash, PartialEq, Eq)]
 pub(crate) enum OutlineRenderGraphNode {
     /// The main outline render node that runs mask, flood, hull, and compose sub-passes.
-    OutlineNode,
+    Main,
 }
 
 #[derive(Default)]
@@ -112,7 +112,7 @@ impl ViewNode for OutlineNode {
         };
 
         let outline_depth_view = flood_textures
-            .outline_depth_texture
+            .outline_depth
             .create_view(&TextureViewDescriptor::default());
 
         run_mask_init_pass(
@@ -192,7 +192,7 @@ fn run_mask_init_pass(
     };
 
     let appearance_color_attachment = RenderPassColorAttachment {
-        view:           &flood_textures.appearance_texture.default_view,
+        view:           &flood_textures.appearance.default_view,
         resolve_target: None,
         ops:            Operations {
             load:  LoadOp::Clear(LinearRgba::NONE.into()),
@@ -202,7 +202,7 @@ fn run_mask_init_pass(
     };
     let owner_color_attachment =
         flood_textures
-            .owner_texture
+            .owner
             .as_ref()
             .map(|tex| RenderPassColorAttachment {
                 view:           &tex.default_view,
@@ -347,8 +347,8 @@ fn run_jump_flood_composite(
             JumpFloodStep {
                 input: flood_textures.input(),
                 output: flood_textures.output(),
-                depth_texture: outline_depth_view,
-                appearance_texture: &flood_textures.appearance_texture.default_view,
+                depth_view: outline_depth_view,
+                appearance_view: &flood_textures.appearance.default_view,
                 size,
             },
         );
@@ -361,7 +361,7 @@ fn run_jump_flood_composite(
             post_process.source,
             &jump_flood_pass.pipeline.sampler,
             &flood_textures.output.default_view,
-            &flood_textures.appearance_texture.default_view,
+            &flood_textures.appearance.default_view,
             &global_depth.texture.default_view,
             outline_depth_view,
             view_depth_texture.view(),

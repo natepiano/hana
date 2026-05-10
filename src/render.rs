@@ -254,18 +254,18 @@ pub(crate) fn prepare_hull_depth_view_bind_groups(
     }
 
     for (entity, flood_textures) in &views {
-        let Some(owner_texture) = flood_textures.owner_texture.as_ref() else {
+        let Some(owner) = flood_textures.owner.as_ref() else {
             continue;
         };
 
         let outline_depth_view = flood_textures
-            .outline_depth_texture
+            .outline_depth
             .create_view(&TextureViewDescriptor::default());
-        let owner_view = &owner_texture.default_view;
+        let owner_view = &owner.default_view;
 
         let bind_group = render_device.create_bind_group(
             Some(HULL_DEPTH_BIND_GROUP_LABEL),
-            &pipeline_cache.get_bind_group_layout(&pipeline.depth_bind_group_layout),
+            &pipeline_cache.get_bind_group_layout(&pipeline.depth_layout),
             &BindGroupEntries::sequential((
                 &pipeline.occlusion_sampler,
                 &outline_depth_view,
@@ -363,7 +363,7 @@ pub(crate) fn prepare_hull_outline_bind_group(
     if let Some(binding) = outline_buffer.0.binding() {
         let bind_group = render_device.create_bind_group(
             Some(HULL_OUTLINE_BIND_GROUP_LABEL),
-            &pipeline_cache.get_bind_group_layout(&outline_pipeline.outline_bind_group_layout),
+            &pipeline_cache.get_bind_group_layout(&outline_pipeline.outline_layout),
             &[BindGroupEntry {
                 binding:  0,
                 resource: binding,

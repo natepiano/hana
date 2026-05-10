@@ -17,17 +17,17 @@ use super::extract::ActiveOutlineModes;
 
 #[derive(Clone, Component)]
 pub(crate) struct FloodTextures {
-    pub(crate) ping_pong:             PingPongState,
+    pub(crate) ping_pong:     PingPongState,
     // Textures for storing input-output of flood passes
-    pub(crate) input:                 CachedTexture,
-    pub(crate) output:                CachedTexture,
+    pub(crate) input:         CachedTexture,
+    pub(crate) output:        CachedTexture,
     /// A dedicated depth texture for mesh outlines to later compare against
     /// global depth
-    pub(crate) outline_depth_texture: Texture,
+    pub(crate) outline_depth: Texture,
     /// Stores outline color and mesh data
-    pub(crate) appearance_texture:    CachedTexture,
+    pub(crate) appearance:    CachedTexture,
     /// Stores per-mesh owner ID in x channel — only allocated when hull outlines are active
-    pub(crate) owner_texture:         Option<CachedTexture>,
+    pub(crate) owner:         Option<CachedTexture>,
 }
 
 #[derive(Clone, Copy)]
@@ -89,7 +89,7 @@ pub(crate) fn prepare_flood_textures(
         };
 
         // Create the depth texture
-        let depth_texture = render_device.create_texture(&TextureDescriptor {
+        let outline_depth = render_device.create_texture(&TextureDescriptor {
             label: Some(OUTLINE_DEPTH_TEXTURE_LABEL),
             size,
             mip_level_count: 1,
@@ -101,7 +101,7 @@ pub(crate) fn prepare_flood_textures(
             view_formats: &[],
         });
 
-        let owner_texture = if active.methods.has_hull() {
+        let owner = if active.methods.has_hull() {
             Some(texture_cache.get(&render_device, texture_descriptor.clone()))
         } else {
             None
@@ -111,9 +111,9 @@ pub(crate) fn prepare_flood_textures(
             ping_pong: PingPongState::PrimaryInput,
             input: texture_cache.get(&render_device, texture_descriptor.clone()),
             output: texture_cache.get(&render_device, texture_descriptor.clone()),
-            outline_depth_texture: depth_texture,
-            appearance_texture: texture_cache.get(&render_device, texture_descriptor),
-            owner_texture,
+            outline_depth,
+            appearance: texture_cache.get(&render_device, texture_descriptor),
+            owner,
         });
         texture_cache.update();
     }

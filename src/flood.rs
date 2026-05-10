@@ -170,11 +170,11 @@ pub(crate) struct JumpFloodPass<'w> {
 }
 
 pub(crate) struct JumpFloodStep<'a> {
-    pub(crate) input:              &'a CachedTexture,
-    pub(crate) output:             &'a CachedTexture,
-    pub(crate) depth_texture:      &'a TextureView,
-    pub(crate) appearance_texture: &'a TextureView,
-    pub(crate) size:               u32,
+    pub(crate) input:           &'a CachedTexture,
+    pub(crate) output:          &'a CachedTexture,
+    pub(crate) depth_view:      &'a TextureView,
+    pub(crate) appearance_view: &'a TextureView,
+    pub(crate) size:            u32,
 }
 
 impl<'w> JumpFloodPass<'w> {
@@ -194,8 +194,8 @@ impl<'w> JumpFloodPass<'w> {
         let JumpFloodStep {
             input,
             output,
-            depth_texture,
-            appearance_texture,
+            depth_view,
+            appearance_view,
             size,
         } = step;
         let Some(lookup_binding) = self.pipeline.lookup_buffer.binding() else {
@@ -210,8 +210,8 @@ impl<'w> JumpFloodPass<'w> {
                 &input.default_view,
                 &self.pipeline.sampler,
                 lookup_binding,
-                depth_texture,
-                appearance_texture,
+                depth_view,
+                appearance_view,
             )),
         );
 
