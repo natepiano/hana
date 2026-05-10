@@ -115,8 +115,8 @@ mod tests {
     fn orientation_inverse_undoes_rotation() {
         let orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
         let inverse_orientation = orientation.inverse();
-        let composed = orientation * inverse_orientation;
-        let result = composed * Vec3::X;
+        let composed_orientation = orientation * inverse_orientation;
+        let result = composed_orientation * Vec3::X;
         assert!((result - Vec3::X).length() < IDENTITY_ROTATION_TOLERANCE);
     }
 
@@ -131,8 +131,8 @@ mod tests {
     fn orientation_rotation_composition() {
         let first_orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
         let second_orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
-        let composed = first_orientation * second_orientation;
-        let result = composed * Vec3::X;
+        let composed_orientation = first_orientation * second_orientation;
+        let result = composed_orientation * Vec3::X;
         assert!((result - Vec3::NEG_X).length() < COMPOSED_ROTATION_TOLERANCE);
     }
 

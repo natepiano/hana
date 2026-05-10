@@ -62,25 +62,26 @@ fn main() {
 
     println!("\n=== Orientation: rotation wrapper ===\n");
 
-    let rotation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
-    let rotated = rotation * Vec3::X;
+    let quarter_turn_orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
+    let rotated = quarter_turn_orientation * Vec3::X;
     println!("X rotated 90° around Y: {rotated:?}");
 
     // Composition
-    let double = rotation * rotation;
-    let result = double * Vec3::X;
+    let double_orientation = quarter_turn_orientation * quarter_turn_orientation;
+    let result = double_orientation * Vec3::X;
     println!("X rotated 180° around Y: {result:?}");
 
     // Inverse
-    let undone = rotation * rotation.inverse();
-    let identity_result = undone * Vec3::X;
+    let undone_orientation =
+        quarter_turn_orientation * quarter_turn_orientation.inverse();
+    let identity_result = undone_orientation * Vec3::X;
     println!("Rotation * inverse = identity: {identity_result:?}");
 
     // Interpolation
     let start_orientation = Orientation::from(Quat::IDENTITY);
     let end_orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
-    let halfway = start_orientation.slerp(end_orientation, SLERP_FACTOR);
-    let slerp_result = halfway * Vec3::X;
+    let halfway_orientation = start_orientation.slerp(end_orientation, SLERP_FACTOR);
+    let slerp_result = halfway_orientation * Vec3::X;
     println!("Slerp halfway (0° to 90°): {slerp_result:?}");
 
     println!("\n=== Displacement and Velocity ===\n");
