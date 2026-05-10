@@ -72,8 +72,7 @@ fn main() {
     println!("X rotated 180° around Y: {result:?}");
 
     // Inverse
-    let undone_orientation =
-        quarter_turn_orientation * quarter_turn_orientation.inverse();
+    let undone_orientation = quarter_turn_orientation * quarter_turn_orientation.inverse();
     let identity_result = undone_orientation * Vec3::X;
     println!("Rotation * inverse = identity: {identity_result:?}");
 
