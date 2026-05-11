@@ -32,12 +32,12 @@ use super::line::CalloutLine;
 use super::line::CalloutVisual;
 use crate::panel::SurfaceShadow;
 use crate::render;
-use crate::render::SdfPanelMaterial;
-use crate::render::SdfPanelMaterialInput;
-use crate::render::SdfPrimitiveMaterialInput;
 use crate::render::LAYER_DEPTH_BIAS;
 use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
+use crate::render::SdfPanelMaterial;
+use crate::render::SdfPanelMaterialInput;
+use crate::render::SdfPrimitiveMaterialInput;
 
 /// Shared rendering parameters that every callout spawn helper threads through.
 /// Exists to keep helper argument lists under the "context struct when > 7

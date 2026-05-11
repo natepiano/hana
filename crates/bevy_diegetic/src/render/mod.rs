@@ -13,17 +13,17 @@ mod transparency;
 mod world_text;
 
 use bevy::prelude::*;
-pub use constants::default_panel_material;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
+pub use constants::default_panel_material;
 use panel_geometry::PanelGeometryPlugin;
 use panel_rtt::PanelRttPlugin;
-pub(crate) use sdf_material::sdf_panel_material;
-pub(crate) use sdf_material::sdf_primitive_material;
 pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::SdfPanelMaterialInput;
 pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
+pub(crate) use sdf_material::sdf_panel_material;
+pub(crate) use sdf_material::sdf_primitive_material;
 use text_renderer::TextRenderPlugin;
 pub use transparency::StableTransparency;
 #[cfg(feature = "typography_overlay")]
