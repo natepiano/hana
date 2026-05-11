@@ -35,6 +35,7 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticTextMeasurer;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -579,14 +580,15 @@ fn build_clay_rows(dynamic: &DynamicRows, sizing: &PanelSizing) -> Vec<(String, 
 fn rebuild_diegetic_panel(
     dynamic: Res<DynamicRows>,
     sizing: Res<PanelSizing>,
-    mut panels: Query<&mut DiegeticPanel>,
+    panels: Query<Entity, With<DiegeticPanel>>,
+    mut commands: Commands,
 ) {
     if !dynamic.is_changed() && !sizing.is_changed() {
         return;
     }
     let rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
-    for mut panel in &mut panels {
-        panel.set_tree(build_diegetic_tree(&rows, sizing.world_size));
+    for entity in &panels {
+        commands.set_tree(entity, build_diegetic_tree(&rows, sizing.world_size));
     }
 }
 

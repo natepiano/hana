@@ -5,7 +5,7 @@
 Make `bevy_lagrange` opinionated about Bevy's action/context input model while
 keeping camera behavior separate from physical input policy.
 
-The target shape is:
+The target structure is:
 
 - `OrbitCam` owns camera state, response scaling, smoothing, limits, animation behavior, and active-camera behavior.
 - `bevy_enhanced_input` owns the public action model: actions, contexts, bindings, modifiers, conditions, and user keymaps.
@@ -79,7 +79,7 @@ them as constraints unless implementation proves one is unworkable.
   Use the observer shim for tidy mutations and `PreInput` validation as the
   deterministic authority until native Bevy mutually exclusive components can replace
   the shim. Do not reopen a single `OrbitCamInputMode` enum component for the initial
-  refactor; this marker-component shape is a locked public API decision.
+  refactor; this marker-component pattern is a locked public API decision.
 - `OrbitCam::default()` resolves to the stable `SimpleMouse` preset. `BlenderLike`
   remains explicit editor-style configuration.
 - Use one progressive `OrbitCamBindings` builder. Do not add a second simple/custom
@@ -154,7 +154,7 @@ name can change during implementation, but the module should isolate:
 - enhanced-input binding descriptors and system-set names;
 - action/mock write paths used by adapter-backed sources.
 
-Conceptual shape:
+Conceptual structure:
 
 ```rust
 pub(crate) trait EnhancedInputCameraAdapter {
@@ -185,7 +185,7 @@ Also add a startup diagnostic in strict mode that verifies the expected ordering
 resources, context registration, plugin setup, and one known enhanced-input API marker
 were installed by `LagrangePlugin`. Bevy does not expose a general runtime schedule
 proof, so the diagnostic should fail loud for missing setup, missing context
-registration, unexpected enhanced-input API shape, or missing Lagrange set
+registration, unexpected enhanced-input API structure, or missing Lagrange set
 configuration; the ECS ordering tests remain the authoritative guard for barrier
 semantics.
 
@@ -198,7 +198,7 @@ References:
 - <https://docs.rs/bevy_enhanced_input/latest/bevy_enhanced_input/action/mock/struct.ActionMock.html>
 - <https://docs.rs/bevy_enhanced_input/latest/bevy_enhanced_input/context/struct.ExternallyMocked.html>
 
-## Public Module Shape
+## Public Module Structure
 
 Group the public input API under `bevy_lagrange::input` so the binding model is
 discoverable.
@@ -785,7 +785,7 @@ into `OrbitCamBindings` must run the same validation as the builder. If the runt
 type needs to be registered for `OrbitCamBindings` reflection, use Bevy's
 supported opaque/custom reflection path rather than making raw binding fields mutable
 through reflection.
-The reflected runtime shape should be read-only or opaque. A future implementation
+The reflected runtime structure should be read-only or opaque. A future implementation
 may wrap the runtime value in a `ValidatedOrbitCamBindings` newtype internally if that
 makes the descriptor-to-runtime authority boundary clearer, but public reflected
 mutation must always go through `OrbitCamBindingsDescriptor`.
@@ -795,7 +795,7 @@ It contains two kinds of configuration:
 - ordinary enhanced-input bindings for public semantic actions;
 - adapter policy for sources enhanced input does not currently describe richly enough.
 
-Conceptual shape:
+Conceptual structure:
 
 ```rust
 #[derive(Component, Debug, Reflect)]
@@ -1891,7 +1891,7 @@ impl OrbitCamInput {
 Manual users should not normally set value, source, and phase fields directly. The
 public manual writer API should be method-based:
 
-| API shape | Source attribution | Use when |
+| API structure | Source attribution | Use when |
 |-----------|--------------------|----------|
 | `orbit_pixels`, `pan_pixels`, `zoom_*_amount` | Defaults to `ManualInputSource::manual()` / `MANUAL`. | Prototypes, tests, simple app-authored camera motion. |
 | `orbit`, `pan`, `zoom_coarse`, `zoom_smooth` with `ManualInputSource` | Preserves `MANUAL` plus observed source flags such as `KEYBOARD` or `GAMEPAD`. | Editor overlays, guidance UI, analytics, or debugging need source provenance. |
@@ -2905,7 +2905,7 @@ PostUpdate:
 ```
 
 The exact enhanced-input set names should come from the dependency, but the ordering
-shape should keep the public scheduling surface small:
+structure should keep the public scheduling surface small:
 
 ```rust
 app.configure_sets(

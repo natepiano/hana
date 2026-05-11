@@ -56,8 +56,8 @@ pub(super) fn rasterize_glyph(
     let face = Face::parse(font_data, 0).ok()?;
     let glyph_id = GlyphId(glyph_index);
 
-    // Load glyph shape from font.
-    let shape = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?;
+    // Load glyph outline from font.
+    let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?;
 
     // Get glyph bounding box in font units.
     let bbox = face.glyph_bounding_box(glyph_id)?;
@@ -84,7 +84,7 @@ pub(super) fn rasterize_glyph(
 
     // Color edges for multi-channel generation.
     let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
-    let colored = Shape::edge_coloring_simple(shape, sin_alpha, EDGE_COLORING_SEED);
+    let colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED);
 
     // Build transform: font units → pixel coordinates.
     // Origin in font space is at (bbox.x_min, bbox.y_min).
@@ -227,7 +227,7 @@ mod tests {
         let o = rasterize_glyph(FONT_DATA, o_idx, 32, 4.0, 2)
             .unwrap_or_else(|| panic!("rasterize 'O' returned None"));
 
-        // At minimum, the data should differ (different glyph shapes).
+        // At minimum, the data should differ (different glyph outlines).
         assert_ne!(
             a.data, o.data,
             "'A' and 'O' should produce different bitmaps"
@@ -422,7 +422,7 @@ mod tests {
         let cmap_colon = face.glyph_index(':').unwrap().0;
         println!("cmap colon glyph ID: {cmap_colon}");
 
-        // Shape "A::B" through parley and collect glyph IDs.
+        // Run text shaping for "A::B" through parley and collect glyph IDs.
         let mut font_cx = parley::FontContext::default();
         font_cx
             .collection
@@ -487,9 +487,10 @@ mod tests {
             let gid16 = gid.to_u16();
             let result = rasterize_glyph(FONT_DATA, gid16, 32, 4.0, 2);
             let bbox = face.glyph_bounding_box(GlyphId(gid16));
-            let has_shape = fdsm_ttf_parser::load_shape_from_face(&face, GlyphId(gid16)).is_some();
+            let has_outline =
+                fdsm_ttf_parser::load_shape_from_face(&face, GlyphId(gid16)).is_some();
             println!(
-                "  glyph {gid16}: rasterize={}, bbox={:?}, has_shape={has_shape}, advance={adv}",
+                "  glyph {gid16}: rasterize={}, bbox={:?}, has_outline={has_outline}, advance={adv}",
                 result.is_some(),
                 bbox
             );

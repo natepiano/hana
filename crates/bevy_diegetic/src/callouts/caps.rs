@@ -244,7 +244,7 @@ impl CalloutCap {
         }
     }
 
-    /// Sets the cap height for shapes that support an explicit height.
+    /// Sets the cap height for cap variants that support an explicit height.
     #[must_use]
     pub const fn height(self, height: f32) -> Self {
         match self {

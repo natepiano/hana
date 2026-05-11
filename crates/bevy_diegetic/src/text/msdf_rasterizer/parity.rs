@@ -78,13 +78,13 @@ fn fdsm_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
 fn msdfgen_fill(font_data: &[u8], ch: char, px_size: u32) -> Option<f64> {
     let face = ttf_parser_018::Face::parse(font_data, 0).ok()?;
     let glyph_id = glyph_index_018_for(font_data, ch)?;
-    let mut shape = face.glyph_shape(glyph_id)?;
-    let bound = shape.get_bound();
+    let mut outline = face.glyph_shape(glyph_id)?;
+    let bound = outline.get_bound();
     let framing = bound.autoframe(px_size, px_size, Range::Px(SDF_RANGE), None)?;
-    shape.edge_coloring_simple(3.0, 0);
+    outline.edge_coloring_simple(3.0, 0);
     let config = MsdfGeneratorConfig::default();
     let mut bitmap = Bitmap::<Rgb<f32>>::new(px_size, px_size);
-    shape.generate_msdf(&mut bitmap, framing, config);
+    outline.generate_msdf(&mut bitmap, framing, config);
     let width = bitmap.width();
     let height = bitmap.height();
     let mut pixels = Vec::with_capacity((width * height * 3).to_usize());

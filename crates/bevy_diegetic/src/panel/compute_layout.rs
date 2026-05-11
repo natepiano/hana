@@ -193,7 +193,6 @@ mod tests {
     use bevy::window::Window;
     use bevy_kana::ToF32;
 
-    use super::super::diegetic_panel::ScaledLayoutTreeCache;
     use crate::Anchor;
     use crate::Fit;
     use crate::FitMax;
@@ -211,6 +210,7 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::panel::diegetic_panel::ScaledLayoutTreeCache;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
 
@@ -299,7 +299,7 @@ mod tests {
 
         app.world_mut()
             .commands()
-            .set_diegetic_panel_tree(entity, colored_text_tree("Hello", Color::BLACK));
+            .set_tree(entity, colored_text_tree("Hello", Color::BLACK));
         app.update();
 
         let computed = app
@@ -343,8 +343,8 @@ mod tests {
 
         {
             let mut commands = app.world_mut().commands();
-            commands.set_diegetic_panel_tree(entity, colored_text_tree("Hi", Color::BLACK));
-            commands.set_diegetic_panel_tree(entity, colored_text_tree("Hello", Color::BLACK));
+            commands.set_tree(entity, colored_text_tree("Hi", Color::BLACK));
+            commands.set_tree(entity, colored_text_tree("Hello", Color::BLACK));
         }
         app.update();
 

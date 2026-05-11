@@ -18,6 +18,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -324,11 +325,11 @@ fn toggle_taa(
     }
 }
 
-fn update_hud(taa: Res<TaaEnabled>, mut huds: Query<&mut DiegeticPanel, With<HudPanel>>) {
+fn update_hud(taa: Res<TaaEnabled>, huds: Query<Entity, With<HudPanel>>, mut commands: Commands) {
     if !taa.is_changed() {
         return;
     }
-    for mut panel in &mut huds {
-        panel.set_tree(build_hud_tree(taa.0));
+    for entity in &huds {
+        commands.set_tree(entity, build_hud_tree(taa.0));
     }
 }

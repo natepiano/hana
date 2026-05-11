@@ -7,12 +7,12 @@ use bevy_diegetic::TextMeasure;
 use bevy_kana::ToF32;
 use clay_layout::math::Dimensions;
 
-pub(crate) const FONT_SIZE: f32 = 10.0;
-pub(crate) const CLAY_FONT_SIZE: u16 = 10;
-pub(crate) const CHAR_WIDTH_FACTOR: f32 = 0.6;
+pub const FONT_SIZE: f32 = 10.0;
+pub const CLAY_FONT_SIZE: u16 = 10;
+pub const CHAR_WIDTH_FACTOR: f32 = 0.6;
 
 #[must_use = "text dimensions are the benchmarked measurement result"]
-pub(crate) fn monospace_measure_text(text: &str, measure: &TextMeasure) -> TextDimensions {
+pub fn monospace_measure_text(text: &str, measure: &TextMeasure) -> TextDimensions {
     let char_width = measure.size * CHAR_WIDTH_FACTOR;
     let mut max_line_width: f32 = 0.0;
     let mut line_count = 0_u32;
@@ -32,16 +32,16 @@ pub(crate) fn monospace_measure_text(text: &str, measure: &TextMeasure) -> TextD
 }
 
 #[must_use = "the raw layout engine needs a measurement callback"]
-pub(crate) fn monospace_measure_text_fn() -> MeasureTextFn { Arc::new(monospace_measure_text) }
+pub fn monospace_measure_text_fn() -> MeasureTextFn { Arc::new(monospace_measure_text) }
 
 #[must_use = "the headless app needs this resource for panel layout"]
-pub(crate) fn monospace_measurer() -> DiegeticTextMeasurer {
+pub fn monospace_measurer() -> DiegeticTextMeasurer {
     DiegeticTextMeasurer {
         measure_fn: monospace_measure_text_fn(),
     }
 }
 
-pub(crate) fn clay_monospace_measure(
+pub fn clay_monospace_measure(
     text: &str,
     config: &clay_layout::text::TextConfig,
     _: &mut (),

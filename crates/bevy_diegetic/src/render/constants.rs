@@ -59,7 +59,7 @@ pub(super) const RTT_CAMERA_Z: f32 = 5.0;
 pub(super) const RTT_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
 // sdf rendering
-/// World-space padding added to each SDF quad mesh beyond the shape boundary.
+/// World-space padding added to each SDF quad mesh beyond the SDF boundary.
 /// Gives the exterior anti-aliasing ramp room to render — without this, the
 /// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
 pub const SDF_AA_PADDING: f32 = 0.001;

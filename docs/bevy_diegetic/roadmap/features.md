@@ -68,7 +68,7 @@
 | 13 | Corner radius       | Rounded rect shader. 4-corner independent radii. **Done.**        |
 | 13b | SDF fragment clipping | Walk parent hierarchy, pass clip bounds + corner radius to fragment shader. Prerequisite for scroll containers, widgets, and any content overflow. (Inspired by univis_ui `UClip`.) |
 | 13c | Fit-content roots   | Panel auto-sizes to content with optional min/max constraints. Eliminates manual width/height for simple panels. (Inspired by univis_ui `fit_content_world_3d`.) |
-| 13d | Chamfered corners   | `CornerStyle` enum: `Rounded` (existing) or `Cut` (diagonal chamfer). Small SDF shader delta. (Inspired by univis_ui `Shape::Cut`.) |
+| 13d | Chamfered corners   | `CornerStyle` enum: `Rounded` (existing) or `Cut` (diagonal chamfer). Small SDF shader delta. (Inspired by univis_ui's cut-corner style.) |
 | 14 | Image elements      | Image content in panel elements.                                   |
 | 15 | Typography overlay  | Feature-gated. `TypographyOverlay` component — font metric lines, per-glyph bounding boxes. In progress. |
 | 16 | Panel layout overlay | Feature-gated. `LayoutOverlay` component — sizing modes, padding, alignment, borders. Color-coded by sizing mode. |

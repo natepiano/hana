@@ -120,9 +120,9 @@ trigger.
 
 ## API sketch (tentative — pending Q1–Q7)
 
-Two plausible shapes depending on answers above:
+Two plausible options depending on answers above:
 
-### Shape A — `El::embed(panel)`
+### Option A — `El::embed(panel)`
 
 ```rust
 let inner = DiegeticPanel::world()
@@ -139,7 +139,7 @@ DiegeticPanel::world()
     .build()?
 ```
 
-### Shape B — Panel-as-component, ChildOf composition
+### Option B — Panel-as-component, ChildOf composition
 
 ```rust
 commands.spawn((
@@ -151,8 +151,8 @@ commands.spawn((
 ));
 ```
 
-Shape A keeps everything in one builder closure — ergonomic but
-forces the layout engine to know about panels. Shape B leans on
+Option A keeps everything in one builder closure — ergonomic but
+forces the layout engine to know about panels. Option B leans on
 Bevy's existing hierarchy — natural but pushes layout coordination
 into a system rather than the builder.
 

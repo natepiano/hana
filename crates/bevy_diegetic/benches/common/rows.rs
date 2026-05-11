@@ -1,9 +1,9 @@
-pub(crate) type StatusRow = (&'static str, &'static str);
+pub type StatusRow = (&'static str, &'static str);
 
-pub(crate) const ROW_COUNTS: [usize; 4] = [5, 20, 100, 500];
+pub const ROW_COUNTS: [usize; 4] = [5, 20, 100, 500];
 
 #[must_use = "benchmarks need generated rows as fixture input"]
-pub(crate) fn generate_status_rows(count: usize) -> Vec<StatusRow> {
+pub fn generate_status_rows(count: usize) -> Vec<StatusRow> {
     const LABELS: &[&str] = &[
         "fps:",
         "frame ms:",

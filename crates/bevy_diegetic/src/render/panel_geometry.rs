@@ -319,7 +319,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
     let half_width = world_width * 0.5;
     let half_height = world_height * 0.5;
 
-    // Mesh is slightly larger than the SDF shape so the exterior
+    // Mesh is slightly larger than the SDF form so the exterior
     // anti-aliasing ramp has fragments to render on.
     let pad = constants::SDF_AA_PADDING;
     let mesh_half_width = half_width + pad;

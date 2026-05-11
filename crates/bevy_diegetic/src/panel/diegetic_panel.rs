@@ -225,18 +225,11 @@ impl DiegeticPanel {
     /// Replaces the layout tree and takes the conservative full-layout path.
     ///
     /// For optimized visual-only updates, prefer
-    /// [`DiegeticPanelCommands::set_diegetic_panel_tree`]. A direct component
+    /// [`DiegeticPanelCommands::set_tree`]. A direct component
     /// method cannot update the sibling change-classification component.
-    pub fn set_tree(&mut self, tree: LayoutTree) {
-        self.tree = tree;
-        self.tree_revision = self.tree_revision.wrapping_add(1);
-    }
-
-    /// Replaces the layout tree through the conservative full-layout path for
-    /// benchmark comparisons.
     #[cfg(feature = "bench_support")]
     #[doc(hidden)]
-    pub fn set_tree_full_rebuild_for_bench(&mut self, tree: LayoutTree) {
+    pub fn set_tree_full_rebuild(&mut self, tree: LayoutTree) {
         self.tree = tree;
         self.tree_revision = self.tree_revision.wrapping_add(1);
     }
@@ -392,22 +385,33 @@ impl DiegeticPanel {
 }
 
 /// Extension methods for mutating diegetic panels through [`Commands`].
+///
+/// This trait is an ergonomic wrapper around Bevy's
+/// [`Commands::run_system_cached_with`]. Replacing a tree has two effects:
+/// it stores the new tree on [`DiegeticPanel`], and it records a pending
+/// `Identical` / `VisualOnly` / `LayoutAffecting` decision for the later layout
+/// system to consume. That pending decision lives on an internal sibling
+/// component, not on [`DiegeticPanel`] itself, so a plain `&mut DiegeticPanel`
+/// method would update the tree but lose the information needed to skip layout.
+/// Keeping the wrapper here lets callers use a focused panel API instead of
+/// exposing the cached-system function and its tuple input structure as public
+/// surface.
 pub trait DiegeticPanelCommands {
     /// Queues a layout-tree replacement that records whether the change is
     /// visual-only or layout-affecting.
     ///
     /// The queued setter is deferred. Schedule systems that call this before
     /// panel layout systems when the update must be visible in the same frame.
-    fn set_diegetic_panel_tree(&mut self, entity: Entity, tree: LayoutTree);
+    fn set_tree(&mut self, entity: Entity, tree: LayoutTree);
 }
 
 impl DiegeticPanelCommands for Commands<'_, '_> {
-    fn set_diegetic_panel_tree(&mut self, entity: Entity, tree: LayoutTree) {
-        self.run_system_cached_with(set_diegetic_panel_tree, (entity, tree));
+    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) {
+        self.run_system_cached_with(set_tree_command, (entity, tree));
     }
 }
 
-fn set_diegetic_panel_tree(
+fn set_tree_command(
     In((entity, next_tree)): In<(Entity, LayoutTree)>,
     mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
 ) {
@@ -454,7 +458,7 @@ impl DiegeticPanelChangeClassification {
         });
     }
 
-    pub(super) fn take(&mut self) -> Option<LayoutTreeChange> { self.pending.take() }
+    pub(super) const fn take(&mut self) -> Option<LayoutTreeChange> { self.pending.take() }
 
     pub(super) const fn pending(&self) -> Option<LayoutTreeChange> { self.pending }
 }
@@ -487,7 +491,7 @@ impl From<u64> for TreeRevision {
 pub(super) struct F32Bits(u32);
 
 impl F32Bits {
-    fn new(value: f32) -> Self { Self(value.to_bits()) }
+    const fn new(value: f32) -> Self { Self(value.to_bits()) }
 }
 
 impl ScaledLayoutTreeCache {
@@ -572,7 +576,7 @@ impl ComputedDiegeticPanel {
     pub const fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
 
     /// Returns the computed layout result mutably, or `None` if not yet computed.
-    pub(super) fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
+    pub(super) const fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
 
     /// Stores the computed layout result.
     pub fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }
@@ -631,6 +635,7 @@ mod tests {
         assert_eq!(cache.misses(), 4);
     }
 
+    #[cfg(feature = "bench_support")]
     #[test]
     fn tree_revision_changes_only_when_tree_is_replaced() {
         let mut panel = DiegeticPanel::default();
@@ -644,7 +649,7 @@ mod tests {
         assert!(resize_result.is_ok());
         assert_eq!(panel.tree_revision(), 0);
 
-        panel.set_tree(test_tree("next"));
+        panel.set_tree_full_rebuild(test_tree("next"));
         assert_eq!(panel.tree_revision(), 1);
     }
 

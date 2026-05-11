@@ -5,7 +5,7 @@ use bevy_diegetic::HeadlessLayoutPlugin;
 use super::measurement::monospace_measurer;
 
 #[must_use = "the benchmark app must be spawned into or updated"]
-pub(crate) fn create_bench_app() -> App {
+pub fn create_bench_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.insert_resource(monospace_measurer());

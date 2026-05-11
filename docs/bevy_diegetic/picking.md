@@ -29,7 +29,7 @@ This proposal is motivated by an actual failure in the
 [hana](https://github.com/hanallc/hana) editor. hana mounts a status
 display on a flat `StatusPlane` rectangle (the `Movable` backdrop) and
 attaches a `DiegeticPanel` as a child for the visible content. The
-panel's `LayoutTree` is rebuilt via `panel.set_tree(...)` every time the
+panel's `LayoutTree` is rebuilt via `commands.set_tree(...)` every time the
 displayed data changes — which happens on every diagnostics tick (~500
 ms for FPS / frame time) plus whenever camera radius or movables count
 changes. During a multi-second drag, the panel rebuilds many times. Each
@@ -80,8 +80,8 @@ actual `Movable`) never observe state changes.
 hana relevant code:
 - `crates/hana/src/status_cube/systems.rs::attach_status_panel` — spawns
   the `DiegeticPanel` as a child of `StatusPlane`.
-- `crates/hana/src/status_cube/systems.rs::refresh_status_panel` — calls
-  `panel.set_tree(...)` on every `StatusLabelColumns` change.
+- `crates/hana/src/status_cube/systems.rs::refresh_status_panel` — replaces
+  the panel tree on every `StatusLabelColumns` change.
 - `crates/hana/src/selection/drag_threshold.rs` — patched with
   `try_insert` / `try_remove` to silence the panic, but the panel still
   cannot be dragged because picks route to the churning quad instead of
@@ -111,7 +111,7 @@ frequent producer of the race.
   `CascadeSet` / `Resolved<>` pattern used for fonts, units, and alpha
   modes.
 - Proxy count stays proportional to **picking regions**, not layout
-  elements — no per-leaf churn during `set_tree(...)` rebuilds.
+  elements — no per-leaf churn during tree rebuilds.
 - Internal panel render meshes always non-pickable, in every mode, so
   they never compete or churn.
 - Backwards-compatible default for existing examples that rely on
@@ -329,7 +329,7 @@ buttons don't repeat `Picking::Both` on each one.
 
 `picking_with<C: Component + Clone>(marker: C)` requires storing the
 marker in `Element` until the proxy is spawned, then cloning it onto
-each spawned proxy entity. Two viable shapes:
+each spawned proxy entity. Two viable options:
 
 - **Trait-object box**: `Box<dyn ClonableComponent>` (a custom trait
   combining `Component + Clone + Send + Sync`). Adds an allocation per
@@ -405,7 +405,7 @@ Decision deferred until the API ships.
 
 - Picking on `WorldText` standalone elements (not panel children).
   Same approach probably applies but tracked separately.
-- Per-panel custom picking shapes (circles, polygons). v1 is
+- Per-panel custom picking regions (circles, polygons). v1 is
   rectangular proxies only.
 - Touch / multi-pointer specifics — defers to whatever bevy_picking
   natively supports.

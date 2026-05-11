@@ -25,6 +25,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -425,8 +426,9 @@ fn update_status_panel(
     state: Res<StressControls>,
     stress_perf: Res<StressPerfStats>,
     diegetic_perf: Res<DiegeticPerfStats>,
-    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
+    panels: Query<Entity, With<StatusPanel>>,
     mut last_displayed: ResMut<LastDisplayedStatus>,
+    mut commands: Commands,
     mut timer: Local<Option<Timer>>,
     mut history: Local<VecDeque<PerfSnapshot>>,
 ) {
@@ -504,8 +506,8 @@ fn update_status_panel(
 
     if new_text != last_displayed.text {
         last_displayed.text.clone_from(&new_text);
-        for mut panel in &mut panels {
-            panel.set_tree(build_status_panel(&new_text));
+        for entity in &panels {
+            commands.set_tree(entity, build_status_panel(&new_text));
         }
     }
 }
@@ -533,7 +535,7 @@ fn rows_per_panel() -> usize {
 fn update_panels(
     state: Res<StressControls>,
     existing: Query<(Entity, &StressPanel)>,
-    mut panels: Query<(&mut DiegeticPanel, &mut Transform)>,
+    mut panel_transforms: Query<&mut Transform>,
     mut commands: Commands,
     mut perf: ResMut<StressPerfStats>,
     mut last_panel_count: Local<usize>,
@@ -599,12 +601,12 @@ fn update_panels(
 
     for (entity, sp) in &existing {
         if sp.0 < needed
-            && let Ok((mut panel, mut transform)) = panels.get_mut(entity)
+            && let Ok(mut transform) = panel_transforms.get_mut(entity)
         {
             if sp.0 == active_panel_idx {
                 // Active panel — content changed, rebuild tree.
                 let tree_start = Instant::now();
-                panel.set_tree(build_panel_tree(&state, sp.0, rpp, &words));
+                commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words));
                 tree_build_ms = tree_start
                     .elapsed()
                     .as_secs_f32()
@@ -615,7 +617,7 @@ fn update_panels(
                 // redistribute hue spacing against the new row_count.
                 // Between boundary crossings, hue_offset on the shader
                 // handles color rotation with zero CPU cost.
-                panel.set_tree(build_panel_tree(&state, sp.0, rpp, &words));
+                commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words));
             }
             *transform = panel_transform(sp.0, needed, wh);
         }

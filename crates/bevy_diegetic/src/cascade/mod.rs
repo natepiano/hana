@@ -71,7 +71,7 @@
 //! An earlier revision split 2-tier cascades into separate `CascadePanel` and
 //! `CascadeEntity` traits with blanket
 //! `impl<A: CascadePanel> CascadeTarget for A` / `impl<A: CascadeEntity> ...`.
-//! That shape fails Rust's coherence check (E0119) — the compiler cannot
+//! That structure fails Rust's coherence check (E0119) — the compiler cannot
 //! prove disjointness of user-facing supertrait bounds. The current module
 //! uses a single [`CascadeTarget`] trait; topology intent is expressed at the
 //! registration site via [`CascadePanelPlugin`] vs. [`CascadeEntityPlugin`].

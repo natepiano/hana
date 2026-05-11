@@ -221,7 +221,7 @@ const fn alpha_mode_description(mode: AlphaMode) -> &'static str {
         },
         AlphaMode::Opaque => {
             "Disables alpha handling entirely. Each glyph renders as a \
-             colored rectangle with no shape; the MSDF silhouette is lost.\n\n\
+             colored rectangle with no glyph silhouette; the MSDF outline is lost.\n\n\
              Not useful for text. Included here only for completeness \
              — try it and you'll see colored squares instead of letters."
         },

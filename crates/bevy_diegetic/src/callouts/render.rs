@@ -32,12 +32,12 @@ use super::line::CalloutLine;
 use super::line::CalloutVisual;
 use crate::panel::SurfaceShadow;
 use crate::render;
+use crate::render::SdfPanelMaterial;
+use crate::render::SdfPanelMaterialInput;
+use crate::render::SdfPrimitiveMaterialInput;
 use crate::render::LAYER_DEPTH_BIAS;
 use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
-use crate::render::SdfPanelMaterial;
-use crate::render::SdfPanelMaterialInput;
-use crate::render::SdfShapeMaterialInput;
 
 /// Shared rendering parameters that every callout spawn helper threads through.
 /// Exists to keep helper argument lists under the "context struct when > 7
@@ -137,15 +137,15 @@ fn spawn_cap(
         },
         CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Solid => {
             let (length, width) = resolved_arrow_dimensions(cap, stroke.cap_size);
-            spawn_cap_shape(ctx, tip, -dir, CapShape::Triangle, length, width, color);
+            spawn_cap_form(ctx, tip, -dir, CapPrimitive::Triangle, length, width, color);
         },
         CalloutCap::Circle(cap) => {
             let radius = cap.radius.unwrap_or(stroke.cap_size * 0.5);
-            spawn_cap_shape(
+            spawn_cap_form(
                 ctx,
                 tip,
                 dir,
-                CapShape::Circle,
+                CapPrimitive::Circle,
                 radius * 2.0,
                 radius * 2.0,
                 color,
@@ -153,11 +153,11 @@ fn spawn_cap(
         },
         CalloutCap::Square(cap) => {
             let size = cap.size.unwrap_or(stroke.cap_size);
-            spawn_cap_shape(ctx, tip, dir, CapShape::Square, size, size, color);
+            spawn_cap_form(ctx, tip, dir, CapPrimitive::Square, size, size, color);
         },
         CalloutCap::Diamond(cap) => {
             let (width, height) = resolved_diamond_dimensions(cap, stroke.cap_size);
-            spawn_cap_shape(ctx, tip, dir, CapShape::Diamond, width, height, color);
+            spawn_cap_form(ctx, tip, dir, CapPrimitive::Diamond, width, height, color);
         },
         CalloutCap::None | CalloutCap::Arrow(_) => {},
     }
@@ -192,14 +192,14 @@ fn spawn_open_arrow_cap(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CapShape {
+enum CapPrimitive {
     Triangle,
     Circle,
     Square,
     Diamond,
 }
 
-impl CapShape {
+impl CapPrimitive {
     const fn sdf_kind(self) -> u32 {
         match self {
             Self::Triangle => 1,
@@ -290,11 +290,11 @@ fn spawn_segment(
     };
 }
 
-fn spawn_cap_shape(
+fn spawn_cap_form(
     ctx: &mut CalloutRender<'_, '_, '_>,
     tip: Vec3,
     dir: Vec3,
-    shape: CapShape,
+    cap_form: CapPrimitive,
     cap_width: f32,
     cap_height: f32,
     color: Color,
@@ -306,9 +306,9 @@ fn spawn_cap_shape(
         return;
     }
 
-    let (half_width, half_height) = match shape {
-        CapShape::Triangle => (cap_width, cap_height),
-        CapShape::Circle | CapShape::Square | CapShape::Diamond => {
+    let (half_width, half_height) = match cap_form {
+        CapPrimitive::Triangle => (cap_width, cap_height),
+        CapPrimitive::Circle | CapPrimitive::Square | CapPrimitive::Diamond => {
             (cap_width * 0.5, cap_height * 0.5)
         },
     };
@@ -321,21 +321,21 @@ fn spawn_cap_shape(
     base.unlit = true;
     base.depth_bias = order.to_f32() * LAYER_DEPTH_BIAS;
 
-    let shape_params = match shape {
-        CapShape::Triangle => Vec4::new(cap_width * 0.08, 0.6, 0.0, 0.0),
+    let sdf_params = match cap_form {
+        CapPrimitive::Triangle => Vec4::new(cap_width * 0.08, 0.6, 0.0, 0.0),
         _ => Vec4::ZERO,
     };
 
-    let material = render::sdf_shape_material(
+    let material = render::sdf_primitive_material(
         base,
-        SdfShapeMaterialInput {
+        SdfPrimitiveMaterialInput {
             half_size: Vec2::new(half_width, half_height),
             mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
             corner_radii: [0.0; 4],
             border_widths: [0.0; 4],
             border_color: None,
-            shape_kind: shape.sdf_kind(),
-            shape_params,
+            sdf_kind: cap_form.sdf_kind(),
+            sdf_params,
             clip_rect: Vec4::new(
                 -mesh_half_width,
                 -mesh_half_height,

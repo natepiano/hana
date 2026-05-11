@@ -103,9 +103,9 @@ pub enum GlyphRenderMode {
     /// Normal MSDF text rendering — smooth alpha-blended edges.
     #[default]
     Text      = 1,
-    /// Background quad with the text shape cut out (inverted alpha).
+    /// Background quad with the text outline cut out (inverted alpha).
     PunchOut  = 2,
-    /// Opaque quad matching the glyph shape (no MSDF decode).
+    /// Opaque quad matching the glyph outline (no MSDF decode).
     SolidQuad = 3,
 }
 
@@ -125,10 +125,10 @@ impl From<GlyphRenderMode> for u32 {
     fn from(render_mode: GlyphRenderMode) -> Self { render_mode.discriminant() }
 }
 
-/// What shape the shadow cast by glyphs takes.
+/// What silhouette the shadow cast by glyphs uses.
 ///
 /// Independent of [`GlyphRenderMode`] — the visible glyph and its shadow
-/// can use different shapes. Shaped shadows (`Text`, `PunchOut`) spawn a
+/// can use different silhouettes. Text-outline shadows (`Text`, `PunchOut`) spawn a
 /// separate shadow proxy mesh with `AlphaMode::Mask` that is invisible
 /// in the main pass but contributes to the shadow prepass.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
@@ -140,7 +140,7 @@ pub enum GlyphShadowMode {
     /// Shadow follows the text outline (MSDF-decoded in prepass).
     #[default]
     Text,
-    /// Shadow follows the punch-out shape (inverted MSDF in prepass).
+    /// Shadow follows the punch-out outline (inverted MSDF in prepass).
     PunchOut,
 }
 

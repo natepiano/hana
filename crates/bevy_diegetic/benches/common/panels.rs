@@ -24,17 +24,17 @@ use super::measurement::CLAY_FONT_SIZE;
 use super::measurement::FONT_SIZE;
 use super::rows::StatusRow;
 
-pub(crate) const PANEL_SIZE: f32 = 160.0;
-pub(crate) const RESIZED_PANEL_SIZE: f32 = 192.0;
+pub const PANEL_SIZE: f32 = 160.0;
+pub const RESIZED_PANEL_SIZE: f32 = 192.0;
 
 #[derive(Clone, Copy)]
-pub(crate) struct DiegeticStatusTreeStyle {
-    pub(crate) text_color:         Color,
-    pub(crate) root_background:    Color,
-    pub(crate) divider_background: Color,
-    pub(crate) header_background:  Color,
-    pub(crate) body_background:    Color,
-    pub(crate) root_child_gap:     f32,
+pub struct DiegeticStatusTreeStyle {
+    pub text_color:         Color,
+    pub root_background:    Color,
+    pub divider_background: Color,
+    pub header_background:  Color,
+    pub body_background:    Color,
+    pub root_child_gap:     f32,
 }
 
 impl Default for DiegeticStatusTreeStyle {
@@ -51,12 +51,12 @@ impl Default for DiegeticStatusTreeStyle {
 }
 
 #[must_use = "bench panels use this unit for layout and font conversion"]
-pub(crate) fn layout_unit(size: f32) -> Unit { Unit::Custom(1.0 / size) }
+pub fn layout_unit(size: f32) -> Unit { Unit::Custom(1.0 / size) }
 
 #[must_use = "raw benchmarks need the same unit conversion as the public path"]
-pub(crate) fn layout_to_points(size: f32) -> f32 { layout_unit(size).to_points() }
+pub fn layout_to_points(size: f32) -> f32 { layout_unit(size).to_points() }
 
-pub(crate) fn build_clay_status_panel<'a>(
+pub fn build_clay_status_panel<'a>(
     layout: &mut ClayLayoutScope<'a, 'a, (), ()>,
     rows: &[StatusRow],
 ) {
@@ -87,12 +87,12 @@ pub(crate) fn build_clay_status_panel<'a>(
 }
 
 #[must_use = "benchmarks need the tree as fixture input"]
-pub(crate) fn build_diegetic_status_tree(rows: &[StatusRow]) -> LayoutTree {
+pub fn build_diegetic_status_tree(rows: &[StatusRow]) -> LayoutTree {
     build_diegetic_status_tree_with_style(rows, DiegeticStatusTreeStyle::default())
 }
 
 #[must_use = "benchmarks need the tree as fixture input"]
-pub(crate) fn build_diegetic_status_tree_with_text_color(
+pub fn build_diegetic_status_tree_with_text_color(
     rows: &[StatusRow],
     text_color: Color,
 ) -> LayoutTree {
@@ -106,7 +106,7 @@ pub(crate) fn build_diegetic_status_tree_with_text_color(
 }
 
 #[must_use = "benchmarks need the tree as fixture input"]
-pub(crate) fn build_diegetic_status_tree_with_style(
+pub fn build_diegetic_status_tree_with_style(
     rows: &[StatusRow],
     style: DiegeticStatusTreeStyle,
 ) -> LayoutTree {
@@ -136,7 +136,7 @@ pub(crate) fn build_diegetic_status_tree_with_style(
     clippy::expect_used,
     reason = "bench fixture construction should fail loudly if static panel dimensions are invalid"
 )]
-pub(crate) fn bench_panel(tree: LayoutTree, size: f32) -> DiegeticPanel {
+pub fn bench_panel(tree: LayoutTree, size: f32) -> DiegeticPanel {
     let unit = layout_unit(size);
     let dim = bevy_diegetic::Dimension {
         value: size,

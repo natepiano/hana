@@ -6,7 +6,7 @@
 //
 // The quad mesh covers the element's bounding box. The shader computes
 // the SDF for a rounded rectangle and uses it for:
-//   - Background fill alpha (inside the shape)
+//   - Background fill alpha (inside the form)
 //   - Border alpha (between inner and outer edges)
 //   - Smooth anti-aliased transitions at all edges
 //
@@ -44,9 +44,9 @@
 }
 
 struct SdfPanelUniform {
-    /// Half-size of the SDF shape in world units (width/2, height/2).
+    /// Half-size of the SDF form in world units (width/2, height/2).
     half_size:      vec2<f32>,
-    /// Half-size of the mesh quad (includes AA padding beyond shape).
+    /// Half-size of the mesh quad (includes AA padding beyond the SDF form).
     mesh_half_size: vec2<f32>,
     /// Per-corner radii in world units: [TL, TR, BR, BL].
     corner_radii:   vec4<f32>,
@@ -54,11 +54,11 @@ struct SdfPanelUniform {
     border_widths: vec4<f32>,
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
-    /// Shape selector. `0` = rounded rect, `1` = triangle, `2` = circle,
+    /// SDF selector. `0` = rounded rect, `1` = triangle, `2` = circle,
     /// `3` = diamond, `4` = line segment.
-    shape_kind:    u32,
-    /// Extra shape parameters for custom SDF shapes.
-    shape_params:  vec4<f32>,
+    sdf_kind:      u32,
+    /// Extra parameters for custom SDF forms.
+    sdf_params:    vec4<f32>,
     /// Alpha of the fill/base color. Lets the prepass distinguish
     /// filled panels from border-only panels.
     fill_alpha:    f32,
@@ -95,7 +95,7 @@ fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
 /// Signed distance to a right-pointing isosceles triangle whose tip is
 /// at `(+half_size.x, 0)` and whose base spans `(-half_size.x, ±half_size.y)`.
 fn sd_triangle(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
-    let a = vec2<f32>(half_size.x + sdf.shape_params.x, 0.0);
+    let a = vec2<f32>(half_size.x + sdf.sdf_params.x, 0.0);
     let b = vec2<f32>(-half_size.x, half_size.y);
     let c = vec2<f32>(-half_size.x, -half_size.y);
 
@@ -154,18 +154,18 @@ fn sd_diamond(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     return select(dist, -dist, inside);
 }
 
-/// Shape dispatch for callouts/panels sharing the same SDF backend.
-fn sd_shape(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
-    if sdf.shape_kind == 1u {
+/// SDF dispatch for callouts/panels sharing the same backend.
+fn sd_form(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    if sdf.sdf_kind == 1u {
         return sd_triangle(p, half_size);
     }
-    if sdf.shape_kind == 2u {
+    if sdf.sdf_kind == 2u {
         return sd_circle(p, half_size);
     }
-    if sdf.shape_kind == 3u {
+    if sdf.sdf_kind == 3u {
         return sd_diamond(p, half_size);
     }
-    if sdf.shape_kind == 4u {
+    if sdf.sdf_kind == 4u {
         return sd_line_segment(p, half_size);
     }
     return sd_rounded_box(p, half_size, radii);
@@ -207,9 +207,9 @@ fn aa_width(dist: f32) -> f32 {
     return fwidth(dist) * 0.75;
 }
 
-fn shape_aa_width(dist: f32) -> f32 {
-    if sdf.shape_kind == 1u {
-        return aa_width(dist) * max(0.1, sdf.shape_params.y);
+fn form_aa_width(dist: f32) -> f32 {
+    if sdf.sdf_kind == 1u {
+        return aa_width(dist) * max(0.1, sdf.sdf_params.y);
     }
     return aa_width(dist);
 }
@@ -228,9 +228,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
         discard;
     }
 
-    let dist = sd_shape(local, sdf.half_size, sdf.corner_radii);
+    let dist = sd_form(local, sdf.half_size, sdf.corner_radii);
 
-    // Discard fragments outside the rounded shape.
+    // Discard fragments outside the rounded rectangle.
     if dist > 0.0 {
         discard;
     }
@@ -256,7 +256,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) {
         let inner_hs = inner_half_size(shadow_border_widths);
         let inner_offset = border_center_offset(shadow_border_widths);
         let inner_radii = inner_corner_radii(shadow_border_widths);
-        let inner_dist = sd_shape(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
+        let inner_dist = sd_form(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
         if inner_dist <= 0.0 {
             discard;
         }
@@ -282,7 +282,7 @@ fn fragment(
 
     // ── Sub-pixel coverage ───────────────────────────────────────────
     // When the element is thinner than a pixel in either axis, inflate
-    // the SDF shape to 1 pixel minimum and scale alpha proportionally.
+    // the SDF form to 1 pixel minimum and scale alpha proportionally.
     // A 0.3px line renders as a 1px line at 30% alpha — always visible,
     // always consistent, physically correct when zoomed in.
     let pixel_size = vec2<f32>(fwidth(local.x), fwidth(local.y));
@@ -290,7 +290,7 @@ fn fragment(
     let effective_half_size = inflated.xy;
     let coverage_scale = inflated.z;
 
-    let is_line_shape = sdf.shape_kind == 4u;
+    let is_line_form = sdf.sdf_kind == 4u;
     let line_center_dist = line_center_distance(local, effective_half_size);
     let line_outer_dist = line_center_dist - effective_half_size.y;
     let line_inner_dist = line_center_dist + effective_half_size.y;
@@ -299,31 +299,31 @@ fn fragment(
     let line_alpha = select(
         0.0,
         stable_border_alpha(line_outer_alpha, line_outer_dist, line_inner_dist),
-        is_line_shape,
+        is_line_form,
     );
 
-    if is_line_shape && line_alpha < 0.001 {
+    if is_line_form && line_alpha < 0.001 {
         discard;
     }
 
-    // Outer shape distance (using potentially inflated half-size).
-    let outer_dist = sd_shape(local, effective_half_size, sdf.corner_radii);
+    // Outer SDF distance (using potentially inflated half-size).
+    let outer_dist = sd_form(local, effective_half_size, sdf.corner_radii);
 
     // Base AA width from screen-space derivatives of the SDF.
-    let base_aa = shape_aa_width(outer_dist);
+    let base_aa = form_aa_width(outer_dist);
 
-    // Outer shape alpha — centered smoothstep. 50%-alpha pixel lands
+    // Outer alpha — centered smoothstep. 50%-alpha pixel lands
     // exactly on the requested edge, so rendered width matches the
     // requested SDF half-size. Previously this used a one-sided
     // `smoothstep(0, 2*base_aa, outer_dist)` to keep interior pixels
     // fully opaque (avoiding seam double-blend where two panels share
     // an edge at zero gap), but that fattened every stroke by ~1 px
-    // on each edge, visibly inflating thin shapes like callout shafts
+    // on each edge, visibly inflating thin geometry like callout shafts
     // and fine borders.
     let outer_alpha = (1.0 - smoothstep(-base_aa, base_aa, outer_dist)) * coverage_scale;
 
     // Discard fully outside fragments.
-    if !is_line_shape && outer_alpha < 0.001 {
+    if !is_line_form && outer_alpha < 0.001 {
         discard;
     }
 
@@ -333,14 +333,14 @@ fn fragment(
         || sdf.border_widths.z > 0.0
         || sdf.border_widths.w > 0.0;
 
-    // Inner shape distance (inside the border).
+    // Inner SDF distance (inside the border).
     let inner_hs = inner_half_size(sdf.border_widths);
     let inner_offset = border_center_offset(sdf.border_widths);
     let inner_radii = inner_corner_radii(sdf.border_widths);
-    let inner_dist = sd_shape(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
+    let inner_dist = sd_form(local - inner_offset, max(inner_hs, vec2(0.0)), inner_radii);
 
     // Inner fill alpha.
-    let inner_aa = shape_aa_width(inner_dist);
+    let inner_aa = form_aa_width(inner_dist);
     let inner_alpha = 1.0 - smoothstep(-inner_aa, inner_aa, inner_dist);
 
     // Standard PBR input from the base StandardMaterial.
@@ -378,13 +378,13 @@ fn fragment(
         } else {
             // Border-only: composite border color directly with border_alpha.
             // Do not gate through outer_alpha — the stroke path can produce
-            // border_alpha > outer_alpha at the shape boundary.
+            // border_alpha > outer_alpha at the SDF boundary.
             final_color = vec4<f32>(
                 border.rgb,
                 border.a * border_alpha,
             );
         }
-    } else if is_line_shape {
+    } else if is_line_form {
         final_color = vec4<f32>(
             fill.rgb,
             fill.a * line_alpha,

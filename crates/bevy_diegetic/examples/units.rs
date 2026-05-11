@@ -22,6 +22,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -765,15 +766,10 @@ fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut OrbitCam)>) {
 fn toggle_debug_outlines(
     keys: Res<ButtonInput<KeyCode>>,
     mut debug: ResMut<DebugOutlines>,
-    mut a4_panels: Query<&mut DiegeticPanel, With<A4Panel>>,
-    mut card_panels: Query<
-        &mut DiegeticPanel,
-        (With<CardPanel>, Without<A4Panel>, Without<IndexPanel>),
-    >,
-    mut index_panels: Query<
-        &mut DiegeticPanel,
-        (With<IndexPanel>, Without<A4Panel>, Without<CardPanel>),
-    >,
+    a4_panels: Query<Entity, With<A4Panel>>,
+    card_panels: Query<Entity, (With<CardPanel>, Without<A4Panel>, Without<IndexPanel>)>,
+    index_panels: Query<Entity, (With<IndexPanel>, Without<A4Panel>, Without<CardPanel>)>,
+    mut commands: Commands,
 ) {
     if !keys.just_pressed(KeyCode::KeyD) {
         return;
@@ -782,14 +778,14 @@ fn toggle_debug_outlines(
     let on = debug.0;
     bevy::log::info!("debug outlines: {on}");
 
-    for mut panel in &mut a4_panels {
-        panel.set_tree(build_a4_page(on));
+    for entity in &a4_panels {
+        commands.set_tree(entity, build_a4_page(on));
     }
-    for mut panel in &mut card_panels {
-        panel.set_tree(build_card(on));
+    for entity in &card_panels {
+        commands.set_tree(entity, build_card(on));
     }
-    for mut panel in &mut index_panels {
-        panel.set_tree(build_index_page(on));
+    for entity in &index_panels {
+        commands.set_tree(entity, build_index_page(on));
     }
 }
 
@@ -1981,10 +1977,11 @@ fn hud_separator(b: &mut LayoutBuilder) {
 }
 
 fn update_controls_hud(
-    mut huds: Query<&mut DiegeticPanel, With<ControlsPanel>>,
+    huds: Query<Entity, With<ControlsPanel>>,
     debug: Res<DebugOutlines>,
     rulers: Res<RulersVisible>,
     cameras: Query<&Projection>,
+    mut commands: Commands,
     mut previous_state: Local<(bool, bool, bool)>,
 ) {
     let perspective = cameras
@@ -1997,8 +1994,8 @@ fn update_controls_hud(
     }
     *previous_state = state;
 
-    for mut panel in &mut huds {
-        panel.set_tree(build_controls_tree(debug.0, rulers.0, perspective));
+    for entity in &huds {
+        commands.set_tree(entity, build_controls_tree(debug.0, rulers.0, perspective));
     }
 }
 

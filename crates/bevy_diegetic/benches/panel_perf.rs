@@ -17,7 +17,7 @@
 //! - **`resize_only`**: panel dimensions change while the tree is reused.
 //! - **`warm`**: same logical tree rebuilt and assigned every iteration.
 //! - **`color_change_full_rebuild`**: same layout structure rebuilt with visual-only text color
-//!   changes, forced through the full-layout benchmark helper.
+//!   changes, forced through the `bench_support` full-layout component setter.
 //! - **`visual_only_rebuild`**: same visual-only change through the optimized command API.
 //!
 //! Run with `cargo bench --bench panel_perf`.
@@ -37,10 +37,15 @@ use common::panels::bench_panel;
 use common::panels::build_diegetic_status_tree;
 use common::panels::build_diegetic_status_tree_with_text_color;
 use common::rows::ROW_COUNTS;
+use common::rows::StatusRow;
 use common::rows::generate_status_rows;
+use criterion::BenchmarkGroup;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use criterion::measurement::WallTime;
+
+type PanelBenchGroup<'a> = BenchmarkGroup<'a, WallTime>;
 
 fn bench_panel_layout(c: &mut Criterion) {
     for row_count in ROW_COUNTS {
@@ -48,124 +53,141 @@ fn bench_panel_layout(c: &mut Criterion) {
         let group_name = format!("panel_{row_count}_rows");
         let mut group = c.benchmark_group(&group_name);
 
-        group.bench_function("cold", |b| {
-            b.iter_with_setup(
-                || {
-                    let mut app = create_bench_app();
-                    let tree = build_diegetic_status_tree(&rows);
-                    let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
-                    (app, entity)
-                },
-                |(mut app, entity)| {
-                    app.update();
-                    black_box(app.world().get::<ComputedDiegeticPanel>(entity));
-                },
-            );
-        });
-
-        group.bench_function("no_change_update", |b| {
-            let mut app = create_bench_app();
-            let tree = build_diegetic_status_tree(&rows);
-            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
-            app.update();
-
-            b.iter(|| {
-                app.update();
-                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
-            });
-        });
-
-        group.bench_function("resize_only", |b| {
-            let mut app = create_bench_app();
-            let tree = build_diegetic_status_tree(&rows);
-            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
-            app.update();
-
-            let mut expanded = false;
-            b.iter(|| {
-                expanded = !expanded;
-                let size = if expanded {
-                    RESIZED_PANEL_SIZE
-                } else {
-                    PANEL_SIZE
-                };
-                let mut panel = app
-                    .world_mut()
-                    .get_mut::<DiegeticPanel>(entity)
-                    .expect("entity must exist");
-                panel.set_width(size);
-                panel.set_height(size);
-                app.update();
-                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
-            });
-        });
-
-        group.bench_function("warm", |b| {
-            let mut app = create_bench_app();
-            let tree = build_diegetic_status_tree(&rows);
-            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
-            app.update();
-
-            b.iter(|| {
-                let tree = build_diegetic_status_tree(&rows);
-                app.world_mut()
-                    .get_mut::<DiegeticPanel>(entity)
-                    .expect("entity must exist")
-                    .set_tree(tree);
-                app.update();
-                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
-            });
-        });
-
-        group.bench_function("color_change_full_rebuild", |b| {
-            let mut app = create_bench_app();
-            let tree = build_diegetic_status_tree(&rows);
-            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
-            app.update();
-
-            let mut toggle = false;
-            b.iter(|| {
-                toggle = !toggle;
-                let color = if toggle {
-                    Color::srgb(1.0, 0.0, 0.0)
-                } else {
-                    Color::srgb(0.0, 0.0, 1.0)
-                };
-                let tree = build_diegetic_status_tree_with_text_color(&rows, color);
-                app.world_mut()
-                    .get_mut::<DiegeticPanel>(entity)
-                    .expect("entity must exist")
-                    .set_tree_full_rebuild_for_bench(tree);
-                app.update();
-                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
-            });
-        });
-
-        group.bench_function("visual_only_rebuild", |b| {
-            let mut app = create_bench_app();
-            let tree = build_diegetic_status_tree(&rows);
-            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
-            app.update();
-
-            let mut toggle = false;
-            b.iter(|| {
-                toggle = !toggle;
-                let color = if toggle {
-                    Color::srgb(1.0, 0.0, 0.0)
-                } else {
-                    Color::srgb(0.0, 0.0, 1.0)
-                };
-                let tree = build_diegetic_status_tree_with_text_color(&rows, color);
-                app.world_mut()
-                    .commands()
-                    .set_diegetic_panel_tree(entity, tree);
-                app.update();
-                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
-            });
-        });
+        bench_cold(&mut group, &rows);
+        bench_no_change_update(&mut group, &rows);
+        bench_resize_only(&mut group, &rows);
+        bench_warm(&mut group, &rows);
+        bench_color_change_full_rebuild(&mut group, &rows);
+        bench_visual_only_rebuild(&mut group, &rows);
 
         group.finish();
     }
+}
+
+fn bench_cold(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]) {
+    group.bench_function("cold", |b| {
+        b.iter_with_setup(
+            || {
+                let mut app = create_bench_app();
+                let tree = build_diegetic_status_tree(rows);
+                let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+                (app, entity)
+            },
+            |(mut app, entity)| {
+                app.update();
+                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+            },
+        );
+    });
+}
+
+fn bench_no_change_update(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]) {
+    group.bench_function("no_change_update", |b| {
+        let mut app = create_bench_app();
+        let tree = build_diegetic_status_tree(rows);
+        let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+        app.update();
+
+        b.iter(|| {
+            app.update();
+            black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+        });
+    });
+}
+
+fn bench_resize_only(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]) {
+    group.bench_function("resize_only", |b| {
+        let mut app = create_bench_app();
+        let tree = build_diegetic_status_tree(rows);
+        let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+        app.update();
+
+        let mut expanded = false;
+        b.iter(|| {
+            expanded = !expanded;
+            let size = if expanded {
+                RESIZED_PANEL_SIZE
+            } else {
+                PANEL_SIZE
+            };
+            let mut panel = app
+                .world_mut()
+                .get_mut::<DiegeticPanel>(entity)
+                .expect("entity must exist");
+            panel.set_width(size);
+            panel.set_height(size);
+            app.update();
+            black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+        });
+    });
+}
+
+fn bench_warm(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]) {
+    group.bench_function("warm", |b| {
+        let mut app = create_bench_app();
+        let tree = build_diegetic_status_tree(rows);
+        let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+        app.update();
+
+        b.iter(|| {
+            let tree = build_diegetic_status_tree(rows);
+            app.world_mut()
+                .get_mut::<DiegeticPanel>(entity)
+                .expect("entity must exist")
+                .set_tree_full_rebuild(tree);
+            app.update();
+            black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+        });
+    });
+}
+
+fn bench_color_change_full_rebuild(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]) {
+    group.bench_function("color_change_full_rebuild", |b| {
+        let mut app = create_bench_app();
+        let tree = build_diegetic_status_tree(rows);
+        let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+        app.update();
+
+        let mut toggle = false;
+        b.iter(|| {
+            toggle = !toggle;
+            let color = if toggle {
+                Color::srgb(1.0, 0.0, 0.0)
+            } else {
+                Color::srgb(0.0, 0.0, 1.0)
+            };
+            let tree = build_diegetic_status_tree_with_text_color(rows, color);
+            app.world_mut()
+                .get_mut::<DiegeticPanel>(entity)
+                .expect("entity must exist")
+                .set_tree_full_rebuild(tree);
+            app.update();
+            black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+        });
+    });
+}
+
+fn bench_visual_only_rebuild(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]) {
+    group.bench_function("visual_only_rebuild", |b| {
+        let mut app = create_bench_app();
+        let tree = build_diegetic_status_tree(rows);
+        let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+        app.update();
+
+        let mut toggle = false;
+        b.iter(|| {
+            toggle = !toggle;
+            let color = if toggle {
+                Color::srgb(1.0, 0.0, 0.0)
+            } else {
+                Color::srgb(0.0, 0.0, 1.0)
+            };
+            let tree = build_diegetic_status_tree_with_text_color(rows, color);
+            app.world_mut().commands().set_tree(entity, tree);
+            app.update();
+            black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+        });
+    });
 }
 
 criterion_group!(benches, bench_panel_layout);

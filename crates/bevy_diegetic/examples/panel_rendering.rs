@@ -15,6 +15,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -346,20 +347,17 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
         .anchor(Anchor::TopLeft)
         .material(unlit_material.clone())
         .text_material(unlit_material)
-        .layout(|b| {
-            build_hud_content(b, LightingPreset::default(), SCENE_ILLUMINANCE, true);
-        })
+        .with_tree(build_hud_tree(
+            LightingPreset::default(),
+            SCENE_ILLUMINANCE,
+            hud_width,
+            true,
+        ))
         .build();
-    let Ok(mut hud_panel) = hud_panel else {
+    let Ok(hud_panel) = hud_panel else {
         error!("failed to build HUD dimensions");
         return;
     };
-    hud_panel.set_tree(build_hud_tree(
-        LightingPreset::default(),
-        SCENE_ILLUMINANCE,
-        hud_width,
-        true,
-    ));
     commands.spawn((HudPanel, hud_panel, Transform::default()));
 
     // ── Camera ──────────────────────────────────────────────────────
@@ -773,7 +771,8 @@ fn update_hud(
     taa: Res<TaaEnabled>,
     lights: Query<&DirectionalLight, With<SceneLight>>,
     windows: Query<&Window>,
-    mut huds: Query<(&mut Transform, &mut DiegeticPanel), With<HudPanel>>,
+    mut huds: Query<(Entity, &mut Transform, &mut DiegeticPanel), With<HudPanel>>,
+    mut commands: Commands,
     mut previous_state: Local<(u8, u32, u32, bool)>,
 ) {
     let Ok(window) = windows.single() else {
@@ -785,7 +784,7 @@ fn update_hud(
     let half_height = window.height() / 2.0;
     let state = (preset.index, lux.to_bits(), win_width.to_bits(), taa.0);
 
-    for (mut transform, mut panel) in &mut huds {
+    for (entity, mut transform, mut panel) in &mut huds {
         transform.translation.x = -half_width;
         transform.translation.y = half_height;
 
@@ -795,7 +794,7 @@ fn update_hud(
         }
         if *previous_state != state || width_changed {
             let panel_width = panel.width();
-            panel.set_tree(build_hud_tree(*preset, lux, panel_width, taa.0));
+            commands.set_tree(entity, build_hud_tree(*preset, lux, panel_width, taa.0));
         }
     }
     *previous_state = state;

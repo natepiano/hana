@@ -15,6 +15,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -222,7 +223,7 @@ fn build_status_panel(text: &str) -> LayoutTree {
 fn on_font_registered(
     trigger: On<FontRegistered>,
     mut font_count: ResMut<FontCount>,
-    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
+    panels: Query<Entity, With<StatusPanel>>,
     mut commands: Commands,
 ) {
     let idx = font_count.0;
@@ -248,8 +249,8 @@ fn on_font_registered(
 
     // Update status panel.
     let status = format!("Fonts registered: {}", font_count.0);
-    for mut panel in &mut panels {
-        panel.set_tree(build_status_panel(&status));
+    for entity in &panels {
+        commands.set_tree(entity, build_status_panel(&status));
     }
 
     info!(
@@ -261,13 +262,14 @@ fn on_font_registered(
 /// Observer: fires when a font fails to load.
 fn on_font_load_failed(
     trigger: On<FontLoadFailed>,
-    mut panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
+    panels: Query<Entity, With<StatusPanel>>,
+    mut commands: Commands,
 ) {
     warn!("FontLoadFailed: {} — {}", trigger.path, trigger.error);
 
     let status = format!("FAILED: {}", trigger.path);
-    for mut panel in &mut panels {
-        panel.set_tree(build_status_panel(&status));
+    for entity in &panels {
+        commands.set_tree(entity, build_status_panel(&status));
     }
 }
 

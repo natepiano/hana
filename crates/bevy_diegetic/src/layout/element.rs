@@ -408,7 +408,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
-    change = change.combine(classify_material_change(material, n_material));
+    change = change.combine(classify_material_change(
+        material.as_deref(),
+        n_material.as_deref(),
+    ));
 
     change.combine(classify_content_change(content, n_content))
 }
@@ -450,15 +453,15 @@ fn classify_border_change(border: Option<Border>, next: Option<Border>) -> Layou
     }
 }
 
-fn classify_material_change(
-    material: &Option<Box<StandardMaterial>>,
-    next: &Option<Box<StandardMaterial>>,
+const fn classify_material_change(
+    material: Option<&StandardMaterial>,
+    next: Option<&StandardMaterial>,
 ) -> LayoutTreeChange {
     match (material, next) {
         (None, None) => LayoutTreeChange::Identical,
         // StandardMaterial does not provide the tight layout-vs-render
         // comparator this optimization needs. Stay conservative until it does.
-        (Some(_), Some(_)) | (None, Some(_)) | (Some(_), None) => LayoutTreeChange::LayoutAffecting,
+        (Some(_) | None, Some(_)) | (Some(_), None) => LayoutTreeChange::LayoutAffecting,
     }
 }
 

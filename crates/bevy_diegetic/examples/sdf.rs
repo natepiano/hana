@@ -3,7 +3,7 @@
 //! Static comparison scene for experimenting with line rendering in world
 //! space. The first pass focuses on vertical line segments at multiple
 //! widths:
-//! - raw line `shape_kind = 4`
+//! - raw line `sdf_kind = 4`
 //! - one-sided border-strip workaround
 //! - border-reference panel edges
 
@@ -165,8 +165,8 @@ struct ExampleSdfUniform {
     corner_radii:     Vec4,
     border_widths:    Vec4,
     border_color:     Vec4,
-    shape_kind:       u32,
-    shape_params:     Vec4,
+    sdf_kind:         u32,
+    sdf_params:       Vec4,
     fill_alpha:       f32,
     clip_rect:        Vec4,
     oit_depth_offset: f32,
@@ -534,8 +534,8 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
         // Row labels: one per row, placed inline at ROW_LABEL_X so they
         // sit at the same height as the strokes they describe.
         for (text, y) in [
-            ("raw line shape_kind=4", ROW_Y[0]),
-            ("stretched rect shape_kind=0", ROW_Y[1]),
+            ("raw line sdf_kind=4", ROW_Y[0]),
+            ("stretched rect sdf_kind=0", ROW_Y[1]),
             ("border edge", ROW_Y[2]),
         ] {
             parent.spawn((
@@ -624,12 +624,12 @@ fn trigger_home_camera(
 // Every approach builds the mesh in "line-local" space where X is the
 // stroke length and Y is its thickness, then rotates -90° about Z so
 // the stroke stands vertically in world space. This is required for
-// `shape_kind = 4` (sd_line_segment), which expects a horizontal
+// `sdf_kind = 4` (sd_line_segment), which expects a horizontal
 // segment; the other rows follow the same convention for consistency.
 
 fn rotate_vertical() -> Quat { Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2) }
 
-/// Row 0 — `sd_line_segment` (`shape_kind` = 4). The path the doc
+/// Row 0 — `sd_line_segment` (`sdf_kind` = 4). The path the doc
 /// flags as producing artifacts.
 fn spawn_raw_line(
     commands: &mut Commands,
@@ -640,7 +640,7 @@ fn spawn_raw_line(
     y: f32,
     width: f32,
 ) {
-    spawn_line_with_shape(
+    spawn_line_with_sdf(
         commands, parent, meshes, materials, x, y, width, 4, LINE_COLOR,
     );
 }
@@ -648,7 +648,7 @@ fn spawn_raw_line(
 /// Row 1 — `sd_rounded_box` with radii = 0 and `half_size.y` equal
 /// to the stroke half-thickness. A filled thin rectangle treated as
 /// a line. Isolates whether the raw-line artifacts come from the
-/// line SDF itself or from the generic shape/alpha path.
+/// line SDF itself or from the generic SDF/alpha path.
 fn spawn_stretched_rect(
     commands: &mut Commands,
     parent: Entity,
@@ -658,14 +658,14 @@ fn spawn_stretched_rect(
     y: f32,
     width: f32,
 ) {
-    spawn_line_with_shape(
+    spawn_line_with_sdf(
         commands, parent, meshes, materials, x, y, width, 0, LINE_COLOR,
     );
 }
 
-/// Shared filled-shape spawner for rows 0 and 1. Same mesh, same
-/// transform, only the `shape_kind` differs.
-fn spawn_line_with_shape(
+/// Shared filled-SDF spawner for rows 0 and 1. Same mesh, same transform, only
+/// the `sdf_kind` differs.
+fn spawn_line_with_sdf(
     commands: &mut Commands,
     parent: Entity,
     meshes: &mut Assets<Mesh>,
@@ -673,7 +673,7 @@ fn spawn_line_with_shape(
     x: f32,
     y: f32,
     width: f32,
-    shape_kind: u32,
+    sdf_kind: u32,
     color: Color,
 ) {
     let half_length = LINE_LENGTH * 0.5;
@@ -693,7 +693,7 @@ fn spawn_line_with_shape(
         [0.0; 4],
         [0.0; 4],
         None,
-        shape_kind,
+        sdf_kind,
     ));
     commands.entity(parent).with_child((
         Mesh3d(meshes.add(Rectangle::new(
@@ -766,7 +766,7 @@ fn example_sdf_material(
     corner_radii: [f32; 4],
     border_widths: [f32; 4],
     border_color: Option<Color>,
-    shape_kind: u32,
+    sdf_kind: u32,
 ) -> ExampleSdfMaterial {
     // Single-sided, back-face culled. Double-sided + cull_mode=None
     // caused front and back fragments to both emit partial-alpha pixels
@@ -796,8 +796,8 @@ fn example_sdf_material(
                 corner_radii: Vec4::from_array(corner_radii),
                 border_widths: Vec4::from_array(border_widths),
                 border_color: border_linear,
-                shape_kind,
-                shape_params: Vec4::ZERO,
+                sdf_kind,
+                sdf_params: Vec4::ZERO,
                 fill_alpha,
                 clip_rect: Vec4::new(
                     -mesh_half_width,

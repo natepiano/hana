@@ -20,6 +20,7 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -798,23 +799,25 @@ fn column(b: &mut LayoutBuilder, align: AlignX, row_height: Sizing, cells: &[Col
 
 fn on_font_registered(
     trigger: On<FontRegistered>,
-    mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
+    panels: Query<Entity, With<FontsPanel>>,
     font_registry: Res<FontRegistry>,
     selected_font: Res<SelectedFont>,
+    mut commands: Commands,
 ) {
     info!(
         "FontRegistered: {} (id: {}, {:?})",
         trigger.name, trigger.id.0, trigger.source
     );
-    for mut panel in &mut panels {
+    for entity in &panels {
         info!("Rebuilding fonts panel");
-        panel.set_tree(build_fonts_panel(&font_registry, selected_font.0));
+        commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
     }
 }
 
 fn update_controls_hud(
-    mut huds: Query<&mut DiegeticPanel, With<ControlsPanel>>,
+    huds: Query<Entity, With<ControlsPanel>>,
     with_overlay: Query<Entity, (With<DisplayText>, With<TypographyOverlay>)>,
+    mut commands: Commands,
     mut previous_state: Local<bool>,
 ) {
     let overlay_on = !with_overlay.is_empty();
@@ -823,8 +826,8 @@ fn update_controls_hud(
     }
     *previous_state = overlay_on;
 
-    for mut panel in &mut huds {
-        panel.set_tree(build_controls_tree(overlay_on));
+    for entity in &huds {
+        commands.set_tree(entity, build_controls_tree(overlay_on));
     }
 }
 
@@ -905,8 +908,9 @@ fn switch_font(
     keyboard: Res<ButtonInput<KeyCode>>,
     font_registry: Res<FontRegistry>,
     mut selected_font: ResMut<SelectedFont>,
-    mut panels: Query<&mut DiegeticPanel, With<FontsPanel>>,
+    panels: Query<Entity, With<FontsPanel>>,
     mut texts: Query<&mut WorldTextStyle, With<DisplayText>>,
+    mut commands: Commands,
 ) {
     let pressed = FONT_KEYS
         .iter()
@@ -925,7 +929,7 @@ fn switch_font(
             .with_font(font_id)
             .with_color(Color::srgb(0.9, 0.9, 0.9));
     }
-    for mut panel in &mut panels {
-        panel.set_tree(build_fonts_panel(&font_registry, selected_font.0));
+    for entity in &panels {
+        commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
     }
 }
