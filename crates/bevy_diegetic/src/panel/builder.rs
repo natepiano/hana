@@ -707,6 +707,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
 fn build_panel(data: BuilderData) -> DiegeticPanel {
     DiegeticPanel {
         tree:             data.tree.unwrap_or_default(),
+        tree_revision:    0,
         width:            data.width,
         height:           data.height,
         layout_unit:      data.layout_unit,

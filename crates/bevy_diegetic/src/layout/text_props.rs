@@ -502,6 +502,49 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         font_features.hash(hasher);
     }
 
+    /// Returns whether layout-affecting text fields match, ignoring fields
+    /// that only affect rendering.
+    #[cfg(feature = "bench_support")]
+    pub(super) fn layout_eq_excluding_visuals(&self, other: &Self) -> bool {
+        let Self {
+            font_id,
+            size,
+            weight,
+            slant,
+            line_height,
+            letter_spacing,
+            word_spacing,
+            wrap,
+            align,
+            anchor,
+            font_features,
+            unit,
+            world_scale,
+            // Render-only.
+            color: _,
+            render_mode: _,
+            shadow_mode: _,
+            sidedness: _,
+            loading_policy: _,
+            alpha_mode: _,
+            context: _,
+        } = self;
+
+        *font_id == other.font_id
+            && size.to_bits() == other.size.to_bits()
+            && weight.0.to_bits() == other.weight.0.to_bits()
+            && *slant == other.slant
+            && line_height.to_bits() == other.line_height.to_bits()
+            && letter_spacing.to_bits() == other.letter_spacing.to_bits()
+            && word_spacing.to_bits() == other.word_spacing.to_bits()
+            && *wrap == other.wrap
+            && *align == other.align
+            && *anchor == other.anchor
+            && *font_features == other.font_features
+            && *unit == other.unit
+            && *world_scale == other.world_scale
+    }
+
     /// Extracts measurement-relevant fields as a [`TextMeasure`].
     ///
     /// Used by [`MeasureTextFn`](crate::layout::MeasureTextFn) — no generic

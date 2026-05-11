@@ -14,6 +14,7 @@ use super::coordinate_space::CoordinateSpace;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
 use super::diegetic_panel::PanelFontUnit;
+use super::diegetic_panel::ScaledLayoutTreeCache;
 use super::perf::DiegeticPerfStats;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
@@ -33,7 +34,7 @@ use crate::text::DiegeticTextMeasurer;
 /// returned from the cache without calling parley. On cache miss, falls back
 /// to the parley-backed [`DiegeticTextMeasurer`].
 pub(super) fn compute_panel_layouts(
-    panels: Query<(Entity, Ref<DiegeticPanel>)>,
+    mut panels: Query<(Entity, Ref<DiegeticPanel>, &mut ScaledLayoutTreeCache)>,
     mut computed_panels: Query<&mut ComputedDiegeticPanel>,
     panel_font_units: Query<&Resolved<PanelFontUnit>>,
     measurer: Res<DiegeticTextMeasurer>,
@@ -41,18 +42,6 @@ pub(super) fn compute_panel_layouts(
     mut perf: ResMut<DiegeticPerfStats>,
     defaults: Res<CascadeDefaults>,
 ) {
-    let changed_entities: Vec<Entity> = panels
-        .iter()
-        .filter(|(_, panel_ref)| panel_ref.is_changed())
-        .map(|(entity, _)| entity)
-        .collect();
-
-    if changed_entities.is_empty() {
-        perf.compute_ms = 0.0;
-        perf.compute_panels = 0;
-        return;
-    }
-
     let start = Instant::now();
     let mut panel_count = 0_usize;
 
@@ -74,27 +63,32 @@ pub(super) fn compute_panel_layouts(
         dims
     });
 
-    for entity in &changed_entities {
-        let Ok((_, panel_ref)) = panels.get(*entity) else {
+    for (entity, panel_ref, mut scaled_tree_cache) in &mut panels {
+        if !panel_ref.is_changed() {
             continue;
-        };
-        let Ok(mut computed) = computed_panels.get_mut(*entity) else {
+        }
+        let Ok(mut computed) = computed_panels.get_mut(entity) else {
             continue;
         };
         panel_count += 1;
 
         let layout_unit = panel_ref.layout_unit();
-        let font_unit = panel_font_units.get(*entity).map_or_else(
+        let font_unit = panel_font_units.get(entity).map_or_else(
             |_| PanelFontUnit::global_default(&defaults).0,
             |resolved| resolved.0.0,
         );
         let layout_to_points = layout_unit.to_points();
         let font_to_points = font_unit.to_points();
 
-        let scaled_tree = panel_ref.tree().scaled(layout_to_points, font_to_points);
+        let scaled_tree = scaled_tree_cache.get_or_update(
+            panel_ref.tree(),
+            panel_ref.tree_revision(),
+            layout_to_points,
+            font_to_points,
+        );
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(
-            &scaled_tree,
+            scaled_tree,
             panel_ref.width() * layout_to_points,
             panel_ref.height() * layout_to_points,
             1.0,
@@ -108,8 +102,11 @@ pub(super) fn compute_panel_layouts(
         computed.set_result(result);
     }
 
-    let compute_ms = start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    perf.compute_ms = compute_ms;
+    perf.compute_ms = if panel_count == 0 {
+        0.0
+    } else {
+        start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND
+    };
     perf.compute_panels = panel_count;
 }
 
@@ -173,6 +170,7 @@ mod tests {
     use bevy::window::Window;
     use bevy_kana::ToF32;
 
+    use super::super::diegetic_panel::ScaledLayoutTreeCache;
     use crate::Anchor;
     use crate::Fit;
     use crate::FitMax;
@@ -183,6 +181,7 @@ mod tests {
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanel;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::screen_space::ScreenSpacePlugin;
@@ -457,6 +456,78 @@ mod tests {
                 panel.height()
             );
         }
+    }
+
+    #[test]
+    fn screen_window_resize_reuses_scaled_layout_tree_cache() {
+        let mut app = make_app();
+        let window_entity = app
+            .world_mut()
+            .spawn((
+                Window {
+                    resolution: (1600_u32, 900_u32).into(),
+                    ..Default::default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        app.add_plugins(ScreenSpacePlugin);
+
+        let panel = DiegeticPanel::screen()
+            .size(Percent(0.25), Percent(0.20))
+            .layout(|b| {
+                b.text("Resize", LayoutTextStyle::new(16.0));
+            })
+            .build()
+            .expect("percent screen panel should build");
+
+        let panel_entity = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(panel_entity)
+            .expect("panel component must exist");
+        assert_eq!(panel.width(), 400.0);
+        assert_eq!(panel.height(), 180.0);
+
+        let cache = app
+            .world()
+            .get::<ScaledLayoutTreeCache>(panel_entity)
+            .expect("cache component must exist");
+        assert_eq!(cache.misses(), 1);
+        assert_eq!(cache.hits(), 0);
+
+        {
+            let mut window = app
+                .world_mut()
+                .get_mut::<Window>(window_entity)
+                .expect("primary window component must exist");
+            window.resolution.set(2000.0, 1000.0);
+        }
+
+        app.update();
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(panel_entity)
+            .expect("panel component must exist");
+        assert_eq!(panel.width(), 500.0);
+        assert_eq!(panel.height(), 200.0);
+
+        let cache = app
+            .world()
+            .get::<ScaledLayoutTreeCache>(panel_entity)
+            .expect("cache component must exist");
+        assert_eq!(cache.misses(), 1);
+        assert_eq!(cache.hits(), 1);
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(panel_entity)
+            .expect("computed panel component must exist");
+        assert!(computed.result().is_some());
     }
 
     #[test]

@@ -52,6 +52,8 @@ mod units;
 pub use builder::El;
 pub use builder::LayoutBuilder;
 pub use element::LayoutTree;
+#[cfg(feature = "bench_support")]
+pub use element::LayoutTreeChange;
 pub use engine::LayoutEngine;
 pub use engine::LayoutResult;
 pub use engine::MeasureTextFn;

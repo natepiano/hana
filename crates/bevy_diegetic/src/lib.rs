@@ -63,6 +63,7 @@ mod text;
 pub mod bench_support {
     pub use crate::layout::LayoutEngine;
     pub use crate::layout::LayoutResult;
+    pub use crate::layout::LayoutTreeChange;
     pub use crate::layout::MeasureTextFn;
     pub use crate::layout::RectangleSource;
     pub use crate::layout::RenderCommand;

@@ -85,6 +85,29 @@ pub(super) enum ElementContent {
     Empty,
 }
 
+/// Classifies the difference between two layout trees.
+#[cfg(feature = "bench_support")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LayoutTreeChange {
+    /// Trees are exactly identical for the fields this classifier inspects.
+    Identical,
+    /// Trees differ only in fields that should not affect layout bounds.
+    VisualOnly,
+    /// Trees differ in structure, sizing, measurement, or placement fields.
+    LayoutAffecting,
+}
+
+#[cfg(feature = "bench_support")]
+impl LayoutTreeChange {
+    const fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::LayoutAffecting, _) | (_, Self::LayoutAffecting) => Self::LayoutAffecting,
+            (Self::VisualOnly, _) | (_, Self::VisualOnly) => Self::VisualOnly,
+            (Self::Identical, Self::Identical) => Self::Identical,
+        }
+    }
+}
+
 impl Default for Element {
     fn default() -> Self {
         Self {
@@ -242,6 +265,25 @@ impl LayoutTree {
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
 
+    /// Classifies whether `next` differs from this tree only in render-only
+    /// fields.
+    #[cfg(feature = "bench_support")]
+    #[must_use]
+    pub fn classify_change(&self, next: &Self) -> LayoutTreeChange {
+        if self.root != next.root || self.elements.len() != next.elements.len() {
+            return LayoutTreeChange::LayoutAffecting;
+        }
+
+        let mut change = LayoutTreeChange::Identical;
+        for (element, next_element) in self.elements.iter().zip(&next.elements) {
+            change = change.combine(classify_element_change(element, next_element));
+            if change == LayoutTreeChange::LayoutAffecting {
+                return change;
+            }
+        }
+        change
+    }
+
     /// Returns the PBR material override for the element at `index`, if any.
     #[must_use]
     pub fn element_material(&self, index: usize) -> Option<&StandardMaterial> {
@@ -287,5 +329,101 @@ impl LayoutTree {
             }
         }
         tree
+    }
+}
+
+#[cfg(feature = "bench_support")]
+fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
+    if element.width != next.width
+        || element.height != next.height
+        || element.padding != next.padding
+        || element.child_gap != next.child_gap
+        || element.direction != next.direction
+        || element.child_align_x != next.child_align_x
+        || element.child_align_y != next.child_align_y
+        || element.clip != next.clip
+    {
+        return LayoutTreeChange::LayoutAffecting;
+    }
+
+    let border_change = classify_border_change(element.border, next.border);
+    if border_change == LayoutTreeChange::LayoutAffecting {
+        return LayoutTreeChange::LayoutAffecting;
+    }
+
+    let mut change = border_change;
+    if element.background != next.background
+        || element.corner_radius != next.corner_radius
+        || element.material.is_some()
+        || next.material.is_some()
+    {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
+
+    change.combine(classify_content_change(&element.content, &next.content))
+}
+
+#[cfg(feature = "bench_support")]
+fn classify_border_change(border: Option<Border>, next: Option<Border>) -> LayoutTreeChange {
+    match (border, next) {
+        (None, None) => LayoutTreeChange::Identical,
+        (Some(border), Some(next)) => {
+            if border.left != next.left
+                || border.right != next.right
+                || border.top != next.top
+                || border.bottom != next.bottom
+                || border.between_children != next.between_children
+            {
+                LayoutTreeChange::LayoutAffecting
+            } else if border.color != next.color {
+                LayoutTreeChange::VisualOnly
+            } else {
+                LayoutTreeChange::Identical
+            }
+        },
+        (None, Some(_)) | (Some(_), None) => LayoutTreeChange::LayoutAffecting,
+    }
+}
+
+#[cfg(feature = "bench_support")]
+fn classify_content_change(content: &ElementContent, next: &ElementContent) -> LayoutTreeChange {
+    match (content, next) {
+        (ElementContent::Children(children), ElementContent::Children(next_children)) => {
+            if children == next_children {
+                LayoutTreeChange::Identical
+            } else {
+                LayoutTreeChange::LayoutAffecting
+            }
+        },
+        (
+            ElementContent::Text { text, config },
+            ElementContent::Text {
+                text: next_text,
+                config: next_config,
+            },
+        ) => {
+            if text != next_text || !config.layout_eq_excluding_visuals(next_config) {
+                LayoutTreeChange::LayoutAffecting
+            } else if config != next_config {
+                LayoutTreeChange::VisualOnly
+            } else {
+                LayoutTreeChange::Identical
+            }
+        },
+        (
+            ElementContent::Image { handle, tint },
+            ElementContent::Image {
+                handle: next_handle,
+                tint: next_tint,
+            },
+        ) => {
+            if handle == next_handle && tint == next_tint {
+                LayoutTreeChange::Identical
+            } else {
+                LayoutTreeChange::VisualOnly
+            }
+        },
+        (ElementContent::Empty, ElementContent::Empty) => LayoutTreeChange::Identical,
+        _ => LayoutTreeChange::LayoutAffecting,
     }
 }

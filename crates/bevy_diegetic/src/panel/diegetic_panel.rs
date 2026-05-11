@@ -47,11 +47,14 @@ use crate::layout::Unit;
 /// Requires a [`Transform`] for world-space positioning.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-#[require(ComputedDiegeticPanel, Transform, Visibility)]
+#[require(ComputedDiegeticPanel, ScaledLayoutTreeCache, Transform, Visibility)]
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
     pub(super) tree:             LayoutTree,
+    /// Monotonic revision for cache invalidation when [`Self::tree`] is replaced.
+    #[reflect(ignore)]
+    pub(super) tree_revision:    u64,
     /// Panel width in layout units. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
     pub(super) width:            f32,
@@ -104,6 +107,7 @@ impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
             tree:             LayoutTree::default(),
+            tree_revision:    0,
             width:            0.0,
             height:           0.0,
             layout_unit:      Unit::Meters,
@@ -127,6 +131,10 @@ impl DiegeticPanel {
     /// Returns a reference to the layout tree.
     #[must_use]
     pub const fn tree(&self) -> &LayoutTree { &self.tree }
+
+    /// Revision of the current layout tree.
+    #[must_use]
+    pub(super) const fn tree_revision(&self) -> u64 { self.tree_revision }
 
     /// Panel width in layout units.
     #[must_use]
@@ -208,7 +216,10 @@ impl DiegeticPanel {
     }
 
     /// Replaces the layout tree.
-    pub fn set_tree(&mut self, tree: LayoutTree) { self.tree = tree; }
+    pub fn set_tree(&mut self, tree: LayoutTree) {
+        self.tree = tree;
+        self.tree_revision = self.tree_revision.wrapping_add(1);
+    }
 
     /// Sets the panel width directly (in layout units).
     ///
@@ -380,6 +391,67 @@ impl CascadeTarget for PanelFontUnit {
     fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.panel_font_unit) }
 }
 
+/// Cached point-scaled layout tree for one [`DiegeticPanel`].
+///
+/// The source [`LayoutTree`] remains owned by [`DiegeticPanel`]. This component
+/// stores the derived tree used by the layout engine after layout and font units
+/// are converted to points.
+#[derive(Component, Default)]
+pub(super) struct ScaledLayoutTreeCache {
+    tree_revision:         u64,
+    layout_to_points_bits: u32,
+    font_to_points_bits:   u32,
+    tree:                  Option<LayoutTree>,
+    #[cfg(test)]
+    hits:                  usize,
+    #[cfg(test)]
+    misses:                usize,
+}
+
+impl ScaledLayoutTreeCache {
+    /// Returns a point-scaled tree, rebuilding the cache when the source tree
+    /// or scale factors change.
+    pub(super) fn get_or_update(
+        &mut self,
+        source: &LayoutTree,
+        tree_revision: u64,
+        layout_to_points: f32,
+        font_to_points: f32,
+    ) -> &LayoutTree {
+        let layout_to_points_bits = layout_to_points.to_bits();
+        let font_to_points_bits = font_to_points.to_bits();
+        let cache_hit = self.tree.is_some()
+            && self.tree_revision == tree_revision
+            && self.layout_to_points_bits == layout_to_points_bits
+            && self.font_to_points_bits == font_to_points_bits;
+
+        if cache_hit {
+            #[cfg(test)]
+            {
+                self.hits += 1;
+            }
+        } else {
+            self.tree_revision = tree_revision;
+            self.layout_to_points_bits = layout_to_points_bits;
+            self.font_to_points_bits = font_to_points_bits;
+            self.tree = None;
+            #[cfg(test)]
+            {
+                self.misses += 1;
+            }
+        }
+
+        self.tree
+            .get_or_insert_with(|| source.scaled(layout_to_points, font_to_points))
+    }
+
+    #[cfg(test)]
+    pub(super) const fn hits(&self) -> usize { self.hits }
+
+    #[cfg(test)]
+    pub(super) const fn misses(&self) -> usize { self.misses }
+}
+
 /// Computed layout result for a [`DiegeticPanel`].
 ///
 /// Automatically added via required components when a [`DiegeticPanel`] is inserted.
@@ -423,5 +495,81 @@ impl ComputedDiegeticPanel {
     pub const fn set_content_size(&mut self, width: f32, height: f32) {
         self.content_width = width;
         self.content_height = height;
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "tests compare exact revision and cache counter values"
+)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic if fixture panel construction fails"
+)]
+mod tests {
+    use super::DiegeticPanel;
+    use super::ScaledLayoutTreeCache;
+    use crate::LayoutBuilder;
+    use crate::LayoutTextStyle;
+
+    fn test_tree(text: &str) -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(text, LayoutTextStyle::new(10.0));
+        builder.build()
+    }
+
+    #[test]
+    fn scaled_tree_cache_hits_until_revision_or_scale_changes() {
+        let tree = test_tree("cache");
+        let mut cache = ScaledLayoutTreeCache::default();
+
+        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        assert_eq!(cache.hits(), 0);
+        assert_eq!(cache.misses(), 1);
+
+        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 1);
+
+        let _ = cache.get_or_update(&tree, 1, 2.0, 3.0);
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 2);
+
+        let _ = cache.get_or_update(&tree, 1, 4.0, 3.0);
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 3);
+
+        let _ = cache.get_or_update(&tree, 1, 4.0, 5.0);
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 4);
+    }
+
+    #[test]
+    fn tree_revision_changes_only_when_tree_is_replaced() {
+        let mut panel = DiegeticPanel::default();
+        assert_eq!(panel.tree_revision(), 0);
+
+        panel.set_width(120.0);
+        panel.set_height(80.0);
+        assert_eq!(panel.tree_revision(), 0);
+
+        let resize_result = panel.set_size((2.0, 1.0));
+        assert!(resize_result.is_ok());
+        assert_eq!(panel.tree_revision(), 0);
+
+        panel.set_tree(test_tree("next"));
+        assert_eq!(panel.tree_revision(), 1);
+    }
+
+    #[test]
+    fn builder_panels_start_at_tree_revision_zero() {
+        let panel = DiegeticPanel::world()
+            .size(1.0, 0.5)
+            .with_tree(test_tree("builder"))
+            .build()
+            .expect("test panel should build");
+
+        assert_eq!(panel.tree_revision(), 0);
     }
 }

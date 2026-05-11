@@ -27,6 +27,29 @@ use super::rows::StatusRow;
 pub(crate) const PANEL_SIZE: f32 = 160.0;
 pub(crate) const RESIZED_PANEL_SIZE: f32 = 192.0;
 
+#[derive(Clone, Copy)]
+pub(crate) struct DiegeticStatusTreeStyle {
+    pub(crate) text_color:         Color,
+    pub(crate) root_background:    Color,
+    pub(crate) divider_background: Color,
+    pub(crate) header_background:  Color,
+    pub(crate) body_background:    Color,
+    pub(crate) root_child_gap:     f32,
+}
+
+impl Default for DiegeticStatusTreeStyle {
+    fn default() -> Self {
+        Self {
+            text_color:         Color::WHITE,
+            root_background:    Color::srgb_u8(180, 96, 122),
+            divider_background: Color::srgb_u8(74, 196, 172),
+            header_background:  Color::srgb_u8(52, 98, 90),
+            body_background:    Color::srgb_u8(22, 28, 34),
+            root_child_gap:     5.0,
+        }
+    }
+}
+
 #[must_use = "bench panels use this unit for layout and font conversion"]
 pub(crate) fn layout_unit(size: f32) -> Unit { Unit::Custom(1.0 / size) }
 
@@ -65,7 +88,7 @@ pub(crate) fn build_clay_status_panel<'a>(
 
 #[must_use = "benchmarks need the tree as fixture input"]
 pub(crate) fn build_diegetic_status_tree(rows: &[StatusRow]) -> LayoutTree {
-    build_diegetic_status_tree_with_text_color(rows, Color::WHITE)
+    build_diegetic_status_tree_with_style(rows, DiegeticStatusTreeStyle::default())
 }
 
 #[must_use = "benchmarks need the tree as fixture input"]
@@ -73,24 +96,38 @@ pub(crate) fn build_diegetic_status_tree_with_text_color(
     rows: &[StatusRow],
     text_color: Color,
 ) -> LayoutTree {
+    build_diegetic_status_tree_with_style(
+        rows,
+        DiegeticStatusTreeStyle {
+            text_color,
+            ..Default::default()
+        },
+    )
+}
+
+#[must_use = "benchmarks need the tree as fixture input"]
+pub(crate) fn build_diegetic_status_tree_with_style(
+    rows: &[StatusRow],
+    style: DiegeticStatusTreeStyle,
+) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(8.0))
             .direction(Direction::TopToBottom)
-            .child_gap(5.0)
-            .background(Color::srgb_u8(180, 96, 122)),
+            .child_gap(style.root_child_gap)
+            .background(style.root_background),
     );
-    build_diegetic_header(&mut builder, text_color);
+    build_diegetic_header(&mut builder, style);
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::fixed(4.0))
-            .background(Color::srgb_u8(74, 196, 172)),
+            .background(style.divider_background),
         |_| {},
     );
-    build_diegetic_body(&mut builder, rows, text_color);
+    build_diegetic_body(&mut builder, rows, style);
     builder.build()
 }
 
@@ -231,14 +268,14 @@ fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[Statu
     );
 }
 
-fn build_diegetic_header(builder: &mut LayoutBuilder, text_color: Color) {
+fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeStyle) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::grow_range(FONT_SIZE, 20.0))
             .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
             .child_align_y(AlignY::Center)
-            .background(Color::srgb_u8(52, 98, 90)),
+            .background(style.header_background),
         |builder| {
             builder.with(
                 El::new()
@@ -251,7 +288,7 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, text_color: Color) {
                         |builder| {
                             builder.text(
                                 "STATUS",
-                                LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
+                                LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
                             );
                         },
                     );
@@ -267,7 +304,7 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, text_color: Color) {
                         |builder| {
                             builder.text(
                                 "BENCH",
-                                LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
+                                LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
                             );
                         },
                     );
@@ -277,12 +314,16 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, text_color: Color) {
     );
 }
 
-fn build_diegetic_body(builder: &mut LayoutBuilder, rows: &[StatusRow], text_color: Color) {
+fn build_diegetic_body(
+    builder: &mut LayoutBuilder,
+    rows: &[StatusRow],
+    style: DiegeticStatusTreeStyle,
+) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .background(Color::srgb_u8(22, 28, 34)),
+            .background(style.body_background),
         |builder| {
             builder.with(
                 El::new()
@@ -300,7 +341,7 @@ fn build_diegetic_body(builder: &mut LayoutBuilder, rows: &[StatusRow], text_col
                             |builder| {
                                 builder.text(
                                     *label,
-                                    LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
+                                    LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
                                 );
                                 builder.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -308,7 +349,7 @@ fn build_diegetic_body(builder: &mut LayoutBuilder, rows: &[StatusRow], text_col
                                 );
                                 builder.text(
                                     *value,
-                                    LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
+                                    LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
                                 );
                             },
                         );
