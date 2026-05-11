@@ -91,11 +91,25 @@ pub use input::OrbitCamButtonDragZoomAxis;
 pub use input::OrbitCamButtonDragZoomBinding;
 pub use input::OrbitCamInput;
 pub use input::OrbitCamInputContext;
+#[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputMode;
+#[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputModeApplied;
+#[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputModeApplyState;
+#[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputModeApplyStatus;
+#[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputModeDescriptor;
+#[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputModeRejected;
+use input::OrbitCamInputModesPlugin;
 pub use input::OrbitCamInteractionEnded;
 pub use input::OrbitCamInteractionKind;
 pub use input::OrbitCamInteractionSourcesChanged;
 pub use input::OrbitCamInteractionStarted;
 pub use input::OrbitCamInteractionState;
+pub use input::OrbitCamManual;
 pub use input::OrbitCamManualInput;
 pub use input::OrbitCamManualInputWriter;
 pub use input::OrbitCamOrbitAction;
@@ -148,7 +162,11 @@ pub struct LagrangePlugin;
 
 impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((LagrangeEnhancedInputPlugin, LagrangeSystemSetsPlugin));
+        app.add_plugins((
+            LagrangeEnhancedInputPlugin,
+            LagrangeSystemSetsPlugin,
+            OrbitCamInputModesPlugin,
+        ));
 
         app.init_resource::<ActiveCameraData>()
             .init_resource::<MouseKeyTracker>()

@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use super::CoarseZoomDelta;
 use super::ManualInputSource;
 use super::OrbitCamInput;
+use super::OrbitCamManual;
 use super::OrbitDelta;
 use super::PanDelta;
 use super::SmoothZoomDelta;
@@ -12,7 +13,7 @@ use super::SmoothZoomDelta;
 /// System parameter for writing app-authored manual `OrbitCamInput`.
 #[derive(SystemParam)]
 pub struct OrbitCamManualInputWriter<'w, 's> {
-    inputs: Query<'w, 's, &'static mut OrbitCamInput>,
+    inputs: Query<'w, 's, &'static mut OrbitCamInput, With<OrbitCamManual>>,
 }
 
 impl OrbitCamManualInputWriter<'_, '_> {
@@ -20,8 +21,8 @@ impl OrbitCamManualInputWriter<'_, '_> {
     ///
     /// # Errors
     ///
-    /// Returns [`QueryEntityError`] when `camera` does not have an `OrbitCamInput`
-    /// component or cannot be queried.
+    /// Returns [`QueryEntityError`] when `camera` is not in manual input mode, does
+    /// not have an `OrbitCamInput` component, or cannot be queried.
     pub fn get_mut(
         &mut self,
         camera: Entity,

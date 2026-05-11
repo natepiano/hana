@@ -20,6 +20,7 @@ mod intent;
 mod legacy;
 mod manual;
 mod metrics;
+mod modes;
 mod sources;
 mod state;
 
@@ -84,6 +85,20 @@ pub use manual::OrbitCamManualInput;
 pub use manual::OrbitCamManualInputWriter;
 pub use metrics::CameraInputMetricKind;
 pub use metrics::CameraInputSurfaceMetrics;
+#[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputMode;
+#[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputModeApplied;
+#[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputModeApplyState;
+#[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputModeApplyStatus;
+#[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputModeDescriptor;
+#[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputModeRejected;
+pub(crate) use modes::OrbitCamInputModesPlugin;
+pub use modes::OrbitCamManual;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;
 pub use state::OrbitCamInteractionState;

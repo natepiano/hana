@@ -1,3 +1,4 @@
+use std::fmt;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
@@ -21,7 +22,8 @@ const ZOOM_COARSE_ACTION_NAME: &str = "OrbitCamZoomCoarseAction";
 const ZOOM_SMOOTH_ACTION_NAME: &str = "OrbitCamZoomSmoothAction";
 
 /// Built-in orbit-camera input presets.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component, Default)]
 #[non_exhaustive]
 pub enum OrbitCamPreset {
     /// Mouse-oriented default controls.
@@ -57,7 +59,9 @@ impl OrbitCamPreset {
 }
 
 /// Validated runtime binding specification for an `OrbitCam`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+#[reflect(opaque)]
 pub struct OrbitCamBindings {
     orbit:            OrbitCamOrbitActionBindings,
     pan:              OrbitCamPanActionBindings,
@@ -725,6 +729,43 @@ impl OrbitCamBindingsError {
         }
     }
 }
+
+impl fmt::Display for OrbitCamBindingsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingWheelPolicy => {
+                formatter.write_str("custom bindings must choose a wheel policy")
+            },
+            Self::MissingSources => formatter.write_str("binding source metadata is missing"),
+            Self::HeldMotionMissingEngagement { action } => {
+                write!(
+                    formatter,
+                    "{action} is a held binding but has no engagement binding"
+                )
+            },
+            Self::ImpulseEngagement { action } => {
+                write!(
+                    formatter,
+                    "{action} is an impulse binding and cannot have an engagement action"
+                )
+            },
+            Self::AdapterConflict { source } => {
+                write!(
+                    formatter,
+                    "binding conflicts with Lagrange's {source} adapter"
+                )
+            },
+            Self::HeldSourceMismatch { action } => {
+                write!(
+                    formatter,
+                    "{action} motion and engagement bindings do not share source metadata"
+                )
+            },
+        }
+    }
+}
+
+impl std::error::Error for OrbitCamBindingsError {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Reflect)]
 struct HeldBindingDescriptor {
