@@ -9,6 +9,24 @@ use bevy_kana::ToF32;
 use super::constants::DEFAULT_RESOLUTION_SENTINEL;
 use super::obstacle::Obstacle;
 
+enum TangentSample {
+    Only,
+    First,
+    Last,
+    Interior,
+}
+
+impl TangentSample {
+    const fn from_point_index(point_index: usize, point_count: usize) -> Self {
+        match (point_count, point_index) {
+            (0 | 1, _) => Self::Only,
+            (_, 0) => Self::First,
+            _ if point_index == point_count - 1 => Self::Last,
+            _ => Self::Interior,
+        }
+    }
+}
+
 /// Where a cable connects to an object.
 #[derive(Clone, Copy, Debug)]
 pub struct Anchor {
@@ -85,20 +103,21 @@ impl CableSegment {
             return Self::default();
         }
 
-        let n = points.len();
+        let point_count = points.len();
 
         let tangents: Vec<Vec3> = points
             .iter()
             .enumerate()
-            .map(|(i, _)| {
-                if n == 1 {
-                    Vec3::Y
-                } else if i == 0 {
-                    (points[1] - points[0]).normalize_or_zero()
-                } else if i == n - 1 {
-                    (points[n - 1] - points[n - 2]).normalize_or_zero()
-                } else {
-                    (points[i + 1] - points[i - 1]).normalize_or_zero()
+            .map(|(point_index, _)| {
+                match TangentSample::from_point_index(point_index, point_count) {
+                    TangentSample::Only => Vec3::Y,
+                    TangentSample::First => (points[1] - points[0]).normalize_or_zero(),
+                    TangentSample::Last => {
+                        (points[point_count - 1] - points[point_count - 2]).normalize_or_zero()
+                    }
+                    TangentSample::Interior => {
+                        (points[point_index + 1] - points[point_index - 1]).normalize_or_zero()
+                    }
                 }
             })
             .collect();

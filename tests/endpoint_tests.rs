@@ -7,8 +7,11 @@
 //! Uses `MinimalPlugins` for headless testing: no window, no renderer.
 
 use bevy::app::App;
+use bevy::asset::AssetPlugin;
+use bevy::gizmos::GizmoPlugin;
 use bevy::math::Vec3;
 use bevy::prelude::*;
+use bevy::transform::TransformPlugin;
 use bevy_catenary::AttachedTo;
 use bevy_catenary::Cable;
 use bevy_catenary::CableEnd;
@@ -42,9 +45,9 @@ fn spawn_world_cable(app: &mut App, start: Vec3, end: Vec3) -> Entity {
 fn build_test_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(bevy::asset::AssetPlugin::default());
-    app.add_plugins(bevy::transform::TransformPlugin);
-    app.add_plugins(bevy::gizmos::GizmoPlugin);
+    app.add_plugins(AssetPlugin::default());
+    app.add_plugins(TransformPlugin);
+    app.add_plugins(GizmoPlugin);
     app.add_plugins(CatenaryPlugin);
     app
 }
