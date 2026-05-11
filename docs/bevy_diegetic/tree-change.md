@@ -11,7 +11,7 @@ the optimized tree setter. It should not add per-frame comparison work.
 When user code replaces a panel tree through the optimized API:
 
 ```rust
-commands.set_diegetic_panel_tree(panel_entity, next_tree);
+commands.set_tree(panel_entity, next_tree);
 ```
 
 the queued setter should classify the change:
@@ -31,7 +31,7 @@ The important split is:
 - `VisualOnly`: geometry is still valid, but render commands may need to be
   re-emitted because colors/materials/backgrounds/borders/images may differ.
 
-## Why This Shape
+## Why This Design
 
 Today `LayoutEngine::compute` does two jobs:
 
@@ -142,14 +142,14 @@ The optimized public mutation path should be a `Commands` extension that queues
 a cached setter system:
 
 ```rust
-commands.set_diegetic_panel_tree(entity, next_tree);
+commands.set_tree(entity, next_tree);
 ```
 
 Internally that extension can use `run_system_cached_with` so the system has
 access to both components:
 
 ```rust
-fn set_diegetic_panel_tree(
+fn set_tree_command(
     In((entity, next_tree)): In<(Entity, LayoutTree)>,
     mut panels: Query<(
         &mut DiegeticPanel,
@@ -163,22 +163,22 @@ fn set_diegetic_panel_tree(
 This setter is deferred. Systems that respond to tree changes, including
 `compute_panel_layouts`, must run after the deferred setter has been applied.
 The plugin schedule must provide an `ApplyDeferred` boundary between user code
-that queues `set_diegetic_panel_tree` and layout systems that consume the
-pending classification.
+that queues `commands.set_tree(...)` and layout systems that consume the pending
+classification.
 
 Full-rebuild benchmark comparisons should use a `bench_support`-only helper
 that replaces the tree and forces the conservative full-layout path. Normal
 callers that want optimized change classification should use
-`commands.set_diegetic_panel_tree(entity, next_tree)`. Any remaining direct
-`DiegeticPanel::set_tree` call sites are compatibility surface to migrate
-toward the command API rather than the long-term preferred path.
+`commands.set_tree(entity, next_tree)`. Benchmark comparisons
+can use the `bench_support`-gated `DiegeticPanel::set_tree_full_rebuild`
+component method to opt into the conservative full-layout path explicitly.
 
 ## Layout Result Refactor
 
 Refactor `LayoutResult` so render command generation can run independently from
 layout geometry computation.
 
-Current shape:
+Current structure:
 
 ```rust
 LayoutResult {
@@ -187,7 +187,7 @@ LayoutResult {
 }
 ```
 
-Target shape can stay source-compatible at first, but internally it needs enough
+Target structure can stay source-compatible at first, but internally it needs enough
 cached layout data to regenerate commands without recomputing geometry:
 
 - computed element bounds
@@ -220,7 +220,7 @@ the wrong scale.
 `compute_panel_layouts` should become:
 
 ```rust
-// Runs after ApplyDeferred for set_diegetic_panel_tree.
+// Runs after ApplyDeferred for commands.set_tree(...).
 for changed panel {
     match pending_tree_change.take() {
         None => {
@@ -319,7 +319,7 @@ System tests:
 2. Implement classifier methods with exhaustive destructuring and add the
    classification unit tests.
 3. Add the required `DiegeticPanelChangeClassification` component and the
-   command-backed `set_diegetic_panel_tree` API.
+   command-backed `set_tree` API.
 4. Add a `bench_support`-only full-rebuild tree setter for benchmark
    comparisons.
 5. Schedule layout response after the deferred tree setter has applied.
@@ -332,9 +332,9 @@ System tests:
 9. Add pending tree-change recording to the queued tree setter.
 10. Add the `VisualOnly` branch in `compute_panel_layouts`.
 11. Add public-path benchmark coverage for visual-only tree replacement.
-12. Migrate crate examples from direct `DiegeticPanel::set_tree` calls to
-    `commands.set_diegetic_panel_tree(entity, next_tree)` once the optimized
+12. Migrate crate examples from direct tree replacement to
+    `commands.set_tree(entity, next_tree)` once the optimized
     command API is tested and benchmarked.
-13. After examples and internal callers use the command API, decide whether
-    direct `DiegeticPanel::set_tree` should stay as a documented conservative
-    escape hatch or be deprecated.
+13. Gate the direct component fallback
+    `DiegeticPanel::set_tree_full_rebuild` behind `bench_support` so full
+    recomputation remains available to benchmarks but is not normal public API.
