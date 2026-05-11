@@ -13,6 +13,7 @@ use super::constants::PANEL_RESIZE_EPSILON;
 use super::coordinate_space::CoordinateSpace;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
+use super::diegetic_panel::DiegeticPanelChangeClassification;
 use super::diegetic_panel::PanelFontUnit;
 use super::diegetic_panel::ScaledLayoutTreeCache;
 use super::perf::DiegeticPerfStats;
@@ -21,6 +22,7 @@ use crate::cascade::CascadeTarget;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::LayoutEngine;
+use crate::layout::LayoutTreeChange;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
 use crate::layout::Sizing;
@@ -34,7 +36,12 @@ use crate::text::DiegeticTextMeasurer;
 /// returned from the cache without calling parley. On cache miss, falls back
 /// to the parley-backed [`DiegeticTextMeasurer`].
 pub(super) fn compute_panel_layouts(
-    mut panels: Query<(Entity, Ref<DiegeticPanel>, &mut ScaledLayoutTreeCache)>,
+    mut panels: Query<(
+        Entity,
+        Ref<DiegeticPanel>,
+        &mut DiegeticPanelChangeClassification,
+        &mut ScaledLayoutTreeCache,
+    )>,
     mut computed_panels: Query<&mut ComputedDiegeticPanel>,
     panel_font_units: Query<&Resolved<PanelFontUnit>>,
     measurer: Res<DiegeticTextMeasurer>,
@@ -63,14 +70,13 @@ pub(super) fn compute_panel_layouts(
         dims
     });
 
-    for (entity, panel_ref, mut scaled_tree_cache) in &mut panels {
-        if !panel_ref.is_changed() {
+    for (entity, panel_ref, mut tree_change, mut scaled_tree_cache) in &mut panels {
+        if !panel_ref.is_changed() && tree_change.pending().is_none() {
             continue;
         }
         let Ok(mut computed) = computed_panels.get_mut(entity) else {
             continue;
         };
-        panel_count += 1;
 
         let layout_unit = panel_ref.layout_unit();
         let font_unit = panel_font_units.get(entity).map_or_else(
@@ -80,12 +86,28 @@ pub(super) fn compute_panel_layouts(
         let layout_to_points = layout_unit.to_points();
         let font_to_points = font_unit.to_points();
 
+        let pending_change = tree_change.take();
+        if matches!(pending_change, Some(LayoutTreeChange::Identical))
+            && computed.result().is_some()
+        {
+            continue;
+        }
+
         let scaled_tree = scaled_tree_cache.get_or_update(
             panel_ref.tree(),
             panel_ref.tree_revision(),
             layout_to_points,
             font_to_points,
         );
+
+        if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
+            && let Some(result) = computed.result_mut()
+        {
+            result.regenerate_commands(scaled_tree);
+            panel_count += 1;
+            continue;
+        }
+
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(
             scaled_tree,
@@ -100,6 +122,7 @@ pub(super) fn compute_panel_layouts(
         }
 
         computed.set_result(result);
+        panel_count += 1;
     }
 
     perf.compute_ms = if panel_count == 0 {
@@ -179,10 +202,14 @@ mod tests {
     use crate::Percent;
     use crate::Px;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
+    use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutTree;
+    use crate::layout::RenderCommandKind;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanel;
+    use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
@@ -216,6 +243,129 @@ mod tests {
         app.insert_resource(monospace_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
         app
+    }
+
+    fn colored_text_tree(text: &str, color: Color) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(text, LayoutTextStyle::new(10.0).with_color(color));
+        builder.build()
+    }
+
+    fn first_text_color(computed: &ComputedDiegeticPanel) -> Color {
+        let result = computed.result().expect("layout result should exist");
+        result
+            .commands
+            .iter()
+            .find_map(|command| {
+                if let RenderCommandKind::Text { config, .. } = &command.kind {
+                    Some(config.color())
+                } else {
+                    None
+                }
+            })
+            .expect("panel should produce a text command")
+    }
+
+    #[test]
+    fn queued_visual_only_tree_change_regenerates_commands_without_moving_content() {
+        let mut app = make_app();
+        let entity = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(colored_text_tree("Hello", Color::WHITE))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+
+        app.update();
+
+        let before = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("computed panel should exist")
+            .content_bounds()
+            .expect("content bounds should exist");
+        assert_eq!(
+            first_text_color(
+                app.world()
+                    .get::<ComputedDiegeticPanel>(entity)
+                    .expect("computed panel should exist")
+            ),
+            Color::WHITE
+        );
+
+        app.world_mut()
+            .commands()
+            .set_diegetic_panel_tree(entity, colored_text_tree("Hello", Color::BLACK));
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("computed panel should exist");
+        let after = computed
+            .content_bounds()
+            .expect("content bounds should still exist");
+        assert_eq!(before, after);
+        assert_eq!(first_text_color(computed), Color::BLACK);
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel should exist");
+        assert_eq!(panel.tree_revision(), 1);
+    }
+
+    #[test]
+    fn repeated_queued_tree_changes_compose_to_layout_affecting() {
+        let mut app = make_app();
+        let entity = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(colored_text_tree("Hi", Color::WHITE))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+
+        app.update();
+        let before = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("computed panel should exist")
+            .content_bounds()
+            .expect("content bounds should exist");
+
+        {
+            let mut commands = app.world_mut().commands();
+            commands.set_diegetic_panel_tree(entity, colored_text_tree("Hi", Color::BLACK));
+            commands.set_diegetic_panel_tree(entity, colored_text_tree("Hello", Color::BLACK));
+        }
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("computed panel should exist");
+        let after = computed
+            .content_bounds()
+            .expect("content bounds should still exist");
+        assert!(
+            after.width > before.width,
+            "layout-affecting text change should recompute content width"
+        );
+        assert_eq!(first_text_color(computed), Color::BLACK);
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel should exist");
+        assert_eq!(panel.tree_revision(), 2);
     }
 
     #[test]

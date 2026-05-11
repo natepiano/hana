@@ -8,12 +8,14 @@ use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
 
 /// A single line of wrapped text with its measured width.
+#[derive(Clone, Debug)]
 pub(super) struct WrappedLine {
     pub(super) text:  String,
     pub(super) width: f32,
 }
 
 /// Pre-computed word-wrap results for a text element.
+#[derive(Clone, Debug)]
 pub(super) struct WrappedText {
     pub(super) lines:       Vec<WrappedLine>,
     pub(super) line_height: f32,

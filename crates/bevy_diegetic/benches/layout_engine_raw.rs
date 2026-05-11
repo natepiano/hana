@@ -12,6 +12,7 @@
 //! - **`build_tree_only`**: public `LayoutBuilder` tree construction.
 //! - **`scale_tree_only`**: unit conversion via `LayoutTree::scaled`.
 //! - **`raw_compute_prebuilt_tree`**: `LayoutEngine::compute` on an already built and scaled tree.
+//! - **`regenerate_commands_only`**: visual-only command regeneration from cached geometry.
 //! - **`layout_tree_diff_*`**: field-by-field tree change classification cost.
 //!
 //! Run with `cargo bench --bench layout_engine_raw --features bench_support`.
@@ -84,6 +85,26 @@ fn bench_raw_status_panel(
                 black_box(viewport_size),
                 black_box(1.0),
             );
+            black_box(result);
+        });
+    });
+
+    group.bench_function("regenerate_commands_only", |b| {
+        let tree = build_diegetic_status_tree(rows).scaled(scale, scale);
+        let text_color_tree = build_diegetic_status_tree_with_style(
+            rows,
+            DiegeticStatusTreeStyle {
+                text_color: Color::srgb(0.2, 0.8, 1.0),
+                ..Default::default()
+            },
+        )
+        .scaled(scale, scale);
+        let engine = LayoutEngine::new(monospace_measure_text_fn());
+        let base_result = engine.compute(&tree, viewport_size, viewport_size, 1.0);
+
+        b.iter(|| {
+            let mut result = black_box(base_result.clone());
+            result.regenerate_commands(black_box(&text_color_tree));
             black_box(result);
         });
     });

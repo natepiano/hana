@@ -8,6 +8,10 @@
 //! provides a fluent API that converts into an `Element` via `into_element()`. Think of `El`
 //! as the ergonomic front door and `Element` as the canonical storage format.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
+
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
@@ -86,26 +90,19 @@ pub(super) enum ElementContent {
 }
 
 /// Classifies the difference between two layout trees.
-#[cfg(feature = "bench_support")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum LayoutTreeChange {
     /// Trees are exactly identical for the fields this classifier inspects.
-    Identical,
+    Identical       = 0,
     /// Trees differ only in fields that should not affect layout bounds.
-    VisualOnly,
+    VisualOnly      = 1,
     /// Trees differ in structure, sizing, measurement, or placement fields.
-    LayoutAffecting,
+    LayoutAffecting = 2,
 }
 
-#[cfg(feature = "bench_support")]
 impl LayoutTreeChange {
-    const fn combine(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::LayoutAffecting, _) | (_, Self::LayoutAffecting) => Self::LayoutAffecting,
-            (Self::VisualOnly, _) | (_, Self::VisualOnly) => Self::VisualOnly,
-            (Self::Identical, Self::Identical) => Self::Identical,
-        }
-    }
+    pub(crate) fn combine(self, other: Self) -> Self { self.max(other) }
 }
 
 impl Default for Element {
@@ -267,7 +264,6 @@ impl LayoutTree {
 
     /// Classifies whether `next` differs from this tree only in render-only
     /// fields.
-    #[cfg(feature = "bench_support")]
     #[must_use]
     pub fn classify_change(&self, next: &Self) -> LayoutTreeChange {
         if self.root != next.root || self.elements.len() != next.elements.len() {
@@ -282,6 +278,32 @@ impl LayoutTree {
             }
         }
         change
+    }
+
+    /// Hashes only structural facts needed to safely reuse computed geometry.
+    #[must_use]
+    pub(super) fn structure_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.root.hash(&mut hasher);
+        self.elements.len().hash(&mut hasher);
+        for element in &self.elements {
+            match &element.content {
+                ElementContent::Children(children) => {
+                    0_u8.hash(&mut hasher);
+                    children.hash(&mut hasher);
+                },
+                ElementContent::Text { .. } => {
+                    1_u8.hash(&mut hasher);
+                },
+                ElementContent::Image { .. } => {
+                    2_u8.hash(&mut hasher);
+                },
+                ElementContent::Empty => {
+                    3_u8.hash(&mut hasher);
+                },
+            }
+        }
+        hasher.finish()
     }
 
     /// Returns the PBR material override for the element at `index`, if any.
@@ -332,50 +354,93 @@ impl LayoutTree {
     }
 }
 
-#[cfg(feature = "bench_support")]
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
-    if element.width != next.width
-        || element.height != next.height
-        || element.padding != next.padding
-        || element.child_gap != next.child_gap
-        || element.direction != next.direction
-        || element.child_align_x != next.child_align_x
-        || element.child_align_y != next.child_align_y
-        || element.clip != next.clip
+    let Element {
+        width,
+        height,
+        padding,
+        child_gap,
+        direction,
+        child_align_x,
+        child_align_y,
+        background,
+        border,
+        corner_radius,
+        clip,
+        material,
+        content,
+    } = element;
+    let Element {
+        width: n_width,
+        height: n_height,
+        padding: n_padding,
+        child_gap: n_child_gap,
+        direction: n_direction,
+        child_align_x: n_child_align_x,
+        child_align_y: n_child_align_y,
+        background: n_background,
+        border: n_border,
+        corner_radius: n_corner_radius,
+        clip: n_clip,
+        material: n_material,
+        content: n_content,
+    } = next;
+
+    if width != n_width
+        || height != n_height
+        || padding != n_padding
+        || child_gap != n_child_gap
+        || direction != n_direction
+        || child_align_x != n_child_align_x
+        || child_align_y != n_child_align_y
+        || clip != n_clip
     {
         return LayoutTreeChange::LayoutAffecting;
     }
 
-    let border_change = classify_border_change(element.border, next.border);
+    let border_change = classify_border_change(*border, *n_border);
     if border_change == LayoutTreeChange::LayoutAffecting {
         return LayoutTreeChange::LayoutAffecting;
     }
 
     let mut change = border_change;
-    if element.background != next.background
-        || element.corner_radius != next.corner_radius
-        || element.material.is_some()
-        || next.material.is_some()
-    {
+    if background != n_background || corner_radius != n_corner_radius {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
-    change.combine(classify_content_change(&element.content, &next.content))
+    change = change.combine(classify_material_change(material, n_material));
+
+    change.combine(classify_content_change(content, n_content))
 }
 
-#[cfg(feature = "bench_support")]
 fn classify_border_change(border: Option<Border>, next: Option<Border>) -> LayoutTreeChange {
     match (border, next) {
         (None, None) => LayoutTreeChange::Identical,
         (Some(border), Some(next)) => {
-            if border.left != next.left
-                || border.right != next.right
-                || border.top != next.top
-                || border.bottom != next.bottom
-                || border.between_children != next.between_children
+            let Border {
+                color,
+                left,
+                right,
+                top,
+                bottom,
+                between_children,
+            } = border;
+            let Border {
+                color: n_color,
+                left: n_left,
+                right: n_right,
+                top: n_top,
+                bottom: n_bottom,
+                between_children: n_between_children,
+            } = next;
+            if left != n_left
+                || right != n_right
+                || top != n_top
+                || bottom != n_bottom
+                || between_children != n_between_children
             {
                 LayoutTreeChange::LayoutAffecting
-            } else if border.color != next.color {
+            } else if color != n_color {
                 LayoutTreeChange::VisualOnly
             } else {
                 LayoutTreeChange::Identical
@@ -385,7 +450,18 @@ fn classify_border_change(border: Option<Border>, next: Option<Border>) -> Layou
     }
 }
 
-#[cfg(feature = "bench_support")]
+fn classify_material_change(
+    material: &Option<Box<StandardMaterial>>,
+    next: &Option<Box<StandardMaterial>>,
+) -> LayoutTreeChange {
+    match (material, next) {
+        (None, None) => LayoutTreeChange::Identical,
+        // StandardMaterial does not provide the tight layout-vs-render
+        // comparator this optimization needs. Stay conservative until it does.
+        (Some(_), Some(_)) | (None, Some(_)) | (Some(_), None) => LayoutTreeChange::LayoutAffecting,
+    }
+}
+
 fn classify_content_change(content: &ElementContent, next: &ElementContent) -> LayoutTreeChange {
     match (content, next) {
         (ElementContent::Children(children), ElementContent::Children(next_children)) => {
@@ -425,5 +501,157 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
         },
         (ElementContent::Empty, ElementContent::Empty) => LayoutTreeChange::Identical,
         _ => LayoutTreeChange::LayoutAffecting,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::color::Color;
+
+    use super::LayoutTree;
+    use super::LayoutTreeChange;
+    use crate::layout::Border;
+    use crate::layout::El;
+    use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutTextStyle;
+    use crate::layout::Padding;
+    use crate::layout::Sizing;
+    use crate::layout::TextWrap;
+
+    fn text_tree(text: &str, style: LayoutTextStyle) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(text, style);
+        builder.build()
+    }
+
+    fn root_tree(root: El) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_root(root);
+        builder.text("child", LayoutTextStyle::new(10.0));
+        builder.build()
+    }
+
+    #[test]
+    fn identical_tree_classifies_as_identical() {
+        let tree = text_tree("same", LayoutTextStyle::new(10.0));
+
+        assert_eq!(
+            tree.classify_change(&tree.clone()),
+            LayoutTreeChange::Identical
+        );
+    }
+
+    #[test]
+    fn text_color_only_classifies_as_visual_only() {
+        let tree = text_tree("same", LayoutTextStyle::new(10.0).with_color(Color::WHITE));
+        let next = text_tree("same", LayoutTextStyle::new(10.0).with_color(Color::BLACK));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn background_add_remove_classifies_as_visual_only() {
+        let tree = root_tree(El::new().width(Sizing::GROW).height(Sizing::GROW));
+        let next = root_tree(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(Color::srgb(0.2, 0.3, 0.4)),
+        );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn text_content_change_classifies_as_layout_affecting() {
+        let tree = text_tree("before", LayoutTextStyle::new(10.0));
+        let next = text_tree("after", LayoutTextStyle::new(10.0));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn text_measurement_change_classifies_as_layout_affecting() {
+        let tree = text_tree("same", LayoutTextStyle::new(10.0));
+        let next = text_tree("same", LayoutTextStyle::new(11.0));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn border_color_only_classifies_as_visual_only() {
+        let tree = root_tree(El::new().border(Border::all(2.0, Color::WHITE)));
+        let next = root_tree(El::new().border(Border::all(2.0, Color::BLACK)));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn border_width_change_classifies_as_layout_affecting() {
+        let tree = root_tree(El::new().border(Border::all(2.0, Color::WHITE)));
+        let next = root_tree(El::new().border(Border::all(3.0, Color::WHITE)));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn combined_visual_and_layout_change_classifies_as_layout_affecting() {
+        let tree = root_tree(
+            El::new()
+                .padding(Padding::all(4.0))
+                .background(Color::WHITE),
+        );
+        let next = root_tree(
+            El::new()
+                .padding(Padding::all(8.0))
+                .background(Color::BLACK),
+        );
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn empty_to_populated_tree_classifies_as_layout_affecting() {
+        let tree = LayoutTree::new();
+        let next = text_tree("child", LayoutTextStyle::new(10.0));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+        assert_eq!(
+            next.classify_change(&tree),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn material_change_is_conservatively_layout_affecting() {
+        let tree = root_tree(El::new());
+        let next = root_tree(El::new().material(bevy::pbr::StandardMaterial::default()));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn layout_text_ignores_standalone_only_world_scale() {
+        let tree = text_tree("same", LayoutTextStyle::new(10.0).wrap(TextWrap::Words));
+        let next = text_tree("same", LayoutTextStyle::new(10.0).wrap(TextWrap::Words));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::Identical);
     }
 }

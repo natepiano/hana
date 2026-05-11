@@ -504,7 +504,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 
     /// Returns whether layout-affecting text fields match, ignoring fields
     /// that only affect rendering.
-    #[cfg(feature = "bench_support")]
     pub(super) fn layout_eq_excluding_visuals(&self, other: &Self) -> bool {
         let Self {
             font_id,

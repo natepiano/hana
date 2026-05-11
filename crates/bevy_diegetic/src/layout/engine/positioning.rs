@@ -364,6 +364,66 @@ pub(super) fn position_and_render(
     commands
 }
 
+/// Generates render commands from already-computed element bounds.
+pub(super) fn render_commands_from_geometry(
+    tree: &LayoutTree,
+    computed: &[ComputedLayout],
+    root: usize,
+    wrapped: &[Option<WrappedText>],
+    viewport_width: f32,
+    viewport_height: f32,
+    font_scale: f32,
+) -> Vec<RenderCommand> {
+    let mut commands = Vec::with_capacity(tree.len() * 2);
+
+    // Stack entries: (element_index, is_second_visit)
+    let mut stack: Vec<(usize, bool)> = Vec::with_capacity(tree.len());
+    stack.push((root, false));
+
+    while let Some((index, visited)) = stack.pop() {
+        let element = &tree.elements[index];
+        let bounds = computed[index].bounds;
+        let offscreen = is_offscreen(
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height,
+            viewport_width,
+            viewport_height,
+        );
+
+        if visited {
+            emit_up_traversal_commands(
+                tree,
+                computed,
+                &mut commands,
+                element,
+                bounds,
+                index,
+                offscreen,
+            );
+            continue;
+        }
+
+        emit_down_traversal_commands(
+            &mut commands,
+            element,
+            wrapped[index].as_ref(),
+            bounds,
+            index,
+            offscreen,
+            font_scale,
+        );
+
+        stack.push((index, true));
+        for &child_idx in tree.children_of(index).iter().rev() {
+            stack.push((child_idx, false));
+        }
+    }
+
+    commands
+}
+
 /// Emit border-between-children rectangles.
 ///
 /// Uses children's already-computed bounds (set during DFS first visit)

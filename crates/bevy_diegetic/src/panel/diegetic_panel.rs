@@ -16,6 +16,7 @@ use crate::layout::BoundingBox;
 use crate::layout::InvalidSize;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
+use crate::layout::LayoutTreeChange;
 use crate::layout::PanelSize;
 use crate::layout::Unit;
 
@@ -47,7 +48,13 @@ use crate::layout::Unit;
 /// Requires a [`Transform`] for world-space positioning.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-#[require(ComputedDiegeticPanel, ScaledLayoutTreeCache, Transform, Visibility)]
+#[require(
+    ComputedDiegeticPanel,
+    DiegeticPanelChangeClassification,
+    ScaledLayoutTreeCache,
+    Transform,
+    Visibility
+)]
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
@@ -215,8 +222,21 @@ impl DiegeticPanel {
         Ok(())
     }
 
-    /// Replaces the layout tree.
+    /// Replaces the layout tree and takes the conservative full-layout path.
+    ///
+    /// For optimized visual-only updates, prefer
+    /// [`DiegeticPanelCommands::set_diegetic_panel_tree`]. A direct component
+    /// method cannot update the sibling change-classification component.
     pub fn set_tree(&mut self, tree: LayoutTree) {
+        self.tree = tree;
+        self.tree_revision = self.tree_revision.wrapping_add(1);
+    }
+
+    /// Replaces the layout tree through the conservative full-layout path for
+    /// benchmark comparisons.
+    #[cfg(feature = "bench_support")]
+    #[doc(hidden)]
+    pub fn set_tree_full_rebuild_for_bench(&mut self, tree: LayoutTree) {
         self.tree = tree;
         self.tree_revision = self.tree_revision.wrapping_add(1);
     }
@@ -371,6 +391,35 @@ impl DiegeticPanel {
     }
 }
 
+/// Extension methods for mutating diegetic panels through [`Commands`].
+pub trait DiegeticPanelCommands {
+    /// Queues a layout-tree replacement that records whether the change is
+    /// visual-only or layout-affecting.
+    ///
+    /// The queued setter is deferred. Schedule systems that call this before
+    /// panel layout systems when the update must be visible in the same frame.
+    fn set_diegetic_panel_tree(&mut self, entity: Entity, tree: LayoutTree);
+}
+
+impl DiegeticPanelCommands for Commands<'_, '_> {
+    fn set_diegetic_panel_tree(&mut self, entity: Entity, tree: LayoutTree) {
+        self.run_system_cached_with(set_diegetic_panel_tree, (entity, tree));
+    }
+}
+
+fn set_diegetic_panel_tree(
+    In((entity, next_tree)): In<(Entity, LayoutTree)>,
+    mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
+) {
+    let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
+        return;
+    };
+    let change = panel.tree.classify_change(&next_tree);
+    classification.record(change);
+    panel.tree = next_tree;
+    panel.tree_revision = panel.tree_revision.wrapping_add(1);
+}
+
 /// Cascading attribute for panel-text font unit.
 ///
 /// 2-tier cascade: [`DiegeticPanel::font_unit`] (panel override) →
@@ -391,6 +440,25 @@ impl CascadeTarget for PanelFontUnit {
     fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.panel_font_unit) }
 }
 
+/// Per-frame tree-change classification consumed by the panel layout system.
+#[derive(Component, Default)]
+pub(super) struct DiegeticPanelChangeClassification {
+    pending: Option<LayoutTreeChange>,
+}
+
+impl DiegeticPanelChangeClassification {
+    pub(super) fn record(&mut self, change: LayoutTreeChange) {
+        self.pending = Some(match self.pending.take() {
+            None => change,
+            Some(prior) => prior.combine(change),
+        });
+    }
+
+    pub(super) fn take(&mut self) -> Option<LayoutTreeChange> { self.pending.take() }
+
+    pub(super) const fn pending(&self) -> Option<LayoutTreeChange> { self.pending }
+}
+
 /// Cached point-scaled layout tree for one [`DiegeticPanel`].
 ///
 /// The source [`LayoutTree`] remains owned by [`DiegeticPanel`]. This component
@@ -398,14 +466,28 @@ impl CascadeTarget for PanelFontUnit {
 /// are converted to points.
 #[derive(Component, Default)]
 pub(super) struct ScaledLayoutTreeCache {
-    tree_revision:         u64,
-    layout_to_points_bits: u32,
-    font_to_points_bits:   u32,
+    tree_revision:         TreeRevision,
+    layout_to_points_bits: F32Bits,
+    font_to_points_bits:   F32Bits,
     tree:                  Option<LayoutTree>,
     #[cfg(test)]
     hits:                  usize,
     #[cfg(test)]
     misses:                usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct TreeRevision(u64);
+
+impl From<u64> for TreeRevision {
+    fn from(value: u64) -> Self { Self(value) }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct F32Bits(u32);
+
+impl F32Bits {
+    fn new(value: f32) -> Self { Self(value.to_bits()) }
 }
 
 impl ScaledLayoutTreeCache {
@@ -418,8 +500,9 @@ impl ScaledLayoutTreeCache {
         layout_to_points: f32,
         font_to_points: f32,
     ) -> &LayoutTree {
-        let layout_to_points_bits = layout_to_points.to_bits();
-        let font_to_points_bits = font_to_points.to_bits();
+        let tree_revision = TreeRevision::from(tree_revision);
+        let layout_to_points_bits = F32Bits::new(layout_to_points);
+        let font_to_points_bits = F32Bits::new(font_to_points);
         let cache_hit = self.tree.is_some()
             && self.tree_revision == tree_revision
             && self.layout_to_points_bits == layout_to_points_bits
@@ -487,6 +570,9 @@ impl ComputedDiegeticPanel {
     /// Returns the computed layout result, or `None` if not yet computed.
     #[must_use]
     pub const fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
+
+    /// Returns the computed layout result mutably, or `None` if not yet computed.
+    pub(super) fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
 
     /// Stores the computed layout result.
     pub fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }

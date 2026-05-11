@@ -10,6 +10,7 @@ mod gizmos;
 mod perf;
 mod sizing;
 
+use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
 pub use coordinate_space::CoordinateSpace;
@@ -19,6 +20,7 @@ pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
+pub use diegetic_panel::DiegeticPanelCommands;
 pub(crate) use diegetic_panel::PanelFontUnit;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
@@ -51,7 +53,9 @@ use crate::layout::ShapedTextCache;
 /// use `.before(PanelSystems::ComputeLayout)` / `.after(PanelSystems::ComputeLayout)`
 /// rather than referencing concrete system symbols.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum PanelSystems {
+pub enum PanelSystems {
+    /// Applies deferred tree replacement commands before layout responds.
+    ApplyTreeChanges,
     /// Runs [`compute_panel_layouts`](compute_layout::compute_panel_layouts).
     ComputeLayout,
     /// Runs [`resolve_world_panel_fit`](compute_layout::resolve_world_panel_fit)
@@ -84,11 +88,15 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<CascadeDefaults>()
             .configure_sets(
                 Update,
-                PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
+                (
+                    PanelSystems::ApplyTreeChanges.before(PanelSystems::ComputeLayout),
+                    PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
+                ),
             )
             .add_systems(
                 Update,
                 (
+                    ApplyDeferred.in_set(PanelSystems::ApplyTreeChanges),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),

@@ -16,7 +16,9 @@
 //! - **`no_change_update`**: unchanged panel frame; layout should be skipped.
 //! - **`resize_only`**: panel dimensions change while the tree is reused.
 //! - **`warm`**: same logical tree rebuilt and assigned every iteration.
-//! - **`color_change_rebuild`**: same layout structure rebuilt with visual-only text color changes.
+//! - **`color_change_full_rebuild`**: same layout structure rebuilt with visual-only text color
+//!   changes, forced through the full-layout benchmark helper.
+//! - **`visual_only_rebuild`**: same visual-only change through the optimized command API.
 //!
 //! Run with `cargo bench --bench panel_perf`.
 
@@ -27,6 +29,7 @@ use std::hint::black_box;
 use bevy::prelude::*;
 use bevy_diegetic::ComputedDiegeticPanel;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use common::app::create_bench_app;
 use common::panels::PANEL_SIZE;
 use common::panels::RESIZED_PANEL_SIZE;
@@ -114,7 +117,7 @@ fn bench_panel_layout(c: &mut Criterion) {
             });
         });
 
-        group.bench_function("color_change_rebuild", |b| {
+        group.bench_function("color_change_full_rebuild", |b| {
             let mut app = create_bench_app();
             let tree = build_diegetic_status_tree(&rows);
             let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
@@ -132,7 +135,30 @@ fn bench_panel_layout(c: &mut Criterion) {
                 app.world_mut()
                     .get_mut::<DiegeticPanel>(entity)
                     .expect("entity must exist")
-                    .set_tree(tree);
+                    .set_tree_full_rebuild_for_bench(tree);
+                app.update();
+                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+            });
+        });
+
+        group.bench_function("visual_only_rebuild", |b| {
+            let mut app = create_bench_app();
+            let tree = build_diegetic_status_tree(&rows);
+            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+            app.update();
+
+            let mut toggle = false;
+            b.iter(|| {
+                toggle = !toggle;
+                let color = if toggle {
+                    Color::srgb(1.0, 0.0, 0.0)
+                } else {
+                    Color::srgb(0.0, 0.0, 1.0)
+                };
+                let tree = build_diegetic_status_tree_with_text_color(&rows, color);
+                app.world_mut()
+                    .commands()
+                    .set_diegetic_panel_tree(entity, tree);
                 app.update();
                 black_box(app.world().get::<ComputedDiegeticPanel>(entity));
             });

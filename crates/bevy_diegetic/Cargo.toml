@@ -67,8 +67,9 @@ name              = "layout_comparison"
 required-features = ["bench_support"]
 
 [[bench]]
-harness = false
-name    = "panel_perf"
+harness           = false
+name              = "panel_perf"
+required-features = ["bench_support"]
 
 [[bench]]
 harness           = false

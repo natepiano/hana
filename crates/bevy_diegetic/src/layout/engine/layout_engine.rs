@@ -4,6 +4,7 @@ use super::positioning;
 use super::sizing;
 use super::sizing::Axis;
 use super::wrapping;
+use super::wrapping::WrappedText;
 use crate::layout::BoundingBox;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
@@ -126,7 +127,15 @@ impl LayoutEngine {
             font_scale,
         );
 
-        LayoutResult { computed, commands }
+        LayoutResult {
+            computed,
+            commands,
+            wrapped,
+            viewport_width,
+            viewport_height,
+            font_scale,
+            structure_hash: tree.structure_hash(),
+        }
     }
 
     /// Initialize leaf element dimensions from text measurement and fixed sizing rules.
@@ -175,9 +184,14 @@ impl LayoutEngine {
 #[derive(Clone, Debug, Default)]
 pub struct LayoutResult {
     /// Computed layout for each element, indexed by element index.
-    pub computed: Vec<ComputedLayout>,
+    pub computed:    Vec<ComputedLayout>,
     /// Render commands in draw order.
-    pub commands: Vec<RenderCommand>,
+    pub commands:    Vec<RenderCommand>,
+    wrapped:         Vec<Option<WrappedText>>,
+    viewport_width:  f32,
+    viewport_height: f32,
+    font_scale:      f32,
+    structure_hash:  u64,
 }
 
 impl LayoutResult {
@@ -191,4 +205,31 @@ impl LayoutResult {
     /// Returns `None` if no user-defined element exists.
     #[must_use = "callers use the content bounds to resolve fit-sized panels"]
     pub fn content_bounds(&self) -> Option<BoundingBox> { self.computed.get(1).map(|c| c.bounds) }
+
+    /// Regenerates render commands from cached geometry and wrapped text data.
+    pub fn regenerate_commands(&mut self, tree: &LayoutTree) {
+        let Some(root) = tree.root else {
+            debug_assert!(self.computed.is_empty());
+            self.commands.clear();
+            return;
+        };
+
+        debug_assert_eq!(self.computed.len(), tree.len());
+        debug_assert_eq!(self.wrapped.len(), tree.len());
+        debug_assert_eq!(self.structure_hash, tree.structure_hash());
+
+        if self.computed.len() != tree.len() || self.wrapped.len() != tree.len() {
+            return;
+        }
+
+        self.commands = positioning::render_commands_from_geometry(
+            tree,
+            &self.computed,
+            root,
+            &self.wrapped,
+            self.viewport_width,
+            self.viewport_height,
+            self.font_scale,
+        );
+    }
 }
