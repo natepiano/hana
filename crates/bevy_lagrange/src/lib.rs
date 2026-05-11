@@ -6,6 +6,7 @@ mod components;
 mod constants;
 #[cfg(feature = "bevy_egui")]
 mod egui;
+mod enhanced_input;
 mod events;
 mod fit;
 #[cfg(feature = "fit_overlay")]
@@ -15,6 +16,7 @@ mod observers;
 mod orbit_cam;
 mod orbital_math;
 mod projection;
+mod system_sets;
 mod touch;
 
 pub use animation::CameraMove;
@@ -35,6 +37,7 @@ pub use egui::BlockOnEguiFocus;
 pub use egui::EguiFocusIncludesHover;
 #[cfg(feature = "bevy_egui")]
 pub use egui::EguiWantsFocus;
+use enhanced_input::LagrangeEnhancedInputPlugin;
 pub use events::AnimateToFit;
 pub use events::AnimationBegin;
 pub use events::AnimationCancelled;
@@ -72,6 +75,8 @@ pub use orbit_cam::OrbitCam;
 pub use orbit_cam::OrbitCamSystemSet;
 pub use orbit_cam::TimeSource;
 pub use orbit_cam::UpsideDownPolicy;
+use system_sets::LagrangeSystemSetsPlugin;
+pub use system_sets::OrbitCamInputPhase;
 pub use touch::TouchInput;
 use touch::TouchTracker;
 
@@ -91,7 +96,8 @@ pub struct LagrangePlugin;
 
 impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActiveCameraData>()
+        app.add_plugins((LagrangeEnhancedInputPlugin, LagrangeSystemSetsPlugin))
+            .init_resource::<ActiveCameraData>()
             .init_resource::<MouseKeyTracker>()
             .init_resource::<TouchTracker>()
             .add_systems(
