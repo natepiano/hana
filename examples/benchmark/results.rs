@@ -23,6 +23,7 @@ use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO;
 use crate::constants::DATE_COMMAND;
 use crate::constants::DATE_COMMAND_ARG_FORMAT;
 use crate::constants::DATE_COMMAND_ARG_REFERENCE_TIME;
+use crate::constants::MEDIAN_PERCENTILE;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::constants::NINETY_FIFTH_PERCENTILE;
 use crate::constants::NINETY_NINTH_PERCENTILE;
@@ -56,7 +57,7 @@ pub(super) fn compute_statistics(name: &str, frame_times: &mut [f64]) -> Scenari
     let len = frame_times.len();
     let sum: f64 = frame_times.iter().sum();
     let average = sum / len.to_f64();
-    let median = percentile(frame_times, 50.0);
+    let median = percentile(frame_times, MEDIAN_PERCENTILE);
     let percentile_95 = percentile(frame_times, NINETY_FIFTH_PERCENTILE);
     let percentile_99 = percentile(frame_times, NINETY_NINTH_PERCENTILE);
     let min = frame_times.first().copied().unwrap_or(0.0);

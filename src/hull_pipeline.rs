@@ -51,6 +51,7 @@ use super::constants::HULL_DEPTH_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::HULL_OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::HULL_OUTLINE_PIPELINE_LABEL;
 use super::constants::HULL_SHADER_HANDLE;
+use super::constants::MISSING_BATCH_SET_INDEX;
 use super::constants::OUTLINE_NORMAL_SHADER_LOCATION;
 use super::constants::PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF;
 use super::indexing_mode::IndexingMode;
@@ -323,7 +324,7 @@ impl GetFullBatchData for HullPipeline {
     ) {
         let indirect_parameters = IndirectParametersCpuMetadata {
             base_output_index,
-            batch_set_index: batch_set_index.map_or(!0, u32::from),
+            batch_set_index: batch_set_index.map_or(MISSING_BATCH_SET_INDEX, u32::from),
         };
 
         IndexingMode::from(indexed).write_metadata(

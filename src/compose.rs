@@ -19,6 +19,7 @@ use bevy::shader::ShaderDefVal;
 
 use super::constants::COMPOSE_SHADER_HANDLE;
 use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::MSAA_DISABLED_SAMPLE_COUNT;
 use super::constants::MULTISAMPLED_SHADER_DEF;
 use super::constants::OUTLINE_COMPOSE_OUTPUT_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::OUTLINE_COMPOSE_OUTPUT_MSAA_BIND_GROUP_LAYOUT_LABEL;
@@ -35,7 +36,7 @@ pub(crate) enum SampleMode {
 
 impl From<Msaa> for SampleMode {
     fn from(msaa: Msaa) -> Self {
-        if msaa.samples() > 1 {
+        if msaa.samples() > MSAA_DISABLED_SAMPLE_COUNT {
             Self::MultiSample
         } else {
             Self::SingleSample

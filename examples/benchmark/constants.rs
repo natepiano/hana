@@ -57,6 +57,7 @@ pub(super) const LIGHT_RANGE: f32 = 100.0;
 
 // measurement
 pub(super) const MEASURE_FRAMES: u32 = 600;
+pub(super) const MEDIAN_PERCENTILE: f64 = 50.0;
 pub(super) const MILLISECONDS_PER_SECOND: f64 = 1000.0;
 pub(super) const NINETY_FIFTH_PERCENTILE: f64 = 95.0;
 pub(super) const NINETY_NINTH_PERCENTILE: f64 = 99.0;
@@ -86,6 +87,7 @@ pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO: &str = "Scenario";
 pub(super) const DATE_COMMAND: &str = "date";
 pub(super) const DATE_COMMAND_ARG_FORMAT: &str = "+%Y_%m_%d_%H_%M";
 pub(super) const DATE_COMMAND_ARG_REFERENCE_TIME: &str = "-r";
+pub(super) const RESULT_LABEL_PADDING: usize = 6;
 pub(super) const RESULTS_DIRECTORY_NAME: &str = "results";
 
 // startup

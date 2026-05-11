@@ -19,6 +19,7 @@ use crate::constants::MEASURE_FRAMES;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::constants::OUTLINE_PRESENCE_DISABLED_LABEL;
 use crate::constants::OUTLINE_PRESENCE_ENABLED_LABEL;
+use crate::constants::RESULT_LABEL_PADDING;
 use crate::constants::SCENARIOS;
 use crate::constants::WARMUP_FRAMES;
 use crate::scenarios::ScenarioDefinition;
@@ -109,7 +110,7 @@ fn auto_progress_label(state: &BenchmarkState) -> String {
 fn results_label_width() -> usize {
     let mut max_label_len = BENCHMARK_LABEL.len();
     for scenario in SCENARIOS {
-        max_label_len = max_label_len.max(scenario.name.len() + 6);
+        max_label_len = max_label_len.max(scenario.name.len() + RESULT_LABEL_PADDING);
     }
     max_label_len + 1
 }

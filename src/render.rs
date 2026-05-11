@@ -24,8 +24,17 @@ use bevy_render::renderer::RenderQueue;
 use bytemuck::Zeroable;
 
 use super::constants::HULL_DEPTH_BIND_GROUP_LABEL;
+use super::constants::HULL_DEPTH_BIND_GROUP_SLOT;
+use super::constants::HULL_MESH_BIND_GROUP_SLOT;
+use super::constants::HULL_MESH_VIEW_BIND_GROUP_SLOT;
+use super::constants::HULL_MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT;
 use super::constants::HULL_OUTLINE_BIND_GROUP_LABEL;
+use super::constants::HULL_OUTLINE_BIND_GROUP_SLOT;
+use super::constants::MESH_BIND_GROUP_SLOT;
+use super::constants::MESH_VIEW_BIND_GROUP_SLOT;
+use super::constants::MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT;
 use super::constants::OUTLINE_BIND_GROUP_LABEL;
+use super::constants::OUTLINE_BIND_GROUP_SLOT;
 use super::extract::ActiveOutlineModes;
 use super::extract::ExtractedOutlineUniforms;
 use super::hull_pipeline::HullPipeline;
@@ -37,20 +46,20 @@ use super::uniforms::OutlineUniform;
 
 pub(crate) type DrawOutline = (
     SetItemPipeline,
-    SetMeshViewBindGroup<0>,
-    SetMeshViewBindingArrayBindGroup<1>,
-    SetMeshBindGroup<2>,
-    SetOutlineBindGroup<3>,
+    SetMeshViewBindGroup<MESH_VIEW_BIND_GROUP_SLOT>,
+    SetMeshViewBindingArrayBindGroup<MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT>,
+    SetMeshBindGroup<MESH_BIND_GROUP_SLOT>,
+    SetOutlineBindGroup<OUTLINE_BIND_GROUP_SLOT>,
     DrawMesh,
 );
 
 pub(crate) type DrawHull = (
     SetItemPipeline,
-    SetMeshViewBindGroup<0>,
-    SetMeshViewBindingArrayBindGroup<1>,
-    SetMeshBindGroup<2>,
-    SetHullOutlineBindGroup<3>,
-    SetHullDepthBindGroup<4>,
+    SetMeshViewBindGroup<HULL_MESH_VIEW_BIND_GROUP_SLOT>,
+    SetMeshViewBindingArrayBindGroup<HULL_MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT>,
+    SetMeshBindGroup<HULL_MESH_BIND_GROUP_SLOT>,
+    SetHullOutlineBindGroup<HULL_OUTLINE_BIND_GROUP_SLOT>,
+    SetHullDepthBindGroup<HULL_DEPTH_BIND_GROUP_SLOT>,
     DrawMesh,
 );
 

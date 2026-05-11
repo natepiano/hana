@@ -5,6 +5,9 @@ use bevy::prelude::LinearRgba;
 use bevy::prelude::Shader;
 use bevy::render::render_resource::VertexFormat;
 
+// batching
+pub(super) const MISSING_BATCH_SET_INDEX: u32 = !0;
+
 // bind group labels
 pub(super) const COMPOSE_OUTPUT_BIND_GROUP_LABEL: &str = "compose_output_bind_group";
 pub(super) const HULL_DEPTH_BIND_GROUP_LABEL: &str = "hull_depth_bind_group";
@@ -21,6 +24,19 @@ pub(super) const OUTLINE_COMPOSE_OUTPUT_BIND_GROUP_LAYOUT_LABEL: &str =
 pub(super) const OUTLINE_COMPOSE_OUTPUT_MSAA_BIND_GROUP_LAYOUT_LABEL: &str =
     "outline_compose_output_bind_group_layout_msaa";
 pub(super) const OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL: &str = "OutlineInstance";
+
+// bind group slots
+pub(super) const COMPOSE_BIND_GROUP_SLOT: usize = 0;
+pub(super) const HULL_DEPTH_BIND_GROUP_SLOT: usize = 4;
+pub(super) const HULL_MESH_BIND_GROUP_SLOT: usize = 2;
+pub(super) const HULL_MESH_VIEW_BIND_GROUP_SLOT: usize = 0;
+pub(super) const HULL_MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT: usize = 1;
+pub(super) const HULL_OUTLINE_BIND_GROUP_SLOT: usize = 3;
+pub(super) const JUMP_FLOOD_BIND_GROUP_SLOT: usize = 0;
+pub(super) const MESH_BIND_GROUP_SLOT: usize = 2;
+pub(super) const MESH_VIEW_BIND_GROUP_SLOT: usize = 0;
+pub(super) const MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT: usize = 1;
+pub(super) const OUTLINE_BIND_GROUP_SLOT: usize = 3;
 
 // logging
 pub(super) const FAILED_TO_SPECIALIZE_HULL_MESH_PIPELINE_WARNING: &str =
@@ -52,6 +68,8 @@ pub(super) const DEGENERATE_EDGE_THRESHOLD: f32 = 1e-10;
 pub(super) const JUMP_FLOOD_NO_SEED_CLEAR_COLOR: LinearRgba =
     LinearRgba::new(-1.0, -1.0, -1.0, 0.0);
 
+pub(super) const MSAA_DISABLED_SAMPLE_COUNT: u32 = 1;
+
 /// Reverse-Z far-plane sentinel used when clearing the outline depth texture.
 /// Cleared to 0.0 so that any rendered outline fragment (closer than the far
 /// plane) will pass the depth comparison.
@@ -71,6 +89,9 @@ pub(super) const OUTLINE_COMPOSE_OUTPUT_MSAA_PIPELINE_LABEL: &str =
 pub(super) const OUTLINE_COMPOSE_OUTPUT_PIPELINE_LABEL: &str = "outline_compose_output_pipeline";
 pub(super) const OUTLINE_JUMP_FLOOD_PIPELINE_LABEL: &str = "outline_jump_flood_pipeline";
 pub(super) const OUTLINE_PIPELINE_LABEL: &str = "outline_pipeline";
+
+// render pass constants
+pub(super) const FULLSCREEN_TRIANGLE_VERTEX_COUNT: u32 = 3;
 
 // render pass labels
 pub(super) const HULL_OUTLINE_PASS_LABEL: &str = "hull_outline_pass";
@@ -101,3 +122,6 @@ pub(super) const VIEW_HELPERS_SHADER_HANDLE: Handle<Shader> =
 
 // texture labels
 pub(super) const OUTLINE_DEPTH_TEXTURE_LABEL: &str = "outline depth texture";
+
+// view
+pub(super) const PRIMARY_SUBVIEW_INDEX: u32 = 0;

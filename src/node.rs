@@ -27,7 +27,9 @@ use bevy_render::view::ViewTarget;
 use super::compose::ComposeOutputPipeline;
 use super::compose::ComposeVariant;
 use super::compose::SampleMode;
+use super::constants::COMPOSE_BIND_GROUP_SLOT;
 use super::constants::COMPOSE_OUTPUT_BIND_GROUP_LABEL;
+use super::constants::FULLSCREEN_TRIANGLE_VERTEX_COUNT;
 use super::constants::HULL_OUTLINE_PASS_LABEL;
 use super::constants::JUMP_FLOOD_NO_SEED_CLEAR_COLOR;
 use super::constants::OUTLINE_DEPTH_FAR_PLANE_CLEAR;
@@ -386,6 +388,6 @@ fn run_jump_flood_composite(
     });
 
     render_pass.set_render_pipeline(pipeline);
-    render_pass.set_bind_group(0, &bind_group, &[]);
-    render_pass.draw(0..3, 0..1);
+    render_pass.set_bind_group(COMPOSE_BIND_GROUP_SLOT, &bind_group, &[]);
+    render_pass.draw(0..FULLSCREEN_TRIANGLE_VERTEX_COUNT, 0..1);
 }

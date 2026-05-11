@@ -5,6 +5,7 @@ use bevy_render::batching::gpu_preprocessing::GpuPreprocessingSupport;
 use bevy_render::render_phase::ViewBinnedRenderPhases;
 use bevy_render::view::RetainedViewEntity;
 
+use super::constants::PRIMARY_SUBVIEW_INDEX;
 use super::mask::HullOutlinePhase;
 use super::mask::JumpFloodOutlinePhase;
 
@@ -22,7 +23,8 @@ pub(crate) fn update_views(
             continue;
         }
 
-        let retained_view_entity = RetainedViewEntity::new(main_entity.into(), None, 0);
+        let retained_view_entity =
+            RetainedViewEntity::new(main_entity.into(), None, PRIMARY_SUBVIEW_INDEX);
         outline_phases.prepare_for_new_frame(
             retained_view_entity,
             gpu_preprocessing_support.max_supported_mode,
