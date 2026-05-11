@@ -3,190 +3,54 @@
     reason = "benchmarks expect on just-spawned entities where None is a test bug"
 )]
 
-//! Benchmark for `DiegeticPanel` layout performance at various sizes.
+//! Benchmark for public `DiegeticPanel` layout performance at various sizes.
 //!
-//! Measures the public `DiegeticPanel` update path: build a `LayoutTree`,
-//! assign it to a panel, and run `app.update()` so `compute_panel_layouts`
-//! executes. This includes retained-mode API-boundary work and Bevy scheduling;
-//! it is not a raw `LayoutEngine` benchmark.
+//! Measures the public `DiegeticPanel` update path: build or reuse a
+//! `LayoutTree`, mutate a panel when the scenario calls for it, and run
+//! `app.update()` so `compute_panel_layouts` has a chance to execute. This
+//! includes retained-mode API-boundary work and Bevy scheduling; it is not a
+//! raw `LayoutEngine` benchmark.
 //!
-//! Three scenarios per row count:
-//! - **cold**: First layout — full engine computation.
-//! - **warm**: Same tree reassigned — full engine computation (change detected).
-//! - **`color_change_rebuild`**: Tree rebuilt with different colors and the
-//!   same layout structure. This currently still recomputes layout; it does
-//!   not exercise a color-only/hash fast path.
+//! Scenarios per row count:
+//! - **`cold`**: first layout for a fresh panel.
+//! - **`no_change_update`**: unchanged panel frame; layout should be skipped.
+//! - **`resize_only`**: panel dimensions change while the tree is reused.
+//! - **`warm`**: same logical tree rebuilt and assigned every iteration.
+//! - **`color_change_rebuild`**: same layout structure rebuilt with visual-only text color changes.
 //!
 //! Run with `cargo bench --bench panel_perf`.
 
-use std::hint::black_box;
-use std::sync::Arc;
+mod common;
 
-use bevy::app::App;
+use std::hint::black_box;
+
 use bevy::prelude::*;
-use bevy_diegetic::Border;
 use bevy_diegetic::ComputedDiegeticPanel;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticTextMeasurer;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::HeadlessLayoutPlugin;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextDimensions;
-use bevy_diegetic::TextMeasure;
-use bevy_diegetic::Unit;
-use bevy_kana::ToF32;
+use common::app::create_bench_app;
+use common::panels::PANEL_SIZE;
+use common::panels::RESIZED_PANEL_SIZE;
+use common::panels::bench_panel;
+use common::panels::build_diegetic_status_tree;
+use common::panels::build_diegetic_status_tree_with_text_color;
+use common::rows::ROW_COUNTS;
+use common::rows::generate_status_rows;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 
-// ── Shared measurement ──────────────────────────────────────────────────
-
-const FONT_SIZE: f32 = 7.0;
-const LAYOUT_SIZE: f32 = 160.0;
-const LAYOUT_METERS_PER_UNIT: f32 = 1.0 / LAYOUT_SIZE;
-
-fn monospace_measurer() -> DiegeticTextMeasurer {
-    DiegeticTextMeasurer {
-        measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
-            let char_width = measure.size * 0.6;
-            let mut max_line_width: f32 = 0.0;
-            let mut line_count = 0_u32;
-            for line in text.lines() {
-                line_count += 1;
-                let width = line.chars().count().to_f32() * char_width;
-                max_line_width = max_line_width.max(width);
-            }
-            if line_count == 0 {
-                line_count = 1;
-            }
-            TextDimensions {
-                width:       max_line_width,
-                height:      measure.size * line_count.to_f32(),
-                line_height: measure.size,
-            }
-        }),
-    }
-}
-
-// ── Row data ────────────────────────────────────────────────────────────
-
-const WORDS: &[&str] = &[
-    "bevy",
-    "diegetic",
-    "layout",
-    "engine",
-    "text",
-    "rendering",
-    "msdf",
-    "atlas",
-    "glyph",
-    "quad",
-    "mesh",
-    "shader",
-    "pipeline",
-    "parley",
-    "shaping",
-    "font",
-    "registry",
-    "plugin",
-    "system",
-    "resource",
-];
-
-fn generate_rows(count: usize) -> Vec<(String, &'static str)> {
-    (0..count)
-        .map(|i| (format!("item {i}:"), WORDS[i % WORDS.len()]))
-        .collect()
-}
-
-// ── Tree builder ────────────────────────────────────────────────────────
-
-fn build_panel_tree(rows: &[(String, &str)], text_color: Color) -> bevy_diegetic::LayoutTree {
-    let mut builder = LayoutBuilder::new(LAYOUT_SIZE, LAYOUT_SIZE);
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(5.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(2.0)
-            .background(Color::srgb_u8(40, 44, 52))
-            .border(Border::all(1.0, Color::srgb_u8(120, 130, 140))),
-        |b| {
-            for (label, value) in rows {
-                b.with(
-                    El::new()
-                        .width(Sizing::GROW)
-                        .height(Sizing::FIT)
-                        .direction(Direction::LeftToRight)
-                        .child_gap(5.0),
-                    |b| {
-                        b.text(
-                            label,
-                            LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
-                        );
-                        b.with(
-                            El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                            |_| {},
-                        );
-                        b.text(
-                            *value,
-                            LayoutTextStyle::new(FONT_SIZE).with_color(text_color),
-                        );
-                    },
-                );
-            }
-        },
-    );
-    builder.build()
-}
-
-// ── Headless app ────────────────────────────────────────────────────────
-
-fn create_bench_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(HeadlessLayoutPlugin);
-    app.insert_resource(monospace_measurer());
-    app.update();
-    app
-}
-
-fn bench_panel(tree: bevy_diegetic::LayoutTree) -> DiegeticPanel {
-    let dim = bevy_diegetic::Dimension {
-        value: LAYOUT_SIZE,
-        unit:  Some(Unit::Custom(LAYOUT_METERS_PER_UNIT)),
-    };
-    DiegeticPanel::world()
-        .size(
-            bevy_diegetic::Sizing::Fixed(dim),
-            bevy_diegetic::Sizing::Fixed(dim),
-        )
-        .font_unit(Unit::Custom(LAYOUT_METERS_PER_UNIT))
-        .with_tree(tree)
-        .build()
-        .expect("bench panel dimensions must be valid")
-}
-
-// ── Benchmarks ──────────────────────────────────────────────────────────
-
 fn bench_panel_layout(c: &mut Criterion) {
-    for row_count in [5, 20, 100, 500] {
-        let rows = generate_rows(row_count);
+    for row_count in ROW_COUNTS {
+        let rows = generate_status_rows(row_count);
         let group_name = format!("panel_{row_count}_rows");
         let mut group = c.benchmark_group(&group_name);
 
-        // Cold: first layout computation for a fresh panel.
         group.bench_function("cold", |b| {
             b.iter_with_setup(
                 || {
                     let mut app = create_bench_app();
-                    let tree = build_panel_tree(&rows, Color::WHITE);
-                    let entity = app.world_mut().spawn(bench_panel(tree)).id();
+                    let tree = build_diegetic_status_tree(&rows);
+                    let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
                     (app, entity)
                 },
                 |(mut app, entity)| {
@@ -196,16 +60,51 @@ fn bench_panel_layout(c: &mut Criterion) {
             );
         });
 
-        // Warm: tree mutation triggers full layout recomputation.
-        group.bench_function("warm", |b| {
+        group.bench_function("no_change_update", |b| {
             let mut app = create_bench_app();
-            let tree = build_panel_tree(&rows, Color::WHITE);
-            let entity = app.world_mut().spawn(bench_panel(tree)).id();
-            app.update(); // Initial layout.
+            let tree = build_diegetic_status_tree(&rows);
+            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+            app.update();
 
             b.iter(|| {
-                // Rebuild tree with same content — triggers Changed<DiegeticPanel>.
-                let tree = build_panel_tree(&rows, Color::WHITE);
+                app.update();
+                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+            });
+        });
+
+        group.bench_function("resize_only", |b| {
+            let mut app = create_bench_app();
+            let tree = build_diegetic_status_tree(&rows);
+            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+            app.update();
+
+            let mut expanded = false;
+            b.iter(|| {
+                expanded = !expanded;
+                let size = if expanded {
+                    RESIZED_PANEL_SIZE
+                } else {
+                    PANEL_SIZE
+                };
+                let mut panel = app
+                    .world_mut()
+                    .get_mut::<DiegeticPanel>(entity)
+                    .expect("entity must exist");
+                panel.set_width(size);
+                panel.set_height(size);
+                app.update();
+                black_box(app.world().get::<ComputedDiegeticPanel>(entity));
+            });
+        });
+
+        group.bench_function("warm", |b| {
+            let mut app = create_bench_app();
+            let tree = build_diegetic_status_tree(&rows);
+            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+            app.update();
+
+            b.iter(|| {
+                let tree = build_diegetic_status_tree(&rows);
                 app.world_mut()
                     .get_mut::<DiegeticPanel>(entity)
                     .expect("entity must exist")
@@ -215,24 +114,21 @@ fn bench_panel_layout(c: &mut Criterion) {
             });
         });
 
-        // Color change: same layout structure, different colors. This still
-        // triggers Changed<DiegeticPanel> and recomputes layout today.
         group.bench_function("color_change_rebuild", |b| {
             let mut app = create_bench_app();
-            let tree = build_panel_tree(&rows, Color::WHITE);
-            let entity = app.world_mut().spawn(bench_panel(tree)).id();
-            app.update(); // Initial layout.
+            let tree = build_diegetic_status_tree(&rows);
+            let entity = app.world_mut().spawn(bench_panel(tree, PANEL_SIZE)).id();
+            app.update();
 
             let mut toggle = false;
             b.iter(|| {
-                // Alternate colors to ensure Changed<DiegeticPanel> fires.
                 toggle = !toggle;
                 let color = if toggle {
                     Color::srgb(1.0, 0.0, 0.0)
                 } else {
                     Color::srgb(0.0, 0.0, 1.0)
                 };
-                let tree = build_panel_tree(&rows, color);
+                let tree = build_diegetic_status_tree_with_text_color(&rows, color);
                 app.world_mut()
                     .get_mut::<DiegeticPanel>(entity)
                     .expect("entity must exist")

@@ -190,7 +190,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Criterion benchmark smoke
-        run: cargo bench --benches
+        run: cargo bench -p bevy_diegetic --benches --features bench_support
         env:
           WGPU_BACKEND: gl
           WINIT_UNIX_BACKEND: x11

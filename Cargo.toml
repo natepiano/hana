@@ -55,6 +55,7 @@ pedantic = { level = "deny", priority = -1 }
 
 # Universal allows
 multiple_crate_versions = "allow"
+redundant_feature_names = "allow" # `bench_support` names a private benchmark support surface.
 redundant_pub_crate     = "allow"
 
 # Allow specific lints that conflict with Bevy patterns

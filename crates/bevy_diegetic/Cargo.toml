@@ -14,6 +14,7 @@ version.workspace    = true
 workspace = true
 
 [features]
+bench_support      = []
 default            = ["typography_overlay"]
 typography_overlay = []
 
@@ -61,12 +62,18 @@ name = "hue_offset"
 name = "side_by_side"
 
 [[bench]]
-harness = false
-name    = "layout_comparison"
+harness           = false
+name              = "layout_comparison"
+required-features = ["bench_support"]
 
 [[bench]]
 harness = false
 name    = "panel_perf"
+
+[[bench]]
+harness           = false
+name              = "layout_engine_raw"
+required-features = ["bench_support"]
 
 [[example]]
 name              = "typography"

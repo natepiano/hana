@@ -16,3 +16,10 @@ Decisions from the ad hoc review of next steps after clarifying `bevy_diegetic` 
 4. Keep: expand `panel_perf` with public-path scenarios that isolate separate questions: `no_change_update` for unchanged Bevy frames, `resize_only` for reflowing an unchanged tree at a new panel size, `warm` for replacing the panel with a freshly rebuilt but logically identical tree, and `color_change_rebuild` as the baseline for future visual-only fast paths.
 5. Keep: add diagnostic micro-bench slices for `build_tree_only`, `scale_tree_only`, and `raw_compute_prebuilt_tree` so the benchmark matrix can show whether cost comes from public tree construction, unit conversion/scaled-tree cloning, or the raw layout algorithm. Keep the matrix full featured, but preserve a direct Clay-vs-diegetic comparison as an overall goal.
 6. Keep: once the benchmark matrix exists, run baseline benches before choosing optimization work. No premature optimization; scaled-tree caching and/or layout-affecting hashes become candidates only if the new data shows `scale_tree_only`, `color_change_rebuild`, or related public-path results are material.
+
+## Implemented Matrix
+
+1. `layout_comparison`: direct Clay-vs-diegetic layout comparison with shared fixtures, gated by `bench_support`; no Bevy ECS path.
+2. `panel_perf`: covers `cold`, `no_change_update`, `resize_only`, `warm`, and `color_change_rebuild`.
+3. `layout_engine_raw`: gated behind `bench_support`; covers `build_tree_only`, `scale_tree_only`, and `raw_compute_prebuilt_tree`.
+4. CI benchmark smoke command: `cargo bench -p bevy_diegetic --benches --features bench_support`.

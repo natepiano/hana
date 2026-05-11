@@ -1,483 +1,69 @@
-#![allow(
-    clippy::expect_used,
-    reason = "benchmarks expect on just-spawned entities where None is a test bug"
-)]
-
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout performance on
 //! identical panel layouts.
 //!
-//! - **`clay_immediate_full`**: immediate-mode full cycle (allocate + build +
-//!   layout + collect).
-//! - **`diegetic_public_set_tree_update`**: public retained-mode panel path —
-//!   rebuild a `LayoutTree`, assign it to an existing `DiegeticPanel`, run
-//!   `app.update()`, and read `ComputedDiegeticPanel`.
+//! - **`clay_immediate_build_layout_collect`**: immediate-mode build + layout + command collection
+//!   using a reused `Clay` context.
+//! - **`diegetic_build_compute`**: build the same public `LayoutTree` fixture, run
+//!   `LayoutEngine::compute`, and read the `LayoutResult`.
 //!
 //! # Methodology notes
 //!
-//! This benchmark compares user-facing integration paths, not raw layout
-//! engines. The diegetic side includes API-boundary work such as rebuilding
-//! the public tree, converting unit-carrying dimensions to points inside
-//! `compute_panel_layouts`, Bevy change detection, system scheduling, and
-//! storing the result on the ECS component. The Clay side is immediate-mode
-//! layout plus command collection.
+//! This benchmark compares direct layout passes without Bevy ECS scheduling,
+//! `DiegeticPanel` change detection, panel unit scaling, or render-system work.
+//! It exists alongside `panel_perf`, which measures the public Bevy panel path,
+//! and `layout_engine_raw`, which breaks diegetic costs into smaller diagnostic
+//! slices.
 //!
-//! In a real Bevy application, clay's output would also be processed through
-//! the ECS (spawning entities, building meshes), so this benchmark is useful
-//! for integration-cost intuition. It should not be used to infer raw
-//! `LayoutEngine` performance; the crate-internal Clay parity tests exercise
-//! the engine directly for correctness, and a separate raw-engine benchmark
-//! should be used for performance comparisons at that layer.
-//!
-//! Run with `cargo bench --bench layout_comparison`.
+//! Run with `cargo bench -p bevy_diegetic --bench layout_comparison --features bench_support`.
+
+mod common;
 
 use std::hint::black_box;
-use std::sync::Arc;
 
-use bevy::app::App;
-use bevy::prelude::*;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::ComputedDiegeticPanel;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticTextMeasurer;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::HeadlessLayoutPlugin;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextDimensions;
-use bevy_diegetic::TextMeasure;
-use bevy_diegetic::Unit;
-use bevy_kana::ToF32;
+use bevy_diegetic::bench_support::LayoutEngine;
 use clay_layout::Clay;
-use clay_layout::ClayLayoutScope;
-use clay_layout::Declaration;
-use clay_layout::fit;
-use clay_layout::fixed;
-use clay_layout::grow;
-use clay_layout::layout::Alignment;
-use clay_layout::layout::LayoutAlignmentX;
-use clay_layout::layout::LayoutAlignmentY;
-use clay_layout::layout::LayoutDirection;
-use clay_layout::math::Dimensions;
+use common::measurement::clay_monospace_measure;
+use common::measurement::monospace_measure_text_fn;
+use common::panels::PANEL_SIZE;
+use common::panels::build_clay_status_panel;
+use common::panels::build_diegetic_status_tree;
+use common::rows::ROW_COUNTS;
+use common::rows::StatusRow;
+use common::rows::generate_status_rows;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 
-// ── Shared measurement ──────────────────────────────────────────────────
-
-const FONT_SIZE: f32 = 10.0;
-const CLAY_FONT_SIZE: u16 = 10;
-const CHAR_WIDTH_FACTOR: f32 = 0.6;
-
-fn monospace_measurer() -> DiegeticTextMeasurer {
-    DiegeticTextMeasurer {
-        measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
-            let char_width = measure.size * CHAR_WIDTH_FACTOR;
-            let mut max_line_width: f32 = 0.0;
-            let mut line_count = 0_u32;
-            for line in text.lines() {
-                line_count += 1;
-                let width = line.chars().count().to_f32() * char_width;
-                max_line_width = max_line_width.max(width);
-            }
-            if line_count == 0 {
-                line_count = 1;
-            }
-            TextDimensions {
-                width:       max_line_width,
-                height:      measure.size * line_count.to_f32(),
-                line_height: measure.size,
-            }
-        }),
-    }
-}
-
-fn clay_monospace_measure(
-    text: &str,
-    config: &clay_layout::text::TextConfig,
-    _: &mut (),
-) -> Dimensions {
-    let font_size = f32::from(config.font_size);
-    let char_width = font_size * CHAR_WIDTH_FACTOR;
-    let line_height = if config.line_height == 0 {
-        font_size
-    } else {
-        f32::from(config.line_height)
-    };
-    let mut max_line_width: f32 = 0.0;
-    let mut line_count = 0_u32;
-    for line in text.lines() {
-        line_count += 1;
-        let width = line.chars().count().to_f32() * char_width;
-        max_line_width = max_line_width.max(width);
-    }
-    if line_count == 0 {
-        line_count = 1;
-    }
-    Dimensions {
-        width:  max_line_width,
-        height: line_height * line_count.to_f32(),
-    }
-}
-
-// ── Row data ────────────────────────────────────────────────────────────
-
-fn generate_rows(count: usize) -> Vec<(&'static str, &'static str)> {
-    const LABELS: &[&str] = &[
-        "fps:",
-        "frame ms:",
-        "radius:",
-        "entities:",
-        "triangles:",
-        "draw calls:",
-        "memory:",
-        "cpu:",
-        "gpu:",
-        "batches:",
-        "lights:",
-        "shadows:",
-        "textures:",
-        "meshes:",
-        "shaders:",
-        "cameras:",
-        "viewports:",
-        "particles:",
-        "bones:",
-        "clips:",
-    ];
-    const VALUES: &[&str] = &[
-        "60", "16.7", "0.3", "1024", "128000", "42", "512MB", "23%", "45%", "18", "4", "8", "256",
-        "64", "32", "2", "1", "10000", "128", "3",
-    ];
-    (0..count)
-        .map(|i| (LABELS[i % LABELS.len()], VALUES[i % VALUES.len()]))
-        .collect()
-}
-
-// ── Layout builders ─────────────────────────────────────────────────────
-
-fn build_clay_header<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>) {
-    clay.with(
-        Declaration::new()
-            .layout()
-            .width(grow!())
-            .height(grow!(FONT_SIZE, 20.0))
-            .padding(clay_layout::layout::Padding::new(5, 5, 4, 4))
-            .child_alignment(Alignment::new(
-                LayoutAlignmentX::Left,
-                LayoutAlignmentY::Center,
-            ))
-            .end()
-            .background_color((52, 98, 90).into()),
-        |clay| {
-            clay.with(
-                Declaration::new()
-                    .layout()
-                    .width(grow!())
-                    .height(fit!())
-                    .direction(LayoutDirection::LeftToRight)
-                    .end(),
-                |clay| {
-                    clay.with(
-                        Declaration::new()
-                            .layout()
-                            .width(fit!())
-                            .height(grow!())
-                            .end(),
-                        |clay| {
-                            clay.text(
-                                "STATUS",
-                                clay_layout::text::TextConfig::new()
-                                    .font_size(CLAY_FONT_SIZE)
-                                    .end(),
-                            );
-                        },
-                    );
-                    clay.with(
-                        Declaration::new()
-                            .layout()
-                            .width(grow!())
-                            .height(fixed!(1.0))
-                            .end(),
-                        |_| {},
-                    );
-                    clay.with(
-                        Declaration::new()
-                            .layout()
-                            .width(fit!())
-                            .height(grow!())
-                            .end(),
-                        |clay| {
-                            clay.text(
-                                "BENCH",
-                                clay_layout::text::TextConfig::new()
-                                    .font_size(CLAY_FONT_SIZE)
-                                    .end(),
-                            );
-                        },
-                    );
-                },
-            );
-        },
-    );
-}
-
-fn build_clay_body<'a>(clay: &mut ClayLayoutScope<'a, 'a, (), ()>, rows: &[(&str, &str)]) {
-    clay.with(
-        Declaration::new()
-            .layout()
-            .width(grow!())
-            .height(grow!())
-            .end()
-            .background_color((22, 28, 34).into()),
-        |clay| {
-            clay.with(
-                Declaration::new()
-                    .layout()
-                    .width(grow!())
-                    .padding(clay_layout::layout::Padding::all(5))
-                    .direction(LayoutDirection::TopToBottom)
-                    .child_gap(2)
-                    .end(),
-                |clay| {
-                    for (label, value) in rows {
-                        clay.with(
-                            Declaration::new()
-                                .layout()
-                                .width(grow!())
-                                .height(fit!())
-                                .direction(LayoutDirection::LeftToRight)
-                                .end(),
-                            |clay| {
-                                clay.text(
-                                    label,
-                                    clay_layout::text::TextConfig::new()
-                                        .font_size(CLAY_FONT_SIZE)
-                                        .end(),
-                                );
-                                clay.with(Declaration::new().layout().width(grow!()).end(), |_| {});
-                                clay.text(
-                                    value,
-                                    clay_layout::text::TextConfig::new()
-                                        .font_size(CLAY_FONT_SIZE)
-                                        .end(),
-                                );
-                            },
-                        );
-                    }
-                },
-            );
-        },
-    );
-}
-
-fn build_clay_panel<'a>(
-    layout: &mut ClayLayoutScope<'a, 'a, (), ()>,
-    rows: &[(&str, &str)],
-    size: f32,
-) {
-    layout.with(
-        Declaration::new()
-            .layout()
-            .width(fixed!(size))
-            .height(fixed!(size))
-            .padding(clay_layout::layout::Padding::all(8))
-            .direction(LayoutDirection::TopToBottom)
-            .child_gap(5)
-            .end()
-            .background_color((180, 96, 122).into()),
-        |clay| {
-            build_clay_header(clay);
-            // Divider.
-            clay.with(
-                Declaration::new()
-                    .layout()
-                    .width(grow!())
-                    .height(fixed!(4.0))
-                    .end()
-                    .background_color((74, 196, 172).into()),
-                |_| {},
-            );
-            build_clay_body(clay, rows);
-        },
-    );
-}
-
-fn build_diegetic_header(b: &mut LayoutBuilder) {
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::grow_range(FONT_SIZE, 20.0))
-            .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
-            .child_align_y(AlignY::Center)
-            .background(bevy::color::Color::srgb_u8(52, 98, 90)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight),
-                |b| {
-                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", LayoutTextStyle::new(FONT_SIZE));
-                    });
-                    b.with(
-                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                        |_| {},
-                    );
-                    b.with(
-                        El::new()
-                            .width(Sizing::FIT)
-                            .height(Sizing::GROW)
-                            .child_align_x(AlignX::Right),
-                        |b| {
-                            b.text("BENCH", LayoutTextStyle::new(FONT_SIZE));
-                        },
-                    );
-                },
-            );
-        },
-    );
-}
-
-fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(&str, &str)]) {
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .background(bevy::color::Color::srgb_u8(22, 28, 34)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .padding(Padding::all(5.0))
-                    .direction(Direction::TopToBottom)
-                    .child_gap(2.0),
-                |b| {
-                    for (label, value) in rows {
-                        b.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .direction(Direction::LeftToRight),
-                            |b| {
-                                b.text(*label, LayoutTextStyle::new(FONT_SIZE));
-                                b.with(
-                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                    |_| {},
-                                );
-                                b.text(*value, LayoutTextStyle::new(FONT_SIZE));
-                            },
-                        );
-                    }
-                },
-            );
-        },
-    );
-}
-
-fn build_diegetic_tree(rows: &[(&str, &str)], size: f32) -> bevy_diegetic::LayoutTree {
-    let mut b = LayoutBuilder::with_root(
-        El::new()
-            .width(Sizing::fixed(size))
-            .height(Sizing::fixed(size))
-            .padding(Padding::all(8.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0)
-            .background(bevy::color::Color::srgb_u8(180, 96, 122)),
-    );
-    build_diegetic_header(&mut b);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(4.0))
-            .background(bevy::color::Color::srgb_u8(74, 196, 172)),
-        |_| {},
-    );
-    build_diegetic_body(&mut b, rows);
-    b.build()
-}
-
-// ── Headless Bevy app for diegetic benchmarking ─────────────────────────
-
-/// Creates a minimal headless Bevy app with `HeadlessLayoutPlugin`.
-///
-/// No rendering, no window, no GPU — only the ECS scheduler and
-/// layout computation with a monospace measurer.
-fn create_bench_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.insert_resource(monospace_measurer());
-    app.add_plugins(HeadlessLayoutPlugin);
-    app.update();
-    app
-}
-
-fn bench_panel(tree: bevy_diegetic::LayoutTree, size: f32) -> DiegeticPanel {
-    let layout_meters_per_unit = 1.0 / size;
-    let dim = bevy_diegetic::Dimension {
-        value: size,
-        unit:  Some(Unit::Custom(layout_meters_per_unit)),
-    };
-    DiegeticPanel::world()
-        .size(
-            bevy_diegetic::Sizing::Fixed(dim),
-            bevy_diegetic::Sizing::Fixed(dim),
-        )
-        .font_unit(Unit::Custom(layout_meters_per_unit))
-        .with_tree(tree)
-        .build()
-        .expect("bench panel dimensions must be valid")
-}
-
-// ── Benchmark runners ───────────────────────────────────────────────────
-
-fn run_clay_layout(rows: &[(&str, &str)], size: f32) {
-    let mut clay = Clay::new((size, size).into());
-    clay.set_measure_text_function_user_data((), clay_monospace_measure);
+fn run_clay_layout(clay: &mut Clay, rows: &[StatusRow]) {
     let mut layout = clay.begin::<(), ()>();
-    build_clay_panel(&mut layout, rows, size);
-    let cmds: Vec<_> = layout.end().collect();
-    black_box(&cmds);
+    build_clay_status_panel(&mut layout, rows);
+    let commands: Vec<_> = layout.end().collect();
+    black_box(&commands);
 }
 
-fn run_diegetic_layout(app: &mut App, entity: Entity, rows: &[(&str, &str)], size: f32) {
-    let tree = build_diegetic_tree(rows, size);
-    app.world_mut()
-        .get_mut::<DiegeticPanel>(entity)
-        .expect("panel entity must exist")
-        .set_tree(tree);
-    app.update();
-    let computed = app.world().get::<ComputedDiegeticPanel>(entity);
-    black_box(&computed);
+fn run_diegetic_layout(engine: &LayoutEngine, rows: &[StatusRow]) {
+    let tree = build_diegetic_status_tree(rows);
+    let result = engine.compute(&tree, PANEL_SIZE, PANEL_SIZE, 1.0);
+    black_box(result);
 }
-
-// ── Benchmarks ──────────────────────────────────────────────────────────
 
 fn bench_status_panel(c: &mut Criterion) {
-    let size = 160.0;
-
-    for row_count in [5, 20, 100, 500] {
-        let rows = generate_rows(row_count);
-
+    for row_count in ROW_COUNTS {
+        let rows = generate_status_rows(row_count);
         let group_name = format!("status_panel_{row_count}_rows");
         let mut group = c.benchmark_group(&group_name);
 
-        group.bench_function("clay_immediate_full", |b| {
-            b.iter(|| run_clay_layout(&rows, size));
+        group.bench_function("clay_immediate_build_layout_collect", |b| {
+            let mut clay = Clay::new((PANEL_SIZE, PANEL_SIZE).into());
+            clay.set_measure_text_function_user_data((), clay_monospace_measure);
+
+            b.iter(|| run_clay_layout(&mut clay, black_box(&rows)));
         });
 
-        group.bench_function("diegetic_public_set_tree_update", |b| {
-            let mut app = create_bench_app();
-            let tree = build_diegetic_tree(&rows, size);
-            let entity = app.world_mut().spawn(bench_panel(tree, size)).id();
-            // First update to compute initial layout.
-            app.update();
+        group.bench_function("diegetic_build_compute", |b| {
+            let engine = LayoutEngine::new(monospace_measure_text_fn());
 
-            b.iter(|| run_diegetic_layout(&mut app, entity, &rows, size));
+            b.iter(|| run_diegetic_layout(&engine, black_box(&rows)));
         });
 
         group.finish();

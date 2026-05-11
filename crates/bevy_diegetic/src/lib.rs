@@ -57,6 +57,18 @@ mod render;
 mod screen_space;
 mod text;
 
+#[cfg(feature = "bench_support")]
+#[doc(hidden)]
+/// Internal exports used by feature-gated benchmarks.
+pub mod bench_support {
+    pub use crate::layout::LayoutEngine;
+    pub use crate::layout::LayoutResult;
+    pub use crate::layout::MeasureTextFn;
+    pub use crate::layout::RectangleSource;
+    pub use crate::layout::RenderCommand;
+    pub use crate::layout::RenderCommandKind;
+}
+
 use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 pub use callouts::ArrowStyle;

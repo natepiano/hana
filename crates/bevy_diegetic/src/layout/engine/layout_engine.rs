@@ -189,5 +189,6 @@ impl LayoutResult {
     /// bounds reflect the real content size rather than the full viewport.
     ///
     /// Returns `None` if no user-defined element exists.
+    #[must_use = "callers use the content bounds to resolve fit-sized panels"]
     pub fn content_bounds(&self) -> Option<BoundingBox> { self.computed.get(1).map(|c| c.bounds) }
 }
