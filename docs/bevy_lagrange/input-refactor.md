@@ -3626,33 +3626,336 @@ Core ECS-only tests:
 - workspace consumers, especially `crates/bevy_diegetic/examples/*`, compile after
   legacy `OrbitCam` input fields move into input modes and bindings.
 
-## Migration Plan
+## Implementation Phases
 
-1. Add workspace-pinned `bevy_enhanced_input` with explicit compatible version bounds as a normal `bevy_lagrange` dependency and have `LagrangePlugin` install the enhanced-input plugin through the internal enhanced-input integration boundary.
-2. Add `bitflags = { workspace = true }` as a direct `bevy_lagrange` dependency.
-3. Audit `bevy_kana`'s `input` feature. Remove it if unused by `bevy_lagrange`, or validate that it resolves to the same `bevy_enhanced_input` version as the direct dependency.
-4. Add the public `input` module with actions, context, input modes, default-on reflected binding descriptors, validated bindings, intent, disabled input, interaction state, manual writing, and interaction events.
-5. Add `OrbitCamInput`, typed deltas, active-source fields, and helper methods for manual input.
-6. Add `OrbitCamInputContext` as a required component on `OrbitCam` and register it in `LagrangePlugin` after enhanced input is installed.
-7. Add mutually exclusive `OrbitCamPreset`, `OrbitCamBindings`, and `OrbitCamManual`.
-8. Add `OrbitCamBindings`, `OrbitCamBindingsDescriptor`, private fields, sealed action-typed local builder/spec types with per-binding source metadata, typestate wheel ownership, opaque held-entry builders, engagement invariants, gamepad selection policy, metadata-bearing low-level enhanced-input constructors, descriptor apply status/events, and one shared runtime validation function.
-9. Add `ZoomDirection`, `OrbitCamButtonDragZoomBinding`, touch policy, pinch policy, and wheel policy as binding/adapter configuration.
-10. Add the private `OrbitCamInputInstallationOf` / `OrbitCamInputInstallation` relationship, the observer-based input-mode exclusivity shim, and input-mode reconciliation.
-11. Add the private adapter module for wheel units, smooth scroll, pinch, and touch.
-12. Add source-aware interaction tracking, the internal lifecycle queue, `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`, `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionState`.
-13. Replace public runtime gating with `CameraInputDisabled` plus internal transient blockers.
-14. Rename `CameraInputDetection` to `CameraInputRouting` with `CursorHitTest` and `Explicit`.
-15. Implement public routing configuration, internal resolved routing state with an explicit resolver, per-source held latching, deterministic latch recovery, per-event impulse routing, no-position source routing, global gesture fallback routing, logical surface metrics, and inactive-context gating/reset before enhanced-input update.
-16. Add the root-level `system_sets` module, internal `LagrangeSystemSetsPlugin`, and public `OrbitCamInputPhase::{PreInput, WriteManual, Finalize}` scheduling surface.
-17. Add `animation_input_interrupt` and use finalized `OrbitCamInput` as the user-input interrupt signal for `Cancel` and `Complete`; treat `Ignore` as a finalization and pre-controller blocker.
-18. Remove physical binding fields from `OrbitCam` as a breaking change and move their replacement concepts into presets and adapter configuration.
-19. Update egui blocking to feed internal UI-focus blockers before finalization.
-20. Add the `fairy_dust` camera guidance panel and component-insertion camera setup needed by the input-mode examples.
-21. Add the input-mode examples with `fairy_dust` visual feedback.
-22. Migrate existing examples according to the example migration notes.
-23. Migrate workspace consumers, especially `crates/bevy_diegetic/examples/*`, away from legacy `OrbitCam` input fields.
-24. Add missing-plugin diagnostics and first-frame setup validation.
-25. Add ECS-only tests for scheduling invariants, reconciliation, routing, blockers, lifecycle events, legacy behavior preservation, interrupt policies, enhanced-input API compatibility, workspace consumers, and dependency versioning.
+Use integer-prefixed phase names for branches, commits, and review checkpoints. Each
+phase should leave the repository usable at the commit boundary. The one exception is
+the middle of `08-breaking-cutover-and-callers`: once legacy `OrbitCam` input fields
+are removed, the worktree is temporarily unusable until in-repo examples and workspace
+callers are migrated. Do not commit that phase until the migration is complete.
+
+Phase contract:
+
+- Treat each numbered phase as one committable implementation unit.
+- Keep phases `01` through `07` additive. Existing `OrbitCam` behavior remains the
+  runtime source of truth while the new input model is built beside it.
+- Treat phase `08` as the only planned breaking window. It is safe to break local
+  compilation inside the phase, but not safe to commit until callers are migrated and
+  the controller consumes finalized `OrbitCamInput`.
+- Keep phases `09` and `10` as follow-through after the new API is usable: examples,
+  guidance UI, diagnostics, tests, and cleanup.
+- If implementation discovers that a public type must change, fold the change back
+  into the earliest phase that introduces that type instead of adding a late
+  compatibility layer.
+
+Phase index:
+
+| Phase | Commit boundary | Runtime authority at boundary | Primary output |
+|-------|-----------------|-------------------------------|----------------|
+| `01-dependencies-and-plugin-shell` | Usable | Legacy `OrbitCam` input | Dependencies, plugin shell, system-set module. |
+| `02-public-input-surface` | Usable | Legacy `OrbitCam` input | Public input types, manual writer surface, interaction events. |
+| `03-actions-bindings-and-presets` | Usable | Legacy `OrbitCam` input | Actions, bindings, presets, validation. |
+| `04-input-modes-and-installation` | Usable | Legacy `OrbitCam` input | Exclusive input-mode components and private installation ownership. |
+| `05-routing-scheduling-and-blockers` | Usable | Legacy `OrbitCam` input | Routing snapshots, blockers, surface metrics, schedule diagnostics. |
+| `06-adapters-and-action-resolution` | Usable | Legacy `OrbitCam` input | Enhanced-input actions and adapters produce `OrbitCamInput`. |
+| `07-lifecycle-and-manual-finalization` | Usable | Legacy `OrbitCam` input | Finalized input, lifecycle events, manual path, animation blockers. |
+| `08-breaking-cutover-and-callers` | Broken mid-phase; usable only at end | New `OrbitCamInput` pipeline | Controller cutover, legacy field removal, caller migration. |
+| `09-examples-guidance-and-doc-cleanup` | Usable | New `OrbitCamInput` pipeline | Teaching examples, fairy-dust guidance, example cleanup. |
+| `10-tests-diagnostics-and-cleanup` | Usable | New `OrbitCamInput` pipeline | ECS test coverage, diagnostics, transitional-code removal. |
+
+### 01-dependencies-and-plugin-shell
+
+Goal: add dependency and plugin infrastructure without changing camera behavior.
+
+Scope:
+
+- Add workspace-pinned `bevy_enhanced_input` with explicit compatible version bounds
+  as a direct `bevy_lagrange` dependency.
+- Add `bitflags = { workspace = true }` as a direct `bevy_lagrange` dependency.
+- Audit `bevy_kana`'s `input` feature; remove it if unused by `bevy_lagrange`, or
+  prove it resolves to the same `bevy_enhanced_input` version.
+- Add the private enhanced-input integration boundary for plugin setup, context
+  registration, binding installation, and adapter/mock write paths.
+- Add the root-level `system_sets` module, internal `LagrangeSystemSetsPlugin`, and
+  public `OrbitCamInputPhase::{PreInput, WriteManual, Finalize}` type, but keep new
+  input systems inert until later phases.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
+
+Done when:
+
+- `LagrangePlugin` can install the enhanced-input plugin without duplicate setup.
+- Dependency validation proves the workspace-pinned enhanced-input and `bitflags`
+  versions are used.
+- A minimal app with `LagrangePlugin` still compiles and existing camera behavior is
+  unchanged.
+
+### 02-public-input-surface
+
+Goal: add the public type surface that other phases will fill in.
+
+Scope:
+
+- Add the `bevy_lagrange::input` module and root re-exports.
+- Add `OrbitCamInput`, typed deltas, read-only accessors, active-source fields, and
+  private mutation token.
+- Add `CameraInteractionSources`, private source bits, and `ManualInputSource`.
+- Add `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`,
+  `OrbitCamInteractionSourcesChanged`, `CameraInputMetricsMissing`,
+  `OrbitCamInteractionKind`, and `OrbitCamInteractionState`.
+- Add `CameraInputDisabled`, `CameraInputSurfaceMetrics`, and
+  `CameraInputMetricKind`.
+- Add `OrbitCamManualInput` and `OrbitCamManualInputWriter` signatures, but do not
+  require the new manual path to drive the controller yet.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
+
+Done when:
+
+- Public rustdoc describes `OrbitCamInput` as semantic per-frame camera input, not raw
+  device input.
+- Interaction event types carry `camera`, `kind`, and `sources`.
+- `ManualInputSource` cannot be constructed without `MANUAL`.
+
+### 03-actions-bindings-and-presets
+
+Goal: build the action-centered configuration model without installing it into the
+controller yet.
+
+Scope:
+
+- Add public semantic enhanced-input actions:
+  `OrbitCamOrbitAction`, `OrbitCamPanAction`, `OrbitCamZoomCoarseAction`, and
+  `OrbitCamZoomSmoothAction`.
+- Add private engagement actions for held interaction phase tracking.
+- Add `OrbitCamBindings`, `OrbitCamBindingsDescriptor`, private fields, sealed
+  action-typed binding sets, per-binding source metadata, route policy, and the shared
+  `validate_bindings` path.
+- Add the progressive `OrbitCamBindings` builder with typestate wheel ownership,
+  opaque held-entry builders, engagement invariants, gamepad selection policy, and
+  metadata-bearing low-level enhanced-input constructors.
+- Add `OrbitCamWheelBinding`, `OrbitCamBlenderLikeWheelBinding`,
+  `OrbitCamWheelModifier`, `OrbitCamPinchBinding`, `OrbitCamTouchBinding`,
+  `OrbitCamButtonDragZoomBinding`, `OrbitCamButtonDragZoomAxis`,
+  `CameraInputGamepadSelectionPolicy`, and `ZoomDirection`.
+- Add `OrbitCamPreset::{SimpleMouse, BlenderLike}` and `OrbitCamPreset::to_bindings`.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
+
+Done when:
+
+- Presets and custom bindings validate through the same code path.
+- Missing wheel policy, held motion without engagement, impulse engagement, adapter
+  conflicts, and mismatched held source/route policies return structured
+  `OrbitCamBindingsError` values.
+- `wheel_from_preset(...)` copies only the preset wheel policy.
+
+### 04-input-modes-and-installation
+
+Goal: add the runtime input-mode state machine and private installation ownership.
+
+Scope:
+
+- Add mutually exclusive input-mode components: `OrbitCamPreset`, `OrbitCamBindings`,
+  and `OrbitCamManual`.
+- Add the observer shim for tidy component mutations and the exclusive `PreInput`
+  invariant pass as the deterministic authority.
+- Add `OrbitCamInputModeDescriptor`, `OrbitCamInputMode`, `OrbitCamInputModeApplied`,
+  `OrbitCamInputModeRejected`, `OrbitCamInputModeApplyStatus`, and
+  `OrbitCamInputModeApplyState`.
+- Add `OrbitCamInputInstallationOf` / `OrbitCamInputInstallation` and private
+  installation introspection helpers.
+- Add descriptor apply, validation, mode exclusivity, old-installation cleanup, and
+  reconciliation inside the same exclusive `PreInput` structural boundary.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
+The new input-mode components may exist, but the old controller path is still the
+behavioral source of truth.
+
+Done when:
+
+- Every `OrbitCam` has exactly one input-mode component by `PreInput` completion.
+- Descriptor apply is atomic: a changed descriptor exposes exactly one private
+  installation to enhanced input in the same frame.
+- Switching modes clears stale `OrbitCamInput`, source latches, and active interaction
+  state through the lifecycle queue.
+
+### 05-routing-scheduling-and-blockers
+
+Goal: add deterministic frame routing and blocker computation.
+
+Scope:
+
+- Replace the planned public routing API with `CameraInputRouting::{CursorHitTest,
+  Explicit}` and `CameraInputRoutingConfig`, while leaving old
+  `CameraInputDetection` call sites intact until the cutover phase.
+- Add internal resolved routing state, explicit resolver function, source-specific
+  owner latches, `OrbitCamInputOwnerLatch`, deterministic latch recovery, no-position
+  fallback routing, global gesture fallback, and per-camera logical surface metrics.
+- Add `OrbitCamInputBlockers` as the single computed blocker source of truth.
+- Gate inactive `OrbitCamInputContext` state before `EnhancedInputSystems::Update`.
+- Add strict startup diagnostics for missing plugin setup, missing context
+  registration, missing schedule setup, and unexpected enhanced-input API markers.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative,
+but the new route/blocker snapshots can be tested in isolation.
+
+Done when:
+
+- `CameraInputRoutingConfig` mutations take effect at the next `PreInput` route phase.
+- Stale latches are cleared and rerouted in the same route phase.
+- Surface metrics are derived per camera, including non-routed manual cameras.
+- Egui, disabled, inactive-camera, animation-ignore, and unavailable-owner blockers
+  all feed `OrbitCamInputBlockers`.
+
+### 06-adapters-and-action-resolution
+
+Goal: make enhanced-input actions and Lagrange adapters produce `OrbitCamInput`.
+
+Scope:
+
+- Add private adapter modules for wheel units, smooth scroll, pinch, touch, and future
+  roll gesture input.
+- Add private adapter diagnostics for tests and debug logs.
+- Install action/context entities and private adapter state for preset and bindings
+  modes.
+- Inject adapter-backed values before `EnhancedInputSystems::Update` and resolve
+  public semantic actions plus adapter contributions into `OrbitCamInput`.
+- Preserve per-binding source attribution so lifecycle events can distinguish mouse,
+  wheel, smooth-scroll, pinch, touch, keyboard, gamepad, and manual input.
+- Keep camera action consumption non-consuming by default so app contexts can still
+  observe shared bindings.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
+The new pipeline can be tested by reading `OrbitCamInput`, but the controller has not
+cut over yet.
+
+Done when:
+
+- Wheel line/pixel, pinch, touch, keyboard, mouse, gamepad, and manual writes can each
+  produce expected `OrbitCamInput` values in ECS tests.
+- Adapter injection is visible to enhanced input in the same frame.
+- Inactive/gated cameras do not retain stale enhanced-input action state.
+
+### 07-lifecycle-and-manual-finalization
+
+Goal: make source-aware interaction events and finalization deterministic.
+
+Scope:
+
+- Add the serialized lifecycle queue and update `OrbitCamInteractionState`.
+- Emit `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`, and
+  `OrbitCamInteractionSourcesChanged` from finalized `OrbitCamInput`.
+- Finalize manual, preset, and bindings input after `OrbitCamInputPhase::WriteManual`.
+- Apply `CameraInputDisabled`, egui focus, inactive routing, unavailable-owner, and
+  animation-ignore blockers before events are flushed.
+- Add the pre-controller guard that cancels or replaces queued events if a late
+  blocker suppresses input.
+- Add `animation_input_interrupt` wiring for finalized `OrbitCamInput` while the old
+  controller path is still present.
+
+Repository state: usable. Existing `OrbitCam` input behavior remains authoritative,
+but the new lifecycle events may be tested against the new pipeline.
+
+Done when:
+
+- Held interactions emit one started event, source-change events for joins/leaves, and
+  one ended event.
+- Impulse interactions emit started and ended in the same frame.
+- Input-mode replacement, despawn cleanup, and blockers cannot duplicate lifecycle
+  events.
+- Manual writers work only for `OrbitCamManual` cameras.
+
+### 08-breaking-cutover-and-callers
+
+Goal: switch the actual camera controller to the new input model and remove the old
+API.
+
+Scope:
+
+- Make `OrbitCam` require `OrbitCamInput`, `OrbitCamInputContext`, and the default
+  `OrbitCamPreset::SimpleMouse`.
+- Switch `orbit_cam` controller movement to consume finalized `OrbitCamInput`.
+- Remove old physical input fields from `OrbitCam`, including old mouse/key/touch,
+  trackpad, wheel, button-zoom, and zoom-direction input fields.
+- Remove `CameraInputDetection::{Automatic, Manual}` and migrate to
+  `CameraInputRouting::{CursorHitTest, Explicit}`.
+- Migrate every in-repo example and workspace consumer that still references legacy
+  `OrbitCam` input fields, especially `crates/bevy_diegetic/examples/*`.
+- Update egui blocking to feed internal UI-focus blockers instead of old controller
+  fields.
+
+Repository state: temporarily unusable inside the phase after old fields are removed.
+It becomes usable again only after all in-repo callers are migrated and the controller
+consumes `OrbitCamInput`. This phase should be one commit or PR; do not commit the
+half-cutover state.
+
+Done when:
+
+- Existing examples and workspace consumers compile against `OrbitCamPreset`,
+  `OrbitCamBindings`, `OrbitCamManual`, `CameraInputDisabled`, and
+  `CameraInputRouting`.
+- No call site references removed raw `OrbitCam` input fields or old
+  `CameraInputDetection`.
+- The default camera still works with mouse-oriented `SimpleMouse` behavior.
+- `CameraInputInterruptBehavior::{Ignore, Cancel, Complete}` preserve their old
+  externally visible behavior through finalized `OrbitCamInput`.
+
+### 09-examples-guidance-and-doc-cleanup
+
+Goal: add the teaching examples and visual feedback requested by the new API.
+
+Scope:
+
+- Add the `fairy_dust` camera guidance panel and component-insertion camera setup
+  needed by input-mode examples.
+- Add separate examples:
+  `orbit_cam_preset_blender_like.rs`, `orbit_cam_preset_simple_mouse.rs`,
+  `orbit_cam_bindings_keyboard.rs`, `orbit_cam_bindings_gamepad.rs`, and
+  `orbit_cam_manual.rs`.
+- Consume `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`,
+  `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionState` in examples so
+  guidance text highlights active orbit, pan, and zoom rows with source attribution.
+- Update existing examples according to the example migration notes.
+- Collapse the old `zoom_to_fit/main.rs` plus `constants.rs` directory example back
+  into one `zoom_to_fit.rs` file.
+
+Repository state: usable.
+
+Done when:
+
+- Examples show how to use every supported input mode.
+- Fairy-dust guidance visibly distinguishes mouse, wheel, smooth-scroll, pinch, touch,
+  keyboard, gamepad, and manual sources where the example supports them.
+- Render-to-texture examples demonstrate explicit routing plus logical surface
+  metrics.
+
+### 10-tests-diagnostics-and-cleanup
+
+Goal: harden the cutover and remove leftover transitional code.
+
+Scope:
+
+- Add ECS-only tests for scheduling invariants, descriptor apply, reconciliation,
+  input-mode exclusivity, routing, blockers, lifecycle events, latch recovery,
+  adapter behavior, manual writes, interrupt policies, workspace consumers, and
+  dependency versioning.
+- Add the `enhanced_input_scheduling_invariant` test.
+- Add missing-plugin diagnostics and first-frame setup validation.
+- Add strict startup diagnostics for schedule/plugin/context/enhanced-input API
+  assumptions.
+- Remove any internal compatibility scaffolding used only to keep phases 01-07
+  side-by-side with legacy input.
+
+Repository state: usable.
+
+Done when:
+
+- The full workspace validation target passes.
+- There are no references to old input fields, old routing names, or temporary
+  compatibility modules.
+- The test suite covers the event, routing, schedule, adapter, descriptor, and manual
+  input invariants described in this plan.
 
 ## Changelog-Style Summary
 
