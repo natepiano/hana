@@ -17,7 +17,7 @@ The target shape is:
 
 1. `OrbitCam` configures how the camera moves.
 2. `bevy_lagrange::input` contains the public camera-input API.
-3. `OrbitCamControls` configures who owns user-input resolution.
+3. Mutually exclusive control-mode components configure who owns user-input resolution.
 4. `OrbitCamBindings` is the public custom binding and adapter-policy spec.
 5. Enhanced-input actions configure what user input means.
 6. `OrbitCamInput` is the resolved per-frame camera intent.
@@ -36,7 +36,7 @@ Use the simple feature surface:
 - `bitflags` is a direct dependency of `bevy_lagrange`.
 - `bevy_egui` remains optional.
 - `fit_overlay` remains optional.
-- `OrbitCamControls::Manual` is a per-camera control mode, not a no-dependency build mode.
+- `OrbitCamManualControls` is a per-camera control mode, not a no-dependency build mode.
 - `LagrangePlugin` installs the enhanced-input plugin it depends on before registering
   camera input contexts, so apps do not need a second hidden setup step for camera
   input.
@@ -45,6 +45,9 @@ Declare both dependencies through workspace dependency entries and use those ent
 from `crates/bevy_lagrange/Cargo.toml`. `bevy_enhanced_input` should be pinned to the
 Bevy-compatible version the implementation targets so `bevy_lagrange` does not
 silently rely on a transitive copy pulled in by another crate.
+Document the minimum supported Bevy version for the input pipeline and audit schedule
+barrier APIs on every Bevy upgrade, especially any replacement for explicit deferred
+application or exclusive-system behavior.
 
 This plan assumes the current `bevy_enhanced_input` model:
 
@@ -76,14 +79,19 @@ src/
     actions.rs             // public Orbit, Pan, ZoomCoarse, ZoomSmooth, OrbitEngaged
     bindings.rs            // public OrbitCamBindings and adapter binding policy
     context.rs             // public OrbitCamInputContext
-    controls.rs            // public OrbitCamControls and presets
+    controls/
+      mod.rs               // public controls docs and re-exports
+      modes.rs             // public mutually exclusive control-mode components
+      descriptors.rs       // public reflectable draft controls for editors/keymaps
+      exclusive.rs         // private observer shim until native Bevy exclusivity
+      installation.rs      // private owned input-entity relationships
+      reconcile.rs         // private control reconciliation systems
     events.rs              // public camera interaction lifecycle events
     state.rs               // public read-only interaction state
     routing.rs             // public routing config and logical surface metrics
     intent.rs              // public OrbitCamInput and typed deltas
     manual.rs              // public manual writer helper/query pattern
     disabled.rs            // public OrbitCamInputDisabled
-    installation.rs        // private owned input-entity relationships and reconciliation
     adapter/
       mod.rs               // private adapter plugin and systems
       actions.rs           // pub(super) source actions only if needed
@@ -92,26 +100,34 @@ src/
       pinch.rs
 ```
 
-`input/mod.rs` should explain the control modes at the top:
+`input/mod.rs` should explain the control-mode components at the top:
 
 ```rust
 //! Camera input API.
 //!
-//! Start here:
+//! # Quick Start
 //!
-//! - Use [`OrbitCamControls::Preset`] when you want a built-in camera keymap.
-//! - Use [`OrbitCamControls::Custom`] when your app has a keymap or gamepad binding UI.
-//! - Use [`OrbitCamControls::Manual`] when your app wants to compute camera intent itself.
+//! - Use [`OrbitCamPresetControls`] when you want a built-in camera keymap.
+//! - Use [`OrbitCamCustomControls`] when your app has a keymap or gamepad binding UI.
+//! - Use [`OrbitCamManualControls`] when your app wants to compute camera intent itself.
 //!
 //! ```rust
+//! App::new()
+//!     .add_plugins(DefaultPlugins)
+//!     .add_plugins(LagrangePlugin)
+//!     .add_systems(Startup, setup)
+//!     .run();
+//!
+//! fn setup(mut commands: Commands) {
 //! commands.spawn((Camera3d::default(), OrbitCam::default()));
+//! }
 //! ```
 //!
 //! ```rust
 //! commands.spawn((
 //!     Camera3d::default(),
 //!     OrbitCam::default(),
-//!     OrbitCamControls::Custom(my_keymap.to_orbit_cam_bindings()),
+//!     OrbitCamCustomControls(my_keymap.to_orbit_cam_bindings()),
 //! ));
 //! ```
 //!
@@ -129,9 +145,31 @@ src/
 //! policy are configured through [`OrbitCamBindings`], not through private
 //! adapter actions.
 //!
+//! # Observing Interactions
+//!
+//! Use [`CameraInteractionStarted`], [`CameraInteractionEnded`],
+//! [`CameraInteractionSourcesChanged`], or [`OrbitCamInteractionState`] when editor
+//! UI needs to react to orbit, pan, or zoom activity.
+//!
+//! # Advanced
+//!
+//! Render-to-texture and custom editor surfaces use [`CameraInputRouting::Explicit`]
+//! plus optional [`CameraInputSurfaceMetrics`]. Manual input is for apps that compute
+//! camera intent directly; it is not required just to choose an offscreen camera.
+//!
 //! System-set and adapter details are lower-level integration points. Most users
 //! should start with controls, bindings, and interaction events.
 ```
+
+The split between `controls`, `bindings.rs`, and control descriptors should be
+explicit in module docs:
+
+- `controls/modes.rs` owns validated runtime control-mode components that camera input systems trust.
+- `controls/exclusive.rs` owns the temporary observer-based mutual-exclusion invariant.
+- `controls/reconcile.rs` owns conversion from mode components into private enhanced-input installations.
+- `bindings.rs` owns validated runtime binding specs and their builders.
+- `controls/descriptors.rs` owns reflected draft configuration, apply events, and persisted
+  apply status for editors, scene files, and keymap tools.
 
 The public facade should re-export the semantic API from both `input` and the crate
 root for convenience:
@@ -143,18 +181,27 @@ pub use input::{
     CameraInteractionSources,
     CameraInteractionSourcesChanged,
     CameraInteractionStarted,
+    CameraInputMetricsMissing,
     CameraInputRouting,
     CameraInputRoutingConfig,
     CameraInputSurfaceMetrics,
     Orbit,
     OrbitCamBindings,
+    OrbitCamBindingsDescriptor,
     OrbitCamControlPreset,
-    OrbitCamControls,
+    OrbitCamCustomControls,
+    OrbitCamControlsApplied,
+    OrbitCamControlsApplyFailed,
+    OrbitCamControlsApplyState,
+    OrbitCamControlsApplyStatus,
+    OrbitCamControlsDescriptor,
     OrbitCamInteractionState,
     OrbitCamInput,
     OrbitCamInputContext,
     OrbitCamInputDisabled,
     OrbitCamInputSet,
+    OrbitCamManualControls,
+    OrbitCamPresetControls,
     OrbitEngaged,
     ManualOrbitCamInput,
     ManualInputSource,
@@ -201,7 +248,7 @@ configuration.
 #[require(
     OrbitCamInput,
     OrbitCamInputContext,
-    OrbitCamControls,
+    OrbitCamPresetControls,
 )]
 pub struct OrbitCam {
     // camera behavior fields
@@ -212,6 +259,7 @@ pub struct OrbitCam {
 
 ```rust
 app.add_plugins(EnhancedInputPlugin);
+app.add_plugins(OrbitCamControlModeInvariantPlugin);
 app.add_input_context::<OrbitCamInputContext>();
 ```
 
@@ -223,21 +271,35 @@ Add diagnostics for missing setup:
 - `LagrangePlugin` should run a first-frame diagnostic that confirms enhanced input is
   installed and camera input contexts are registered.
 - `OrbitCam` should have an `on_add` hook or equivalent one-time diagnostic path that
-  warns when an `OrbitCam` exists but `LagrangePlugin` has not installed the input
+  emits a one-time `error!` when an `OrbitCam` exists but `LagrangePlugin` has not installed the input
   pipeline. The warning should say that camera input will not resolve until
   `LagrangePlugin` is added.
+- `LagrangePlugin` should expose a diagnostic setting that can panic on missing setup
+  during startup for tests and strict application builds. The default should be an
+  error log, not a panic.
 
 ## Controls And Bindings
 
-`OrbitCamControls` selects who owns user-input resolution for a camera.
+The active control mode is represented by three mutually exclusive components. Exactly
+one control-mode component should be present on every `OrbitCam`:
 
 ```rust
 #[derive(Component, Debug, Reflect)]
 #[reflect(Component)]
-pub enum OrbitCamControls {
-    Preset(OrbitCamControlPreset),
-    Custom(OrbitCamBindings),
-    Manual,
+pub struct OrbitCamPresetControls(pub OrbitCamControlPreset);
+
+#[derive(Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct OrbitCamCustomControls(pub OrbitCamBindings);
+
+#[derive(Component, Default, Debug, Reflect)]
+#[reflect(Component)]
+pub struct OrbitCamManualControls;
+
+impl Default for OrbitCamPresetControls {
+    fn default() -> Self {
+        Self(OrbitCamControlPreset::SimpleMouse)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Reflect)]
@@ -248,23 +310,87 @@ pub enum OrbitCamControlPreset {
 }
 ```
 
-Keep `OrbitCamControls::Custom(OrbitCamBindings)` as one variant rather than splitting
-mode and bindings into separate components. That makes the invalid state
-"custom mode without custom bindings" unrepresentable through the ordinary spawn API.
+`OrbitCamPresetControls`, `OrbitCamCustomControls`, and `OrbitCamManualControls`
+are one exclusive family. This is the same marker-component state-machine pattern
+used in `hana::movable::state`: adding one mode removes the other modes. Keep the
+invariant code isolated in `input/controls/exclusive.rs` so it can be replaced with
+native Bevy mutually exclusive components when the supported Bevy version provides
+them.
+
+Temporary observer shim:
+
+```rust
+pub(crate) struct OrbitCamControlModeInvariantPlugin;
+
+impl Plugin for OrbitCamControlModeInvariantPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(on_preset_controls_added);
+        app.add_observer(on_custom_controls_added);
+        app.add_observer(on_manual_controls_added);
+    }
+}
+
+fn on_preset_controls_added(
+    added: On<Add, OrbitCamPresetControls>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(added.entity)
+        .remove::<OrbitCamCustomControls>()
+        .remove::<OrbitCamManualControls>();
+}
+
+fn on_custom_controls_added(
+    added: On<Add, OrbitCamCustomControls>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(added.entity)
+        .remove::<OrbitCamPresetControls>()
+        .remove::<OrbitCamManualControls>();
+}
+
+fn on_manual_controls_added(
+    added: On<Add, OrbitCamManualControls>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(added.entity)
+        .remove::<OrbitCamPresetControls>()
+        .remove::<OrbitCamCustomControls>();
+}
+```
+
+The invariant module enforces at-most-one mode. Required components provide the normal
+at-least-one default at spawn. If app code removes every control-mode component from
+an existing `OrbitCam`, the pre-input invariant check should restore
+`OrbitCamPresetControls::default()` and log a diagnostic. Use
+`OrbitCamInputDisabled` to pause input without changing the selected mode.
 
 All public components and resources introduced by this refactor should derive
-`Reflect` and register their reflected types. Because `OrbitCamControls` carries
-`OrbitCamBindings`, the public binding spec must also be reflectable. Prefer
-Lagrange-owned, reflectable binding recipes over storing arbitrary closures or opaque
-trait objects in components/resources. If an advanced escape hatch cannot be reflected
-honestly, keep it out of public component/resource state until it has a reflectable
-descriptor or validation story.
+`Reflect` and register their reflected types. The three control-mode components are
+the validated runtime state, while `OrbitCamControlsDescriptor` is the mutable
+reflected draft component for editors, scene files, and keymap tools. Do not make
+reflected field mutation of custom bindings the runtime-authoritative path. A reflect
+client may temporarily create incomplete draft data while the user is editing; the
+camera should continue using the last valid control-mode component until the
+descriptor validates and is applied.
+`OrbitCamCustomControls` must be reflectable as a component, but its
+`OrbitCamBindings` payload should use opaque/custom reflection or an equivalent
+non-editable field strategy. Reflected editing of custom bindings goes through
+`OrbitCamBindingsDescriptor`.
+
+Prefer Lagrange-owned, reflectable binding recipes over storing arbitrary closures or
+opaque trait objects in components/resources. If an advanced escape hatch cannot be
+reflected honestly, keep it out of public component/resource state until it has a
+reflectable descriptor or validation story.
 
 If an `OrbitCam` has no explicit controls component, the required component default
-should be `OrbitCamControls::Preset(OrbitCamControlPreset::SimpleMouse)`. This is the
-most likely default for users who expect a mouse-oriented camera controller. Use
-`BlenderLike` explicitly for editor-style workflows that want Blender's middle-mouse
-orbit convention and trackpad behavior.
+should be `OrbitCamPresetControls(OrbitCamControlPreset::SimpleMouse)`. This is the
+most likely default for users who expect a mouse-oriented camera controller. Insert
+`OrbitCamPresetControls(OrbitCamControlPreset::BlenderLike)` explicitly for
+editor-style workflows that want Blender's middle-mouse orbit convention and trackpad
+behavior.
 
 Future-facing public policy enums should be `#[non_exhaustive]` unless the API is
 intentionally closed. This applies especially to presets, wheel policy, pinch/touch
@@ -274,10 +400,20 @@ The modes mean:
 
 | Mode | Meaning | Library writes `OrbitCamInput` |
 |------|---------|--------------------------------|
-| `Preset(BlenderLike)` | Build `OrbitCamBindings` from the Blender-like preset, install actions and adapter policy, and resolve input. | yes |
-| `Preset(SimpleMouse)` | Build `OrbitCamBindings` from the simpler mouse preset, install actions and adapter policy, and resolve input. | yes |
-| `Custom(bindings)` | Use the public camera context and resolver, but install the app-provided `OrbitCamBindings`. | yes |
-| `Manual` | Do not install or resolve camera actions for this camera. The app writes `OrbitCamInput` through helper methods. | no |
+| `OrbitCamPresetControls(BlenderLike)` | Build `OrbitCamBindings` from the Blender-like preset, install actions and adapter policy, and resolve input. | yes |
+| `OrbitCamPresetControls(SimpleMouse)` | Build `OrbitCamBindings` from the simpler mouse preset, install actions and adapter policy, and resolve input. | yes |
+| `OrbitCamCustomControls(bindings)` | Use the public camera context and resolver, but install the app-provided `OrbitCamBindings`. | yes |
+| `OrbitCamManualControls` | Do not install or resolve camera actions for this camera. The app writes `OrbitCamInput` through helper methods. | no |
+
+Library systems should use component queries rather than matching a mode enum:
+
+```rust
+Query<..., With<OrbitCamPresetControls>>
+Query<..., With<OrbitCamCustomControls>>
+Query<..., With<OrbitCamManualControls>>
+```
+
+That keeps preset/custom resolution and manual writing on separate query surfaces.
 
 Example spawns:
 
@@ -285,7 +421,7 @@ Example spawns:
 commands.spawn((
     Camera3d::default(),
     OrbitCam::default(),
-    OrbitCamControls::Preset(OrbitCamControlPreset::BlenderLike),
+    OrbitCamPresetControls(OrbitCamControlPreset::BlenderLike),
 ));
 ```
 
@@ -293,7 +429,7 @@ commands.spawn((
 commands.spawn((
     Camera3d::default(),
     OrbitCam::default(),
-    OrbitCamControls::Custom(
+    OrbitCamCustomControls(
         editor_keymap.to_orbit_cam_bindings(),
     ),
 ));
@@ -303,9 +439,88 @@ commands.spawn((
 commands.spawn((
     Camera3d::default(),
     OrbitCam::default(),
-    OrbitCamControls::Manual,
+    OrbitCamManualControls,
 ));
 ```
+
+### Reflected Control Drafts
+
+Editor tooling, scene files, and keymap UIs need a mutable reflected representation
+of camera controls. That representation should be separate from the validated runtime
+component:
+
+```rust
+#[derive(Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct OrbitCamControlsDescriptor {
+    pub mode: OrbitCamControlsDescriptorMode,
+}
+
+#[derive(Clone, Debug, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamControlsDescriptorMode {
+    Preset(OrbitCamControlPreset),
+    Custom(OrbitCamBindingsDescriptor),
+    Manual,
+}
+
+#[derive(Clone, Debug, Reflect)]
+pub struct OrbitCamBindingsDescriptor {
+    // Reflectable draft binding recipes and adapter policy.
+}
+```
+
+`OrbitCamControlsDescriptor` is editable draft state, not the source the controller
+trusts. It may be temporarily invalid while a tool mutates fields one at a time. The
+runtime systems consume the exclusive control-mode components, which are only changed
+after descriptor validation succeeds.
+
+The internal apply step runs in `OrbitCamInputSet::PreInput` before control
+reconciliation:
+
+```text
+Changed<OrbitCamControlsDescriptor>
+  -> try_build a validated control-mode component insertion
+      -> success: insert exactly one control-mode component, emit OrbitCamControlsApplied,
+         set OrbitCamControlsApplyStatus.state to OrbitCamControlsApplyState::Applied
+      -> failure: keep previous control-mode component, emit OrbitCamControlsApplyFailed,
+         set OrbitCamControlsApplyStatus.state to OrbitCamControlsApplyState::Rejected with the error
+```
+
+Expose both events for reactive app code and a persisted status component for
+reflect/inspector clients:
+
+```rust
+#[derive(Event, Clone, Debug)]
+pub struct OrbitCamControlsApplied {
+    pub camera: Entity,
+}
+
+#[derive(Event, Clone, Debug)]
+pub struct OrbitCamControlsApplyFailed {
+    pub camera: Entity,
+    pub error: OrbitCamBindingsError,
+}
+
+#[derive(Component, Clone, Debug, Reflect)]
+#[reflect(Component)]
+pub struct OrbitCamControlsApplyStatus {
+    pub state: OrbitCamControlsApplyState,
+    pub last_error: Option<OrbitCamBindingsError>,
+}
+
+#[derive(Clone, Debug, Reflect)]
+pub enum OrbitCamControlsApplyState {
+    Applied,
+    Rejected,
+}
+```
+
+The failure path must be explicit: leave the currently installed control-mode
+component and private input installation in place, update
+`OrbitCamControlsApplyStatus`, emit `OrbitCamControlsApplyFailed`, and log a clear
+diagnostic. Do not silently fall back to a preset and do not partially install an
+invalid custom binding draft.
 
 ### `OrbitCamBindings`
 
@@ -315,6 +530,13 @@ through local builder/spec APIs. The public API should either intentionally re-e
 enhanced-input binding types as part of the `bevy_lagrange` semver surface or wrap
 them behind Lagrange-specific constructors. The default should be to wrap where that
 keeps the camera API stable and lets the implementation adapt to upstream changes.
+`OrbitCamBindings` is the validated runtime representation. Do not derive
+field-by-field reflection for it if that exposes unchecked internals. Reflected
+editing should happen through `OrbitCamBindingsDescriptor`; converting a descriptor
+into `OrbitCamBindings` must run the same validation as the builder. If the runtime
+type needs to be registered for `OrbitCamCustomControls` reflection, use Bevy's
+supported opaque/custom reflection path rather than making raw binding fields mutable
+through reflection.
 
 It contains two kinds of configuration:
 
@@ -324,7 +546,7 @@ It contains two kinds of configuration:
 Conceptual shape:
 
 ```rust
-#[derive(Debug, Reflect)]
+#[derive(Debug)]
 pub struct OrbitCamBindings {
     orbit: OrbitBindings,
     pan: PanBindings,
@@ -353,11 +575,57 @@ pub struct ActionBindingEntry<A: InputAction> {
     route: BindingRoutePolicy,
     engagement: BindingEngagement,
 }
+
+#[derive(Clone, Debug, Reflect)]
+pub enum BindingRecipe<A: InputAction> {
+    Key(KeyCode),
+    MouseButton(MouseButton),
+    MouseMotion(MouseMotionRecipe),
+    GamepadButton(GamepadButton),
+    GamepadAxis(GamepadAxisRecipe),
+    EnhancedInput(EnhancedInputBindingRecipe<A>),
+}
+
+#[derive(Clone, Copy, Debug, Reflect)]
+pub enum BindingEngagement {
+    Impulse,
+    Held,
+}
+
+#[derive(Clone, Debug, Reflect)]
+pub struct EnhancedInputBindingRecipe<A: InputAction> {
+    binding: EnhancedInputBindingDescriptor,
+    modifiers: Vec<EnhancedInputModifierDescriptor>,
+    conditions: Vec<EnhancedInputConditionDescriptor>,
+    action: PhantomData<A>,
+}
+
+pub trait CameraActionPhase: sealed::Sealed {
+    type Phase;
+}
+
+pub enum HeldPhase {}
+pub enum ImpulsePhase {}
 ```
 
 Each action binding entry is typed by semantic action, not just output value. This
 keeps invalid combinations such as pan bindings accidentally installed as orbit
 bindings out of the ordinary API even though both actions output `Vec2`.
+The `OrbitBindings`, `PanBindings`, `SmoothZoomBindings`, and `CoarseZoomBindings`
+newtype wrappers are the safety mechanism; do not inline them into raw
+`ActionBindingSet<A>` fields in a future refactor unless an equivalent type-level
+guard remains.
+
+`BindingRecipe<A>` is the public reflectable descriptor of the underlying
+enhanced-input binding, modifiers, and conditions. It does not infer source metadata;
+source metadata lives on `ActionBindingEntry` and `HeldActionBindingEntry` so the
+resolver can report only sources that actually triggered.
+
+Action phase should be type-encoded where practical. Held actions use
+`CameraActionPhase<Phase = HeldPhase>` and impulse-only adapter contributions use
+`CameraActionPhase<Phase = ImpulsePhase>`. `HeldActionBindingEntry<A>` should be
+available only for held actions, so a future impulse action cannot accidentally bind
+an engagement action.
 
 Each action binding entry also carries source metadata. A single semantic action can
 have multiple entries, such as keyboard plus gamepad zoom. Resolve active sources from
@@ -496,6 +764,19 @@ OrbitCamBindings::builder()              // OrbitCamBindingsBuilder<WheelUnset>
 paths that cannot use typestate, such as reflection or dynamic keymap loading, must
 use `try_build`.
 
+Provide preset shortcuts so custom users do not need to study wheel policy before the
+first compile:
+
+```rust
+OrbitCamBindings::builder()
+    .orbit_drag(MouseButton::Middle)
+    .wheel_for(OrbitCamControlPreset::SimpleMouse)
+    .build();
+```
+
+`MissingWheelPolicy` should recommend `OrbitCamWheelBinding::ZoomOnly` as the safe
+manual choice and `wheel_for(...)` as the easiest preset-matching choice.
+
 Builder docs should explain the constraint:
 
 ```rust
@@ -535,10 +816,10 @@ impl EditorKeymap {
 ```
 
 If the app changes its keymap at runtime, it should rebuild and replace
-`OrbitCamControls::Custom(bindings)`. The control reconciler replaces the camera's
+`OrbitCamCustomControls(bindings)`. The control reconciler replaces the camera's
 library-owned input installation, so the old custom bindings do not remain active.
 
-Manual mode remains unrestricted: a manual user can read any Bevy input source and
+Manual control remains unrestricted: a manual user can read any Bevy input source and
 write `OrbitCamInput` through the public helper methods.
 
 ### Binding Validation
@@ -546,6 +827,7 @@ write `OrbitCamInput` through the public helper methods.
 `OrbitCamBindings` construction should have one strict validation path:
 
 ```rust
+#[derive(Clone, Debug, Reflect)]
 pub enum OrbitCamBindingsError {
     AdapterBindingConflict { source: CameraInteractionSources, action: CameraSemanticAction },
     HeldBindingWithoutEngagement { action: CameraSemanticAction },
@@ -559,8 +841,62 @@ pub enum OrbitCamBindingsError {
 `try_build` returns `Result<OrbitCamBindings, OrbitCamBindingsError>`. Convenience
 `build` may panic with the same structured message, but examples should use the
 non-panicking path where user keymaps are loaded dynamically. Runtime reconciliation
-should re-check custom bindings on `Changed<OrbitCamControls>` and log a clear error
-if reflection-loaded or dynamically generated bindings violate the same rules.
+should re-check custom bindings on `Changed<OrbitCamCustomControls>`.
+Descriptor-driven reflection must validate before inserting
+`OrbitCamCustomControls`; on failure it leaves the previous runtime control-mode
+component in place, emits `OrbitCamControlsApplyFailed`, updates
+`OrbitCamControlsApplyStatus`, and logs a clear error.
+
+`HeldBindingSourceMismatch` means the motion binding and engagement binding do not
+share a compatible source category, route policy, or activation predicate. Accepted
+examples:
+
+```text
+MouseMotion + MouseButton::Middle -> MOUSE
+GamepadAxis::RightStick + GamepadButton::RightStick -> GAMEPAD
+```
+
+Rejected examples:
+
+```text
+MouseMotion + GamepadButton::South
+MouseMotion routed by cursor + MouseButton routed globally
+MouseMotion with Shift condition + MouseButton without the same condition
+```
+
+Adapter conflict validation should run in `try_build` before installation:
+
+| Adapter-owned source | Conflicting public binding |
+|----------------------|----------------------------|
+| `MouseWheel::Line` | raw enhanced-input `Binding::MouseWheel` |
+| `MouseWheel::Pixel` | raw enhanced-input `Binding::MouseWheel` |
+| `PinchGesture` | any future raw pinch binding once enhanced input exposes it |
+| `Touches` | any future raw touch binding once enhanced input exposes it |
+
+Conceptual validation:
+
+```rust
+match binding_recipe.binding() {
+    EnhancedInputBindingDescriptor::MouseWheel if wheel_policy.is_enabled() => {
+        Err(OrbitCamBindingsError::AdapterBindingConflict {
+            source: CameraInteractionSources::WHEEL | CameraInteractionSources::SMOOTH_SCROLL,
+            action,
+        })
+    }
+    _ => Ok(()),
+}
+```
+
+Suggested `Display` text:
+
+| Error | Message |
+|-------|---------|
+| `AdapterBindingConflict` | "binding conflicts with Lagrange's {source} adapter for {action}; configure this source through OrbitCamBindings adapter policy instead" |
+| `HeldBindingWithoutEngagement` | "{action} is a held binding but has no engagement binding; use the held_* builder constructor" |
+| `EngagementBindingForImpulse` | "{action} is an impulse binding and cannot have an engagement action" |
+| `HeldBindingSourceMismatch` | "{action} motion and engagement bindings do not share compatible source, route, or condition policy" |
+| `AmbiguousWheelPolicy` | "wheel policy is ambiguous; choose one line/pixel wheel policy" |
+| `MissingWheelPolicy` | "custom bindings must choose a wheel policy; use wheel_for(SimpleMouse), wheel_for(BlenderLike), ZoomOnly, or Disabled" |
 
 ### Input Installation Ownership
 
@@ -585,15 +921,20 @@ UI hierarchy children. The custom relationship gives reconciliation a precise qu
 for "all private input entities owned by this camera" without mixing them with any
 other child entities an app may attach to the camera.
 
-Changing `OrbitCamControls` replaces the whole private input installation:
+Changing the active control-mode component replaces the whole private input
+installation:
 
 ```text
-Changed<OrbitCamControls>
+Added/Changed<OrbitCamPresetControls>
+Added/Changed<OrbitCamCustomControls>
+Added<OrbitCamManualControls>
+RemovedComponents<OrbitCamPresetControls | OrbitCamCustomControls | OrbitCamManualControls>
   -> finish active camera-input interactions
   -> clear OrbitCamInput for that camera
   -> clear the owner latch if that camera owns input
   -> despawn_related::<OrbitCamInputEntities>()
-  -> install the new preset/custom input entities, or install nothing for Manual
+  -> install the new preset/custom input entities, install nothing for manual mode,
+     or restore the default preset if no mode remains
 ```
 
 The relationship owns structural cleanup. A scheduled reconciliation system owns the
@@ -726,6 +1067,19 @@ treats trackpad scroll that way.
 `BlenderLike` remains the opinionated editor preset, but it should be explicit at the
 spawn site so readers can see when a camera uses Blender-style controls.
 
+Presets should be implemented as binding constructors, not as a separate resolver
+path:
+
+```rust
+impl OrbitCamControlPreset {
+    pub fn to_bindings(self) -> OrbitCamBindings;
+}
+```
+
+Reconciliation should always operate on an `OrbitCamBindings` value internally. This
+keeps preset and custom validation, installation, source attribution, and adapter
+policy on the same code path, and lets users start from a preset and customize it.
+
 ### Wheel And Smooth Scroll
 
 `OrbitCamWheelBinding` should make wheel and smooth-scroll policy explicit:
@@ -785,6 +1139,11 @@ ordinary orbit/pan modifiers as well as Blender-like trackpad pan/zoom modifiers
 Suppression is scoped to the camera receiving the pinch event. It is based on that
 camera's resolved action/modifier state, not global raw key state. A modifier or held
 action on a non-routed camera must not suppress pinch for the routed camera.
+Because the internal context-gating phase may deactivate or reset enhanced-input
+action state before the adapter runs, pinch suppression should use a modifier snapshot
+captured for the routed camera before action state is reset. The adapter should read
+that snapshot during the internal adapter-injection phase rather than relying on
+post-reset action state.
 
 ### Zoom Direction And Button-Drag Zoom
 
@@ -863,8 +1222,9 @@ The adapter should:
 Adapter injection must be visible to enhanced input in the same frame. The schedule
 must enforce this structurally, not as an implementation note. Prefer direct mutation
 of existing action/mock components; if adapter injection uses `Commands` to insert or
-update mock state, the `InjectAdapters` set must include an `apply_deferred` barrier
-before `EnhancedInputSystems::Update`.
+update mock state, the internal adapter-injection phase must run in an exclusive
+system or use the Bevy-version-supported structural barrier before
+`EnhancedInputSystems::Update`.
 
 Camera actions should not consume app input by default. Set camera action/binding
 consumption so app-owned enhanced-input contexts can still observe shared buttons,
@@ -946,6 +1306,8 @@ impl ManualInputSource {
     pub const fn with_observed_mouse(self) -> Self;
     pub const fn with_observed_keyboard(self) -> Self;
     pub const fn with_observed_gamepad(self) -> Self;
+
+    pub const fn into_sources(self) -> CameraInteractionSources;
 }
 
 impl ManualOrbitCamInputWriter<'_> {
@@ -987,6 +1349,14 @@ impl ManualOrbitCamInputWriter<'_> {
 The shorthand methods default to `ManualInputSource::manual()`. Use the explicit
 methods when the app wants to preserve observed-device provenance such as
 `MANUAL | KEYBOARD`.
+`ManualInputSource::into_sources` must force the `MANUAL` bit on even if the internal
+representation changes; manual writer methods never accept raw
+`CameraInteractionSources`.
+
+Document the intended split in rustdoc: use shorthand methods for prototypes, tests,
+and simple app-authored motion; use explicit `ManualInputSource` methods when source
+attribution should flow into camera interaction events for editor overlays,
+analytics, or debugging.
 
 Typed deltas name the units:
 
@@ -1039,12 +1409,11 @@ ManualInputSource::observed_smooth_scroll() -> MANUAL | SMOOTH_SCROLL
 ```
 
 Manual writers should run in `OrbitCamInputSet::WriteManual`. The finalization system
-runs after that set, clears blocked or stale input, emits lifecycle events, and then
+runs after that set, clears blocked or stale input, queues lifecycle events, and then
 hands finalized input to animation and controller systems.
 
-Manual writes are valid only for cameras whose controls are
-`OrbitCamControls::Manual`. Provide a public helper/query pattern that exposes only
-manual cameras, and use it in examples:
+Manual writes are valid only for cameras with `OrbitCamManualControls`. Provide a
+public helper/query pattern that exposes only manual cameras, and use it in examples:
 
 ```rust
 fn manual_camera_input(mut cameras: ManualOrbitCamInput) {
@@ -1059,8 +1428,9 @@ fn manual_camera_input(mut cameras: ManualOrbitCamInput) {
 }
 ```
 
-Manual mode bypasses automatic active-camera routing because the app has chosen to
-write a specific camera's input directly. It still respects `OrbitCamInputDisabled`,
+`OrbitCamManualControls` bypasses automatic active-camera routing because the app has
+chosen to write a specific camera's input directly. It still respects
+`OrbitCamInputDisabled`,
 `BlockOnEguiFocus` when present, animation ignore blockers, and other finalization
 rules. Preset/custom cameras should not be mutated by app systems in `WriteManual`;
 debug builds should warn if a manual writer helper detects an attempted write to a
@@ -1072,7 +1442,8 @@ programmatically from the camera render target, logical viewport, and window. Ma
 users only need an explicit surface-metrics override for render-to-texture, offscreen
 images, or custom editor surfaces whose input coordinate space is not the camera's
 normal window viewport. If metrics cannot be derived or overridden, screen-pixel
-manual input should warn and drop rather than guessing.
+manual input should emit `CameraInputMetricsMissing`, log a per-camera one-time
+`error!`, and drop rather than guessing.
 
 `ZoomInput` uses camera-facing names:
 
@@ -1189,6 +1560,15 @@ pub struct CameraInteractionSourcesChanged {
     pub previous_sources: CameraInteractionSources,
     pub current_sources: CameraInteractionSources,
 }
+
+#[derive(EntityEvent, Reflect)]
+#[reflect(Event, FromReflect)]
+pub struct CameraInputMetricsMissing {
+    #[event_target]
+    pub camera: Entity,
+    pub kind: CameraInteractionKind,
+    pub missing: CameraInputMetricKind,
+}
 ```
 
 Do not expose a public end reason yet.
@@ -1219,6 +1599,14 @@ If input becomes blocked while an interaction is active, emit `CameraInteraction
 before suppressing further input so guidance overlays and editor tools do not get
 stuck highlighted.
 
+Lifecycle events should describe input that the controller will observe this frame.
+`Finalize` should compute and queue lifecycle events after ordinary blockers have
+cleared. A pre-controller guard should run after late animation/blocker changes and
+before `orbit_cam`; it flushes queued events only if input still reaches the
+controller, or replaces them with the needed ended events when a late blocker suppresses
+input. This prevents editor overlays from highlighting input that was dropped by a
+late `CameraInputInterruptBehavior::Ignore` animation.
+
 Source lifetime is deterministic:
 
 | Source class | Examples | Lifecycle |
@@ -1230,7 +1618,7 @@ Owner latching comes only from held sources. Impulse sources are routed per even
 the event window and current pointer/touch position for that frame. Do not add an
 idle-frame grace window for wheel, smooth-scroll, or pinch; presentation layers such
 as `fairy_dust` may add visual highlight linger, but camera input semantics stay exact.
-For an impulse-only interaction, finalization emits `CameraInteractionStarted` and
+For an impulse-only interaction, the lifecycle queue emits `CameraInteractionStarted` and
 `CameraInteractionEnded` in the same frame. The impulse exists only for that input
 frame; it must not keep the semantic active-source set alive into the next frame just
 so the event tracker can observe an empty transition later.
@@ -1259,11 +1647,21 @@ and examples do not have to reconstruct state from events:
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 pub struct OrbitCamInteractionState {
-    pub orbit_sources: CameraInteractionSources,
-    pub pan_sources: CameraInteractionSources,
-    pub zoom_sources: CameraInteractionSources,
+    orbit_sources: CameraInteractionSources,
+    pan_sources: CameraInteractionSources,
+    zoom_sources: CameraInteractionSources,
+}
+
+impl OrbitCamInteractionState {
+    pub const fn orbit_sources(&self) -> CameraInteractionSources;
+    pub const fn pan_sources(&self) -> CameraInteractionSources;
+    pub const fn zoom_sources(&self) -> CameraInteractionSources;
 }
 ```
+
+The fields are internal because this component is the library's authoritative
+interaction tracker. App code reads it through accessors; library systems mutate it
+through internal methods that keep lifecycle events and owner latches consistent.
 
 ## Input Disabling And Blockers
 
@@ -1275,8 +1673,21 @@ Expose a small public app-level disable component:
 pub struct OrbitCamInputDisabled;
 ```
 
-This is separate from `OrbitCamControls`. Disabling input does not replace the selected
-preset, custom bindings, or manual mode.
+This is separate from the mutually exclusive control-mode components. Disabling input
+does not replace the selected preset, custom bindings, or manual mode.
+
+Common pause/resume pattern:
+
+```rust
+commands.entity(camera).insert(OrbitCamInputDisabled);
+
+// Later, when the menu or modal closes:
+commands.entity(camera).remove::<OrbitCamInputDisabled>();
+```
+
+Use `OrbitCamInputDisabled` for temporary pauses such as menus, modal tools, and UI
+capture. Use `OrbitCamManualControls` only when the app takes over writing camera
+intent itself.
 
 Transient blockers remain internal library state:
 
@@ -1291,13 +1702,13 @@ active.
 
 Blocking has two gates.
 
-`GateContexts` acts on enhanced-input's state machine before
+The internal pre-input phase acts on enhanced-input's state machine before
 `EnhancedInputSystems::Update`. Preset and custom contexts that are disabled,
 egui-blocked, animation-ignored, inactive, or unrouted should be deactivated or reset
 so held-button state, action transition edges, condition timers, and stale action
 values do not advance invisibly while the camera cannot consume input.
 
-`FinalizeInput` acts on resolved per-frame intent after all input writers have run.
+`Finalize` acts on resolved per-frame intent after all input writers have run.
 This includes preset/custom action resolution and user systems in
 `OrbitCamInputSet::WriteManual`. It clears blocked intent, emits lifecycle events,
 applies blockers that cannot be expressed inside enhanced input, and enforces owner
@@ -1340,13 +1751,13 @@ pub enum CameraInputRouting {
 }
 ```
 
-`CameraInputRouting::Explicit` is distinct from `OrbitCamControls::Manual`:
+`CameraInputRouting::Explicit` is distinct from `OrbitCamManualControls`:
 
 ```text
 CameraInputRouting::Explicit
   app chooses which camera receives input
 
-OrbitCamControls::Manual
+OrbitCamManualControls
   app writes OrbitCamInput directly
 ```
 
@@ -1362,9 +1773,16 @@ pub struct CameraInputRoutingConfig {
 
 pub(crate) struct ResolvedOrbitCamInputRoute {
     routed_camera: Option<Entity>,
-    held_owner: Option<Entity>,
+    held_latches: CameraInputSourceLatches,
     surface_metrics: CameraInputSurfaceMetrics,
     blockers: OrbitCamInputBlockerFlags,
+}
+
+pub(crate) struct CameraInputSourceLatches {
+    mouse: Option<Entity>,
+    keyboard: Option<Entity>,
+    gamepads: HashMap<Entity, Entity>,
+    touches: HashMap<TouchId, Entity>,
 }
 ```
 
@@ -1372,19 +1790,23 @@ The internal resolved route is rewritten every frame by routing systems and is t
 only state that context gating, adapter injection, and manual finalization should
 consult.
 
-Automatic routing should use an interaction owner latch:
+Automatic routing should use per-source interaction owner latches:
 
 ```text
 When a held camera interaction starts:
-  latch the owning camera.
+  latch the owning camera for that source.
 
-While any held interaction is active:
-  route camera input to the latched owner,
+While that source remains held:
+  route that source's camera input to its latched owner,
   even if cursor/touch position crosses another viewport.
 
-When all held interactions end:
-  clear the owner and allow hit-testing again.
+When that source ends:
+  clear that source's latch and allow hit-testing/fallback routing again.
 ```
+
+Route by source-specific latch first, then no-position fallback, then hit-test. This
+lets a mouse drag remain attached to camera A while a selected gamepad can continue
+driving camera B.
 
 Impulse sources do not latch ownership because Bevy does not expose reliable
 begin/end gesture phases for them:
@@ -1401,7 +1823,7 @@ window plus current cursor position. Bevy `PinchGesture`, `PanGesture`, and
 `RotationGesture` are global deltas without window, cursor, touch ID, or phase
 metadata. Route those global gesture impulses deterministically with this priority:
 
-1. The current held owner, if a held camera interaction is active.
+1. The matching source latch, if that held source already owns a camera.
 2. The explicit routing camera, if `CameraInputRouting::Explicit` is active.
 3. The current cursor-hit camera, if the cursor is inside exactly one eligible camera
    viewport.
@@ -1409,12 +1831,15 @@ metadata. Route those global gesture impulses deterministically with this priori
 
 Document that precise multi-window gesture routing for global Bevy gesture events
 requires explicit routing or an unambiguous cursor-hit camera.
+If a global gesture impulse is dropped because routing is ambiguous, emit a
+rate-limited debug log that names the gesture and the eligible cameras. This keeps the
+semantics deterministic while giving users a clue to use explicit routing.
 
 No-position held sources such as keyboard or gamepad use the same routing family.
 Their binding entries should declare that they have no pointer position. Automatic
 routing should use:
 
-1. The current held owner, if another held camera interaction is already active.
+1. The matching source latch, if that held source already owns a camera.
 2. The explicit routing camera, if `CameraInputRouting::Explicit` is active.
 3. The current cursor-hit camera, if exactly one eligible camera is under the cursor.
 4. The only eligible camera, if there is exactly one routeable `OrbitCam`.
@@ -1445,6 +1870,13 @@ pub struct CameraInputSurfaceMetrics {
     /// [`Window::height`], which are logical dimensions. For custom editor layouts,
     /// use the logical size of the panel or surface that produced the input delta.
     pub input_surface_size: Option<Vec2>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[non_exhaustive]
+pub enum CameraInputMetricKind {
+    CameraViewSize,
+    InputSurfaceSize,
 }
 ```
 
@@ -1478,11 +1910,11 @@ Metric derivation should use this order:
 
 Missing metrics are detected in finalization, where the routed camera entity and
 input kind are known. Screen-pixel orbit or pan input without metrics should be
-dropped with a structured warning that includes the camera entity and the missing
-lookup. Do not fall back to physical framebuffer size or scale-factor-multiplied
-values.
+dropped, emit a per-camera one-time `error!`, and emit `CameraInputMetricsMissing`
+so applications can surface the failure in editor UI or diagnostics. Do not fall back
+to physical framebuffer size or scale-factor-multiplied values.
 
-Enhanced-input action evaluation must also be gated to the latched active camera.
+Enhanced-input action evaluation must also be gated to the source-latched or routed active camera.
 Inactive `OrbitCamInputContext` instances must not accumulate action state. The design
 should use both sides of the invariant: deactivate or gate inactive contexts before
 `EnhancedInputSystems::Update`, and reset their camera action state when route
@@ -1497,19 +1929,30 @@ unavailable:
 - clear active interaction state;
 - clear the owner.
 
-Latch recovery must be deterministic. Clear the held owner immediately on camera
+Routing is locked during the internal route phase of `OrbitCamInputSet::PreInput` for
+the frame. If `Camera::is_active` or equivalent camera activity changes later in the
+frame, do not re-route to a different camera. Treat the originally routed camera as
+blocked by inactive-camera state, clear or suppress its input through
+finalization/pre-controller guard, and allow normal routing to choose again on the
+next frame.
+
+Latch recovery must be deterministic. Clear affected source latches immediately on camera
 despawn, `OrbitCam` removal, controls replacement, `OrbitCamInputDisabled`, target
 window close, application focus loss, or selected gamepad disconnect. Each frame,
-reconcile the latch against the underlying held-source state that created it: if the
+reconcile each source latch against the underlying held-source state that created it: if the
 mouse button is no longer pressed, the touch ID is gone, or the selected gamepad is no
 longer available, force the corresponding interaction ended event and clear the
 latch. Do not use an idle-frame grace window for latch recovery.
 
-Camera despawn and `OrbitCam` removal need an explicit cleanup path because scheduled
-reconciliation may not see the camera after its components are gone. Add an observer
-or lifecycle hook such as `On<Remove, OrbitCam>` that finishes active interactions,
-clears owner state, clears interaction state, and lets the private linked relationship
-handle structural input-entity cleanup.
+Camera despawn and `OrbitCam` removal need an explicit cleanup path. Prefer a system
+in the early input phase that reads `RemovedComponents<OrbitCam>` and clears matching
+source latches, interaction state, and private input entities before routing for the
+frame. Observers may supplement this, but lifecycle cleanup should not depend on
+observer ordering during scene teardown or recursive despawn.
+
+If a selected gamepad disconnects and reconnects in the same frame, the disconnect
+clears its source latch first. Any same-frame press after reconnect reacquires through
+the normal source-specific fallback rules; it does not inherit the stale latch.
 
 ## Scheduling
 
@@ -1529,7 +1972,9 @@ the camera controller.
 ```text
 PreUpdate:
   Bevy input has collected raw device state
-    -> Reconcile changed OrbitCamControls and replace private input installations
+    -> Apply changed OrbitCamControlsDescriptor drafts to exclusive control-mode components
+    -> Enforce control-mode exclusivity and restore the default mode if none remains
+    -> Reconcile changed control-mode components and replace private input installations
     -> Route active camera and update internal input blockers
     -> Gate active camera context/action evaluation
     -> Apply deferred commands so context/activity/entity changes are visible
@@ -1537,7 +1982,7 @@ PreUpdate:
     -> bevy_enhanced_input updates action state
     -> Resolve camera actions and adapter contributions into OrbitCamInput
     -> User systems write manual OrbitCamInput
-    -> Finalize input: clear blocked/stale input, update interaction tracker, emit lifecycle events
+    -> Finalize input: clear blocked/stale input, update interaction tracker, queue lifecycle events
 
 Update:
   Programmatic camera animation requests are queued before camera input can reach the controller
@@ -1548,7 +1993,7 @@ Update:
   process_camera_move_list advances remaining animations
 
 PostUpdate:
-  Pre-controller input guard re-checks animation ignore blockers
+  Pre-controller input guard re-checks animation ignore blockers and flushes queued lifecycle events
   OrbitCam controller reads OrbitCamInput
     -> Camera transform targets are updated
     -> OrbitCamInput is cleared
@@ -1557,19 +2002,15 @@ PostUpdate:
 ```
 
 The exact enhanced-input set names should come from the dependency, but the ordering
-shape should be:
+shape should keep the public scheduling surface small:
 
 ```rust
 app.configure_sets(
     PreUpdate,
     (
-        OrbitCamInputSet::ReconcileControls,
-        OrbitCamInputSet::Route,
-        OrbitCamInputSet::GateContexts,
-        OrbitCamInputSet::InjectAdapters,
-        OrbitCamInputSet::ResolveActions,
+        OrbitCamInputSet::PreInput,
         OrbitCamInputSet::WriteManual,
-        OrbitCamInputSet::FinalizeInput,
+        OrbitCamInputSet::Finalize,
     )
         .chain(),
 );
@@ -1577,63 +2018,25 @@ app.configure_sets(
 app.configure_sets(
     PreUpdate,
     (
-        OrbitCamInputSet::ReconcileControls.after(InputSystems),
-        OrbitCamInputSet::GateContexts.before(EnhancedInputSystems::Update),
-        OrbitCamInputSet::InjectAdapters.before(EnhancedInputSystems::Update),
-        OrbitCamInputSet::ResolveActions.after(EnhancedInputSystems::Apply),
+        OrbitCamInputSet::PreInput.after(InputSystems),
+        OrbitCamInputSet::PreInput.before(EnhancedInputSystems::Update),
+        OrbitCamInputSet::Finalize.after(EnhancedInputSystems::Apply),
     ),
 );
 
 app.add_systems(
     PreUpdate,
-    (
-        reconcile_orbit_cam_controls,
-        apply_deferred,
-    )
-        .chain()
-        .in_set(OrbitCamInputSet::ReconcileControls),
+    orbit_cam_pre_input_exclusive.in_set(OrbitCamInputSet::PreInput),
 );
 
 app.add_systems(
     PreUpdate,
     (
-        update_egui_focus_state,
-        route_active_orbit_cam,
-        reconcile_orbit_cam_input_latch,
-        update_orbit_cam_input_blockers,
+        resolve_orbit_cam_actions,
+        finalize_orbit_cam_input,
     )
         .chain()
-        .in_set(OrbitCamInputSet::Route),
-);
-
-app.add_systems(
-    PreUpdate,
-    (
-        gate_orbit_cam_input_contexts,
-        apply_deferred,
-    )
-        .chain()
-        .in_set(OrbitCamInputSet::GateContexts),
-);
-
-app.add_systems(
-    PreUpdate,
-    (
-        inject_orbit_cam_adapter_values,
-        apply_deferred,
-    )
-        .chain()
-        .in_set(OrbitCamInputSet::InjectAdapters),
-);
-
-app.add_systems(
-    PreUpdate,
-    resolve_orbit_cam_actions.in_set(OrbitCamInputSet::ResolveActions),
-);
-
-app.add_systems(
-    PreUpdate,
-    finalize_orbit_cam_input.in_set(OrbitCamInputSet::FinalizeInput),
+        .in_set(OrbitCamInputSet::Finalize),
 );
 
 app.add_systems(
@@ -1674,34 +2077,34 @@ Keep the public scheduling surface explicit but small:
 
 ```rust
 pub enum OrbitCamInputSet {
-    ReconcileControls,
-    Route,
-    GateContexts,
-    InjectAdapters,
-    ResolveActions,
+    PreInput,
     WriteManual,
-    FinalizeInput,
+    Finalize,
 }
 
 pub struct OrbitCamSystemSet;
 ```
 
-`ReconcileControls` handles structural replacement when `OrbitCamControls` changes.
-`GateContexts` activates only the routed or latched camera input context, deactivates
-or resets inactive contexts, and clears stale action state when ownership changes.
-This set is the chosen inactive-context handling path: it owns action-state hygiene
-via context deactivation/reset before `EnhancedInputSystems::Update`, rather than
-leaving inactive contexts running and trying to repair their output later.
+`PreInput` owns the internal descriptor-apply, control-mode exclusivity, reconcile,
+route, latch, blocker, context-gating, and adapter-injection phases. Those internal
+phases should stay `pub(crate)` so downstream apps do not depend on them as public
+scheduling slots.
+Context gating inside `PreInput` is the chosen inactive-context handling path: it owns
+action-state hygiene via deactivation/reset before `EnhancedInputSystems::Update`,
+rather than leaving inactive contexts running and trying to repair their output later.
 Route resolution, latch reconciliation, blocker computation, and context gating must
-run as one chained sequence from the perspective of enhanced input; `GateContexts`
-must not read a route that disagrees with the held-owner latch.
+run as one chained sequence from the perspective of enhanced input; context gating
+must not read a route that disagrees with the source-latch table.
 Any command-buffered entity, relationship, or context-activity changes needed by
-enhanced input must be visible before `EnhancedInputSystems::Update`; use explicit
-`apply_deferred` barriers or exclusive systems rather than relying on later schedule
-boundaries.
-`FinalizeInput` is the last semantic gate before any animation or controller system
-can observe input. It clears blocked manual/preset/custom input, emits lifecycle
-events, updates interaction state, and clears the owner latch when needed.
+enhanced input must be visible before `EnhancedInputSystems::Update`. Use exclusive
+systems, or the Bevy-version-supported equivalent structural barrier, for
+reconciliation, context gating, and command-buffered adapter injection. Do not rely on
+a nearby ordinary `apply_deferred` system as the correctness boundary; audit this
+ordering on each supported Bevy upgrade.
+`Finalize` is the last public input set before any animation or controller system
+can observe input. It clears blocked manual/preset/custom input, queues lifecycle
+events, updates interaction state, and clears source latches when needed. The
+pre-controller guard flushes queued lifecycle events after the final blocker check.
 
 ## Animation And Programmatic Motion
 
@@ -1711,13 +2114,13 @@ axes:
 | Situation | Existing policy | Input behavior |
 |-----------|-----------------|----------------|
 | New programmatic animation arrives while another animation is active. | `AnimationConflictPolicy` | Does not inspect or modify input blockers. |
-| User input arrives during animation and policy is `Ignore`. | `CameraInputInterruptBehavior::Ignore` | `FinalizeInput` treats the active animation as an input blocker before lifecycle events are emitted; animation continues and input is not observable. |
+| User input arrives during animation and policy is `Ignore`. | `CameraInputInterruptBehavior::Ignore` | `Finalize` treats the active animation as an input blocker before lifecycle events are emitted; animation continues and input is not observable. |
 | User input arrives during animation and policy is `Cancel`. | `CameraInputInterruptBehavior::Cancel` | `animation_input_interrupt` cancels/removes animation, emits existing cancelled events, and keeps finalized input so user control applies this frame. |
 | User input arrives during animation and policy is `Complete`. | `CameraInputInterruptBehavior::Complete` | `animation_input_interrupt` completes/jumps animation, emits existing completion events, and clears input for this frame. |
 
 Finalized `OrbitCamInput` is the user-input interrupt signal for `Cancel` and
 `Complete`. `Ignore` is different: active animation plus `Ignore` is an input blocker
-inside `FinalizeInput` before started/ended input lifecycle events are emitted.
+inside `Finalize` before started/ended input lifecycle events are emitted.
 Finalization should check the authoritative animation state directly, such as
 `CameraMoveList` plus the camera's interrupt policy, so observer-driven animation
 insertion/removal cannot leave a one-frame stale blocker. Animation interruption
@@ -1725,10 +2128,11 @@ should not depend on detecting later target mutation.
 
 Programmatic animation requests that should affect input in the same frame must be
 queued before camera input can reach the controller. If an animation can be inserted
-after `FinalizeInput`, run a pre-controller guard in `PostUpdate` before `orbit_cam`
-that re-checks authoritative animation state and clears blocked input for `Ignore`.
-`Cancel` and `Complete` remain handled by `animation_input_interrupt` for finalized
-input.
+after `Finalize`, run a pre-controller guard in `PostUpdate` before `orbit_cam`
+that re-checks authoritative animation state, clears blocked input for `Ignore`, and
+flushes or cancels queued lifecycle events so tools only observe input that reaches
+the controller. `Cancel` and `Complete` remain handled by `animation_input_interrupt`
+for finalized input.
 
 Programmatic camera operations do not write `OrbitCamInput` and do not emit camera
 input lifecycle events. They continue to use existing events such as `ZoomToFit`,
@@ -1736,7 +2140,7 @@ input lifecycle events. They continue to use existing events such as `ZoomToFit`
 
 ## Examples
 
-Each supported controls mode should have a small example named after the control type.
+Each supported control mode should have a small example named after the control type.
 The controls examples should use `fairy_dust` so the camera window can show live
 guidance text that reacts to `CameraInteractionStarted` and
 `CameraInteractionEnded`.
@@ -1752,7 +2156,7 @@ Recommended new examples:
 Each controls example should:
 
 - spawn one `OrbitCam`;
-- install exactly one controls mode;
+- install exactly one control-mode component;
 - show orbit, pan, and zoom guidance text in the camera view;
 - highlight the relevant guidance text while the interaction is active;
 - display or log the interaction source flags so mouse, wheel, smooth-scroll, pinch,
@@ -1792,7 +2196,7 @@ The custom keyboard example should show the app-owned keymap pattern:
 
 ```rust
 let bindings = editor_keymap.to_orbit_cam_bindings();
-commands.entity(camera).insert(OrbitCamControls::Custom(bindings));
+commands.entity(camera).insert(OrbitCamCustomControls(bindings));
 ```
 
 The custom gamepad example should start from one documented mapping:
@@ -1808,28 +2212,56 @@ The gamepad example should also explain controller-selection assumptions for
 multi-controller apps and include a visible no-gamepad fallback.
 
 `fairy_dust` camera setup also needs to move with the refactor. Existing helpers that
-only mutate `OrbitCam` are not enough because controls now live in separate
-components. Provide either a closure over `EntityCommands` or builder methods such as:
+only mutate `OrbitCam` are not enough because controls now live in mutually exclusive
+components. Provide either a closure over `EntityCommands` or a generic bundle-based
+builder method such as:
 
 ```rust
-with_orbit_cam_controls(OrbitCamControls::Preset(OrbitCamControlPreset::BlenderLike))
+with_orbit_cam_controls(OrbitCamPresetControls(OrbitCamControlPreset::BlenderLike))
 with_camera_guidance(CameraGuidance::for_preset(OrbitCamControlPreset::BlenderLike))
 ```
 
 Examples should be able to insert custom/manual controls and guidance rows on the
 spawned camera without reaching around the helper.
 
+### Render-To-Texture Walkthrough
+
+Render-to-texture is explicit routing, not manual input. The app still uses preset or
+custom controls; it only tells Lagrange which camera receives those controls and what
+logical input surface should scale screen-pixel movement.
+
+```rust
+commands.entity(render_texture_camera).insert((
+    OrbitCam::default(),
+    OrbitCamPresetControls(OrbitCamControlPreset::BlenderLike),
+));
+
+commands.insert_resource(
+    CameraInputRoutingConfig::explicit(render_texture_camera)
+        .with_surface_metrics(CameraInputSurfaceMetrics {
+            camera_view_size: Some(render_target_logical_size),
+            input_surface_size: Some(editor_panel_logical_size),
+        }),
+);
+```
+
+Use this pattern when the camera renders to an image, texture, or editor panel that
+automatic cursor hit-testing cannot discover. Do not switch to `OrbitCamManualControls`
+unless the app is computing orbit/pan/zoom intent directly.
+
 ### Legacy API Migration Table
 
 This refactor is a breaking input API change. Remove the legacy `OrbitCam` raw-input
 fields outright rather than keeping a compatibility shim that maps old fields into
-`OrbitCamControls`. The migration table documents the replacement concepts, but the
-old fields should not remain functional alongside the new controls model.
+the new control-mode components. The migration table documents the replacement
+concepts, but the old fields should not remain functional alongside the new controls
+model.
 
 | Existing API / behavior | New home |
 |-------------------------|----------|
-| `OrbitCam::input_control = None` used to stop user camera input temporarily | Add `OrbitCamInputDisabled` when the selected controls should be preserved; use `OrbitCamControls::Manual` only when the app takes over writing `OrbitCamInput`. |
-| Default left/right mouse controls | `OrbitCamControls::Preset(OrbitCamControlPreset::SimpleMouse)`. |
+| `OrbitCam::input_control = None` used to stop user camera input temporarily | Add `OrbitCamInputDisabled` when the selected control mode should be preserved; use `OrbitCamManualControls` only when the app takes over writing `OrbitCamInput`. |
+| Pause camera input for a menu, modal, or tool overlay | `commands.entity(camera).insert(OrbitCamInputDisabled)`; resume with `remove::<OrbitCamInputDisabled>()`. |
+| Default left/right mouse controls | `OrbitCamPresetControls(OrbitCamControlPreset::SimpleMouse)`. |
 | `TrackpadBehavior::ZoomOnly` | `OrbitCamWheelBinding::ZoomOnly`. |
 | `TrackpadBehavior::BlenderLike` | `OrbitCamWheelBinding::BlenderLike` through preset or custom bindings. |
 | `modifier_pan: None` / `modifier_zoom: None` in Blender-like trackpad config | `WheelModifier::Always`, represented through builder APIs that reject ambiguous combinations. |
@@ -1837,7 +2269,7 @@ old fields should not remain functional alongside the new controls model.
 | `button_zoom` | `ButtonDragZoomBinding`. |
 | `ButtonZoomAxis::{X, Y, XY}` | `ButtonDragZoomAxis::{X, Y, XY}`. |
 | `TouchInput::OneFingerOrbit` / `TwoFingerOrbit` | Touch adapter policy inside `OrbitCamBindings`. |
-| Keyboard control examples that mutate targets directly | `OrbitCamControls::Custom(OrbitCamBindings)` for user input, or existing programmatic camera APIs for non-user camera motion. |
+| Keyboard control examples that mutate targets directly | `OrbitCamCustomControls(OrbitCamBindings)` for user input, or existing programmatic camera APIs for non-user camera motion. |
 | Manual active-camera resource setup for render-to-texture | `CameraInputRouting::Explicit` plus logical `CameraInputSurfaceMetrics`. |
 
 ### Example Migration Notes
@@ -1847,18 +2279,18 @@ old fields should not remain functional alongside the new controls model.
   which resolves to the mouse-oriented `SimpleMouse` preset. Its comments should
   state that `BlenderLike` is available for editor-style workflows.
 - `advanced.rs` should be renamed to `custom_bindings.rs`. It should demonstrate
-  `OrbitCamControls::Custom(OrbitCamBindings)` with custom action bindings plus
+  `OrbitCamCustomControls(OrbitCamBindings)` with custom action bindings plus
   custom wheel, pinch, and touch adapter policy.
 - `keyboard_controls.rs` should be retired. Keyboard-as-user-input should be shown
   through `custom_bindings.rs` or a focused custom controls example, while
   programmatic camera movement is covered by zoom, look, fit, and animation examples.
 - `egui.rs` should remain the focused UI integration example. It should pair a normal
-  controls preset with `BlockOnEguiFocus` and demonstrate that egui pointer/keyboard
-  focus blocks camera interactions without replacing the selected controls.
+  control preset with `BlockOnEguiFocus` and demonstrate that egui pointer/keyboard
+  focus blocks camera interactions without replacing the selected control mode.
 - `pausing.rs` should remain the `TimeSource::Real` example. It should demonstrate
   keeping camera smoothing responsive while virtual time is paused. Migrate it by
   replacing raw `input_control` setup with the default preset or an explicit
-  `OrbitCamControls::Preset(OrbitCamControlPreset::BlenderLike)`.
+  `OrbitCamPresetControls(OrbitCamControlPreset::BlenderLike)`.
 - `render_to_texture.rs` should remain the explicit active-camera routing example.
   It should demonstrate controlling a camera that renders to an image rather than a
   window viewport, so automatic cursor hit-testing cannot choose it. Migrate
@@ -1894,10 +2326,10 @@ old fields should not remain functional alongside the new controls model.
 - `controls_simple_mouse.rs` should show the simpler mouse-oriented preset and make
   its differences from Blender-like controls visible in the guidance text.
 - `controls_custom_keyboard.rs` should show keyboard controls through
-  `OrbitCamControls::Custom(OrbitCamBindings)`, not by mutating camera targets
+  `OrbitCamCustomControls(OrbitCamBindings)`, not by mutating camera targets
   directly.
 - `controls_custom_gamepad.rs` should show gamepad axes/buttons through
-  `OrbitCamControls::Custom(OrbitCamBindings)`, including deadzone/axis guidance and
+  `OrbitCamCustomControls(OrbitCamBindings)`, including deadzone/axis guidance and
   a visible no-gamepad fallback.
 - `controls_manual.rs` should show direct `OrbitCamInput` writes through helper
   methods and typed deltas, with `ManualInputSource::manual()` and at least one
@@ -1913,21 +2345,37 @@ specifically covers rendered output.
 
 Core ECS-only tests:
 
-- default `OrbitCam` receives `OrbitCamControls::Preset(SimpleMouse)` through the
+- default `OrbitCam` receives `OrbitCamPresetControls(SimpleMouse)` through the
   required component path;
-- `Preset -> Manual` despawns related `OrbitCamInputEntities` and installs no new
-  library-owned input entities;
-- `Preset -> Custom` replaces old related entities rather than accumulating bindings;
+- inserting one control-mode component removes the other control-mode components;
+- removing every control-mode component from an `OrbitCam` restores
+  `OrbitCamPresetControls::default()` and logs a diagnostic;
+- valid `OrbitCamControlsDescriptor` changes insert the expected exclusive
+  control-mode component, emit `OrbitCamControlsApplied`, and set
+  `OrbitCamControlsApplyStatus.state` to `OrbitCamControlsApplyState::Applied`;
+- invalid `OrbitCamControlsDescriptor` changes leave the previous control-mode
+  component and private input installation in place, emit `OrbitCamControlsApplyFailed`,
+  and set `OrbitCamControlsApplyStatus.state` to
+  `OrbitCamControlsApplyState::Rejected` with the validation error;
+- `OrbitCamPresetControls -> OrbitCamManualControls` despawns related
+  `OrbitCamInputEntities` and installs no new library-owned input entities;
+- `OrbitCamPresetControls -> OrbitCamCustomControls` replaces old related entities
+  rather than accumulating bindings;
 - replacing controls during an active interaction emits `CameraInteractionEnded` and
   clears stale `OrbitCamInput`;
-- owner latch recovery clears held ownership on despawn, `OrbitCam` removal, controls
+- source-latch recovery clears held ownership on despawn, `OrbitCam` removal, controls
   replacement, input disable, target-window close, application focus loss, selected
   gamepad disconnect, or missing underlying held-source state;
+- per-source latches allow mouse, touch, keyboard, and multiple selected gamepads to
+  keep independent owners, including mixed mouse-plus-keyboard and two-gamepad
+  multi-camera scenarios;
+- selected gamepad disconnect/reconnect clears stale ownership before any same-frame
+  reacquire through normal routing fallback;
 - `OrbitCamInputDisabled`, egui focus blockers, inactive routing, and animation ignore
   clear manual and preset/custom input before animation or controller systems observe it;
-- systems in `OrbitCamInputSet::WriteManual` are visible to `FinalizeInput` in the
+- systems in `OrbitCamInputSet::WriteManual` are visible to `Finalize` in the
   same frame;
-- manual writer helpers expose only `OrbitCamControls::Manual` cameras, and manual
+- manual writer helpers expose only `OrbitCamManualControls` cameras, and manual
   writes cannot override preset/custom resolved input;
 - manual shorthand helpers such as `orbit_pixels` and `pan_pixels` write with
   `ManualInputSource::manual()`;
@@ -1955,13 +2403,13 @@ Core ECS-only tests:
 - per-binding source attribution survives enhanced-input action merging, so
   keyboard-plus-gamepad bindings for the same action report only the source that
   actually triggered;
-- held sources latch the owner until release, while impulse wheel/pinch/smooth-scroll
+- held sources latch their source-specific owner until release, while impulse wheel/pinch/smooth-scroll
   events route independently per event;
 - global Bevy gesture impulses without window metadata route by the documented
   fallback policy and produce no input when ambiguous;
 - per-camera logical surface metrics are used for orbit and pan scaling under
   explicit and cursor-hit-test routing;
-- `ReconcileControls` and `GateContexts` changes are visible to
+- internal reconcile, context-gating, and adapter-injection changes are visible to
   `EnhancedInputSystems::Update` in the same frame;
 - adapter values inserted through command-buffered mock state are visible to enhanced
   input in the same frame because the barrier is structural;
@@ -1999,6 +2447,13 @@ Core ECS-only tests:
 - `CameraInputInterruptBehavior::{Ignore, Cancel, Complete}` preserve their exact
   input, animation-event, and controller-consumption behavior on the frame an
   animation starts, completes, is cancelled, or is replaced;
+- controls replacement during an active `CameraInputInterruptBehavior::Ignore`
+  animation emits one ended lifecycle event, clears input, and does not let stale
+  bindings interrupt the animation;
+- `Camera::is_active` toggled after routing blocks the originally routed camera for
+  the frame rather than re-routing mid-frame;
+- global gesture fallback logs an ambiguous-routing debug message when no unique
+  camera can be selected;
 - dependency validation confirms `bevy_lagrange` uses the workspace-pinned
   `bevy_enhanced_input` and `bitflags` versions without duplicate direct versions,
   and confirms `bevy_kana`'s `input` feature is removed or resolves to the same
@@ -2011,19 +2466,19 @@ Core ECS-only tests:
 1. Add workspace-pinned `bevy_enhanced_input` as a normal `bevy_lagrange` dependency and have `LagrangePlugin` install the enhanced-input plugin.
 2. Add `bitflags = { workspace = true }` as a direct `bevy_lagrange` dependency.
 3. Audit `bevy_kana`'s `input` feature. Remove it if unused by `bevy_lagrange`, or validate that it resolves to the same `bevy_enhanced_input` version as the direct dependency.
-4. Add the public `input` module with actions, context, controls, bindings, intent, disabled input, interaction state, manual writing, and interaction events.
+4. Add the public `input` module with actions, context, controls, binding descriptors, validated bindings, intent, disabled input, interaction state, manual writing, and interaction events.
 5. Add `OrbitCamInput`, typed deltas, active-source fields, and helper methods for manual input.
 6. Add `OrbitCamInputContext` as a required component on `OrbitCam` and register it in `LagrangePlugin` after enhanced input is installed.
-7. Add `OrbitCamControls::{Preset, Custom(OrbitCamBindings), Manual}`.
-8. Add `OrbitCamBindings`, private fields, action-typed local builder/spec types with per-binding source metadata, typestate wheel ownership, engagement invariants, gamepad selection policy, metadata-bearing low-level enhanced-input escape hatches, and runtime validation.
+7. Add mutually exclusive `OrbitCamPresetControls`, `OrbitCamCustomControls`, and `OrbitCamManualControls`.
+8. Add `OrbitCamBindings`, `OrbitCamBindingsDescriptor`, private fields, action-typed local builder/spec types with per-binding source metadata, typestate wheel ownership, engagement invariants, gamepad selection policy, metadata-bearing low-level enhanced-input escape hatches, descriptor apply status/events, and runtime validation.
 9. Add `ZoomDirection`, `ButtonDragZoomBinding`, touch policy, pinch policy, and wheel policy as binding/adapter configuration.
-10. Add the private `OrbitCamInputEntityOf` / `OrbitCamInputEntities` relationship and control reconciliation.
+10. Add the private `OrbitCamInputEntityOf` / `OrbitCamInputEntities` relationship, the observer-based control-mode exclusivity shim, and control reconciliation.
 11. Add the private adapter module for wheel units, smooth scroll, pinch, and touch.
 12. Add source-aware interaction tracking, `CameraInteractionStarted`, `CameraInteractionEnded`, `CameraInteractionSourcesChanged`, and `OrbitCamInteractionState`.
 13. Replace public runtime gating with `OrbitCamInputDisabled` plus internal transient blockers.
 14. Rename `CameraInputDetection` to `CameraInputRouting` with `CursorHitTest` and `Explicit`.
-15. Implement public routing configuration, internal resolved routing state, held-source owner latching, deterministic latch recovery, per-event impulse routing, no-position source routing, global gesture fallback routing, logical surface metrics, and inactive-context gating/reset before enhanced-input update.
-16. Add the root-level `system_sets` module and `LagrangeSystemSetsPlugin` with `ReconcileControls`, `GateContexts`, `WriteManual`, and `FinalizeInput`.
+15. Implement public routing configuration, internal resolved routing state, per-source held latching, deterministic latch recovery, per-event impulse routing, no-position source routing, global gesture fallback routing, logical surface metrics, and inactive-context gating/reset before enhanced-input update.
+16. Add the root-level `system_sets` module and `LagrangeSystemSetsPlugin` with `PreInput`, `WriteManual`, and `Finalize`.
 17. Add `animation_input_interrupt` and use finalized `OrbitCamInput` as the user-input interrupt signal for `Cancel` and `Complete`; treat `Ignore` as a finalization and pre-controller blocker.
 18. Remove physical binding fields from `OrbitCam` as a breaking change and move their replacement concepts into presets and adapter configuration.
 19. Update egui blocking to feed internal UI-focus blockers before finalization.
@@ -2039,13 +2494,16 @@ Core ECS-only tests:
 ### Breaking
 
 - Remove legacy raw-input fields from `OrbitCam`; configure user input through
-  `OrbitCamControls`, `OrbitCamBindings`, and `OrbitCamInputDisabled`.
+  `OrbitCamPresetControls`, `OrbitCamCustomControls`, `OrbitCamManualControls`,
+  `OrbitCamBindings`, and `OrbitCamInputDisabled`.
 - Replace `CameraInputDetection::{Automatic, Manual}` with
   `CameraInputRouting::{CursorHitTest, Explicit}`.
 
 ### Added
 
-- Add enhanced-input based orbit-camera controls with preset, custom, and manual control modes.
+- Add enhanced-input based orbit-camera controls with mutually exclusive preset,
+  custom, and manual control-mode components.
+- Add reflected control descriptors with apply-success/apply-failure events and a persisted apply-status component for editors, scene files, and keymap tools.
 - Add source-aware camera interaction lifecycle events, source-change events, and read-only interaction state.
 - Add `ManualInputSource` so manual camera input always reports `MANUAL` and may include observed device provenance.
 - Add logical `CameraInputSurfaceMetrics` for explicit routing, render-to-texture, and custom editor input surfaces.
@@ -2054,12 +2512,13 @@ Core ECS-only tests:
 
 ### Changed
 
-- Change the default controls model to `OrbitCamControls::Preset(SimpleMouse)` and
+- Change the default control model to `OrbitCamPresetControls(SimpleMouse)` and
   make `BlenderLike` an explicit editor-style preset.
 - Change camera input routing to use `CameraInputRouting::{CursorHitTest, Explicit}` with internal resolved routing state.
 - Change custom bindings to be action-typed and source-aware so lifecycle events can distinguish mouse, wheel, smooth-scroll, pinch, touch, keyboard, gamepad, and manual input.
 - Change render-to-texture routing to use explicit routing plus logical surface metrics instead of manually populating `ActiveCameraData`.
-- Change examples and workspace consumers to configure controls through `OrbitCamControls` and `OrbitCamBindings`.
+- Change examples and workspace consumers to configure controls through the
+  control-mode components and `OrbitCamBindings`.
 
 ### Removed
 
@@ -2071,25 +2530,26 @@ Core ECS-only tests:
 
 ```text
 Preset controls
-  -> OrbitCamControlPreset
+  -> OrbitCamPresetControls(OrbitCamControlPreset)
       -> OrbitCamBindings
           -> private input installation relationship
               -> public enhanced-input actions + private adapter policy
                   -> OrbitCamInput
-                      -> FinalizeInput
+                      -> OrbitCamInputSet::Finalize
                           -> OrbitCam controller
 
 Custom controls
-  -> OrbitCamBindings supplied by the app
+  -> OrbitCamCustomControls(OrbitCamBindings supplied by the app)
       -> private input installation relationship
           -> public enhanced-input actions + private adapter policy
               -> OrbitCamInput
-                  -> FinalizeInput
+                  -> OrbitCamInputSet::Finalize
                       -> OrbitCam controller
 
 Manual controls
-  -> app writes OrbitCamInput through helper methods in OrbitCamInputSet::WriteManual
-      -> FinalizeInput
+  -> OrbitCamManualControls
+      -> app writes OrbitCamInput through helper methods in OrbitCamInputSet::WriteManual
+      -> OrbitCamInputSet::Finalize
           -> OrbitCam controller
 
 Programmatic camera operations
@@ -2113,6 +2573,10 @@ touch tracker computes two-finger rotation even though the controller does not u
 
 Roll should not be added as part of the initial input refactor. It requires extending
 the camera behavior model, not just adding another input action.
+When roll is added, expect to touch the interaction kind enum, input snapshot,
+interaction state, tracker, presets, and manual writer. If that update becomes noisy,
+consider a generic interaction tracker keyed by interaction kind and associated action
+types, but keep that cleanup out of the initial refactor.
 
 Candidate future additions:
 
