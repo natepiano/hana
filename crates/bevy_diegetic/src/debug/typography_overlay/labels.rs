@@ -69,8 +69,8 @@ pub(super) fn spawn_metric_labels(
         label_gap:  scaling::label_gap(ctx.font_size, ctx.scale),
     };
 
-    let line_metrics = font_context.line_metrics;
-    let font_metrics = font_context.font_metrics;
+    let line_metrics = font_context.line;
+    let font_metrics = font_context.font;
     let guides = MetricGuideYs {
         baseline:   line_metrics.baseline,
         ascent:     line_metrics.baseline - line_metrics.ascent,
@@ -167,7 +167,7 @@ pub(super) fn spawn_overlay_bounds_target(
         ctx.scale,
     );
 
-    let line_metrics = font_context.line_metrics;
+    let line_metrics = font_context.line;
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
     let top_y = line_metrics.top;
@@ -305,7 +305,7 @@ fn spawn_left_arrow_labels(
 
     // Baseline label: offset down by half the label's descent so the visual
     // center of the text sits on the red line.
-    let line_metrics = font_context.line_metrics;
+    let line_metrics = font_context.line;
     let label_descent_offset = line_metrics.descent * LABEL_SIZE_RATIO * ctx.scale / 2.0;
     let baseline_label_world =
         scaling::layout_to_world_y(guides.baseline, ctx.anchor_y, ctx.scale) - label_descent_offset;

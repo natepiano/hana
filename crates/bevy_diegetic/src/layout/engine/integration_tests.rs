@@ -66,6 +66,16 @@ fn monospace_measure() -> MeasureTextFn {
 
 fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < 0.01 }
 
+fn text_width(text: &str, font_size: f32) -> f32 {
+    text.chars().count().to_f32() * font_size * MONOSPACE_WIDTH_RATIO
+}
+
+fn line_height(font_size: f32) -> f32 { font_size }
+
+fn text_height(line_count: u32, font_size: f32) -> f32 {
+    line_count.to_f32() * line_height(font_size)
+}
+
 // ── Fixed sizing ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -191,15 +201,20 @@ fn grow_with_min_max() {
 #[test]
 fn fit_wraps_text_content() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    // "Hello" = 5 chars * 16 * 0.6 = 48.0 wide, 16.0 tall.
-    b.text("Hello", LayoutTextStyle::new(16.0));
+    let font_size = 16.0;
+    let text = "Hello";
+    // Expected text bounds come from the same monospace metrics as production.
+    b.text(text, LayoutTextStyle::new(font_size));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
-    assert!(approx_eq(result.computed[1].width, 48.0));
-    assert!(approx_eq(result.computed[1].height, 16.0));
+    assert!(approx_eq(result.computed[1].width, text_width(text, font_size)));
+    assert!(approx_eq(
+        result.computed[1].height,
+        line_height(font_size)
+    ));
 }
 
 #[test]
@@ -228,8 +243,10 @@ fn fit_with_min_respects_minimum() {
 #[test]
 fn fit_root_clamps_grow_children_content_under_max() {
     // Fit root (max 400) with two horizontal GROW children carrying text.
-    // Each "Hello" is 5 chars * 16 * 0.6 = 48 px; sum = 96 px < 400 max.
-    // Expect root resolves to content width (96), not the max.
+    // Expect the root to resolve to the combined text width, not the max.
+    let font_size = 16.0;
+    let text = "Hello";
+    let expected_width = text_width(text, font_size) * 2.0;
     let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fit_range(0.0, 400.0))
@@ -237,10 +254,10 @@ fn fit_root_clamps_grow_children_content_under_max() {
             .direction(Direction::LeftToRight),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text("Hello", LayoutTextStyle::new(16.0));
+        b.text(text, LayoutTextStyle::new(font_size));
     });
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text("Hello", LayoutTextStyle::new(16.0));
+        b.text(text, LayoutTextStyle::new(font_size));
     });
     let tree = b.build();
 
@@ -248,17 +265,18 @@ fn fit_root_clamps_grow_children_content_under_max() {
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
     assert!(
-        approx_eq(result.computed[0].width, 96.0),
-        "root width = {}, expected 96",
+        approx_eq(result.computed[0].width, expected_width),
+        "root width = {}, expected {expected_width}",
         result.computed[0].width
     );
 }
 
 #[test]
 fn fit_root_caps_grow_children_content_at_max() {
-    // Same shape, but text wider than max: each child 30 chars * 9.6 = 288 px;
-    // sum = 576 px > 400 max. Expect root clamped to 400.
+    // Same tree, but combined text content is wider than max.
     let wide = "HelloHelloHelloHelloHelloHello";
+    let font_size = 16.0;
+    let expected_content_width = text_width(wide, font_size) * 2.0;
     let mut b = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::fit_range(0.0, 400.0))
@@ -266,10 +284,10 @@ fn fit_root_caps_grow_children_content_at_max() {
             .direction(Direction::LeftToRight),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(wide, LayoutTextStyle::new(16.0));
+        b.text(wide, LayoutTextStyle::new(font_size));
     });
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(wide, LayoutTextStyle::new(16.0));
+        b.text(wide, LayoutTextStyle::new(font_size));
     });
     let tree = b.build();
 
@@ -278,8 +296,8 @@ fn fit_root_caps_grow_children_content_at_max() {
 
     assert!(
         approx_eq(result.computed[0].width, 400.0),
-        "root width = {}, expected 400 (capped)",
-        result.computed[0].width
+        "root width = {}, expected 400 capped from content width {expected_content_width}",
+        result.computed[0].width,
     );
 }
 
@@ -889,6 +907,12 @@ fn text_positioned_correctly() {
 #[test]
 fn key_value_row_layout() {
     // Label on left, value pushed to right by grow spacer.
+    let label_text = "fps:";
+    let value_text = "60";
+    let font_size = 7.0;
+    let label_width = text_width(label_text, font_size);
+    let value_width = text_width(value_text, font_size);
+    let spacer_width = VIEWPORT - label_width - value_width;
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
         El::new()
@@ -896,12 +920,12 @@ fn key_value_row_layout() {
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight),
         |b| {
-            b.text("fps:", LayoutTextStyle::new(7.0));
+            b.text(label_text, LayoutTextStyle::new(font_size));
             b.with(
                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                 |_| {},
             );
-            b.text("60", LayoutTextStyle::new(7.0));
+            b.text(value_text, LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -909,13 +933,12 @@ fn key_value_row_layout() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
-    // "fps:" is 4 chars * 7 * 0.6 = 16.8 wide.
-    // "60" is 2 chars * 7 * 0.6 = 8.4 wide.
-    // Spacer fills 200 - 16.8 - 8.4 = 174.8.
+    // Spacer fills the space left after the label and value text widths.
     let label = result.computed[2].bounds;
     let value = result.computed[4].bounds;
     assert!(approx_eq(label.x, 0.0));
-    assert!(approx_eq(value.x, 200.0 - 8.4));
+    assert!(approx_eq(result.computed[3].bounds.width, spacer_width));
+    assert!(approx_eq(value.x, VIEWPORT - value_width));
 }
 
 // ── Scissor/clip ─────────────────────────────────────────────────────────────
@@ -1012,11 +1035,18 @@ fn between_children_borders_emitted() {
 
 #[test]
 fn text_wraps_at_word_boundaries() {
-    // "Hello World Test" = 16 chars * 16 * 0.6 = 153.6 unwrapped width.
+    let font_size = 16.0;
+    let hello_width = text_width("Hello", font_size);
+    let world_width = text_width("World", font_size);
+    let test_width = text_width("Test", font_size);
+    let space_width = text_width(" ", font_size);
+    let first_line_width = hello_width + space_width + world_width;
+    // "Hello World Test" is wider than the container before wrapping.
     // Container is 80 wide — should force word wrapping.
-    // "Hello" = 48.0, "World" = 48.0, "Test" = 38.4
-    // Line 1: "Hello World" = 48 + 9.6(space) + 48 = 105.6 > 80, so:
-    // Line 1: "Hello" (48.0), Line 2: "World" (48.0), Line 3: "Test" (38.4)
+    // "Hello World" is wider than the container, so the three words split
+    // across separate lines.
+    assert!(first_line_width > 80.0);
+    assert!(test_width < 80.0);
     let mut b = LayoutBuilder::new(80.0, 200.0);
     b.with(
         El::new()
@@ -1024,7 +1054,7 @@ fn text_wraps_at_word_boundaries() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World Test", LayoutTextStyle::new(16.0));
+            b.text("Hello World Test", LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1032,8 +1062,8 @@ fn text_wraps_at_word_boundaries() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
-    // Text element is index 2. Height should be 3 lines * 16 = 48.
-    assert!(approx_eq(result.computed[2].height, 48.0));
+    // Text element is index 2. Height should be three measured lines.
+    assert!(approx_eq(result.computed[2].height, text_height(3, font_size)));
 
     // Should emit 3 text render commands for the wrapped lines.
     let text_commands: Vec<_> = result
@@ -1077,6 +1107,7 @@ fn text_no_wrap_overflows() {
 #[test]
 fn text_wraps_at_newlines_only() {
     // "Line1\nLine2\nLine3" with TextWrap::Newlines in a wide container.
+    let font_size = 16.0;
     let mut b = LayoutBuilder::new(500.0, 200.0);
     b.with(
         El::new()
@@ -1086,7 +1117,7 @@ fn text_wraps_at_newlines_only() {
         |b| {
             b.text(
                 "Line1\nLine2\nLine3",
-                LayoutTextStyle::new(16.0).wrap(TextWrap::Newlines),
+                LayoutTextStyle::new(font_size).wrap(TextWrap::Newlines),
             );
         },
     );
@@ -1095,8 +1126,7 @@ fn text_wraps_at_newlines_only() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 500.0, 200.0, 1.0);
 
-    // 3 lines * 16 = 48.
-    assert!(approx_eq(result.computed[2].height, 48.0));
+    assert!(approx_eq(result.computed[2].height, text_height(3, font_size)));
 
     let text_commands: Vec<_> = result
         .commands
@@ -1108,8 +1138,11 @@ fn text_wraps_at_newlines_only() {
 
 #[test]
 fn word_wrap_long_word_does_not_break() {
-    // "Supercalifragilistic" = 20 chars * 16 * 0.6 = 192.0 wide.
+    let font_size = 16.0;
+    let word = "Supercalifragilistic";
+    let word_width = text_width(word, font_size);
     // Container is only 80 wide. The word should NOT be broken — stays on one line.
+    assert!(word_width > 80.0);
     let mut b = LayoutBuilder::new(80.0, 200.0);
     b.with(
         El::new()
@@ -1117,7 +1150,7 @@ fn word_wrap_long_word_does_not_break() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Supercalifragilistic", LayoutTextStyle::new(16.0));
+            b.text(word, LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1126,7 +1159,10 @@ fn word_wrap_long_word_does_not_break() {
     let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Should be a single line (word never broken mid-word).
-    assert!(approx_eq(result.computed[2].height, 16.0));
+    assert!(approx_eq(
+        result.computed[2].height,
+        line_height(font_size)
+    ));
 
     let text_commands: Vec<_> = result
         .commands
@@ -1138,9 +1174,13 @@ fn word_wrap_long_word_does_not_break() {
 
 #[test]
 fn word_wrap_preserves_explicit_newlines() {
+    let font_size = 16.0;
+    let first_paragraph_width = text_width("AA BB", font_size);
+    let second_paragraph_width = text_width("CC DD", font_size);
     // "AA BB\nCC DD" with Words wrap in a container that fits "AA BB" but not all four.
-    // "AA" = 19.2, "BB" = 19.2, space = 9.6. "AA BB" = 48.0.
     // Container is 50 wide — "AA BB" fits on one line, "CC DD" fits on one line.
+    assert!(first_paragraph_width < 50.0);
+    assert!(second_paragraph_width < 50.0);
     let mut b = LayoutBuilder::new(50.0, 200.0);
     b.with(
         El::new()
@@ -1148,7 +1188,7 @@ fn word_wrap_preserves_explicit_newlines() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("AA BB\nCC DD", LayoutTextStyle::new(16.0));
+            b.text("AA BB\nCC DD", LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1156,8 +1196,8 @@ fn word_wrap_preserves_explicit_newlines() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 50.0, 200.0, 1.0);
 
-    // 2 paragraphs, each fits on one line = 2 lines * 16 = 32.
-    assert!(approx_eq(result.computed[2].height, 32.0));
+    // Two paragraphs, each fits on one line.
+    assert!(approx_eq(result.computed[2].height, text_height(2, font_size)));
 
     let text_commands: Vec<_> = result
         .commands
@@ -1169,6 +1209,7 @@ fn word_wrap_preserves_explicit_newlines() {
 
 #[test]
 fn word_wrap_empty_string() {
+    let font_size = 16.0;
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
         El::new()
@@ -1176,7 +1217,7 @@ fn word_wrap_empty_string() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("", LayoutTextStyle::new(16.0));
+            b.text("", LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1184,12 +1225,16 @@ fn word_wrap_empty_string() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 200.0, 200.0, 1.0);
 
-    // Empty text produces one empty line — height = 1 * line_height = 16.
-    assert!(approx_eq(result.computed[2].height, 16.0));
+    // Empty text produces one empty line.
+    assert!(approx_eq(
+        result.computed[2].height,
+        line_height(font_size)
+    ));
 }
 
 #[test]
 fn word_wrap_updates_parent_fit_height() {
+    let font_size = 16.0;
     // Parent is Fit-height, child text wraps to 3 lines.
     // Parent height should grow to accommodate.
     let mut b = LayoutBuilder::new(80.0, 200.0);
@@ -1199,7 +1244,7 @@ fn word_wrap_updates_parent_fit_height() {
             .height(Sizing::FIT)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World Test", LayoutTextStyle::new(16.0));
+            b.text("Hello World Test", LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1208,13 +1253,16 @@ fn word_wrap_updates_parent_fit_height() {
     let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Text wraps to 3 lines (see text_wraps_at_word_boundaries test).
-    // Parent Fit height should be 48 (3 * 16).
-    assert!(approx_eq(result.computed[1].height, 48.0));
+    // Parent Fit height should follow the measured wrapped text height.
+    assert!(approx_eq(result.computed[1].height, text_height(3, font_size)));
 }
 
 #[test]
 fn word_wrap_render_commands_per_line() {
     // Verify each wrapped line has correct bounds positioning.
+    let font_size = 16.0;
+    let first_line_width = text_width("AA BB", font_size);
+    let second_line_width = text_width("CC", font_size);
     let mut b = LayoutBuilder::new(50.0, 200.0);
     b.with(
         El::new()
@@ -1222,10 +1270,11 @@ fn word_wrap_render_commands_per_line() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            // "AA BB CC" — each word ~19.2 wide, space ~9.6.
-            // "AA BB" = 48.0 < 50, "CC" = 19.2 < 50.
-            // Line 1: "AA BB" at y=0, Line 2: "CC" at y=16.
-            b.text("AA BB CC", LayoutTextStyle::new(16.0));
+            // The first wrapped line fits in the container; the second starts
+            // one measured line height lower.
+            assert!(first_line_width < 50.0);
+            assert!(second_line_width < 50.0);
+            b.text("AA BB CC", LayoutTextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1244,14 +1293,20 @@ fn word_wrap_render_commands_per_line() {
     // First line starts at y=0 (relative to parent).
     assert!(approx_eq(text_commands[0].bounds.y, 0.0));
 
-    // Second line starts at y=16 (one line height down).
-    assert!(approx_eq(text_commands[1].bounds.y, 16.0));
+    // Second line starts one measured line height down.
+    assert!(approx_eq(
+        text_commands[1].bounds.y,
+        line_height(font_size)
+    ));
 }
 
 // ── Fit parent with Grow children propagation ─────────────────────────────
 
 #[test]
 fn fit_parent_sees_grow_children_content_height() {
+    let title_font_size = 7.0;
+    let subtitle_font_size = 4.0;
+    let text_row_height = line_height(title_font_size);
     // Reproduces the header vertical-centering bug: a Fit-height parent
     // with Grow-height children that contain text. The Fit parent must
     // propagate the children's content size upward so it gets a real
@@ -1264,9 +1319,7 @@ fn fit_parent_sees_grow_children_content_height() {
     //       spacer (Grow width, Fixed height=1)
     //       subtitle_slot (Fit width, Grow height) → text "SUB" (font 4)
     //
-    // "STATUS" = 6 chars * 7 * 0.6 = 25.2 wide, 7.0 tall.
-    // "SUB" = 3 chars * 4 * 0.6 = 7.2 wide, 4.0 tall.
-    // text_row Fit height should be max(7.0, 1.0, 4.0) = 7.0, NOT 1.0.
+    // text_row Fit height should be the title line height, NOT the spacer.
     let mut b = LayoutBuilder::new(160.0, 160.0);
     b.with(
         El::new()
@@ -1282,14 +1335,14 @@ fn fit_parent_sees_grow_children_content_height() {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", LayoutTextStyle::new(7.0));
+                        b.text("STATUS", LayoutTextStyle::new(title_font_size));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                         |_| {},
                     );
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("SUB", LayoutTextStyle::new(4.0));
+                        b.text("SUB", LayoutTextStyle::new(subtitle_font_size));
                     });
                 },
             );
@@ -1301,17 +1354,17 @@ fn fit_parent_sees_grow_children_content_height() {
     let result = engine.compute(&tree, 160.0, 160.0, 1.0);
 
     // text_row is index 2.
-    let text_row_height = result.computed[2].height;
+    let computed_text_row_height = result.computed[2].height;
     assert!(
-        text_row_height >= 7.0 - 0.01,
-        "Fit text_row height should be >= 7.0 (text content), got {text_row_height}"
+        computed_text_row_height >= text_row_height - 0.01,
+        "Fit text_row height should be >= {text_row_height} (text content), got {computed_text_row_height}"
     );
 
     // text_row should be vertically centered in header_container.
     // header_container is 20.0 tall with 4+4=8 vertical padding → 12 content area.
     // Center offset = (12 - text_row_height) / 2 + 4 (top padding).
     let text_row_bounds = result.computed[2].bounds;
-    let expected_y = (12.0 - text_row_height).mul_add(0.5, 4.0);
+    let expected_y = (12.0 - computed_text_row_height).mul_add(0.5, 4.0);
     assert!(
         approx_eq(text_row_bounds.y, expected_y),
         "text_row should be centered: expected y={expected_y}, got y={}",

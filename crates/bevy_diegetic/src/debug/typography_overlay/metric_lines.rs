@@ -55,8 +55,8 @@ pub(super) fn spawn_font_metric_gizmos(
     };
 
     let (_, _, metric_lines) = build_metric_gizmos(
-        font_context.font_metrics,
-        font_context.line_metrics,
+        font_context.font,
+        font_context.line,
         ctx.overlay,
         ctx.anchor_y,
         &extents,
@@ -88,8 +88,8 @@ fn spawn_metric_line_panel(
     extents: &GlyphExtents,
 ) {
     let line_specs = metric_line_specs(
-        font_context.font_metrics,
-        font_context.line_metrics,
+        font_context.font,
+        font_context.line,
         ctx.overlay,
         ctx.anchor_y,
         ctx.scale,
@@ -121,7 +121,7 @@ fn spawn_metric_line_panel(
     material.unlit = true;
 
     let x = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
-    let line_metrics = font_context.line_metrics;
+    let line_metrics = font_context.line;
     let top_layout =
         if (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5 {
             line_metrics.top
@@ -372,8 +372,8 @@ fn spawn_metric_arrow_callouts(
     font_context: &FontContext<'_>,
     extents: &GlyphExtents,
 ) {
-    let line_metrics = font_context.line_metrics;
-    let font_metrics = font_context.font_metrics;
+    let line_metrics = font_context.line;
+    let font_metrics = font_context.font;
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
     let descent_y = baseline_y + line_metrics.descent;

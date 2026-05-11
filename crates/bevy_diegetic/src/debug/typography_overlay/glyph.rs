@@ -151,9 +151,9 @@ fn spawn_bounding_box_callout(
     let shelf_end_x = shelf_right_x + shelf_len;
 
     // Vertical line goes up to halfway between Cap Height and Ascent.
-    let baseline_y_layout = font_context.line_metrics.baseline;
-    let ascent_y_layout = baseline_y_layout - font_context.line_metrics.ascent;
-    let cap_height_y_layout = baseline_y_layout - font_context.font_metrics.cap_height;
+    let baseline_y_layout = font_context.line.baseline;
+    let ascent_y_layout = baseline_y_layout - font_context.line.ascent;
+    let cap_height_y_layout = baseline_y_layout - font_context.font.cap_height;
     let callout_top_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let callout_top_world = scaling::layout_to_world_y(callout_top_layout, ctx.anchor_y, ctx.scale);
 
@@ -211,7 +211,7 @@ fn spawn_origin_and_advancement(
     let first = &computed.glyph_rects[0];
     let first_mid_x = first[0] + first[2] / 2.0;
 
-    let line_metrics = font_context.line_metrics;
+    let line_metrics = font_context.line;
     let baseline_world = scaling::layout_to_world_y(line_metrics.baseline, ctx.anchor_y, ctx.scale);
     let descent_world = scaling::layout_to_world_y(
         line_metrics.baseline + line_metrics.descent,

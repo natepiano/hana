@@ -39,8 +39,8 @@ pub(super) struct OverlayContext<'w, 's, 'a> {
 /// Font-level metrics shared by helpers that draw glyph-level or line-level
 /// guides. Exists to reduce helper parameter counts.
 pub(super) struct FontContext<'a> {
-    pub(super) font_metrics: &'a FontMetrics,
-    pub(super) line_metrics: &'a LineMetricsSnapshot,
+    pub(super) font: &'a FontMetrics,
+    pub(super) line: &'a LineMetricsSnapshot,
 }
 
 /// Asset store handles for overlay mesh/material spawning. Exists to reduce
@@ -173,8 +173,8 @@ pub fn build_typography_overlay(
             scale,
         };
         let font_context = FontContext {
-            font_metrics: &font_metrics,
-            line_metrics: &line_metrics,
+            font: &font_metrics,
+            line: &line_metrics,
         };
         let mut assets = OverlayAssets {
             meshes:    &mut meshes,

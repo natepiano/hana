@@ -375,7 +375,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         PanelSdfMesh,
         Mesh3d(mesh),
         MeshMaterial3d(mat_handle),
-        Transform::from_xyz(world_rect.center_x, world_rect.center_y, 0.0),
+        Transform::from_xyz(world_rect.center.x, world_rect.center.y, 0.0),
         context.layer.clone(),
     );
     match context.shadow_mode {
@@ -407,8 +407,7 @@ fn despawn_children_of<C: Component>(
 }
 
 struct WorldRect {
-    center_x: f32,
-    center_y: f32,
+    center: Vec2,
 }
 
 fn bounds_to_world_rect(
@@ -423,7 +422,6 @@ fn bounds_to_world_rect(
     let top = -(bounds.y.mul_add(points_to_world, -anchor_y));
 
     WorldRect {
-        center_x: width.mul_add(0.5, left),
-        center_y: height.mul_add(-0.5, top),
+        center: Vec2::new(width.mul_add(0.5, left), height.mul_add(-0.5, top)),
     }
 }
