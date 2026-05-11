@@ -180,6 +180,18 @@ pub(crate) struct ResolvedOrbitCamInputRoute {
     blockers:      HashMap<Entity, OrbitCamInputBlockers>,
 }
 
+impl ResolvedOrbitCamInputRoute {
+    pub(crate) const fn routed_camera(&self) -> Option<Entity> { self.routed_camera }
+
+    pub(crate) fn metrics_for(&self, camera: Entity) -> Option<CameraInputSurfaceMetrics> {
+        self.metrics.get(&camera).copied()
+    }
+
+    pub(crate) fn blockers_for(&self, camera: Entity) -> Option<OrbitCamInputBlockers> {
+        self.blockers.get(&camera).copied()
+    }
+}
+
 #[derive(Clone, Copy)]
 struct WindowSnapshot {
     size:   Vec2,

@@ -49,6 +49,22 @@ pub(super) struct OrbitCamPanEngagedAction;
 #[action_output(bool)]
 pub(super) struct OrbitCamZoomEngagedAction;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
+#[action_output(Vec2)]
+pub(super) struct OrbitCamAdapterOrbitAction;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
+#[action_output(Vec2)]
+pub(super) struct OrbitCamAdapterPanAction;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
+#[action_output(f32)]
+pub(super) struct OrbitCamAdapterZoomCoarseAction;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
+#[action_output(f32)]
+pub(super) struct OrbitCamAdapterZoomSmoothAction;
+
 macro_rules! impl_camera_action {
     ($action:ty) => {
         impl sealed::Sealed for $action {}
@@ -63,6 +79,10 @@ impl_camera_action!(OrbitCamZoomSmoothAction);
 impl_camera_action!(OrbitCamOrbitEngagedAction);
 impl_camera_action!(OrbitCamPanEngagedAction);
 impl_camera_action!(OrbitCamZoomEngagedAction);
+impl_camera_action!(OrbitCamAdapterOrbitAction);
+impl_camera_action!(OrbitCamAdapterPanAction);
+impl_camera_action!(OrbitCamAdapterZoomCoarseAction);
+impl_camera_action!(OrbitCamAdapterZoomSmoothAction);
 
 impl HeldCameraAction for OrbitCamOrbitAction {}
 impl HeldCameraAction for OrbitCamPanAction {}

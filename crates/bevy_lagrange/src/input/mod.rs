@@ -12,6 +12,7 @@
 //! [`OrbitCamInputPhase::WriteManual`]: crate::OrbitCamInputPhase::WriteManual
 
 mod actions;
+mod adapter;
 mod bindings;
 mod context;
 mod disabled;
@@ -32,6 +33,7 @@ pub use actions::OrbitCamOrbitAction;
 pub use actions::OrbitCamPanAction;
 pub use actions::OrbitCamZoomCoarseAction;
 pub use actions::OrbitCamZoomSmoothAction;
+pub(crate) use adapter::OrbitCamInputAdapterPlugin;
 pub use bindings::ActionBindingDescriptor;
 pub use bindings::ActionBindingEntry;
 pub use bindings::ActionBindingSet;
@@ -104,7 +106,9 @@ pub use modes::OrbitCamManual;
 pub use routing::CameraInputRouting;
 pub use routing::CameraInputRoutingConfig;
 pub use routing::NoPositionFallback;
+pub(crate) use routing::OrbitCamInputContextGated;
 pub(crate) use routing::OrbitCamRoutingPlugin;
+pub(crate) use routing::ResolvedOrbitCamInputRoute;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;
 pub use state::OrbitCamInteractionState;

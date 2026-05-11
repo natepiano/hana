@@ -122,10 +122,18 @@ impl OrbitCamInput {
         delta: impl Into<OrbitDelta>,
         source: ManualInputSource,
     ) -> &mut Self {
+        self.orbit_pixels_with_sources(delta, source.sources())
+    }
+
+    pub(crate) fn orbit_pixels_with_sources(
+        &mut self,
+        delta: impl Into<OrbitDelta>,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
         let delta = delta.into();
         self.orbit.0 += delta.0;
         self.orbit_active = true;
-        self.sources = self.sources.union(source.sources());
+        self.sources = self.sources.union(sources);
         self
     }
 
@@ -134,10 +142,18 @@ impl OrbitCamInput {
         delta: impl Into<PanDelta>,
         source: ManualInputSource,
     ) -> &mut Self {
+        self.pan_pixels_with_sources(delta, source.sources())
+    }
+
+    pub(crate) fn pan_pixels_with_sources(
+        &mut self,
+        delta: impl Into<PanDelta>,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
         let delta = delta.into();
         self.pan.0 += delta.0;
         self.pan_active = true;
-        self.sources = self.sources.union(source.sources());
+        self.sources = self.sources.union(sources);
         self
     }
 
@@ -146,10 +162,18 @@ impl OrbitCamInput {
         delta: impl Into<CoarseZoomDelta>,
         source: ManualInputSource,
     ) -> &mut Self {
+        self.zoom_coarse_with_sources(delta, source.sources())
+    }
+
+    pub(crate) fn zoom_coarse_with_sources(
+        &mut self,
+        delta: impl Into<CoarseZoomDelta>,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
         let delta = delta.into();
         self.zoom_coarse.0 += delta.0;
         self.zoom_active = true;
-        self.sources = self.sources.union(source.sources());
+        self.sources = self.sources.union(sources);
         self
     }
 
@@ -158,10 +182,18 @@ impl OrbitCamInput {
         delta: impl Into<SmoothZoomDelta>,
         source: ManualInputSource,
     ) -> &mut Self {
+        self.zoom_smooth_with_sources(delta, source.sources())
+    }
+
+    pub(crate) fn zoom_smooth_with_sources(
+        &mut self,
+        delta: impl Into<SmoothZoomDelta>,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
         let delta = delta.into();
         self.zoom_smooth.0 += delta.0;
         self.zoom_active = true;
-        self.sources = self.sources.union(source.sources());
+        self.sources = self.sources.union(sources);
         self
     }
 }

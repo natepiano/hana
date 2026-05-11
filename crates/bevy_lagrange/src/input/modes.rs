@@ -123,7 +123,7 @@ pub(crate) struct OrbitCamInputInstallation {
 pub(crate) struct OrbitCamInputInstallationOf(pub(crate) Entity);
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct OrbitCamInputInstallationPlaceholder;
+pub(crate) struct OrbitCamInputInstallationPlaceholder;
 
 pub(crate) struct OrbitCamInputModesPlugin;
 
@@ -421,6 +421,26 @@ pub(crate) fn installed_input_entities(world: &World, camera: Entity) -> Vec<Ent
                 .is_some_and(|owner| owner.0 == camera)
         })
         .collect()
+}
+
+pub(crate) fn input_installation_has_placeholder(world: &World, camera: Entity) -> bool {
+    installed_input_entities(world, camera)
+        .iter()
+        .any(|entity| {
+            world
+                .get::<OrbitCamInputInstallationPlaceholder>(*entity)
+                .is_some()
+        })
+}
+
+pub(crate) fn replace_installed_input_entities(
+    world: &mut World,
+    camera: Entity,
+    entities: Vec<Entity>,
+) {
+    world
+        .entity_mut(camera)
+        .insert(OrbitCamInputInstallation { entities });
 }
 
 #[cfg(test)]

@@ -96,8 +96,8 @@ them as constraints unless implementation proves one is unworkable.
   `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionKind`.
 - Keep `CameraInteractionSources` as the only public source-set type. Back it with
   private bitflags, expose named source constants and set operations, and do not expose
-  public raw-bit constructors in the initial API. Manual writes use branded
-  `ManualInputSource`.
+  public raw-bit constructors in the initial API. Manual writes use the controlled
+  `ManualInputSource` constructor.
 - Default no-position keyboard/gamepad routing to no input unless a latch, explicit
   route, or unambiguous cursor-hit camera identifies the target. Single-camera
   fallback requires explicit opt-in.
@@ -1870,29 +1870,27 @@ manual writer. App systems can still query `&mut OrbitCamInput`, because it is a
 component, but that mutable reference should not expose useful public setters or
 fields. Library systems may use `pub(crate)` mutation APIs, while app-owned manual
 writes go through `OrbitCamManualInput`.
-Use an internal write-token guard for any direct mutation methods so future setters do
-not accidentally become an app-facing bypass:
+Phase 06 implemented the library-owned mutation path as crate-private source-set
+helpers. Keep those helpers crate-private so future setters do not accidentally become
+an app-facing bypass:
 
 ```rust
-pub(crate) struct OrbitCamInputWriteToken;
-
 impl OrbitCamInput {
     pub fn orbit_delta(&self) -> Vec2;
     pub fn pan_delta(&self) -> Vec2;
     pub fn zoom_coarse_delta(&self) -> f32;
     pub fn zoom_smooth_delta(&self) -> f32;
 
-    pub(crate) fn set_orbit_delta(
+    pub(crate) fn orbit_pixels_with_sources(
         &mut self,
-        token: OrbitCamInputWriteToken,
-        delta: Vec2,
+        delta: impl Into<OrbitDelta>,
+        sources: CameraInteractionSources,
     );
 }
 ```
 
-`OrbitCamInputWriteToken` is not a user-facing API. Library systems and
-`OrbitCamManualInputWriter` can construct it internally; external app code can query
-`OrbitCamInput` for reading but cannot call mutation methods directly.
+External app code can query `OrbitCamInput` for reading, but source-set mutation stays
+inside the crate. Public manual writes continue to use `OrbitCamManualInput`.
 
 Manual users should not normally set value, source, and phase fields directly. The
 public manual writer API should be method-based:
@@ -4145,7 +4143,7 @@ Done when:
 - Phase 10 no longer assumes phase 05 shipped live startup diagnostics; diagnostics
   coverage tracks whichever phase actually implements each diagnostic.
 
-### 06-adapters-and-action-resolution
+### 06-adapters-and-action-resolution (Complete)
 
 Goal: make enhanced-input actions and Lagrange adapters produce `OrbitCamInput`.
 
@@ -4205,13 +4203,78 @@ Done when:
   engagement actions and adapter policy; it does not re-derive held/impulse structure
   from raw recipes.
 
+### Retrospective
+
+**What worked:**
+
+- The phase 04 installation record became the single ownership path for real
+  enhanced-input action entities, binding entities, and private adapter actions.
+- Private adapter actions plus `ActionMock` let wheel, pinch, touch, and button-drag
+  values enter enhanced-input timing without overriding public semantic actions.
+- Phase 05 routing, blockers, context gating, and surface metrics were consumed as
+  snapshots; the adapter/resolver does not recompute route or blocker state.
+
+**What deviated from the plan:**
+
+- `OrbitCamInput` gained crate-private source-set mutation helpers instead of a
+  separate private write-token type. Public mutation still only goes through
+  `OrbitCamManualInput`.
+- Camera actions use non-consuming, non-resetting `ActionSettings` so newly installed
+  contexts can respond in the same frame. Context gating clears blocked action state
+  instead of relying on first-activation reset.
+- Touch production code reads `TouchTracker`, while adapter ECS tests use a test-only
+  touch-gesture override because Bevy's concrete `Touch` fields are private.
+
+**Surprises:**
+
+- Enhanced-input gamepad button bindings read the analog gamepad button value; tests
+  need to set both the analog value and digital pressed state.
+- `ActionSettings::require_reset` suppresses inputs that are already active when a
+  binding is installed, which conflicts with the same-frame installation guarantee.
+
+**Implications for remaining phases:**
+
+- Phase 07 can use `OrbitCamHeldSourceTransitionIntents` as the resolver-owned handoff
+  for latch acquire/release and lifecycle serialization after it refines the handoff to
+  identify the specific active source contribution, not only the action-set union.
+- Phase 07 should preserve the current late-blocker behavior: context gating resets
+  action state, and finalization clears `OrbitCamInput` for blocked cameras.
+- Phase 09 gamepad examples should show analog button values for tests and explain
+  that selected-gamepad policy remains future work beyond the current `Active`/`Disabled`
+  enum.
+
+### Phase 6 Review
+
+- Phase 07 now says the public lifecycle event/state shells already exist; remaining
+  work is lifecycle queue emission and `OrbitCamInteractionState` mutation.
+- Phase 07 now keeps per-kind `OrbitCamInput` source sets as the first lifecycle
+  prerequisite, because the current frame input still has one merged public source set.
+- Phase 07 now refines `OrbitCamHeldSourceTransitionIntents` before latch/lifecycle
+  use so transitions name the specific active source contribution, not only a unioned
+  binding-set source.
+- Phase 07 now explicitly makes latches and `BindingRoutePolicy` influence no-position
+  routing before phase 08 cutover.
+- Phase 07 now owns screen-pixel manual finalization and `CameraInputMetricsMissing`
+  emission for cameras without required logical metrics.
+- Phase 07 now owns pinch suppression for active non-pinch modifiers or held camera
+  actions on the routed camera.
+- Phase 10 diagnostics scope now reflects what phase 06 actually shipped: basic
+  adapter count diagnostics exist, richer live diagnostics still need implementation
+  or narrower tests.
+- Phase 09 now requires the gamepad example to document analog button values for
+  tests and the current `Active`/`Disabled` policy limit.
+- Phase 08 keeps the existing `ZoomDirection` migration note because the new bindings
+  still import it from `input/legacy.rs`.
+
 ### 07-lifecycle-and-manual-finalization
 
 Goal: make source-aware interaction events and finalization deterministic.
 
 Scope:
 
-- Add the serialized lifecycle queue and update `OrbitCamInteractionState`.
+- Add the serialized lifecycle queue and update the existing
+  `OrbitCamInteractionState`. The public event/state types already exist; this phase
+  wires emission and mutation rather than creating a new public event surface.
 - Reshape `OrbitCamInput` so it stores per-kind source sets for orbit, pan, and zoom
   before lifecycle events are derived. A single merged source set cannot represent
   simultaneous interactions such as mouse orbit plus wheel zoom.
@@ -4229,6 +4292,18 @@ Scope:
   controller path is still present.
 - Apply held-source latch acquire/release through the lifecycle queue from phase 06
   transition intent. Resolver systems should not mutate latches independently.
+- Refine phase 06 held transition intents before consuming them: lifecycle needs the
+  specific source contribution that became active or inactive, not only the unioned
+  source set for an action binding group.
+- Make source latches affect routing for no-position held input. `BindingRoutePolicy`
+  values should decide whether an input can acquire from cursor position, an existing
+  latch, explicit routing, or no-position fallback before phase 08 cutover.
+- Finalize logical metrics handling for screen-pixel manual input. If a camera lacks
+  the metrics needed to translate that input, drop the input for that frame and emit
+  `CameraInputMetricsMissing` through the lifecycle/finalization path.
+- Implement the pinch-suppression behavior documented in the adapter design: pinch
+  zoom is ignored while non-pinch camera modifiers or held camera actions are active
+  for the routed camera.
 - Settle late-blocker semantics before phase 08: late blockers may clear intent and
   end active interactions, but they must not reroute input or re-enable a camera that
   `PreInput` already gated off.
@@ -4249,6 +4324,10 @@ Done when:
   through the lifecycle queue in this phase.
 - Manual writers already work only for `OrbitCamManual` cameras; this phase verifies
   finalization and lifecycle behavior for manual input.
+- Pinch suppression is covered for a held camera action on the routed camera and for a
+  held modifier/action on a non-routed camera that must not suppress routed pinch.
+- Latches influence no-position routing before lifecycle events acquire or release
+  ownership.
 
 ### 08-breaking-cutover-and-callers
 
@@ -4299,6 +4378,10 @@ Scope:
   `orbit_cam_preset_blender_like.rs`, `orbit_cam_preset_simple_mouse.rs`,
   `orbit_cam_bindings_keyboard.rs`, `orbit_cam_bindings_gamepad.rs`, and
   `orbit_cam_manual.rs`.
+- The gamepad binding example should explain that tests and synthetic input must set
+  analog gamepad button values as well as digital pressed state. It should also note
+  that the current custom gamepad policy is `Active`/`Disabled`; selected-gamepad
+  routing remains future work until a selected-device API lands.
 - Consume `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`,
   `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionState` in examples so
   guidance text highlights active orbit, pan, and zoom rows with source attribution.
@@ -4341,9 +4424,10 @@ Scope:
   routing, lifecycle, or resolver integration changes those behaviors.
 - Add the `enhanced_input_scheduling_invariant` test.
 - Add regression coverage for live diagnostics in the phase that implements them.
-  Phase 05 added routing/blocker resources and tests, while live enhanced-input
-  installation diagnostics are phase 06 work unless a later phase deliberately moves
-  them here.
+  Phase 05 added routing/blocker resources and tests. Phase 06 added only basic
+  adapter count diagnostics, so phase 10 either expands diagnostics for missing
+  context activation, enhanced-input API-shape checks, and adapter visibility, or
+  narrows diagnostics tests to the concrete diagnostics that exist by then.
 - Add strict startup diagnostic tests for schedule/plugin/context/enhanced-input API
   assumptions only after those diagnostics exist.
 - Remove any internal compatibility scaffolding used only to keep phases 01-07
