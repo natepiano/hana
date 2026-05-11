@@ -16,6 +16,12 @@ pub enum OrbitCamInputPhase {
     Finalize,
 }
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub(crate) enum OrbitCamInputInternalSet {
+    InputModes,
+    Routing,
+}
+
 pub(crate) struct LagrangeSystemSetsPlugin;
 
 impl Plugin for LagrangeSystemSetsPlugin {
@@ -28,6 +34,15 @@ impl Plugin for LagrangeSystemSetsPlugin {
                     .before(EnhancedInputSystems::Update),
                 OrbitCamInputPhase::WriteManual.after(EnhancedInputSystems::Apply),
                 OrbitCamInputPhase::Finalize.after(OrbitCamInputPhase::WriteManual),
+            ),
+        );
+        app.configure_sets(
+            PreUpdate,
+            (
+                OrbitCamInputInternalSet::InputModes.in_set(OrbitCamInputPhase::PreInput),
+                OrbitCamInputInternalSet::Routing
+                    .in_set(OrbitCamInputPhase::PreInput)
+                    .after(OrbitCamInputInternalSet::InputModes),
             ),
         );
     }

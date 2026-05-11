@@ -7,8 +7,8 @@ use super::OrbitCamBindingsDescriptor;
 use super::OrbitCamBindingsError;
 use super::OrbitCamInput;
 use super::OrbitCamPreset;
-use crate::OrbitCamInputPhase;
 use crate::orbit_cam::OrbitCam;
+use crate::system_sets::OrbitCamInputInternalSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ActiveInputMode {
@@ -138,13 +138,13 @@ impl Plugin for OrbitCamInputModesPlugin {
             PreUpdate,
             (apply_input_mode_descriptors, reconcile_input_modes)
                 .chain()
-                .in_set(OrbitCamInputPhase::PreInput),
+                .in_set(OrbitCamInputInternalSet::InputModes),
         );
 
         #[cfg(not(feature = "reflect-input-modes"))]
         app.add_systems(
             PreUpdate,
-            reconcile_input_modes.in_set(OrbitCamInputPhase::PreInput),
+            reconcile_input_modes.in_set(OrbitCamInputInternalSet::InputModes),
         );
     }
 }

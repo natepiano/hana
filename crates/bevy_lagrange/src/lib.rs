@@ -70,6 +70,8 @@ pub use input::CameraInputDisabled;
 pub use input::CameraInputGamepadSelectionPolicy;
 pub use input::CameraInputMetricKind;
 pub use input::CameraInputMetricsMissing;
+pub use input::CameraInputRouting;
+pub use input::CameraInputRoutingConfig;
 pub use input::CameraInputSurfaceMetrics;
 pub use input::CameraInteractionSources;
 pub use input::CameraSemanticAction;
@@ -80,6 +82,7 @@ pub use input::ImpulseCameraAction;
 pub use input::InputControl;
 pub use input::ManualInputSource;
 use input::MouseKeyTracker;
+pub use input::NoPositionFallback;
 pub use input::OrbitCamBindings;
 pub use input::OrbitCamBindingsBuilder;
 pub use input::OrbitCamBindingsDescriptor;
@@ -118,6 +121,7 @@ pub use input::OrbitCamPanAction;
 pub use input::OrbitCamPanActionBindings;
 pub use input::OrbitCamPinchBinding;
 pub use input::OrbitCamPreset;
+use input::OrbitCamRoutingPlugin;
 pub use input::OrbitCamTouchBinding;
 pub use input::OrbitCamWheelBinding;
 pub use input::OrbitCamWheelModifier;
@@ -166,6 +170,7 @@ impl Plugin for LagrangePlugin {
             LagrangeEnhancedInputPlugin,
             LagrangeSystemSetsPlugin,
             OrbitCamInputModesPlugin,
+            OrbitCamRoutingPlugin,
         ));
 
         app.init_resource::<ActiveCameraData>()

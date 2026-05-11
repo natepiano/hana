@@ -4048,7 +4048,7 @@ Done when:
 - Phase 06 still owns the binding-recipe modifier/condition decision before phase 09
   examples depend on keyboard/gamepad expressiveness.
 
-### 05-routing-scheduling-and-blockers
+### 05-routing-scheduling-and-blockers (Complete)
 
 Goal: add deterministic frame routing and blocker computation.
 
@@ -4084,6 +4084,67 @@ Done when:
 - Egui, disabled, inactive-camera, animation-ignore, and unavailable-owner blockers
   all feed `OrbitCamInputBlockers`.
 
+### Retrospective
+
+**What worked:**
+
+- `CameraInputRoutingConfig`, `CameraInputRouting`, and `NoPositionFallback` now give
+  apps an always-on public routing preference without touching legacy
+  `ActiveCameraData` behavior.
+- The new internal routing set runs after input-mode reconciliation and publishes one
+  per-frame route snapshot with per-camera metrics, blockers, and context-gating state.
+- `OrbitCamInputModeReplaced` now clears owner latches through a single hook, and stale
+  latch recovery runs inside the routing phase.
+
+**What deviated from the plan:**
+
+- Source latches are present as internal state, but public acquire/release operations
+  wait until action/lifecycle phases have real held transitions to call them.
+- Routing tests cover explicit routing, latch cleanup/recovery, disabled blockers,
+  context gating, and non-routed manual metrics. Cursor/window hit-test behavior remains
+  isolated in the resolver until later adapter/input paths need event-backed routing.
+- `OrbitCamInputBlockers` and routing snapshots use internal bitflags instead of bool
+  field structs to satisfy the workspace clippy profile and keep blocker composition
+  compact.
+
+**Surprises:**
+
+- The existing legacy active-camera detector can stay completely separate while the
+  new routing snapshot is introduced, preserving current controller behavior.
+- Manual cameras need surface metrics even when they are deliberately not the routed
+  preset/custom camera.
+
+**Implications for remaining phases:**
+
+- Phase 06 should read `ResolvedOrbitCamInputRoute`, `OrbitCamInputBlockers`, and
+  `OrbitCamInputContextGated` instead of recomputing route or blocker state.
+- Phase 06 should emit held-source transition intent from action engagement state, but
+  phase 07 should apply latch acquire/release through the lifecycle authority so route,
+  blocker, mode-replacement, despawn, and lifecycle cleanup cannot diverge.
+- Phase 07 should use the same blocker snapshot during finalization and late
+  pre-controller guarding.
+
+### Phase 5 Review
+
+- Phase 06 now consumes phase 05 routing, metrics, blockers, and context-gating
+  snapshots instead of designing or recomputing them.
+- Phase 06 now adds explicit internal scheduling sets for adapter injection before
+  `EnhancedInputSystems::Update` and action resolution after
+  `EnhancedInputSystems::Apply` but before `OrbitCamInputPhase::WriteManual`.
+- Phase 06 treats manual input as already writing `OrbitCamInput`; remaining manual
+  work moves to phase 07 finalization, active helpers, blockers, and lifecycle.
+- Phase 07 now reshapes `OrbitCamInput` to store per-kind source sets before lifecycle
+  events are implemented.
+- Phase 07 now owns held-source transition authority: phase 06 reports engagement
+  transitions, and phase 07 applies latch acquire/release alongside lifecycle state.
+- Phase 07 now freezes late-blocker semantics before phase 08 cutover: late blockers
+  may clear intent and end interactions, but cannot reroute or re-enable a camera gated
+  off in `PreInput`.
+- Phase 09 now includes a post-cutover docs pass over `input/mod.rs` and crate-root
+  re-exports before examples and guidance are finalized.
+- Phase 10 no longer assumes phase 05 shipped live startup diagnostics; diagnostics
+  coverage tracks whichever phase actually implements each diagnostic.
+
 ### 06-adapters-and-action-resolution
 
 Goal: make enhanced-input actions and Lagrange adapters produce `OrbitCamInput`.
@@ -4093,6 +4154,12 @@ Scope:
 - Add private adapter modules for wheel units, smooth scroll, pinch, touch, and future
   roll gesture input.
 - Add private adapter diagnostics for tests and debug logs.
+- Add private internal schedule sets for adapter injection before
+  `EnhancedInputSystems::Update` and action resolution after
+  `EnhancedInputSystems::Apply` but before `OrbitCamInputPhase::WriteManual`.
+- Consume the phase 05 `ResolvedOrbitCamInputRoute`, `OrbitCamInputBlockers`,
+  `OrbitCamInputContextGated`, and per-camera metrics snapshots. Do not recompute route
+  or blocker state inside adapters/resolvers.
 - Install action/context entities and private adapter state for preset and bindings
   modes by replacing the placeholder entities inside the existing
   `OrbitCamInputInstallation` record. Do not add a second installer ownership path,
@@ -4108,6 +4175,9 @@ Scope:
   wheel, smooth-scroll, pinch, touch, keyboard, gamepad, and manual input.
 - Keep camera action consumption non-consuming by default so app contexts can still
   observe shared bindings.
+- Emit held-source transition intent from engagement actions, but do not mutate owner
+  latches directly from the resolver. Phase 07 applies latch acquire/release through
+  the serialized lifecycle authority.
 - Add a private post-enhanced-input resolution set after `EnhancedInputSystems::Apply`
   and before `OrbitCamInputPhase::WriteManual`; preset and bindings modes write
   `OrbitCamInput` there, while manual cameras bypass automatic resolution.
@@ -4126,8 +4196,9 @@ cut over yet.
 
 Done when:
 
-- Wheel line/pixel, pinch, touch, keyboard, mouse, gamepad, and manual writes can each
-  produce expected `OrbitCamInput` values in ECS tests.
+- Wheel line/pixel, pinch, touch, keyboard, mouse, and gamepad writes can each produce
+  expected `OrbitCamInput` values in ECS tests. Manual write smoke coverage may remain,
+  but manual finalization, active helpers, blockers, and lifecycle are phase 07 work.
 - Adapter injection is visible to enhanced input in the same frame.
 - Inactive/gated cameras do not retain stale enhanced-input action state.
 - The installer uses the phase 03 binding typestate/accessors to attach private
@@ -4141,6 +4212,9 @@ Goal: make source-aware interaction events and finalization deterministic.
 Scope:
 
 - Add the serialized lifecycle queue and update `OrbitCamInteractionState`.
+- Reshape `OrbitCamInput` so it stores per-kind source sets for orbit, pan, and zoom
+  before lifecycle events are derived. A single merged source set cannot represent
+  simultaneous interactions such as mouse orbit plus wheel zoom.
 - Emit `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`, and
   `OrbitCamInteractionSourcesChanged` from finalized `OrbitCamInput`.
 - Finalize manual, preset, and bindings input after `OrbitCamInputPhase::WriteManual`.
@@ -4153,6 +4227,11 @@ Scope:
   blocker suppresses input.
 - Add `animation_input_interrupt` wiring for finalized `OrbitCamInput` while the old
   controller path is still present.
+- Apply held-source latch acquire/release through the lifecycle queue from phase 06
+  transition intent. Resolver systems should not mutate latches independently.
+- Settle late-blocker semantics before phase 08: late blockers may clear intent and
+  end active interactions, but they must not reroute input or re-enable a camera that
+  `PreInput` already gated off.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative,
 but the new lifecycle events may be tested against the new pipeline.
@@ -4224,6 +4303,9 @@ Scope:
   `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionState` in examples so
   guidance text highlights active orbit, pan, and zoom rows with source attribution.
 - Update existing examples according to the example migration notes.
+- After phase 08 cutover, update the public `input/mod.rs` docs and crate-root
+  re-export docs so they no longer describe the new input module as merely additive
+  while legacy raw-input fields remain authoritative.
 - Collapse the old `zoom_to_fit/main.rs` plus `constants.rs` directory example back
   into one `zoom_to_fit.rs` file.
 - Keep examples that use `OrbitCamPreset`, `OrbitCamBindings`, and `OrbitCamManual`
@@ -4258,10 +4340,12 @@ Scope:
   precedence, descriptor success/rejection, and manual-writer filtering unless later
   routing, lifecycle, or resolver integration changes those behaviors.
 - Add the `enhanced_input_scheduling_invariant` test.
-- Expand missing-plugin diagnostics and first-frame setup validation into regression
-  coverage for the live diagnostics added in phase 05.
+- Add regression coverage for live diagnostics in the phase that implements them.
+  Phase 05 added routing/blocker resources and tests, while live enhanced-input
+  installation diagnostics are phase 06 work unless a later phase deliberately moves
+  them here.
 - Add strict startup diagnostic tests for schedule/plugin/context/enhanced-input API
-  assumptions.
+  assumptions only after those diagnostics exist.
 - Remove any internal compatibility scaffolding used only to keep phases 01-07
   side-by-side with legacy input.
 

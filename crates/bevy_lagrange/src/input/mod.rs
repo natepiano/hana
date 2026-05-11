@@ -21,6 +21,7 @@ mod legacy;
 mod manual;
 mod metrics;
 mod modes;
+mod routing;
 mod sources;
 mod state;
 
@@ -97,8 +98,13 @@ pub use modes::OrbitCamInputModeApplyStatus;
 pub use modes::OrbitCamInputModeDescriptor;
 #[cfg(feature = "reflect-input-modes")]
 pub use modes::OrbitCamInputModeRejected;
+pub(crate) use modes::OrbitCamInputModeReplaced;
 pub(crate) use modes::OrbitCamInputModesPlugin;
 pub use modes::OrbitCamManual;
+pub use routing::CameraInputRouting;
+pub use routing::CameraInputRoutingConfig;
+pub use routing::NoPositionFallback;
+pub(crate) use routing::OrbitCamRoutingPlugin;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;
 pub use state::OrbitCamInteractionState;
