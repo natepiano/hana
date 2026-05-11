@@ -210,11 +210,11 @@ fn fit_wraps_text_content() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
-    assert!(approx_eq(result.computed[1].width, text_width(text, font_size)));
     assert!(approx_eq(
-        result.computed[1].height,
-        line_height(font_size)
+        result.computed[1].width,
+        text_width(text, font_size)
     ));
+    assert!(approx_eq(result.computed[1].height, line_height(font_size)));
 }
 
 #[test]
@@ -1063,7 +1063,10 @@ fn text_wraps_at_word_boundaries() {
     let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Text element is index 2. Height should be three measured lines.
-    assert!(approx_eq(result.computed[2].height, text_height(3, font_size)));
+    assert!(approx_eq(
+        result.computed[2].height,
+        text_height(3, font_size)
+    ));
 
     // Should emit 3 text render commands for the wrapped lines.
     let text_commands: Vec<_> = result
@@ -1126,7 +1129,10 @@ fn text_wraps_at_newlines_only() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 500.0, 200.0, 1.0);
 
-    assert!(approx_eq(result.computed[2].height, text_height(3, font_size)));
+    assert!(approx_eq(
+        result.computed[2].height,
+        text_height(3, font_size)
+    ));
 
     let text_commands: Vec<_> = result
         .commands
@@ -1159,10 +1165,7 @@ fn word_wrap_long_word_does_not_break() {
     let result = engine.compute(&tree, 80.0, 200.0, 1.0);
 
     // Should be a single line (word never broken mid-word).
-    assert!(approx_eq(
-        result.computed[2].height,
-        line_height(font_size)
-    ));
+    assert!(approx_eq(result.computed[2].height, line_height(font_size)));
 
     let text_commands: Vec<_> = result
         .commands
@@ -1197,7 +1200,10 @@ fn word_wrap_preserves_explicit_newlines() {
     let result = engine.compute(&tree, 50.0, 200.0, 1.0);
 
     // Two paragraphs, each fits on one line.
-    assert!(approx_eq(result.computed[2].height, text_height(2, font_size)));
+    assert!(approx_eq(
+        result.computed[2].height,
+        text_height(2, font_size)
+    ));
 
     let text_commands: Vec<_> = result
         .commands
@@ -1226,10 +1232,7 @@ fn word_wrap_empty_string() {
     let result = engine.compute(&tree, 200.0, 200.0, 1.0);
 
     // Empty text produces one empty line.
-    assert!(approx_eq(
-        result.computed[2].height,
-        line_height(font_size)
-    ));
+    assert!(approx_eq(result.computed[2].height, line_height(font_size)));
 }
 
 #[test]
@@ -1254,7 +1257,10 @@ fn word_wrap_updates_parent_fit_height() {
 
     // Text wraps to 3 lines (see text_wraps_at_word_boundaries test).
     // Parent Fit height should follow the measured wrapped text height.
-    assert!(approx_eq(result.computed[1].height, text_height(3, font_size)));
+    assert!(approx_eq(
+        result.computed[1].height,
+        text_height(3, font_size)
+    ));
 }
 
 #[test]
@@ -1294,10 +1300,7 @@ fn word_wrap_render_commands_per_line() {
     assert!(approx_eq(text_commands[0].bounds.y, 0.0));
 
     // Second line starts one measured line height down.
-    assert!(approx_eq(
-        text_commands[1].bounds.y,
-        line_height(font_size)
-    ));
+    assert!(approx_eq(text_commands[1].bounds.y, line_height(font_size)));
 }
 
 // ── Fit parent with Grow children propagation ─────────────────────────────
