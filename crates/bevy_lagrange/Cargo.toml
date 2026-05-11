@@ -16,6 +16,7 @@ workspace = true
 
 [features]
 bevy_egui = ["dep:bevy_egui"]
+default = ["reflect-input-modes"]
 fit_overlay = [
   "bevy/bevy_asset",
   "bevy/bevy_gizmos",
@@ -26,6 +27,7 @@ fit_overlay = [
   "bevy/bevy_text",
   "bevy/bevy_ui",
 ]
+reflect-input-modes = []
 
 [dependencies]
 bevy = { workspace = true, features = [

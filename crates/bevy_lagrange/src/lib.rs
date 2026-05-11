@@ -11,7 +11,7 @@ mod events;
 mod fit;
 #[cfg(feature = "fit_overlay")]
 mod fit_overlay;
-mod input;
+pub mod input;
 mod observers;
 mod orbit_cam;
 mod orbital_math;
@@ -60,8 +60,29 @@ pub use fit_overlay::FitTargetOverlayConfig;
 #[cfg(feature = "fit_overlay")]
 use fit_overlay::ZoomOverlayPlugin;
 pub use input::ButtonZoomAxis;
+pub use input::CameraInputDisabled;
+pub use input::CameraInputMetricKind;
+pub use input::CameraInputMetricsMissing;
+pub use input::CameraInputSurfaceMetrics;
+pub use input::CameraInteractionSources;
+pub use input::CoarseZoomDelta;
 pub use input::InputControl;
+#[cfg(feature = "reflect-input-modes")]
+use input::LagrangeInputTypesPlugin;
+pub use input::ManualInputSource;
 use input::MouseKeyTracker;
+pub use input::OrbitCamInput;
+pub use input::OrbitCamInputContext;
+pub use input::OrbitCamInteractionEnded;
+pub use input::OrbitCamInteractionKind;
+pub use input::OrbitCamInteractionSourcesChanged;
+pub use input::OrbitCamInteractionStarted;
+pub use input::OrbitCamInteractionState;
+pub use input::OrbitCamManualInput;
+pub use input::OrbitCamManualInputWriter;
+pub use input::OrbitDelta;
+pub use input::PanDelta;
+pub use input::SmoothZoomDelta;
 pub use input::TrackpadBehavior;
 pub use input::TrackpadInput;
 pub use input::ZoomDirection;
@@ -96,8 +117,12 @@ pub struct LagrangePlugin;
 
 impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((LagrangeEnhancedInputPlugin, LagrangeSystemSetsPlugin))
-            .init_resource::<ActiveCameraData>()
+        app.add_plugins((LagrangeEnhancedInputPlugin, LagrangeSystemSetsPlugin));
+
+        #[cfg(feature = "reflect-input-modes")]
+        app.add_plugins(LagrangeInputTypesPlugin);
+
+        app.init_resource::<ActiveCameraData>()
             .init_resource::<MouseKeyTracker>()
             .init_resource::<TouchTracker>()
             .add_systems(

@@ -9,13 +9,13 @@ use bevy::input::mouse::MouseScrollUnit;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
-use super::constants::BUTTON_ZOOM_SCALE;
-use super::constants::DEFAULT_INPUT_SENSITIVITY;
-use super::constants::PINCH_GESTURE_AMPLIFICATION;
-use super::constants::PIXEL_SCROLL_SCALE;
-use super::orbit_cam::ActiveCameraData;
-use super::orbit_cam::OrbitCam;
-use super::touch::TouchInput;
+use crate::constants::BUTTON_ZOOM_SCALE;
+use crate::constants::DEFAULT_INPUT_SENSITIVITY;
+use crate::constants::PINCH_GESTURE_AMPLIFICATION;
+use crate::constants::PIXEL_SCROLL_SCALE;
+use crate::orbit_cam::ActiveCameraData;
+use crate::orbit_cam::OrbitCam;
+use crate::touch::TouchInput;
 
 /// Which axis controls button-based zoom.
 #[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy)]

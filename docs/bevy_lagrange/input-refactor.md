@@ -3740,7 +3740,7 @@ Done when:
 - Phase 09 now names the existing workspace `fairy_dust` crate as the source of the
   camera guidance panel.
 
-### 02-public-input-surface
+### 02-public-input-surface (Complete)
 
 Goal: add the public type surface that other phases will fill in.
 
@@ -3759,7 +3759,9 @@ Scope:
   integration boundary introduced in phase 01. Do not add action or binding
   installation there yet.
 - Add `OrbitCamInput`, typed deltas, read-only accessors, active-source fields, and
-  private mutation token.
+  crate-private mutation methods used by manual helpers. Keep direct `OrbitCamInput`
+  mutation out of the public API until a library-owned writer needs a private
+  mutation-token type.
 - Add `CameraInteractionSources`, private source bits, and `ManualInputSource`.
 - Add `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`,
   `OrbitCamInteractionSourcesChanged`, `CameraInputMetricsMissing`,
@@ -3777,6 +3779,58 @@ Done when:
   device input.
 - Interaction event types carry `camera`, `kind`, and `sources`.
 - `ManualInputSource` cannot be constructed without `MANUAL`.
+
+### Retrospective
+
+**What worked:**
+
+- The existing raw input implementation moved to `input/legacy.rs`, letting
+  `bevy_lagrange::input` become the public facade without changing legacy controller
+  behavior.
+- `OrbitCamInputContext` could be registered through the phase 01 enhanced-input
+  shell as soon as the context type existed.
+- `reflect-input-modes` was added as a default-on feature and the new reflected input
+  surface compiles with the feature disabled.
+
+**What deviated from the plan:**
+
+- The concrete private mutation-token type was deferred because no library-owned
+  writer exists before action resolution. Direct `OrbitCamInput` mutation methods are
+  crate-private, and public writes go through `OrbitCamManualInput`.
+- `ZoomDirection` stayed in the legacy module and is re-exported through the new
+  facade for now. Phase 03 can rehome it when bindings own zoom policy.
+
+**Surprises:**
+
+- `pub mod input` is required to expose the planned `bevy_lagrange::input` namespace;
+  the crate otherwise still uses private modules plus explicit root re-exports.
+
+**Implications for remaining phases:**
+
+- Phase 03 should add binding policy types into the existing `input` facade and move
+  `ZoomDirection` out of `legacy.rs` only when the new bindings surface owns it.
+- Phase 04 can add mode components directly under the `input` facade without another
+  public module reshuffle.
+- Later library-owned input writers should add the private mutation token when they
+  first need to bypass manual-source branding.
+
+### Phase 2 Review
+
+- Phase 02 tightened `OrbitCamInput` so direct mutation is crate-private; public app
+  writes go through `OrbitCamManualInput`.
+- Phase 02 expanded `OrbitCamInteractionState` to track orbit, pan, and zoom sources
+  independently before lifecycle resolution depends on it.
+- Phase 02 kept `ManualInputSource` non-reflected to preserve its `MANUAL` branding
+  invariant.
+- Phase 02 normalized surface metric names to `camera_view_size` and
+  `input_surface_size` before routing examples and diagnostics harden them.
+- Phase 04 now updates `OrbitCamManualInputWriter` to query only `OrbitCamManual`
+  cameras when that marker exists.
+- Phase 03/04 now split preset ownership: phase 03 introduces preset values and
+  binding conversion, while phase 04 owns the component/exclusivity role.
+- Phase 07 keeps the lifecycle implementation work but no longer needs to add
+  `OrbitCamInteractionSourcesChanged` source-difference helpers because phase 02
+  added them.
 
 ### 03-actions-bindings-and-presets
 
@@ -3803,6 +3857,8 @@ Scope:
   module; do not introduce a duplicate public `ZoomDirection` name while the old
   controller still consumes it.
 - Add `OrbitCamPreset::{SimpleMouse, BlenderLike}` and `OrbitCamPreset::to_bindings`.
+  Phase 03 introduces the preset value and binding conversion; phase 04 owns its
+  active input-mode component role and exclusivity behavior.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
 
@@ -3822,6 +3878,8 @@ Scope:
 
 - Add mutually exclusive input-mode components: `OrbitCamPreset`, `OrbitCamBindings`,
   and `OrbitCamManual`.
+- Activate `OrbitCamPreset` as an input-mode component in the exclusive family; phase
+  03 only introduced the preset value and conversion API.
 - Add the observer shim for tidy component mutations and the exclusive `PreInput`
   invariant pass as the deterministic authority.
 - Add `OrbitCamInputModeDescriptor`, `OrbitCamInputMode`, `OrbitCamInputModeApplied`,
@@ -3831,6 +3889,8 @@ Scope:
   installation introspection helpers.
 - Add descriptor apply, validation, mode exclusivity, old-installation cleanup, and
   reconciliation inside the same exclusive `PreInput` structural boundary.
+- Update `OrbitCamManualInputWriter` so it only yields writers for cameras that have
+  `OrbitCamManual`.
 - Keep mode-replacement cleanup structural in this phase: remove stale private
   installations and clear same-frame `OrbitCamInput`. Source-latch cleanup is
   completed in phase 05 after latches exist, and lifecycle queue cleanup is completed
@@ -3936,6 +3996,8 @@ Done when:
 
 - Held interactions emit one started event, source-change events for joins/leaves, and
   one ended event.
+- `OrbitCamInteractionState` maintains independent source sets for orbit, pan, and
+  zoom so simultaneous interactions can be observed correctly.
 - Impulse interactions emit started and ended in the same frame.
 - Input-mode replacement, despawn cleanup, and blockers cannot duplicate lifecycle
   events.
