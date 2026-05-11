@@ -6,24 +6,27 @@
 //! Benchmark comparing Clay (FFI) and `bevy_diegetic` layout performance on
 //! identical panel layouts.
 //!
-//! - **Clay**: immediate-mode full cycle (allocate + build + layout + collect).
-//! - **Diegetic**: ECS-based — spawn a `DiegeticPanel`, run `app.update()`, read
-//!   `ComputedDiegeticPanel`. Uses [`HeadlessLayoutPlugin`] for headless operation.
+//! - **`clay_immediate_full`**: immediate-mode full cycle (allocate + build +
+//!   layout + collect).
+//! - **`diegetic_public_set_tree_update`**: public retained-mode panel path —
+//!   rebuild a `LayoutTree`, assign it to an existing `DiegeticPanel`, run
+//!   `app.update()`, and read `ComputedDiegeticPanel`.
 //!
 //! # Methodology notes
 //!
-//! The diegetic side pays ~30µs of Bevy ECS scheduling overhead per
-//! `app.update()` that the clay side does not. This overhead is constant
-//! regardless of layout size — it's the scheduler dispatching systems and
-//! running change detection.
+//! This benchmark compares user-facing integration paths, not raw layout
+//! engines. The diegetic side includes API-boundary work such as rebuilding
+//! the public tree, converting unit-carrying dimensions to points inside
+//! `compute_panel_layouts`, Bevy change detection, system scheduling, and
+//! storing the result on the ECS component. The Clay side is immediate-mode
+//! layout plus command collection.
 //!
 //! In a real Bevy application, clay's output would also be processed through
-//! the ECS (spawning entities, building meshes), so both sides pay this cost
-//! in practice. The bench intentionally includes it for the diegetic side to
-//! measure the true user-facing cost of using `DiegeticPanel`.
-//!
-//! Subtracting the ECS baseline (~30µs), the raw layout engine is faster than
-//! clay at all tested sizes.
+//! the ECS (spawning entities, building meshes), so this benchmark is useful
+//! for integration-cost intuition. It should not be used to infer raw
+//! `LayoutEngine` performance; the crate-internal Clay parity tests exercise
+//! the engine directly for correctness, and a separate raw-engine benchmark
+//! should be used for performance comparisons at that layer.
 //!
 //! Run with `cargo bench --bench layout_comparison`.
 
@@ -463,11 +466,11 @@ fn bench_status_panel(c: &mut Criterion) {
         let group_name = format!("status_panel_{row_count}_rows");
         let mut group = c.benchmark_group(&group_name);
 
-        group.bench_function("clay", |b| {
+        group.bench_function("clay_immediate_full", |b| {
             b.iter(|| run_clay_layout(&rows, size));
         });
 
-        group.bench_function("diegetic", |b| {
+        group.bench_function("diegetic_public_set_tree_update", |b| {
             let mut app = create_bench_app();
             let tree = build_diegetic_tree(&rows, size);
             let entity = app.world_mut().spawn(bench_panel(tree, size)).id();

@@ -5,14 +5,17 @@
 
 //! Benchmark for `DiegeticPanel` layout performance at various sizes.
 //!
-//! Measures the real user-facing cost: build a `LayoutTree`, assign it to a
-//! `DiegeticPanel`, and run `app.update()` so `compute_panel_layouts` executes.
+//! Measures the public `DiegeticPanel` update path: build a `LayoutTree`,
+//! assign it to a panel, and run `app.update()` so `compute_panel_layouts`
+//! executes. This includes retained-mode API-boundary work and Bevy scheduling;
+//! it is not a raw `LayoutEngine` benchmark.
 //!
 //! Three scenarios per row count:
 //! - **cold**: First layout — full engine computation.
 //! - **warm**: Same tree reassigned — full engine computation (change detected).
-//! - **`color_only`**: Tree rebuilt with different colors, same structure — layout hash matches,
-//!   only render command colors are patched.
+//! - **`color_change_rebuild`**: Tree rebuilt with different colors and the
+//!   same layout structure. This currently still recomputes layout; it does
+//!   not exercise a color-only/hash fast path.
 //!
 //! Run with `cargo bench --bench panel_perf`.
 
@@ -212,9 +215,9 @@ fn bench_panel_layout(c: &mut Criterion) {
             });
         });
 
-        // Color-only: same layout structure, different colors — hash matches,
-        // skips engine.compute(), only patches render command colors.
-        group.bench_function("color_only", |b| {
+        // Color change: same layout structure, different colors. This still
+        // triggers Changed<DiegeticPanel> and recomputes layout today.
+        group.bench_function("color_change_rebuild", |b| {
             let mut app = create_bench_app();
             let tree = build_panel_tree(&rows, Color::WHITE);
             let entity = app.world_mut().spawn(bench_panel(tree)).id();
