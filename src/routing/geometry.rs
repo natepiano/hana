@@ -114,10 +114,10 @@ impl CableSegment {
                     TangentSample::First => (points[1] - points[0]).normalize_or_zero(),
                     TangentSample::Last => {
                         (points[point_count - 1] - points[point_count - 2]).normalize_or_zero()
-                    }
+                    },
                     TangentSample::Interior => {
                         (points[point_index + 1] - points[point_index - 1]).normalize_or_zero()
-                    }
+                    },
                 }
             })
             .collect();
