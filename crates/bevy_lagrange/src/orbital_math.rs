@@ -228,12 +228,12 @@ mod approx_equal_tests {
 
     #[test]
     fn value_within_threshold_is_approx_equal() {
-        assert!(approx_equal(1.0, 1.0 + EPSILON * 0.1));
+        assert!(approx_equal(1.0, EPSILON.mul_add(0.1, 1.0)));
     }
 
     #[test]
     fn value_outside_threshold_is_not_approx_equal() {
-        assert!(!approx_equal(1.0, 1.0 + EPSILON * 10.0));
+        assert!(!approx_equal(1.0, EPSILON.mul_add(10.0, 1.0)));
     }
 }
 
