@@ -53,9 +53,21 @@ impl OrbitCamManualInput<'_> {
         self
     }
 
+    /// Marks orbit input active for the frame without adding motion.
+    pub fn orbit_active(&mut self) -> &mut Self {
+        self.input.orbit_active_with_sources(self.source.sources());
+        self
+    }
+
     /// Adds pan intent in logical pixels.
     pub fn pan_pixels(&mut self, delta: impl Into<PanDelta>) -> &mut Self {
         self.input.pan_pixels_from(delta, self.source);
+        self
+    }
+
+    /// Marks pan input active for the frame without adding motion.
+    pub fn pan_active(&mut self) -> &mut Self {
+        self.input.pan_active_with_sources(self.source.sources());
         self
     }
 
@@ -68,6 +80,12 @@ impl OrbitCamManualInput<'_> {
     /// Adds smooth zoom intent.
     pub fn zoom_smooth_amount(&mut self, delta: impl Into<SmoothZoomDelta>) -> &mut Self {
         self.input.zoom_smooth_from(delta, self.source);
+        self
+    }
+
+    /// Marks zoom input active for the frame without adding zoom.
+    pub fn zoom_active(&mut self) -> &mut Self {
+        self.input.zoom_active_with_sources(self.source.sources());
         self
     }
 }

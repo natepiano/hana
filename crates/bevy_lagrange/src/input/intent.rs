@@ -63,14 +63,17 @@ impl SmoothZoomDelta {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
 #[reflect(Component, Default)]
 pub struct OrbitCamInput {
-    orbit:        OrbitDelta,
-    pan:          PanDelta,
-    zoom_coarse:  CoarseZoomDelta,
-    zoom_smooth:  SmoothZoomDelta,
-    sources:      CameraInteractionSources,
-    orbit_active: bool,
-    pan_active:   bool,
-    zoom_active:  bool,
+    orbit:                OrbitDelta,
+    pan:                  PanDelta,
+    zoom_coarse:          CoarseZoomDelta,
+    zoom_smooth:          SmoothZoomDelta,
+    orbit_sources:        CameraInteractionSources,
+    pan_sources:          CameraInteractionSources,
+    zoom_sources:         CameraInteractionSources,
+    zoom_impulse_sources: CameraInteractionSources,
+    orbit_active:         bool,
+    pan_active:           bool,
+    zoom_active:          bool,
 }
 
 impl OrbitCamInput {
@@ -92,7 +95,23 @@ impl OrbitCamInput {
 
     /// Returns all active sources for this frame.
     #[must_use]
-    pub const fn sources(&self) -> CameraInteractionSources { self.sources }
+    pub const fn sources(&self) -> CameraInteractionSources {
+        self.orbit_sources
+            .union(self.pan_sources)
+            .union(self.zoom_sources)
+    }
+
+    /// Returns active sources for orbit input this frame.
+    #[must_use]
+    pub const fn orbit_sources(&self) -> CameraInteractionSources { self.orbit_sources }
+
+    /// Returns active sources for pan input this frame.
+    #[must_use]
+    pub const fn pan_sources(&self) -> CameraInteractionSources { self.pan_sources }
+
+    /// Returns active sources for zoom input this frame.
+    #[must_use]
+    pub const fn zoom_sources(&self) -> CameraInteractionSources { self.zoom_sources }
 
     /// Returns `true` when the frame carries any camera intent.
     #[must_use]
@@ -133,7 +152,16 @@ impl OrbitCamInput {
         let delta = delta.into();
         self.orbit.0 += delta.0;
         self.orbit_active = true;
-        self.sources = self.sources.union(sources);
+        self.orbit_sources = self.orbit_sources.union(sources);
+        self
+    }
+
+    pub(crate) const fn orbit_active_with_sources(
+        &mut self,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
+        self.orbit_active = true;
+        self.orbit_sources = self.orbit_sources.union(sources);
         self
     }
 
@@ -153,7 +181,16 @@ impl OrbitCamInput {
         let delta = delta.into();
         self.pan.0 += delta.0;
         self.pan_active = true;
-        self.sources = self.sources.union(sources);
+        self.pan_sources = self.pan_sources.union(sources);
+        self
+    }
+
+    pub(crate) const fn pan_active_with_sources(
+        &mut self,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
+        self.pan_active = true;
+        self.pan_sources = self.pan_sources.union(sources);
         self
     }
 
@@ -173,7 +210,8 @@ impl OrbitCamInput {
         let delta = delta.into();
         self.zoom_coarse.0 += delta.0;
         self.zoom_active = true;
-        self.sources = self.sources.union(sources);
+        self.zoom_sources = self.zoom_sources.union(sources);
+        self.zoom_impulse_sources = self.zoom_impulse_sources.union(sources);
         self
     }
 
@@ -193,7 +231,34 @@ impl OrbitCamInput {
         let delta = delta.into();
         self.zoom_smooth.0 += delta.0;
         self.zoom_active = true;
-        self.sources = self.sources.union(sources);
+        self.zoom_sources = self.zoom_sources.union(sources);
+        self
+    }
+
+    pub(crate) const fn zoom_active_with_sources(
+        &mut self,
+        sources: CameraInteractionSources,
+    ) -> &mut Self {
+        self.zoom_active = true;
+        self.zoom_sources = self.zoom_sources.union(sources);
+        self
+    }
+
+    pub(crate) const fn zoom_impulse_sources(&self) -> CameraInteractionSources {
+        self.zoom_impulse_sources
+    }
+
+    pub(crate) fn clear_orbit(&mut self) -> &mut Self {
+        self.orbit = OrbitDelta::default();
+        self.orbit_sources = CameraInteractionSources::NONE;
+        self.orbit_active = false;
+        self
+    }
+
+    pub(crate) fn clear_pan(&mut self) -> &mut Self {
+        self.pan = PanDelta::default();
+        self.pan_sources = CameraInteractionSources::NONE;
+        self.pan_active = false;
         self
     }
 }

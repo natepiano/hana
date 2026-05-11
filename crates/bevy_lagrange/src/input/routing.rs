@@ -13,6 +13,7 @@ use crate::egui::BlockOnEguiFocus;
 use crate::egui::EguiWantsFocus;
 use crate::input::CameraInputDisabled;
 use crate::input::CameraInputSurfaceMetrics;
+use crate::input::CameraInteractionSources;
 use crate::input::OrbitCamInputModeReplaced;
 use crate::input::OrbitCamManual;
 use crate::system_sets::OrbitCamInputInternalSet;
@@ -96,6 +97,37 @@ pub(crate) struct CameraInputSourceLatches {
 }
 
 impl CameraInputSourceLatches {
+    pub(crate) const fn acquire_sources(
+        &mut self,
+        camera: Entity,
+        sources: CameraInteractionSources,
+    ) {
+        if sources.contains(CameraInteractionSources::MOUSE)
+            || sources.contains(CameraInteractionSources::WHEEL)
+            || sources.contains(CameraInteractionSources::SMOOTH_SCROLL)
+        {
+            self.mouse = Some(OrbitCamInputOwnerLatch(camera));
+        }
+        if sources.contains(CameraInteractionSources::KEYBOARD) {
+            self.keyboard = Some(OrbitCamInputOwnerLatch(camera));
+        }
+    }
+
+    pub(crate) fn release_sources(&mut self, camera: Entity, sources: CameraInteractionSources) {
+        if (sources.contains(CameraInteractionSources::MOUSE)
+            || sources.contains(CameraInteractionSources::WHEEL)
+            || sources.contains(CameraInteractionSources::SMOOTH_SCROLL))
+            && self.mouse.is_some_and(|latch| latch.camera() == camera)
+        {
+            self.mouse = None;
+        }
+        if sources.contains(CameraInteractionSources::KEYBOARD)
+            && self.keyboard.is_some_and(|latch| latch.camera() == camera)
+        {
+            self.keyboard = None;
+        }
+    }
+
     pub(crate) fn clear_camera(&mut self, camera: Entity) {
         if self.mouse.is_some_and(|latch| latch.camera() == camera) {
             self.mouse = None;
@@ -256,11 +288,13 @@ fn resolve_camera_input_routing(world: &mut World) {
         .map(|snapshot| snapshot.entity)
         .collect::<Vec<_>>();
 
-    world
-        .resource_mut::<CameraInputSourceLatches>()
-        .recover_unavailable_latches(&available_cameras);
+    let latches = {
+        let mut latches = world.resource_mut::<CameraInputSourceLatches>();
+        latches.recover_unavailable_latches(&available_cameras);
+        latches.clone()
+    };
 
-    let routed_camera = select_routed_camera(&config, &snapshots, &available_cameras);
+    let routed_camera = select_routed_camera(&config, &snapshots, &available_cameras, &latches);
     let mut resolved = ResolvedOrbitCamInputRoute {
         routed_camera,
         metrics: HashMap::new(),
@@ -450,21 +484,43 @@ fn select_routed_camera(
     config: &CameraInputRoutingConfig,
     snapshots: &[CameraRoutingSnapshot],
     available_cameras: &[Entity],
+    latches: &CameraInputSourceLatches,
 ) -> Option<Entity> {
     match config.mode {
         CameraInputRouting::Explicit => config
             .explicit_camera
             .filter(|camera| available_cameras.contains(camera)),
-        CameraInputRouting::CursorHitTest => cursor_hit_camera(snapshots).or_else(|| {
-            if config.no_position_fallback == NoPositionFallback::OnlyEligibleCamera
-                && available_cameras.len() == 1
-            {
-                available_cameras.first().copied()
-            } else {
-                None
-            }
-        }),
+        CameraInputRouting::CursorHitTest => latched_camera(latches, available_cameras)
+            .or_else(|| cursor_hit_camera(snapshots))
+            .or_else(|| {
+                if config.no_position_fallback == NoPositionFallback::OnlyEligibleCamera
+                    && available_cameras.len() == 1
+                {
+                    available_cameras.first().copied()
+                } else {
+                    None
+                }
+            }),
     }
+}
+
+fn latched_camera(
+    latches: &CameraInputSourceLatches,
+    available_cameras: &[Entity],
+) -> Option<Entity> {
+    let mut camera = None;
+    for latch in [latches.mouse, latches.keyboard].into_iter().flatten() {
+        let latched_camera = latch.camera();
+        if !available_cameras.contains(&latched_camera) {
+            continue;
+        }
+        match camera {
+            Some(existing) if existing != latched_camera => return None,
+            Some(_) => {},
+            None => camera = Some(latched_camera),
+        }
+    }
+    camera
 }
 
 fn cursor_hit_camera(snapshots: &[CameraRoutingSnapshot]) -> Option<Entity> {
@@ -563,6 +619,24 @@ mod tests {
                 .resource::<CameraInputSourceLatches>()
                 .keyboard
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn source_latch_routes_without_cursor_hit() {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        app.world_mut()
+            .resource_mut::<CameraInputSourceLatches>()
+            .keyboard = Some(OrbitCamInputOwnerLatch(camera));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<ResolvedOrbitCamInputRoute>()
+                .routed_camera,
+            Some(camera)
         );
     }
 

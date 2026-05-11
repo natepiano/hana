@@ -4266,7 +4266,7 @@ Done when:
 - Phase 08 keeps the existing `ZoomDirection` migration note because the new bindings
   still import it from `input/legacy.rs`.
 
-### 07-lifecycle-and-manual-finalization
+### 07-lifecycle-and-manual-finalization (Complete)
 
 Goal: make source-aware interaction events and finalization deterministic.
 
@@ -4329,6 +4329,67 @@ Done when:
 - Latches influence no-position routing before lifecycle events acquire or release
   ownership.
 
+### Retrospective
+
+**What worked:**
+
+- `input/lifecycle.rs` became the single finalization point for interaction events,
+  `OrbitCamInteractionState`, blockers, metrics checks, and latch acquire/release.
+- Per-kind source sets in `OrbitCamInput` were enough to serialize simultaneous
+  orbit, pan, and zoom interactions without adding a separate lifecycle queue
+  resource.
+- Source latches now influence cursor-hit routing before no-position fallback, so
+  held keyboard/mouse ownership can keep routing stable after the cursor leaves a
+  camera surface.
+
+**What deviated from the plan:**
+
+- Lifecycle does not consume `OrbitCamHeldSourceTransitionIntents`. The resolver now
+  writes refined per-kind source sets directly into `OrbitCamInput`, and finalization
+  derives started/ended/source-change events from those finalized source deltas.
+- Late blockers clear finalized input and end active interactions in the finalizer
+  rather than through a separate pre-controller event guard.
+- Pinch suppression covers active keyboard and mouse-button engagement recipes. Gamepad
+  suppression remains coupled to future selected-device policy work.
+- `animation_input_interrupt` remains controller-cutover work because the legacy
+  controller still owns behavior until phase 08 consumes finalized `OrbitCamInput`.
+
+**Surprises:**
+
+- Manual screen-pixel metric coverage needed a lifecycle-only test app because the
+  routing plugin intentionally supplies default camera metrics.
+- Wheel zoom needed separate impulse-source tracking so it can emit same-frame
+  started/ended events without leaving zoom marked active in
+  `OrbitCamInteractionState`.
+
+**Implications for remaining phases:**
+
+- Phase 08 must wire `animation_input_interrupt` at the same time the controller moves
+  to finalized `OrbitCamInput`.
+- Phase 08 should remove `OrbitCamHeldSourceTransitionIntents` and its
+  `push_held_intent` write path because finalized per-kind source deltas are now the
+  lifecycle authority.
+- Phase 10 lifecycle tests should focus on finalizer ordering, blockers, metrics,
+  latch recovery, and impulse-vs-held state rather than a separate lifecycle queue
+  resource.
+
+### Phase 7 Review
+
+- Phase 08 now explicitly preserves finalization-before-controller ordering and places
+  `animation_input_interrupt` after finalization but before controller movement.
+- Phase 08 now replaces `ActiveCameraData` metric consumption with finalized
+  routing/surface metrics instead of switching only the intent payload.
+- Phase 08 now removes the obsolete `OrbitCamHeldSourceTransitionIntents` resource and
+  `push_held_intent` path during cutover.
+- Phase 09 now documents current latch scope: mouse-like and keyboard ownership are in
+  scope, while gamepad/touch owner latches wait for selected-device/touch-owner policy.
+- Phase 10 now focuses lifecycle coverage on cross-system cutover, scheduling,
+  interrupt policy, workspace consumers, and diagnostics rather than duplicating phase
+  07 unit coverage.
+- Phase 08 now names legacy systems and public facades that must be removed or
+  replaced: `mouse_key_tracker`, `active_viewport_data`, `ActiveCameraData`, and
+  legacy input re-exports.
+
 ### 08-breaking-cutover-and-callers
 
 Goal: switch the actual camera controller to the new input model and remove the old
@@ -4339,8 +4400,22 @@ Scope:
 - Make `OrbitCam` require `OrbitCamInput`, `OrbitCamInputContext`, and the default
   `OrbitCamPreset::SimpleMouse`.
 - Switch `orbit_cam` controller movement to consume finalized `OrbitCamInput`.
+- Preserve ordering during the cutover: `OrbitCamInputPhase::Finalize` must complete
+  before animation interruption and controller movement, and
+  `animation_input_interrupt` must read finalized input after finalization but before
+  the controller consumes movement.
+- Replace the legacy `ActiveCameraData` metric path with finalized
+  `CameraInputSurfaceMetrics` and resolved routing metrics. The controller should not
+  keep reading stale `window_size` or `viewport_size` values from the old active-camera
+  pipeline after it consumes semantic input.
+- Remove `OrbitCamHeldSourceTransitionIntents` and its `push_held_intent` write path;
+  lifecycle and latch transitions are derived from finalized per-kind source sets on
+  `OrbitCamInput`.
 - Remove old physical input fields from `OrbitCam`, including old mouse/key/touch,
   trackpad, wheel, button-zoom, and zoom-direction input fields.
+- Remove or replace the old raw-input pipeline systems and facade exports, including
+  `mouse_key_tracker`, `active_viewport_data`, `ActiveCameraData`, and public legacy
+  input re-exports from `input/mod.rs` and `lib.rs`.
 - Move `ZoomDirection` out of `input/legacy.rs` before deleting legacy raw-input code,
   or otherwise give the public facade a non-legacy home for the binding zoom policy.
 - Remove `CameraInputDetection::{Automatic, Manual}` and migrate to
@@ -4365,6 +4440,8 @@ Done when:
 - The default camera still works with mouse-oriented `SimpleMouse` behavior.
 - `CameraInputInterruptBehavior::{Ignore, Cancel, Complete}` preserve their old
   externally visible behavior through finalized `OrbitCamInput`.
+- Orbit and pan scaling use finalized routing/surface metrics, including explicit
+  render-to-texture metrics, rather than `ActiveCameraData`.
 
 ### 09-examples-guidance-and-doc-cleanup
 
@@ -4382,6 +4459,9 @@ Scope:
   analog gamepad button values as well as digital pressed state. It should also note
   that the current custom gamepad policy is `Active`/`Disabled`; selected-gamepad
   routing remains future work until a selected-device API lands.
+- Document that current source latches stabilize mouse-like and keyboard held
+  ownership. Gamepad and touch source attribution is supported, but owner latching for
+  those sources remains future selected-device or touch-owner policy work.
 - Consume `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`,
   `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionState` in examples so
   guidance text highlights active orbit, pan, and zoom rows with source attribution.
@@ -4416,6 +4496,11 @@ Scope:
   input-mode exclusivity, routing, blockers, lifecycle events, latch recovery,
   adapter behavior, manual writes, interrupt policies, workspace consumers, and
   dependency versioning.
+- Do not repeat the phase 07 unit coverage for held transitions, same-frame impulses,
+  manual zero-delta activity, blocker clearing, metric drops, latch routing, stale
+  latch recovery, or pinch suppression. Phase 10 lifecycle coverage should focus on
+  cross-system cutover tests, finalizer/controller scheduling, interrupt-policy
+  integration, workspace consumers, and diagnostics.
 - Do not duplicate the phase 03 pure binding-validator unit tests. Phase 10 binding
   coverage should focus on descriptor apply, installation replacement, ECS resolver
   behavior, and integration with routing/lifecycle/blockers.
@@ -4464,8 +4549,9 @@ Done when:
 - Add source-aware camera interaction lifecycle events, source-change events, and read-only interaction state.
 - Add helper methods on `OrbitCamInteractionSourcesChanged` for added and removed
   source flags.
-- Add an internal lifecycle queue that deduplicates started/ended/source-change events
-  across routing, blocker, control replacement, and despawn cleanup paths.
+- Add an internal finalization path that derives started/ended/source-change events
+  from finalized per-kind source deltas and applies blocker, metric, and latch
+  cleanup before the controller consumes input.
 - Add `ManualInputSource` so manual camera input always reports `MANUAL` and may include observed device provenance.
 - Add logical `CameraInputSurfaceMetrics` for explicit routing, render-to-texture, and custom editor input surfaces.
 - Add structured binding validation and missing-plugin diagnostics for common setup mistakes.

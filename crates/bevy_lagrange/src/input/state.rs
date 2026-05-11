@@ -46,4 +46,16 @@ impl OrbitCamInteractionState {
     /// Returns the sources currently contributing to zoom input.
     #[must_use]
     pub const fn zoom_sources(&self) -> CameraInteractionSources { self.zoom }
+
+    pub(crate) const fn set_sources(
+        &mut self,
+        kind: OrbitCamInteractionKind,
+        sources: CameraInteractionSources,
+    ) {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit = sources,
+            OrbitCamInteractionKind::Pan => self.pan = sources,
+            OrbitCamInteractionKind::Zoom => self.zoom = sources,
+        }
+    }
 }

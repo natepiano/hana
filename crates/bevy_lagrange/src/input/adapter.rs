@@ -520,7 +520,7 @@ fn adapter_contributions(
 ) -> AdapterContributions {
     let mut contributions = AdapterContributions::default();
     apply_wheel_contribution(bindings, scroll, keyboard, &mut contributions);
-    apply_pinch_contribution(bindings, pinch, &mut contributions);
+    apply_pinch_contribution(bindings, pinch, keyboard, mouse_buttons, &mut contributions);
     apply_touch_contribution(bindings, touch_gestures, &mut contributions);
     apply_button_drag_zoom_contribution(bindings, mouse_motion, mouse_buttons, &mut contributions);
     contributions
@@ -592,9 +592,14 @@ fn apply_wheel_contribution(
 fn apply_pinch_contribution(
     bindings: &OrbitCamBindings,
     pinch: f32,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+    mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
 ) {
-    if bindings.pinch() != OrbitCamPinchBinding::Zoom || pinch == 0.0 {
+    if bindings.pinch() != OrbitCamPinchBinding::Zoom
+        || pinch == 0.0
+        || pinch_suppressed(bindings, keyboard, mouse_buttons)
+    {
         return;
     }
 
@@ -607,6 +612,46 @@ fn apply_pinch_contribution(
         .sources
         .zoom_smooth
         .union(CameraInteractionSources::PINCH);
+}
+
+fn pinch_suppressed(
+    bindings: &OrbitCamBindings,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+    mouse_buttons: Option<&ButtonInput<MouseButton>>,
+) -> bool {
+    bindings
+        .orbit()
+        .entries()
+        .iter()
+        .any(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
+        || bindings
+            .pan()
+            .entries()
+            .iter()
+            .any(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
+        || bindings
+            .zoom_smooth()
+            .entries()
+            .iter()
+            .any(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
+}
+
+fn recipe_active(
+    recipe: BindingRecipe,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+    mouse_buttons: Option<&ButtonInput<MouseButton>>,
+) -> bool {
+    match recipe {
+        BindingRecipe::Key(key) => keyboard.is_some_and(|keyboard| keyboard.pressed(key)),
+        BindingRecipe::MouseButton(button) => {
+            mouse_buttons.is_some_and(|buttons| buttons.pressed(button))
+        },
+        BindingRecipe::MouseMotion
+        | BindingRecipe::MouseWheel
+        | BindingRecipe::GamepadButton(_)
+        | BindingRecipe::GamepadAxis(_)
+        | BindingRecipe::None => false,
+    }
 }
 
 fn apply_touch_contribution(
@@ -763,12 +808,17 @@ const fn state_for_f32(value: f32) -> TriggerState {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the resolver keeps related enhanced-input query reads in one scheduling system"
+)]
 fn resolve_actions_into_orbit_cam_input(
     route: Res<ResolvedOrbitCamInputRoute>,
     mut held_intents: ResMut<OrbitCamHeldSourceTransitionIntents>,
     mut cameras: Query<
         (
             Entity,
+            &OrbitCamInstalledBindings,
             &OrbitCamInputActionEntities,
             &OrbitCamAdapterFrameSources,
             Option<&OrbitCamInputContextGated>,
@@ -780,10 +830,12 @@ fn resolve_actions_into_orbit_cam_input(
     f32_actions: F32ActionQueries,
     bool_actions: BoolActionQueries,
     states: Query<&TriggerState>,
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
 ) {
     held_intents.intents.clear();
 
-    for (camera, actions, frame_sources, gated, mut input) in &mut cameras {
+    for (camera, bindings, actions, frame_sources, gated, mut input) in &mut cameras {
         input.clear();
         if route.routed_camera() != Some(camera)
             || route.metrics_for(camera).is_none()
@@ -798,45 +850,64 @@ fn resolve_actions_into_orbit_cam_input(
         let orbit_engaged = bool_action_active(actions.orbit_engaged, &bool_actions.orbit, &states);
         let pan_engaged = bool_action_active(actions.pan_engaged, &bool_actions.pan, &states);
         let zoom_engaged = bool_action_active(actions.zoom_engaged, &bool_actions.zoom, &states);
+        let orbit_sources = held_sources_for_state(
+            orbit_engaged,
+            bindings.0.orbit().entries(),
+            actions.orbit_sources,
+            keyboard.as_deref(),
+            mouse_buttons.as_deref(),
+        );
+        let pan_sources = held_sources_for_state(
+            pan_engaged,
+            bindings.0.pan().entries(),
+            actions.pan_sources,
+            keyboard.as_deref(),
+            mouse_buttons.as_deref(),
+        );
+        let zoom_smooth_sources = held_sources_for_state(
+            zoom_engaged,
+            bindings.0.zoom_smooth().entries(),
+            actions.zoom_smooth_sources,
+            keyboard.as_deref(),
+            mouse_buttons.as_deref(),
+        );
 
         push_held_intent(
             &mut held_intents,
             camera,
             OrbitCamInteractionKind::Orbit,
-            actions.orbit_sources,
+            orbit_sources,
             orbit_engaged,
         );
         push_held_intent(
             &mut held_intents,
             camera,
             OrbitCamInteractionKind::Pan,
-            actions.pan_sources,
+            pan_sources,
             pan_engaged,
         );
         push_held_intent(
             &mut held_intents,
             camera,
             OrbitCamInteractionKind::Zoom,
-            actions.zoom_smooth_sources,
+            zoom_smooth_sources,
             zoom_engaged,
         );
 
         if orbit_engaged {
             input.orbit_pixels_with_sources(
                 action_value(actions.orbit, &vec2_actions.orbit),
-                actions.orbit_sources,
+                orbit_sources,
             );
         }
         if pan_engaged {
-            input.pan_pixels_with_sources(
-                action_value(actions.pan, &vec2_actions.pan),
-                actions.pan_sources,
-            );
+            input
+                .pan_pixels_with_sources(action_value(actions.pan, &vec2_actions.pan), pan_sources);
         }
         if zoom_engaged {
             input.zoom_smooth_with_sources(
                 action_value(actions.zoom_smooth, &f32_actions.zoom_smooth),
-                actions.zoom_smooth_sources,
+                zoom_smooth_sources,
             );
         }
         if action_state_active(actions.zoom_coarse, &states) {
@@ -900,6 +971,30 @@ struct BoolActionQueries<'w, 's> {
     orbit: Query<'w, 's, &'static Action<OrbitCamOrbitEngagedAction>>,
     pan:   Query<'w, 's, &'static Action<OrbitCamPanEngagedAction>>,
     zoom:  Query<'w, 's, &'static Action<OrbitCamZoomEngagedAction>>,
+}
+
+fn held_sources_for_state<A: HeldCameraAction>(
+    engaged: bool,
+    entries: &[HeldActionBindingEntry<A>],
+    fallback: CameraInteractionSources,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+    mouse_buttons: Option<&ButtonInput<MouseButton>>,
+) -> CameraInteractionSources {
+    if !engaged {
+        return CameraInteractionSources::NONE;
+    }
+
+    let active_sources = entries
+        .iter()
+        .filter(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
+        .fold(CameraInteractionSources::NONE, |sources, entry| {
+            sources.union(entry.sources())
+        });
+    if active_sources.is_empty() {
+        fallback
+    } else {
+        active_sources
+    }
 }
 
 fn push_held_intent(
@@ -1112,6 +1207,51 @@ mod tests {
         app.update();
 
         let input = camera_input(&app, camera)?;
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            2.0 * PINCH_GESTURE_AMPLIFICATION,
+        );
+        assert!(input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn pinch_adapter_is_suppressed_by_routed_held_action() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut().write_message(PinchGesture(2.0));
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(input.zoom_smooth().amount(), 0.0);
+        assert!(!input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn non_routed_held_action_does_not_suppress_routed_pinch() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .pinch(OrbitCamPinchBinding::Zoom)
+            .wheel(OrbitCamWheelBinding::Disabled)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let routed = spawn_camera(app.world_mut(), bindings);
+        let _non_routed = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        route_to(&mut app, routed);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut().write_message(PinchGesture(2.0));
+
+        app.update();
+
+        let input = camera_input(&app, routed)?;
         assert_f32_close(
             input.zoom_smooth().amount(),
             2.0 * PINCH_GESTURE_AMPLIFICATION,

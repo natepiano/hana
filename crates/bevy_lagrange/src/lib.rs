@@ -95,6 +95,7 @@ pub use input::OrbitCamButtonDragZoomBinding;
 pub use input::OrbitCamInput;
 use input::OrbitCamInputAdapterPlugin;
 pub use input::OrbitCamInputContext;
+use input::OrbitCamInputLifecyclePlugin;
 #[cfg(feature = "reflect-input-modes")]
 pub use input::OrbitCamInputMode;
 #[cfg(feature = "reflect-input-modes")]
@@ -173,6 +174,7 @@ impl Plugin for LagrangePlugin {
             OrbitCamInputModesPlugin,
             OrbitCamRoutingPlugin,
             OrbitCamInputAdapterPlugin,
+            OrbitCamInputLifecyclePlugin,
         ));
 
         app.init_resource::<ActiveCameraData>()
