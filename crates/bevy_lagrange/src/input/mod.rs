@@ -11,6 +11,8 @@
 //!
 //! [`OrbitCamInputPhase::WriteManual`]: crate::OrbitCamInputPhase::WriteManual
 
+mod actions;
+mod bindings;
 mod context;
 mod disabled;
 mod events;
@@ -21,8 +23,40 @@ mod metrics;
 mod sources;
 mod state;
 
-#[cfg(feature = "reflect-input-modes")]
-use bevy::prelude::*;
+pub use actions::CameraSemanticAction;
+pub use actions::HeldCameraAction;
+pub use actions::ImpulseCameraAction;
+pub use actions::OrbitCamOrbitAction;
+pub use actions::OrbitCamPanAction;
+pub use actions::OrbitCamZoomCoarseAction;
+pub use actions::OrbitCamZoomSmoothAction;
+pub use bindings::ActionBindingDescriptor;
+pub use bindings::ActionBindingEntry;
+pub use bindings::ActionBindingSet;
+pub use bindings::BindingEngagement;
+pub use bindings::BindingRecipe;
+pub use bindings::BindingRoutePolicy;
+pub use bindings::CameraInputGamepadSelectionPolicy;
+pub use bindings::HeldActionBindingEntry;
+pub use bindings::OrbitCamBindings;
+pub use bindings::OrbitCamBindingsBuilder;
+pub use bindings::OrbitCamBindingsDescriptor;
+pub use bindings::OrbitCamBindingsError;
+pub use bindings::OrbitCamBindingsWheelSet;
+pub use bindings::OrbitCamBindingsWheelUnset;
+pub use bindings::OrbitCamBlenderLikeWheelBinding;
+pub use bindings::OrbitCamButtonDragZoomAxis;
+pub use bindings::OrbitCamButtonDragZoomBinding;
+pub use bindings::OrbitCamOrbitActionBindings;
+pub use bindings::OrbitCamPanActionBindings;
+pub use bindings::OrbitCamPinchBinding;
+pub use bindings::OrbitCamPreset;
+pub use bindings::OrbitCamTouchBinding;
+pub use bindings::OrbitCamWheelBinding;
+pub use bindings::OrbitCamWheelModifier;
+pub use bindings::OrbitCamZoomCoarseActionBindings;
+pub use bindings::OrbitCamZoomSmoothActionBindings;
+pub use bindings::validate_bindings;
 pub use context::OrbitCamInputContext;
 pub use disabled::CameraInputDisabled;
 pub use events::CameraInputMetricsMissing;
@@ -53,31 +87,3 @@ pub use metrics::CameraInputSurfaceMetrics;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;
 pub use state::OrbitCamInteractionState;
-
-#[cfg(feature = "reflect-input-modes")]
-pub(crate) struct LagrangeInputTypesPlugin;
-
-#[cfg(feature = "reflect-input-modes")]
-impl Plugin for LagrangeInputTypesPlugin {
-    fn build(&self, app: &mut App) { register_input_reflection(app); }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-fn register_input_reflection(app: &mut App) {
-    app.register_type::<CameraInputDisabled>()
-        .register_type::<CameraInputMetricKind>()
-        .register_type::<CameraInputMetricsMissing>()
-        .register_type::<CameraInputSurfaceMetrics>()
-        .register_type::<CameraInteractionSources>()
-        .register_type::<CoarseZoomDelta>()
-        .register_type::<OrbitCamInput>()
-        .register_type::<OrbitCamInputContext>()
-        .register_type::<OrbitCamInteractionEnded>()
-        .register_type::<OrbitCamInteractionKind>()
-        .register_type::<OrbitCamInteractionSourcesChanged>()
-        .register_type::<OrbitCamInteractionStarted>()
-        .register_type::<OrbitCamInteractionState>()
-        .register_type::<OrbitDelta>()
-        .register_type::<PanDelta>()
-        .register_type::<SmoothZoomDelta>();
-}

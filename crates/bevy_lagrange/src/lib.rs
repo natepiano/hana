@@ -59,18 +59,36 @@ pub use events::ZoomToFit;
 pub use fit_overlay::FitTargetOverlayConfig;
 #[cfg(feature = "fit_overlay")]
 use fit_overlay::ZoomOverlayPlugin;
+pub use input::ActionBindingDescriptor;
+pub use input::ActionBindingEntry;
+pub use input::ActionBindingSet;
+pub use input::BindingEngagement;
+pub use input::BindingRecipe;
+pub use input::BindingRoutePolicy;
 pub use input::ButtonZoomAxis;
 pub use input::CameraInputDisabled;
+pub use input::CameraInputGamepadSelectionPolicy;
 pub use input::CameraInputMetricKind;
 pub use input::CameraInputMetricsMissing;
 pub use input::CameraInputSurfaceMetrics;
 pub use input::CameraInteractionSources;
+pub use input::CameraSemanticAction;
 pub use input::CoarseZoomDelta;
+pub use input::HeldActionBindingEntry;
+pub use input::HeldCameraAction;
+pub use input::ImpulseCameraAction;
 pub use input::InputControl;
-#[cfg(feature = "reflect-input-modes")]
-use input::LagrangeInputTypesPlugin;
 pub use input::ManualInputSource;
 use input::MouseKeyTracker;
+pub use input::OrbitCamBindings;
+pub use input::OrbitCamBindingsBuilder;
+pub use input::OrbitCamBindingsDescriptor;
+pub use input::OrbitCamBindingsError;
+pub use input::OrbitCamBindingsWheelSet;
+pub use input::OrbitCamBindingsWheelUnset;
+pub use input::OrbitCamBlenderLikeWheelBinding;
+pub use input::OrbitCamButtonDragZoomAxis;
+pub use input::OrbitCamButtonDragZoomBinding;
 pub use input::OrbitCamInput;
 pub use input::OrbitCamInputContext;
 pub use input::OrbitCamInteractionEnded;
@@ -80,6 +98,19 @@ pub use input::OrbitCamInteractionStarted;
 pub use input::OrbitCamInteractionState;
 pub use input::OrbitCamManualInput;
 pub use input::OrbitCamManualInputWriter;
+pub use input::OrbitCamOrbitAction;
+pub use input::OrbitCamOrbitActionBindings;
+pub use input::OrbitCamPanAction;
+pub use input::OrbitCamPanActionBindings;
+pub use input::OrbitCamPinchBinding;
+pub use input::OrbitCamPreset;
+pub use input::OrbitCamTouchBinding;
+pub use input::OrbitCamWheelBinding;
+pub use input::OrbitCamWheelModifier;
+pub use input::OrbitCamZoomCoarseAction;
+pub use input::OrbitCamZoomCoarseActionBindings;
+pub use input::OrbitCamZoomSmoothAction;
+pub use input::OrbitCamZoomSmoothActionBindings;
 pub use input::OrbitDelta;
 pub use input::PanDelta;
 pub use input::SmoothZoomDelta;
@@ -118,9 +149,6 @@ pub struct LagrangePlugin;
 impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((LagrangeEnhancedInputPlugin, LagrangeSystemSetsPlugin));
-
-        #[cfg(feature = "reflect-input-modes")]
-        app.add_plugins(LagrangeInputTypesPlugin);
 
         app.init_resource::<ActiveCameraData>()
             .init_resource::<MouseKeyTracker>()

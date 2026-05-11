@@ -72,8 +72,9 @@ These decisions are settled for the initial refactor. Future reviews should trea
 them as constraints unless implementation proves one is unworkable.
 
 - `bevy_enhanced_input` is a normal dependency installed by `LagrangePlugin`.
-- Keep all reflected editor/keymap support in `bevy_lagrange` behind a default-on
-  `reflect-input-modes` feature.
+- Keep reflected editor/keymap apply systems in `bevy_lagrange` behind a default-on
+  `reflect-input-modes` feature. Concrete non-generic reflected configuration types
+  remain normal API types and rely on `Reflect` derives, not manual type registration.
 - Keep three mutually exclusive input-mode marker components:
   `OrbitCamPreset`, `OrbitCamBindings`, and `OrbitCamManual`.
   Use the observer shim for tidy mutations and `PreInput` validation as the
@@ -122,12 +123,12 @@ Use the simple feature surface:
 
 - `bevy_enhanced_input` is a normal dependency of `bevy_lagrange`.
 - `bitflags` is a direct dependency of `bevy_lagrange`.
-- Reflected descriptor/editor support is a default-on feature, tentatively
+- Reflected descriptor/editor apply support is a default-on feature, tentatively
   `reflect-input-modes`. Keep it in `bevy_lagrange`, not a separate crate. Disabling it
-  removes `OrbitCamInputModeDescriptor`, `OrbitCamBindingsDescriptor`, descriptor
-  apply systems, apply-status components, and related reflected editor/keymap
-  registration. It does not remove preset input modes, custom runtime bindings, manual
-  input, routing, lifecycle events, or the enhanced-input adapter.
+  removes descriptor apply systems, apply-status components, and related editor/keymap
+  integration. It does not remove concrete descriptor value types used by builders and
+  dynamic keymaps, preset input modes, custom runtime bindings, manual input, routing,
+  lifecycle events, or the enhanced-input adapter.
 - `bevy_egui` remains optional.
 - `fit_overlay` remains optional.
 - `OrbitCamManual` is a per-camera input mode, not a no-dependency build mode.
@@ -652,8 +653,10 @@ commands.spawn((
 ### Reflected Input Mode Drafts
 
 With the default-on `reflect-input-modes` feature, editor tooling, scene files, and
-keymap UIs get a mutable reflected representation of camera input modes. That
-representation should be separate from the validated runtime component:
+keymap UIs get systems and status components that apply mutable reflected
+representations of camera input modes. The concrete descriptor value types are normal
+public API types so builders and dynamic keymaps can use them without a feature split.
+That representation should be separate from the validated runtime component:
 
 ```rust
 #[derive(Component, Debug, Reflect)]
@@ -691,7 +694,8 @@ input-mode components, which are only changed after descriptor validation succee
 Scenes and editor files should serialize `OrbitCamInputModeDescriptor`, not
 `OrbitCamBindings` internals. If a keymap or scene format uses Serde, implement
 `Serialize`/`Deserialize` for the descriptor types; if it uses Bevy scene reflection,
-register equivalent reflected serialization. Runtime load/apply validates the
+use the descriptor types' `Reflect` derives and Bevy's normal type-registration
+behavior. Runtime load/apply validates the
 descriptor in `PreInput` and changes the runtime input-mode component only after
 validation succeeds.
 
@@ -3832,7 +3836,7 @@ Done when:
   `OrbitCamInteractionSourcesChanged` source-difference helpers because phase 02
   added them.
 
-### 03-actions-bindings-and-presets
+### 03-actions-bindings-and-presets (Complete)
 
 Goal: build the action-centered configuration model without installing it into the
 controller yet.
@@ -3870,23 +3874,93 @@ Done when:
   `OrbitCamBindingsError` values.
 - `wheel_from_preset(...)` copies only the preset wheel policy.
 
+### Retrospective
+
+**What worked:**
+
+- Semantic action markers, private held-engagement actions, typed binding sets, presets,
+  and validation all fit under the phase 02 `input` facade without disturbing the
+  legacy controller.
+- The typestate `OrbitCamBindingsBuilder` now prevents ordinary callers from building
+  without a wheel policy, while `OrbitCamBindingsDescriptor` still reports
+  `MissingWheelPolicy` for reflected or dynamic data.
+
+**What deviated from the plan:**
+
+- Non-generic reflected types rely on their `Reflect` derives only; the explicit
+  `register_type` plugin path was removed because modern Bevy handles those
+  registrations automatically.
+- `OrbitCamWheelBinding::LineZoom` became a tuple variant to keep the reflected enum
+  compatible with the workspace clippy profile.
+- `ZoomDirection` remains in `input/legacy.rs` and is re-exported through the new
+  facade until the phase 08 cutover removes legacy raw-input ownership.
+
+**Surprises:**
+
+- Holding private engagement actions as typestate on held binding sets keeps them real
+  phase-03 structure without exposing them or leaving dead code before the resolver
+  phase.
+- The workspace clippy profile applies `expect_used` and `panic` to tests, so binding
+  invariant tests use `Result` returns and direct `Err(...)` comparisons.
+
+**Implications for remaining phases:**
+
+- Phase 04 can make `OrbitCamBindings` an input-mode component directly, but reflected
+  editing should continue to flow through `OrbitCamBindingsDescriptor` rather than
+  mutable runtime binding fields.
+- Phase 06 can install private engagement actions from the held binding set typestate
+  instead of asking public binding APIs to name those actions.
+- Phase 08 still owns moving or deleting legacy raw-input types, including the final
+  home for `ZoomDirection`.
+
+### Phase 3 Review
+
+- Phase 04 now treats `OrbitCamPreset`, `OrbitCamBindings`, and
+  `OrbitCamBindingsDescriptor` as already introduced by phase 03, and focuses on
+  component promotion, `OrbitCamManual`, exclusivity, descriptor apply, and
+  installation records.
+- Phase 04 now scopes installation cleanup to an authoritative ownership record; phase
+  06 owns actual enhanced-input entities and adapter state.
+- Phase 04 now has an internal ordering split between mode/exclusivity/manual-writer
+  work and descriptor apply/status/installation replacement.
+- The `reflect-input-modes` feature now gates descriptor apply systems and status
+  integration, not the concrete descriptor value types or automatic `Reflect` derives.
+- Phase 05 now validates the live plugin/context/schedule setup from phases 01-02
+  instead of reintroducing setup paths.
+- Phase 06 now requires a crate-private binding installer/visitor for held typestate,
+  private engagement actions, and adapter policy.
+- Phase 06 now names the modifier/condition descriptor gap: expand recipes for the
+  supported examples or reject unsupported advanced descriptors without adding a raw
+  enhanced-input escape hatch.
+- Phase 06 now places preset/bindings resolution after enhanced-input apply and before
+  `OrbitCamInputPhase::WriteManual`, with manual cameras bypassing automatic
+  resolution.
+- Phase 08 now explicitly moves `ZoomDirection` out of `input/legacy.rs` before
+  deleting the legacy module.
+- Phase 10 now narrows binding coverage to ECS descriptor apply, installation, and
+  resolver behavior because phase 03 added pure validation tests.
+
 ### 04-input-modes-and-installation
 
 Goal: add the runtime input-mode state machine and private installation ownership.
 
 Scope:
 
-- Add mutually exclusive input-mode components: `OrbitCamPreset`, `OrbitCamBindings`,
-  and `OrbitCamManual`.
+- Promote the existing `OrbitCamPreset` and `OrbitCamBindings` runtime types into
+  mutually exclusive input-mode components, and add the `OrbitCamManual` marker.
 - Activate `OrbitCamPreset` as an input-mode component in the exclusive family; phase
   03 only introduced the preset value and conversion API.
 - Add the observer shim for tidy component mutations and the exclusive `PreInput`
   invariant pass as the deterministic authority.
 - Add `OrbitCamInputModeDescriptor`, `OrbitCamInputMode`, `OrbitCamInputModeApplied`,
   `OrbitCamInputModeRejected`, `OrbitCamInputModeApplyStatus`, and
-  `OrbitCamInputModeApplyState`.
+  `OrbitCamInputModeApplyState`. Gate the descriptor apply systems and apply-status
+  components behind `reflect-input-modes`; keep the concrete descriptor value types
+  available as normal public API.
 - Add `OrbitCamInputInstallationOf` / `OrbitCamInputInstallation` and private
-  installation introspection helpers.
+  installation introspection helpers as an authoritative ownership record. Phase 06
+  attaches actual enhanced-input action/context entities and adapter state to this
+  ownership boundary.
 - Add descriptor apply, validation, mode exclusivity, old-installation cleanup, and
   reconciliation inside the same exclusive `PreInput` structural boundary.
 - Update `OrbitCamManualInputWriter` so it only yields writers for cameras that have
@@ -3895,6 +3969,9 @@ Scope:
   installations and clear same-frame `OrbitCamInput`. Source-latch cleanup is
   completed in phase 05 after latches exist, and lifecycle queue cleanup is completed
   in phase 07 after lifecycle state exists.
+- Implement phase 04 in two internal passes: first component promotion, exclusivity,
+  defaults, and manual-writer filtering; then descriptor apply, apply-status events,
+  and installation-record replacement.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
 The new input-mode components may exist, but the old controller path is still the
@@ -3903,8 +3980,9 @@ behavioral source of truth.
 Done when:
 
 - Every `OrbitCam` has exactly one input-mode component by `PreInput` completion.
-- Descriptor apply is atomic: a changed descriptor exposes exactly one private
-  installation to enhanced input in the same frame.
+- Descriptor apply is atomic: a changed descriptor produces exactly one authoritative
+  installation record in the same frame. Phase 06 is responsible for turning that
+  record into enhanced-input entities and adapter state.
 - Switching modes clears stale `OrbitCamInput` and stale private installations.
   Later latch and lifecycle cleanup phases must hook into the same mode-replacement
   signal rather than adding a second replacement path.
@@ -3928,6 +4006,9 @@ Scope:
 - Gate inactive `OrbitCamInputContext` state before `EnhancedInputSystems::Update`.
 - Add strict startup diagnostics for missing plugin setup, missing context
   registration, missing schedule setup, and unexpected enhanced-input API markers.
+  Treat phase 01's plugin guard, `OrbitCamInputContext` registration, and
+  `OrbitCamInputPhase` schedule shell as already installed; this phase validates the
+  live setup instead of reintroducing setup paths.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative,
 but the new route/blocker snapshots can be tested in isolation.
@@ -3952,6 +4033,9 @@ Scope:
 - Add private adapter diagnostics for tests and debug logs.
 - Install action/context entities and private adapter state for preset and bindings
   modes.
+- Add a crate-private binding installer/visitor that reads `OrbitCamBindings` held
+  entries, motion recipes, engagement recipes, source metadata, and adapter policy
+  without exposing private engagement actions or duplicating binding structure.
 - Inject adapter-backed values before `EnhancedInputSystems::Update` and resolve
   public semantic actions plus adapter contributions into `OrbitCamInput`.
 - Add the adapter/mock write portions of the private enhanced-input integration
@@ -3960,6 +4044,14 @@ Scope:
   wheel, smooth-scroll, pinch, touch, keyboard, gamepad, and manual input.
 - Keep camera action consumption non-consuming by default so app contexts can still
   observe shared bindings.
+- Add a private post-enhanced-input resolution set after `EnhancedInputSystems::Apply`
+  and before `OrbitCamInputPhase::WriteManual`; preset and bindings modes write
+  `OrbitCamInput` there, while manual cameras bypass automatic resolution.
+- Before installing custom recipes, either extend `BindingRecipe` with the modifier
+  and condition descriptors needed by in-tree keyboard/gamepad examples or reject
+  unsupported advanced descriptors with structured validation errors. Do not add a raw
+  public enhanced-input escape hatch that bypasses source metadata and held/impulse
+  validation.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
 The new pipeline can be tested by reading `OrbitCamInput`, but the controller has not
@@ -3971,6 +4063,9 @@ Done when:
   produce expected `OrbitCamInput` values in ECS tests.
 - Adapter injection is visible to enhanced input in the same frame.
 - Inactive/gated cameras do not retain stale enhanced-input action state.
+- The installer uses the phase 03 binding typestate/accessors to attach private
+  engagement actions and adapter policy; it does not re-derive held/impulse structure
+  from raw recipes.
 
 ### 07-lifecycle-and-manual-finalization
 
@@ -4017,6 +4112,8 @@ Scope:
 - Switch `orbit_cam` controller movement to consume finalized `OrbitCamInput`.
 - Remove old physical input fields from `OrbitCam`, including old mouse/key/touch,
   trackpad, wheel, button-zoom, and zoom-direction input fields.
+- Move `ZoomDirection` out of `input/legacy.rs` before deleting legacy raw-input code,
+  or otherwise give the public facade a non-legacy home for the binding zoom policy.
 - Remove `CameraInputDetection::{Automatic, Manual}` and migrate to
   `CameraInputRouting::{CursorHitTest, Explicit}`.
 - Migrate every in-repo example and workspace consumer that still references legacy
@@ -4079,6 +4176,9 @@ Scope:
   input-mode exclusivity, routing, blockers, lifecycle events, latch recovery,
   adapter behavior, manual writes, interrupt policies, workspace consumers, and
   dependency versioning.
+- Do not duplicate the phase 03 pure binding-validator unit tests. Phase 10 binding
+  coverage should focus on descriptor apply, installation replacement, ECS resolver
+  behavior, and integration with routing/lifecycle/blockers.
 - Add the `enhanced_input_scheduling_invariant` test.
 - Expand missing-plugin diagnostics and first-frame setup validation into regression
   coverage for the live diagnostics added in phase 05.
