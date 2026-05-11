@@ -237,6 +237,7 @@ mod tests {
 
     use super::CURRENT_STATE_VERSION;
     use super::DEFAULT_SCALE_FACTOR;
+    use super::PERSISTED_STATE_VERSION_V1;
     use super::PersistedEntry;
     use super::PersistedState;
     use super::SavedVideoMode;
@@ -318,9 +319,10 @@ mod tests {
 
     #[test]
     fn decode_v1_migrates_to_v2() {
-        let v1_ron = "\
+        let v1_ron = format!(
+            "\
 (
-    version: 1,
+    version: {PERSISTED_STATE_VERSION_V1},
     entries: [
         (
             key: Primary,
@@ -334,9 +336,10 @@ mod tests {
             ),
         ),
     ],
-)";
+)",
+        );
 
-        let decoded = format::decode(v1_ron);
+        let decoded = format::decode(&v1_ron);
         assert!(decoded.is_some(), "expected v1 decode to succeed");
         let decoded = decoded.unwrap_or_default();
         let state = &decoded[&WindowKey::Primary];

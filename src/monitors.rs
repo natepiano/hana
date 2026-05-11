@@ -37,7 +37,7 @@ pub struct MonitorInfo {
 
 /// Sorted monitor list, updated when monitors change.
 ///
-/// Monitors are sorted with primary (at 0,0) first, then by position.
+/// `Monitors` are sorted with primary (at 0,0) first, then by position.
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
 pub struct Monitors {
