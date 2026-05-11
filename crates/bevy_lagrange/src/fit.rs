@@ -419,7 +419,16 @@ fn refine_focus_centering(
     reason = "expect is idiomatic for test assertions"
 )]
 mod tests {
-    use super::*;
+    use bevy::prelude::Camera;
+    use bevy::prelude::OrthographicProjection;
+    use bevy::prelude::PerspectiveProjection;
+    use bevy::prelude::Projection;
+    use bevy::prelude::Rect;
+    use bevy::prelude::Vec3;
+
+    use super::FitError;
+    use super::calculate_fit;
+    use crate::constants::DEFAULT_FIT_MARGIN;
 
     fn default_perspective() -> Projection {
         Projection::Perspective(PerspectiveProjection::default())
@@ -438,7 +447,7 @@ mod tests {
             Vec3::ZERO,
             0.0,
             0.0,
-            0.1,
+            DEFAULT_FIT_MARGIN,
             &projection,
             &camera,
         );
@@ -452,7 +461,15 @@ mod tests {
         let camera = Camera::default();
         let points = [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO];
 
-        let result = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 0.1, &projection, &camera);
+        let result = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            DEFAULT_FIT_MARGIN,
+            &projection,
+            &camera,
+        );
 
         assert!(matches!(result, Err(FitError::PointsBehindCamera)));
     }
@@ -518,8 +535,16 @@ mod tests {
             .map(Vec3::length)
             .fold(0.0_f32, f32::max);
 
-        let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 0.1, &projection, &camera)
-            .expect("edge-on flat plane should produce a valid fit");
+        let fit = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            DEFAULT_FIT_MARGIN,
+            &projection,
+            &camera,
+        )
+        .expect("edge-on flat plane should produce a valid fit");
 
         assert!(
             fit.radius < object_radius * 10.0,
@@ -547,8 +572,16 @@ mod tests {
             .map(Vec3::length)
             .fold(0.0_f32, f32::max);
 
-        let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.001, 0.1, &projection, &camera)
-            .expect("near-edge-on flat plane should produce a valid fit");
+        let fit = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.001,
+            DEFAULT_FIT_MARGIN,
+            &projection,
+            &camera,
+        )
+        .expect("near-edge-on flat plane should produce a valid fit");
 
         assert!(
             fit.radius < object_radius * 10.0,
@@ -567,8 +600,16 @@ mod tests {
         let points = [Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
         let object_radius = 1.0;
 
-        let fit = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 0.1, &projection, &camera)
-            .expect("vertical line should produce a valid fit");
+        let fit = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            DEFAULT_FIT_MARGIN,
+            &projection,
+            &camera,
+        )
+        .expect("vertical line should produce a valid fit");
 
         assert!(
             fit.radius < object_radius * 10.0,
