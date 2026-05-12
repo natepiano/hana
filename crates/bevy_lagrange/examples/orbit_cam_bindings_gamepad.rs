@@ -9,20 +9,15 @@ mod common;
 
 use bevy::input::gamepad::Gamepad;
 use bevy::prelude::*;
-use bevy_lagrange::BindingRecipe;
-use bevy_lagrange::BindingRoutePolicy;
 use bevy_lagrange::CameraInputGamepadSelectionPolicy;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::CameraInteractionSources;
-use bevy_lagrange::HeldActionBindingEntry;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
+use bevy_lagrange::OrbitCamHeldBinding;
+use bevy_lagrange::OrbitCamInputBinding;
 use bevy_lagrange::OrbitCamInteractionKind;
-use bevy_lagrange::OrbitCamOrbitAction;
-use bevy_lagrange::OrbitCamPanAction;
-use bevy_lagrange::OrbitCamWheelBinding;
-use bevy_lagrange::OrbitCamZoomSmoothAction;
 use fairy_dust::CameraGuidance;
 use fairy_dust::CameraGuidanceRow;
 
@@ -31,40 +26,22 @@ struct GamepadStatus;
 
 fn gamepad_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
     let right_stick =
-        BindingRecipe::GamepadAxes2d(GamepadAxis::RightStickX, GamepadAxis::RightStickY);
-    let left_stick = BindingRecipe::GamepadAxes2d(GamepadAxis::LeftStickX, GamepadAxis::LeftStickY);
-    let triggers = BindingRecipe::BidirectionalGamepadButtons(
+        OrbitCamInputBinding::gamepad_axes_2d(GamepadAxis::RightStickX, GamepadAxis::RightStickY);
+    let left_stick =
+        OrbitCamInputBinding::gamepad_axes_2d(GamepadAxis::LeftStickX, GamepadAxis::LeftStickY);
+    let triggers = OrbitCamInputBinding::bidirectional_gamepad_buttons(
         GamepadButton::RightTrigger2,
         GamepadButton::LeftTrigger2,
     );
 
     OrbitCamBindings::builder()
-        .held_orbit_binding(
-            HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
-                right_stick,
-                right_stick,
-                CameraInteractionSources::GAMEPAD,
-                BindingRoutePolicy::NoPosition,
-            )?,
-        )
-        .held_pan_binding(
-            HeldActionBindingEntry::<OrbitCamPanAction>::from_enhanced_input_pair(
-                left_stick,
-                BindingRecipe::GamepadButton(GamepadButton::LeftTrigger),
-                CameraInteractionSources::GAMEPAD,
-                BindingRoutePolicy::NoPosition,
-            )?,
-        )
-        .held_smooth_zoom_binding(
-            HeldActionBindingEntry::<OrbitCamZoomSmoothAction>::from_enhanced_input_pair(
-                triggers,
-                triggers,
-                CameraInteractionSources::GAMEPAD,
-                BindingRoutePolicy::NoPosition,
-            )?,
-        )
+        .orbit(right_stick)
+        .pan(OrbitCamHeldBinding::new(
+            left_stick,
+            GamepadButton::LeftTrigger,
+        ))
+        .zoom(triggers)
         .gamepad(CameraInputGamepadSelectionPolicy::Active)
-        .wheel(OrbitCamWheelBinding::Disabled)
         .build()
 }
 

@@ -2,23 +2,30 @@
 //!
 //! Controls:
 //!   Orbit: Middle mouse drag
+//!   Orbit: Trackpad scroll
 //!   Pan: Right mouse drag
-//!   Zoom: Mousewheel OR back-button drag up/down
+//!   Pan: Shift + trackpad scroll
+//!   Zoom: Mousewheel OR Control + trackpad scroll OR pinch OR back-button drag up/down
+//!   Touch: Two-finger orbit
 //!   Toggle input: T
 
 use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_enhanced_input::prelude::ModKeys;
 use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
+use bevy_lagrange::OrbitCamButtonDragZoom;
 use bevy_lagrange::OrbitCamButtonDragZoomAxis;
-use bevy_lagrange::OrbitCamButtonDragZoomBinding;
-use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::OrbitCamMouseDrag;
+use bevy_lagrange::OrbitCamMouseWheelZoom;
+use bevy_lagrange::OrbitCamPinchZoom;
 use bevy_lagrange::OrbitCamTouchBinding;
+use bevy_lagrange::OrbitCamTrackpadScroll;
 use bevy_lagrange::UpsideDownPolicy;
 use bevy_lagrange::ZoomDirection;
 use bevy_window_manager::WindowManagerPlugin;
@@ -48,14 +55,18 @@ const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
 
 fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
     OrbitCamBindings::builder()
-        .held_mouse_orbit(MouseButton::Middle)
-        .held_mouse_pan(MouseButton::Right)
-        .wheel_from_preset(OrbitCamPreset::BlenderLike)
-        .touch(Some(OrbitCamTouchBinding::TwoFingerOrbit))
-        .button_drag_zoom(Some(OrbitCamButtonDragZoomBinding {
+        .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+        .orbit(OrbitCamTrackpadScroll::default())
+        .pan(OrbitCamMouseDrag::new(MouseButton::Right))
+        .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
+        .zoom(OrbitCamMouseWheelZoom::default())
+        .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
+        .zoom(OrbitCamPinchZoom)
+        .zoom(OrbitCamButtonDragZoom {
             button: MouseButton::Back,
             axis:   OrbitCamButtonDragZoomAxis::Y,
-        }))
+        })
+        .touch(Some(OrbitCamTouchBinding::TwoFingerOrbit))
         .zoom_direction(ZoomDirection::Reversed)
         .build()
 }

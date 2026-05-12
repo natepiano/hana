@@ -2,6 +2,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
+use bevy_enhanced_input::prelude::Binding;
+use bevy_enhanced_input::prelude::ModKeys;
 
 use super::CameraInteractionSources;
 use super::CameraSemanticAction;
@@ -42,23 +44,29 @@ impl OrbitCamPreset {
     pub fn to_bindings(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         match self {
             Self::SimpleMouse => OrbitCamBindings::builder()
-                .held_mouse_orbit(MouseButton::Left)
-                .held_mouse_pan(MouseButton::Right)
-                .wheel_from_preset(Self::SimpleMouse)
-                .pinch(OrbitCamPinchBinding::Zoom)
+                .orbit(OrbitCamMouseDrag::new(MouseButton::Left))
+                .pan(OrbitCamMouseDrag::new(MouseButton::Right))
+                .zoom(OrbitCamMouseWheelZoom::default())
+                .zoom(OrbitCamTrackpadScroll::default())
+                .zoom(OrbitCamPinchZoom)
+                .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
                 .build(),
             Self::BlenderLike => OrbitCamBindings::builder()
-                .held_mouse_orbit(MouseButton::Middle)
-                .held_mouse_pan(MouseButton::Middle)
-                .wheel_from_preset(Self::BlenderLike)
-                .pinch(OrbitCamPinchBinding::Zoom)
+                .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+                .orbit(OrbitCamTrackpadScroll::default())
+                .pan(OrbitCamMouseDrag::new(MouseButton::Middle).with_mod_keys(ModKeys::SHIFT))
+                .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
+                .zoom(OrbitCamMouseWheelZoom::default())
+                .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
+                .zoom(OrbitCamPinchZoom)
+                .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
                 .build(),
         }
     }
 }
 
 /// Validated runtime binding specification for an `OrbitCam`.
-#[derive(Component, Clone, Debug, PartialEq, Eq, Reflect)]
+#[derive(Component, Clone, Debug, PartialEq, Reflect)]
 #[reflect(Component)]
 #[reflect(opaque)]
 pub struct OrbitCamBindings {
@@ -66,12 +74,15 @@ pub struct OrbitCamBindings {
     pan:              OrbitCamPanActionBindings,
     zoom_smooth:      OrbitCamZoomSmoothActionBindings,
     zoom_coarse:      OrbitCamZoomCoarseActionBindings,
-    wheel:            OrbitCamWheelBinding,
-    pinch:            OrbitCamPinchBinding,
+    trackpad_orbit:   Vec<OrbitCamTrackpadScroll>,
+    trackpad_pan:     Vec<OrbitCamTrackpadScroll>,
+    trackpad_zoom:    Vec<OrbitCamTrackpadScroll>,
+    mouse_wheel_zoom: Option<OrbitCamMouseWheelZoom>,
+    pinch_zoom:       bool,
     touch:            Option<OrbitCamTouchBinding>,
     gamepad:          CameraInputGamepadSelectionPolicy,
     zoom_direction:   ZoomDirection,
-    button_drag_zoom: Option<OrbitCamButtonDragZoomBinding>,
+    button_drag_zoom: Option<OrbitCamButtonDragZoom>,
 }
 
 impl OrbitCamBindings {
@@ -95,13 +106,25 @@ impl OrbitCamBindings {
     #[must_use]
     pub const fn zoom_coarse(&self) -> &OrbitCamZoomCoarseActionBindings { &self.zoom_coarse }
 
-    /// Returns wheel policy.
+    /// Returns trackpad orbit bindings.
     #[must_use]
-    pub const fn wheel(&self) -> OrbitCamWheelBinding { self.wheel }
+    pub fn trackpad_orbit(&self) -> &[OrbitCamTrackpadScroll] { &self.trackpad_orbit }
 
-    /// Returns pinch policy.
+    /// Returns trackpad pan bindings.
     #[must_use]
-    pub const fn pinch(&self) -> OrbitCamPinchBinding { self.pinch }
+    pub fn trackpad_pan(&self) -> &[OrbitCamTrackpadScroll] { &self.trackpad_pan }
+
+    /// Returns trackpad zoom bindings.
+    #[must_use]
+    pub fn trackpad_zoom(&self) -> &[OrbitCamTrackpadScroll] { &self.trackpad_zoom }
+
+    /// Returns mouse wheel zoom binding.
+    #[must_use]
+    pub const fn mouse_wheel_zoom(&self) -> Option<OrbitCamMouseWheelZoom> { self.mouse_wheel_zoom }
+
+    /// Returns whether pinch zoom is enabled.
+    #[must_use]
+    pub const fn pinch_zoom(&self) -> bool { self.pinch_zoom }
 
     /// Returns touch policy.
     #[must_use]
@@ -117,24 +140,25 @@ impl OrbitCamBindings {
 
     /// Returns button-drag zoom policy.
     #[must_use]
-    pub const fn button_drag_zoom(&self) -> Option<OrbitCamButtonDragZoomBinding> {
-        self.button_drag_zoom
-    }
+    pub const fn button_drag_zoom(&self) -> Option<OrbitCamButtonDragZoom> { self.button_drag_zoom }
 }
 
 /// Reflectable draft binding specification for editor and keymap tooling.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Reflect)]
+#[derive(Clone, Debug, Default, PartialEq, Reflect)]
 pub struct OrbitCamBindingsDescriptor {
     orbit:            Vec<HeldBindingDescriptor>,
     pan:              Vec<HeldBindingDescriptor>,
     zoom_smooth:      Vec<HeldBindingDescriptor>,
     zoom_coarse:      Vec<ActionBindingDescriptor>,
-    wheel:            Option<OrbitCamWheelBinding>,
-    pinch:            OrbitCamPinchBinding,
+    trackpad_orbit:   Vec<OrbitCamTrackpadScroll>,
+    trackpad_pan:     Vec<OrbitCamTrackpadScroll>,
+    trackpad_zoom:    Vec<OrbitCamTrackpadScroll>,
+    mouse_wheel_zoom: Option<OrbitCamMouseWheelZoom>,
+    pinch_zoom:       bool,
     touch:            Option<OrbitCamTouchBinding>,
     gamepad:          CameraInputGamepadSelectionPolicy,
     zoom_direction:   ZoomDirection,
-    button_drag_zoom: Option<OrbitCamButtonDragZoomBinding>,
+    button_drag_zoom: Option<OrbitCamButtonDragZoom>,
 }
 
 impl TryFrom<OrbitCamBindingsDescriptor> for OrbitCamBindings {
@@ -145,94 +169,71 @@ impl TryFrom<OrbitCamBindingsDescriptor> for OrbitCamBindings {
     }
 }
 
-/// Typestate marker for bindings builders that have not selected a wheel policy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct OrbitCamBindingsWheelUnset;
-
-/// Typestate marker for bindings builders that selected a wheel policy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct OrbitCamBindingsWheelSet;
+#[cfg(test)]
+pub(crate) fn invalid_bindings_descriptor_for_tests() -> OrbitCamBindingsDescriptor {
+    let mut descriptor = OrbitCamBindingsDescriptor::default();
+    descriptor.orbit.push(HeldBindingDescriptor {
+        motion:             OrbitCamInputBinding::from(Binding::mouse_motion()).descriptor(),
+        engagement:         None,
+        sources:            CameraInteractionSources::MOUSE,
+        engagement_sources: CameraInteractionSources::MOUSE,
+        route:              BindingRoutePolicy::CursorPosition,
+    });
+    descriptor
+}
 
 /// Builder for `OrbitCamBindings`.
-#[derive(Clone, Debug)]
-pub struct OrbitCamBindingsBuilder<WheelState = OrbitCamBindingsWheelUnset> {
+#[derive(Clone, Debug, Default)]
+pub struct OrbitCamBindingsBuilder {
     descriptor: OrbitCamBindingsDescriptor,
-    wheel:      PhantomData<WheelState>,
 }
 
-impl Default for OrbitCamBindingsBuilder<OrbitCamBindingsWheelUnset> {
-    fn default() -> Self {
-        Self {
-            descriptor: OrbitCamBindingsDescriptor::default(),
-            wheel:      PhantomData,
+impl OrbitCamBindingsBuilder {
+    /// Adds a binding that produces orbit intent.
+    #[must_use]
+    pub fn orbit(mut self, binding: impl Into<OrbitCamOrbitBinding>) -> Self {
+        match binding.into() {
+            OrbitCamOrbitBinding::Held(binding) => self
+                .descriptor
+                .orbit
+                .push(HeldBindingDescriptor::from_held_binding(binding)),
+            OrbitCamOrbitBinding::Trackpad(binding) => self.descriptor.trackpad_orbit.push(binding),
         }
-    }
-}
-
-impl<WheelState> OrbitCamBindingsBuilder<WheelState> {
-    /// Adds a held mouse orbit binding.
-    #[must_use]
-    pub fn held_mouse_orbit(mut self, button: MouseButton) -> Self {
-        self.descriptor
-            .orbit
-            .push(HeldBindingDescriptor::mouse_motion_with_button(
-                button,
-                CameraInteractionSources::MOUSE,
-                BindingRoutePolicy::CursorPosition,
-            ));
         self
     }
 
-    /// Adds a held mouse pan binding.
+    /// Adds a binding that produces pan intent.
     #[must_use]
-    pub fn held_mouse_pan(mut self, button: MouseButton) -> Self {
-        self.descriptor
-            .pan
-            .push(HeldBindingDescriptor::mouse_motion_with_button(
-                button,
-                CameraInteractionSources::MOUSE,
-                BindingRoutePolicy::CursorPosition,
-            ));
+    pub fn pan(mut self, binding: impl Into<OrbitCamPanBinding>) -> Self {
+        match binding.into() {
+            OrbitCamPanBinding::Held(binding) => self
+                .descriptor
+                .pan
+                .push(HeldBindingDescriptor::from_held_binding(binding)),
+            OrbitCamPanBinding::Trackpad(binding) => self.descriptor.trackpad_pan.push(binding),
+        }
         self
     }
 
-    /// Adds a held orbit binding from explicit enhanced-input recipes.
+    /// Adds a binding that produces zoom intent.
     #[must_use]
-    pub fn held_orbit_binding(
-        mut self,
-        binding: HeldActionBindingEntry<OrbitCamOrbitAction>,
-    ) -> Self {
-        self.descriptor
-            .orbit
-            .push(HeldBindingDescriptor::from_held_entry(binding));
-        self
-    }
-
-    /// Adds a held pan binding from explicit enhanced-input recipes.
-    #[must_use]
-    pub fn held_pan_binding(mut self, binding: HeldActionBindingEntry<OrbitCamPanAction>) -> Self {
-        self.descriptor
-            .pan
-            .push(HeldBindingDescriptor::from_held_entry(binding));
-        self
-    }
-
-    /// Adds a held smooth-zoom binding from explicit enhanced-input recipes.
-    #[must_use]
-    pub fn held_smooth_zoom_binding(
-        mut self,
-        binding: HeldActionBindingEntry<OrbitCamZoomSmoothAction>,
-    ) -> Self {
-        self.descriptor
-            .zoom_smooth
-            .push(HeldBindingDescriptor::from_held_entry(binding));
-        self
-    }
-
-    /// Sets the pinch policy.
-    #[must_use]
-    pub const fn pinch(mut self, pinch: OrbitCamPinchBinding) -> Self {
-        self.descriptor.pinch = pinch;
+    pub fn zoom(mut self, binding: impl Into<OrbitCamZoomBinding>) -> Self {
+        match binding.into() {
+            OrbitCamZoomBinding::Held(binding) => self
+                .descriptor
+                .zoom_smooth
+                .push(HeldBindingDescriptor::from_held_binding(binding)),
+            OrbitCamZoomBinding::Trackpad(binding) => self.descriptor.trackpad_zoom.push(binding),
+            OrbitCamZoomBinding::MouseWheel(binding) => {
+                self.descriptor.mouse_wheel_zoom = Some(binding);
+            },
+            OrbitCamZoomBinding::Pinch(_) => {
+                self.descriptor.pinch_zoom = true;
+            },
+            OrbitCamZoomBinding::ButtonDrag(binding) => {
+                self.descriptor.button_drag_zoom = Some(binding);
+            },
+        }
         self
     }
 
@@ -257,67 +258,6 @@ impl<WheelState> OrbitCamBindingsBuilder<WheelState> {
         self
     }
 
-    /// Sets the button-drag zoom policy.
-    #[must_use]
-    pub const fn button_drag_zoom(
-        mut self,
-        button_drag_zoom: Option<OrbitCamButtonDragZoomBinding>,
-    ) -> Self {
-        self.descriptor.button_drag_zoom = button_drag_zoom;
-        self
-    }
-
-    /// Adds a low-level enhanced-input impulse zoom binding.
-    #[must_use]
-    pub fn zoom_coarse_binding(mut self, binding: ActionBindingDescriptor) -> Self {
-        self.descriptor.zoom_coarse.push(binding);
-        self
-    }
-}
-
-impl OrbitCamBindingsBuilder<OrbitCamBindingsWheelUnset> {
-    /// Sets the wheel policy.
-    #[must_use]
-    pub fn wheel(
-        mut self,
-        wheel: OrbitCamWheelBinding,
-    ) -> OrbitCamBindingsBuilder<OrbitCamBindingsWheelSet> {
-        self.descriptor.wheel = Some(wheel);
-        OrbitCamBindingsBuilder {
-            descriptor: self.descriptor,
-            wheel:      PhantomData,
-        }
-    }
-
-    /// Copies only the wheel policy from a preset.
-    #[must_use]
-    pub fn wheel_from_preset(
-        mut self,
-        preset: OrbitCamPreset,
-    ) -> OrbitCamBindingsBuilder<OrbitCamBindingsWheelSet> {
-        self.descriptor.wheel = Some(wheel_binding_from_preset(preset));
-        OrbitCamBindingsBuilder {
-            descriptor: self.descriptor,
-            wheel:      PhantomData,
-        }
-    }
-}
-
-impl OrbitCamBindingsBuilder<OrbitCamBindingsWheelSet> {
-    /// Sets the wheel policy.
-    #[must_use]
-    pub const fn wheel(mut self, wheel: OrbitCamWheelBinding) -> Self {
-        self.descriptor.wheel = Some(wheel);
-        self
-    }
-
-    /// Copies only the wheel policy from a preset.
-    #[must_use]
-    pub fn wheel_from_preset(mut self, preset: OrbitCamPreset) -> Self {
-        self.descriptor.wheel = Some(wheel_binding_from_preset(preset));
-        self
-    }
-
     /// Builds validated `OrbitCamBindings`.
     ///
     /// # Errors
@@ -329,37 +269,405 @@ impl OrbitCamBindingsBuilder<OrbitCamBindingsWheelSet> {
     }
 }
 
-fn wheel_binding_from_preset(preset: OrbitCamPreset) -> OrbitCamWheelBinding {
-    match preset {
-        OrbitCamPreset::SimpleMouse => {
-            OrbitCamWheelBinding::LineZoom(OrbitCamWheelModifier::default())
-        },
-        OrbitCamPreset::BlenderLike => {
-            OrbitCamWheelBinding::BlenderLike(OrbitCamBlenderLikeWheelBinding::default())
-        },
+/// Binding that can produce orbit intent.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamOrbitBinding {
+    /// Held enhanced-input binding.
+    Held(OrbitCamHeldBinding),
+    /// Trackpad smooth-scroll binding.
+    Trackpad(OrbitCamTrackpadScroll),
+}
+
+impl From<OrbitCamHeldBinding> for OrbitCamOrbitBinding {
+    fn from(value: OrbitCamHeldBinding) -> Self { Self::Held(value) }
+}
+
+impl From<OrbitCamMouseDrag> for OrbitCamOrbitBinding {
+    fn from(value: OrbitCamMouseDrag) -> Self { Self::Held(value.into()) }
+}
+
+impl From<OrbitCamInputBinding> for OrbitCamOrbitBinding {
+    fn from(value: OrbitCamInputBinding) -> Self { Self::Held(OrbitCamHeldBinding::same(value)) }
+}
+
+impl From<OrbitCamTrackpadScroll> for OrbitCamOrbitBinding {
+    fn from(value: OrbitCamTrackpadScroll) -> Self { Self::Trackpad(value) }
+}
+
+/// Binding that can produce pan intent.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamPanBinding {
+    /// Held enhanced-input binding.
+    Held(OrbitCamHeldBinding),
+    /// Trackpad smooth-scroll binding.
+    Trackpad(OrbitCamTrackpadScroll),
+}
+
+impl From<OrbitCamHeldBinding> for OrbitCamPanBinding {
+    fn from(value: OrbitCamHeldBinding) -> Self { Self::Held(value) }
+}
+
+impl From<OrbitCamMouseDrag> for OrbitCamPanBinding {
+    fn from(value: OrbitCamMouseDrag) -> Self { Self::Held(value.into()) }
+}
+
+impl From<OrbitCamInputBinding> for OrbitCamPanBinding {
+    fn from(value: OrbitCamInputBinding) -> Self { Self::Held(OrbitCamHeldBinding::same(value)) }
+}
+
+impl From<OrbitCamTrackpadScroll> for OrbitCamPanBinding {
+    fn from(value: OrbitCamTrackpadScroll) -> Self { Self::Trackpad(value) }
+}
+
+/// Binding that can produce zoom intent.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamZoomBinding {
+    /// Held enhanced-input binding.
+    Held(OrbitCamHeldBinding),
+    /// Trackpad smooth-scroll binding.
+    Trackpad(OrbitCamTrackpadScroll),
+    /// Mouse wheel zoom binding.
+    MouseWheel(OrbitCamMouseWheelZoom),
+    /// Pinch gesture zoom binding.
+    Pinch(OrbitCamPinchZoom),
+    /// Button-drag zoom binding.
+    ButtonDrag(OrbitCamButtonDragZoom),
+}
+
+impl From<OrbitCamHeldBinding> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamHeldBinding) -> Self { Self::Held(value) }
+}
+
+impl From<OrbitCamInputBinding> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamInputBinding) -> Self { Self::Held(OrbitCamHeldBinding::same(value)) }
+}
+
+impl From<OrbitCamTrackpadScroll> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamTrackpadScroll) -> Self { Self::Trackpad(value) }
+}
+
+impl From<OrbitCamMouseWheelZoom> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamMouseWheelZoom) -> Self { Self::MouseWheel(value) }
+}
+
+impl From<OrbitCamPinchZoom> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamPinchZoom) -> Self { Self::Pinch(value) }
+}
+
+impl From<OrbitCamButtonDragZoom> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamButtonDragZoom) -> Self { Self::ButtonDrag(value) }
+}
+
+/// A held enhanced-input binding made from a value binding and an engagement binding.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+pub struct OrbitCamHeldBinding {
+    motion:     OrbitCamInputBinding,
+    engagement: OrbitCamInputBinding,
+    sources:    CameraInteractionSources,
+    route:      BindingRoutePolicy,
+}
+
+impl OrbitCamHeldBinding {
+    /// Creates a held binding from BEI-style value and engagement bindings.
+    #[must_use]
+    pub fn new(
+        motion: impl Into<OrbitCamInputBinding>,
+        engagement: impl Into<OrbitCamInputBinding>,
+    ) -> Self {
+        let motion = motion.into();
+        let engagement = engagement.into();
+        let sources = motion.sources().union(engagement.sources());
+        let route = route_for_sources(sources);
+        Self {
+            motion,
+            engagement,
+            sources,
+            route,
+        }
+    }
+
+    /// Creates a held binding whose value binding also engages the action.
+    #[must_use]
+    pub fn same(binding: impl Into<OrbitCamInputBinding>) -> Self {
+        let binding = binding.into();
+        Self::new(binding.clone(), binding)
+    }
+
+    /// Overrides source attribution for this binding.
+    #[must_use]
+    pub const fn with_sources(mut self, sources: CameraInteractionSources) -> Self {
+        self.sources = sources;
+        self
+    }
+
+    /// Overrides routing for this binding.
+    #[must_use]
+    pub const fn with_route(mut self, route: BindingRoutePolicy) -> Self {
+        self.route = route;
+        self
     }
 }
 
+/// A BEI-style input binding plus `OrbitCam` composite helpers.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamInputBinding {
+    /// A native `bevy_enhanced_input` binding.
+    Binding(Binding),
+    /// Four keyboard keys captured as positive Y, positive X, negative Y, negative X.
+    CardinalKeys(KeyCode, KeyCode, KeyCode, KeyCode),
+    /// Two keyboard keys captured as positive and negative 1D values.
+    BidirectionalKeys(KeyCode, KeyCode),
+    /// Two gamepad axes captured as X and Y.
+    GamepadAxes2d(GamepadAxis, GamepadAxis),
+    /// Two analog gamepad buttons captured as positive and negative 1D values.
+    BidirectionalGamepadButtons(GamepadButton, GamepadButton),
+}
+
+impl OrbitCamInputBinding {
+    /// Creates a four-key 2D binding from positive Y, positive X, negative Y, negative X.
+    #[must_use]
+    pub const fn cardinal_keys(
+        north: KeyCode,
+        east: KeyCode,
+        south: KeyCode,
+        west: KeyCode,
+    ) -> Self {
+        Self::CardinalKeys(north, east, south, west)
+    }
+
+    /// Creates a two-key 1D binding from positive and negative keys.
+    #[must_use]
+    pub const fn bidirectional_keys(positive: KeyCode, negative: KeyCode) -> Self {
+        Self::BidirectionalKeys(positive, negative)
+    }
+
+    /// Creates a two-axis gamepad binding from X and Y axes.
+    #[must_use]
+    pub const fn gamepad_axes_2d(x: GamepadAxis, y: GamepadAxis) -> Self {
+        Self::GamepadAxes2d(x, y)
+    }
+
+    /// Creates a two-button gamepad binding from positive and negative buttons.
+    #[must_use]
+    pub const fn bidirectional_gamepad_buttons(
+        positive: GamepadButton,
+        negative: GamepadButton,
+    ) -> Self {
+        Self::BidirectionalGamepadButtons(positive, negative)
+    }
+
+    fn descriptor(&self) -> InputBindingDescriptor {
+        match *self {
+            Self::Binding(binding) => InputBindingDescriptor::single(binding),
+            Self::CardinalKeys(north, east, south, west) => InputBindingDescriptor::entries([
+                InputBindingEntry::new(Binding::from(east), InputBindingTransform::None),
+                InputBindingEntry::new(Binding::from(west), InputBindingTransform::Negate),
+                InputBindingEntry::new(Binding::from(north), InputBindingTransform::Swizzle),
+                InputBindingEntry::new(Binding::from(south), InputBindingTransform::SwizzleNegate),
+            ]),
+            Self::BidirectionalKeys(positive, negative) => InputBindingDescriptor::entries([
+                InputBindingEntry::new(Binding::from(positive), InputBindingTransform::None),
+                InputBindingEntry::new(Binding::from(negative), InputBindingTransform::Negate),
+            ]),
+            Self::GamepadAxes2d(x, y) => InputBindingDescriptor::entries([
+                InputBindingEntry::new(Binding::GamepadAxis(x), InputBindingTransform::None),
+                InputBindingEntry::new(Binding::GamepadAxis(y), InputBindingTransform::Swizzle),
+            ]),
+            Self::BidirectionalGamepadButtons(positive, negative) => {
+                InputBindingDescriptor::entries([
+                    InputBindingEntry::new(
+                        Binding::GamepadButton(positive),
+                        InputBindingTransform::None,
+                    ),
+                    InputBindingEntry::new(
+                        Binding::GamepadButton(negative),
+                        InputBindingTransform::Negate,
+                    ),
+                ])
+            },
+        }
+    }
+
+    const fn sources(&self) -> CameraInteractionSources {
+        match *self {
+            Self::Binding(binding) => sources_for_binding(binding),
+            Self::CardinalKeys(..) | Self::BidirectionalKeys(..) => {
+                CameraInteractionSources::KEYBOARD
+            },
+            Self::GamepadAxes2d(..) | Self::BidirectionalGamepadButtons(..) => {
+                CameraInteractionSources::GAMEPAD
+            },
+        }
+    }
+}
+
+impl From<Binding> for OrbitCamInputBinding {
+    fn from(value: Binding) -> Self { Self::Binding(value) }
+}
+
+impl From<KeyCode> for OrbitCamInputBinding {
+    fn from(value: KeyCode) -> Self { Self::Binding(Binding::from(value)) }
+}
+
+impl From<MouseButton> for OrbitCamInputBinding {
+    fn from(value: MouseButton) -> Self { Self::Binding(Binding::from(value)) }
+}
+
+impl From<GamepadButton> for OrbitCamInputBinding {
+    fn from(value: GamepadButton) -> Self { Self::Binding(Binding::from(value)) }
+}
+
+impl From<GamepadAxis> for OrbitCamInputBinding {
+    fn from(value: GamepadAxis) -> Self { Self::Binding(Binding::GamepadAxis(value)) }
+}
+
+/// Mouse-drag binding for orbit or pan behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+pub struct OrbitCamMouseDrag {
+    /// Mouse button that engages the drag.
+    pub button:   MouseButton,
+    /// Keyboard modifiers required by both motion and button engagement.
+    pub mod_keys: ModKeys,
+}
+
+impl OrbitCamMouseDrag {
+    /// Creates a mouse-drag binding without keyboard modifiers.
+    #[must_use]
+    pub const fn new(button: MouseButton) -> Self {
+        Self {
+            button,
+            mod_keys: ModKeys::empty(),
+        }
+    }
+
+    /// Requires keyboard modifiers on both mouse motion and button engagement.
+    #[must_use]
+    pub const fn with_mod_keys(mut self, mod_keys: ModKeys) -> Self {
+        self.mod_keys = mod_keys;
+        self
+    }
+}
+
+impl From<OrbitCamMouseDrag> for OrbitCamHeldBinding {
+    fn from(value: OrbitCamMouseDrag) -> Self {
+        Self::new(
+            Binding::MouseMotion {
+                mod_keys: value.mod_keys,
+            },
+            Binding::MouseButton {
+                button:   value.button,
+                mod_keys: value.mod_keys,
+            },
+        )
+        .with_sources(CameraInteractionSources::MOUSE)
+        .with_route(BindingRoutePolicy::CursorPosition)
+    }
+}
+
+/// Trackpad smooth-scroll binding for orbit, pan, or zoom behavior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub struct OrbitCamTrackpadScroll {
+    /// Keyboard modifiers required by the smooth-scroll binding.
+    pub mod_keys: ModKeys,
+}
+
+impl OrbitCamTrackpadScroll {
+    /// Requires keyboard modifiers on smooth-scroll input.
+    #[must_use]
+    pub const fn with_mod_keys(mut self, mod_keys: ModKeys) -> Self {
+        self.mod_keys = mod_keys;
+        self
+    }
+}
+
+/// Mouse-wheel zoom binding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub struct OrbitCamMouseWheelZoom {
+    /// Whether to invert the wheel value before applying zoom direction.
+    pub inverted: bool,
+}
+
+/// Pinch gesture zoom binding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub struct OrbitCamPinchZoom;
+
+/// Button-drag zoom binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+pub struct OrbitCamButtonDragZoom {
+    /// Mouse button that engages button-drag zoom.
+    pub button: MouseButton,
+    /// Axis used for button-drag zoom.
+    pub axis:   OrbitCamButtonDragZoomAxis,
+}
+
+/// Touch gesture policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamTouchBinding {
+    /// One finger orbits and two fingers pan and zoom.
+    OneFingerOrbit,
+    /// One finger pans and two fingers orbit and zoom.
+    TwoFingerOrbit,
+}
+
+/// Direction of scroll/zoom input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum ZoomDirection {
+    /// Scrolling zooms in the default direction.
+    #[default]
+    Normal,
+    /// Scrolling zooms in the opposite direction.
+    Reversed,
+}
+
+/// Axis used for button-drag zoom.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[non_exhaustive]
+pub enum OrbitCamButtonDragZoomAxis {
+    /// Horizontal motion controls zoom.
+    X,
+    /// Vertical motion controls zoom.
+    #[default]
+    Y,
+    /// Horizontal plus vertical motion controls zoom.
+    XY,
+}
+
+/// Gamepad routing policy for camera input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[non_exhaustive]
+pub enum CameraInputGamepadSelectionPolicy {
+    /// Ignore gamepad input.
+    #[default]
+    Disabled,
+    /// Route a single gamepad through active camera routing.
+    Active,
+}
+
 /// Orbit action binding set.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct OrbitCamOrbitActionBindings(
     HeldActionBindingSet<OrbitCamOrbitAction, OrbitCamOrbitEngagedAction>,
 );
 
 /// Pan action binding set.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct OrbitCamPanActionBindings(
     HeldActionBindingSet<OrbitCamPanAction, OrbitCamPanEngagedAction>,
 );
 
 /// Smooth zoom action binding set.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct OrbitCamZoomSmoothActionBindings(
     HeldActionBindingSet<OrbitCamZoomSmoothAction, OrbitCamZoomEngagedAction>,
 );
 
 /// Coarse zoom action binding set.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct OrbitCamZoomCoarseActionBindings(ActionBindingSet<OrbitCamZoomCoarseAction>);
 
 impl OrbitCamOrbitActionBindings {
@@ -421,7 +729,7 @@ impl OrbitCamZoomCoarseActionBindings {
 }
 
 /// Binding set for one semantic action.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActionBindingSet<A: CameraSemanticAction> {
     entries: Vec<ActionBindingEntry<A>>,
     action:  PhantomData<A>,
@@ -441,7 +749,7 @@ impl<A: CameraSemanticAction> ActionBindingSet<A> {
     pub fn entries(&self) -> &[ActionBindingEntry<A>] { &self.entries }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct HeldActionBindingSet<A: HeldCameraAction, E: CameraSemanticAction> {
     entries: Vec<HeldActionBindingEntry<A>>,
     action:  PhantomData<(A, E)>,
@@ -456,37 +764,17 @@ impl<A: HeldCameraAction, E: CameraSemanticAction> HeldActionBindingSet<A, E> {
 }
 
 /// Binding entry for an impulse camera action.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActionBindingEntry<A: CameraSemanticAction> {
-    binding:    BindingRecipe,
+    binding:    InputBindingDescriptor,
     sources:    CameraInteractionSources,
     route:      BindingRoutePolicy,
     engagement: BindingEngagement,
     action:     PhantomData<A>,
 }
 
-impl<A: ImpulseCameraAction> ActionBindingEntry<A> {
-    /// Creates an impulse binding from an enhanced-input recipe and explicit metadata.
-    #[must_use]
-    pub const fn from_enhanced_input_impulse(
-        binding: BindingRecipe,
-        sources: CameraInteractionSources,
-        route: BindingRoutePolicy,
-    ) -> Self {
-        Self {
-            binding,
-            sources,
-            route,
-            engagement: BindingEngagement::Impulse,
-            action: PhantomData,
-        }
-    }
-}
-
 impl<A: CameraSemanticAction> ActionBindingEntry<A> {
-    /// Returns the binding recipe.
-    #[must_use]
-    pub const fn binding(&self) -> BindingRecipe { self.binding }
+    pub(crate) const fn binding_descriptor(&self) -> &InputBindingDescriptor { &self.binding }
 
     /// Returns source metadata for this binding.
     #[must_use]
@@ -502,46 +790,37 @@ impl<A: CameraSemanticAction> ActionBindingEntry<A> {
 }
 
 /// Paired movement and engagement entry for held camera actions.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HeldActionBindingEntry<A: HeldCameraAction> {
-    motion:     BindingRecipe,
-    engagement: BindingRecipe,
+    motion:     InputBindingDescriptor,
+    engagement: InputBindingDescriptor,
     sources:    CameraInteractionSources,
     route:      BindingRoutePolicy,
     action:     PhantomData<A>,
 }
 
 impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
-    /// Creates a held binding from paired enhanced-input recipes and explicit metadata.
+    /// Creates a held binding from BEI-style input bindings.
     ///
     /// # Errors
     ///
     /// Returns [`OrbitCamBindingsError`] when the source metadata is empty.
-    pub const fn from_enhanced_input_pair(
-        motion: BindingRecipe,
-        engagement: BindingRecipe,
-        sources: CameraInteractionSources,
-        route: BindingRoutePolicy,
-    ) -> Result<Self, OrbitCamBindingsError> {
-        if sources.is_empty() {
+    pub fn new(binding: OrbitCamHeldBinding) -> Result<Self, OrbitCamBindingsError> {
+        if binding.sources.is_empty() {
             return Err(OrbitCamBindingsError::MissingSources);
         }
         Ok(Self {
-            motion,
-            engagement,
-            sources,
-            route,
-            action: PhantomData,
+            motion:     binding.motion.descriptor(),
+            engagement: binding.engagement.descriptor(),
+            sources:    binding.sources,
+            route:      binding.route,
+            action:     PhantomData,
         })
     }
 
-    /// Returns the motion binding recipe.
-    #[must_use]
-    pub const fn motion(&self) -> BindingRecipe { self.motion }
+    pub(crate) const fn motion_descriptor(&self) -> &InputBindingDescriptor { &self.motion }
 
-    /// Returns the engagement binding recipe.
-    #[must_use]
-    pub const fn engagement(&self) -> BindingRecipe { self.engagement }
+    pub(crate) const fn engagement_descriptor(&self) -> &InputBindingDescriptor { &self.engagement }
 
     /// Returns source metadata for this binding.
     #[must_use]
@@ -550,34 +829,6 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
     /// Returns route policy for this binding.
     #[must_use]
     pub const fn route(&self) -> BindingRoutePolicy { self.route }
-}
-
-/// Public recipe for a single enhanced-input binding.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-#[non_exhaustive]
-pub enum BindingRecipe {
-    /// Keyboard key binding.
-    Key(KeyCode),
-    /// Four keyboard keys captured as positive Y, positive X, negative Y, negative X.
-    CardinalKeys(KeyCode, KeyCode, KeyCode, KeyCode),
-    /// Two keyboard keys captured as positive and negative 1D values.
-    BidirectionalKeys(KeyCode, KeyCode),
-    /// Mouse button binding.
-    MouseButton(MouseButton),
-    /// Mouse motion binding.
-    MouseMotion,
-    /// Mouse wheel binding.
-    MouseWheel,
-    /// Gamepad button binding.
-    GamepadButton(GamepadButton),
-    /// Gamepad axis binding.
-    GamepadAxis(GamepadAxis),
-    /// Two gamepad axes captured as X and Y.
-    GamepadAxes2d(GamepadAxis, GamepadAxis),
-    /// Two analog gamepad buttons captured as positive and negative 1D values.
-    BidirectionalGamepadButtons(GamepadButton, GamepadButton),
-    /// Empty binding.
-    None,
 }
 
 /// Route policy attached to a binding entry.
@@ -596,120 +847,14 @@ pub enum BindingRoutePolicy {
 pub enum BindingEngagement {
     /// One-frame or impulse binding.
     Impulse,
-    /// Held binding with a separate engagement recipe.
+    /// Held binding with a separate engagement binding.
     Held,
-}
-
-/// Mouse wheel policy for `OrbitCamBindings`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-#[non_exhaustive]
-pub enum OrbitCamWheelBinding {
-    /// Disable wheel input.
-    Disabled,
-    /// Treat line-wheel input as coarse zoom with the provided modifier.
-    LineZoom(OrbitCamWheelModifier),
-    /// Use Blender-like pixel scroll policy.
-    BlenderLike(OrbitCamBlenderLikeWheelBinding),
-}
-
-/// Blender-like wheel and smooth-scroll policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-pub struct OrbitCamBlenderLikeWheelBinding {
-    /// Modifier that turns smooth scroll into pan.
-    pub pan_modifier:  Option<KeyCode>,
-    /// Modifier that turns smooth scroll into zoom.
-    pub zoom_modifier: Option<KeyCode>,
-    /// Wheel modifier applied to zoom values.
-    pub wheel:         OrbitCamWheelModifier,
-}
-
-impl Default for OrbitCamBlenderLikeWheelBinding {
-    fn default() -> Self {
-        Self {
-            pan_modifier:  Some(KeyCode::ShiftLeft),
-            zoom_modifier: Some(KeyCode::ControlLeft),
-            wheel:         OrbitCamWheelModifier::default(),
-        }
-    }
-}
-
-/// Modifier applied to wheel zoom values.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub struct OrbitCamWheelModifier {
-    /// Whether to invert the wheel value before applying zoom direction.
-    pub inverted: bool,
-}
-
-/// Pinch gesture policy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[non_exhaustive]
-pub enum OrbitCamPinchBinding {
-    /// Disable pinch input.
-    #[default]
-    Disabled,
-    /// Treat pinch input as smooth zoom.
-    Zoom,
-}
-
-/// Touch gesture policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-#[non_exhaustive]
-pub enum OrbitCamTouchBinding {
-    /// One finger orbits and two fingers pan and zoom.
-    OneFingerOrbit,
-    /// One finger pans and two fingers orbit and zoom.
-    TwoFingerOrbit,
-}
-
-/// Button-drag zoom policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-pub struct OrbitCamButtonDragZoomBinding {
-    /// Mouse button that engages button-drag zoom.
-    pub button: MouseButton,
-    /// Axis used for button-drag zoom.
-    pub axis:   OrbitCamButtonDragZoomAxis,
-}
-
-/// Direction of scroll/zoom input.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub enum ZoomDirection {
-    /// Scrolling zooms in the default direction.
-    #[default]
-    Normal,
-    /// Scrolling zooms in the opposite direction.
-    Reversed,
-}
-
-/// Axis used for button-drag zoom.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[non_exhaustive]
-pub enum OrbitCamButtonDragZoomAxis {
-    /// Horizontal motion controls zoom.
-    X,
-    /// Vertical motion controls zoom.
-    #[default]
-    Y,
-    /// Horizontal plus vertical motion controls zoom.
-    XY,
-}
-
-/// Gamepad routing policy for camera input.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[non_exhaustive]
-pub enum CameraInputGamepadSelectionPolicy {
-    /// Ignore gamepad input.
-    #[default]
-    Disabled,
-    /// Route a single gamepad through active camera routing.
-    Active,
 }
 
 /// Structured binding validation error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OrbitCamBindingsError {
-    /// No wheel policy was selected.
-    MissingWheelPolicy,
     /// A binding entry did not provide source metadata.
     MissingSources,
     /// A held action has motion without engagement.
@@ -721,11 +866,6 @@ pub enum OrbitCamBindingsError {
     ImpulseEngagement {
         /// Semantic action name.
         action: &'static str,
-    },
-    /// An adapter-owned source was also bound as a public enhanced-input binding.
-    AdapterConflict {
-        /// Conflicting source name.
-        source: &'static str,
     },
     /// Held motion and engagement metadata did not match.
     HeldSourceMismatch {
@@ -742,7 +882,7 @@ impl OrbitCamBindingsError {
             Self::HeldMotionMissingEngagement { action }
             | Self::ImpulseEngagement { action }
             | Self::HeldSourceMismatch { action } => Some(*action),
-            Self::MissingWheelPolicy | Self::MissingSources | Self::AdapterConflict { .. } => None,
+            Self::MissingSources => None,
         }
     }
 }
@@ -750,9 +890,6 @@ impl OrbitCamBindingsError {
 impl fmt::Display for OrbitCamBindingsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingWheelPolicy => {
-                formatter.write_str("custom bindings must choose a wheel policy")
-            },
             Self::MissingSources => formatter.write_str("binding source metadata is missing"),
             Self::HeldMotionMissingEngagement { action } => {
                 write!(
@@ -764,12 +901,6 @@ impl fmt::Display for OrbitCamBindingsError {
                 write!(
                     formatter,
                     "{action} is an impulse binding and cannot have an engagement action"
-                )
-            },
-            Self::AdapterConflict { source } => {
-                write!(
-                    formatter,
-                    "binding conflicts with Lagrange's {source} adapter"
                 )
             },
             Self::HeldSourceMismatch { action } => {
@@ -784,68 +915,100 @@ impl fmt::Display for OrbitCamBindingsError {
 
 impl std::error::Error for OrbitCamBindingsError {}
 
-#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+#[derive(Clone, Debug, PartialEq, Reflect)]
 struct HeldBindingDescriptor {
-    motion:             BindingRecipe,
-    engagement:         Option<BindingRecipe>,
+    motion:             InputBindingDescriptor,
+    engagement:         Option<InputBindingDescriptor>,
     sources:            CameraInteractionSources,
     engagement_sources: CameraInteractionSources,
     route:              BindingRoutePolicy,
 }
 
 impl HeldBindingDescriptor {
-    const fn mouse_motion_with_button(
-        button: MouseButton,
-        sources: CameraInteractionSources,
-        route: BindingRoutePolicy,
-    ) -> Self {
+    fn from_held_binding(binding: OrbitCamHeldBinding) -> Self {
         Self {
-            motion: BindingRecipe::MouseMotion,
-            engagement: Some(BindingRecipe::MouseButton(button)),
-            sources,
-            engagement_sources: sources,
-            route,
-        }
-    }
-
-    const fn from_held_entry<A: HeldCameraAction>(entry: HeldActionBindingEntry<A>) -> Self {
-        Self {
-            motion:             entry.motion,
-            engagement:         Some(entry.engagement),
-            sources:            entry.sources,
-            engagement_sources: entry.sources,
-            route:              entry.route,
+            motion:             binding.motion.descriptor(),
+            engagement:         Some(binding.engagement.descriptor()),
+            sources:            binding.sources,
+            engagement_sources: binding.sources,
+            route:              binding.route,
         }
     }
 }
 
 /// Reflectable descriptor for an impulse action binding.
-#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+#[derive(Clone, Debug, PartialEq, Reflect)]
 pub struct ActionBindingDescriptor {
-    binding:    BindingRecipe,
+    binding:    InputBindingDescriptor,
     sources:    CameraInteractionSources,
     route:      BindingRoutePolicy,
     engagement: BindingEngagement,
 }
 
-impl ActionBindingDescriptor {
-    /// Creates an impulse action binding descriptor.
-    ///
-    /// Source metadata is explicit so the resolver can later report only the
-    /// sources that actually contributed to camera intent.
-    #[must_use]
-    pub const fn impulse(
-        binding: BindingRecipe,
-        sources: CameraInteractionSources,
-        route: BindingRoutePolicy,
-    ) -> Self {
+#[derive(Clone, Debug, Default, PartialEq, Reflect)]
+pub(crate) struct InputBindingDescriptor {
+    entries: Vec<InputBindingEntry>,
+}
+
+impl InputBindingDescriptor {
+    fn single(binding: Binding) -> Self {
         Self {
-            binding,
-            sources,
-            route,
-            engagement: BindingEngagement::Impulse,
+            entries: vec![InputBindingEntry::new(binding, InputBindingTransform::None)],
         }
     }
+
+    fn entries<const N: usize>(entries: [InputBindingEntry; N]) -> Self {
+        Self {
+            entries: entries.into(),
+        }
+    }
+
+    pub(crate) fn entries_slice(&self) -> &[InputBindingEntry] { &self.entries }
+
+    const fn is_empty(&self) -> bool { self.entries.is_empty() }
+
+    pub(crate) fn is_active(
+        &self,
+        keyboard: Option<&ButtonInput<KeyCode>>,
+        mouse_buttons: Option<&ButtonInput<MouseButton>>,
+    ) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| binding_active(entry.binding, keyboard, mouse_buttons))
+    }
+
+    pub(crate) fn mouse_button_engagement(&self) -> Option<(MouseButton, ModKeys)> {
+        self.entries.iter().find_map(|entry| match entry.binding {
+            Binding::MouseButton { button, mod_keys } => Some((button, mod_keys)),
+            Binding::Keyboard { .. }
+            | Binding::MouseMotion { .. }
+            | Binding::MouseWheel { .. }
+            | Binding::GamepadButton(_)
+            | Binding::GamepadAxis(_)
+            | Binding::AnyKey
+            | Binding::None => None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub(crate) struct InputBindingEntry {
+    pub(crate) binding:   Binding,
+    pub(crate) transform: InputBindingTransform,
+}
+
+impl InputBindingEntry {
+    const fn new(binding: Binding, transform: InputBindingTransform) -> Self {
+        Self { binding, transform }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+pub(crate) enum InputBindingTransform {
+    None,
+    Negate,
+    Swizzle,
+    SwizzleNegate,
 }
 
 /// Validates and builds `OrbitCamBindings` from a descriptor.
@@ -856,27 +1019,25 @@ impl ActionBindingDescriptor {
 pub fn validate_bindings(
     descriptor: &OrbitCamBindingsDescriptor,
 ) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-    let wheel = descriptor
-        .wheel
-        .ok_or(OrbitCamBindingsError::MissingWheelPolicy)?;
-
     validate_held_entries(ORBIT_ACTION_NAME, &descriptor.orbit)?;
     validate_held_entries(PAN_ACTION_NAME, &descriptor.pan)?;
     validate_held_entries(ZOOM_SMOOTH_ACTION_NAME, &descriptor.zoom_smooth)?;
     validate_impulse_entries(ZOOM_COARSE_ACTION_NAME, &descriptor.zoom_coarse)?;
-    validate_adapter_conflicts(wheel, descriptor)?;
 
     Ok(OrbitCamBindings {
-        orbit: OrbitCamOrbitActionBindings(held_descriptors_to_set(
+        orbit:            OrbitCamOrbitActionBindings(held_descriptors_to_set(
             ORBIT_ACTION_NAME,
             &descriptor.orbit,
         )?),
-        pan: OrbitCamPanActionBindings(held_descriptors_to_set(PAN_ACTION_NAME, &descriptor.pan)?),
-        zoom_smooth: OrbitCamZoomSmoothActionBindings(held_descriptors_to_set(
+        pan:              OrbitCamPanActionBindings(held_descriptors_to_set(
+            PAN_ACTION_NAME,
+            &descriptor.pan,
+        )?),
+        zoom_smooth:      OrbitCamZoomSmoothActionBindings(held_descriptors_to_set(
             ZOOM_SMOOTH_ACTION_NAME,
             &descriptor.zoom_smooth,
         )?),
-        zoom_coarse: OrbitCamZoomCoarseActionBindings(ActionBindingSet {
+        zoom_coarse:      OrbitCamZoomCoarseActionBindings(ActionBindingSet {
             entries: descriptor
                 .zoom_coarse
                 .iter()
@@ -884,11 +1045,14 @@ pub fn validate_bindings(
                 .collect(),
             action:  PhantomData,
         }),
-        wheel,
-        pinch: descriptor.pinch,
-        touch: descriptor.touch,
-        gamepad: descriptor.gamepad,
-        zoom_direction: descriptor.zoom_direction,
+        trackpad_orbit:   descriptor.trackpad_orbit.clone(),
+        trackpad_pan:     descriptor.trackpad_pan.clone(),
+        trackpad_zoom:    descriptor.trackpad_zoom.clone(),
+        mouse_wheel_zoom: descriptor.mouse_wheel_zoom,
+        pinch_zoom:       descriptor.pinch_zoom,
+        touch:            descriptor.touch,
+        gamepad:          descriptor.gamepad,
+        zoom_direction:   descriptor.zoom_direction,
         button_drag_zoom: descriptor.button_drag_zoom,
     })
 }
@@ -907,6 +1071,14 @@ fn validate_held_entries(
         if entry.sources != entry.engagement_sources {
             return Err(OrbitCamBindingsError::HeldSourceMismatch { action });
         }
+        if entry.motion.is_empty()
+            || entry
+                .engagement
+                .as_ref()
+                .is_some_and(InputBindingDescriptor::is_empty)
+        {
+            return Err(OrbitCamBindingsError::MissingSources);
+        }
     }
     Ok(())
 }
@@ -916,27 +1088,11 @@ fn validate_impulse_entries(
     entries: &[ActionBindingDescriptor],
 ) -> Result<(), OrbitCamBindingsError> {
     for entry in entries {
-        if entry.sources.is_empty() {
+        if entry.sources.is_empty() || entry.binding.is_empty() {
             return Err(OrbitCamBindingsError::MissingSources);
         }
         if entry.engagement == BindingEngagement::Held {
             return Err(OrbitCamBindingsError::ImpulseEngagement { action });
-        }
-    }
-    Ok(())
-}
-
-fn validate_adapter_conflicts(
-    wheel: OrbitCamWheelBinding,
-    descriptor: &OrbitCamBindingsDescriptor,
-) -> Result<(), OrbitCamBindingsError> {
-    if wheel != OrbitCamWheelBinding::Disabled {
-        for entry in &descriptor.zoom_coarse {
-            if entry.binding == BindingRecipe::MouseWheel {
-                return Err(OrbitCamBindingsError::AdapterConflict {
-                    source: "mouse wheel",
-                });
-            }
         }
     }
     Ok(())
@@ -961,88 +1117,141 @@ fn held_descriptor_to_entry<A: HeldCameraAction>(
 ) -> Result<HeldActionBindingEntry<A>, OrbitCamBindingsError> {
     let engagement = descriptor
         .engagement
+        .clone()
         .ok_or(OrbitCamBindingsError::HeldMotionMissingEngagement { action })?;
 
-    HeldActionBindingEntry::from_enhanced_input_pair(
-        descriptor.motion,
+    Ok(HeldActionBindingEntry {
+        motion: descriptor.motion.clone(),
         engagement,
-        descriptor.sources,
-        descriptor.route,
-    )
+        sources: descriptor.sources,
+        route: descriptor.route,
+        action: PhantomData,
+    })
 }
 
-const fn action_descriptor_to_entry<A: ImpulseCameraAction>(
+fn action_descriptor_to_entry<A: ImpulseCameraAction>(
     descriptor: &ActionBindingDescriptor,
 ) -> ActionBindingEntry<A> {
-    ActionBindingEntry::from_enhanced_input_impulse(
-        descriptor.binding,
-        descriptor.sources,
-        descriptor.route,
-    )
+    ActionBindingEntry {
+        binding:    descriptor.binding.clone(),
+        sources:    descriptor.sources,
+        route:      descriptor.route,
+        engagement: BindingEngagement::Impulse,
+        action:     PhantomData,
+    }
+}
+
+const fn route_for_sources(sources: CameraInteractionSources) -> BindingRoutePolicy {
+    if sources.contains(CameraInteractionSources::MOUSE) {
+        BindingRoutePolicy::CursorPosition
+    } else {
+        BindingRoutePolicy::NoPosition
+    }
+}
+
+const fn sources_for_binding(binding: Binding) -> CameraInteractionSources {
+    match binding {
+        Binding::Keyboard { .. } => CameraInteractionSources::KEYBOARD,
+        Binding::MouseButton { .. } | Binding::MouseMotion { .. } => {
+            CameraInteractionSources::MOUSE
+        },
+        Binding::MouseWheel { .. } => CameraInteractionSources::WHEEL,
+        Binding::GamepadButton(_) | Binding::GamepadAxis(_) => CameraInteractionSources::GAMEPAD,
+        Binding::AnyKey => CameraInteractionSources::KEYBOARD
+            .union(CameraInteractionSources::MOUSE)
+            .union(CameraInteractionSources::GAMEPAD),
+        Binding::None => CameraInteractionSources::NONE,
+    }
+}
+
+fn binding_active(
+    binding: Binding,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+    mouse_buttons: Option<&ButtonInput<MouseButton>>,
+) -> bool {
+    match binding {
+        Binding::Keyboard { key, mod_keys } => keyboard
+            .is_some_and(|keyboard| keyboard.pressed(key) && mod_keys_pressed(keyboard, mod_keys)),
+        Binding::MouseButton { button, mod_keys } => {
+            mouse_buttons.is_some_and(|buttons| buttons.pressed(button))
+                && keyboard.is_some_and(|keyboard| mod_keys_pressed(keyboard, mod_keys))
+        },
+        Binding::AnyKey => {
+            keyboard.is_some_and(|keyboard| keyboard.get_pressed().next().is_some())
+                || mouse_buttons
+                    .is_some_and(|mouse_buttons| mouse_buttons.get_pressed().next().is_some())
+        },
+        Binding::MouseMotion { .. }
+        | Binding::MouseWheel { .. }
+        | Binding::GamepadButton(_)
+        | Binding::GamepadAxis(_)
+        | Binding::None => false,
+    }
+}
+
+pub(crate) fn mod_keys_pressed(keyboard: &ButtonInput<KeyCode>, mod_keys: ModKeys) -> bool {
+    mod_keys.iter_keys().all(|keys| keyboard.any_pressed(keys))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn descriptor_with_disabled_wheel() -> OrbitCamBindingsDescriptor {
-        OrbitCamBindingsDescriptor {
-            wheel: Some(OrbitCamWheelBinding::Disabled),
-            ..OrbitCamBindingsDescriptor::default()
-        }
+    fn descriptor_with_no_bindings() -> OrbitCamBindingsDescriptor {
+        OrbitCamBindingsDescriptor::default()
     }
 
     #[test]
     fn presets_validate_through_shared_path() -> Result<(), OrbitCamBindingsError> {
         let simple = OrbitCamPreset::SimpleMouse.to_bindings()?;
-        assert_eq!(
-            simple.wheel(),
-            OrbitCamWheelBinding::LineZoom(OrbitCamWheelModifier::default())
-        );
-        assert_eq!(simple.pinch(), OrbitCamPinchBinding::Zoom);
+        assert!(simple.mouse_wheel_zoom().is_some());
+        assert_eq!(simple.trackpad_zoom().len(), 1);
+        assert!(simple.pinch_zoom());
+        assert!(simple.touch().is_some());
 
         let blender = OrbitCamPreset::BlenderLike.to_bindings()?;
+        assert_eq!(blender.orbit().len(), 1);
+        assert_eq!(blender.pan().len(), 1);
+        assert_eq!(blender.trackpad_orbit().len(), 1);
+        assert_eq!(blender.trackpad_pan().len(), 1);
+        assert_eq!(blender.trackpad_zoom().len(), 1);
+        assert!(blender.mouse_wheel_zoom().is_some());
+        assert!(blender.pinch_zoom());
+
+        let [pan] = blender.pan().entries() else {
+            assert_eq!(blender.pan().entries().len(), 1);
+            return Ok(());
+        };
         assert_eq!(
-            blender.wheel(),
-            OrbitCamWheelBinding::BlenderLike(OrbitCamBlenderLikeWheelBinding::default())
+            pan.engagement_descriptor().mouse_button_engagement(),
+            Some((MouseButton::Middle, ModKeys::SHIFT))
         );
-        assert_eq!(blender.pinch(), OrbitCamPinchBinding::Zoom);
 
         Ok(())
     }
 
     #[test]
-    fn wheel_from_preset_copies_only_wheel_policy() -> Result<(), OrbitCamBindingsError> {
-        let bindings = OrbitCamBindings::builder()
-            .wheel_from_preset(OrbitCamPreset::BlenderLike)
-            .build()?;
+    fn empty_bindings_are_valid() -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder().build()?;
 
         assert!(bindings.orbit().is_empty());
         assert!(bindings.pan().is_empty());
         assert!(bindings.zoom_smooth().is_empty());
         assert!(bindings.zoom_coarse().is_empty());
-        assert_eq!(bindings.pinch(), OrbitCamPinchBinding::Disabled);
-        assert_eq!(
-            bindings.wheel(),
-            OrbitCamWheelBinding::BlenderLike(OrbitCamBlenderLikeWheelBinding::default())
-        );
+        assert!(bindings.trackpad_orbit().is_empty());
+        assert!(bindings.trackpad_pan().is_empty());
+        assert!(bindings.trackpad_zoom().is_empty());
+        assert!(!bindings.pinch_zoom());
+        assert!(bindings.mouse_wheel_zoom().is_none());
 
         Ok(())
     }
 
     #[test]
-    fn missing_wheel_policy_is_rejected() {
-        assert_eq!(
-            validate_bindings(&OrbitCamBindingsDescriptor::default()),
-            Err(OrbitCamBindingsError::MissingWheelPolicy)
-        );
-    }
-
-    #[test]
     fn held_motion_without_engagement_is_rejected() {
-        let mut descriptor = descriptor_with_disabled_wheel();
+        let mut descriptor = descriptor_with_no_bindings();
         descriptor.orbit.push(HeldBindingDescriptor {
-            motion:             BindingRecipe::MouseMotion,
+            motion:             OrbitCamInputBinding::from(Binding::mouse_motion()).descriptor(),
             engagement:         None,
             sources:            CameraInteractionSources::MOUSE,
             engagement_sources: CameraInteractionSources::MOUSE,
@@ -1059,10 +1268,10 @@ mod tests {
 
     #[test]
     fn held_source_mismatch_is_rejected() {
-        let mut descriptor = descriptor_with_disabled_wheel();
+        let mut descriptor = descriptor_with_no_bindings();
         descriptor.pan.push(HeldBindingDescriptor {
-            motion:             BindingRecipe::MouseMotion,
-            engagement:         Some(BindingRecipe::Key(KeyCode::ShiftLeft)),
+            motion:             OrbitCamInputBinding::from(Binding::mouse_motion()).descriptor(),
+            engagement:         Some(OrbitCamInputBinding::from(KeyCode::ShiftLeft).descriptor()),
             sources:            CameraInteractionSources::MOUSE,
             engagement_sources: CameraInteractionSources::KEYBOARD,
             route:              BindingRoutePolicy::CursorPosition,
@@ -1078,9 +1287,9 @@ mod tests {
 
     #[test]
     fn impulse_engagement_is_rejected() {
-        let mut descriptor = descriptor_with_disabled_wheel();
+        let mut descriptor = descriptor_with_no_bindings();
         descriptor.zoom_coarse.push(ActionBindingDescriptor {
-            binding:    BindingRecipe::Key(KeyCode::Space),
+            binding:    OrbitCamInputBinding::from(KeyCode::Space).descriptor(),
             sources:    CameraInteractionSources::KEYBOARD,
             route:      BindingRoutePolicy::NoPosition,
             engagement: BindingEngagement::Held,
@@ -1095,50 +1304,16 @@ mod tests {
     }
 
     #[test]
-    fn adapter_conflict_is_rejected() {
-        let mut descriptor = OrbitCamBindingsDescriptor {
-            wheel: Some(OrbitCamWheelBinding::LineZoom(
-                OrbitCamWheelModifier::default(),
-            )),
-            ..OrbitCamBindingsDescriptor::default()
-        };
-        descriptor
-            .zoom_coarse
-            .push(ActionBindingDescriptor::impulse(
-                BindingRecipe::MouseWheel,
-                CameraInteractionSources::WHEEL,
-                BindingRoutePolicy::NoPosition,
-            ));
+    fn held_binding_preserves_bei_bindings() -> Result<(), OrbitCamBindingsError> {
+        let binding = OrbitCamHeldBinding::new(KeyCode::KeyA, KeyCode::ShiftLeft);
 
-        assert_eq!(
-            validate_bindings(&descriptor),
-            Err(OrbitCamBindingsError::AdapterConflict {
-                source: "mouse wheel",
-            })
-        );
-    }
-
-    #[test]
-    fn held_entry_builder_preserves_motion_and_engagement() -> Result<(), OrbitCamBindingsError> {
-        let entry = HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
-            BindingRecipe::Key(KeyCode::KeyA),
-            BindingRecipe::Key(KeyCode::ShiftLeft),
-            CameraInteractionSources::KEYBOARD,
-            BindingRoutePolicy::NoPosition,
-        )?;
-
-        let bindings = OrbitCamBindings::builder()
-            .held_orbit_binding(entry)
-            .wheel(OrbitCamWheelBinding::Disabled)
-            .build()?;
+        let bindings = OrbitCamBindings::builder().orbit(binding).build()?;
         let [entry] = bindings.orbit().entries() else {
             assert_eq!(bindings.orbit().entries().len(), 1);
             return Ok(());
         };
 
-        assert_eq!(entry.motion(), BindingRecipe::Key(KeyCode::KeyA));
-        assert_eq!(entry.engagement(), BindingRecipe::Key(KeyCode::ShiftLeft));
-        assert_eq!(entry.sources(), CameraInteractionSources::KEYBOARD);
+        assert!(entry.sources().contains(CameraInteractionSources::KEYBOARD));
         assert_eq!(entry.route(), BindingRoutePolicy::NoPosition);
 
         Ok(())

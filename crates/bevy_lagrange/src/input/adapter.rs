@@ -16,16 +16,18 @@ use bevy_enhanced_input::prelude::ContextPriority;
 use bevy_enhanced_input::prelude::GamepadDevice;
 use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::MockSpan;
+use bevy_enhanced_input::prelude::ModKeys;
 use bevy_enhanced_input::prelude::Negate;
 use bevy_enhanced_input::prelude::SwizzleAxis;
 use bevy_enhanced_input::prelude::TriggerState;
 
 use super::ActionBindingEntry;
-use super::BindingRecipe;
 use super::CameraInputGamepadSelectionPolicy;
 use super::CameraInteractionSources;
 use super::HeldActionBindingEntry;
 use super::HeldCameraAction;
+use super::InputBindingDescriptor;
+use super::InputBindingTransform;
 use super::OrbitCamBindings;
 use super::OrbitCamButtonDragZoomAxis;
 use super::OrbitCamInput;
@@ -33,11 +35,9 @@ use super::OrbitCamInputContext;
 use super::OrbitCamInputContextGated;
 use super::OrbitCamOrbitAction;
 use super::OrbitCamPanAction;
-use super::OrbitCamPinchBinding;
 use super::OrbitCamPreset;
 use super::OrbitCamTouchBinding;
-use super::OrbitCamWheelBinding;
-use super::OrbitCamWheelModifier;
+use super::OrbitCamTrackpadScroll;
 use super::OrbitCamZoomCoarseAction;
 use super::OrbitCamZoomSmoothAction;
 use super::ResolvedOrbitCamInputRoute;
@@ -49,6 +49,7 @@ use super::actions::OrbitCamAdapterZoomSmoothAction;
 use super::actions::OrbitCamOrbitEngagedAction;
 use super::actions::OrbitCamPanEngagedAction;
 use super::actions::OrbitCamZoomEngagedAction;
+use super::mod_keys_pressed;
 use super::modes::input_installation_has_placeholder;
 use super::modes::installed_input_entities;
 use super::modes::replace_installed_input_entities;
@@ -61,7 +62,7 @@ use crate::system_sets::OrbitCamInputInternalSet;
 use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
 
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq)]
 struct OrbitCamInstalledBindings(OrbitCamBindings);
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,7 +264,12 @@ fn spawn_input_installation(
         &mut entities,
     );
     for entry in bindings.zoom_coarse().entries() {
-        entities.extend(spawn_binding(world, camera, zoom_coarse, entry.binding()));
+        entities.extend(spawn_binding(
+            world,
+            camera,
+            zoom_coarse,
+            entry.binding_descriptor(),
+        ));
     }
 
     SpawnedInputInstallation {
@@ -316,12 +322,17 @@ fn spawn_held_bindings<A: HeldCameraAction>(
     entities: &mut Vec<Entity>,
 ) {
     for entry in entries {
-        entities.extend(spawn_binding(world, camera, motion_action, entry.motion()));
+        entities.extend(spawn_binding(
+            world,
+            camera,
+            motion_action,
+            entry.motion_descriptor(),
+        ));
         entities.extend(spawn_binding(
             world,
             camera,
             engagement_action,
-            entry.engagement(),
+            entry.engagement_descriptor(),
         ));
     }
 }
@@ -330,149 +341,36 @@ fn spawn_binding(
     world: &mut World,
     camera: Entity,
     action: Entity,
-    recipe: BindingRecipe,
+    binding_descriptor: &InputBindingDescriptor,
 ) -> Vec<Entity> {
     let installation = super::modes::OrbitCamInputInstallationOf(camera);
-    match recipe {
-        BindingRecipe::Key(key) => {
-            vec![spawn_single_binding(
-                world,
-                action,
-                installation,
-                key_binding(key),
-            )]
-        },
-        BindingRecipe::CardinalKeys(north, east, south, west) => {
-            spawn_cardinal_key_bindings(world, action, installation, north, east, south, west)
-        },
-        BindingRecipe::BidirectionalKeys(positive, negative) => {
-            spawn_bidirectional_key_bindings(world, action, installation, positive, negative)
-        },
-        BindingRecipe::MouseButton(button) => vec![spawn_single_binding(
-            world,
-            action,
-            installation,
-            mouse_button_binding(button),
-        )],
-        BindingRecipe::MouseMotion => vec![spawn_single_binding(
-            world,
-            action,
-            installation,
-            Binding::MouseMotion {
-                mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-            },
-        )],
-        BindingRecipe::MouseWheel => vec![spawn_single_binding(
-            world,
-            action,
-            installation,
-            Binding::MouseWheel {
-                mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-            },
-        )],
-        BindingRecipe::GamepadButton(button) => {
-            vec![spawn_single_binding(
-                world,
-                action,
-                installation,
-                Binding::GamepadButton(button),
-            )]
-        },
-        BindingRecipe::GamepadAxis(axis) => {
-            vec![spawn_single_binding(
-                world,
-                action,
-                installation,
-                Binding::GamepadAxis(axis),
-            )]
-        },
-        BindingRecipe::GamepadAxes2d(x, y) => vec![
-            spawn_single_binding(world, action, installation, Binding::GamepadAxis(x)),
-            spawn_swizzled_binding(world, action, installation, Binding::GamepadAxis(y)),
-        ],
-        BindingRecipe::BidirectionalGamepadButtons(positive, negative) => vec![
-            spawn_single_binding(
-                world,
-                action,
-                installation,
-                Binding::GamepadButton(positive),
-            ),
-            spawn_modified_binding(
-                world,
-                action,
-                installation,
-                Binding::GamepadButton(negative),
-                Negate::all(),
-            ),
-        ],
-        BindingRecipe::None => vec![spawn_single_binding(
-            world,
-            action,
-            installation,
-            Binding::None,
-        )],
-    }
+    binding_descriptor
+        .entries_slice()
+        .iter()
+        .map(|entry| {
+            spawn_binding_entry(world, action, installation, entry.binding, entry.transform)
+        })
+        .collect()
 }
 
-fn spawn_cardinal_key_bindings(
+fn spawn_binding_entry(
     world: &mut World,
     action: Entity,
     installation: super::modes::OrbitCamInputInstallationOf,
-    north: KeyCode,
-    east: KeyCode,
-    south: KeyCode,
-    west: KeyCode,
-) -> Vec<Entity> {
-    vec![
-        spawn_single_binding(world, action, installation, key_binding(east)),
-        spawn_modified_binding(
-            world,
-            action,
-            installation,
-            key_binding(west),
-            Negate::all(),
-        ),
-        spawn_swizzled_binding(world, action, installation, key_binding(north)),
-        spawn_swizzled_modified_binding(
-            world,
-            action,
-            installation,
-            key_binding(south),
-            Negate::all(),
-        ),
-    ]
-}
-
-fn spawn_bidirectional_key_bindings(
-    world: &mut World,
-    action: Entity,
-    installation: super::modes::OrbitCamInputInstallationOf,
-    positive: KeyCode,
-    negative: KeyCode,
-) -> Vec<Entity> {
-    vec![
-        spawn_single_binding(world, action, installation, key_binding(positive)),
-        spawn_modified_binding(
-            world,
-            action,
-            installation,
-            key_binding(negative),
-            Negate::all(),
-        ),
-    ]
-}
-
-const fn key_binding(key: KeyCode) -> Binding {
-    Binding::Keyboard {
-        key,
-        mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-    }
-}
-
-const fn mouse_button_binding(button: MouseButton) -> Binding {
-    Binding::MouseButton {
-        button,
-        mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
+    binding: Binding,
+    transform: InputBindingTransform,
+) -> Entity {
+    match transform {
+        InputBindingTransform::None => spawn_single_binding(world, action, installation, binding),
+        InputBindingTransform::Negate => {
+            spawn_modified_binding(world, action, installation, binding, Negate::all())
+        },
+        InputBindingTransform::Swizzle => {
+            spawn_swizzled_binding(world, action, installation, binding)
+        },
+        InputBindingTransform::SwizzleNegate => {
+            spawn_swizzled_modified_binding(world, action, installation, binding, Negate::all())
+        },
     }
 }
 
@@ -669,73 +567,139 @@ fn adapter_contributions(
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> AdapterContributions {
     let mut contributions = AdapterContributions::default();
-    apply_wheel_contribution(bindings, scroll, keyboard, &mut contributions);
+    apply_mouse_wheel_zoom_contribution(bindings, scroll, &mut contributions);
+    apply_trackpad_scroll_contribution(bindings, scroll, keyboard, &mut contributions);
     apply_pinch_contribution(bindings, pinch, keyboard, mouse_buttons, &mut contributions);
     apply_touch_contribution(bindings, touch_gestures, &mut contributions);
     apply_button_drag_zoom_contribution(bindings, mouse_motion, mouse_buttons, &mut contributions);
     contributions
 }
 
-fn apply_wheel_contribution(
+fn apply_mouse_wheel_zoom_contribution(
+    bindings: &OrbitCamBindings,
+    scroll: AccumulatedMouseScroll,
+    contributions: &mut AdapterContributions,
+) {
+    let Some(mouse_wheel_zoom) = bindings.mouse_wheel_zoom() else {
+        return;
+    };
+    if scroll.delta == Vec2::ZERO || scroll.unit != MouseScrollUnit::Line {
+        return;
+    }
+
+    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings, mouse_wheel_zoom.inverted);
+    contributions.sources.zoom_coarse = contributions
+        .sources
+        .zoom_coarse
+        .union(CameraInteractionSources::WHEEL);
+}
+
+fn apply_trackpad_scroll_contribution(
     bindings: &OrbitCamBindings,
     scroll: AccumulatedMouseScroll,
     keyboard: Option<&ButtonInput<KeyCode>>,
     contributions: &mut AdapterContributions,
 ) {
-    if scroll.delta == Vec2::ZERO {
+    if scroll.delta == Vec2::ZERO || scroll.unit != MouseScrollUnit::Pixel {
         return;
     }
 
-    match bindings.wheel() {
-        OrbitCamWheelBinding::Disabled => {},
-        OrbitCamWheelBinding::LineZoom(modifier) => match scroll.unit {
-            MouseScrollUnit::Line => {
-                contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings, modifier);
-                contributions.sources.zoom_coarse = contributions
-                    .sources
-                    .zoom_coarse
-                    .union(CameraInteractionSources::WHEEL);
-            },
-            MouseScrollUnit::Pixel => {
-                contributions.zoom_smooth +=
-                    zoom_signed(scroll.delta.y * PIXEL_SCROLL_SCALE, bindings, modifier);
-                contributions.sources.zoom_smooth = contributions
-                    .sources
-                    .zoom_smooth
-                    .union(CameraInteractionSources::SMOOTH_SCROLL);
-            },
+    match selected_trackpad_binding(bindings, keyboard) {
+        Some(TrackpadScrollTarget::Orbit) => {
+            contributions.orbit += scroll.delta;
+            contributions.sources.orbit = contributions
+                .sources
+                .orbit
+                .union(CameraInteractionSources::SMOOTH_SCROLL);
         },
-        OrbitCamWheelBinding::BlenderLike(policy) => match scroll.unit {
-            MouseScrollUnit::Line => {
-                contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings, policy.wheel);
-                contributions.sources.zoom_coarse = contributions
-                    .sources
-                    .zoom_coarse
-                    .union(CameraInteractionSources::WHEEL);
-            },
-            MouseScrollUnit::Pixel => {
-                if key_pressed(keyboard, policy.zoom_modifier) {
-                    contributions.zoom_smooth +=
-                        zoom_signed(scroll.delta.y * PIXEL_SCROLL_SCALE, bindings, policy.wheel);
-                    contributions.sources.zoom_smooth = contributions
-                        .sources
-                        .zoom_smooth
-                        .union(CameraInteractionSources::SMOOTH_SCROLL);
-                } else if key_pressed(keyboard, policy.pan_modifier) {
-                    contributions.pan += scroll.delta;
-                    contributions.sources.pan = contributions
-                        .sources
-                        .pan
-                        .union(CameraInteractionSources::SMOOTH_SCROLL);
-                } else {
-                    contributions.orbit += scroll.delta;
-                    contributions.sources.orbit = contributions
-                        .sources
-                        .orbit
-                        .union(CameraInteractionSources::SMOOTH_SCROLL);
-                }
-            },
+        Some(TrackpadScrollTarget::Pan) => {
+            contributions.pan += scroll.delta;
+            contributions.sources.pan = contributions
+                .sources
+                .pan
+                .union(CameraInteractionSources::SMOOTH_SCROLL);
         },
+        Some(TrackpadScrollTarget::Zoom) => {
+            contributions.zoom_smooth +=
+                zoom_signed(scroll.delta.y * PIXEL_SCROLL_SCALE, bindings, false);
+            contributions.sources.zoom_smooth = contributions
+                .sources
+                .zoom_smooth
+                .union(CameraInteractionSources::SMOOTH_SCROLL);
+        },
+        None => {},
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrackpadScrollTarget {
+    Orbit,
+    Pan,
+    Zoom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TrackpadScrollCandidate {
+    target:   TrackpadScrollTarget,
+    mod_keys: ModKeys,
+}
+
+fn selected_trackpad_binding(
+    bindings: &OrbitCamBindings,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+) -> Option<TrackpadScrollTarget> {
+    let candidates = bindings
+        .trackpad_orbit()
+        .iter()
+        .map(|binding| trackpad_candidate(TrackpadScrollTarget::Orbit, *binding))
+        .chain(
+            bindings
+                .trackpad_pan()
+                .iter()
+                .map(|binding| trackpad_candidate(TrackpadScrollTarget::Pan, *binding)),
+        )
+        .chain(
+            bindings
+                .trackpad_zoom()
+                .iter()
+                .map(|binding| trackpad_candidate(TrackpadScrollTarget::Zoom, *binding)),
+        );
+
+    candidates
+        .filter(|candidate| trackpad_mod_keys_pressed(keyboard, candidate.mod_keys))
+        .max_by_key(|candidate| {
+            (
+                mod_key_count(candidate.mod_keys),
+                trackpad_target_priority(candidate.target),
+            )
+        })
+        .map(|candidate| candidate.target)
+}
+
+const fn trackpad_candidate(
+    target: TrackpadScrollTarget,
+    binding: OrbitCamTrackpadScroll,
+) -> TrackpadScrollCandidate {
+    TrackpadScrollCandidate {
+        target,
+        mod_keys: binding.mod_keys,
+    }
+}
+
+fn trackpad_mod_keys_pressed(keyboard: Option<&ButtonInput<KeyCode>>, mod_keys: ModKeys) -> bool {
+    if mod_keys.is_empty() {
+        return true;
+    }
+    keyboard.is_some_and(|keyboard| mod_keys_pressed(keyboard, mod_keys))
+}
+
+fn mod_key_count(mod_keys: ModKeys) -> usize { mod_keys.iter_names().count() }
+
+const fn trackpad_target_priority(target: TrackpadScrollTarget) -> usize {
+    match target {
+        TrackpadScrollTarget::Orbit => 0,
+        TrackpadScrollTarget::Pan => 1,
+        TrackpadScrollTarget::Zoom => 2,
     }
 }
 
@@ -746,18 +710,12 @@ fn apply_pinch_contribution(
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
 ) {
-    if bindings.pinch() != OrbitCamPinchBinding::Zoom
-        || pinch == 0.0
-        || pinch_suppressed(bindings, keyboard, mouse_buttons)
+    if !bindings.pinch_zoom() || pinch == 0.0 || pinch_suppressed(bindings, keyboard, mouse_buttons)
     {
         return;
     }
 
-    contributions.zoom_smooth += zoom_signed(
-        pinch * PINCH_GESTURE_AMPLIFICATION,
-        bindings,
-        OrbitCamWheelModifier::default(),
-    );
+    contributions.zoom_smooth += zoom_signed(pinch * PINCH_GESTURE_AMPLIFICATION, bindings, false);
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
@@ -769,49 +727,19 @@ fn pinch_suppressed(
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> bool {
-    bindings
-        .orbit()
-        .entries()
-        .iter()
-        .any(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
-        || bindings
-            .pan()
-            .entries()
-            .iter()
-            .any(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
-        || bindings
-            .zoom_smooth()
-            .entries()
-            .iter()
-            .any(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
-}
-
-fn recipe_active(
-    recipe: BindingRecipe,
-    keyboard: Option<&ButtonInput<KeyCode>>,
-    mouse_buttons: Option<&ButtonInput<MouseButton>>,
-) -> bool {
-    match recipe {
-        BindingRecipe::Key(key) => keyboard.is_some_and(|keyboard| keyboard.pressed(key)),
-        BindingRecipe::CardinalKeys(north, east, south, west) => keyboard.is_some_and(|keyboard| {
-            keyboard.pressed(north)
-                || keyboard.pressed(east)
-                || keyboard.pressed(south)
-                || keyboard.pressed(west)
-        }),
-        BindingRecipe::BidirectionalKeys(positive, negative) => keyboard
-            .is_some_and(|keyboard| keyboard.pressed(positive) || keyboard.pressed(negative)),
-        BindingRecipe::MouseButton(button) => {
-            mouse_buttons.is_some_and(|buttons| buttons.pressed(button))
-        },
-        BindingRecipe::MouseMotion
-        | BindingRecipe::MouseWheel
-        | BindingRecipe::GamepadButton(_)
-        | BindingRecipe::GamepadAxis(_)
-        | BindingRecipe::GamepadAxes2d(..)
-        | BindingRecipe::BidirectionalGamepadButtons(..)
-        | BindingRecipe::None => false,
-    }
+    bindings.orbit().entries().iter().any(|entry| {
+        entry
+            .engagement_descriptor()
+            .is_active(keyboard, mouse_buttons)
+    }) || bindings.pan().entries().iter().any(|entry| {
+        entry
+            .engagement_descriptor()
+            .is_active(keyboard, mouse_buttons)
+    }) || bindings.zoom_smooth().entries().iter().any(|entry| {
+        entry
+            .engagement_descriptor()
+            .is_active(keyboard, mouse_buttons)
+    })
 }
 
 fn apply_touch_contribution(
@@ -858,7 +786,7 @@ fn apply_touch_contribution(
             .union(CameraInteractionSources::TOUCH);
     }
     if zoom != 0.0 {
-        contributions.zoom_smooth += zoom_signed(zoom, bindings, OrbitCamWheelModifier::default());
+        contributions.zoom_smooth += zoom_signed(zoom, bindings, false);
         contributions.sources.zoom_smooth = contributions
             .sources
             .zoom_smooth
@@ -886,28 +814,20 @@ fn apply_button_drag_zoom_contribution(
         OrbitCamButtonDragZoomAxis::Y => -mouse_motion.y,
         OrbitCamButtonDragZoomAxis::XY => mouse_motion.x - mouse_motion.y,
     };
-    contributions.zoom_smooth += zoom_signed(
-        delta * BUTTON_ZOOM_SCALE,
-        bindings,
-        OrbitCamWheelModifier::default(),
-    );
+    contributions.zoom_smooth += zoom_signed(delta * BUTTON_ZOOM_SCALE, bindings, false);
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
         .union(CameraInteractionSources::MOUSE);
 }
 
-fn zoom_signed(value: f32, bindings: &OrbitCamBindings, modifier: OrbitCamWheelModifier) -> f32 {
-    let wheel_sign = if modifier.inverted { -1.0 } else { 1.0 };
+fn zoom_signed(value: f32, bindings: &OrbitCamBindings, inverted: bool) -> f32 {
+    let wheel_sign = if inverted { -1.0 } else { 1.0 };
     let zoom_sign = match bindings.zoom_direction() {
         ZoomDirection::Normal => 1.0,
         ZoomDirection::Reversed => -1.0,
     };
     value * wheel_sign * zoom_sign
-}
-
-fn key_pressed(keyboard: Option<&ButtonInput<KeyCode>>, key: Option<KeyCode>) -> bool {
-    key.is_none_or(|key| keyboard.is_some_and(|keyboard| keyboard.pressed(key)))
 }
 
 fn mock_adapter_actions(
@@ -1007,6 +927,8 @@ fn resolve_actions_into_orbit_cam_input(
         let orbit_engaged = bool_action_active(actions.orbit_engaged, &bool_actions.orbit, &states);
         let pan_engaged = bool_action_active(actions.pan_engaged, &bool_actions.pan, &states);
         let zoom_engaged = bool_action_active(actions.zoom_engaged, &bool_actions.zoom, &states);
+        let pan_overrides_orbit =
+            pan_overrides_orbit(&bindings.0, keyboard.as_deref(), mouse_buttons.as_deref());
         let orbit_sources = held_sources_for_state(
             orbit_engaged,
             bindings.0.orbit().entries(),
@@ -1029,7 +951,7 @@ fn resolve_actions_into_orbit_cam_input(
             mouse_buttons.as_deref(),
         );
 
-        if orbit_engaged {
+        if orbit_engaged && !pan_overrides_orbit {
             input.orbit_pixels_with_sources(
                 action_value(actions.orbit, &vec2_actions.orbit),
                 orbit_sources,
@@ -1121,7 +1043,11 @@ fn held_sources_for_state<A: HeldCameraAction>(
 
     let active_sources = entries
         .iter()
-        .filter(|entry| recipe_active(entry.engagement(), keyboard, mouse_buttons))
+        .filter(|entry| {
+            entry
+                .engagement_descriptor()
+                .is_active(keyboard, mouse_buttons)
+        })
         .fold(CameraInteractionSources::NONE, |sources, entry| {
             sources.union(entry.sources())
         });
@@ -1130,6 +1056,38 @@ fn held_sources_for_state<A: HeldCameraAction>(
     } else {
         active_sources
     }
+}
+
+fn pan_overrides_orbit(
+    bindings: &OrbitCamBindings,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+    mouse_buttons: Option<&ButtonInput<MouseButton>>,
+) -> bool {
+    bindings.pan().entries().iter().any(|pan| {
+        let Some((pan_button, pan_mod_keys)) =
+            pan.engagement_descriptor().mouse_button_engagement()
+        else {
+            return false;
+        };
+        if !pan
+            .engagement_descriptor()
+            .is_active(keyboard, mouse_buttons)
+        {
+            return false;
+        }
+        bindings.orbit().entries().iter().any(|orbit| {
+            let Some((orbit_button, orbit_mod_keys)) =
+                orbit.engagement_descriptor().mouse_button_engagement()
+            else {
+                return false;
+            };
+            pan_button == orbit_button
+                && mod_key_count(pan_mod_keys) > mod_key_count(orbit_mod_keys)
+                && orbit
+                    .engagement_descriptor()
+                    .is_active(keyboard, mouse_buttons)
+        })
+    })
 }
 
 fn bool_action_active<A: InputAction<Output = bool>>(
@@ -1169,11 +1127,11 @@ mod tests {
 
     use super::*;
     use crate::enhanced_input::LagrangeEnhancedInputPlugin;
-    use crate::input::BindingRoutePolicy;
     use crate::input::CameraInputRoutingConfig;
+    use crate::input::OrbitCamHeldBinding;
+    use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamManual;
-    use crate::input::OrbitCamWheelBinding;
-    use crate::input::OrbitCamWheelModifier;
+    use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitDelta;
     use crate::input::modes::OrbitCamInputModesPlugin;
     use crate::input::routing::OrbitCamRoutingPlugin;
@@ -1269,6 +1227,30 @@ mod tests {
     }
 
     #[test]
+    fn blender_like_shift_middle_mouse_resolves_to_pan_only() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(5.0, -2.0);
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert!(!input.has_orbit());
+        assert_eq!(input.pan().pixels(), Vec2::new(5.0, -2.0));
+        assert!(input.sources().contains(CameraInteractionSources::MOUSE));
+        Ok(())
+    }
+
+    #[test]
     fn wheel_line_adapter_resolves_to_coarse_zoom() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
@@ -1288,12 +1270,63 @@ mod tests {
     }
 
     #[test]
+    fn blender_like_trackpad_shift_resolves_to_pan_only() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(4.0, 6.0),
+        };
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert!(!input.has_orbit());
+        assert_eq!(input.pan().pixels(), Vec2::new(4.0, 6.0));
+        assert!(
+            input
+                .sources()
+                .contains(CameraInteractionSources::SMOOTH_SCROLL)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_trackpad_control_resolves_to_zoom_only() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ControlLeft);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(4.0, 6.0),
+        };
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert!(!input.has_orbit());
+        assert!(!input.has_pan());
+        assert_f32_close(input.zoom_smooth().amount(), 6.0 * PIXEL_SCROLL_SCALE);
+        assert!(
+            input
+                .sources()
+                .contains(CameraInteractionSources::SMOOTH_SCROLL)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn pixel_scroll_adapter_resolves_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
         let bindings = OrbitCamBindings::builder()
-            .wheel(OrbitCamWheelBinding::LineZoom(
-                OrbitCamWheelModifier::default(),
-            ))
+            .zoom(OrbitCamTrackpadScroll::default())
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1355,8 +1388,7 @@ mod tests {
     fn non_routed_held_action_does_not_suppress_routed_pinch() -> TestResult {
         let mut app = test_app();
         let bindings = OrbitCamBindings::builder()
-            .pinch(OrbitCamPinchBinding::Zoom)
-            .wheel(OrbitCamWheelBinding::Disabled)
+            .zoom(OrbitCamPinchZoom)
             .build()
             .map_err(|_| "bindings should validate")?;
         let routed = spawn_camera(app.world_mut(), bindings);
@@ -1383,7 +1415,6 @@ mod tests {
         let mut app = test_app();
         let bindings = OrbitCamBindings::builder()
             .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
-            .wheel(OrbitCamWheelBinding::Disabled)
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1405,16 +1436,8 @@ mod tests {
     #[test]
     fn keyboard_binding_resolves_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
-        let binding = HeldActionBindingEntry::<OrbitCamZoomSmoothAction>::from_enhanced_input_pair(
-            BindingRecipe::Key(KeyCode::Equal),
-            BindingRecipe::Key(KeyCode::ShiftLeft),
-            CameraInteractionSources::KEYBOARD,
-            BindingRoutePolicy::NoPosition,
-        )
-        .map_err(|_| "held binding should validate")?;
         let bindings = OrbitCamBindings::builder()
-            .held_smooth_zoom_binding(binding)
-            .wheel(OrbitCamWheelBinding::Disabled)
+            .zoom(OrbitCamHeldBinding::new(KeyCode::Equal, KeyCode::ShiftLeft))
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1436,17 +1459,12 @@ mod tests {
     #[test]
     fn gamepad_binding_resolves_to_orbit_input() -> TestResult {
         let mut app = test_app();
-        let binding = HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
-            BindingRecipe::GamepadAxis(GamepadAxis::LeftStickX),
-            BindingRecipe::GamepadButton(GamepadButton::LeftTrigger2),
-            CameraInteractionSources::GAMEPAD,
-            BindingRoutePolicy::NoPosition,
-        )
-        .map_err(|_| "held binding should validate")?;
         let bindings = OrbitCamBindings::builder()
-            .held_orbit_binding(binding)
+            .orbit(OrbitCamHeldBinding::new(
+                GamepadAxis::LeftStickX,
+                GamepadButton::LeftTrigger2,
+            ))
             .gamepad(CameraInputGamepadSelectionPolicy::Active)
-            .wheel(OrbitCamWheelBinding::Disabled)
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1468,22 +1486,13 @@ mod tests {
     #[test]
     fn cardinal_keyboard_binding_resolves_to_orbit_input() -> TestResult {
         let mut app = test_app();
-        let arrows = BindingRecipe::CardinalKeys(
-            KeyCode::ArrowUp,
-            KeyCode::ArrowRight,
-            KeyCode::ArrowDown,
-            KeyCode::ArrowLeft,
-        );
-        let binding = HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
-            arrows,
-            arrows,
-            CameraInteractionSources::KEYBOARD,
-            BindingRoutePolicy::NoPosition,
-        )
-        .map_err(|_| "held binding should validate")?;
         let bindings = OrbitCamBindings::builder()
-            .held_orbit_binding(binding)
-            .wheel(OrbitCamWheelBinding::Disabled)
+            .orbit(OrbitCamInputBinding::cardinal_keys(
+                KeyCode::ArrowUp,
+                KeyCode::ArrowRight,
+                KeyCode::ArrowDown,
+                KeyCode::ArrowLeft,
+            ))
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1505,17 +1514,11 @@ mod tests {
     #[test]
     fn bidirectional_keyboard_binding_resolves_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
-        let zoom_keys = BindingRecipe::BidirectionalKeys(KeyCode::Equal, KeyCode::Minus);
-        let binding = HeldActionBindingEntry::<OrbitCamZoomSmoothAction>::from_enhanced_input_pair(
-            zoom_keys,
-            zoom_keys,
-            CameraInteractionSources::KEYBOARD,
-            BindingRoutePolicy::NoPosition,
-        )
-        .map_err(|_| "held binding should validate")?;
         let bindings = OrbitCamBindings::builder()
-            .held_smooth_zoom_binding(binding)
-            .wheel(OrbitCamWheelBinding::Disabled)
+            .zoom(OrbitCamInputBinding::bidirectional_keys(
+                KeyCode::Equal,
+                KeyCode::Minus,
+            ))
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1535,19 +1538,12 @@ mod tests {
     #[test]
     fn gamepad_axes2d_binding_resolves_to_orbit_input() -> TestResult {
         let mut app = test_app();
-        let stick =
-            BindingRecipe::GamepadAxes2d(GamepadAxis::RightStickX, GamepadAxis::RightStickY);
-        let binding = HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
-            stick,
-            stick,
-            CameraInteractionSources::GAMEPAD,
-            BindingRoutePolicy::NoPosition,
-        )
-        .map_err(|_| "held binding should validate")?;
         let bindings = OrbitCamBindings::builder()
-            .held_orbit_binding(binding)
+            .orbit(OrbitCamInputBinding::gamepad_axes_2d(
+                GamepadAxis::RightStickX,
+                GamepadAxis::RightStickY,
+            ))
             .gamepad(CameraInputGamepadSelectionPolicy::Active)
-            .wheel(OrbitCamWheelBinding::Disabled)
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);
@@ -1568,21 +1564,12 @@ mod tests {
     #[test]
     fn bidirectional_gamepad_buttons_resolve_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
-        let triggers = BindingRecipe::BidirectionalGamepadButtons(
-            GamepadButton::RightTrigger2,
-            GamepadButton::LeftTrigger2,
-        );
-        let binding = HeldActionBindingEntry::<OrbitCamZoomSmoothAction>::from_enhanced_input_pair(
-            triggers,
-            triggers,
-            CameraInteractionSources::GAMEPAD,
-            BindingRoutePolicy::NoPosition,
-        )
-        .map_err(|_| "held binding should validate")?;
         let bindings = OrbitCamBindings::builder()
-            .held_smooth_zoom_binding(binding)
+            .zoom(OrbitCamInputBinding::bidirectional_gamepad_buttons(
+                GamepadButton::RightTrigger2,
+                GamepadButton::LeftTrigger2,
+            ))
             .gamepad(CameraInputGamepadSelectionPolicy::Active)
-            .wheel(OrbitCamWheelBinding::Disabled)
             .build()
             .map_err(|_| "bindings should validate")?;
         let camera = spawn_camera(app.world_mut(), bindings);

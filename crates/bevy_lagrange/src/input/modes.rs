@@ -43,7 +43,7 @@ pub struct OrbitCamManual;
 
 /// Mutable reflected draft for applying an orbit-camera input mode.
 #[cfg(feature = "reflect-input-modes")]
-#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Reflect)]
+#[derive(Component, Clone, Debug, Default, PartialEq, Reflect)]
 #[reflect(Component, Default)]
 pub struct OrbitCamInputModeDescriptor {
     /// Draft mode to validate and apply.
@@ -52,7 +52,7 @@ pub struct OrbitCamInputModeDescriptor {
 
 /// Reflected draft input-mode value.
 #[cfg(feature = "reflect-input-modes")]
-#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+#[derive(Clone, Debug, PartialEq, Reflect)]
 #[non_exhaustive]
 pub enum OrbitCamInputMode {
     /// Built-in preset mode.
@@ -450,6 +450,7 @@ mod tests {
     use super::*;
     use crate::input::OrbitCamInputModeDescriptor;
     use crate::input::OrbitCamInputModeRejected;
+    use crate::input::bindings::invalid_bindings_descriptor_for_tests;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
     #[derive(Resource)]
@@ -553,7 +554,7 @@ mod tests {
                 OrbitCamInput::default(),
                 OrbitCamPreset::BlenderLike,
                 OrbitCamInputModeDescriptor {
-                    mode: OrbitCamInputMode::Bindings(OrbitCamBindingsDescriptor::default()),
+                    mode: OrbitCamInputMode::Bindings(invalid_bindings_descriptor_for_tests()),
                 },
             ))
             .id();

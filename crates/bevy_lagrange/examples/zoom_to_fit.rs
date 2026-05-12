@@ -24,6 +24,7 @@ use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::SetFitTarget;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
@@ -99,7 +100,11 @@ fn setup(
         Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera — close to the gray cube, target cube just visible on the right
-    commands.spawn((Transform::from_translation(START_POS), OrbitCam::default()));
+    commands.spawn((
+        Transform::from_translation(START_POS),
+        OrbitCam::default(),
+        OrbitCamPreset::BlenderLike,
+    ));
 
     // Instructions
     commands.spawn(Text::new(

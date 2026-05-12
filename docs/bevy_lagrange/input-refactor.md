@@ -56,11 +56,13 @@ names such as `Orbit` or `Pan` for zero-sized marker types. Use names such as
 
 Source-policy types follow the same prefix rule. Use `OrbitCam*` when the policy
 encodes orbit-camera action semantics, even if the type lives inside
-`OrbitCamBindings`: `OrbitCamWheelBinding`, `OrbitCamBlenderLikeWheelBinding`,
-`OrbitCamWheelModifier`, `OrbitCamButtonDragZoomBinding`, and
+`OrbitCamBindings`: `OrbitCamMouseDrag`, `OrbitCamTrackpadScroll`,
+`OrbitCamMouseWheelZoom`, `OrbitCamPinchZoom`, `OrbitCamButtonDragZoom`, and
 `OrbitCamButtonDragZoomAxis`. Touch policy also uses this controller prefix:
-`OrbitCamTouchBinding`. Use `CameraInput*` when the policy is shared device
-infrastructure that can apply unchanged to multiple camera controllers:
+`OrbitCamTouchBinding`. BEI-style custom values go through
+`OrbitCamInputBinding` and held pairings go through `OrbitCamHeldBinding`. Use
+`CameraInput*` when the policy is shared device infrastructure that can apply
+unchanged to multiple camera controllers:
 `CameraInputGamepadSelectionPolicy`. Do not introduce bare public names such as
 `WheelBinding`, `WheelModifier`, `TouchInput`, `ButtonDragZoomBinding`, or
 `GamepadSelectionPolicy`; those names do not make ownership clear in imports,
@@ -86,8 +88,9 @@ them as constraints unless implementation proves one is unworkable.
 - Use one progressive `OrbitCamBindings` builder. Do not add a second simple/custom
   builder surface.
 - Keep adapter internals private and replaceable. Do not add an adapter feature gate
-  or a separate pure-enhanced-input control path. Public wheel, pinch, touch, and
-  smooth-scroll policy types describe camera behavior, not adapter mechanics.
+  or a separate pure-enhanced-input control path. Public mouse wheel, trackpad,
+  pinch, touch, and button-drag policy types describe camera behavior, not adapter
+  mechanics.
 - Keep engagement actions such as `OrbitCamOrbitEngagedAction`,
   `OrbitCamPanEngagedAction`, and `OrbitCamZoomEngagedAction` private. Public UI and
   editor code observes interaction events and `OrbitCamInteractionState`.
@@ -1131,106 +1134,89 @@ Builder rustdoc should include this decision tree before introducing lower-level
 held-entry, source-metadata, or adapter-conflict terminology.
 
 Gamepad ownership is shared camera-input device policy, not orbit-camera action
-policy. Custom gamepad bindings should make controller selection explicit:
+policy. The implemented initial policy intentionally exposes only active-controller
+routing and disabled gamepad input:
 
 ```rust
 pub enum CameraInputGamepadSelectionPolicy {
-    Any,
-    Selected(Entity),
     Disabled,
+    Active,
 }
 ```
 
-Held gamepad pairs must carry the same `CameraInputGamepadSelectionPolicy` on the
-motion and engagement halves. A selected-gamepad axis paired with an any-gamepad
-button is invalid because selection changes can break held ownership mid-gesture.
-If the selected gamepad changes or disconnects during an active held interaction,
-latch reconciliation emits `OrbitCamInteractionEnded` for the old owner before any
-new selected gamepad can acquire the source.
-Document how disconnected selected gamepads are handled. The default custom gamepad
-example should use a selected gamepad when one is available, show a no-gamepad
-fallback, and avoid accidentally letting every connected controller drive the camera.
+Selected-gamepad ownership is future API work. Do not document `Selected(Entity)`,
+selected-device fallback, or disconnected selected-gamepad reconciliation as shipped
+behavior until the policy exists in code.
 
-Wheel policy needs a typestate builder, or an equivalent compile-time constrained API,
-so custom users must intentionally choose adapter-owned wheel behavior or disabled
-wheel behavior. Preset/custom input modes should not expose raw `MouseWheel` binding
-helpers.
-Low-level enhanced-input descriptor methods that could conflict with Lagrange's wheel
-adapter should only be available in a builder state where the adapter-owned wheel
-policy has been disabled. The ordinary builder path should make the conflict
-unrepresentable where practical, and the shared validator remains the fallback for
-reflected or dynamically loaded descriptors.
-
-The builder should make wheel policy compile-time mandatory:
-
-```rust
-OrbitCamBindings::builder()              // OrbitCamBindingsBuilder<WheelUnset>
-    .orbit_drag(MouseButton::Middle)
-    .wheel(OrbitCamWheelBinding::Disabled) // OrbitCamBindingsBuilder<WheelSet>
-    .build()
-```
-
-`OrbitCamBindingsBuilder<WheelUnset>` should not expose `build`. Runtime construction
-paths that cannot use typestate, such as reflection or dynamic keymap loading, must
-use `try_build`.
-Do not add `build_with_wheel_disabled()` or another one-call escape hatch that hides
-the wheel decision. Prototype code should still make the choice visible with
-`.wheel(OrbitCamWheelBinding::Disabled)` or `.wheel_from_preset(...)`.
-
-Provide preset shortcuts so custom users do not need to study wheel policy before the
-first compile:
+The builder is behavior-first and additive. Users add bindings to camera behaviors,
+and the binding value carries whether the input is mouse, keyboard, gamepad,
+trackpad, wheel, pinch, or button-drag:
 
 ```rust
 OrbitCamBindings::builder()
-    .orbit_drag(MouseButton::Middle)
-    .wheel_from_preset(OrbitCamPreset::SimpleMouse)
-    .build();
+    .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+    .pan(OrbitCamMouseDrag::new(MouseButton::Middle).with_mod_keys(ModKeys::SHIFT))
+    .zoom(OrbitCamMouseWheelZoom::default())
+    .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
+    .zoom(OrbitCamPinchZoom)
+    .build()
 ```
 
-`MissingWheelPolicy` should recommend `OrbitCamWheelBinding::ZoomOnly` as the safe
-manual choice and `wheel_from_preset(...)` as the easiest preset-matching choice.
-`wheel_from_preset(preset)` copies only that preset's wheel policy into a custom
-binding builder. It does not switch the whole camera to the preset. Users who want the
-entire preset should use `OrbitCamPreset::to_bindings()` or insert the preset
-component directly.
+Multiple calls for the same behavior are valid. Do not reintroduce separate
+`orbit_mouse`, `held_mouse_orbit`, `zoom_keys`, `wheel(...)`, or
+`wheel_from_preset(...)` methods unless they are thin conveniences over the same
+behavior-first model.
+
+Preset matching stays explicit: use `OrbitCamPreset::BlenderLike` for the whole
+preset, or spell out the individual bindings when an app wants custom behavior:
+
+```rust
+OrbitCamBindings::builder()
+    .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+    .orbit(OrbitCamTrackpadScroll::default())
+    .pan(OrbitCamMouseDrag::new(MouseButton::Middle).with_mod_keys(ModKeys::SHIFT))
+    .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
+    .zoom(OrbitCamMouseWheelZoom::default())
+    .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
+    .zoom(OrbitCamPinchZoom)
+    .build();
+```
 
 Builder docs should explain the constraint:
 
 ```rust
 /// Builder for custom orbit-camera bindings.
 ///
-/// Wheel input is configured through [`OrbitCamWheelBinding`] instead of ordinary
-/// enhanced-input mouse-wheel bindings because `bevy_lagrange` needs Bevy's wheel
-/// unit information to distinguish line scroll from pixel scroll. Line scroll feeds
-/// coarse zoom; pixel scroll may feed smooth zoom, pan, or orbit depending on the
-/// selected camera policy.
-///
-/// The builder requires an explicit wheel choice so custom bindings cannot
-/// accidentally route the same wheel event through both enhanced input and the
-/// Lagrange wheel adapter.
+/// Add one or more bindings to `.orbit(...)`, `.pan(...)`, and `.zoom(...)`.
+/// Direct BEI bindings can be wrapped in [`OrbitCamInputBinding`]. Sources that need
+/// Bevy adapter data, such as trackpad scroll, mouse wheel units, pinch gestures, and
+/// button-drag zoom, use OrbitCam-specific binding values.
 ```
 
 Builder rustdoc should be progressive: start with common mouse, keyboard, gamepad, and
-wheel methods, then introduce held-entry terminology, source metadata, low-level
-enhanced-input descriptors, and adapter conflict rules only in later sections.
+wheel methods, then introduce held-entry terminology, source metadata, direct BEI
+bindings, and adapter-owned source rules only in later sections.
 
 Example custom keymap handoff:
 
 ```rust
 pub struct EditorKeymap {
     pub orbit_button: MouseButton,
-    pub pan_modifier: KeyCode,
+    pub pan_mod_keys: ModKeys,
     pub zoom_in_key: KeyCode,
     pub zoom_out_key: KeyCode,
 }
 
 impl EditorKeymap {
-    pub fn to_orbit_cam_bindings(&self) -> OrbitCamBindings {
+    pub fn to_orbit_cam_bindings(&self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         OrbitCamBindings::builder()
-            .orbit_drag(self.orbit_button)
-            .pan_drag_with_key(self.orbit_button, self.pan_modifier)
-            .zoom_keys(self.zoom_in_key, self.zoom_out_key)
-            .wheel(OrbitCamWheelBinding::blender_like())
+            .orbit(OrbitCamMouseDrag::new(self.orbit_button))
+            .pan(OrbitCamMouseDrag::new(self.orbit_button).with_mod_keys(self.pan_mod_keys))
+            .zoom(OrbitCamInputBinding::bidirectional_keys(
+                self.zoom_in_key,
+                self.zoom_out_key,
+            ))
+            .zoom(OrbitCamMouseWheelZoom::default())
             .build()
     }
 }
@@ -1250,13 +1236,13 @@ low-level types. Users should not need to discover these rules from failed valid
 
 | Rule | Example | Fix |
 |------|---------|-----|
-| Choose exactly one wheel policy. | Custom bindings omit wheel setup. | Call `.wheel_from_preset(OrbitCamPreset::SimpleMouse)` or `.wheel(OrbitCamWheelBinding::Disabled)`. |
-| Use held constructors for drags and held gamepad controls. | Mouse motion is bound without a held mouse button. | Use `.held_mouse_orbit(...)`, `.held_mouse_pan(...)`, or the matching gamepad held constructor. |
-| Do not provide engagement state for impulses. | Wheel zoom attempts to add a held engagement half. | Configure wheel, pinch, smooth-scroll, or touch through adapter policy. |
+| Add bindings by behavior. | A custom builder tries to call `.held_mouse_orbit(...)` or `.zoom_keys(...)`. | Use `.orbit(...)`, `.pan(...)`, and `.zoom(...)`; let the binding value carry the device shape. |
+| Use held binding values for drags and held gamepad controls. | Mouse motion is bound without a held mouse button. | Use `OrbitCamMouseDrag` or `OrbitCamHeldBinding::new(motion, engagement)`. |
+| Do not provide engagement state for impulses. | Wheel zoom attempts to add a held engagement half. | Configure wheel, pinch, trackpad, or button-drag zoom through `.zoom(...)` values. |
 | Keep held motion and engagement in the same source family. | Mouse motion plus gamepad button. | Use one mouse-held pair or one gamepad-held pair. |
 | Keep held motion and engagement on compatible route policies. | Cursor-routed mouse motion plus global engagement. | Use a constructor that records the same route policy for both halves. |
 | Preserve source metadata per binding entry. | Keyboard and gamepad both feed zoom. | Let each entry carry `KEYBOARD` or `GAMEPAD`; do not infer from the merged action value. |
-| Do not double-bind adapter-owned raw sources. | `Binding::MouseWheel` plus enabled Lagrange wheel policy. | Configure wheel through `OrbitCamWheelBinding` or disable Lagrange wheel policy. |
+| Keep adapter-owned raw sources in OrbitCam binding values. | A raw `Binding::MouseWheel` is used for zoom. | Use `OrbitCamMouseWheelZoom`, `OrbitCamTrackpadScroll`, `OrbitCamPinchZoom`, or `OrbitCamButtonDragZoom`. |
 | Use descriptors for reflected/dynamic edits. | A keymap UI mutates runtime `OrbitCamBindings` fields. | Edit `OrbitCamBindingsDescriptor`, then validate and apply. |
 
 ### Binding Validation
@@ -1266,18 +1252,15 @@ low-level types. Users should not need to discover these rules from failed valid
 ```rust
 #[derive(Clone, Debug, Reflect)]
 pub enum OrbitCamBindingsError {
-    AdapterBindingConflict { source: CameraInteractionSources, action: CameraSemanticAction },
-    HeldBindingWithoutEngagement { action: CameraSemanticAction },
-    EngagementBindingForImpulse { action: CameraSemanticAction },
-    HeldBindingSourceMismatch { action: CameraSemanticAction },
-    AmbiguousWheelPolicy,
-    MissingWheelPolicy,
+    MissingSources,
+    HeldMotionMissingEngagement { action: &'static str },
+    ImpulseEngagement { action: &'static str },
+    HeldSourceMismatch { action: &'static str },
 }
 ```
 
-`try_build` returns `Result<OrbitCamBindings, OrbitCamBindingsError>`. Convenience
-`build` may panic with the same structured message, but examples should use the
-non-panicking path where user keymaps are loaded dynamically. Runtime reconciliation
+`build` returns `Result<OrbitCamBindings, OrbitCamBindingsError>` because binding
+errors are app/keymap configuration errors, not library bugs. Runtime reconciliation
 should re-check custom bindings on `Changed<OrbitCamBindings>`.
 Descriptor-driven reflection must validate before inserting
 `OrbitCamBindings`; on rejection it leaves the previous runtime input-mode
@@ -1292,15 +1275,11 @@ fn validate_bindings(
 ) -> Result<OrbitCamBindings, OrbitCamBindingsError>;
 ```
 
-The typestate builder may make common invalid states unrepresentable, but its final
-`build`/`try_build` path should still call this same validation function. Reflection,
-deserialization, dynamic keymaps, and preset constructors should also pass through it
-or through a validated `OrbitCamBindings` value produced by it.
-Reflection and dynamic keymap paths should reject `MissingWheelPolicy`; they should
-not silently default it. Defaults belong in presets and explicit builder shortcuts
-such as `wheel_from_preset(...)`, not in descriptor validation.
+Builder, reflection, deserialization, dynamic keymaps, and preset constructors should
+all pass through this validation function or through a validated `OrbitCamBindings`
+value produced by it. Empty binding sets are valid.
 
-`HeldBindingSourceMismatch` means the motion binding and engagement binding do not
+`HeldSourceMismatch` means the motion binding and engagement binding do not
 share a compatible source category, route policy, or activation predicate. Accepted
 examples:
 
@@ -1323,65 +1302,38 @@ Compatibility should be documented as a small matrix:
 |-------------|-----------------|--------|
 | cursor-routed mouse motion | same mouse button and same modifier predicates | valid |
 | cursor-routed mouse motion | global mouse button with no cursor route metadata | reject |
-| gamepad axis scoped to selected gamepad | button from the same selected gamepad | valid |
-| gamepad axis scoped to selected gamepad | keyboard key or any-gamepad button | reject |
-| gamepad axis scoped to selected gamepad | button scoped to a different selected gamepad or `Any` | reject |
+| active gamepad axis | active gamepad button | valid |
+| active gamepad axis | keyboard key | reject |
 | motion with a condition/deadzone predicate | engagement with the same activation predicate family | valid |
 | motion with a condition/deadzone predicate | engagement without that predicate | reject |
 
-Route policy must be stored on the binding entry, not inferred from the binding recipe
-alone. `try_build` can reject incompatible held pairs when both motion and engagement
-entries carry route metadata. If a future low-level enhanced-input descriptor cannot
-provide enough information until installation, reconciliation should reject it through
-the same `HeldBindingSourceMismatch` error, emit `OrbitCamInputModeRejected`, and
-leave the previous runtime input mode installed.
-
-Adapter conflict validation should run in `try_build` before installation:
-
-| Adapter-owned source | Conflicting public binding |
-|----------------------|----------------------------|
-| `MouseWheel::Line` | raw enhanced-input `Binding::MouseWheel` |
-| `MouseWheel::Pixel` | raw enhanced-input `Binding::MouseWheel` |
-| `PinchGesture` | any future raw pinch binding once enhanced input exposes it |
-| `Touches` | any future raw touch binding once enhanced input exposes it |
-
-Conceptual validation:
-
-```rust
-match binding_recipe.binding() {
-    EnhancedInputBindingDescriptor::MouseWheel if wheel_policy.is_enabled() => {
-        Err(OrbitCamBindingsError::AdapterBindingConflict {
-            source: CameraInteractionSources::WHEEL | CameraInteractionSources::SMOOTH_SCROLL,
-            action,
-        })
-    }
-    _ => Ok(()),
-}
-```
+Route policy must be stored on the binding entry, not inferred from the input binding
+alone. If a future low-level enhanced-input descriptor cannot provide enough
+information until installation, reconciliation should reject it through the same
+`HeldSourceMismatch` error, emit `OrbitCamInputModeRejected`, and leave the previous
+runtime input mode installed.
 
 Suggested `Display` text:
 
 | Error | Message |
 |-------|---------|
-| `AdapterBindingConflict` | "binding conflicts with Lagrange's {source} adapter for {action}; configure this source through OrbitCamBindings adapter policy instead" |
-| `HeldBindingWithoutEngagement` | "{action} is a held binding but has no engagement binding; use the held_* builder constructor" |
-| `EngagementBindingForImpulse` | "{action} is an impulse binding and cannot have an engagement action" |
-| `HeldBindingSourceMismatch` | "{action} motion and engagement bindings do not share compatible source, route, or condition policy" |
-| `AmbiguousWheelPolicy` | "wheel policy is ambiguous; choose one line/pixel wheel policy" |
-| `MissingWheelPolicy` | "custom bindings must choose a wheel policy; use wheel_from_preset(SimpleMouse), wheel_from_preset(BlenderLike), ZoomOnly, or Disabled" |
+| `MissingSources` | "binding source metadata is missing" |
+| `HeldMotionMissingEngagement` | "{action} is a held binding but has no engagement binding" |
+| `ImpulseEngagement` | "{action} is an impulse binding and cannot have an engagement action" |
+| `HeldSourceMismatch` | "{action} motion and engagement bindings do not share source metadata" |
 
 Actionable remediation text should accompany these messages in `Display` or in a
 structured diagnostic helper. For example:
 
-- `HeldBindingWithoutEngagement`: "Use `.held_mouse_orbit(...)`,
-  `.held_mouse_pan(...)`, or the matching gamepad held constructor so motion and held
-  state are installed together."
-- `EngagementBindingForImpulse`: "Wheel, pinch, smooth-scroll, and gesture bindings
-  are impulses; configure them through wheel, pinch, touch, or adapter policy rather
-  than an engagement action."
-- `HeldBindingSourceMismatch`: "Motion and engagement must share the same source
-  family and routing policy. For mouse drag, use a held mouse constructor; for
-  gamepad, use a held gamepad constructor."
+- `HeldMotionMissingEngagement`: "Use `OrbitCamMouseDrag` or
+  `OrbitCamHeldBinding::new(motion, engagement)` so motion and held state are
+  installed together."
+- `ImpulseEngagement`: "Wheel, pinch, smooth-scroll, and gesture bindings are
+  impulses; configure them through `.zoom(...)`, `.touch(...)`, or OrbitCam adapter
+  policy values rather than an engagement action."
+- `HeldSourceMismatch`: "Motion and engagement must share the same source family and
+  routing policy. For mouse drag, use `OrbitCamMouseDrag`; for gamepad, use
+  `OrbitCamHeldBinding::new` with gamepad motion and engagement values."
 
 Public rustdoc should include an "Error Reference" table for the same variants. Each
 entry should name:
@@ -3263,11 +3215,11 @@ is an intentional breaking cleanup while `bevy_lagrange` has no external users.
 | `OrbitCam::input_control = None` used to stop user camera input temporarily | Add `CameraInputDisabled` when the selected input mode should be preserved; use `OrbitCamManual` only when the app takes over writing `OrbitCamInput`. |
 | Pause camera input for a menu, modal, or tool overlay | `commands.entity(camera).insert(CameraInputDisabled)`; resume with `remove::<CameraInputDisabled>()`. |
 | Default left/right mouse controls | `OrbitCamPreset::SimpleMouse`. |
-| `TrackpadBehavior::ZoomOnly` | `OrbitCamWheelBinding::ZoomOnly`. |
-| `TrackpadBehavior::BlenderLike` | `OrbitCamWheelBinding::BlenderLike` through preset or custom bindings. |
-| `modifier_pan: None` / `modifier_zoom: None` in Blender-like trackpad config | `OrbitCamWheelModifier::Always`, represented through builder APIs that reject ambiguous combinations. |
+| `TrackpadBehavior::ZoomOnly` | `OrbitCamBindings::builder().zoom(OrbitCamTrackpadScroll::default())`. |
+| `TrackpadBehavior::BlenderLike` | `OrbitCamPreset::BlenderLike` or explicit `.orbit/.pan/.zoom` trackpad bindings. |
+| `modifier_pan` / `modifier_zoom` in Blender-like trackpad config | `OrbitCamTrackpadScroll::default().with_mod_keys(...)` added to `.pan(...)` or `.zoom(...)`. |
 | `ZoomDirection::Reversed` | `OrbitCamBindings::zoom_direction(ZoomDirection::Reversed)` or equivalent response config, applied uniformly to every user-input zoom source. |
-| `button_zoom` | `OrbitCamButtonDragZoomBinding`. |
+| `button_zoom` | `OrbitCamButtonDragZoom`. |
 | `ButtonZoomAxis::{X, Y, XY}` | `OrbitCamButtonDragZoomAxis::{X, Y, XY}`. |
 | `OrbitCamTouchBinding::OneFingerOrbit` / `TwoFingerOrbit` | Touch adapter policy inside `OrbitCamBindings`. |
 | Keyboard control examples that mutate targets directly | `OrbitCamBindings` for user input, or existing programmatic camera APIs for non-user camera motion. |
@@ -3276,7 +3228,7 @@ is an intentional breaking cleanup while `bevy_lagrange` has no external users.
 
 ### Migration Examples
 
-Legacy Blender-like trackpad behavior with a pan modifier and always-on zoom:
+Legacy Blender-like trackpad behavior:
 
 ```rust
 // Before:
@@ -3293,10 +3245,13 @@ If the app needs the same policy inside a custom binding:
 
 ```rust
 let bindings = OrbitCamBindings::builder()
-    .orbit_drag(MouseButton::Middle)
-    .wheel(OrbitCamWheelBinding::blender_like()
-        .with_pan_modifier(OrbitCamWheelModifier::Key(KeyCode::ShiftLeft))
-        .with_zoom_modifier(OrbitCamWheelModifier::Always))
+    .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+    .orbit(OrbitCamTrackpadScroll::default())
+    .pan(OrbitCamMouseDrag::new(MouseButton::Middle).with_mod_keys(ModKeys::SHIFT))
+    .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
+    .zoom(OrbitCamMouseWheelZoom::default())
+    .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
+    .zoom(OrbitCamPinchZoom)
     .build();
 
 commands.entity(camera).insert(bindings);
@@ -3320,11 +3275,16 @@ target mutation:
 
 ```rust
 let bindings = OrbitCamBindings::builder()
-    .zoom_keys(KeyCode::Equal, KeyCode::Minus)
-    .gamepad(CameraInputGamepadSelectionPolicy::Selected(gamepad))
-    .gamepad_orbit(GamepadAxis::RightStick)
-    .gamepad_smooth_zoom(GamepadAxis::RightTrigger, GamepadAxis::LeftTrigger)
-    .wheel_from_preset(OrbitCamPreset::SimpleMouse)
+    .zoom(OrbitCamInputBinding::bidirectional_keys(KeyCode::Equal, KeyCode::Minus))
+    .orbit(OrbitCamInputBinding::gamepad_axes_2d(
+        GamepadAxis::RightStickX,
+        GamepadAxis::RightStickY,
+    ))
+    .zoom(OrbitCamInputBinding::bidirectional_gamepad_buttons(
+        GamepadButton::RightTrigger2,
+        GamepadButton::LeftTrigger2,
+    ))
+    .gamepad(CameraInputGamepadSelectionPolicy::Active)
     .build();
 
 commands.entity(camera).insert(bindings);
@@ -3334,13 +3294,12 @@ Legacy button-drag zoom:
 
 ```rust
 let bindings = OrbitCamBindings::builder()
-    .orbit_drag(MouseButton::Middle)
-    .button_drag_zoom(OrbitCamButtonDragZoomBinding {
+    .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+    .zoom(OrbitCamMouseWheelZoom::default())
+    .zoom(OrbitCamButtonDragZoom {
         button: MouseButton::Right,
         axis: OrbitCamButtonDragZoomAxis::Y,
-        scale: 1.0,
     })
-    .wheel_from_preset(OrbitCamPreset::SimpleMouse)
     .build();
 
 commands.entity(camera).insert(bindings);
@@ -4667,7 +4626,7 @@ Done when:
   compatibility modules.
 - The test suite covers the event, routing, schedule, adapter, descriptor, and manual
   input invariants described in this plan.
-- The new multi-binding `BindingRecipe` variants are covered by ECS resolver tests.
+- The new multi-binding `OrbitCamInputBinding` variants are covered by ECS resolver tests.
 - Stale example names and old `zoom_to_fit` paths are absent from manifests and
   user-facing docs.
 - Feature-gated descriptor tooling tests run separately from always-on runtime mode
@@ -4714,6 +4673,54 @@ Done when:
   animation, and controller invariant, while multi-binding resolver coverage remains
   adapter ECS coverage.
 
+### Post-Phase Binding API Review
+
+**What worked:**
+
+- The custom binding API now mirrors the shape users already know from BEI:
+  binding values are added to behavior methods with `.orbit(...)`, `.pan(...)`,
+  and `.zoom(...)`.
+- `OrbitCamPreset::BlenderLike` now standardizes both mouse and Mac-style trackpad
+  navigation in one preset.
+
+**What deviated from the plan:**
+
+- The earlier `BindingRecipe`, `OrbitCamWheelBinding`, typestate wheel builder,
+  and `wheel_from_preset` design was removed. `OrbitCamInputBinding` now wraps
+  direct BEI `Binding` values and composite helpers, while adapter-owned policies
+  are explicit zoom/trackpad/pinch values passed through `.zoom(...)`.
+- Custom bindings no longer require a wheel policy; empty binding sets validate.
+- Selected gamepad ownership remains future work. The implemented public gamepad
+  policy is `CameraInputGamepadSelectionPolicy::{Disabled, Active}`.
+- `zoom_to_fit` intentionally opts into `OrbitCamPreset::BlenderLike` so the
+  programmatic example keeps the standardized editor-style navigation used by the
+  other camera demos.
+
+**Surprises:**
+
+- `bevy_enhanced_input::Binding` is `PartialEq` but not `Eq`, so reflected binding
+  descriptors and installed-binding snapshots cannot derive `Eq`.
+
+**Implications for remaining phases:**
+
+- Any historical plan section that still names `BindingRecipe`,
+  `OrbitCamWheelBinding`, wheel typestate, `orbit_mouse`, `held_mouse_orbit`,
+  `zoom_keys`, `wheel(...)`, or `wheel_from_preset(...)` is superseded by the
+  behavior-first builder described in this review and the changelog summary below.
+- Pinch suppression still needs an explicit behavior decision: either suppress
+  pinch while trackpad modifier bindings such as Shift-pan or Control-zoom are
+  active, or narrow the old modifier-suppression documentation to held BEI bindings.
+
+### Post-Phase Binding API Review Findings
+
+- BindingRecipe and wheel-builder plan text was marked superseded by the
+  behavior-first `.orbit/.pan/.zoom` API.
+- Gamepad selected-device docs were narrowed to current `Disabled` and `Active`
+  policy, with selected ownership left as future work.
+- `custom_bindings.rs` controls prose now lists trackpad, pinch, touch, and reversed
+  zoom behavior.
+- Pinch suppression remains a significant decision for user review.
+
 ## Changelog-Style Summary
 
 ### Breaking
@@ -4728,6 +4735,9 @@ Done when:
 
 - Add enhanced-input based orbit-camera input modes with mutually exclusive preset,
   bindings, and manual input-mode components.
+- Add behavior-first `OrbitCamBindings` builder methods:
+  `.orbit(...)`, `.pan(...)`, and `.zoom(...)`. Binding values carry mouse,
+  trackpad, wheel, pinch, button-drag, keyboard, or gamepad shape.
 - Add default-on reflected input-mode descriptors with applied/rejected events and a
   persisted apply-status component for editors, scene files, and keymap tools.
 - Add source-aware camera interaction lifecycle events, source-change events, and read-only interaction state.
@@ -4747,6 +4757,10 @@ Done when:
 
 - Change the default input model to `OrbitCamPreset::SimpleMouse` and
   make `BlenderLike` an explicit editor-style preset.
+- Change `OrbitCamPreset::BlenderLike` to configure both mouse and Mac-style
+  trackpad navigation: middle-mouse orbit, Shift + middle-mouse pan, trackpad
+  orbit, Shift + trackpad pan, Control + trackpad zoom, mouse-wheel zoom, and
+  pinch zoom.
 - Change camera input routing to use `CameraInputRouting::{CursorHitTest, Explicit}` with internal resolved routing state.
 - Change custom bindings to be action-typed and source-aware so lifecycle events can distinguish mouse, wheel, smooth-scroll, pinch, touch, keyboard, gamepad, and manual input.
 - Change binding validation so builders, descriptors, reflection, dynamic keymaps, and
@@ -4760,9 +4774,10 @@ Done when:
 - Remove legacy raw-input fields from `OrbitCam` as a breaking change.
 - Remove the old `CameraInputDetection::{Automatic, Manual}` API in favor of `CameraInputRouting::{CursorHitTest, Explicit}`.
 - Remove the old keyboard-controls pattern that mutates camera targets directly for user input.
-- Do not add a public raw enhanced-input binding escape hatch; advanced enhanced-input
-  descriptors must go through typed Lagrange constructors that preserve source
-  metadata and held/impulse validation.
+- Remove the earlier `BindingRecipe` and wheel-policy builder design in favor of
+  direct BEI `Binding` values wrapped by `OrbitCamInputBinding` plus OrbitCam-owned
+  adapter policies.
+- Remove the stale `degenerate_angle_test` example entry and deleted example files.
 
 ## Final Architecture
 
