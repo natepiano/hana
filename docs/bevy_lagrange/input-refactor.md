@@ -4707,9 +4707,8 @@ Done when:
   `OrbitCamWheelBinding`, wheel typestate, `orbit_mouse`, `held_mouse_orbit`,
   `zoom_keys`, `wheel(...)`, or `wheel_from_preset(...)` is superseded by the
   behavior-first builder described in this review and the changelog summary below.
-- Pinch suppression still needs an explicit behavior decision: either suppress
-  pinch while trackpad modifier bindings such as Shift-pan or Control-zoom are
-  active, or narrow the old modifier-suppression documentation to held BEI bindings.
+- Pinch suppression follows the Blender-like modifier policy: configured trackpad
+  modifier bindings such as Shift-pan and Control-zoom suppress pinch while active.
 
 ### Post-Phase Binding API Review Findings
 
@@ -4719,7 +4718,8 @@ Done when:
   policy, with selected ownership left as future work.
 - `custom_bindings.rs` controls prose now lists trackpad, pinch, touch, and reversed
   zoom behavior.
-- Pinch suppression remains a significant decision for user review.
+- Pinch suppression was resolved in favor of Blender-like modifier behavior and now
+  covers configured trackpad modifiers.
 
 ## Changelog-Style Summary
 

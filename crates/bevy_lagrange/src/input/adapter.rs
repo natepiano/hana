@@ -727,19 +727,38 @@ fn pinch_suppressed(
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> bool {
-    bindings.orbit().entries().iter().any(|entry| {
-        entry
-            .engagement_descriptor()
-            .is_active(keyboard, mouse_buttons)
-    }) || bindings.pan().entries().iter().any(|entry| {
-        entry
-            .engagement_descriptor()
-            .is_active(keyboard, mouse_buttons)
-    }) || bindings.zoom_smooth().entries().iter().any(|entry| {
-        entry
-            .engagement_descriptor()
-            .is_active(keyboard, mouse_buttons)
-    })
+    trackpad_modifier_active(bindings, keyboard)
+        || bindings.orbit().entries().iter().any(|entry| {
+            entry
+                .engagement_descriptor()
+                .is_active(keyboard, mouse_buttons)
+        })
+        || bindings.pan().entries().iter().any(|entry| {
+            entry
+                .engagement_descriptor()
+                .is_active(keyboard, mouse_buttons)
+        })
+        || bindings.zoom_smooth().entries().iter().any(|entry| {
+            entry
+                .engagement_descriptor()
+                .is_active(keyboard, mouse_buttons)
+        })
+}
+
+fn trackpad_modifier_active(
+    bindings: &OrbitCamBindings,
+    keyboard: Option<&ButtonInput<KeyCode>>,
+) -> bool {
+    let Some(keyboard) = keyboard else {
+        return false;
+    };
+
+    bindings
+        .trackpad_orbit()
+        .iter()
+        .chain(bindings.trackpad_pan())
+        .chain(bindings.trackpad_zoom())
+        .any(|binding| !binding.mod_keys.is_empty() && mod_keys_pressed(keyboard, binding.mod_keys))
 }
 
 fn apply_touch_contribution(
@@ -1374,6 +1393,42 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
+        app.world_mut().write_message(PinchGesture(2.0));
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(input.zoom_smooth().amount(), 0.0);
+        assert!(!input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_shift_modifier_suppresses_pinch() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        app.world_mut().write_message(PinchGesture(2.0));
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(input.zoom_smooth().amount(), 0.0);
+        assert!(!input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_control_modifier_suppresses_pinch() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ControlLeft);
         app.world_mut().write_message(PinchGesture(2.0));
 
         app.update();
