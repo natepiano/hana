@@ -16,6 +16,8 @@ use bevy_enhanced_input::prelude::ContextPriority;
 use bevy_enhanced_input::prelude::GamepadDevice;
 use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::MockSpan;
+use bevy_enhanced_input::prelude::Negate;
+use bevy_enhanced_input::prelude::SwizzleAxis;
 use bevy_enhanced_input::prelude::TriggerState;
 
 use super::ActionBindingEntry;
@@ -261,7 +263,7 @@ fn spawn_input_installation(
         &mut entities,
     );
     for entry in bindings.zoom_coarse().entries() {
-        entities.push(spawn_binding(world, camera, zoom_coarse, entry.binding()));
+        entities.extend(spawn_binding(world, camera, zoom_coarse, entry.binding()));
     }
 
     SpawnedInputInstallation {
@@ -314,8 +316,8 @@ fn spawn_held_bindings<A: HeldCameraAction>(
     entities: &mut Vec<Entity>,
 ) {
     for entry in entries {
-        entities.push(spawn_binding(world, camera, motion_action, entry.motion()));
-        entities.push(spawn_binding(
+        entities.extend(spawn_binding(world, camera, motion_action, entry.motion()));
+        entities.extend(spawn_binding(
             world,
             camera,
             engagement_action,
@@ -329,36 +331,199 @@ fn spawn_binding(
     camera: Entity,
     action: Entity,
     recipe: BindingRecipe,
+) -> Vec<Entity> {
+    let installation = super::modes::OrbitCamInputInstallationOf(camera);
+    match recipe {
+        BindingRecipe::Key(key) => {
+            vec![spawn_single_binding(
+                world,
+                action,
+                installation,
+                key_binding(key),
+            )]
+        },
+        BindingRecipe::CardinalKeys(north, east, south, west) => {
+            spawn_cardinal_key_bindings(world, action, installation, north, east, south, west)
+        },
+        BindingRecipe::BidirectionalKeys(positive, negative) => {
+            spawn_bidirectional_key_bindings(world, action, installation, positive, negative)
+        },
+        BindingRecipe::MouseButton(button) => vec![spawn_single_binding(
+            world,
+            action,
+            installation,
+            mouse_button_binding(button),
+        )],
+        BindingRecipe::MouseMotion => vec![spawn_single_binding(
+            world,
+            action,
+            installation,
+            Binding::MouseMotion {
+                mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
+            },
+        )],
+        BindingRecipe::MouseWheel => vec![spawn_single_binding(
+            world,
+            action,
+            installation,
+            Binding::MouseWheel {
+                mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
+            },
+        )],
+        BindingRecipe::GamepadButton(button) => {
+            vec![spawn_single_binding(
+                world,
+                action,
+                installation,
+                Binding::GamepadButton(button),
+            )]
+        },
+        BindingRecipe::GamepadAxis(axis) => {
+            vec![spawn_single_binding(
+                world,
+                action,
+                installation,
+                Binding::GamepadAxis(axis),
+            )]
+        },
+        BindingRecipe::GamepadAxes2d(x, y) => vec![
+            spawn_single_binding(world, action, installation, Binding::GamepadAxis(x)),
+            spawn_swizzled_binding(world, action, installation, Binding::GamepadAxis(y)),
+        ],
+        BindingRecipe::BidirectionalGamepadButtons(positive, negative) => vec![
+            spawn_single_binding(
+                world,
+                action,
+                installation,
+                Binding::GamepadButton(positive),
+            ),
+            spawn_modified_binding(
+                world,
+                action,
+                installation,
+                Binding::GamepadButton(negative),
+                Negate::all(),
+            ),
+        ],
+        BindingRecipe::None => vec![spawn_single_binding(
+            world,
+            action,
+            installation,
+            Binding::None,
+        )],
+    }
+}
+
+fn spawn_cardinal_key_bindings(
+    world: &mut World,
+    action: Entity,
+    installation: super::modes::OrbitCamInputInstallationOf,
+    north: KeyCode,
+    east: KeyCode,
+    south: KeyCode,
+    west: KeyCode,
+) -> Vec<Entity> {
+    vec![
+        spawn_single_binding(world, action, installation, key_binding(east)),
+        spawn_modified_binding(
+            world,
+            action,
+            installation,
+            key_binding(west),
+            Negate::all(),
+        ),
+        spawn_swizzled_binding(world, action, installation, key_binding(north)),
+        spawn_swizzled_modified_binding(
+            world,
+            action,
+            installation,
+            key_binding(south),
+            Negate::all(),
+        ),
+    ]
+}
+
+fn spawn_bidirectional_key_bindings(
+    world: &mut World,
+    action: Entity,
+    installation: super::modes::OrbitCamInputInstallationOf,
+    positive: KeyCode,
+    negative: KeyCode,
+) -> Vec<Entity> {
+    vec![
+        spawn_single_binding(world, action, installation, key_binding(positive)),
+        spawn_modified_binding(
+            world,
+            action,
+            installation,
+            key_binding(negative),
+            Negate::all(),
+        ),
+    ]
+}
+
+const fn key_binding(key: KeyCode) -> Binding {
+    Binding::Keyboard {
+        key,
+        mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
+    }
+}
+
+const fn mouse_button_binding(button: MouseButton) -> Binding {
+    Binding::MouseButton {
+        button,
+        mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
+    }
+}
+
+fn spawn_single_binding(
+    world: &mut World,
+    action: Entity,
+    installation: super::modes::OrbitCamInputInstallationOf,
+    binding: Binding,
+) -> Entity {
+    world.spawn((binding, BindingOf(action), installation)).id()
+}
+
+fn spawn_modified_binding(
+    world: &mut World,
+    action: Entity,
+    installation: super::modes::OrbitCamInputInstallationOf,
+    binding: Binding,
+    modifier: Negate,
 ) -> Entity {
     world
-        .spawn((
-            recipe_to_binding(recipe),
-            BindingOf(action),
-            super::modes::OrbitCamInputInstallationOf(camera),
-        ))
+        .spawn((binding, BindingOf(action), installation, modifier))
         .id()
 }
 
-const fn recipe_to_binding(recipe: BindingRecipe) -> Binding {
-    match recipe {
-        BindingRecipe::Key(key) => Binding::Keyboard {
-            key,
-            mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-        },
-        BindingRecipe::MouseButton(button) => Binding::MouseButton {
-            button,
-            mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-        },
-        BindingRecipe::MouseMotion => Binding::MouseMotion {
-            mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-        },
-        BindingRecipe::MouseWheel => Binding::MouseWheel {
-            mod_keys: bevy_enhanced_input::prelude::ModKeys::empty(),
-        },
-        BindingRecipe::GamepadButton(button) => Binding::GamepadButton(button),
-        BindingRecipe::GamepadAxis(axis) => Binding::GamepadAxis(axis),
-        BindingRecipe::None => Binding::None,
-    }
+fn spawn_swizzled_binding(
+    world: &mut World,
+    action: Entity,
+    installation: super::modes::OrbitCamInputInstallationOf,
+    binding: Binding,
+) -> Entity {
+    world
+        .spawn((binding, BindingOf(action), installation, SwizzleAxis::YXZ))
+        .id()
+}
+
+fn spawn_swizzled_modified_binding(
+    world: &mut World,
+    action: Entity,
+    installation: super::modes::OrbitCamInputInstallationOf,
+    binding: Binding,
+    modifier: Negate,
+) -> Entity {
+    world
+        .spawn((
+            binding,
+            BindingOf(action),
+            installation,
+            SwizzleAxis::YXZ,
+            modifier,
+        ))
+        .id()
 }
 
 fn held_sources<A: HeldCameraAction>(
@@ -628,6 +793,14 @@ fn recipe_active(
 ) -> bool {
     match recipe {
         BindingRecipe::Key(key) => keyboard.is_some_and(|keyboard| keyboard.pressed(key)),
+        BindingRecipe::CardinalKeys(north, east, south, west) => keyboard.is_some_and(|keyboard| {
+            keyboard.pressed(north)
+                || keyboard.pressed(east)
+                || keyboard.pressed(south)
+                || keyboard.pressed(west)
+        }),
+        BindingRecipe::BidirectionalKeys(positive, negative) => keyboard
+            .is_some_and(|keyboard| keyboard.pressed(positive) || keyboard.pressed(negative)),
         BindingRecipe::MouseButton(button) => {
             mouse_buttons.is_some_and(|buttons| buttons.pressed(button))
         },
@@ -635,6 +808,8 @@ fn recipe_active(
         | BindingRecipe::MouseWheel
         | BindingRecipe::GamepadButton(_)
         | BindingRecipe::GamepadAxis(_)
+        | BindingRecipe::GamepadAxes2d(..)
+        | BindingRecipe::BidirectionalGamepadButtons(..)
         | BindingRecipe::None => false,
     }
 }

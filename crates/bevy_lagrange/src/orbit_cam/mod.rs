@@ -167,23 +167,19 @@ pub struct OrbitCam {
     /// Defaults to `None`.
     pub pitch:               Option<f32>,
     /// The target focus point. The camera will smoothly transition to this value. Updated
-    /// automatically, but you can also update it manually to control the camera independently of
-    /// the mouse controls, e.g. with the keyboard.
+    /// automatically, but you can also update it directly for programmatic camera motion.
     /// Defaults to `Vec3::ZERO`.
     pub target_focus:        Vec3,
     /// The target yaw value. The camera will smoothly transition to this value. Updated
-    /// automatically, but you can also update it manually to control the camera independently of
-    /// the mouse controls, e.g. with the keyboard.
+    /// automatically, but you can also update it directly for programmatic camera motion.
     /// Defaults to `0.0`.
     pub target_yaw:          f32,
     /// The target pitch value. The camera will smoothly transition to this value Updated
-    /// automatically, but you can also update it manually to control the camera independently of
-    /// the mouse controls, e.g. with the keyboard.
+    /// automatically, but you can also update it directly for programmatic camera motion.
     /// Defaults to `0.0`.
     pub target_pitch:        f32,
     /// The target radius value. The camera will smoothly transition to this value. Updated
-    /// automatically, but you can also update it manually to control the camera independently of
-    /// the mouse controls, e.g. with the keyboard.
+    /// automatically, but you can also update it directly for programmatic camera motion.
     /// Defaults to `1.0`.
     pub target_radius:       f32,
     /// Upper limit on the `yaw` value, in radians. Use this to restrict the maximum rotation

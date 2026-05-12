@@ -103,6 +103,18 @@ impl ManualInputSource {
         }
     }
 
+    /// Creates a manual source token for keyboard-driven app code.
+    #[must_use]
+    pub const fn observed_keyboard() -> Self {
+        Self::with_sources(CameraInteractionSources::KEYBOARD)
+    }
+
+    /// Creates a manual source token for gamepad-driven app code.
+    #[must_use]
+    pub const fn observed_gamepad() -> Self {
+        Self::with_sources(CameraInteractionSources::GAMEPAD)
+    }
+
     /// Returns the source set, always including [`CameraInteractionSources::MANUAL`].
     #[must_use]
     pub const fn sources(self) -> CameraInteractionSources { self.sources }

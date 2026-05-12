@@ -39,6 +39,8 @@ use bevy::ecs::system::ScheduleSystem;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 pub use bevy_lagrange::OrbitCam;
+pub use camera_control_panel::CameraGuidance;
+pub use camera_control_panel::CameraGuidanceRow;
 
 mod brp_extras;
 mod camera_control_panel;
@@ -107,14 +109,22 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
-    /// Spawn a screen-space panel anchored bottom-right that documents
-    /// `bevy_lagrange::OrbitCam` mouse and trackpad controls.
+    /// Spawn a static screen-space panel anchored bottom-right that documents
+    /// the default `bevy_lagrange::OrbitCam` controls.
     ///
     /// Pulls in `DiegeticUiPlugin` and `MeshPickingPlugin` if not already
     /// present.
     #[must_use]
     pub fn with_camera_control_panel(mut self) -> Self {
         camera_control_panel::install(&mut self.app);
+        self
+    }
+
+    /// Enable data-driven camera guidance panels for cameras that carry
+    /// [`CameraGuidance`].
+    #[must_use]
+    pub fn with_camera_guidance_panel(mut self) -> Self {
+        camera_control_panel::install_guidance(&mut self.app);
         self
     }
 
@@ -143,6 +153,13 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Mirror of [`App::insert_resource`].
+    #[must_use]
+    pub fn insert_resource<R: Resource>(mut self, resource: R) -> Self {
+        self.app.insert_resource(resource);
+        self
+    }
+
     /// Run the configured app. Mirror of [`App::run`].
     pub fn run(mut self) -> AppExit { self.app.run() }
 
@@ -154,15 +171,34 @@ impl<S> SprinkleBuilder<S> {
 // State transition: `NoOrbitCam` → `WithOrbitCam`.
 impl SprinkleBuilder<NoOrbitCam> {
     /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
-    /// Defaults to MMB orbit, Shift+MMB pan, scroll zoom, and Blender-like
-    /// trackpad input (Shift+scroll pan, Ctrl+scroll zoom, pinch zoom). The
-    /// caller's `configure` closure runs after defaults so it can set
-    /// `focus`, `radius`, `yaw`, `pitch`, or override the default buttons.
+    /// The caller's `configure` closure can set `focus`, `radius`, `yaw`,
+    /// `pitch`, sensitivity, limits, or other camera behavior fields. Input
+    /// uses `OrbitCamPreset::SimpleMouse` unless another input-mode component
+    /// is inserted.
     pub fn with_orbit_cam_configured<F>(mut self, configure: F) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
     {
         orbit_cam::install_with(&mut self.app, configure);
+        SprinkleBuilder {
+            app:    self.app,
+            _state: PhantomData,
+        }
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
+    /// insert extra camera-side components such as `OrbitCamPreset`,
+    /// `OrbitCamBindings`, `OrbitCamManual`, or [`CameraGuidance`].
+    pub fn with_orbit_cam_bundle<F, B>(
+        mut self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        orbit_cam::install_with_bundle(&mut self.app, configure, bundle);
         SprinkleBuilder {
             app:    self.app,
             _state: PhantomData,

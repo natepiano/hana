@@ -1203,6 +1203,7 @@ dependencies = [
  "bevy_kana 0.0.5",
  "bevy_window_manager",
  "bitflags 2.11.0",
+ "fairy_dust",
  "float-cmp",
 ]
 

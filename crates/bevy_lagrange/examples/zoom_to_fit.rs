@@ -1,17 +1,17 @@
 //! Demonstrates `ZoomToFit`, `LookAt`, and `LookAtAndZoomToFit`.
 //!
 //! Controls:
-//!   Space — `ZoomToFit` the cube (frames without changing look direction)
-//!   L     — `LookAt` the cube (rotates camera in place)
-//!   K     — `LookAtAndZoomToFit` the cube (rotates + frames)
-//!   D     — Toggle debug overlay
-//!   R     — Reset camera to starting position
+//!   Space - `ZoomToFit` the cube (frames without changing look direction)
+//!   L     - `LookAt` the cube (rotates camera in place)
+//!   K     - `LookAtAndZoomToFit` the cube (rotates + frames)
+//!   D     - Toggle debug overlay
+//!   R     - Reset camera to starting position
 //!
 //! Compare K vs Space: both frame the target, but `LookAtAndZoomToFit` also
 //! changes the orbit focus to the target, while `ZoomToFit` keeps the
 //! current focus and only adjusts radius.
 
-mod constants;
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -30,19 +30,20 @@ use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
-use crate::constants::FIT_DURATION;
-use crate::constants::FIT_MARGIN;
-use crate::constants::GROUND_COLOR;
-use crate::constants::GROUND_SIZE;
-use crate::constants::LIGHT_TRANSLATION;
-use crate::constants::LOOK_AT_DURATION;
-use crate::constants::REFERENCE_CUBE_COLOR;
-use crate::constants::REFERENCE_CUBE_SIZE;
-use crate::constants::REFERENCE_CUBE_TRANSLATION;
-use crate::constants::START_POS;
-use crate::constants::TARGET_COLOR;
-use crate::constants::TARGET_SIZE;
-use crate::constants::TARGET_TRANSLATION;
+const FIT_DURATION: Duration = Duration::from_millis(800);
+const FIT_MARGIN: f32 = 0.15;
+const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
+
+const START_POS: Vec3 = Vec3::new(0.0, 1.5, 3.0);
+const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
+const GROUND_SIZE: f32 = 10.0;
+const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+const REFERENCE_CUBE_COLOR: Color = Color::srgb(0.5, 0.5, 0.5);
+const REFERENCE_CUBE_SIZE: Vec3 = Vec3::splat(0.5);
+const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.25, 0.0);
+const TARGET_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const TARGET_SIZE: Vec3 = Vec3::splat(1.0);
+const TARGET_TRANSLATION: Vec3 = Vec3::new(3.5, 0.5, 0.0);
 
 #[derive(Component)]
 struct Target;

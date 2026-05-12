@@ -2,8 +2,24 @@
 //!
 //! # Quick Start
 //!
-//! App-authored manual camera input should write [`OrbitCamInput`] through
+//! `OrbitCam` defaults to [`OrbitCamPreset::SimpleMouse`]. Insert
+//! [`OrbitCamPreset::BlenderLike`] for editor-style navigation, insert
+//! [`OrbitCamBindings`] when your app owns a keymap or gamepad mapping, or
+//! insert [`OrbitCamManual`] when your app computes camera intent itself.
+//!
+//! App-authored manual camera input should write through
 //! [`OrbitCamManualInputWriter`] in [`OrbitCamInputPhase::WriteManual`].
+//! Preset and custom binding input is finalized before the controller runs and
+//! emits [`OrbitCamInteractionStarted`], [`OrbitCamInteractionEnded`], and
+//! [`OrbitCamInteractionSourcesChanged`] with source attribution.
+//!
+//! Surface metrics are derived into the resolved input route each frame.
+//! An explicit [`CameraInputSurfaceMetrics`] component overrides only the
+//! fields it provides, which is useful for render-to-texture and editor-panel
+//! cameras whose logical input surface differs from the rendered camera view.
+//! Mouse-like and keyboard held interactions keep their owner while held.
+//! Gamepad and touch source attribution is reported today; selected-gamepad
+//! and touch-owner latching are future routing policy work.
 //!
 //! [`OrbitCamInputPhase::WriteManual`]: crate::OrbitCamInputPhase::WriteManual
 

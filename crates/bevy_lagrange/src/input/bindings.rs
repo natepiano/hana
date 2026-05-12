@@ -558,6 +558,10 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
 pub enum BindingRecipe {
     /// Keyboard key binding.
     Key(KeyCode),
+    /// Four keyboard keys captured as positive Y, positive X, negative Y, negative X.
+    CardinalKeys(KeyCode, KeyCode, KeyCode, KeyCode),
+    /// Two keyboard keys captured as positive and negative 1D values.
+    BidirectionalKeys(KeyCode, KeyCode),
     /// Mouse button binding.
     MouseButton(MouseButton),
     /// Mouse motion binding.
@@ -568,6 +572,10 @@ pub enum BindingRecipe {
     GamepadButton(GamepadButton),
     /// Gamepad axis binding.
     GamepadAxis(GamepadAxis),
+    /// Two gamepad axes captured as X and Y.
+    GamepadAxes2d(GamepadAxis, GamepadAxis),
+    /// Two analog gamepad buttons captured as positive and negative 1D values.
+    BidirectionalGamepadButtons(GamepadButton, GamepadButton),
     /// Empty binding.
     None,
 }

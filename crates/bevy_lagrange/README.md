@@ -18,7 +18,8 @@ A camera controller for [Bevy](https://bevyengine.org) that combines smooth orbi
 - Zoom-to-fit, look-at, and queued camera animations with easing
 - Event-driven control with full lifecycle events for sequencing
 - Orthographic and perspective projection, multi-viewport, render-to-texture
-- Touch, trackpad, and `bevy_egui` support
+- Preset, custom, and manual input modes with source-attributed interaction events
+- Touch, trackpad, keyboard, gamepad, and `bevy_egui` support
 - Debug overlay for fit targets (optional `fit_overlay` feature)
 
 ## Quick Start
@@ -58,6 +59,12 @@ Default mouse controls:
 | Right Mouse | Pan |
 | Scroll Wheel | Zoom |
 
+The default input mode is `OrbitCamPreset::SimpleMouse`. Insert
+`OrbitCamPreset::BlenderLike` for middle-mouse editor navigation, use
+`OrbitCamBindings` for app-owned keymaps or gamepad mappings, and use
+`OrbitCamManual` with `OrbitCamManualInputWriter` only when your app computes
+orbit, pan, or zoom intent itself.
+
 Default touch controls:
 
 | Input | Action |
@@ -66,7 +73,8 @@ Default touch controls:
 | Two fingers | Pan |
 | Pinch | Zoom |
 
-All controls are configurable via `OrbitCam` fields — buttons, modifiers, sensitivity, smoothness, and limits.
+Camera behavior such as sensitivity, smoothing, limits, and projection handling
+stays on `OrbitCam`. User input bindings live on input-mode components.
 
 ## Event-Driven Camera Control
 

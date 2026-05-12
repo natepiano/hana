@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Replaced legacy raw `OrbitCam` input fields with input-mode components:
+  `OrbitCamPreset`, `OrbitCamBindings`, and `OrbitCamManual`.
+- Replaced manual active-camera setup for render-to-texture with
+  `CameraInputRoutingConfig::explicit(...)` plus logical `CameraInputSurfaceMetrics`.
+- Replaced keyboard target-mutation examples with `OrbitCamBindings` and
+  `OrbitCamManualInputWriter` examples for user input.
+
+### Added
+- Source-attributed camera interaction lifecycle events and
+  `OrbitCamInteractionState`.
+- Teaching examples for SimpleMouse, BlenderLike, keyboard bindings, gamepad
+  bindings, manual input, and custom bindings.
+
 ## [0.0.3] - 2026-04-15
 
 ### Changed

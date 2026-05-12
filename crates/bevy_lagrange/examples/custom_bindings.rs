@@ -1,10 +1,10 @@
-//! Demonstrates common configuration options,
-//! and how to modify them at runtime
+//! Demonstrates custom camera bindings and runtime input disabling.
 //!
 //! Controls:
-//!   Orbit: Middle click
-//!   Pan: Shift + Middle click
-//!   Zoom: Mousewheel OR Right click + move mouse up/down
+//!   Orbit: Middle mouse drag
+//!   Pan: Right mouse drag
+//!   Zoom: Mousewheel OR back-button drag up/down
+//!   Toggle input: T
 
 use std::f32::consts::TAU;
 
@@ -46,14 +46,14 @@ const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
 const GROUND_SIZE: f32 = 5.0;
 const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
 
-fn advanced_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
+fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
     OrbitCamBindings::builder()
         .held_mouse_orbit(MouseButton::Middle)
-        .held_mouse_pan(MouseButton::Middle)
+        .held_mouse_pan(MouseButton::Right)
         .wheel_from_preset(OrbitCamPreset::BlenderLike)
         .touch(Some(OrbitCamTouchBinding::TwoFingerOrbit))
         .button_drag_zoom(Some(OrbitCamButtonDragZoomBinding {
-            button: MouseButton::Right,
+            button: MouseButton::Back,
             axis:   OrbitCamButtonDragZoomAxis::Y,
         }))
         .zoom_direction(ZoomDirection::Reversed)
@@ -96,8 +96,8 @@ fn setup(
         Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera
-    let Ok(bindings) = advanced_bindings() else {
-        error!("advanced camera bindings failed to validate");
+    let Ok(bindings) = custom_bindings() else {
+        error!("custom camera bindings failed to validate");
         return;
     };
     commands.spawn((

@@ -4508,7 +4508,7 @@ Done when:
 - Phase 10 now decides whether diagnostics expose concrete blocker causes such as
   disabled camera, inactive camera, egui focus, and animation-ignore blockers.
 
-### 09-examples-guidance-and-doc-cleanup
+### 09-examples-guidance-and-doc-cleanup (Complete)
 
 Goal: add the teaching examples and visual feedback requested by the new API.
 
@@ -4563,6 +4563,54 @@ Done when:
 - Guidance and docs do not imply stable gamepad or touch owner latching; they describe
   those as future selected-device or touch-owner policy work.
 
+### Retrospective
+
+**What worked:**
+
+- `fairy_dust::CameraGuidance` now drives live guidance panels from
+  `OrbitCamInteractionState` and interaction lifecycle observers.
+- Separate examples now cover `OrbitCamPreset`, `OrbitCamBindings`,
+  `OrbitCamManual`, custom bindings, render-to-texture routing, and zoom-to-fit.
+
+**What deviated from the plan:**
+
+- Keyboard and gamepad examples needed additive `BindingRecipe` variants for cardinal
+  keys, bidirectional keys, 2D gamepad axes, and bidirectional analog buttons.
+- `advanced.rs` became `custom_bindings.rs`, `keyboard_controls.rs` was removed, and
+  `zoom_to_fit` was collapsed into `zoom_to_fit.rs`.
+
+**Surprises:**
+
+- `bevy_lagrange` examples can dev-depend on `fairy_dust` without a Cargo cycle even
+  though `fairy_dust` depends on `bevy_lagrange`.
+- Named-field `BindingRecipe` variants interacted poorly with `Reflect` under clippy,
+  so the new recipe variants are tuple-style.
+
+**Implications for remaining phases:**
+
+- Phase 10 should test the new multi-binding `BindingRecipe` variants, not only the
+  older single-key and single-axis paths.
+- Phase 10 should include a quick stale-example audit for removed example names and
+  renamed `custom_bindings.rs` references.
+
+### Phase 9 Review
+
+- Phase 10 now explicitly tests the new tuple-style multi-binding `BindingRecipe`
+  variants through installation and ECS resolver behavior.
+- Phase 10 adapter coverage is narrowed away from already-covered mouse, wheel,
+  scroll, pinch, touch, single keyboard, single gamepad, manual bypass, and gating
+  paths and toward new variant coverage plus cross-system integration.
+- Phase 10 now treats gamepad/touch latch cleanup as a required gate before closing
+  lifecycle coverage: either remove speculative internal fields or test the current
+  non-latching behavior.
+- Phase 10 diagnostics are narrowed to concrete internal diagnostics and implemented
+  log/event behavior unless a separate diagnostics implementation is intentionally
+  added.
+- Phase 10 stale-example cleanup is a targeted manifest/doc/reference audit for
+  removed and renamed examples, not another broad migration pass.
+- Phase 10 workspace consumer validation now explicitly includes `fairy_dust`
+  guidance and bundle camera setup paths.
+
 ### 10-tests-diagnostics-and-cleanup
 
 Goal: harden the cutover and remove leftover transitional code.
@@ -4571,8 +4619,11 @@ Scope:
 
 - Add ECS-only tests for scheduling invariants, descriptor apply, reconciliation,
   input-mode exclusivity, routing, blockers, lifecycle events, latch recovery,
-  adapter behavior, manual writes, interrupt policies, workspace consumers, and
-  dependency versioning.
+  focused adapter behavior, manual writes, interrupt policies, workspace consumers,
+  and dependency versioning.
+- Add ECS installation and resolver coverage for the phase 09 tuple-style
+  `BindingRecipe` variants: `CardinalKeys`, `BidirectionalKeys`, `GamepadAxes2d`,
+  and `BidirectionalGamepadButtons`.
 - Do not repeat the phase 07 unit coverage for held transitions, same-frame impulses,
   manual zero-delta activity, blocker clearing, metric drops, latch routing, stale
   latch recovery, or pinch suppression. Phase 10 lifecycle coverage should focus on
@@ -4590,22 +4641,30 @@ Scope:
   speculative gamepad/touch fields from the internal latch resource.
 - Do not duplicate the phase 03 pure binding-validator unit tests. Phase 10 binding
   coverage should focus on descriptor apply, installation replacement, ECS resolver
-  behavior, and integration with routing/lifecycle/blockers.
+  behavior, new multi-binding recipe variants, and integration with
+  routing/lifecycle/blockers.
 - Do not duplicate the phase 04 unit tests for default preset restoration, manual
   precedence, descriptor success/rejection, and manual-writer filtering unless later
   routing, lifecycle, or resolver integration changes those behaviors.
 - Add the `enhanced_input_scheduling_invariant` test.
-- Add regression coverage for live diagnostics in the phase that implements them.
-  Phase 05 added routing/blocker resources and tests. Phase 06 added only basic
-  adapter count diagnostics, so phase 10 either expands diagnostics for missing
-  context activation, enhanced-input API-shape checks, and adapter visibility, or
-  narrows diagnostics tests to the concrete diagnostics that exist by then.
+- Add regression coverage only for diagnostics that concretely exist by phase 10.
+  Phase 05 added routing/blocker resources and tests, and phase 06 added private
+  adapter count/gated-camera diagnostics. Do not create tests that imply a public
+  startup-diagnostics or blocker-cause API unless phase 10 intentionally implements
+  that API first.
 - Decide whether diagnostics expose concrete phase 08 blocker causes, including
   disabled cameras, inactive cameras, egui focus, and animation-ignore blockers. If
   those causes remain internal-only, diagnostics tests should not imply a public
   blocker-cause API exists.
 - Add strict startup diagnostic tests for schedule/plugin/context/enhanced-input API
-  assumptions only after those diagnostics exist.
+  assumptions only after those diagnostics exist; otherwise keep the phase 10
+  diagnostics pass scoped to private diagnostics and documented log/event behavior.
+- Audit manifests and docs for stale references to removed or renamed examples:
+  `advanced.rs`, `keyboard_controls.rs`, the old `zoom_to_fit/` directory example,
+  and the new `custom_bindings.rs` name.
+- Treat `fairy_dust` as a workspace consumer of the public input API. Validation
+  should compile the guidance panel, lifecycle/source-flag consumption, and
+  bundle-based orbit-camera setup paths.
 - Remove any internal compatibility scaffolding used only to keep phases 01-07
   side-by-side with legacy input.
 
@@ -4618,6 +4677,9 @@ Done when:
   compatibility modules.
 - The test suite covers the event, routing, schedule, adapter, descriptor, and manual
   input invariants described in this plan.
+- The new multi-binding `BindingRecipe` variants are covered by ECS resolver tests.
+- Stale example names and old `zoom_to_fit` paths are absent from manifests and
+  user-facing docs.
 - Feature-gated descriptor tooling tests run separately from always-on runtime mode
   tests so `--no-default-features` remains meaningful.
 

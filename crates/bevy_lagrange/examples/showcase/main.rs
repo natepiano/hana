@@ -160,7 +160,7 @@ fn setup(
 ) {
     let ground = scene::spawn_scene_objects(&mut commands, &mut meshes, &mut materials);
 
-    // Camera (middle-click orbit, shift+middle pan, trackpad support)
+    // Camera using the default SimpleMouse input preset.
     let camera = commands
         .spawn(OrbitCam {
             yaw: Some(CAMERA_START_YAW),

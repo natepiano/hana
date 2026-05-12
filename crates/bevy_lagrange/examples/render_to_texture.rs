@@ -1,8 +1,9 @@
-//! Demonstrates the ability to manually override which instance of `OrbitCam` receives input
-//! events, which is necessary when rendering to a texture/image instead of a window/viewport.
+//! Demonstrates explicit camera input routing for an `OrbitCam` that renders to a texture/image
+//! instead of a window viewport.
 //!
-//! In this example, input controls the camera that is rendering the texture applied to the cube,
-//! rather than the main window camera.
+//! In this example, Bevy input is routed to the camera that renders the texture applied to the
+//! cube, rather than the main window camera. The camera still uses normal preset/custom input;
+//! explicit routing only chooses which camera receives that input.
 //!
 //! This example is based off Bevy's `render_to_texture` example.
 
@@ -147,6 +148,9 @@ fn setup(
             Transform::from_translation(FIRST_PASS_CAMERA_TRANSLATION)
                 .looking_at(Vec3::ZERO, Vec3::Y),
             OrbitCam::default(),
+            // Logical camera-view and input-surface sizes replace the old active-camera
+            // bookkeeping path. Use image texel dimensions only when the image grid is the
+            // interaction surface.
             CameraInputSurfaceMetrics::camera_view_and_input_surface(
                 Vec2::new(size.width.to_f32(), size.height.to_f32()),
                 Vec2::new(primary_window.width(), primary_window.height()),
