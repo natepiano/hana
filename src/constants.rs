@@ -5,6 +5,12 @@
 pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
 pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
 
+// monitor detection
+pub(crate) const MONITOR_SOURCE_EXISTING: &str = "existing";
+pub(crate) const MONITOR_SOURCE_FALLBACK: &str = "fallback";
+pub(crate) const MONITOR_SOURCE_POSITION: &str = "position";
+pub(crate) const MONITOR_SOURCE_WINIT: &str = "winit";
+
 // monitor selection
 pub(crate) const PRIMARY_MONITOR_INDEX: usize = 0;
 
@@ -16,6 +22,10 @@ pub(crate) const STATE_FILE: &str = "windows.ron";
 // platform
 #[cfg(target_os = "linux")]
 pub(crate) const WAYLAND_DISPLAY_ENV_VAR: &str = "WAYLAND_DISPLAY";
+
+// restore strategy
+pub(crate) const RESTORE_STRATEGY_APPLY_UNCHANGED: &str = "ApplyUnchanged";
+pub(crate) const RESTORE_STRATEGY_LOWER_TO_HIGHER: &str = "LowerToHigher";
 
 // scale factor
 /// Fallback scale factor when the monitor cannot be determined.

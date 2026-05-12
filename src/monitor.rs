@@ -15,6 +15,10 @@ use super::ManagedWindow;
 use super::monitors::CurrentMonitor;
 use super::monitors::MonitorInfo;
 use super::monitors::Monitors;
+use crate::constants::MONITOR_SOURCE_EXISTING;
+use crate::constants::MONITOR_SOURCE_FALLBACK;
+use crate::constants::MONITOR_SOURCE_POSITION;
+use crate::constants::MONITOR_SOURCE_WINIT;
 
 /// Unified monitor detection system. Maintains `CurrentMonitor` on all managed windows.
 ///
@@ -47,10 +51,10 @@ pub(crate) fn update_current_monitor(
         };
 
         let (monitor_info, source) = match (winit_result, position_result, existing) {
-            (Some(info), _, _) => (info, "winit"),
-            (_, Some(info), _) => (info, "position"),
-            (_, _, Some(current_monitor)) => (current_monitor.monitor, "existing"),
-            _ => (*monitors.first(), "fallback"),
+            (Some(info), _, _) => (info, MONITOR_SOURCE_WINIT),
+            (_, Some(info), _) => (info, MONITOR_SOURCE_POSITION),
+            (_, _, Some(current_monitor)) => (current_monitor.monitor, MONITOR_SOURCE_EXISTING),
+            _ => (*monitors.first(), MONITOR_SOURCE_FALLBACK),
         };
 
         // Compute effective mode

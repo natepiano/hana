@@ -42,13 +42,16 @@ pub(crate) fn compensate_target_position(
             continue;
         };
 
-        let Some(frame_top) = query_frame_top_for_entity(entity) else {
+        let Some(physical_frame_top) = query_frame_top_for_entity(entity) else {
             continue;
         };
 
-        let physical_compensated = IVec2::new(physical_position.x, physical_position.y - frame_top);
+        let physical_compensated = IVec2::new(
+            physical_position.x,
+            physical_position.y - physical_frame_top,
+        );
         info!(
-            "[W6] Compensating position: {physical_position:?} -> {physical_compensated:?} (frame_top={frame_top})"
+            "[W6] Compensating position: {physical_position:?} -> {physical_compensated:?} (physical_frame_top={physical_frame_top})"
         );
         target.physical_position = Some(physical_compensated);
         commands.entity(entity).insert(X11FrameCompensated);

@@ -13,6 +13,8 @@ use bevy_kana::ToU32;
 use super::settle_state::SettleState;
 use super::winit_info::X11FrameCompensated;
 use crate::Platform;
+use crate::constants::RESTORE_STRATEGY_APPLY_UNCHANGED;
+use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
 use crate::constants::SCALE_FACTOR_EPSILON;
 use crate::monitors::MonitorInfo;
 use crate::monitors::Monitors;
@@ -35,7 +37,7 @@ pub struct ResolvedMonitor<'a> {
 #[must_use]
 pub fn resolve_target_monitor_and_position(
     saved_monitor_index: usize,
-    saved_position: Option<(i32, i32)>,
+    logical_saved_position: Option<(i32, i32)>,
     monitors: &Monitors,
 ) -> ResolvedMonitor<'_> {
     monitors.by_index(saved_monitor_index).map_or_else(
@@ -46,7 +48,7 @@ pub fn resolve_target_monitor_and_position(
         },
         |info| ResolvedMonitor {
             info,
-            logical_position: saved_position,
+            logical_position: logical_saved_position,
             source: MonitorResolutionSource::Requested,
         },
     )
@@ -246,8 +248,8 @@ impl TargetPosition {
 pub fn compute_target_position(
     saved_state: &WindowState,
     target_info: &MonitorInfo,
-    fallback_position: Option<(i32, i32)>,
-    decoration: UVec2,
+    logical_fallback_position: Option<(i32, i32)>,
+    physical_decoration: UVec2,
     starting_scale: f64,
     platform: Platform,
 ) -> TargetPosition {
@@ -258,9 +260,9 @@ pub fn compute_target_position(
     let physical_width = (f64::from(saved_state.logical_width) * target_scale).to_u32();
     let physical_height = (f64::from(saved_state.logical_height) * target_scale).to_u32();
 
-    let physical_outer_width = physical_width + decoration.x;
-    let physical_outer_height = physical_height + decoration.y;
-    let physical_position = fallback_position.map(|(x, y)| {
+    let physical_outer_width = physical_width + physical_decoration.x;
+    let physical_outer_height = physical_height + physical_decoration.y;
+    let physical_position = logical_fallback_position.map(|(x, y)| {
         // Convert logical position to physical using the target monitor's scale factor.
         let physical_x = (f64::from(x) * target_scale).round().to_i32();
         let physical_y = (f64::from(y) * target_scale).round().to_i32();
@@ -276,7 +278,7 @@ pub fn compute_target_position(
 
     TargetPosition {
         physical_position,
-        logical_position: fallback_position.map(|(x, y)| IVec2::new(x, y)),
+        logical_position: logical_fallback_position.map(|(x, y)| IVec2::new(x, y)),
         physical_size: UVec2::new(physical_width, physical_height),
         logical_size: UVec2::new(saved_state.logical_width, saved_state.logical_height),
         target_scale,
@@ -309,17 +311,19 @@ fn clamp_position_to_monitor(
     platform: Platform,
 ) -> IVec2 {
     if platform.should_clamp_position() {
-        let monitor_right = target_info.physical_position.x + target_info.physical_size.x.to_i32();
-        let monitor_bottom = target_info.physical_position.y + target_info.physical_size.y.to_i32();
+        let physical_monitor_right =
+            target_info.physical_position.x + target_info.physical_size.x.to_i32();
+        let physical_monitor_bottom =
+            target_info.physical_position.y + target_info.physical_size.y.to_i32();
 
         let mut physical_x = physical_saved_x;
         let mut physical_y = physical_saved_y;
 
-        if physical_x + physical_outer_width.to_i32() > monitor_right {
-            physical_x = monitor_right - physical_outer_width.to_i32();
+        if physical_x + physical_outer_width.to_i32() > physical_monitor_right {
+            physical_x = physical_monitor_right - physical_outer_width.to_i32();
         }
-        if physical_y + physical_outer_height.to_i32() > monitor_bottom {
-            physical_y = monitor_bottom - physical_outer_height.to_i32();
+        if physical_y + physical_outer_height.to_i32() > physical_monitor_bottom {
+            physical_y = physical_monitor_bottom - physical_outer_height.to_i32();
         }
         physical_x = physical_x.max(target_info.physical_position.x);
         physical_y = physical_y.max(target_info.physical_position.y);
@@ -654,7 +658,7 @@ fn try_apply_restore(
                 window,
                 target.physical_position,
                 target.physical_size,
-                "ApplyUnchanged",
+                RESTORE_STRATEGY_APPLY_UNCHANGED,
                 None,
                 target.monitor_index,
             );
@@ -681,7 +685,7 @@ fn try_apply_restore(
                 window,
                 target.compensated_position(),
                 target.compensated_size(),
-                "LowerToHigher",
+                RESTORE_STRATEGY_LOWER_TO_HIGHER,
                 Some(target.ratio()),
                 target.monitor_index,
             );

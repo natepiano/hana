@@ -28,16 +28,16 @@ struct WindowDecoration {
 #[derive(Resource)]
 pub struct WinitInfo {
     starting_monitor_index: usize,
-    decoration:             WindowDecoration,
+    window_decoration:      WindowDecoration,
 }
 
 impl WinitInfo {
     /// Get window decoration dimensions as a `UVec2`.
     #[must_use]
-    pub const fn decoration(&self) -> UVec2 {
+    pub const fn physical_decoration(&self) -> UVec2 {
         UVec2::new(
-            self.decoration.physical_width,
-            self.decoration.physical_height,
+            self.window_decoration.physical_width,
+            self.window_decoration.physical_height,
         )
     }
 }
@@ -74,7 +74,7 @@ pub fn init_winit_info(
         if let Some(winit_window) = winit_windows.get_window(*window_entity) {
             let outer = winit_window.outer_size();
             let inner = winit_window.inner_size();
-            let decoration = WindowDecoration {
+            let physical_decoration = WindowDecoration {
                 physical_width:  outer.width.saturating_sub(inner.width),
                 physical_height: outer.height.saturating_sub(inner.height),
             };
@@ -114,8 +114,8 @@ pub fn init_winit_info(
 
             debug!(
                 "[init_winit_info] decoration={}x{} position=({}, {}) starting_monitor={starting_monitor_index}",
-                decoration.physical_width,
-                decoration.physical_height,
+                physical_decoration.physical_width,
+                physical_decoration.physical_height,
                 physical_position.x,
                 physical_position.y,
             );
@@ -127,7 +127,7 @@ pub fn init_winit_info(
 
             commands.insert_resource(WinitInfo {
                 starting_monitor_index,
-                decoration,
+                window_decoration: physical_decoration,
             });
         }
     });
@@ -188,7 +188,7 @@ pub fn load_target_position(
         &state,
         resolved.info,
         resolved.logical_position,
-        winit_info.decoration(),
+        winit_info.physical_decoration(),
         starting_scale,
         *platform,
     );

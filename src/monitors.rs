@@ -158,21 +158,22 @@ impl Monitors {
         self.list
             .iter()
             .min_by_key(|monitor| {
-                let right = monitor.physical_position.x + monitor.physical_size.x.to_i32();
-                let bottom = monitor.physical_position.y + monitor.physical_size.y.to_i32();
+                let physical_right = monitor.physical_position.x + monitor.physical_size.x.to_i32();
+                let physical_bottom =
+                    monitor.physical_position.y + monitor.physical_size.y.to_i32();
 
                 let dx = if physical_x < monitor.physical_position.x {
                     monitor.physical_position.x - physical_x
-                } else if physical_x >= right {
-                    physical_x - right + 1
+                } else if physical_x >= physical_right {
+                    physical_x - physical_right + 1
                 } else {
                     0
                 };
 
                 let dy = if physical_y < monitor.physical_position.y {
                     monitor.physical_position.y - physical_y
-                } else if physical_y >= bottom {
-                    physical_y - bottom + 1
+                } else if physical_y >= physical_bottom {
+                    physical_y - physical_bottom + 1
                 } else {
                     0
                 };

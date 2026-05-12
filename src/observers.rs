@@ -331,7 +331,7 @@ fn restore_managed_window(
         );
     }
 
-    let decoration = winit_info.decoration();
+    let physical_decoration = winit_info.physical_decoration();
 
     // The window is created on the focused window's monitor (the primary window's monitor)
     // without explicit positioning. Its starting scale matches the primary monitor, not the
@@ -340,7 +340,7 @@ fn restore_managed_window(
         saved_state,
         resolved.info,
         resolved.logical_position,
-        decoration,
+        physical_decoration,
         primary_scale,
         platform,
     );
