@@ -1,6 +1,13 @@
+use std::cmp::Ordering;
 use std::fmt::Write as _;
+use std::fs::create_dir_all;
 use std::fs::File;
+use std::io::Error;
 use std::io::Write as _;
+use std::path::Path;
+use std::process::Command;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use bevy::prelude::*;
 use bevy_kana::ToF64;
@@ -52,7 +59,7 @@ impl ScenarioResult {
 }
 
 pub(super) fn compute_statistics(name: &str, frame_times: &mut [f64]) -> ScenarioResult {
-    frame_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    frame_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
 
     let len = frame_times.len();
     let sum: f64 = frame_times.iter().sum();
@@ -122,12 +129,12 @@ pub(super) fn write_results(results: &[ScenarioResult]) {
 }
 
 fn format_timestamp() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    let output = std::process::Command::new(DATE_COMMAND)
+    let output = Command::new(DATE_COMMAND)
         .args([
             DATE_COMMAND_ARG_REFERENCE_TIME,
             &now.to_string(),
@@ -141,9 +148,9 @@ fn format_timestamp() -> String {
     }
 }
 
-fn write_csv(results: &[ScenarioResult]) -> Result<String, std::io::Error> {
-    let results_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULTS_DIRECTORY_NAME);
-    std::fs::create_dir_all(&results_dir)?;
+fn write_csv(results: &[ScenarioResult]) -> Result<String, Error> {
+    let results_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(RESULTS_DIRECTORY_NAME);
+    create_dir_all(&results_dir)?;
 
     let timestamp = format_timestamp();
     let path = results_dir.join(format!(

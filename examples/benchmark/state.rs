@@ -1,3 +1,5 @@
+use std::env::var;
+
 use bevy::prelude::*;
 use bevy_kana::ToUsize;
 use bevy_liminal::OutlineMethod;
@@ -60,7 +62,7 @@ pub(super) struct BenchmarkState {
 
 impl BenchmarkState {
     pub(super) fn new() -> Self {
-        let exit_behavior = if std::env::var(AUTO_MODE_ENV_VAR)
+        let exit_behavior = if var(AUTO_MODE_ENV_VAR)
             .is_ok_and(|value| value == AUTO_MODE_ENV_VAR_ENABLED_VALUE)
         {
             ExitBehavior::OnComplete

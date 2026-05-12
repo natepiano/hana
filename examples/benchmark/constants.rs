@@ -107,7 +107,7 @@ pub(super) const DEFAULT_OUTLINE_INTENSITY: f32 = 1.0;
 pub(super) const DEFAULT_OUTLINE_WIDTH: f32 = 5.0;
 
 // scenarios
-pub(crate) const SCENARIOS: &[ScenarioDefinition] = &[
+pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
     ScenarioDefinition {
         name: "Entities1",
         key:  KeyCode::Digit1,

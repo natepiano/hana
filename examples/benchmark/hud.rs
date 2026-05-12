@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 
+use bevy::diagnostic::Diagnostic;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
@@ -119,11 +120,11 @@ fn live_metrics(diagnostics: &DiagnosticsStore) -> LiveMetrics {
     LiveMetrics {
         fps:        diagnostics
             .get(&FrameTimeDiagnosticsPlugin::FPS)
-            .and_then(bevy::diagnostic::Diagnostic::smoothed)
+            .and_then(Diagnostic::smoothed)
             .unwrap_or(0.0),
         frame_time: diagnostics
             .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
-            .and_then(bevy::diagnostic::Diagnostic::smoothed)
+            .and_then(Diagnostic::smoothed)
             .unwrap_or(0.0),
     }
 }

@@ -1,3 +1,5 @@
+use std::process::exit;
+
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
@@ -216,7 +218,7 @@ fn handle_exit_delay_phase(state: &mut BenchmarkState, time: &Time<Real>) {
     state.exit_timer.tick(time.delta());
     if state.exit_timer.just_finished() {
         info!("{}", EXITING_MESSAGE);
-        std::process::exit(0);
+        exit(0);
     }
 }
 

@@ -1,3 +1,5 @@
+use std::f32::consts::FRAC_PI_4;
+
 use bevy::prelude::*;
 
 use crate::constants::CAMERA_LOOK_AT;
@@ -21,7 +23,7 @@ pub(super) fn compute_viewport_info(
 ) -> ViewportInfo {
     let fov = match projection {
         Projection::Perspective(perspective) => perspective.fov,
-        Projection::Orthographic(_) | Projection::Custom(_) => std::f32::consts::FRAC_PI_4,
+        Projection::Orthographic(_) | Projection::Custom(_) => FRAC_PI_4,
     };
 
     let distance = camera_transform.translation.distance(CAMERA_LOOK_AT);

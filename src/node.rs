@@ -109,7 +109,7 @@ impl ViewNode for OutlineNode {
         };
         let mut flood_textures = flood_textures.clone();
         let Some(global_depth) = prepass_textures.depth.as_ref() else {
-            tracing::warn!("No global depth texture found");
+            warn!("No global depth texture found");
             return Ok(());
         };
 

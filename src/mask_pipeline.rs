@@ -193,7 +193,7 @@ impl GetBatchData for MeshMaskPipeline {
         (_, main_entity): (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
-            tracing::error!(
+            error!(
                 "`get_batch_data` should never be called in GPU mesh uniform \
                 building mode"
             );
@@ -230,7 +230,7 @@ impl GetFullBatchData for MeshMaskPipeline {
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
         // This should only be called during GPU building.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            tracing::error!(
+            error!(
                 "`get_index_and_compare_data` should never be called in CPU mesh uniform \
                 building mode"
             );
@@ -250,7 +250,7 @@ impl GetFullBatchData for MeshMaskPipeline {
         main_entity: MainEntity,
     ) -> Option<Self::BufferData> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
-            tracing::error!(
+            error!(
                 "`get_binned_batch_data` should never be called in GPU mesh uniform building mode"
             );
             return None;
@@ -278,7 +278,7 @@ impl GetFullBatchData for MeshMaskPipeline {
     ) -> Option<NonMaxU32> {
         // This should only be called during GPU building.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            tracing::error!(
+            error!(
                 "`get_binned_index` should never be called in CPU mesh uniform \
                 building mode"
             );

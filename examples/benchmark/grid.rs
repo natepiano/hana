@@ -5,6 +5,7 @@ use bevy_kana::ToU32;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineMethod;
 use bevy_liminal::OverlapMode;
+use rand::rng;
 use rand::RngExt;
 
 use crate::constants::DEFAULT_OUTLINE_INTENSITY;
@@ -85,7 +86,7 @@ pub(super) fn spawn_grid(
 }
 
 fn random_outline_color() -> Color {
-    let mut rng = rand::rng();
+    let mut rng = rng();
     Color::srgb(rng.random(), rng.random(), rng.random())
 }
 

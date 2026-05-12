@@ -90,7 +90,7 @@ pub(crate) fn queue_outline(
             }
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(main_entity)
             else {
-                tracing::warn!(
+                warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{NO_MESH_INSTANCE_FOUND_WARNING} {main_entity:?}"
                 );
@@ -100,7 +100,7 @@ pub(crate) fn queue_outline(
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
 
             let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
-                tracing::warn!(
+                warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{NO_MESH_FOUND_WARNING} {main_entity:?}"
                 );
@@ -124,7 +124,7 @@ pub(crate) fn queue_outline(
                 },
                 &mesh.layout,
             ) else {
-                tracing::warn!(
+                warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{FAILED_TO_SPECIALIZE_MESH_PIPELINE_WARNING}"
                 );
@@ -213,7 +213,7 @@ pub(crate) fn queue_hull_outline(
 
             let Some(mesh_instance) = render_mesh_instances.render_mesh_queue_data(main_entity)
             else {
-                tracing::warn!(
+                warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{NO_MESH_INSTANCE_FOUND_WARNING} {main_entity:?}"
                 );
@@ -223,7 +223,7 @@ pub(crate) fn queue_hull_outline(
             let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
 
             let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
-                tracing::warn!(
+                warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{NO_MESH_FOUND_WARNING} {main_entity:?}"
                 );
@@ -248,7 +248,7 @@ pub(crate) fn queue_hull_outline(
                 },
                 &mesh.layout,
             ) else {
-                tracing::warn!(
+                warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{FAILED_TO_SPECIALIZE_HULL_MESH_PIPELINE_WARNING}"
                 );

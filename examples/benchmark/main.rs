@@ -10,6 +10,7 @@ mod tick;
 mod viewport;
 
 use bevy::color::palettes::css::DARK_SEA_GREEN;
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::window::PresentMode;
@@ -54,7 +55,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault))
         .add_plugins(LagrangePlugin)
         .add_plugins(LiminalPlugin)
