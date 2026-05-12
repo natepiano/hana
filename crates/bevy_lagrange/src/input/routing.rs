@@ -92,8 +92,6 @@ impl OrbitCamInputOwnerLatch {
 pub(crate) struct CameraInputSourceLatches {
     mouse:    Option<OrbitCamInputOwnerLatch>,
     keyboard: Option<OrbitCamInputOwnerLatch>,
-    gamepads: HashMap<Entity, OrbitCamInputOwnerLatch>,
-    touches:  HashMap<u64, OrbitCamInputOwnerLatch>,
 }
 
 impl CameraInputSourceLatches {
@@ -135,8 +133,6 @@ impl CameraInputSourceLatches {
         if self.keyboard.is_some_and(|latch| latch.camera() == camera) {
             self.keyboard = None;
         }
-        self.gamepads.retain(|_, latch| latch.camera() != camera);
-        self.touches.retain(|_, latch| latch.camera() != camera);
     }
 
     fn recover_unavailable_latches(&mut self, available_cameras: &[Entity]) {
@@ -155,9 +151,6 @@ impl CameraInputSourceLatches {
             debug!("cleared stale keyboard OrbitCam input latch");
             self.keyboard = None;
         }
-        self.gamepads
-            .retain(|_, latch| is_available(latch.camera()));
-        self.touches.retain(|_, latch| is_available(latch.camera()));
     }
 }
 
@@ -693,6 +686,26 @@ mod tests {
         let resolved = app.world().resource::<ResolvedOrbitCamInputRoute>();
         assert!(resolved.metrics.contains_key(&manual));
         assert_eq!(resolved.routed_camera, Some(routed));
+    }
+
+    #[test]
+    fn explicit_surface_metrics_are_recorded_in_route_resource() {
+        let mut app = test_app();
+        let metrics = CameraInputSurfaceMetrics::camera_view_and_input_surface(
+            Vec2::new(120.0, 80.0),
+            Vec2::new(240.0, 160.0),
+        );
+        let camera = spawn_camera(app.world_mut(), (OrbitCamPreset::SimpleMouse, metrics));
+        app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<ResolvedOrbitCamInputRoute>()
+                .metrics_for(camera),
+            Some(metrics)
+        );
     }
 
     #[test]

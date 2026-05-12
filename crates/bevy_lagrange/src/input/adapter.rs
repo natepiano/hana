@@ -1466,6 +1466,141 @@ mod tests {
     }
 
     #[test]
+    fn cardinal_keyboard_binding_resolves_to_orbit_input() -> TestResult {
+        let mut app = test_app();
+        let arrows = BindingRecipe::CardinalKeys(
+            KeyCode::ArrowUp,
+            KeyCode::ArrowRight,
+            KeyCode::ArrowDown,
+            KeyCode::ArrowLeft,
+        );
+        let binding = HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
+            arrows,
+            arrows,
+            CameraInteractionSources::KEYBOARD,
+            BindingRoutePolicy::NoPosition,
+        )
+        .map_err(|_| "held binding should validate")?;
+        let bindings = OrbitCamBindings::builder()
+            .held_orbit_binding(binding)
+            .wheel(OrbitCamWheelBinding::Disabled)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), bindings);
+        route_to(&mut app, camera);
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::ArrowRight);
+            keyboard.press(KeyCode::ArrowUp);
+        }
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_eq!(input.orbit().pixels(), Vec2::ONE);
+        assert!(input.sources().contains(CameraInteractionSources::KEYBOARD));
+        Ok(())
+    }
+
+    #[test]
+    fn bidirectional_keyboard_binding_resolves_to_smooth_zoom() -> TestResult {
+        let mut app = test_app();
+        let zoom_keys = BindingRecipe::BidirectionalKeys(KeyCode::Equal, KeyCode::Minus);
+        let binding = HeldActionBindingEntry::<OrbitCamZoomSmoothAction>::from_enhanced_input_pair(
+            zoom_keys,
+            zoom_keys,
+            CameraInteractionSources::KEYBOARD,
+            BindingRoutePolicy::NoPosition,
+        )
+        .map_err(|_| "held binding should validate")?;
+        let bindings = OrbitCamBindings::builder()
+            .held_smooth_zoom_binding(binding)
+            .wheel(OrbitCamWheelBinding::Disabled)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), bindings);
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Minus);
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(input.zoom_smooth().amount(), -1.0);
+        assert!(input.sources().contains(CameraInteractionSources::KEYBOARD));
+        Ok(())
+    }
+
+    #[test]
+    fn gamepad_axes2d_binding_resolves_to_orbit_input() -> TestResult {
+        let mut app = test_app();
+        let stick =
+            BindingRecipe::GamepadAxes2d(GamepadAxis::RightStickX, GamepadAxis::RightStickY);
+        let binding = HeldActionBindingEntry::<OrbitCamOrbitAction>::from_enhanced_input_pair(
+            stick,
+            stick,
+            CameraInteractionSources::GAMEPAD,
+            BindingRoutePolicy::NoPosition,
+        )
+        .map_err(|_| "held binding should validate")?;
+        let bindings = OrbitCamBindings::builder()
+            .held_orbit_binding(binding)
+            .gamepad(CameraInputGamepadSelectionPolicy::Active)
+            .wheel(OrbitCamWheelBinding::Disabled)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), bindings);
+        route_to(&mut app, camera);
+        let mut gamepad = Gamepad::default();
+        gamepad.analog_mut().set(GamepadAxis::RightStickX, 0.5);
+        gamepad.analog_mut().set(GamepadAxis::RightStickY, -0.25);
+        app.world_mut().spawn(gamepad);
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_eq!(input.orbit().pixels(), Vec2::new(0.5, -0.25));
+        assert!(input.sources().contains(CameraInteractionSources::GAMEPAD));
+        Ok(())
+    }
+
+    #[test]
+    fn bidirectional_gamepad_buttons_resolve_to_smooth_zoom() -> TestResult {
+        let mut app = test_app();
+        let triggers = BindingRecipe::BidirectionalGamepadButtons(
+            GamepadButton::RightTrigger2,
+            GamepadButton::LeftTrigger2,
+        );
+        let binding = HeldActionBindingEntry::<OrbitCamZoomSmoothAction>::from_enhanced_input_pair(
+            triggers,
+            triggers,
+            CameraInteractionSources::GAMEPAD,
+            BindingRoutePolicy::NoPosition,
+        )
+        .map_err(|_| "held binding should validate")?;
+        let bindings = OrbitCamBindings::builder()
+            .held_smooth_zoom_binding(binding)
+            .gamepad(CameraInputGamepadSelectionPolicy::Active)
+            .wheel(OrbitCamWheelBinding::Disabled)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), bindings);
+        route_to(&mut app, camera);
+        let mut gamepad = Gamepad::default();
+        gamepad.analog_mut().set(GamepadButton::LeftTrigger2, 0.4);
+        gamepad.digital_mut().press(GamepadButton::LeftTrigger2);
+        app.world_mut().spawn(gamepad);
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(input.zoom_smooth().amount(), -0.4);
+        assert!(input.sources().contains(CameraInteractionSources::GAMEPAD));
+        Ok(())
+    }
+
+    #[test]
     fn manual_mode_bypasses_action_resolution() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(app.world_mut(), OrbitCamManual);

@@ -589,3 +589,170 @@ pub(crate) fn process_camera_move_list(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::input::CameraInteractionSources;
+
+    const MOVE_DURATION_MILLIS: u64 = 1_000;
+    const INTERRUPT_DELTA: Vec2 = Vec2::X;
+    const FINAL_FOCUS: Vec3 = Vec3::new(1.0, 2.0, 3.0);
+    const FINAL_YAW: f32 = 0.75;
+    const FINAL_PITCH: f32 = 0.25;
+    const FINAL_RADIUS: f32 = 5.0;
+
+    #[derive(Resource, Default)]
+    struct AnimationEventCounts {
+        cancelled: usize,
+        ended:     usize,
+    }
+
+    type TestResult = Result<(), &'static str>;
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<AnimationEventCounts>()
+            .add_systems(Update, process_camera_move_list);
+        app
+    }
+
+    fn camera_move(focus: Vec3, yaw: f32, pitch: f32, radius: f32) -> CameraMove {
+        CameraMove::ToOrbit {
+            focus,
+            yaw,
+            pitch,
+            radius,
+            duration: Duration::from_millis(MOVE_DURATION_MILLIS),
+            easing: EaseFunction::Linear,
+        }
+    }
+
+    fn spawn_animated_camera(
+        app: &mut App,
+        interrupt_behavior: CameraInputInterruptBehavior,
+        camera_moves: VecDeque<CameraMove>,
+    ) -> Entity {
+        let camera = app
+            .world_mut()
+            .spawn((
+                OrbitCam::default(),
+                OrbitCamInput::default(),
+                CameraMoveList::new(camera_moves),
+                interrupt_behavior,
+            ))
+            .id();
+        observe_animation_events(app.world_mut(), camera);
+        camera
+    }
+
+    fn observe_animation_events(world: &mut World, camera: Entity) {
+        world.entity_mut(camera).observe(
+            |_event: On<AnimationCancelled>, mut counts: ResMut<AnimationEventCounts>| {
+                counts.cancelled += 1;
+            },
+        );
+        world.entity_mut(camera).observe(
+            |_event: On<AnimationEnd>, mut counts: ResMut<AnimationEventCounts>| {
+                counts.ended += 1;
+            },
+        );
+    }
+
+    fn add_interrupt_input(app: &mut App, camera: Entity) -> TestResult {
+        app.world_mut()
+            .get_mut::<OrbitCamInput>(camera)
+            .ok_or("camera missing OrbitCamInput")?
+            .orbit_pixels_with_sources(INTERRUPT_DELTA, CameraInteractionSources::MOUSE);
+        Ok(())
+    }
+
+    fn assert_f32_close(actual: f32, expected: f32) {
+        assert!((actual - expected).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn cancel_interrupt_removes_animation_and_emits_cancelled_event() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_animated_camera(
+            &mut app,
+            CameraInputInterruptBehavior::Cancel,
+            VecDeque::from([camera_move(Vec3::ZERO, 1.0, 0.0, 2.0)]),
+        );
+        add_interrupt_input(&mut app, camera)?;
+
+        app.update();
+
+        let counts = app.world().resource::<AnimationEventCounts>();
+        assert_eq!(counts.cancelled, 1);
+        assert_eq!(counts.ended, 0);
+        assert!(app.world().get::<CameraMoveList>(camera).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn complete_interrupt_jumps_to_final_move_and_clears_input() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_animated_camera(
+            &mut app,
+            CameraInputInterruptBehavior::Complete,
+            VecDeque::from([
+                camera_move(Vec3::ZERO, 1.0, 0.0, 2.0),
+                camera_move(FINAL_FOCUS, FINAL_YAW, FINAL_PITCH, FINAL_RADIUS),
+            ]),
+        );
+        add_interrupt_input(&mut app, camera)?;
+
+        app.update();
+
+        let counts = app.world().resource::<AnimationEventCounts>();
+        assert_eq!(counts.cancelled, 0);
+        assert_eq!(counts.ended, 1);
+        assert!(app.world().get::<CameraMoveList>(camera).is_none());
+        assert!(
+            !app.world()
+                .get::<OrbitCamInput>(camera)
+                .ok_or("camera missing OrbitCamInput")?
+                .has_input()
+        );
+
+        let orbit_cam = app
+            .world()
+            .get::<OrbitCam>(camera)
+            .ok_or("camera missing OrbitCam")?;
+        assert_eq!(orbit_cam.target_focus, FINAL_FOCUS);
+        assert_f32_close(orbit_cam.target_yaw, FINAL_YAW);
+        assert_f32_close(orbit_cam.target_pitch, FINAL_PITCH);
+        assert_f32_close(orbit_cam.target_radius, FINAL_RADIUS);
+        Ok(())
+    }
+
+    #[test]
+    fn ignore_interrupt_clears_input_and_keeps_animation() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_animated_camera(
+            &mut app,
+            CameraInputInterruptBehavior::Ignore,
+            VecDeque::from([camera_move(Vec3::ZERO, 1.0, 0.0, 2.0)]),
+        );
+        add_interrupt_input(&mut app, camera)?;
+
+        app.update();
+
+        let counts = app.world().resource::<AnimationEventCounts>();
+        assert_eq!(counts.cancelled, 0);
+        assert_eq!(counts.ended, 0);
+        assert!(app.world().get::<CameraMoveList>(camera).is_some());
+        assert!(
+            !app.world()
+                .get::<OrbitCamInput>(camera)
+                .ok_or("camera missing OrbitCamInput")?
+                .has_input()
+        );
+        Ok(())
+    }
+}

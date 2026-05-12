@@ -182,13 +182,10 @@ Add an enhanced-input integration test that compiles and exercises the pinned AP
 surface: context registration, expected system-set ordering, normal binding
 installation, and adapter/mock contribution if mocks are used. Run this test on every
 Bevy or `bevy_enhanced_input` upgrade.
-Also add a startup diagnostic in strict mode that verifies the expected ordering
-resources, context registration, plugin setup, and one known enhanced-input API marker
-were installed by `LagrangePlugin`. Bevy does not expose a general runtime schedule
-proof, so the diagnostic should fail loud for missing setup, missing context
-registration, unexpected enhanced-input API structure, or missing Lagrange set
-configuration; the ECS ordering tests remain the authoritative guard for barrier
-semantics.
+Do not add a public strict-startup diagnostics API in the initial refactor. Bevy does
+not expose a general runtime schedule proof, so ECS ordering tests remain the
+authoritative guard for barrier semantics, context registration, plugin setup, and
+the pinned enhanced-input API shape.
 
 References:
 
@@ -439,24 +436,19 @@ app.add_input_context::<OrbitCamInputContext>();
 ```
 
 The plugin should own this setup. A minimal app that adds only `LagrangePlugin` should
-have all enhanced-input resources and systems required by `OrbitCamInputContext`.
+have the Lagrange-owned resources, messages, enhanced-input setup, and systems
+required by `OrbitCamInputContext` without panicking. Actual keyboard, mouse,
+gamepad, touch, and gesture event production still comes from Bevy input plugins,
+normally through `DefaultPlugins`.
 Guard plugin setup so workspace-composed apps can add `LagrangePlugin` from multiple
 modules without double-installing enhanced input. If Bevy exposes an
 `is_plugin_added::<EnhancedInputPlugin>()` equivalent, use it before adding
 `EnhancedInputPlugin`; otherwise use an internal setup marker resource and emit a
 one-time warning if setup is requested again.
 
-Add diagnostics for missing setup:
-
-- `LagrangePlugin` should run a first-frame diagnostic that confirms enhanced input is
-  installed and camera input contexts are registered.
-- `OrbitCam` should have an `on_add` hook or equivalent one-time diagnostic path that
-  emits a one-time `error!` when an `OrbitCam` exists but `LagrangePlugin` has not installed the input
-  pipeline. The warning should say that camera input will not resolve until
-  `LagrangePlugin` is added.
-- `LagrangePlugin` should expose a diagnostic setting that can panic on missing setup
-  during startup for tests and strict application builds. The default should be an
-  error log, not a panic.
+Do not add public startup diagnostics in the initial refactor unless a concrete
+in-tree need appears. The shipped diagnostic surface stays limited to private adapter
+counts, route/blocker state, lifecycle events, and missing metrics events.
 
 ## Input Modes And Bindings
 
@@ -2752,21 +2744,20 @@ into orbit or pan response.
 
 In normal window and viewport cases, derive these metrics programmatically from the
 camera's render target, logical viewport, and window. Manual camera input should not
-force the user to provide metrics that Bevy already knows. Expose an explicit routing
-override for render-to-texture, offscreen images, or custom editor surfaces where the
-input surface is not the camera's window viewport:
+force the user to provide metrics that Bevy already knows. Expose an explicit
+per-camera metrics override component for render-to-texture, offscreen images, or
+custom editor surfaces where the input surface is not the camera's window viewport:
 
 ```rust
-CameraInputRoutingConfig::explicit(camera)
-    .with_surface_metrics(CameraInputSurfaceMetrics {
-        camera_view_size: Some(render_target_logical_size),
-        input_surface_size: Some(panel_logical_size),
-    });
+commands.entity(camera).insert(CameraInputSurfaceMetrics {
+    camera_view_size: Some(render_target_logical_size),
+    input_surface_size: Some(panel_logical_size),
+});
 ```
 
 Metric derivation should use this order:
 
-1. Explicit `CameraInputSurfaceMetrics` on `CameraInputRoutingConfig`.
+1. Explicit `CameraInputSurfaceMetrics` component fields on the camera.
 2. The selected camera's `Camera::logical_viewport_size` for `camera_view_size`.
 3. The target window's logical `Window::width` and `Window::height` for
    `input_surface_size` when the camera renders to a window.
@@ -3043,9 +3034,9 @@ All input phases are sequenced with explicit ordering. App systems that mutate
 `OrbitCamInput`, routing, bindings, or input-mode components should run in the public
 phase intended for that mutation and should not spawn parallel tasks that mutate those
 same ECS values concurrently with `OrbitCamInputPhase::*`.
-Strict diagnostics should confirm at startup that the Lagrange input sets were
-configured and that the enhanced-input update/apply sets are ordered relative to
-`PreInput` and `Finalize` as expected for the supported Bevy/enhanced-input versions.
+ECS schedule tests should confirm that the Lagrange input sets are configured and
+that the enhanced-input update/apply sets are ordered relative to `PreInput` and
+`Finalize` as expected for the supported Bevy/enhanced-input versions.
 `Finalize` is the last public input set before any animation or controller system
 can observe input. It clears blocked manual/preset/custom input, queues lifecycle
 events, updates interaction state, and clears source latches when needed. The
@@ -3244,15 +3235,13 @@ scale screen-pixel movement.
 commands.entity(render_texture_camera).insert((
     OrbitCam::default(),
     OrbitCamPreset::BlenderLike,
+    CameraInputSurfaceMetrics {
+        camera_view_size: Some(render_target_logical_size),
+        input_surface_size: Some(editor_panel_logical_size),
+    },
 ));
 
-commands.insert_resource(
-    CameraInputRoutingConfig::explicit(render_texture_camera)
-        .with_surface_metrics(CameraInputSurfaceMetrics {
-            camera_view_size: Some(render_target_logical_size),
-            input_surface_size: Some(editor_panel_logical_size),
-        }),
-);
+commands.insert_resource(CameraInputRoutingConfig::explicit(render_texture_camera));
 ```
 
 Use this pattern when the camera renders to an image, texture, or editor panel that
@@ -3547,10 +3536,10 @@ Core ECS-only tests:
 - the enhanced-input integration boundary compiles against the pinned API signatures
   for context registration, binding installation, system-set ordering, and adapter/mock
   contribution when mocks are used;
-- strict startup diagnostics fail when Lagrange input phases, context registration, or
-  enhanced-input ordering integration are missing;
-- strict startup diagnostics fail when the expected enhanced-input API marker or
-  plugin setup is missing;
+- ECS tests fail when Lagrange input phases, context registration, or enhanced-input
+  ordering integration are missing;
+- `LagrangePlugin` initializes the Bevy resources/messages its camera-input systems
+  read directly, including `Touches` and `PinchGesture`;
 - adapter values inserted through command-buffered mock state are visible to enhanced
   input in the same frame because the barrier is structural;
 - routing/context-gating/adapter-injection swaps for 10 or more frames produce no
@@ -3569,10 +3558,9 @@ Core ECS-only tests:
   event and leaves no orphaned started event;
 - one tick that removes an input mode, inserts a replacement, and despawns the camera
   produces no duplicate lifecycle events and no stale source latch;
-- `App::new().add_plugins(LagrangePlugin)` installs the enhanced-input plugin and
-  registers `OrbitCamInputContext` without additional app setup;
-- spawning `OrbitCam` without `LagrangePlugin` produces a one-time diagnostic error
-  that input will not resolve;
+- `App::new().add_plugins(LagrangePlugin)` installs the enhanced-input plugin,
+  registers `OrbitCamInputContext`, and initializes direct camera-input
+  resources/messages without additional app setup;
 - `CameraInteractionSources` has no public raw-bit constructor, ordinary callers can
   only compose named source constants, and `ManualInputSource` cannot be constructed
   without `MANUAL`;
@@ -3739,7 +3727,7 @@ Done when:
   introducing a duplicate name.
 - Phase 04 now owns structural mode replacement and installation cleanup only; latch
   cleanup is completed in phase 05 and lifecycle cleanup in phase 07.
-- Phase 05 now owns the live startup diagnostics, while phase 10 owns broader
+- Phase 05 now owns routing/blocker diagnostic state, while phase 10 owns broader
   regression coverage and transitional-code cleanup.
 - Phase 09 now names the existing workspace `fairy_dust` crate as the source of the
   camera guidance panel.
@@ -4033,7 +4021,7 @@ Done when:
   that hook for latch and lifecycle cleanup.
 - Phase 06 now explicitly mutates the phase 04 installation record and replaces its
   placeholder entities instead of creating a competing installer path.
-- Phase 05 diagnostics now focus on routing, blockers, and schedule placement; live
+- Phase 05 diagnostics now focus on routing, blockers, and schedule placement; private
   enhanced-input context/entity diagnostics move to phase 06 when those entities exist.
 - Phase 07 now owns manual zero-delta active helpers such as orbit-active, pan-active,
   and zoom-active before lifecycle behavior is considered complete.
@@ -4063,10 +4051,10 @@ Scope:
   public scheduling surface; add private internal sets only where ordering tests prove
   they are needed.
 - Gate inactive `OrbitCamInputContext` state before `EnhancedInputSystems::Update`.
-- Add strict startup diagnostics for missing routing config, missing schedule setup,
-  blocker computation, and input-mode replacement cleanup. Treat phase 01's plugin
-  guard, `OrbitCamInputContext` registration, and `OrbitCamInputPhase` schedule shell
-  as already installed; this phase validates routing/blocker setup instead of
+- Add tests and private diagnostic state for routing config, schedule setup, blocker
+  computation, and input-mode replacement cleanup. Treat phase 01's plugin guard,
+  `OrbitCamInputContext` registration, and `OrbitCamInputPhase` schedule shell as
+  already installed; this phase validates routing/blocker setup instead of
   reintroducing setup paths.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative,
@@ -4140,8 +4128,8 @@ Done when:
   off in `PreInput`.
 - Phase 09 now includes a post-cutover docs pass over `input/mod.rs` and crate-root
   re-exports before examples and guidance are finalized.
-- Phase 10 no longer assumes phase 05 shipped live startup diagnostics; diagnostics
-  coverage tracks whichever phase actually implements each diagnostic.
+- Phase 10 no longer assumes phase 05 shipped public startup diagnostics; diagnostics
+  coverage tracks the concrete private diagnostics and events that actually exist.
 
 ### 06-adapters-and-action-resolution (Complete)
 
@@ -4184,9 +4172,10 @@ Scope:
   unsupported advanced descriptors with structured validation errors. Do not add a raw
   public enhanced-input escape hatch that bypasses source metadata and held/impulse
   validation.
-- Move live enhanced-input installation diagnostics here: context entity installation,
-  missing context activation, unexpected enhanced-input action API shape, and adapter
-  entity visibility are meaningful only after real action/context entities exist.
+- Move private enhanced-input installation diagnostics here: context entity
+  installation counts, missing context activation, expected enhanced-input action API
+  shape, and adapter entity visibility are meaningful only after real action/context
+  entities exist.
 
 Repository state: usable. Existing `OrbitCam` input behavior remains authoritative.
 The new pipeline can be tested by reading `OrbitCamInput`, but the controller has not
@@ -4656,9 +4645,10 @@ Scope:
   disabled cameras, inactive cameras, egui focus, and animation-ignore blockers. If
   those causes remain internal-only, diagnostics tests should not imply a public
   blocker-cause API exists.
-- Add strict startup diagnostic tests for schedule/plugin/context/enhanced-input API
-  assumptions only after those diagnostics exist; otherwise keep the phase 10
-  diagnostics pass scoped to private diagnostics and documented log/event behavior.
+- Do not add strict startup diagnostic tests for schedule/plugin/context/enhanced-input
+  API assumptions unless those diagnostics are intentionally implemented first; keep
+  the phase 10 diagnostics pass scoped to private diagnostics and documented log/event
+  behavior.
 - Audit manifests and docs for stale references to removed or renamed examples:
   `advanced.rs`, `keyboard_controls.rs`, the old `zoom_to_fit/` directory example,
   and the new `custom_bindings.rs` name.
@@ -4682,6 +4672,47 @@ Done when:
   user-facing docs.
 - Feature-gated descriptor tooling tests run separately from always-on runtime mode
   tests so `--no-default-features` remains meaningful.
+
+### Retrospective
+
+**What worked:**
+
+- Adapter ECS tests now cover `CardinalKeys`, `BidirectionalKeys`,
+  `GamepadAxes2d`, and `BidirectionalGamepadButtons` through installed bindings.
+- The public `LagrangePlugin` schedule is covered by
+  `enhanced_input_scheduling_invariant`, which exercises manual writes, lifecycle
+  finalization, animation cancellation, and controller movement in one frame.
+
+**What deviated from the plan:**
+
+- Diagnostics coverage stayed internal and concrete: route blockers, route metrics,
+  adapter counts, and existing lifecycle events. Phase 10 did not add public startup
+  diagnostics or blocker-cause APIs.
+- Speculative gamepad and touch latch maps were removed instead of preserved behind
+  tests, matching the phase 09 documentation that selected-device/touch-owner
+  policies are future work.
+
+**Surprises:**
+
+- Minimal `LagrangePlugin` schedule tests exposed that the plugin should initialize
+  Bevy's `PinchGesture` message and `Touches` resource because its own systems read
+  them directly.
+
+### Phase 10 Review
+
+- The plugin setup contract now says `LagrangePlugin` owns its direct camera-input
+  resources/messages (`Touches` and `PinchGesture`) while event production still
+  comes from Bevy input plugins.
+- Strict startup-diagnostics claims were removed or deferred; the shipped diagnostic
+  surface remains private adapter diagnostics, route/blocker state, lifecycle events,
+  and missing-metrics events.
+- Surface-metrics snippets now show `CameraInputSurfaceMetrics` as a camera component
+  override rather than a `CameraInputRoutingConfig` builder method.
+- Future cleanup now names gamepad/touch owner latching as selected-device and
+  touch-owner policy work.
+- The schedule-test scope is recorded as a public-plugin manual input, finalization,
+  animation, and controller invariant, while multi-binding resolver coverage remains
+  adapter ECS coverage.
 
 ## Changelog-Style Summary
 
@@ -4707,7 +4738,8 @@ Done when:
   cleanup before the controller consumes input.
 - Add `ManualInputSource` so manual camera input always reports `MANUAL` and may include observed device provenance.
 - Add logical `CameraInputSurfaceMetrics` for explicit routing, render-to-texture, and custom editor input surfaces.
-- Add structured binding validation and missing-plugin diagnostics for common setup mistakes.
+- Add structured binding validation, private adapter diagnostics, and missing-metrics
+  events for common setup mistakes.
 - Add an error-reference and binding-invariants docs path for custom binding failures.
 - Add input-mode examples with `fairy_dust` guidance that highlights active camera interactions and source flags.
 
@@ -4770,6 +4802,15 @@ presets and bindings input modes keep camera input inside the same action/contex
 architecture used by the rest of the app.
 
 ## Future Cleanup
+
+### Gamepad And Touch Ownership
+
+The initial refactor supports gamepad and touch source attribution, but stable
+per-device gamepad ownership and per-touch ownership are future policy work. Source
+latches currently stabilize mouse-like and keyboard ownership only. Add gamepad
+owner latches after a selected-gamepad API exists, and add touch owner latches only
+with a concrete touch-owner policy that defines what happens when fingers begin,
+end, or transfer between cameras.
 
 ### Roll
 
