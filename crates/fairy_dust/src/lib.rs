@@ -38,14 +38,20 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+pub use bevy_diegetic::Anchor;
 pub use bevy_lagrange::OrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
+use primitive::PrimitiveConfig;
+pub use screen_panels::DescriptionPanel;
+pub use screen_panels::TitleBar;
 
 mod brp_extras;
 mod camera_control_panel;
 mod orbit_cam;
+mod primitive;
 mod save_window_position;
+mod screen_panels;
 mod transparency;
 
 /// Default `tracing` filter applied by [`sprinkle_example`].
@@ -73,6 +79,15 @@ pub struct WithOrbitCam;
 pub struct SprinkleBuilder<S> {
     app:    App,
     _state: PhantomData<S>,
+}
+
+/// Builder returned while configuring a simple scene primitive.
+///
+/// Calling a non-primitive builder method finalizes the primitive and returns
+/// to the normal [`SprinkleBuilder`] chain.
+pub struct PrimitiveBuilder<S> {
+    parent: SprinkleBuilder<S>,
+    config: PrimitiveConfig,
 }
 
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
@@ -128,6 +143,38 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Starts configuring a reusable ground plane for the example scene.
+    #[must_use]
+    pub const fn with_ground_plane(self) -> PrimitiveBuilder<S> {
+        PrimitiveBuilder {
+            parent: self,
+            config: PrimitiveConfig::ground_plane(),
+        }
+    }
+
+    /// Starts configuring a reusable cube for the example scene.
+    #[must_use]
+    pub const fn with_cube(self) -> PrimitiveBuilder<S> {
+        PrimitiveBuilder {
+            parent: self,
+            config: PrimitiveConfig::cube(),
+        }
+    }
+
+    /// Spawn a static side panel that describes the example.
+    #[must_use]
+    pub fn with_description_panel(mut self, panel: DescriptionPanel) -> Self {
+        screen_panels::install_description(&mut self.app, panel);
+        self
+    }
+
+    /// Spawn a compact top-left title bar for example controls.
+    #[must_use]
+    pub fn with_title_bar(mut self, title_bar: TitleBar) -> Self {
+        screen_panels::install_title_bar(&mut self.app, title_bar);
+        self
+    }
+
     /// Mirror of [`App::add_plugins`].
     #[must_use]
     pub fn add_plugins<M>(mut self, plugins: impl Plugins<M>) -> Self {
@@ -168,6 +215,119 @@ impl<S> SprinkleBuilder<S> {
     pub const fn app_mut(&mut self) -> &mut App { &mut self.app }
 }
 
+impl<S> PrimitiveBuilder<S> {
+    /// Sets the primitive size.
+    ///
+    /// For a ground plane this is the square edge length. For a cube this is
+    /// the cube edge length.
+    #[must_use]
+    pub const fn size(mut self, size: f32) -> Self {
+        self.config.set_size(size);
+        self
+    }
+
+    /// Sets the primitive material base color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.config.set_color(color);
+        self
+    }
+
+    /// Sets the full primitive material.
+    ///
+    /// This overrides any color previously configured with [`Self::color`].
+    #[must_use]
+    pub fn material(mut self, material: StandardMaterial) -> Self {
+        self.config = self.config.with_material(material);
+        self
+    }
+
+    /// Sets the primitive transform.
+    #[must_use]
+    pub const fn transform(mut self, transform: Transform) -> Self {
+        self.config.set_transform(transform);
+        self
+    }
+
+    /// Finalizes the current primitive and starts configuring a ground plane.
+    #[must_use]
+    pub fn with_ground_plane(self) -> Self { self.finish().with_ground_plane() }
+
+    /// Finalizes the current primitive and starts configuring a cube.
+    #[must_use]
+    pub fn with_cube(self) -> Self { self.finish().with_cube() }
+
+    /// Finalizes the current primitive and adds window position persistence.
+    #[must_use]
+    pub fn with_save_window_position(self) -> SprinkleBuilder<S> {
+        self.finish().with_save_window_position()
+    }
+
+    /// Finalizes the current primitive and adds BRP extras.
+    #[must_use]
+    pub fn with_brp_extras(self) -> SprinkleBuilder<S> { self.finish().with_brp_extras() }
+
+    /// Finalizes the current primitive and adds the static camera control panel.
+    #[must_use]
+    pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
+        self.finish().with_camera_control_panel()
+    }
+
+    /// Finalizes the current primitive and enables camera guidance panels.
+    #[must_use]
+    pub fn with_camera_guidance_panel(self) -> SprinkleBuilder<S> {
+        self.finish().with_camera_guidance_panel()
+    }
+
+    /// Finalizes the current primitive and adds an example description panel.
+    #[must_use]
+    pub fn with_description_panel(self, panel: DescriptionPanel) -> SprinkleBuilder<S> {
+        self.finish().with_description_panel(panel)
+    }
+
+    /// Finalizes the current primitive and adds an example title bar.
+    #[must_use]
+    pub fn with_title_bar(self, title_bar: TitleBar) -> SprinkleBuilder<S> {
+        self.finish().with_title_bar(title_bar)
+    }
+
+    /// Finalizes the current primitive and mirrors [`App::add_plugins`].
+    #[must_use]
+    pub fn add_plugins<M>(self, plugins: impl Plugins<M>) -> SprinkleBuilder<S> {
+        self.finish().add_plugins(plugins)
+    }
+
+    /// Finalizes the current primitive and mirrors [`App::add_systems`].
+    #[must_use]
+    pub fn add_systems<M>(
+        self,
+        schedule: impl ScheduleLabel,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> SprinkleBuilder<S> {
+        self.finish().add_systems(schedule, systems)
+    }
+
+    /// Finalizes the current primitive and mirrors [`App::init_resource`].
+    #[must_use]
+    pub fn init_resource<R: Resource + FromWorld>(self) -> SprinkleBuilder<S> {
+        self.finish().init_resource::<R>()
+    }
+
+    /// Finalizes the current primitive and mirrors [`App::insert_resource`].
+    #[must_use]
+    pub fn insert_resource<R: Resource>(self, resource: R) -> SprinkleBuilder<S> {
+        self.finish().insert_resource(resource)
+    }
+
+    /// Finalizes the current primitive and runs the configured app.
+    pub fn run(self) -> AppExit { self.finish().run() }
+
+    fn finish(mut self) -> SprinkleBuilder<S> {
+        primitive::install(&mut self.parent.app, self.config);
+        self.parent
+    }
+}
+
 // State transition: `NoOrbitCam` → `WithOrbitCam`.
 impl SprinkleBuilder<NoOrbitCam> {
     /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
@@ -206,6 +366,31 @@ impl SprinkleBuilder<NoOrbitCam> {
     }
 }
 
+impl PrimitiveBuilder<NoOrbitCam> {
+    /// Finalizes the current primitive, adds `LagrangePlugin`, and spawns an
+    /// `OrbitCam` entity.
+    pub fn with_orbit_cam_configured<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_configured(configure)
+    }
+
+    /// Finalizes the current primitive, adds `LagrangePlugin`, spawns an
+    /// `OrbitCam`, and inserts extra camera-side components.
+    pub fn with_orbit_cam_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_bundle(configure, bundle)
+    }
+}
+
 // Camera-attached capabilities — only valid after an `OrbitCam` has been
 // configured.
 impl SprinkleBuilder<WithOrbitCam> {
@@ -223,6 +408,15 @@ impl SprinkleBuilder<WithOrbitCam> {
     pub fn with_stable_transparency(mut self) -> Self {
         transparency::install(&mut self.app);
         self
+    }
+}
+
+impl PrimitiveBuilder<WithOrbitCam> {
+    /// Finalizes the current primitive and adds stable transparency to the
+    /// spawned `OrbitCam`.
+    #[must_use]
+    pub fn with_stable_transparency(self) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_stable_transparency()
     }
 }
 

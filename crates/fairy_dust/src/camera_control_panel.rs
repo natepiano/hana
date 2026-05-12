@@ -34,6 +34,7 @@ use crate::ensure_plugin;
 /// examples.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CameraGuidance {
+    anchor:       Anchor,
     title:        String,
     rows:         Vec<CameraGuidanceRow>,
     show_sources: bool,
@@ -84,10 +85,18 @@ impl CameraGuidance {
     #[must_use]
     pub fn custom(rows: impl IntoIterator<Item = CameraGuidanceRow>) -> Self {
         Self {
+            anchor:       Anchor::BottomRight,
             title:        "Camera".to_string(),
             rows:         rows.into_iter().collect(),
             show_sources: true,
         }
+    }
+
+    /// Sets the panel screen anchor.
+    #[must_use]
+    pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
+        self.anchor = anchor;
+        self
     }
 
     /// Replaces the panel title.
@@ -183,11 +192,9 @@ pub(crate) fn install(app: &mut App) {
 
 pub(crate) fn install_guidance(app: &mut App) {
     ensure_panel_plugins(app);
-    app.add_systems(
-        PostUpdate,
-        (spawn_guidance_panels, refresh_changed_guidance),
-    );
-    app.add_observer(refresh_on_interaction_started)
+    app.add_systems(PostUpdate, refresh_changed_guidance);
+    app.add_observer(spawn_guidance_panel_on_add)
+        .add_observer(refresh_on_interaction_started)
         .add_observer(refresh_on_interaction_ended)
         .add_observer(refresh_on_sources_changed);
 }
@@ -217,34 +224,34 @@ fn spawn_static_panel(mut commands: Commands) {
     }
 }
 
-fn spawn_guidance_panels(
+fn spawn_guidance_panel_on_add(
+    trigger: On<Add, CameraGuidance>,
     mut commands: Commands,
-    cameras: Query<
-        (Entity, &CameraGuidance, Option<&OrbitCamInteractionState>),
-        Added<CameraGuidance>,
-    >,
+    cameras: Query<(&CameraGuidance, Option<&OrbitCamInteractionState>)>,
 ) {
-    for (camera, guidance, state) in &cameras {
-        let unlit = unlit_panel_material();
-        let panel = DiegeticPanel::screen()
-            .size(Fit, Fit)
-            .anchor(Anchor::BottomRight)
-            .material(unlit.clone())
-            .text_material(unlit)
-            .with_tree(build_guidance_tree(
-                guidance,
-                state.copied().unwrap_or_default(),
-            ))
-            .build();
+    let camera = trigger.entity;
+    let Ok((guidance, state)) = cameras.get(camera) else {
+        return;
+    };
+    let unlit = unlit_panel_material();
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(guidance.anchor)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_guidance_tree(
+            guidance,
+            state.copied().unwrap_or_default(),
+        ))
+        .build();
 
-        match panel {
-            Ok(panel) => {
-                commands.spawn((CameraGuidancePanel { camera }, panel, Transform::default()));
-            },
-            Err(error) => {
-                error!("fairy_dust: failed to build camera guidance panel: {error}");
-            },
-        }
+    match panel {
+        Ok(panel) => {
+            commands.spawn((CameraGuidancePanel { camera }, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("fairy_dust: failed to build camera guidance panel: {error}");
+        },
     }
 }
 

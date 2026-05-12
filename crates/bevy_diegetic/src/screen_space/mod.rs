@@ -44,7 +44,10 @@ impl Plugin for ScreenSpacePlugin {
             .add_observer(cleanup_screen_space_view)
             .add_systems(
                 Update,
-                position_screen_space_panels.before(PanelSystems::ComputeLayout),
+                (
+                    position_screen_space_panels.before(PanelSystems::ComputeLayout),
+                    finalize_screen_space_panel_positions.after(PanelSystems::ComputeLayout),
+                ),
             )
             .add_systems(PostUpdate, propagate_screen_space_render_layers);
     }
@@ -61,6 +64,23 @@ fn position_screen_space_panels(
     let Ok(window) = windows.single() else {
         return;
     };
+    resolve_and_position_screen_space_panels(window, &mut panels);
+}
+
+fn finalize_screen_space_panel_positions(
+    windows: Query<&Window>,
+    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    resolve_and_position_screen_space_panels(window, &mut panels);
+}
+
+fn resolve_and_position_screen_space_panels(
+    window: &Window,
+    panels: &mut Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
+) {
     let window_width = window.width();
     let window_height = window.height();
     if window_width <= 0.0 || window_height <= 0.0 {
@@ -69,8 +89,8 @@ fn position_screen_space_panels(
     let half_width = window_width / 2.0;
     let half_height = window_height / 2.0;
 
-    for (mut transform, mut panel, computed) in &mut panels {
-        let CoordinateSpace::Screen {
+    for (mut transform, mut panel, computed) in panels.iter_mut() {
+        let &CoordinateSpace::Screen {
             position,
             width,
             height,
@@ -79,9 +99,6 @@ fn position_screen_space_panels(
         else {
             continue;
         };
-        let position = *position;
-        let width = *width;
-        let height = *height;
         let (content_width, content_height) = (computed.content_width(), computed.content_height());
 
         let new_width = resolve_screen_axis(width, window_width, content_width, panel.width());
