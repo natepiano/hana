@@ -121,7 +121,7 @@ fn keyboard_input(
     mut commands: Commands,
     camera_query: Query<Entity, With<OrbitCam>>,
     target_query: Query<Entity, With<Target>>,
-    mut pan_orbit_query: Query<&mut OrbitCam>,
+    mut orbit_cam_query: Query<&mut OrbitCam>,
 ) {
     let Ok(camera) = camera_query.single() else {
         return;
@@ -154,14 +154,14 @@ fn keyboard_input(
     }
 
     if keys.just_pressed(KeyCode::KeyR)
-        && let Ok(mut pan_orbit) = pan_orbit_query.get_mut(camera)
+        && let Ok(mut orbit_cam) = orbit_cam_query.get_mut(camera)
     {
         let radius = START_POS.length();
-        pan_orbit.target_focus = Vec3::ZERO;
-        pan_orbit.target_yaw = f32::atan2(START_POS.x, START_POS.z);
-        pan_orbit.target_pitch = f32::asin(START_POS.y / radius);
-        pan_orbit.target_radius = radius;
-        pan_orbit.force_update = ForceUpdate::Pending;
+        orbit_cam.target_focus = Vec3::ZERO;
+        orbit_cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);
+        orbit_cam.target_pitch = f32::asin(START_POS.y / radius);
+        orbit_cam.target_radius = radius;
+        orbit_cam.force_update = ForceUpdate::Pending;
         info!("Camera reset");
     }
 }

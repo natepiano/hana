@@ -9,9 +9,9 @@
 
 use std::f32::consts::PI;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ImageRenderTarget;
 use bevy::camera::RenderTarget;
-use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDescriptor;
@@ -136,7 +136,7 @@ fn setup(
 
     // The camera for the first pass cube that will be rendered to the texture. This is the camera
     // that is controlled by `OrbitCam`.
-    let pan_orbit_id = commands
+    let orbit_cam_id = commands
         .spawn((
             Camera {
                 // render before the "main pass" camera
@@ -184,7 +184,7 @@ fn setup(
         Transform::from_translation(MAIN_PASS_CAMERA_TRANSLATION).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.insert_resource(CameraInputRoutingConfig::explicit(pan_orbit_id));
+    commands.insert_resource(CameraInputRoutingConfig::explicit(orbit_cam_id));
 }
 
 /// Rotates the outer cube (main pass)

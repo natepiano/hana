@@ -53,7 +53,7 @@ fn main() {
         .run();
 }
 
-fn pan_orbit_default() -> OrbitCam { OrbitCam::default() }
+fn orbit_cam_default() -> OrbitCam { OrbitCam::default() }
 
 fn setup(
     mut commands: Commands,
@@ -83,7 +83,7 @@ fn setup(
     // --- Primary window: main camera ---
     commands.spawn((
         Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
-        pan_orbit_default(),
+        orbit_cam_default(),
     ));
 
     // --- Primary window: minimap viewport overlay ---
@@ -94,7 +94,7 @@ fn setup(
             clear_color: ClearColorConfig::None,
             ..default()
         },
-        pan_orbit_default(),
+        orbit_cam_default(),
         MinimapCamera,
     ));
 
@@ -115,7 +115,7 @@ fn setup(
         Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
         Camera::default(),
         RenderTarget::Window(WindowRef::Entity(second_window)),
-        pan_orbit_default(),
+        orbit_cam_default(),
     ));
 }
 
