@@ -13,10 +13,8 @@ use bevy_egui::EguiPlugin;
 use bevy_egui::EguiPrimaryContextPass;
 use bevy_egui::egui;
 use bevy_lagrange::BlockOnEguiFocus;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 // camera
@@ -80,13 +78,7 @@ fn setup(
     // Camera — starts with blocking enabled
     commands.spawn((
         Transform::from_translation(CAMERA_TRANSLATION),
-        OrbitCam {
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
-            ..default()
-        },
+        OrbitCam::default(),
         BlockOnEguiFocus,
     ));
 }

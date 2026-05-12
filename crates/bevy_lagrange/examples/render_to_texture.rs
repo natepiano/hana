@@ -4,7 +4,7 @@
 //! In this example, input controls the camera that is rendering the texture applied to the cube,
 //! rather than the main window camera.
 //!
-//! This example is based off Bevy's `render_to_texture` example. See also `ActiveCameraData`.
+//! This example is based off Bevy's `render_to_texture` example.
 
 use std::f32::consts::PI;
 
@@ -20,12 +20,10 @@ use bevy::render::render_resource::TextureUsages;
 use bevy::window::PrimaryWindow;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_kana::ToF32;
-use bevy_lagrange::ActiveCameraData;
-use bevy_lagrange::CameraInputDetection;
-use bevy_lagrange::InputControl;
+use bevy_lagrange::CameraInputRoutingConfig;
+use bevy_lagrange::CameraInputSurfaceMetrics;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 // camera
@@ -77,7 +75,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut active_camera: ResMut<ActiveCameraData>,
     primary_window: Single<&Window, With<PrimaryWindow>>,
 ) {
     let size = Extent3d {
@@ -149,13 +146,11 @@ fn setup(
             RenderTarget::Image(ImageRenderTarget::from(image_handle.clone())),
             Transform::from_translation(FIRST_PASS_CAMERA_TRANSLATION)
                 .looking_at(Vec3::ZERO, Vec3::Y),
-            OrbitCam {
-                input_control: Some(InputControl {
-                    trackpad: Some(TrackpadInput::blender_default()),
-                    ..default()
-                }),
-                ..default()
-            },
+            OrbitCam::default(),
+            CameraInputSurfaceMetrics::camera_view_and_input_surface(
+                Vec2::new(size.width.to_f32(), size.height.to_f32()),
+                Vec2::new(primary_window.width(), primary_window.height()),
+            ),
             first_pass_layer,
         ))
         .id();
@@ -185,23 +180,7 @@ fn setup(
         Transform::from_translation(MAIN_PASS_CAMERA_TRANSLATION).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Set up manual override of OrbitCam. Note that this must run after OrbitCamPlugin
-    // is added, otherwise ActiveCameraData will be overwritten.
-    // Note: you probably want to update the `viewport_size` and `window_size` whenever they change,
-    // I haven't done this here for simplicity.
-    let viewport_size = Some(Vec2::new(size.width.to_f32(), size.height.to_f32()));
-    active_camera.set_if_neq(ActiveCameraData {
-        // Set the entity to the entity ID of the camera you want to control. In this case, it's
-        // the inner (first pass) cube that is rendered to the texture/image.
-        entity: Some(pan_orbit_id),
-        // What you set these values to will depend on your use case, but generally you want the
-        // viewport size to match the size of the render target (image, viewport), and the window
-        // size to match the size of the window that you are interacting with.
-        viewport_size,
-        window_size: Some(Vec2::new(primary_window.width(), primary_window.height())),
-        // Manual detection: the plugin won't auto-detect the active camera from cursor position
-        detection: CameraInputDetection::Manual,
-    });
+    commands.insert_resource(CameraInputRoutingConfig::explicit(pan_orbit_id));
 }
 
 /// Rotates the outer cube (main pass)

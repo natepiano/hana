@@ -50,11 +50,8 @@ use bevy_diegetic::TextDimensions;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
@@ -334,13 +331,6 @@ fn setup(
         },
         OrbitCam {
             focus: midpoint,
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput {
-                    behavior:    TrackpadBehavior::blender_default(),
-                    sensitivity: 0.5,
-                }),
-                ..default()
-            }),
             ..default()
         },
     ));

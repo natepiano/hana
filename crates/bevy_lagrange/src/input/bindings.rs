@@ -11,7 +11,6 @@ use super::OrbitCamOrbitAction;
 use super::OrbitCamPanAction;
 use super::OrbitCamZoomCoarseAction;
 use super::OrbitCamZoomSmoothAction;
-use super::ZoomDirection;
 use super::actions::OrbitCamOrbitEngagedAction;
 use super::actions::OrbitCamPanEngagedAction;
 use super::actions::OrbitCamZoomEngagedAction;
@@ -661,6 +660,16 @@ pub struct OrbitCamButtonDragZoomBinding {
     pub button: MouseButton,
     /// Axis used for button-drag zoom.
     pub axis:   OrbitCamButtonDragZoomAxis,
+}
+
+/// Direction of scroll/zoom input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum ZoomDirection {
+    /// Scrolling zooms in the default direction.
+    #[default]
+    Normal,
+    /// Scrolling zooms in the opposite direction.
+    Reversed,
 }
 
 /// Axis used for button-drag zoom.

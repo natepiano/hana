@@ -1,24 +1,5 @@
 use bevy::input::touch::Touch;
-use bevy::math::Vec2;
 use bevy::prelude::*;
-
-/// The control scheme to use for touch input. Given that some touch gestures don't make sense
-/// being changed (e.g. pinch to zoom), there is just a set if different schemes rather than
-/// full customization.
-#[derive(Reflect, Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub enum TouchInput {
-    /// Touch controls where single finger orbits:
-    ///  - One finger move: orbit
-    ///  - Two finger move: pan
-    ///  - Two finger pinch: zoom
-    #[default]
-    OneFingerOrbit,
-    /// Touch controls where single finger pans:
-    ///  - One finger move: pan
-    ///  - Two finger move: orbit
-    ///  - Two finger pinch: zoom
-    TwoFingerOrbit,
-}
 
 /// Holds information about current mobile gestures
 #[derive(Debug, Clone)]

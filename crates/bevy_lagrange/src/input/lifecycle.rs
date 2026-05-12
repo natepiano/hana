@@ -12,6 +12,7 @@ use super::OrbitCamInteractionKind;
 use super::OrbitCamInteractionSourcesChanged;
 use super::OrbitCamInteractionStarted;
 use super::OrbitCamInteractionState;
+use super::ResolvedOrbitCamInputRoute;
 use crate::system_sets::OrbitCamInputPhase;
 
 #[derive(Clone, Copy, Debug)]
@@ -42,6 +43,7 @@ impl Plugin for OrbitCamInputLifecyclePlugin {
 }
 
 fn finalize_orbit_cam_input(world: &mut World) {
+    let route = world.get_resource::<ResolvedOrbitCamInputRoute>().cloned();
     let mut query = world.query::<(
         Entity,
         &OrbitCamInput,
@@ -57,7 +59,10 @@ fn finalize_orbit_cam_input(world: &mut World) {
                 *input,
                 state.copied().unwrap_or_default(),
                 blockers.copied().unwrap_or_default(),
-                metrics.copied(),
+                merged_surface_metrics(
+                    route.as_ref().and_then(|route| route.metrics_for(camera)),
+                    metrics.copied(),
+                ),
             )
         })
         .collect::<Vec<_>>();
@@ -70,6 +75,25 @@ fn finalize_orbit_cam_input(world: &mut World) {
         for event in finalized.events {
             apply_lifecycle_event(world, finalized.camera, event);
         }
+    }
+}
+
+const fn merged_surface_metrics(
+    routed: Option<CameraInputSurfaceMetrics>,
+    explicit: Option<CameraInputSurfaceMetrics>,
+) -> Option<CameraInputSurfaceMetrics> {
+    match (routed, explicit) {
+        (None, None) => None,
+        (Some(metrics), None) | (None, Some(metrics)) => Some(metrics),
+        (Some(mut metrics), Some(explicit)) => {
+            if explicit.camera_view_size.is_some() {
+                metrics.camera_view_size = explicit.camera_view_size;
+            }
+            if explicit.input_surface_size.is_some() {
+                metrics.input_surface_size = explicit.input_surface_size;
+            }
+            Some(metrics)
+        },
     }
 }
 

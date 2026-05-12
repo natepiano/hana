@@ -42,13 +42,11 @@ use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::FitOverlay;
 use bevy_lagrange::ForceUpdate;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
-use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomCancelled;
 use bevy_lagrange::ZoomEnd;
@@ -165,13 +163,6 @@ fn setup(
     // Camera (middle-click orbit, shift+middle pan, trackpad support)
     let camera = commands
         .spawn(OrbitCam {
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
             yaw: Some(CAMERA_START_YAW),
             pitch: Some(CAMERA_START_PITCH),
             ..default()

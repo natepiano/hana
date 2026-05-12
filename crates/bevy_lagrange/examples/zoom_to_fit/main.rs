@@ -20,13 +20,11 @@ use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 use bevy_lagrange::FitOverlay;
 use bevy_lagrange::ForceUpdate;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::SetFitTarget;
-use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
@@ -100,16 +98,7 @@ fn setup(
         Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera — close to the gray cube, target cube just visible on the right
-    commands.spawn((
-        Transform::from_translation(START_POS),
-        OrbitCam {
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
-            ..default()
-        },
-    ));
+    commands.spawn((Transform::from_translation(START_POS), OrbitCam::default()));
 
     // Instructions
     commands.spawn(Text::new(

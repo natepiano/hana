@@ -4390,7 +4390,7 @@ Done when:
   replaced: `mouse_key_tracker`, `active_viewport_data`, `ActiveCameraData`, and
   legacy input re-exports.
 
-### 08-breaking-cutover-and-callers
+### 08-breaking-cutover-and-callers (Complete)
 
 Goal: switch the actual camera controller to the new input model and remove the old
 API.
@@ -4443,6 +4443,71 @@ Done when:
 - Orbit and pan scaling use finalized routing/surface metrics, including explicit
   render-to-texture metrics, rather than `ActiveCameraData`.
 
+### Retrospective
+
+**What worked:**
+
+- `OrbitCam` now requires `OrbitCamInput`, `OrbitCamInputContext`, and
+  `OrbitCamPreset`; the controller consumes finalized `OrbitCamInput`.
+- Removing `ActiveCameraData`, `CameraInputDetection`, `mouse_key_tracker`, and the
+  legacy input facade forced all in-repo callers onto the new input modes or default
+  `SimpleMouse` preset.
+- `render_to_texture.rs` now uses `CameraInputRoutingConfig::explicit` plus
+  `CameraInputSurfaceMetrics`, which validates the intended replacement for manual
+  active-camera setup.
+
+**What deviated from the plan:**
+
+- Existing examples were migrated to compile against the new API, but most were not
+  redesigned as teaching examples. Phase 09 still owns polished preset, bindings,
+  gamepad, manual, and guidance examples.
+- Animation input interruption now reads finalized `OrbitCamInput` in the existing
+  `process_camera_move_list` system rather than adding a separately named
+  `animation_input_interrupt` system.
+- `CameraInputSurfaceMetrics` remains the explicit per-camera override component, but
+  routing no longer overwrites that component with derived values every frame. The
+  resolved route resource carries derived metrics, and explicit component values
+  override derived fields when present.
+
+**Surprises:**
+
+- The old `TouchInput` API had no remaining production role after the adapter cutover;
+  `OrbitCamTouchBinding` fully replaced it.
+- Several examples only used old raw-input fields to request Blender-like trackpad
+  behavior. After the cutover those examples can use the default `SimpleMouse` path
+  until phase 09 adds explicit input-mode examples.
+
+**Implications for remaining phases:**
+
+- Phase 09 should decide which existing examples should opt into `OrbitCamPreset` or
+  `OrbitCamBindings` explicitly instead of silently relying on the default preset.
+- Phase 09 should update user-facing prose and example comments that still describe
+  old middle-click or trackpad behavior after the compile-only migration.
+- Phase 10 should add cross-system tests for animation interrupt policies and
+  controller movement from finalized input; phase 08 only added focused controller
+  unit coverage for scaling and metric precedence.
+
+### Phase 8 Review
+
+- Phase 09 is now scoped as teaching polish, explicit example selection, guidance UI,
+  and stale prose cleanup. Broad caller migration is already complete.
+- Phase 09 now documents the phase 08 metrics contract: derived metrics live in the
+  resolved route resource, while explicit `CameraInputSurfaceMetrics` component fields
+  override derived values when present.
+- Phase 10 now tests the route-resource plus explicit-metrics override path end to end.
+- Phase 10 now targets the implemented animation-interrupt shape:
+  `process_camera_move_list` reads finalized input in `Update` after `Finalize` and
+  before controller movement.
+- Phase 10 now includes an ECS controller integration test where finalized input
+  changes yaw, pitch, focus, or radius through the public plugin schedule.
+- Phase 09 keeps gamepad/touch ownership wording future-scoped; Phase 10 either tests
+  current non-latching behavior or removes speculative gamepad/touch latch fields.
+- Phase 09 now audits existing comments and README-style prose before adding new
+  examples so stale middle-click/trackpad wording does not leak into the teaching
+  surface.
+- Phase 10 now decides whether diagnostics expose concrete blocker causes such as
+  disabled camera, inactive camera, egui focus, and animation-ignore blockers.
+
 ### 09-examples-guidance-and-doc-cleanup
 
 Goal: add the teaching examples and visual feedback requested by the new API.
@@ -4451,6 +4516,11 @@ Scope:
 
 - Use the existing workspace `fairy_dust` crate to add the camera guidance panel and
   component-insertion camera setup needed by input-mode examples.
+- Treat existing example caller migration as complete from phase 08. This phase owns
+  teaching polish, explicit example selection, guidance UI, and stale prose cleanup.
+- Audit existing example comments and README-style prose before adding new examples so
+  old raw-input, middle-click, trackpad, and active-camera wording is removed or
+  updated.
 - Add separate examples:
   `orbit_cam_preset_blender_like.rs`, `orbit_cam_preset_simple_mouse.rs`,
   `orbit_cam_bindings_keyboard.rs`, `orbit_cam_bindings_gamepad.rs`, and
@@ -4462,6 +4532,11 @@ Scope:
 - Document that current source latches stabilize mouse-like and keyboard held
   ownership. Gamepad and touch source attribution is supported, but owner latching for
   those sources remains future selected-device or touch-owner policy work.
+- Document the current surface-metrics model consistently: routing derives per-camera
+  metrics into `ResolvedOrbitCamInputRoute`, and explicit
+  `CameraInputSurfaceMetrics` component fields override derived values only where
+  present. Examples should not imply that routing overwrites the explicit component
+  every frame.
 - Consume `OrbitCamInteractionStarted`, `OrbitCamInteractionEnded`,
   `OrbitCamInteractionSourcesChanged`, and `OrbitCamInteractionState` in examples so
   guidance text highlights active orbit, pan, and zoom rows with source attribution.
@@ -4485,6 +4560,8 @@ Done when:
   keyboard, gamepad, and manual sources where the example supports them.
 - Render-to-texture examples demonstrate explicit routing plus logical surface
   metrics.
+- Guidance and docs do not imply stable gamepad or touch owner latching; they describe
+  those as future selected-device or touch-owner policy work.
 
 ### 10-tests-diagnostics-and-cleanup
 
@@ -4501,6 +4578,16 @@ Scope:
   latch recovery, or pinch suppression. Phase 10 lifecycle coverage should focus on
   cross-system cutover tests, finalizer/controller scheduling, interrupt-policy
   integration, workspace consumers, and diagnostics.
+- Add an ECS controller integration test where finalized input changes yaw, pitch,
+  focus, or radius through the public plugin schedule.
+- Add end-to-end coverage for the route-resource metrics path plus explicit
+  `CameraInputSurfaceMetrics` component overrides.
+- Test animation interruption through the implemented system shape:
+  `OrbitCamInputPhase::Finalize` in `PreUpdate`, `process_camera_move_list` in
+  `Update`, and controller movement in `PostUpdate`. Do not look for a separate
+  `animation_input_interrupt` system.
+- Either test the current non-latching behavior for gamepad/touch ownership or remove
+  speculative gamepad/touch fields from the internal latch resource.
 - Do not duplicate the phase 03 pure binding-validator unit tests. Phase 10 binding
   coverage should focus on descriptor apply, installation replacement, ECS resolver
   behavior, and integration with routing/lifecycle/blockers.
@@ -4513,6 +4600,10 @@ Scope:
   adapter count diagnostics, so phase 10 either expands diagnostics for missing
   context activation, enhanced-input API-shape checks, and adapter visibility, or
   narrows diagnostics tests to the concrete diagnostics that exist by then.
+- Decide whether diagnostics expose concrete phase 08 blocker causes, including
+  disabled cameras, inactive cameras, egui focus, and animation-ignore blockers. If
+  those causes remain internal-only, diagnostics tests should not imply a public
+  blocker-cause API exists.
 - Add strict startup diagnostic tests for schedule/plugin/context/enhanced-input API
   assumptions only after those diagnostics exist.
 - Remove any internal compatibility scaffolding used only to keep phases 01-07

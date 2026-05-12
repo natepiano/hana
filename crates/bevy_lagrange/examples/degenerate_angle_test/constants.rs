@@ -7,7 +7,6 @@ use bevy::prelude::Vec3;
 pub(super) const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 pub(super) const CAMERA_PITCH: f32 = 0.0;
 pub(super) const CAMERA_RADIUS: f32 = 5.0;
-pub(super) const CAMERA_TRACKPAD_SENSITIVITY: f32 = 0.5;
 pub(super) const CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 1.0, 5.0);
 pub(super) const CAMERA_YAW: f32 = 0.0;
 

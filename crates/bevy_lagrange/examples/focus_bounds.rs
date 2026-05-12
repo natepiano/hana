@@ -3,10 +3,8 @@
 use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 // camera
@@ -69,10 +67,6 @@ fn setup(
             ),
             // Move the origin of the shape
             focus_bounds_origin: FOCUS_BOUNDS_ORIGIN,
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
             ..default()
         },
     ));

@@ -9,10 +9,8 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::ForceUpdate;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 // camera
@@ -77,13 +75,7 @@ fn setup(
     // Camera
     commands.spawn((
         Transform::from_translation(CAMERA_TRANSLATION),
-        OrbitCam {
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
-            ..default()
-        },
+        OrbitCam::default(),
     ));
 }
 

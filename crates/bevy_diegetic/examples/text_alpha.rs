@@ -40,12 +40,9 @@ use bevy_diegetic::StableTransparency;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::CameraMove;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, 0.3, 0.6);
@@ -332,19 +329,6 @@ fn orbit_cam_home() -> OrbitCam {
         radius: Some(HOME_RADIUS),
         yaw: Some(HOME_YAW),
         pitch: Some(HOME_PITCH),
-        button_orbit: MouseButton::Middle,
-        button_pan: MouseButton::Middle,
-        modifier_pan: Some(KeyCode::ShiftLeft),
-        input_control: Some(InputControl {
-            trackpad: Some(TrackpadInput {
-                behavior:    TrackpadBehavior::BlenderLike {
-                    modifier_pan:  Some(KeyCode::ShiftLeft),
-                    modifier_zoom: Some(KeyCode::ControlLeft),
-                },
-                sensitivity: 0.5,
-            }),
-            ..default()
-        }),
         ..default()
     }
 }

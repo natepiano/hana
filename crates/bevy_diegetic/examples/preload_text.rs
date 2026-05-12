@@ -45,11 +45,8 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::MsdfAtlas;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
@@ -148,19 +145,6 @@ fn setup(
             radius: Some(8.0),
             yaw: Some(0.0),
             pitch: Some(-0.1),
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput {
-                    behavior:    TrackpadBehavior::BlenderLike {
-                        modifier_pan:  Some(KeyCode::ShiftLeft),
-                        modifier_zoom: Some(KeyCode::ControlLeft),
-                    },
-                    sensitivity: 0.5,
-                }),
-                ..default()
-            }),
             ..default()
         },
     ));

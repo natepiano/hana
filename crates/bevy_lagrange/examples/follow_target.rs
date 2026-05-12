@@ -5,10 +5,8 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::ForceUpdate;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 // animation
@@ -81,10 +79,6 @@ fn setup(
             // immediately snaps to that location. If you want the 'follow' to be smoothed,
             // leave this at default or set it to something between 0 and 1.
             pan_smoothness: CAMERA_PAN_SMOOTHNESS,
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
             ..default()
         },
     ));

@@ -29,7 +29,6 @@ use super::OrbitCamButtonDragZoomAxis;
 use super::OrbitCamInput;
 use super::OrbitCamInputContext;
 use super::OrbitCamInputContextGated;
-use super::OrbitCamInteractionKind;
 use super::OrbitCamOrbitAction;
 use super::OrbitCamPanAction;
 use super::OrbitCamPinchBinding;
@@ -97,25 +96,11 @@ pub(crate) struct OrbitCamAdapterDiagnostics {
     pub(crate) gated_cameras:      usize,
 }
 
-#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct OrbitCamHeldSourceTransitionIntents {
-    intents: Vec<OrbitCamHeldSourceTransitionIntent>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct OrbitCamHeldSourceTransitionIntent {
-    pub(crate) camera:  Entity,
-    pub(crate) kind:    OrbitCamInteractionKind,
-    pub(crate) sources: CameraInteractionSources,
-    pub(crate) active:  bool,
-}
-
 pub(crate) struct OrbitCamInputAdapterPlugin;
 
 impl Plugin for OrbitCamInputAdapterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitCamAdapterDiagnostics>()
-            .init_resource::<OrbitCamHeldSourceTransitionIntents>()
             .add_systems(
                 PreUpdate,
                 (
@@ -814,7 +799,6 @@ const fn state_for_f32(value: f32) -> TriggerState {
 )]
 fn resolve_actions_into_orbit_cam_input(
     route: Res<ResolvedOrbitCamInputRoute>,
-    mut held_intents: ResMut<OrbitCamHeldSourceTransitionIntents>,
     mut cameras: Query<
         (
             Entity,
@@ -833,8 +817,6 @@ fn resolve_actions_into_orbit_cam_input(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
 ) {
-    held_intents.intents.clear();
-
     for (camera, bindings, actions, frame_sources, gated, mut input) in &mut cameras {
         input.clear();
         if route.routed_camera() != Some(camera)
@@ -870,28 +852,6 @@ fn resolve_actions_into_orbit_cam_input(
             actions.zoom_smooth_sources,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
-        );
-
-        push_held_intent(
-            &mut held_intents,
-            camera,
-            OrbitCamInteractionKind::Orbit,
-            orbit_sources,
-            orbit_engaged,
-        );
-        push_held_intent(
-            &mut held_intents,
-            camera,
-            OrbitCamInteractionKind::Pan,
-            pan_sources,
-            pan_engaged,
-        );
-        push_held_intent(
-            &mut held_intents,
-            camera,
-            OrbitCamInteractionKind::Zoom,
-            zoom_smooth_sources,
-            zoom_engaged,
         );
 
         if orbit_engaged {
@@ -994,23 +954,6 @@ fn held_sources_for_state<A: HeldCameraAction>(
         fallback
     } else {
         active_sources
-    }
-}
-
-fn push_held_intent(
-    intents: &mut OrbitCamHeldSourceTransitionIntents,
-    camera: Entity,
-    kind: OrbitCamInteractionKind,
-    sources: CameraInteractionSources,
-    active: bool,
-) {
-    if !sources.is_empty() {
-        intents.intents.push(OrbitCamHeldSourceTransitionIntent {
-            camera,
-            kind,
-            sources,
-            active,
-        });
     }
 }
 

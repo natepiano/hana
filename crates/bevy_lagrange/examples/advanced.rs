@@ -10,11 +10,15 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_lagrange::InputControl;
+use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TouchInput;
-use bevy_lagrange::TrackpadInput;
+use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamBindingsError;
+use bevy_lagrange::OrbitCamButtonDragZoomAxis;
+use bevy_lagrange::OrbitCamButtonDragZoomBinding;
+use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::OrbitCamTouchBinding;
 use bevy_lagrange::UpsideDownPolicy;
 use bevy_lagrange::ZoomDirection;
 use bevy_window_manager::WindowManagerPlugin;
@@ -41,6 +45,20 @@ const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 0.0);
 const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
 const GROUND_SIZE: f32 = 5.0;
 const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+
+fn advanced_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
+    OrbitCamBindings::builder()
+        .held_mouse_orbit(MouseButton::Middle)
+        .held_mouse_pan(MouseButton::Middle)
+        .wheel_from_preset(OrbitCamPreset::BlenderLike)
+        .touch(Some(OrbitCamTouchBinding::TwoFingerOrbit))
+        .button_drag_zoom(Some(OrbitCamButtonDragZoomBinding {
+            button: MouseButton::Right,
+            axis:   OrbitCamButtonDragZoomAxis::Y,
+        }))
+        .zoom_direction(ZoomDirection::Reversed)
+        .build()
+}
 
 fn main() {
     App::new()
@@ -78,6 +96,10 @@ fn setup(
         Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera
+    let Ok(bindings) = advanced_bindings() else {
+        error!("advanced camera bindings failed to validate");
+        return;
+    };
     commands.spawn((
         // Note we're setting the initial position below with yaw, pitch, and radius, hence
         // we don't set transform on the camera.
@@ -101,23 +123,9 @@ fn setup(
             zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
             // Allow the camera to go upside down
             upside_down_policy: UpsideDownPolicy::Allow,
-            // Change the controls (these match Blender)
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            // Also enable zooming by holding right click and moving the mouse
-            button_zoom: Some(MouseButton::Right),
-            // Optionally configure button zoom to use left-right mouse movement
-            // button_zoom_axis: ButtonZoomAxis::X,
-            input_control: Some(InputControl {
-                // Use alternate touch controls
-                touch:    Some(TouchInput::TwoFingerOrbit),
-                trackpad: Some(TrackpadInput::blender_default()),
-                // Reverse the zoom direction
-                zoom:     ZoomDirection::Reversed,
-            }),
             ..default()
         },
+        bindings,
     ));
 }
 
@@ -125,18 +133,15 @@ fn setup(
 // Press 'T' to toggle the camera controls.
 fn toggle_camera_controls_system(
     key_input: Res<ButtonInput<KeyCode>>,
-    mut saved_input_control: Local<Option<InputControl>>,
-    mut orbit_cam_query: Query<&mut OrbitCam>,
+    mut commands: Commands,
+    orbit_cam_query: Query<(Entity, Option<&CameraInputDisabled>), With<OrbitCam>>,
 ) {
     if key_input.just_pressed(KeyCode::KeyT) {
-        for mut orbit_cam in &mut orbit_cam_query {
-            if let Some(input_control) = orbit_cam.input_control {
-                *saved_input_control = Some(input_control);
-                orbit_cam.input_control = None;
+        for (camera, disabled) in &orbit_cam_query {
+            if disabled.is_some() {
+                commands.entity(camera).remove::<CameraInputDisabled>();
             } else {
-                orbit_cam.input_control = saved_input_control
-                    .take()
-                    .or_else(|| Some(InputControl::default()));
+                commands.entity(camera).insert(CameraInputDisabled);
             }
         }
     }

@@ -131,7 +131,7 @@ impl OrbitCamInput {
     #[must_use]
     pub const fn has_zoom(&self) -> bool { self.zoom_active }
 
-    pub(super) fn clear(&mut self) -> &mut Self {
+    pub(crate) fn clear(&mut self) -> &mut Self {
         *self = Self::default();
         self
     }

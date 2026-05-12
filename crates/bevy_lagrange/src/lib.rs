@@ -65,7 +65,6 @@ pub use input::ActionBindingSet;
 pub use input::BindingEngagement;
 pub use input::BindingRecipe;
 pub use input::BindingRoutePolicy;
-pub use input::ButtonZoomAxis;
 pub use input::CameraInputDisabled;
 pub use input::CameraInputGamepadSelectionPolicy;
 pub use input::CameraInputMetricKind;
@@ -79,9 +78,7 @@ pub use input::CoarseZoomDelta;
 pub use input::HeldActionBindingEntry;
 pub use input::HeldCameraAction;
 pub use input::ImpulseCameraAction;
-pub use input::InputControl;
 pub use input::ManualInputSource;
-use input::MouseKeyTracker;
 pub use input::NoPositionFallback;
 pub use input::OrbitCamBindings;
 pub use input::OrbitCamBindingsBuilder;
@@ -134,12 +131,8 @@ pub use input::OrbitCamZoomSmoothActionBindings;
 pub use input::OrbitDelta;
 pub use input::PanDelta;
 pub use input::SmoothZoomDelta;
-pub use input::TrackpadBehavior;
-pub use input::TrackpadInput;
 pub use input::ZoomDirection;
 use observers::ObserverPlugin;
-pub use orbit_cam::ActiveCameraData;
-pub use orbit_cam::CameraInputDetection;
 pub use orbit_cam::FocusBoundsShape;
 pub use orbit_cam::ForceUpdate;
 pub use orbit_cam::InitializationState;
@@ -148,8 +141,8 @@ pub use orbit_cam::OrbitCamSystemSet;
 pub use orbit_cam::TimeSource;
 pub use orbit_cam::UpsideDownPolicy;
 use system_sets::LagrangeSystemSetsPlugin;
+use system_sets::OrbitCamInputInternalSet;
 pub use system_sets::OrbitCamInputPhase;
-pub use touch::TouchInput;
 use touch::TouchTracker;
 
 /// Bevy plugin that contains the systems for controlling `OrbitCam` components.
@@ -177,24 +170,16 @@ impl Plugin for LagrangePlugin {
             OrbitCamInputLifecyclePlugin,
         ));
 
-        app.init_resource::<ActiveCameraData>()
-            .init_resource::<MouseKeyTracker>()
-            .init_resource::<TouchTracker>()
+        app.init_resource::<TouchTracker>()
+            .add_systems(
+                PreUpdate,
+                touch::touch_tracker
+                    .in_set(OrbitCamInputPhase::PreInput)
+                    .before(OrbitCamInputInternalSet::AdapterInjection),
+            )
             .add_systems(
                 PostUpdate,
-                (
-                    (
-                        orbit_cam::active_viewport_data.run_if(
-                            |active_camera: Res<ActiveCameraData>| {
-                                active_camera.detection == CameraInputDetection::Automatic
-                            },
-                        ),
-                        input::mouse_key_tracker,
-                        touch::touch_tracker,
-                    ),
-                    orbit_cam::orbit_cam,
-                )
-                    .chain()
+                orbit_cam::orbit_cam
                     .in_set(OrbitCamSystemSet)
                     .before(TransformSystems::Propagate)
                     .before(CameraUpdateSystems),

@@ -25,15 +25,13 @@ use crate::orbit_cam::OrbitCam;
 /// Component that stores camera runtime state values during animations.
 ///
 /// When camera animations are active (via [`CameraMoveList`]), the smoothness values are
-/// temporarily set to `0.0` for instant movement. Depending on
-/// [`CameraInputInterruptBehavior`], camera input may also be temporarily disabled.
-/// Original values are stored here and restored when the animation completes.
+/// temporarily set to `0.0` for instant movement. Original values are stored here and
+/// restored when the animation completes.
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub(crate) struct OrbitCamStash {
-    pub(crate) zoom:    f32,
-    pub(crate) pan:     f32,
-    pub(crate) orbit:   f32,
-    pub(crate) control: Option<crate::InputControl>,
+    pub(crate) zoom:  f32,
+    pub(crate) pan:   f32,
+    pub(crate) orbit: f32,
 }
 
 /// Ensures camera runtime state is stashed once and animation overrides are applied.
@@ -42,14 +40,13 @@ fn stash_camera_state(
     entity: Entity,
     camera: &mut OrbitCam,
     existing_stash: Option<&OrbitCamStash>,
-    interrupt_behavior: CameraInputInterruptBehavior,
+    _interrupt_behavior: CameraInputInterruptBehavior,
 ) {
     if existing_stash.is_none() {
         let stash = OrbitCamStash {
-            zoom:    camera.zoom_smoothness,
-            pan:     camera.pan_smoothness,
-            orbit:   camera.orbit_smoothness,
-            control: camera.input_control,
+            zoom:  camera.zoom_smoothness,
+            pan:   camera.pan_smoothness,
+            orbit: camera.orbit_smoothness,
         };
         commands.entity(entity).insert(stash);
     }
@@ -57,10 +54,6 @@ fn stash_camera_state(
     camera.zoom_smoothness = INSTANT_SMOOTHNESS;
     camera.pan_smoothness = INSTANT_SMOOTHNESS;
     camera.orbit_smoothness = INSTANT_SMOOTHNESS;
-
-    if interrupt_behavior == CameraInputInterruptBehavior::Ignore {
-        camera.input_control = None;
-    }
 }
 
 /// Fires `ZoomBegin` and inserts `ZoomAnimationMarker` when the accepted
@@ -232,7 +225,6 @@ pub(super) fn restore_camera_state(
     camera.zoom_smoothness = stash.zoom;
     camera.pan_smoothness = stash.pan;
     camera.orbit_smoothness = stash.orbit;
-    camera.input_control = stash.control;
 
     commands.entity(entity).remove::<OrbitCamStash>();
 }

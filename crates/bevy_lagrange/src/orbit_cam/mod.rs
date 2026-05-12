@@ -1,12 +1,7 @@
 //! `OrbitCam` component, systems, and helpers.
 
-mod active_camera_data;
 mod controller;
 
-pub use active_camera_data::ActiveCameraData;
-pub use active_camera_data::CameraInputDetection;
-pub use active_camera_data::OrbitCamSystemSet;
-pub(crate) use active_camera_data::active_viewport_data;
 use bevy::prelude::*;
 pub(crate) use controller::orbit_cam;
 
@@ -17,8 +12,13 @@ use super::constants::DEFAULT_PAN_SMOOTHNESS;
 use super::constants::DEFAULT_TARGET_RADIUS;
 use super::constants::DEFAULT_ZOOM_LOWER_LIMIT;
 use super::constants::DEFAULT_ZOOM_SMOOTHNESS;
-use super::input::ButtonZoomAxis;
-use super::input::InputControl;
+use super::input::OrbitCamInput;
+use super::input::OrbitCamInputContext;
+use super::input::OrbitCamPreset;
+
+/// Base system set to allow ordering of `OrbitCam`.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct OrbitCamSystemSet;
 
 /// The shape to restrict the camera's focus inside.
 #[derive(Clone, PartialEq, Debug, Reflect, Copy)]
@@ -80,7 +80,8 @@ pub enum TimeSource {
 /// Internal per-camera state used to keep orbit direction stable during a drag.
 #[derive(Component, Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OrbitDragState {
-    orientation: CameraOrientation,
+    orientation:  CameraOrientation,
+    orbit_active: bool,
 }
 
 /// Whether the camera was latched as upside down when orbit dragging started.
@@ -129,7 +130,13 @@ const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
 /// ```
 #[derive(Component, Reflect, Copy, Clone, Debug, PartialEq)]
 #[reflect(Component)]
-#[require(Camera3d, OrbitDragState)]
+#[require(
+    Camera3d,
+    OrbitDragState,
+    OrbitCamInput,
+    OrbitCamInputContext,
+    OrbitCamPreset
+)]
 pub struct OrbitCam {
     /// The point to orbit around, and what the camera looks at. Updated automatically.
     /// If you want to change the focus programmatically after initialization, set `target_focus`
@@ -238,28 +245,6 @@ pub struct OrbitCam {
     /// Note that this setting does not apply to pixel-based scroll events, as they are typically
     /// already smooth. It only applies to line-based scroll events.
     pub zoom_smoothness:     f32,
-    /// Button used to orbit the camera.
-    /// Defaults to `Button::Left`.
-    pub button_orbit:        MouseButton,
-    /// Button used to pan the camera.
-    /// Defaults to `Button::Right`.
-    pub button_pan:          MouseButton,
-    /// Button used to zoom the camera, by holding it down and moving the mouse forward and back.
-    /// Defaults to `None`.
-    pub button_zoom:         Option<MouseButton>,
-    /// Which axis should zoom the camera when using `button_zoom`.
-    /// Defaults to `ButtonZoomAxis::Y`.
-    pub button_zoom_axis:    ButtonZoomAxis,
-    /// Key that must be pressed for `button_orbit` to work.
-    /// Defaults to `None` (no modifier).
-    pub modifier_orbit:      Option<KeyCode>,
-    /// Key that must be pressed for `button_pan` to work.
-    /// Defaults to `None` (no modifier).
-    pub modifier_pan:        Option<KeyCode>,
-    /// Interactive input configuration.
-    /// Set to `None` to disable all user input for this camera.
-    /// Defaults to `Some(InputControl::default())`.
-    pub input_control:       Option<InputControl>,
     /// Whether to allow the camera to go upside down.
     /// Defaults to `UpsideDownPolicy::Prevent`.
     pub upside_down_policy:  UpsideDownPolicy,
@@ -296,13 +281,6 @@ impl Default for OrbitCam {
             pan_smoothness:      DEFAULT_PAN_SMOOTHNESS,
             zoom_sensitivity:    DEFAULT_INPUT_SENSITIVITY,
             zoom_smoothness:     DEFAULT_ZOOM_SMOOTHNESS,
-            button_orbit:        MouseButton::Left,
-            button_pan:          MouseButton::Right,
-            button_zoom:         None,
-            button_zoom_axis:    ButtonZoomAxis::Y,
-            modifier_orbit:      None,
-            modifier_pan:        None,
-            input_control:       Some(InputControl::default()),
             yaw:                 None,
             pitch:               None,
             target_yaw:          DEFAULT_ORBIT_ANGLE,

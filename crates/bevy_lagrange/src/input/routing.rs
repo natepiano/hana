@@ -309,7 +309,6 @@ fn resolve_camera_input_routing(world: &mut World) {
             OrbitCamInputContextGated {
                 allowed: !blockers.is_blocked(),
             },
-            snapshot.metrics,
         ));
         resolved.metrics.insert(snapshot.entity, snapshot.metrics);
         resolved.blockers.insert(snapshot.entity, blockers);
@@ -366,14 +365,24 @@ fn collect_camera_snapshots_impl(
         Option<&CameraInputDisabled>,
         Option<&CameraMoveList>,
         Option<&CameraInputInterruptBehavior>,
+        Option<&CameraInputSurfaceMetrics>,
     )>();
 
     query
         .iter(world)
         .map(
-            |(entity, camera, target, manual, disabled, move_list, interrupt)| {
+            |(entity, camera, target, manual, disabled, move_list, interrupt, explicit_metrics)| {
                 camera_snapshot(
-                    entity, camera, target, manual, disabled, move_list, interrupt, false, windows,
+                    entity,
+                    camera,
+                    target,
+                    manual,
+                    disabled,
+                    move_list,
+                    interrupt,
+                    explicit_metrics,
+                    false,
+                    windows,
                 )
             },
         )
@@ -396,13 +405,24 @@ fn collect_camera_snapshots_impl(
         Option<&CameraInputDisabled>,
         Option<&CameraMoveList>,
         Option<&CameraInputInterruptBehavior>,
+        Option<&CameraInputSurfaceMetrics>,
         Option<&BlockOnEguiFocus>,
     )>();
 
     query
         .iter(world)
         .map(
-            |(entity, camera, target, manual, disabled, move_list, interrupt, block_on_egui)| {
+            |(
+                entity,
+                camera,
+                target,
+                manual,
+                disabled,
+                move_list,
+                interrupt,
+                explicit_metrics,
+                block_on_egui,
+            )| {
                 camera_snapshot(
                     entity,
                     camera,
@@ -411,6 +431,7 @@ fn collect_camera_snapshots_impl(
                     disabled,
                     move_list,
                     interrupt,
+                    explicit_metrics,
                     egui_blocks_all && block_on_egui.is_some(),
                     windows,
                 )
@@ -427,16 +448,12 @@ fn camera_snapshot(
     disabled: Option<&CameraInputDisabled>,
     move_list: Option<&CameraMoveList>,
     interrupt: Option<&CameraInputInterruptBehavior>,
+    explicit_metrics: Option<&CameraInputSurfaceMetrics>,
     egui_blocked: bool,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> CameraRoutingSnapshot {
     let window = window_snapshot(target, windows);
-    let metrics = CameraInputSurfaceMetrics {
-        camera_view_size:   camera.logical_viewport_size(),
-        input_surface_size: window
-            .map(|window| window.size)
-            .or_else(|| camera.logical_viewport_size()),
-    };
+    let metrics = camera_input_surface_metrics(camera, window, explicit_metrics.copied());
     let cursor_hit = window
         .and_then(|window| window.cursor)
         .is_some_and(|cursor| cursor_hits_camera(cursor, camera));
@@ -456,6 +473,30 @@ fn camera_snapshot(
         flags,
         metrics,
     }
+}
+
+fn camera_input_surface_metrics(
+    camera: &Camera,
+    window: Option<&WindowSnapshot>,
+    explicit: Option<CameraInputSurfaceMetrics>,
+) -> CameraInputSurfaceMetrics {
+    let mut metrics = CameraInputSurfaceMetrics {
+        camera_view_size:   camera.logical_viewport_size(),
+        input_surface_size: window
+            .map(|window| window.size)
+            .or_else(|| camera.logical_viewport_size()),
+    };
+
+    if let Some(explicit) = explicit {
+        if explicit.camera_view_size.is_some() {
+            metrics.camera_view_size = explicit.camera_view_size;
+        }
+        if explicit.input_surface_size.is_some() {
+            metrics.input_surface_size = explicit.input_surface_size;
+        }
+    }
+
+    metrics
 }
 
 fn window_snapshot<'a>(

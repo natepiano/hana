@@ -9,18 +9,14 @@ mod constants;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::WindowManagerPlugin;
 
 use crate::constants::CAMERA_FOCUS;
 use crate::constants::CAMERA_PITCH;
 use crate::constants::CAMERA_RADIUS;
-use crate::constants::CAMERA_TRACKPAD_SENSITIVITY;
 use crate::constants::CAMERA_TRANSLATION;
 use crate::constants::CAMERA_YAW;
 use crate::constants::CUBE_COLOR;
@@ -99,16 +95,6 @@ fn setup(
             yaw: Some(CAMERA_YAW),
             radius: Some(CAMERA_RADIUS),
             focus: CAMERA_FOCUS,
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput {
-                    behavior:    TrackpadBehavior::blender_default(),
-                    sensitivity: CAMERA_TRACKPAD_SENSITIVITY,
-                }),
-                ..default()
-            }),
             ..default()
         },
         Transform::from_translation(CAMERA_TRANSLATION).looking_at(CAMERA_FOCUS, Vec3::Y),

@@ -19,15 +19,14 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::ForceUpdate;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 use crate::constants::ANIMATE_TO_FIT_DURATION;
@@ -64,8 +63,7 @@ enum ManualAnimationMode {
 
 #[derive(Resource, Default)]
 struct ManualAnimationState {
-    mode:                ManualAnimationMode,
-    saved_input_control: Option<InputControl>,
+    mode: ManualAnimationMode,
 }
 
 fn main() {
@@ -110,16 +108,7 @@ fn setup(
         Transform::from_translation(LIGHT_TRANSLATION),
     ));
     // Camera
-    commands.spawn((
-        Transform::from_translation(START_POS),
-        OrbitCam {
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
-            ..default()
-        },
-    ));
+    commands.spawn((Transform::from_translation(START_POS), OrbitCam::default()));
 
     // Instructions
     commands.spawn((
@@ -136,13 +125,15 @@ fn setup(
     ));
 }
 
-fn stop_manual(manual: &mut ManualAnimationState, cam: &mut OrbitCam) {
+fn stop_manual(
+    commands: &mut Commands,
+    manual: &mut ManualAnimationState,
+    camera: Entity,
+    cam: &mut OrbitCam,
+) {
     if manual.mode == ManualAnimationMode::Active {
         manual.mode = ManualAnimationMode::Inactive;
-        cam.input_control = manual
-            .saved_input_control
-            .take()
-            .or_else(|| Some(InputControl::default()));
+        commands.entity(camera).remove::<CameraInputDisabled>();
         cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
         cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
         cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
@@ -168,11 +159,10 @@ fn keyboard_input(
     // Toggle manual animation
     if keys.just_pressed(KeyCode::KeyM) {
         if manual.mode == ManualAnimationMode::Active {
-            stop_manual(&mut manual, &mut cam);
+            stop_manual(&mut commands, &mut manual, camera, &mut cam);
         } else {
             manual.mode = ManualAnimationMode::Active;
-            manual.saved_input_control = cam.input_control;
-            cam.input_control = None;
+            commands.entity(camera).insert(CameraInputDisabled);
             cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
             cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
             cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
@@ -187,7 +177,7 @@ fn keyboard_input(
 
     // AnimateToFit — event-driven
     if keys.just_pressed(KeyCode::KeyA) {
-        stop_manual(&mut manual, &mut cam);
+        stop_manual(&mut commands, &mut manual, camera, &mut cam);
         let Ok(target) = target_query.single() else {
             return;
         };
@@ -203,7 +193,7 @@ fn keyboard_input(
 
     // PlayAnimation — event-driven multi-step sequence
     if keys.just_pressed(KeyCode::Space) {
-        stop_manual(&mut manual, &mut cam);
+        stop_manual(&mut commands, &mut manual, camera, &mut cam);
         let moves = PLAY_ANIMATION_STEPS.map(|step| CameraMove::ToOrbit {
             focus:    PLAY_ANIMATION_FOCUS,
             yaw:      step.yaw,
@@ -219,7 +209,7 @@ fn keyboard_input(
 
     // Reset
     if keys.just_pressed(KeyCode::KeyR) {
-        stop_manual(&mut manual, &mut cam);
+        stop_manual(&mut commands, &mut manual, camera, &mut cam);
         let radius = START_POS.length();
         cam.target_focus = Vec3::ZERO;
         cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);

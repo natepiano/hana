@@ -27,11 +27,8 @@ use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
 use bevy_window_manager::WindowManagerPlugin;
 
 /// World-space panel height. Width follows the window aspect ratio.
@@ -186,19 +183,6 @@ fn setup(
         radius: Some(4.385_594_4),
         yaw: Some(-0.004_848_164),
         pitch: Some(0.026_128_9),
-        button_orbit: MouseButton::Middle,
-        button_pan: MouseButton::Middle,
-        modifier_pan: Some(KeyCode::ShiftLeft),
-        input_control: Some(InputControl {
-            trackpad: Some(TrackpadInput {
-                behavior: TrackpadBehavior::BlenderLike {
-                    modifier_pan:  Some(KeyCode::ShiftLeft),
-                    modifier_zoom: Some(KeyCode::ControlLeft),
-                },
-                ..default()
-            }),
-            ..default()
-        }),
         ..default()
     },));
 }

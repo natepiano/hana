@@ -2,10 +2,6 @@
 //!
 //! # Quick Start
 //!
-//! `OrbitCam` still uses the legacy raw-input fields until the input cutover phase.
-//! The types in this module define the additive semantic input surface that later
-//! phases connect to enhanced input.
-//!
 //! App-authored manual camera input should write [`OrbitCamInput`] through
 //! [`OrbitCamManualInputWriter`] in [`OrbitCamInputPhase::WriteManual`].
 //!
@@ -18,7 +14,6 @@ mod context;
 mod disabled;
 mod events;
 mod intent;
-mod legacy;
 mod lifecycle;
 mod manual;
 mod metrics;
@@ -61,6 +56,7 @@ pub use bindings::OrbitCamWheelBinding;
 pub use bindings::OrbitCamWheelModifier;
 pub use bindings::OrbitCamZoomCoarseActionBindings;
 pub use bindings::OrbitCamZoomSmoothActionBindings;
+pub use bindings::ZoomDirection;
 pub use bindings::validate_bindings;
 pub use context::OrbitCamInputContext;
 pub use disabled::CameraInputDisabled;
@@ -74,17 +70,6 @@ pub use intent::OrbitCamInput;
 pub use intent::OrbitDelta;
 pub use intent::PanDelta;
 pub use intent::SmoothZoomDelta;
-pub use legacy::ButtonZoomAxis;
-pub use legacy::InputControl;
-pub(crate) use legacy::MouseKeyTracker;
-pub(crate) use legacy::OrbitButtonChange;
-pub use legacy::TrackpadBehavior;
-pub use legacy::TrackpadInput;
-pub use legacy::ZoomDirection;
-pub(crate) use legacy::button_zoom_just_pressed;
-pub(crate) use legacy::mouse_key_tracker;
-pub(crate) use legacy::orbit_just_pressed;
-pub(crate) use legacy::pan_just_pressed;
 pub(crate) use lifecycle::OrbitCamInputLifecyclePlugin;
 pub use manual::OrbitCamManualInput;
 pub use manual::OrbitCamManualInputWriter;

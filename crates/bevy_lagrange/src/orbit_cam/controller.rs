@@ -3,7 +3,6 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 
-use super::ActiveCameraData;
 use super::CameraOrientation;
 use super::ForceUpdate;
 use super::InitializationState;
@@ -12,22 +11,17 @@ use super::OrbitDragState;
 use super::TimeSource;
 use super::UpsideDownPolicy;
 use crate::constants::SCROLL_ZOOM_FACTOR;
-use crate::constants::TOUCH_PINCH_SCALE;
-use crate::input::MouseKeyTracker;
-use crate::input::OrbitButtonChange;
-use crate::input::ZoomDirection;
+use crate::input::CameraInputSurfaceMetrics;
+use crate::input::OrbitCamInput;
+use crate::input::ResolvedOrbitCamInputRoute;
 use crate::orbital_math;
-use crate::touch::TouchGestures;
-use crate::touch::TouchInput;
-use crate::touch::TouchTracker;
 
 /// Aggregated camera input for a single frame.
 struct CameraInput {
-    orbit:               Vec2,
-    pan:                 Vec2,
-    scroll_line:         f32,
-    scroll_pixel:        f32,
-    orbit_button_change: OrbitButtonChange,
+    orbit:        Vec2,
+    pan:          Vec2,
+    scroll_line:  f32,
+    scroll_pixel: f32,
 }
 
 /// Initializes `OrbitCam` from the camera's current transform, applying all limits.
@@ -72,75 +66,43 @@ fn initialize_orbit_cam(
     orbit_cam.initialization = InitializationState::Complete;
 }
 
-/// Collects mouse, keyboard, and touch input into a single `CameraInput`.
-fn collect_camera_input(
-    entity: Entity,
-    orbit_cam: &OrbitCam,
-    active_camera: &ActiveCameraData,
-    mouse_key_tracker: &MouseKeyTracker,
-    touch_tracker: &TouchTracker,
-) -> CameraInput {
-    let mut orbit = Vec2::ZERO;
-    let mut pan = Vec2::ZERO;
-    let mut scroll_line = 0.0;
-    let mut scroll_pixel = 0.0;
-    let mut orbit_button_change = OrbitButtonChange::Unchanged;
+/// Converts finalized semantic input into controller movement values.
+fn collect_camera_input(orbit_cam: &OrbitCam, input: &OrbitCamInput) -> CameraInput {
+    let mut camera_input = CameraInput {
+        orbit:        Vec2::ZERO,
+        pan:          Vec2::ZERO,
+        scroll_line:  0.0,
+        scroll_pixel: 0.0,
+    };
 
-    // Only skip getting input if the camera is inactive/disabled — it might still
-    // be lerping towards target values when the user is not actively controlling it.
-    if let Some(input_control) = orbit_cam.input_control
-        && active_camera.entity == Some(entity)
-    {
-        let zoom_sign = match input_control.zoom {
-            ZoomDirection::Normal => 1.0,
-            ZoomDirection::Reversed => -1.0,
-        };
+    if input.has_orbit() {
+        camera_input.orbit = input.orbit().pixels() * orbit_cam.orbit_sensitivity;
+    }
+    if input.has_pan() {
+        camera_input.pan = input.pan().pixels() * orbit_cam.pan_sensitivity;
+    }
+    if input.has_zoom() {
+        camera_input.scroll_line = input.zoom_coarse().amount() * orbit_cam.zoom_sensitivity;
+        camera_input.scroll_pixel = input.zoom_smooth().amount() * orbit_cam.zoom_sensitivity;
+    }
 
-        orbit = mouse_key_tracker.orbit * orbit_cam.orbit_sensitivity;
-        pan = mouse_key_tracker.pan * orbit_cam.pan_sensitivity;
-        scroll_line = mouse_key_tracker.scroll_line * zoom_sign * orbit_cam.zoom_sensitivity;
-        scroll_pixel = mouse_key_tracker.scroll_pixel * zoom_sign * orbit_cam.zoom_sensitivity;
-        orbit_button_change = mouse_key_tracker.orbit_button_change;
+    camera_input
+}
 
-        if let Some(touch_input) = input_control.touch {
-            let (touch_orbit, touch_pan, touch_zoom_pixel) = match touch_input {
-                TouchInput::OneFingerOrbit => match touch_tracker.get_touch_gestures() {
-                    TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
-                    TouchGestures::OneFinger(one_finger_gestures) => {
-                        (one_finger_gestures.motion, Vec2::ZERO, 0.0)
-                    },
-                    TouchGestures::TwoFinger(two_finger_gestures) => (
-                        Vec2::ZERO,
-                        two_finger_gestures.motion,
-                        two_finger_gestures.pinch * TOUCH_PINCH_SCALE,
-                    ),
-                },
-                TouchInput::TwoFingerOrbit => match touch_tracker.get_touch_gestures() {
-                    TouchGestures::None => (Vec2::ZERO, Vec2::ZERO, 0.0),
-                    TouchGestures::OneFinger(one_finger_gestures) => {
-                        (Vec2::ZERO, one_finger_gestures.motion, 0.0)
-                    },
-                    TouchGestures::TwoFinger(two_finger_gestures) => (
-                        two_finger_gestures.motion,
-                        Vec2::ZERO,
-                        two_finger_gestures.pinch * TOUCH_PINCH_SCALE,
-                    ),
-                },
-            };
-
-            orbit += touch_orbit * orbit_cam.orbit_sensitivity;
-            pan += touch_pan * orbit_cam.pan_sensitivity;
-            scroll_pixel += touch_zoom_pixel * zoom_sign * orbit_cam.zoom_sensitivity;
+fn merged_surface_metrics(
+    routed: Option<CameraInputSurfaceMetrics>,
+    explicit: Option<CameraInputSurfaceMetrics>,
+) -> CameraInputSurfaceMetrics {
+    let mut metrics = routed.unwrap_or_default();
+    if let Some(explicit) = explicit {
+        if explicit.camera_view_size.is_some() {
+            metrics.camera_view_size = explicit.camera_view_size;
+        }
+        if explicit.input_surface_size.is_some() {
+            metrics.input_surface_size = explicit.input_surface_size;
         }
     }
-
-    CameraInput {
-        orbit,
-        pan,
-        scroll_line,
-        scroll_pixel,
-        orbit_button_change,
-    }
+    metrics
 }
 
 /// Applies orbit input to target yaw/pitch. Returns `true` if the camera moved.
@@ -286,54 +248,59 @@ fn smooth_and_update_transform(
 
 /// Main system for processing input and converting to transformations
 pub fn orbit_cam(
-    active_camera: Res<ActiveCameraData>,
-    mouse_key_tracker: Res<MouseKeyTracker>,
-    touch_tracker: Res<TouchTracker>,
+    route: Res<ResolvedOrbitCamInputRoute>,
     mut orbit_cameras: Query<(
         Entity,
         &mut OrbitCam,
         &mut OrbitDragState,
+        &OrbitCamInput,
+        Option<&CameraInputSurfaceMetrics>,
         &mut Transform,
         &mut Projection,
     )>,
     time_real: Res<Time<Real>>,
     time_virt: Res<Time<Virtual>>,
 ) {
-    for (entity, mut orbit_cam, mut drag_state, mut transform, mut projection) in &mut orbit_cameras
+    for (
+        entity,
+        mut orbit_cam,
+        mut drag_state,
+        input,
+        explicit_metrics,
+        mut transform,
+        mut projection,
+    ) in &mut orbit_cameras
     {
         if orbit_cam.initialization == InitializationState::Pending {
             initialize_orbit_cam(&mut orbit_cam, &mut transform, &mut projection);
         }
 
-        let input = collect_camera_input(
-            entity,
-            &orbit_cam,
-            &active_camera,
-            &mouse_key_tracker,
-            &touch_tracker,
-        );
+        let input = collect_camera_input(&orbit_cam, input);
+        let metrics = merged_surface_metrics(route.metrics_for(entity), explicit_metrics.copied());
 
         // Only check for upside down when orbiting started or ended this frame,
         // so we don't reverse the yaw direction while the user is still dragging
-        if input.orbit_button_change == OrbitButtonChange::Changed {
+        let orbit_active = input.orbit != Vec2::ZERO;
+        if orbit_active != drag_state.orbit_active {
             let world_up = orbit_cam.axis[1];
             drag_state.orientation = if transform.up().dot(world_up) < 0.0 {
                 CameraOrientation::UpsideDown
             } else {
                 CameraOrientation::Normal
             };
+            drag_state.orbit_active = orbit_active;
         }
 
         let mut has_moved = apply_orbit_input(
             input.orbit,
             &mut orbit_cam,
             *drag_state,
-            active_camera.window_size,
+            metrics.input_surface_size,
         );
         has_moved |= apply_pan_input(
             input.pan,
             &mut orbit_cam,
-            active_camera.viewport_size,
+            metrics.camera_view_size,
             &transform,
             &projection,
         );
@@ -377,5 +344,48 @@ pub fn orbit_cam(
         if needs_update {
             smooth_and_update_transform(&mut orbit_cam, &mut transform, &mut projection, delta);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::CameraInteractionSources;
+
+    #[test]
+    fn collect_camera_input_scales_finalized_intent() {
+        let orbit_cam = OrbitCam {
+            orbit_sensitivity: 2.0,
+            pan_sensitivity: 3.0,
+            zoom_sensitivity: 4.0,
+            ..default()
+        };
+        let mut input = OrbitCamInput::default();
+        input
+            .orbit_pixels_with_sources(Vec2::new(1.0, 2.0), CameraInteractionSources::MOUSE)
+            .pan_pixels_with_sources(Vec2::new(3.0, 4.0), CameraInteractionSources::MOUSE)
+            .zoom_coarse_with_sources(5.0, CameraInteractionSources::WHEEL)
+            .zoom_smooth_with_sources(6.0, CameraInteractionSources::SMOOTH_SCROLL);
+
+        let input = collect_camera_input(&orbit_cam, &input);
+
+        assert_eq!(input.orbit, Vec2::new(2.0, 4.0));
+        assert_eq!(input.pan, Vec2::new(9.0, 12.0));
+        assert!((input.scroll_line - 20.0).abs() <= f32::EPSILON);
+        assert!((input.scroll_pixel - 24.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn explicit_surface_metrics_override_routed_metrics() {
+        let routed = CameraInputSurfaceMetrics::camera_view_and_input_surface(
+            Vec2::new(100.0, 200.0),
+            Vec2::new(300.0, 400.0),
+        );
+        let explicit = CameraInputSurfaceMetrics::camera_view(Vec2::new(500.0, 600.0));
+
+        let metrics = merged_surface_metrics(Some(routed), Some(explicit));
+
+        assert_eq!(metrics.camera_view_size, Some(Vec2::new(500.0, 600.0)));
+        assert_eq!(metrics.input_surface_size, Some(Vec2::new(300.0, 400.0)));
     }
 }

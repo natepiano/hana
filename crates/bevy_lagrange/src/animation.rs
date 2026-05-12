@@ -27,6 +27,7 @@ use super::events::CameraMoveEnd;
 use super::events::ZoomCancelled;
 use super::events::ZoomContext;
 use super::events::ZoomEnd;
+use super::input::OrbitCamInput;
 
 /// Tracks a zoom-to-fit operation routed through the animation system.
 ///
@@ -516,13 +517,21 @@ pub(crate) fn process_camera_move_list(
         Entity,
         &mut OrbitCam,
         &mut CameraMoveList,
+        &mut OrbitCamInput,
         &CameraInputInterruptBehavior,
         Option<&ZoomAnimationMarker>,
         Option<&AnimationSourceMarker>,
     )>,
 ) {
-    for (entity, mut pan_orbit, mut queue, interrupt_behavior, zoom_marker, source_marker) in
-        &mut camera_query
+    for (
+        entity,
+        mut pan_orbit,
+        mut queue,
+        mut input,
+        interrupt_behavior,
+        zoom_marker,
+        source_marker,
+    ) in &mut camera_query
     {
         let source = source_marker.map_or(AnimationSource::PlayAnimation, |m| m.0);
 
@@ -531,7 +540,7 @@ pub(crate) fn process_camera_move_list(
             continue;
         };
 
-        if queue.state.externally_modified(&pan_orbit) {
+        if input.has_input() || queue.state.externally_modified(&pan_orbit) {
             let outcome = handle_camera_input_interrupt(
                 &mut commands,
                 entity,
@@ -545,8 +554,13 @@ pub(crate) fn process_camera_move_list(
                 },
             );
             match outcome {
-                CameraInputInterruptBehavior::Ignore => {},
+                CameraInputInterruptBehavior::Ignore => {
+                    input.clear();
+                },
                 CameraInputInterruptBehavior::Cancel | CameraInputInterruptBehavior::Complete => {
+                    if outcome == CameraInputInterruptBehavior::Complete {
+                        input.clear();
+                    }
                     continue;
                 },
             }
