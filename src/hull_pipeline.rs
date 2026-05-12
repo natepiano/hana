@@ -226,9 +226,7 @@ impl GetBatchData for HullPipeline {
         (_, main_entity): (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_batch_data` should never be called in GPU mesh uniform building mode"
-            );
+            error!("`get_batch_data` should never be called in GPU mesh uniform building mode");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -305,9 +303,7 @@ impl GetFullBatchData for HullPipeline {
         main_entity: MainEntity,
     ) -> Option<NonMaxU32> {
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_binned_index` should never be called in CPU mesh uniform building mode"
-            );
+            error!("`get_binned_index` should never be called in CPU mesh uniform building mode");
             return None;
         };
         mesh_instances

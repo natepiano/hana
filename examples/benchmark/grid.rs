@@ -5,8 +5,8 @@ use bevy_kana::ToU32;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineMethod;
 use bevy_liminal::OverlapMode;
-use rand::rng;
 use rand::RngExt;
+use rand::rng;
 
 use crate::constants::DEFAULT_OUTLINE_INTENSITY;
 use crate::constants::DEPTH_SPACING_MULTIPLIER;

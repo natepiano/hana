@@ -62,13 +62,12 @@ pub(super) struct BenchmarkState {
 
 impl BenchmarkState {
     pub(super) fn new() -> Self {
-        let exit_behavior = if var(AUTO_MODE_ENV_VAR)
-            .is_ok_and(|value| value == AUTO_MODE_ENV_VAR_ENABLED_VALUE)
-        {
-            ExitBehavior::OnComplete
-        } else {
-            ExitBehavior::KeepRunning
-        };
+        let exit_behavior =
+            if var(AUTO_MODE_ENV_VAR).is_ok_and(|value| value == AUTO_MODE_ENV_VAR_ENABLED_VALUE) {
+                ExitBehavior::OnComplete
+            } else {
+                ExitBehavior::KeepRunning
+            };
         let (mode, phase) = if exit_behavior == ExitBehavior::OnComplete {
             (BenchmarkMode::Auto, BenchmarkPhase::StartupDelay)
         } else {
