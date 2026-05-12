@@ -99,21 +99,21 @@ const fn shadow_mode_label(mode: GlyphShadowMode) -> &'static str {
 
 /// Grid dimensions derived from the mode arrays.
 struct GridLayout {
-    grid_width:    f32,
-    grid_height:   f32,
-    grid_center_y: f32,
-    rows:          usize,
+    width:    f32,
+    height:   f32,
+    center_y: f32,
+    rows:     usize,
 }
 
 impl GridLayout {
     fn new(num_rows: usize, num_cols: usize) -> Self {
-        let grid_width = (num_cols - 1).to_f32() * COL_SPACING;
-        let grid_height = (num_rows - 1).to_f32() * ROW_SPACING;
-        let grid_center_y = grid_height * 0.5 + 1.5;
+        let width = (num_cols - 1).to_f32() * COL_SPACING;
+        let height = (num_rows - 1).to_f32() * ROW_SPACING;
+        let center_y = height * 0.5 + 1.5;
         Self {
-            grid_width,
-            grid_height,
-            grid_center_y,
+            width,
+            height,
+            center_y,
             rows: num_rows,
         }
     }
@@ -182,8 +182,8 @@ fn spawn_ground_and_backdrop(
 
     commands.insert_resource(SceneBounds(ground));
 
-    let panel_width = grid.grid_width + 3.0;
-    let panel_height = grid.grid_height + 3.0;
+    let panel_width = grid.width + 3.0;
+    let panel_height = grid.height + 3.0;
     let backdrop = commands
         .spawn((
             Mesh3d(meshes.add(Rectangle::new(panel_width, panel_height))),
@@ -193,7 +193,7 @@ fn spawn_ground_and_backdrop(
                 cull_mode: None,
                 ..default()
             })),
-            Transform::from_xyz(0.0, grid.grid_center_y, -PANEL_OFFSET),
+            Transform::from_xyz(0.0, grid.center_y, -PANEL_OFFSET),
         ))
         .observe(on_entity_clicked)
         .id();
@@ -216,11 +216,11 @@ fn spawn_grid_headers(
 
     // Row headers (render mode labels on the left).
     for (row, &render_mode) in render_modes.iter().enumerate() {
-        let y = grid.grid_height.mul_add(
+        let y = grid.height.mul_add(
             -0.5,
             (grid.rows - 1 - row)
                 .to_f32()
-                .mul_add(ROW_SPACING, grid.grid_center_y),
+                .mul_add(ROW_SPACING, grid.center_y),
         );
         spawn_label(
             commands,
@@ -230,14 +230,14 @@ fn spawn_grid_headers(
             label_color,
             label_shadow_color,
             label_shadow_offset,
-            Vec3::new((-grid.grid_width).mul_add(0.5, -1.5), y, 0.0),
+            Vec3::new((-grid.width).mul_add(0.5, -1.5), y, 0.0),
         );
     }
 
     // Column headers (shadow mode labels on top).
     for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-        let x = col.to_f32().mul_add(COL_SPACING, -(grid.grid_width * 0.5));
-        let y = grid.grid_center_y + grid.grid_height.mul_add(0.5, 0.8);
+        let x = col.to_f32().mul_add(COL_SPACING, -(grid.width * 0.5));
+        let y = grid.center_y + grid.height.mul_add(0.5, 0.8);
         spawn_label(
             commands,
             ground,
@@ -261,12 +261,12 @@ fn spawn_glyph_grid(
 ) {
     for (row, &render_mode) in render_modes.iter().enumerate() {
         for (col, &shadow_mode) in shadow_modes.iter().enumerate() {
-            let x = col.to_f32().mul_add(COL_SPACING, -(grid.grid_width * 0.5));
-            let y = grid.grid_height.mul_add(
+            let x = col.to_f32().mul_add(COL_SPACING, -(grid.width * 0.5));
+            let y = grid.height.mul_add(
                 -0.5,
                 (grid.rows - 1 - row)
                     .to_f32()
-                    .mul_add(ROW_SPACING, grid.grid_center_y),
+                    .mul_add(ROW_SPACING, grid.center_y),
             );
 
             let glyph = commands

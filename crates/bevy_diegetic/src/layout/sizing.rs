@@ -2,7 +2,7 @@
 
 use super::Dimension;
 
-/// Sizing behavior for a layout element along one axis.
+/// `Sizing` behavior for a layout element along one axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sizing {
     /// Shrink-wrap to content, clamped to `[min, max]`.
@@ -220,7 +220,7 @@ impl Sizing {
     }
 }
 
-/// Direction in which children are laid out.
+/// `Direction` in which children are laid out.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Direction {
     /// Children flow left to right.

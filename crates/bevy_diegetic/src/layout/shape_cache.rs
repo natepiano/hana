@@ -31,7 +31,7 @@ use super::text_props::TextMeasure;
 #[derive(Clone, Debug)]
 pub struct ShapedGlyph {
     /// Glyph index within the font.
-    pub glyph_id: u16,
+    pub id:       u16,
     /// X position relative to the text origin (accumulated advance + fine
     /// offset).
     pub x:        f32,

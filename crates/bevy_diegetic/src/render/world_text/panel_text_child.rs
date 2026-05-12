@@ -20,9 +20,9 @@ pub struct PanelTextChild {
     pub scale_x:       f32,
     /// Y scale: points to meters.
     pub scale_y:       f32,
-    /// Anchor X offset in world units.
+    /// `Anchor` X offset in world units.
     pub anchor_x:      f32,
-    /// Anchor Y offset in world units.
+    /// `Anchor` Y offset in world units.
     pub anchor_y:      f32,
     /// Active clip rect in layout coordinates, or `None` if unclipped.
     pub clip_rect:     Option<BoundingBox>,

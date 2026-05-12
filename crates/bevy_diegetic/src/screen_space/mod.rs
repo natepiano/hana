@@ -27,7 +27,7 @@ use crate::panel::ScreenPosition;
 #[derive(Component)]
 pub(crate) struct ScreenSpaceCamera {
     pub render_layers: RenderLayers,
-    pub camera_order:  isize,
+    pub order:         isize,
 }
 
 /// Marker on directional lights spawned alongside overlay cameras.
@@ -183,7 +183,7 @@ fn setup_screen_space_view(
 
     let already_exists = cameras
         .iter()
-        .any(|cam| cam.camera_order == camera_order && cam.render_layers == *render_layers);
+        .any(|cam| cam.order == camera_order && cam.render_layers == *render_layers);
     if already_exists {
         return;
     }
@@ -191,7 +191,7 @@ fn setup_screen_space_view(
     commands.spawn((
         ScreenSpaceCamera {
             render_layers: render_layers.clone(),
-            camera_order,
+            order:         camera_order,
         },
         Camera3d {
             depth_texture_usages: Camera3dDepthTextureUsage(
@@ -328,7 +328,7 @@ fn cleanup_screen_space_view(
     }
 
     for (entity, cam) in &cameras {
-        if cam.camera_order == camera_order && cam.render_layers == *render_layers {
+        if cam.order == camera_order && cam.render_layers == *render_layers {
             commands.entity(entity).despawn();
         }
     }
@@ -365,7 +365,7 @@ mod tests {
         assert_close(resolve_screen_axis(size, 2000.0, 0.0, 0.0), 280.0);
     }
 
-    /// Percent multiplies the window axis by the fraction.
+    /// `Percent` multiplies the window axis by the fraction.
     #[test]
     fn percent_scales_with_window() {
         let size = Sizing::Percent(0.25);

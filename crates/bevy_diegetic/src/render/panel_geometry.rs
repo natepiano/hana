@@ -73,8 +73,8 @@ impl Plugin for PanelGeometryPlugin {
 
 /// Gathered fill + border data for a single element.
 struct ElementSurface {
-    /// Element index in the layout tree.
-    element_idx:   usize,
+    /// `Element` index in the layout tree.
+    index:         usize,
     /// Bounding box from the render command.
     bounds:        BoundingBox,
     /// Fill color (from Rectangle command), if any.
@@ -150,7 +150,7 @@ fn build_panel_geometry(
                 anchor_y,
                 layer: &layer,
                 meshes: &mut meshes,
-                sdf_materials: &mut sdf_materials,
+                materials: &mut sdf_materials,
                 commands: &mut commands,
                 panel_entity,
             };
@@ -161,7 +161,7 @@ fn build_panel_geometry(
             // ── Spawn between-children dividers as SDF elements ─────────
             for &(cmd_index, bounds, color, clip) in &gathered.dividers {
                 let divider_surface = ElementSurface {
-                    element_idx: usize::MAX,
+                    index: usize::MAX,
                     bounds,
                     fill_color: Some(color),
                     border_widths: [0.0; 4],
@@ -232,7 +232,7 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
                     surfaces
                         .entry(cmd.element_idx)
                         .or_insert_with(|| ElementSurface {
-                            element_idx:   cmd.element_idx,
+                            index:         cmd.element_idx,
                             bounds:        cmd.bounds,
                             fill_color:    None,
                             border_widths: [0.0; 4],
@@ -247,7 +247,7 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
                 let surface = surfaces
                     .entry(cmd.element_idx)
                     .or_insert_with(|| ElementSurface {
-                        element_idx:   cmd.element_idx,
+                        index:         cmd.element_idx,
                         bounds:        cmd.bounds,
                         fill_color:    None,
                         border_widths: [0.0; 4],
@@ -279,17 +279,14 @@ struct SdfElementSpawnContext<'a, 'w, 's> {
     anchor_y:        f32,
     layer:           &'a RenderLayers,
     meshes:          &'a mut Assets<Mesh>,
-    sdf_materials:   &'a mut Assets<SdfPanelMaterial>,
+    materials:       &'a mut Assets<SdfPanelMaterial>,
     commands:        &'a mut Commands<'w, 's>,
     panel_entity:    Entity,
 }
 
 fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnContext<'_, '_, '_>) {
-    let element_mat = context.panel.tree().element_material(surface.element_idx);
-    let corner_radius = context
-        .panel
-        .tree()
-        .element_corner_radius(surface.element_idx);
+    let element_mat = context.panel.tree().element_material(surface.index);
+    let corner_radius = context.panel.tree().element_corner_radius(surface.index);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -370,7 +367,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         mesh_half_width * 2.0,
         mesh_half_height * 2.0,
     ));
-    let mat_handle = context.sdf_materials.add(sdf_mat);
+    let mat_handle = context.materials.add(sdf_mat);
     let base_components = (
         PanelSdfMesh,
         Mesh3d(mesh),

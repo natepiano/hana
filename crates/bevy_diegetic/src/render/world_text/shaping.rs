@@ -24,9 +24,9 @@ use crate::text::MsdfAtlas;
 pub(super) struct ShapedWorldText {
     /// Per-glyph quads keyed by atlas page index.
     pub(super) quads:         Vec<(u32, GlyphQuadData)>,
-    /// Anchor offset X in layout units.
+    /// `Anchor` offset X in layout units.
     pub(super) anchor_x:      f32,
-    /// Anchor offset Y in layout units.
+    /// `Anchor` offset Y in layout units.
     pub(super) anchor_y:      f32,
     /// Per-glyph ink bounding boxes `[x, y, width, height]` in world units.
     #[cfg(feature = "typography_overlay")]
@@ -56,7 +56,7 @@ impl ShapedWorldText {
 struct BuiltGlyphQuads {
     quads:         Vec<(u32, GlyphQuadData)>,
     #[cfg(feature = "typography_overlay")]
-    glyph_rects:   Vec<[f32; 4]>,
+    rects:         Vec<[f32; 4]>,
     #[cfg(feature = "typography_overlay")]
     first_advance: f32,
 }
@@ -141,7 +141,7 @@ pub(super) fn shape_world_text(
     let BuiltGlyphQuads {
         mut quads,
         #[cfg(feature = "typography_overlay")]
-        glyph_rects,
+            rects: glyph_rects,
         #[cfg(feature = "typography_overlay")]
         first_advance,
     } = build_glyph_quads(
@@ -198,7 +198,7 @@ fn build_glyph_quads(
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
-            glyph_index: shaped_glyph.glyph_id,
+            glyph_index: shaped_glyph.id,
         };
 
         let metrics = match atlas.lookup_or_queue(glyph_key, font_data) {
@@ -238,7 +238,7 @@ fn build_glyph_quads(
         #[cfg(feature = "typography_overlay")]
         if let Some(rect) = ink_rect(
             font_data,
-            shaped_glyph.glyph_id,
+            shaped_glyph.id,
             boosted_size,
             shaped_glyph.x,
             shaped_glyph.baseline + shaped_glyph.y,
@@ -252,10 +252,10 @@ fn build_glyph_quads(
     BuiltGlyphQuads {
         quads,
         #[cfg(feature = "typography_overlay")]
-        glyph_rects,
+        rects: glyph_rects,
         #[cfg(feature = "typography_overlay")]
         first_advance: glyphs.first().map_or(0.0, |shaped_glyph| {
-            glyph_advance(font_data, shaped_glyph.glyph_id, boosted_size, world_scale)
+            glyph_advance(font_data, shaped_glyph.id, boosted_size, world_scale)
         }),
     }
 }
@@ -273,7 +273,7 @@ fn ensure_all_glyphs_ready(
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
-            glyph_index: shaped_glyph.glyph_id,
+            glyph_index: shaped_glyph.id,
         };
         match atlas.lookup_or_queue(glyph_key, font_data) {
             GlyphLookup::Ready(_) => {},
@@ -304,7 +304,7 @@ fn measure_anchor_offset(
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
             font_id:     style.font_id(),
-            glyph_index: shaped_glyph.glyph_id,
+            glyph_index: shaped_glyph.id,
         };
         if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {
             let right = (metrics.pixel_width.to_f32()).mul_add(

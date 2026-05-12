@@ -230,8 +230,8 @@ fn fit_camera_on_start(
 
 // ── Panel builders ───────────────────────────────────────────────────
 
-/// Demo panel showing every spatial property using Dimension newtypes.
-/// The panel `layout_unit` is Millimeters, so bare f32 values are in mm.
+/// Demo panel showing every spatial property using `Dimension` newtypes.
+/// The panel `layout_unit` is `Millimeters`, so bare f32 values are in mm.
 ///
 /// Structure: outer border -> padding (visible gap) -> content background.
 /// Each padding side is labeled with its unit. Inner content shows

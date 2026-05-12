@@ -56,7 +56,7 @@ struct SceneBounds(Entity);
 #[derive(Component)]
 struct AnchorDemoText {
     /// The world-space position of the anchor point (stays fixed during rotation).
-    anchor_pos:    Vec3,
+    position:      Vec3,
     /// The base rotation of the demo panel.
     base_rotation: Quat,
 }
@@ -308,7 +308,7 @@ fn spawn_anchor_demo(
                     .with_anchor(anchor),
                 Transform::from_translation(world_pos).with_rotation(demo_rotation),
                 AnchorDemoText {
-                    anchor_pos:    world_pos,
+                    position:      world_pos,
                     base_rotation: demo_rotation,
                 },
             ))
@@ -484,7 +484,7 @@ fn home_camera(
 }
 
 /// Press X, Y, or Z to start a full rotation around that local axis.
-/// Anchor demo texts rotate around their anchor point (red dot stays fixed).
+/// `Anchor` demo texts rotate around their anchor point (red dot stays fixed).
 /// The cube rotates around its own center on the same axis simultaneously.
 fn rotate_anchor_demo(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -527,7 +527,7 @@ fn rotate_anchor_demo(
         // Snap back to start.
         for (demo, mut transform) in &mut texts {
             *transform =
-                Transform::from_translation(demo.anchor_pos).with_rotation(demo.base_rotation);
+                Transform::from_translation(demo.position).with_rotation(demo.base_rotation);
         }
         if let (Ok(mut cube_t), Some(base)) = (cube.single_mut(), *cube_base_rotation) {
             cube_t.rotation = base;

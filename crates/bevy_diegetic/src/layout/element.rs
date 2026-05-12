@@ -42,7 +42,7 @@ pub(super) struct Element {
     pub(super) height:        Sizing,
     /// Interior padding.
     pub(super) padding:       Padding,
-    /// Gap between children along the layout axis.
+    /// Gap between children along the layout `Direction`.
     pub(super) child_gap:     Dimension,
     /// Direction children are laid out.
     pub(super) direction:     Direction,

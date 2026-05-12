@@ -1,6 +1,6 @@
 use bevy::prelude::Reflect;
 
-/// Anchor point for standalone text positioning.
+/// `Anchor` point for standalone text positioning.
 ///
 /// Determines which point of the text block's bounding box is placed
 /// at the entity's [`Transform`](bevy::prelude::Transform) position.

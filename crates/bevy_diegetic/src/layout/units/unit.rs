@@ -79,9 +79,9 @@ impl Unit {
 /// Carries both the numeric value and the unit it's expressed in.
 /// Created implicitly via `From` impls on [`Pt`], [`Mm`], [`In`], and bare `f32`.
 ///
-/// - `Pt(24.0).into()` → value 24.0, unit Points
-/// - `Mm(6.0).into()` → value 6.0, unit Millimeters
-/// - `In(0.24).into()` → value 0.24, unit Inches
+/// - `Pt(24.0).into()` → value 24.0, unit `Points`
+/// - `Mm(6.0).into()` → value 6.0, unit `Millimeters`
+/// - `In(0.24).into()` → value 0.24, unit `Inches`
 /// - `(24.0_f32).into()` → value 24.0, unit None (contextual default)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Dimension {

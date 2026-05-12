@@ -217,7 +217,7 @@ fn shape_text_to_quads(
     for shaped_glyph in &shaped.glyphs {
         let glyph_key = GlyphKey {
             font_id:     config.font_id(),
-            glyph_index: shaped_glyph.glyph_id,
+            glyph_index: shaped_glyph.id,
         };
 
         let metrics = match atlas.lookup_or_queue(glyph_key, font_data) {
@@ -286,7 +286,7 @@ fn all_glyphs_ready_when_required(
     for shaped_glyph in shaped_glyphs {
         let glyph_key = GlyphKey {
             font_id:     config.font_id(),
-            glyph_index: shaped_glyph.glyph_id,
+            glyph_index: shaped_glyph.id,
         };
         match atlas.lookup_or_queue(glyph_key, font_data) {
             GlyphLookup::Ready(_) => {},

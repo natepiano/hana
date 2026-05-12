@@ -21,6 +21,7 @@ use panel_geometry::PanelGeometryPlugin;
 use panel_rtt::PanelRttPlugin;
 pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::SdfPanelMaterialInput;
+pub(crate) use sdf_material::SdfPrimitiveKind;
 pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_primitive_material;

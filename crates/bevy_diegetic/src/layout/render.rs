@@ -29,7 +29,7 @@ pub struct RenderCommand {
 /// (like the color-only fast path) apply the correct color source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RectangleSource {
-    /// Element background fill.
+    /// `Element` background fill.
     Background,
     /// Line drawn between children from a [`Border::between_children`] width.
     BetweenChildrenBorder,

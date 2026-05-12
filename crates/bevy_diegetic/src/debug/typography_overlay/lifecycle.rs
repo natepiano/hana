@@ -47,12 +47,10 @@ pub fn emit_typography_overlay_ready(
             continue;
         }
         commands.entity(entity).remove::<AwaitingOverlayReady>();
-        let ready_target = awaiting.ready_target;
-        commands
-            .entity(ready_target)
-            .trigger(|e| TypographyOverlayReady {
-                entity: e,
-                owner:  entity,
-            });
+        let target = awaiting.target;
+        commands.entity(target).trigger(|e| TypographyOverlayReady {
+            entity: e,
+            owner:  entity,
+        });
     }
 }

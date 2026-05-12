@@ -27,9 +27,9 @@ use crate::layout::WorldTextStyle;
 #[cfg(feature = "typography_overlay")]
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
-    /// Anchor offset X in layout units (matches the renderer's anchor).
+    /// `Anchor` offset X in layout units (matches the renderer's anchor).
     pub anchor_x:      f32,
-    /// Anchor offset Y in layout units (matches the renderer's anchor).
+    /// `Anchor` offset Y in layout units (matches the renderer's anchor).
     pub anchor_y:      f32,
     /// Per-glyph ink bounding boxes `[x, y, width, height]` in world
     /// units. Derived from the font's glyph bbox, positioned using the
@@ -90,9 +90,10 @@ impl CascadeTarget for WorldTextAlpha {
 /// Cascading attribute for standalone-world-text font unit.
 ///
 /// 2-tier cascade: [`WorldTextStyle::unit`] (entity) →
-/// [`CascadeDefaults::world_font_unit`] (global). Resolved on each
-/// standalone [`WorldText`] entity; readers multiply by
-/// `meters_per_unit()` to convert font sizes into world-space scale.
+/// [`CascadeDefaults::world_font_unit`] (global). The resolved value is cached
+/// in [`Resolved<WorldFontUnit>`] on each standalone [`WorldText`] entity;
+/// readers multiply by `meters_per_unit()` to convert font sizes into
+/// world-space scale.
 /// A non-`None` [`WorldTextStyle::world_scale`] short-circuits this
 /// cascade (it is a raw meters-per-unit override that bypasses the
 /// [`Unit`] abstraction).

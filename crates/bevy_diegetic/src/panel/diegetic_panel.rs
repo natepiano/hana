@@ -62,10 +62,10 @@ pub struct DiegeticPanel {
     /// Monotonic revision for cache invalidation when [`Self::tree`] is replaced.
     #[reflect(ignore)]
     pub(super) tree_revision:    u64,
-    /// Panel width in layout units. Prefer [`set_size`](Self::set_size) for
+    /// Panel width in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
     pub(super) width:            f32,
-    /// Panel height in layout units. Prefer [`set_size`](Self::set_size) for
+    /// Panel height in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
     pub(super) height:           f32,
     /// Unit for `width`/`height`. Set automatically by

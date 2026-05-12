@@ -136,5 +136,5 @@ pub struct TypographyOverlayReady {
 /// glyphs to finish and transforms to propagate.
 #[derive(Component)]
 pub(super) struct AwaitingOverlayReady {
-    ready_target: Entity,
+    target: Entity,
 }

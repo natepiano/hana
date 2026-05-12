@@ -198,7 +198,7 @@ pub fn build_typography_overlay(
             // Mark for deferred readiness check — label glyphs may still
             // need rasterization and transform propagation.
             ctx.commands.entity(entity).insert(AwaitingOverlayReady {
-                ready_target: bounds_target,
+                target: bounds_target,
             });
         }
 
@@ -208,7 +208,7 @@ pub fn build_typography_overlay(
 
         if overlay.font_metrics != GlyphMetricVisibility::Shown {
             ctx.commands.entity(entity).insert(AwaitingOverlayReady {
-                ready_target: container_entity,
+                target: container_entity,
             });
         }
     }

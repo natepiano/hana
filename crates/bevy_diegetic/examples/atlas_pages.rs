@@ -443,7 +443,7 @@ fn cell_center_position(row: usize, col: usize, total_rows: usize, total_cols: u
 
 /// Holds the per-cell data needed to populate a grid cell.
 struct PageCellData<'a> {
-    cell_index:  usize,
+    index:       usize,
     chars:       &'a [char],
     glyph_color: Color,
     atlas_image: Option<Handle<Image>>,
@@ -521,7 +521,7 @@ fn build_cell(b: &mut LayoutBuilder, data: Option<&PageCellData>, cols: usize) {
     let header_style = LayoutTextStyle::new(CELL_LABEL_SIZE).with_color(CELL_LABEL_COLOR);
     let glyph_style = LayoutTextStyle::new(GLYPH_FONT_SIZE).with_color(data.glyph_color);
 
-    let page_label = format!("page {}", data.cell_index);
+    let page_label = format!("page {}", data.index);
 
     // Cell: left-to-right — text column | atlas image.
     b.with(
@@ -738,7 +738,7 @@ fn display_committed_pages(
         // atlas rasterization.
         if !all_chars.0.is_empty() {
             cells.push(PageCellData {
-                cell_index:  0,
+                index:       0,
                 chars:       &all_chars.0,
                 glyph_color: glyph_color_for(&all_chars.0),
                 atlas_image: None,
@@ -748,7 +748,7 @@ fn display_committed_pages(
         let shown = revealed.0.min(committed.0.len());
         for (i, page) in committed.0[..shown].iter().enumerate() {
             cells.push(PageCellData {
-                cell_index:  i,
+                index:       i,
                 chars:       &page.chars,
                 glyph_color: glyph_color_for(&page.chars),
                 atlas_image: atlas.image_handle(i.to_u32()).cloned(),

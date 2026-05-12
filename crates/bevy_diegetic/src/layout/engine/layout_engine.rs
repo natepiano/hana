@@ -31,9 +31,9 @@ pub type MeasureTextFn = Arc<dyn Fn(&str, &TextMeasure) -> TextDimensions + Send
 pub struct ComputedLayout {
     /// Final bounding box in layout coordinates.
     pub bounds:                    BoundingBox,
-    /// Resolved width before positioning.
+    /// Width after sizing, before positioning.
     pub width:                     f32,
-    /// Resolved height before positioning.
+    /// Height after sizing, before positioning.
     pub height:                    f32,
     /// Propagated minimum width from children's content.
     ///
@@ -183,7 +183,7 @@ impl LayoutEngine {
 /// Result of a layout computation.
 #[derive(Clone, Debug, Default)]
 pub struct LayoutResult {
-    /// Computed layout for each element, indexed by element index.
+    /// Computed layout for each `Element`, indexed by element index.
     pub computed:    Vec<ComputedLayout>,
     /// Render commands in draw order.
     pub commands:    Vec<RenderCommand>,

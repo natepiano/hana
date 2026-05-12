@@ -31,16 +31,16 @@ pub(super) fn border_leading(element: &Element, axis: Axis) -> f32 {
     })
 }
 
-/// Bottom-up pass: set Fit container sizes and propagate `minDimensions`.
+/// Bottom-up pass: set `Fit` container sizes and propagate `minDimensions`.
 ///
 /// This runs before the BFS so that when a parent processes its children,
-/// Fit containers already have a content-based initial size and every element
+/// `Fit` containers already have a content-based initial size and every element
 /// has its `min_width`/`min_height` floor computed.
 ///
-/// Returns the content size of the element so that parent Fit elements can
-/// account for it — even if this element is Grow (whose actual size is
-/// determined later by `size_along_axis`). Without this, a Fit parent with
-/// Grow children would see 0 and compute a collapsed height.
+/// Returns the content size of the element so that parent `Fit` elements can
+/// account for it — even if this element is `Grow` (whose actual size is
+/// determined later by `size_along_axis`). Without this, a `Fit` parent with
+/// `Grow` children would see 0 and compute a collapsed height.
 pub(super) fn propagate_fit_sizes(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
@@ -405,7 +405,7 @@ fn compress_children(
     }
 }
 
-/// Expands Grow children using the smallest-first heuristic.
+/// Expands `Grow` children using the smallest-first heuristic.
 ///
 /// Iterates `children` directly each pass to avoid per-call Vec allocations.
 fn expand_children(

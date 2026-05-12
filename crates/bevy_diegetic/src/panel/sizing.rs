@@ -76,19 +76,19 @@ impl Mode for super::builder::World {}
 
 // ── Unit markers ─────────────────────────────────────────────────────────────
 
-/// Unit marker: millimeters.
+/// `Unit` marker: millimeters.
 #[derive(Clone, Copy, Debug)]
 pub struct Millimeters;
-/// Unit marker: inches.
+/// `Unit` marker: inches.
 #[derive(Clone, Copy, Debug)]
 pub struct Inches;
-/// Unit marker: typographic points.
+/// `Unit` marker: typographic points.
 #[derive(Clone, Copy, Debug)]
 pub struct Points;
-/// Unit marker: logical pixels.
+/// `Unit` marker: logical pixels.
 #[derive(Clone, Copy, Debug)]
 pub struct Pixels;
-/// Unit marker: unit-less values (e.g. [`Fit`], bare `f32`, [`Sizing`]).
+/// `Unit` marker: unit-less values (e.g. [`Fit`], bare `f32`, [`Sizing`]).
 ///
 /// Adopts the other axis's unit on world panels, or the mode default
 /// when both axes are unit-less.

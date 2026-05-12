@@ -37,6 +37,7 @@ use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
 use crate::render::SdfPanelMaterial;
 use crate::render::SdfPanelMaterialInput;
+use crate::render::SdfPrimitiveKind;
 use crate::render::SdfPrimitiveMaterialInput;
 
 /// Shared rendering parameters that every callout spawn helper threads through.
@@ -57,7 +58,7 @@ struct CalloutRender<'w, 's, 'a> {
 /// segments — cap footprint size, line thickness, and base color.
 #[derive(Clone, Copy)]
 struct CapStroke {
-    cap_size:  f32,
+    size:      f32,
     thickness: f32,
     color:     Color,
 }
@@ -113,7 +114,7 @@ pub(super) fn update_callout_lines(
         }
 
         let stroke = CapStroke {
-            cap_size:  line.cap_size,
+            size:      line.cap_size,
             thickness: line.thickness,
             color:     line.color,
         };
@@ -132,15 +133,15 @@ fn spawn_cap(
     let color = cap.resolved_color(stroke.color);
     match cap {
         CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Open => {
-            let (length, width) = resolved_arrow_dimensions(cap, stroke.cap_size);
+            let (length, width) = resolved_arrow_dimensions(cap, stroke.size);
             spawn_open_arrow_cap(ctx, tip, dir, length, width, stroke.thickness, color);
         },
         CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Solid => {
-            let (length, width) = resolved_arrow_dimensions(cap, stroke.cap_size);
+            let (length, width) = resolved_arrow_dimensions(cap, stroke.size);
             spawn_cap_form(ctx, tip, -dir, CapPrimitive::Triangle, length, width, color);
         },
         CalloutCap::Circle(cap) => {
-            let radius = cap.radius.unwrap_or(stroke.cap_size * 0.5);
+            let radius = cap.radius.unwrap_or(stroke.size * 0.5);
             spawn_cap_form(
                 ctx,
                 tip,
@@ -152,11 +153,11 @@ fn spawn_cap(
             );
         },
         CalloutCap::Square(cap) => {
-            let size = cap.size.unwrap_or(stroke.cap_size);
+            let size = cap.size.unwrap_or(stroke.size);
             spawn_cap_form(ctx, tip, dir, CapPrimitive::Square, size, size, color);
         },
         CalloutCap::Diamond(cap) => {
-            let (width, height) = resolved_diamond_dimensions(cap, stroke.cap_size);
+            let (width, height) = resolved_diamond_dimensions(cap, stroke.size);
             spawn_cap_form(ctx, tip, dir, CapPrimitive::Diamond, width, height, color);
         },
         CalloutCap::None | CalloutCap::Arrow(_) => {},
@@ -200,12 +201,12 @@ enum CapPrimitive {
 }
 
 impl CapPrimitive {
-    const fn sdf_kind(self) -> u32 {
+    const fn sdf_primitive_kind(self) -> SdfPrimitiveKind {
         match self {
-            Self::Triangle => 1,
-            Self::Circle => 2,
-            Self::Square => 0,
-            Self::Diamond => 3,
+            Self::Triangle => SdfPrimitiveKind::Triangle,
+            Self::Circle => SdfPrimitiveKind::Circle,
+            Self::Square => SdfPrimitiveKind::RoundedRect,
+            Self::Diamond => SdfPrimitiveKind::Diamond,
         }
     }
 }
@@ -329,20 +330,20 @@ fn spawn_cap_form(
     let material = render::sdf_primitive_material(
         base,
         SdfPrimitiveMaterialInput {
-            half_size: Vec2::new(half_width, half_height),
-            mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
-            corner_radii: [0.0; 4],
-            border_widths: [0.0; 4],
-            border_color: None,
-            sdf_kind: cap_form.sdf_kind(),
-            sdf_params,
-            clip_rect: Vec4::new(
+            half_size:          Vec2::new(half_width, half_height),
+            mesh_half_size:     Vec2::new(mesh_half_width, mesh_half_height),
+            corner_radii:       [0.0; 4],
+            border_widths:      [0.0; 4],
+            border_color:       None,
+            sdf_primitive_kind: cap_form.sdf_primitive_kind(),
+            params:             sdf_params,
+            clip_rect:          Vec4::new(
                 -mesh_half_width,
                 -mesh_half_height,
                 mesh_half_width,
                 mesh_half_height,
             ),
-            oit_depth_offset: order.to_f32() * OIT_DEPTH_STEP,
+            oit_depth_offset:   order.to_f32() * OIT_DEPTH_STEP,
         },
     );
     let mesh = ctx.meshes.add(Rectangle::new(

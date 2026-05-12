@@ -168,7 +168,7 @@ pub(super) fn shape_text_cached(
             for cluster in glyph_run.clusters() {
                 for glyph in cluster.glyphs() {
                     glyphs.push(ShapedGlyph {
-                        glyph_id: glyph.id.to_u16(),
+                        id:       glyph.id.to_u16(),
                         x:        run.offset() + advance_x + glyph.x,
                         y:        glyph.y,
                         baseline: run.baseline(),
