@@ -1,68 +1,29 @@
-//! Capability: small screen-space panels for examples.
+//! Compact top-left title bar for example-level controls.
 
 use bevy::prelude::*;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::default_panel_material;
 
+use super::CONTROL_ACTIVE_COLOR;
+use super::CONTROL_INACTIVE_COLOR;
+use super::CONTROL_SIZE;
+use super::DIVIDER_COLOR;
+use super::panel_frame;
+use super::unlit_panel_material;
+use crate::camera_home;
 use crate::camera_home::CameraHomeConfig;
-use crate::ensure_plugin;
-
-/// A static side panel that explains what an example demonstrates.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DescriptionPanel {
-    anchor: Anchor,
-    title:  String,
-    lines:  Vec<String>,
-}
-
-impl DescriptionPanel {
-    /// Creates a description panel with a title.
-    #[must_use]
-    pub fn new(title: impl Into<String>) -> Self {
-        Self {
-            anchor: Anchor::BottomLeft,
-            title:  title.into(),
-            lines:  Vec::new(),
-        }
-    }
-
-    /// Sets the panel screen anchor.
-    #[must_use]
-    pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
-        self.anchor = anchor;
-        self
-    }
-
-    /// Adds one display line to the panel.
-    #[must_use]
-    pub fn line(mut self, line: impl Into<String>) -> Self {
-        self.lines.push(line.into());
-        self
-    }
-
-    /// Adds multiple display lines to the panel.
-    #[must_use]
-    pub fn lines(mut self, lines: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.lines.extend(lines.into_iter().map(Into::into));
-        self
-    }
-}
+use crate::ui::theme::TITLE_COLOR;
+use crate::ui::theme::TITLE_SIZE;
 
 /// A compact top-left title bar for example-level controls.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -160,79 +121,24 @@ impl TitleBarControlState {
 }
 
 #[derive(Component)]
-struct DescriptionPanelMarker;
-
-#[derive(Component)]
 struct TitleBarMarker;
 
-const RADIUS: Px = Px(12.0);
-const FRAME_PAD: Px = Px(2.0);
-const BORDER: Px = Px(2.0);
-const INNER_PAD: Px = Px(10.0);
-const INSET: Px = Px(FRAME_PAD.0 + BORDER.0);
-const INNER_RADIUS: Px = Px(RADIUS.0 - INSET.0);
-
-const TITLE_SIZE: Pt = Pt(14.0);
-const BODY_SIZE: Pt = Pt(11.0);
-const CONTROL_SIZE: Pt = Pt(12.0);
-
-const DESCRIPTION_WIDTH: Px = Px(330.0);
-
-const INNER_BG: Color = Color::srgba(0.02, 0.03, 0.07, 0.50);
-const BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
-const BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
-const TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
-const BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-const CONTROL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
-const CONTROL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
-
-pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
-    ensure_plugin(app, DiegeticUiPlugin);
-    app.add_systems(Startup, move |mut commands: Commands| {
-        spawn_description_panel(&mut commands, &panel);
-    });
-}
-
-pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
-    ensure_plugin(app, DiegeticUiPlugin);
-    app.add_systems(PostUpdate, refresh_changed_title_bar);
-    app.add_systems(
-        Startup,
-        move |mut commands: Commands, home: Option<Res<CameraHomeConfig>>| {
-            let mut bar = title_bar.clone();
-            if home.is_some()
-                && !bar
-                    .controls
-                    .iter()
-                    .any(|control| control == crate::camera_home::HOME_CONTROL)
-            {
-                bar.controls
-                    .insert(0, crate::camera_home::HOME_CONTROL.to_string());
-            }
-            spawn_title_bar(&mut commands, &bar);
-        },
-    );
-}
-
-fn spawn_description_panel(commands: &mut Commands, panel: &DescriptionPanel) {
-    let unlit = unlit_panel_material();
-    let panel = DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(panel.anchor)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .layout(|builder| build_description_layout(builder, panel))
-        .build();
-
-    match panel {
-        Ok(panel) => {
-            commands.spawn((DescriptionPanelMarker, panel, Transform::default()));
-        },
-        Err(error) => {
-            error!("fairy_dust: failed to build description panel: {error}");
-        },
+pub(super) fn spawn_title_bar_with_home_chip(
+    commands: &mut Commands,
+    title_bar: &TitleBar,
+    home: Option<&CameraHomeConfig>,
+) {
+    let mut bar = title_bar.clone();
+    if home.is_some()
+        && !bar
+            .controls
+            .iter()
+            .any(|control| control == camera_home::HOME_CONTROL)
+    {
+        bar.controls
+            .insert(0, camera_home::HOME_CONTROL.to_string());
     }
+    spawn_title_bar(commands, &bar);
 }
 
 fn spawn_title_bar(commands: &mut Commands, title_bar: &TitleBar) {
@@ -262,7 +168,7 @@ fn spawn_title_bar(commands: &mut Commands, title_bar: &TitleBar) {
     }
 }
 
-fn refresh_changed_title_bar(
+pub(super) fn refresh_changed_title_bar(
     mut commands: Commands,
     title_bars: Query<
         (Entity, &TitleBar, &TitleBarControlState),
@@ -272,33 +178,6 @@ fn refresh_changed_title_bar(
     for (entity, title_bar, state) in &title_bars {
         commands.set_tree(entity, build_title_bar_tree(title_bar, state));
     }
-}
-
-fn unlit_panel_material() -> StandardMaterial {
-    StandardMaterial {
-        unlit: true,
-        ..default_panel_material()
-    }
-}
-
-fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPanel) {
-    let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let body = LayoutTextStyle::new(BODY_SIZE).with_color(BODY_COLOR);
-
-    panel_frame(builder, Sizing::fixed(DESCRIPTION_WIDTH), |builder| {
-        builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .direction(Direction::TopToBottom)
-                .child_gap(Px(6.0)),
-            |builder| {
-                builder.text(panel.title.to_uppercase(), title);
-                for line in &panel.lines {
-                    builder.text(line, body.clone());
-                }
-            },
-        );
-    });
 }
 
 fn build_title_bar_tree(title_bar: &TitleBar, state: &TitleBarControlState) -> LayoutTree {
@@ -337,33 +216,6 @@ fn build_title_bar_layout(
             },
         );
     });
-}
-
-fn panel_frame(
-    builder: &mut LayoutBuilder,
-    width: Sizing,
-    content: impl FnOnce(&mut LayoutBuilder),
-) {
-    builder.with(
-        El::new()
-            .width(width)
-            .height(Sizing::FIT)
-            .padding(Padding::all(FRAME_PAD))
-            .corner_radius(CornerRadius::all(RADIUS))
-            .border(Border::all(BORDER, BORDER_ACCENT)),
-        |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .padding(Padding::all(INNER_PAD))
-                    .corner_radius(CornerRadius::all(INNER_RADIUS))
-                    .background(INNER_BG)
-                    .border(Border::all(Px(1.0), BORDER_DIM)),
-                content,
-            );
-        },
-    );
 }
 
 fn title_separator(builder: &mut LayoutBuilder) {

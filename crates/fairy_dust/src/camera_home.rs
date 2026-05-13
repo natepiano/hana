@@ -16,7 +16,7 @@ use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 
 use crate::orbit_cam::FairyDustOrbitCam;
-use crate::screen_panels::TitleBarControlState;
+use crate::ui::screen_panels::TitleBarControlState;
 
 pub(crate) const HOME_CONTROL: &str = "H Home";
 pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
