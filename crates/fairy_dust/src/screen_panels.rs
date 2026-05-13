@@ -20,6 +20,7 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 
+use crate::camera_home::CameraHomeConfig;
 use crate::ensure_plugin;
 
 /// A static side panel that explains what an example demonstrates.
@@ -196,9 +197,22 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
 pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(PostUpdate, refresh_changed_title_bar);
-    app.add_systems(Startup, move |mut commands: Commands| {
-        spawn_title_bar(&mut commands, &title_bar);
-    });
+    app.add_systems(
+        Startup,
+        move |mut commands: Commands, home: Option<Res<CameraHomeConfig>>| {
+            let mut bar = title_bar.clone();
+            if home.is_some()
+                && !bar
+                    .controls
+                    .iter()
+                    .any(|control| control == crate::camera_home::HOME_CONTROL)
+            {
+                bar.controls
+                    .insert(0, crate::camera_home::HOME_CONTROL.to_string());
+            }
+            spawn_title_bar(&mut commands, &bar);
+        },
+    );
 }
 
 fn spawn_description_panel(commands: &mut Commands, panel: &DescriptionPanel) {

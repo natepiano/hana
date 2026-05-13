@@ -58,8 +58,7 @@ name              = "showcase"
 required-features = ["fit_overlay"]
 
 [[example]]
-name              = "zoom_to_fit"
-required-features = ["fit_overlay"]
+name = "zoom_to_fit"
 
 [[example]]
 name = "animation"

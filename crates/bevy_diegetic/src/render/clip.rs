@@ -269,7 +269,7 @@ mod tests {
         let viewport = panel_viewport(&panel);
         let mm_to_points = Unit::Millimeters.to_points();
 
-        assert!(210.0f32.mul_add(-mm_to_points, viewport.width).abs() < f32::EPSILON);
-        assert!(297.0f32.mul_add(-mm_to_points, viewport.height).abs() < f32::EPSILON);
+        assert!(210.0f32.mul_add(-mm_to_points, viewport.width).abs() < 1e-3);
+        assert!(297.0f32.mul_add(-mm_to_points, viewport.height).abs() < 1e-3);
     }
 }

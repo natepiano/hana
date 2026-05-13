@@ -1,61 +1,81 @@
 //! Demonstrates `ZoomToFit`, `LookAt`, and `LookAtAndZoomToFit`.
 //!
 //! Controls:
-//!   Space - `ZoomToFit` the cube (frames without changing look direction)
-//!   L     - `LookAt` the cube (rotates camera in place)
-//!   K     - `LookAtAndZoomToFit` the cube (rotates + frames)
-//!   D     - Toggle debug overlay
-//!   R     - Reset camera to starting position
+//!   Z - `ZoomToFit` the cube (frames without changing look direction)
+//!   L - `LookAt` the cube (rotates camera in place)
+//!   K - `LookAtAndZoomToFit` the cube (rotates + frames)
+//!   H - Return to the camera home pose
 //!
-//! Compare K vs Space: both frame the target, but `LookAtAndZoomToFit` also
+//! Compare K vs Z: both frame the target, but `LookAtAndZoomToFit` also
 //! changes the orbit focus to the target, while `ZoomToFit` keeps the
 //! current focus and only adjusts radius.
 
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
-use bevy_lagrange::FitOverlay;
-use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::SetFitTarget;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
-use bevy_window_manager::WindowManagerPlugin;
+use fairy_dust::Anchor;
+use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControlState;
 
 const FIT_DURATION: Duration = Duration::from_millis(800);
 const FIT_MARGIN: f32 = 0.15;
 const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
 
-const START_POS: Vec3 = Vec3::new(0.0, 1.5, 3.0);
-const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
-const GROUND_SIZE: f32 = 10.0;
-const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+const HOME_FRAMED_REGION: Vec3 = Vec3::new(4.0, 1.5, 2.5);
+const HOME_PITCH: f32 = 0.46;
+
 const REFERENCE_CUBE_COLOR: Color = Color::srgb(0.5, 0.5, 0.5);
-const REFERENCE_CUBE_SIZE: Vec3 = Vec3::splat(0.5);
-const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.25, 0.0);
+const REFERENCE_CUBE_SIZE: f32 = 0.5;
+const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.3, 0.0);
+
 const TARGET_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
-const TARGET_SIZE: Vec3 = Vec3::splat(1.0);
-const TARGET_TRANSLATION: Vec3 = Vec3::new(3.5, 0.5, 0.0);
+const TARGET_SIZE: f32 = 1.0;
+const TARGET_TRANSLATION: Vec3 = Vec3::new(3.5, 0.55, 0.0);
+
+const ZOOM_CONTROL: &str = "Z ZoomToFit";
+const LOOK_CONTROL: &str = "L LookAt";
+const LOOK_AND_ZOOM_CONTROL: &str = "K LookAtAndZoomToFit";
 
 #[derive(Component)]
 struct Target;
 
+#[derive(Resource)]
+struct TargetEntity(Entity);
+
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(LagrangePlugin)
-        .add_plugins(BrpExtrasPlugin::default())
-        .add_plugins(WindowManagerPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(Update, (keyboard_input, toggle_debug_overlay))
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_restart_key()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_cube()
+        .size(REFERENCE_CUBE_SIZE)
+        .color(REFERENCE_CUBE_COLOR)
+        .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
+        .with_orbit_cam_bundle(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_camera_home(Transform::from_translation(Vec3::ZERO).with_scale(HOME_FRAMED_REGION))
+        .pitch(HOME_PITCH)
+        .with_title_bar(
+            TitleBar::new("Controls")
+                .with_anchor(Anchor::TopLeft)
+                .control(ZOOM_CONTROL)
+                .control(LOOK_CONTROL)
+                .control(LOOK_AND_ZOOM_CONTROL),
+        )
+        .with_camera_control_panel()
+        .add_systems(Startup, spawn_target)
+        .add_systems(Update, keyboard_input)
         .add_observer(on_zoom_begin)
         .add_observer(on_zoom_end)
         .add_observer(on_animation_begin)
@@ -63,153 +83,103 @@ fn main() {
         .run();
 }
 
-fn setup(
+fn spawn_target(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Ground
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
-        MeshMaterial3d(materials.add(GROUND_COLOR)),
-    ));
-    // Target cube — off to the right so it's barely in view
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(TARGET_SIZE.x, TARGET_SIZE.y, TARGET_SIZE.z))),
-        MeshMaterial3d(materials.add(TARGET_COLOR)),
-        Transform::from_translation(TARGET_TRANSLATION),
-        Target,
-    ));
-    // Gray cube near origin — what the camera starts focused on
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(
-            REFERENCE_CUBE_SIZE.x,
-            REFERENCE_CUBE_SIZE.y,
-            REFERENCE_CUBE_SIZE.z,
-        ))),
-        MeshMaterial3d(materials.add(REFERENCE_CUBE_COLOR)),
-        Transform::from_translation(REFERENCE_CUBE_TRANSLATION),
-    ));
-    // Light
-    commands.spawn((
-        PointLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_translation(LIGHT_TRANSLATION),
-    ));
-    // Camera — close to the gray cube, target cube just visible on the right
-    commands.spawn((
-        Transform::from_translation(START_POS),
-        OrbitCam::default(),
-        OrbitCamPreset::BlenderLike,
-    ));
-
-    // Instructions
-    commands.spawn(Text::new(
-        "Space - ZoomToFit (frames without rotating)\n\
-         L - LookAt (rotates camera only)\n\
-         K - LookAtAndZoomToFit (rotates + frames)\n\
-         D - Toggle debug overlay\n\
-         R - Reset camera",
-    ));
+    let entity = commands
+        .spawn((
+            Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(TARGET_SIZE)))),
+            MeshMaterial3d(materials.add(StandardMaterial::from(TARGET_COLOR))),
+            Transform::from_translation(TARGET_TRANSLATION),
+            Target,
+        ))
+        .id();
+    commands.insert_resource(TargetEntity(entity));
 }
 
 fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     camera_query: Query<Entity, With<OrbitCam>>,
-    target_query: Query<Entity, With<Target>>,
-    mut orbit_cam_query: Query<&mut OrbitCam>,
+    target: Res<TargetEntity>,
 ) {
     let Ok(camera) = camera_query.single() else {
         return;
     };
-    let Ok(target) = target_query.single() else {
-        return;
-    };
 
-    if keys.just_pressed(KeyCode::Space) {
+    if keys.just_pressed(KeyCode::KeyZ) {
         commands.trigger(
-            ZoomToFit::new(camera, target)
+            ZoomToFit::new(camera, target.0)
                 .margin(FIT_MARGIN)
                 .duration(FIT_DURATION),
         );
-        info!("ZoomToFit triggered");
     }
 
     if keys.just_pressed(KeyCode::KeyL) {
-        commands.trigger(LookAt::new(camera, target).duration(LOOK_AT_DURATION));
-        info!("LookAt triggered");
+        commands.trigger(LookAt::new(camera, target.0).duration(LOOK_AT_DURATION));
     }
 
     if keys.just_pressed(KeyCode::KeyK) {
         commands.trigger(
-            LookAtAndZoomToFit::new(camera, target)
+            LookAtAndZoomToFit::new(camera, target.0)
                 .margin(FIT_MARGIN)
                 .duration(FIT_DURATION),
         );
-        info!("LookAtAndZoomToFit triggered");
-    }
-
-    if keys.just_pressed(KeyCode::KeyR)
-        && let Ok(mut orbit_cam) = orbit_cam_query.get_mut(camera)
-    {
-        let radius = START_POS.length();
-        orbit_cam.target_focus = Vec3::ZERO;
-        orbit_cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);
-        orbit_cam.target_pitch = f32::asin(START_POS.y / radius);
-        orbit_cam.target_radius = radius;
-        info!("Camera reset");
     }
 }
 
-fn on_zoom_begin(trigger: On<ZoomBegin>) {
-    info!(
-        "ZoomBegin: camera={:?} target={:?} margin={:.2}",
-        trigger.camera, trigger.target, trigger.margin
-    );
-}
-
-fn on_zoom_end(trigger: On<ZoomEnd>) {
-    info!(
-        "ZoomEnd: camera={:?} target={:?}",
-        trigger.camera, trigger.target
-    );
-}
-
-fn on_animation_begin(trigger: On<AnimationBegin>) {
-    info!("AnimationBegin: source={:?}", trigger.source);
-}
-
-fn on_animation_end(trigger: On<AnimationEnd>) {
-    if trigger.source == AnimationSource::ZoomToFit {
-        info!("Animation backing the ZoomToFit completed");
-    } else {
-        info!("AnimationEnd: source={:?}", trigger.source);
-    }
-}
-
-fn toggle_debug_overlay(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
-    camera_query: Query<(Entity, Option<&FitOverlay>), With<OrbitCam>>,
-    target_query: Query<Entity, With<Target>>,
+fn on_zoom_begin(
+    trigger: On<ZoomBegin>,
+    target: Option<Res<TargetEntity>>,
+    mut bars: Query<&mut TitleBarControlState>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyD) {
-        return;
-    }
-    let Ok(target) = target_query.single() else {
+    let Some(target) = target else {
         return;
     };
-    for (camera, debug_overlay) in &camera_query {
-        if debug_overlay.is_some() {
-            commands.entity(camera).remove::<FitOverlay>();
-            info!("Debug overlay OFF");
-        } else {
-            commands.trigger(SetFitTarget::new(camera, target));
-            commands.entity(camera).insert(FitOverlay);
-            info!("Debug overlay ON");
-        }
+    if trigger.target != target.0 {
+        return;
+    }
+    for mut bar in &mut bars {
+        bar.set_active(ZOOM_CONTROL, true);
+    }
+}
+
+fn on_zoom_end(
+    trigger: On<ZoomEnd>,
+    target: Option<Res<TargetEntity>>,
+    mut bars: Query<&mut TitleBarControlState>,
+) {
+    let Some(target) = target else {
+        return;
+    };
+    if trigger.target != target.0 {
+        return;
+    }
+    for mut bar in &mut bars {
+        bar.set_active(ZOOM_CONTROL, false);
+    }
+}
+
+fn on_animation_begin(trigger: On<AnimationBegin>, mut bars: Query<&mut TitleBarControlState>) {
+    let control = match trigger.source {
+        AnimationSource::LookAt => LOOK_CONTROL,
+        AnimationSource::LookAtAndZoomToFit => LOOK_AND_ZOOM_CONTROL,
+        _ => return,
+    };
+    for mut bar in &mut bars {
+        bar.set_active(control, true);
+    }
+}
+
+fn on_animation_end(trigger: On<AnimationEnd>, mut bars: Query<&mut TitleBarControlState>) {
+    let control = match trigger.source {
+        AnimationSource::LookAt => LOOK_CONTROL,
+        AnimationSource::LookAtAndZoomToFit => LOOK_AND_ZOOM_CONTROL,
+        _ => return,
+    };
+    for mut bar in &mut bars {
+        bar.set_active(control, false);
     }
 }

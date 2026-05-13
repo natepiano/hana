@@ -31,6 +31,7 @@
 //! [`ensure_plugin`], regardless of how many capabilities pull it in.
 
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use bevy::app::Plugins;
 use bevy::ecs::schedule::IntoScheduleConfigs;
@@ -42,6 +43,7 @@ pub use bevy_diegetic::Anchor;
 pub use bevy_lagrange::OrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
+use camera_home::CameraHomeConfig;
 use primitive::PrimitiveConfig;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
@@ -49,9 +51,11 @@ pub use screen_panels::TitleBarControlState;
 
 mod brp_extras;
 mod camera_control_panel;
+mod camera_home;
 mod lighting;
 mod orbit_cam;
 mod primitive;
+mod restart;
 mod save_window_position;
 mod screen_panels;
 mod transparency;
@@ -92,10 +96,25 @@ pub struct PrimitiveBuilder<S> {
     config: PrimitiveConfig,
 }
 
+/// Builder returned while configuring a camera "home" pose.
+///
+/// Calling a non-home builder method finalizes the home registration and
+/// returns to the normal [`SprinkleBuilder`] chain.
+pub struct CameraHomeBuilder<S> {
+    parent: SprinkleBuilder<S>,
+    config: CameraHomeConfig,
+}
+
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.
+///
+/// If this process was spawned as a restart trampoline (see
+/// [`SprinkleBuilder::with_restart_key`]), this function never returns —
+/// it sleeps so the parent process is fully reaped, then `exec`s the same
+/// binary without the trampoline marker.
 #[must_use]
 pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
+    restart::handle_trampoline_if_active();
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(LogPlugin {
         filter: LOG_FILTER.to_string(),
@@ -176,6 +195,38 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Enable `Ctrl+Shift+R` to re-exec the current example binary.
+    ///
+    /// Binds the shortcut through `bevy_enhanced_input` (via `bevy_kana`
+    /// action/event macros). If a title bar is installed, a
+    /// `Ctrl+Shift+R Restart` chip is prepended automatically.
+    #[must_use]
+    pub fn with_restart_key(mut self) -> Self {
+        restart::install(&mut self.app);
+        self
+    }
+
+    /// Begin configuring a generalized camera "home" pose.
+    ///
+    /// Spawns an invisible cube at the given [`Transform`] (its `scale` defines
+    /// the framed volume) and wires `H` to an [`bevy_lagrange::AnimateToFit`]
+    /// of that region using the configured `yaw`/`pitch`. If a title bar is
+    /// installed, the `H Home` chip is prepended automatically and highlights
+    /// for the duration of the home animation.
+    #[must_use]
+    pub const fn with_camera_home(self, transform: Transform) -> CameraHomeBuilder<S> {
+        CameraHomeBuilder {
+            parent: self,
+            config: CameraHomeConfig {
+                transform,
+                yaw: 0.0,
+                pitch: 0.0,
+                duration: camera_home::HOME_DEFAULT_DURATION,
+                margin: camera_home::HOME_DEFAULT_MARGIN,
+            },
+        }
+    }
+
     /// Mirror of [`App::add_plugins`].
     #[must_use]
     pub fn add_plugins<M>(mut self, plugins: impl Plugins<M>) -> Self {
@@ -194,6 +245,18 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Mirror of [`App::add_observer`].
+    #[must_use]
+    pub fn add_observer<E, B, M, I>(mut self, observer: I) -> Self
+    where
+        E: bevy::ecs::event::Event,
+        B: Bundle,
+        I: bevy::ecs::system::IntoObserverSystem<E, B, M>,
+    {
+        self.app.add_observer(observer);
+        self
+    }
+
     /// Mirror of [`App::init_resource`].
     #[must_use]
     pub fn init_resource<R: Resource + FromWorld>(mut self) -> Self {
@@ -208,8 +271,14 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
-    /// Run the configured app. Mirror of [`App::run`].
-    pub fn run(mut self) -> AppExit { self.app.run() }
+    /// Run the configured app. Mirror of [`App::run`], with the exception
+    /// that a `Ctrl+Shift+R` press handled via [`Self::with_restart_key`]
+    /// will re-exec the current binary before this method returns.
+    pub fn run(mut self) -> AppExit {
+        let exit = self.app.run();
+        restart::perform_restart_if_requested();
+        exit
+    }
 
     /// Escape hatch: borrow the underlying [`App`] for capabilities not yet
     /// surfaced as `with_*` methods.
@@ -274,6 +343,10 @@ impl<S> PrimitiveBuilder<S> {
         self.finish().with_camera_control_panel()
     }
 
+    /// Finalizes the current primitive and enables the `Ctrl+Shift+R` restart key.
+    #[must_use]
+    pub fn with_restart_key(self) -> SprinkleBuilder<S> { self.finish().with_restart_key() }
+
     /// Finalizes the current primitive and adds studio lighting.
     #[must_use]
     pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
@@ -290,6 +363,12 @@ impl<S> PrimitiveBuilder<S> {
         self.finish().with_title_bar(title_bar)
     }
 
+    /// Finalizes the current primitive and starts configuring a camera home pose.
+    #[must_use]
+    pub fn with_camera_home(self, transform: Transform) -> CameraHomeBuilder<S> {
+        self.finish().with_camera_home(transform)
+    }
+
     /// Finalizes the current primitive and mirrors [`App::add_plugins`].
     #[must_use]
     pub fn add_plugins<M>(self, plugins: impl Plugins<M>) -> SprinkleBuilder<S> {
@@ -304,6 +383,17 @@ impl<S> PrimitiveBuilder<S> {
         systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
     ) -> SprinkleBuilder<S> {
         self.finish().add_systems(schedule, systems)
+    }
+
+    /// Finalizes the current primitive and mirrors [`App::add_observer`].
+    #[must_use]
+    pub fn add_observer<E, B, M, I>(self, observer: I) -> SprinkleBuilder<S>
+    where
+        E: bevy::ecs::event::Event,
+        B: Bundle,
+        I: bevy::ecs::system::IntoObserverSystem<E, B, M>,
+    {
+        self.finish().add_observer(observer)
     }
 
     /// Finalizes the current primitive and mirrors [`App::init_resource`].
@@ -387,6 +477,170 @@ impl PrimitiveBuilder<NoOrbitCam> {
         B: Bundle + Send + Sync + 'static,
     {
         self.finish().with_orbit_cam_bundle(configure, bundle)
+    }
+}
+
+impl<S> CameraHomeBuilder<S> {
+    /// Sets the home pose yaw in radians.
+    #[must_use]
+    pub const fn yaw(mut self, yaw: f32) -> Self {
+        self.config.yaw = yaw;
+        self
+    }
+
+    /// Sets the home pose pitch in radians.
+    #[must_use]
+    pub const fn pitch(mut self, pitch: f32) -> Self {
+        self.config.pitch = pitch;
+        self
+    }
+
+    /// Sets the duration of the `H`-triggered home animation.
+    ///
+    /// The startup framing is always instant; this only affects subsequent
+    /// `H` presses.
+    #[must_use]
+    pub const fn duration(mut self, duration: Duration) -> Self {
+        self.config.duration = duration;
+        self
+    }
+
+    /// Sets the screen-fraction margin used when framing the home region.
+    #[must_use]
+    pub const fn margin(mut self, margin: f32) -> Self {
+        self.config.margin = margin;
+        self
+    }
+
+    /// Finalizes the current home registration and starts configuring another.
+    #[must_use]
+    pub fn with_camera_home(self, transform: Transform) -> Self {
+        self.finish().with_camera_home(transform)
+    }
+
+    /// Finalizes the current home registration and starts configuring a ground plane.
+    #[must_use]
+    pub fn with_ground_plane(self) -> PrimitiveBuilder<S> { self.finish().with_ground_plane() }
+
+    /// Finalizes the current home registration and starts configuring a cube.
+    #[must_use]
+    pub fn with_cube(self) -> PrimitiveBuilder<S> { self.finish().with_cube() }
+
+    /// Finalizes the current home registration and adds window position persistence.
+    #[must_use]
+    pub fn with_save_window_position(self) -> SprinkleBuilder<S> {
+        self.finish().with_save_window_position()
+    }
+
+    /// Finalizes the current home registration and adds BRP extras.
+    #[must_use]
+    pub fn with_brp_extras(self) -> SprinkleBuilder<S> { self.finish().with_brp_extras() }
+
+    /// Finalizes the current home registration and adds the smart camera control panel.
+    #[must_use]
+    pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
+        self.finish().with_camera_control_panel()
+    }
+
+    /// Finalizes the current home registration and enables the `Ctrl+Shift+R` restart key.
+    #[must_use]
+    pub fn with_restart_key(self) -> SprinkleBuilder<S> { self.finish().with_restart_key() }
+
+    /// Finalizes the current home registration and adds studio lighting.
+    #[must_use]
+    pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
+
+    /// Finalizes the current home registration and adds an example description panel.
+    #[must_use]
+    pub fn with_description_panel(self, panel: DescriptionPanel) -> SprinkleBuilder<S> {
+        self.finish().with_description_panel(panel)
+    }
+
+    /// Finalizes the current home registration and adds an example title bar.
+    #[must_use]
+    pub fn with_title_bar(self, title_bar: TitleBar) -> SprinkleBuilder<S> {
+        self.finish().with_title_bar(title_bar)
+    }
+
+    /// Finalizes the current home registration and mirrors [`App::add_plugins`].
+    #[must_use]
+    pub fn add_plugins<M>(self, plugins: impl Plugins<M>) -> SprinkleBuilder<S> {
+        self.finish().add_plugins(plugins)
+    }
+
+    /// Finalizes the current home registration and mirrors [`App::add_systems`].
+    #[must_use]
+    pub fn add_systems<M>(
+        self,
+        schedule: impl ScheduleLabel,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> SprinkleBuilder<S> {
+        self.finish().add_systems(schedule, systems)
+    }
+
+    /// Finalizes the current home registration and mirrors [`App::add_observer`].
+    #[must_use]
+    pub fn add_observer<E, B, M, I>(self, observer: I) -> SprinkleBuilder<S>
+    where
+        E: bevy::ecs::event::Event,
+        B: Bundle,
+        I: bevy::ecs::system::IntoObserverSystem<E, B, M>,
+    {
+        self.finish().add_observer(observer)
+    }
+
+    /// Finalizes the current home registration and mirrors [`App::init_resource`].
+    #[must_use]
+    pub fn init_resource<R: Resource + FromWorld>(self) -> SprinkleBuilder<S> {
+        self.finish().init_resource::<R>()
+    }
+
+    /// Finalizes the current home registration and mirrors [`App::insert_resource`].
+    #[must_use]
+    pub fn insert_resource<R: Resource>(self, resource: R) -> SprinkleBuilder<S> {
+        self.finish().insert_resource(resource)
+    }
+
+    /// Finalizes the current home registration and runs the configured app.
+    pub fn run(self) -> AppExit { self.finish().run() }
+
+    fn finish(mut self) -> SprinkleBuilder<S> {
+        camera_home::install(&mut self.parent.app, self.config);
+        self.parent
+    }
+}
+
+impl CameraHomeBuilder<NoOrbitCam> {
+    /// Finalizes the current home registration, adds `LagrangePlugin`, and spawns an
+    /// `OrbitCam` entity.
+    pub fn with_orbit_cam_configured<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_configured(configure)
+    }
+
+    /// Finalizes the current home registration, adds `LagrangePlugin`, spawns an
+    /// `OrbitCam`, and inserts extra camera-side components.
+    pub fn with_orbit_cam_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_bundle(configure, bundle)
+    }
+}
+
+impl CameraHomeBuilder<WithOrbitCam> {
+    /// Finalizes the current home registration and adds stable transparency to the
+    /// spawned `OrbitCam`.
+    #[must_use]
+    pub fn with_stable_transparency(self) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_stable_transparency()
     }
 }
 
