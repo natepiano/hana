@@ -23,7 +23,6 @@ use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
-use bevy_lagrange::ForceUpdate;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
@@ -215,7 +214,6 @@ fn keyboard_input(
         cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);
         cam.target_pitch = f32::asin(START_POS.y / radius);
         cam.target_radius = radius;
-        cam.force_update = ForceUpdate::Pending;
         info!("Camera reset");
     }
 }
@@ -236,7 +234,7 @@ fn manual_animate(
             (((time.elapsed_secs_wrapped() * MANUAL_ORBIT_RADIUS_FREQUENCY).cos() + 1.0) * 0.5)
                 .mul_add(MANUAL_ORBIT_RADIUS_DELTA, MANUAL_ORBIT_RADIUS_BASE),
         );
-        cam.force_update = ForceUpdate::Pending;
+        cam.force_update();
     }
 }
 

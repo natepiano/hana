@@ -42,7 +42,6 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
 use bevy_lagrange::CameraMove;
-use bevy_lagrange::ForceUpdate;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
@@ -706,7 +705,7 @@ fn toggle_projection(
                 far: 40.0,
                 ..OrthographicProjection::default_3d()
             });
-            poc.force_update = ForceUpdate::Pending;
+            poc.force_update();
         } else if to_perspective && matches!(&*proj, Projection::Orthographic(_)) {
             let r = poc.radius.unwrap_or(1.0);
             let persp_r = orthographic_to_perspective_radius(r);
@@ -718,7 +717,7 @@ fn toggle_projection(
                 fov: PERSPECTIVE_FOV,
                 ..default()
             });
-            poc.force_update = ForceUpdate::Pending;
+            poc.force_update();
         }
     }
 }
@@ -739,7 +738,7 @@ fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut OrbitCam)>) {
                 p.near = new_near;
                 p.far = new_far;
                 p.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -new_near);
-                poc.force_update = ForceUpdate::Pending;
+                poc.force_update();
             }
         }
     }

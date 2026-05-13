@@ -49,7 +49,6 @@ impl OrbitCamPreset {
                 .zoom(OrbitCamMouseWheelZoom::default())
                 .zoom(OrbitCamTrackpadScroll::default())
                 .zoom(OrbitCamPinchZoom)
-                .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
                 .build(),
             Self::BlenderLike => OrbitCamBindings::builder()
                 .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
@@ -59,7 +58,6 @@ impl OrbitCamPreset {
                 .zoom(OrbitCamMouseWheelZoom::default())
                 .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
                 .zoom(OrbitCamPinchZoom)
-                .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
                 .build(),
         }
     }
@@ -1207,7 +1205,7 @@ mod tests {
         assert!(simple.mouse_wheel_zoom().is_some());
         assert_eq!(simple.trackpad_zoom().len(), 1);
         assert!(simple.pinch_zoom());
-        assert!(simple.touch().is_some());
+        assert!(simple.touch().is_none());
 
         let blender = OrbitCamPreset::BlenderLike.to_bindings()?;
         assert_eq!(blender.orbit().len(), 1);

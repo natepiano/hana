@@ -137,7 +137,7 @@ fn build_panel_geometry(
         despawn_children_of(&old_interaction, panel_entity, &mut commands);
 
         // ── Gather fill + border per element ────────────────────────
-        let gathered = gather_surfaces(&result.commands);
+        let gathered = gather_surfaces(panel, &result.commands);
 
         // ── Spawn SDF quads ─────────────────────────────────────────
         {
@@ -213,21 +213,21 @@ struct GatheredCommands {
 ///
 /// Computes the active clip rect for each command via
 /// [`clip::compute_clip_rects`] and stores it on each surface and divider.
-fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
+fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> GatheredCommands {
     let clip_rects = clip::compute_clip_rects(commands);
+    let viewport = clip::panel_viewport(panel);
     let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
     let mut dividers: Vec<(usize, BoundingBox, Color, Option<BoundingBox>)> = Vec::new();
 
     for (cmd_index, cmd) in commands.iter().enumerate() {
-        let clip = clip_rects[cmd_index];
+        let active_clip = clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport);
         match &cmd.kind {
             RenderCommandKind::Rectangle { color, source } => {
-                // Skip surfaces entirely outside their clip rect.
-                if clip.is_some_and(|c| cmd.bounds.intersect(&c).is_none()) {
+                let Some(active_clip) = active_clip else {
                     continue;
-                }
+                };
                 if *source == RectangleSource::BetweenChildrenBorder {
-                    dividers.push((cmd_index, cmd.bounds, *color, clip));
+                    dividers.push((cmd_index, cmd.bounds, *color, Some(active_clip)));
                 } else {
                     surfaces
                         .entry(cmd.element_idx)
@@ -238,12 +238,15 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
                             border_widths: [0.0; 4],
                             border_color:  None,
                             command_index: cmd_index,
-                            clip_rect:     clip,
+                            clip_rect:     Some(active_clip),
                         })
                         .fill_color = Some(*color);
                 }
             },
             RenderCommandKind::Border { border } => {
+                let Some(active_clip) = active_clip else {
+                    continue;
+                };
                 let surface = surfaces
                     .entry(cmd.element_idx)
                     .or_insert_with(|| ElementSurface {
@@ -253,7 +256,7 @@ fn gather_surfaces(commands: &[RenderCommand]) -> GatheredCommands {
                         border_widths: [0.0; 4],
                         border_color:  None,
                         command_index: cmd_index,
-                        clip_rect:     clip,
+                        clip_rect:     Some(active_clip),
                     });
                 surface.border_widths = [
                     border.top.value,

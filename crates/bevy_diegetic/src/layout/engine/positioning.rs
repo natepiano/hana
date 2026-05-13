@@ -17,18 +17,6 @@ use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
 
-/// Returns true if the bounding box is entirely outside the viewport.
-const fn is_offscreen(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    viewport_width: f32,
-    viewport_height: f32,
-) -> bool {
-    x > viewport_width || y > viewport_height || x + width < 0.0 || y + height < 0.0
-}
-
 /// Emits border and scissor-end commands during the up-traversal (second visit)
 /// of the DFS positioning pass.
 fn emit_up_traversal_commands(
@@ -38,9 +26,8 @@ fn emit_up_traversal_commands(
     element: &Element,
     bounds: BoundingBox,
     index: usize,
-    offscreen: bool,
 ) {
-    if !offscreen && let Some(ref border) = element.border {
+    if let Some(ref border) = element.border {
         commands.push(RenderCommand {
             bounds,
             kind: RenderCommandKind::Border { border: *border },
@@ -70,11 +57,10 @@ fn emit_down_traversal_commands(
     wrapped: Option<&WrappedText>,
     bounds: BoundingBox,
     index: usize,
-    offscreen: bool,
     font_scale: f32,
 ) {
     // Emit rectangle if background is set.
-    if !offscreen && let Some(color) = element.background {
+    if let Some(color) = element.background {
         commands.push(RenderCommand {
             bounds,
             kind: RenderCommandKind::Rectangle {
@@ -108,17 +94,16 @@ fn emit_down_traversal_commands(
     }
 
     // Emit text render commands.
-    if !offscreen
-        && let ElementContent::Text {
-            ref config,
-            ref text,
-        } = element.content
+    if let ElementContent::Text {
+        ref config,
+        ref text,
+    } = element.content
     {
         emit_text_commands(commands, wrapped, config, text, bounds, index, font_scale);
     }
 
     // Emit image render commands.
-    if !offscreen && let ElementContent::Image { ref handle, tint } = element.content {
+    if let ElementContent::Image { ref handle, tint } = element.content {
         commands.push(RenderCommand {
             bounds,
             kind: RenderCommandKind::Image {
@@ -283,16 +268,13 @@ fn push_children_to_stack(
 }
 
 /// DFS positioning pass. Computes final bounding boxes and emits render commands.
-///
-/// Elements whose bounding box lies entirely outside the viewport are
-/// omitted from the command list (viewport culling).
 pub(super) fn position_and_render(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
-    viewport_width: f32,
-    viewport_height: f32,
+    _viewport_width: f32,
+    _viewport_height: f32,
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
@@ -311,42 +293,13 @@ pub(super) fn position_and_render(
         };
 
         if *visited {
-            let offscreen = is_offscreen(
-                x,
-                y,
-                bounds.width,
-                bounds.height,
-                viewport_width,
-                viewport_height,
-            );
-            emit_up_traversal_commands(
-                tree,
-                computed,
-                &mut commands,
-                element,
-                bounds,
-                index,
-                offscreen,
-            );
+            emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
             stack.pop();
         } else {
             *visited = true;
 
-            // Store the final bounding box (always, even if culled — computed
-            // layout is the full picture, only render commands are filtered).
+            // Store the final bounding box for render-side culling and clipping.
             computed[index].bounds = bounds;
-
-            // Cull off-screen elements: skip render commands but still recurse
-            // into children (a parent can be off-screen while children are on-screen
-            // due to overflow).
-            let offscreen = is_offscreen(
-                x,
-                y,
-                bounds.width,
-                bounds.height,
-                viewport_width,
-                viewport_height,
-            );
 
             emit_down_traversal_commands(
                 &mut commands,
@@ -354,7 +307,6 @@ pub(super) fn position_and_render(
                 wrapped[index].as_ref(),
                 bounds,
                 index,
-                offscreen,
                 font_scale,
             );
 
@@ -370,8 +322,8 @@ pub(super) fn render_commands_from_geometry(
     computed: &[ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
-    viewport_width: f32,
-    viewport_height: f32,
+    _viewport_width: f32,
+    _viewport_height: f32,
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
@@ -383,25 +335,9 @@ pub(super) fn render_commands_from_geometry(
     while let Some((index, visited)) = stack.pop() {
         let element = &tree.elements[index];
         let bounds = computed[index].bounds;
-        let offscreen = is_offscreen(
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-            viewport_width,
-            viewport_height,
-        );
 
         if visited {
-            emit_up_traversal_commands(
-                tree,
-                computed,
-                &mut commands,
-                element,
-                bounds,
-                index,
-                offscreen,
-            );
+            emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
             continue;
         }
 
@@ -411,7 +347,6 @@ pub(super) fn render_commands_from_geometry(
             wrapped[index].as_ref(),
             bounds,
             index,
-            offscreen,
             font_scale,
         );
 

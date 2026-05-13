@@ -35,6 +35,7 @@ use crate::layout::LayoutTextStyle;
 use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
 use crate::layout::Padding;
+use crate::layout::RectangleSource;
 use crate::layout::RenderCommandKind;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
@@ -74,6 +75,46 @@ fn line_height(font_size: f32) -> f32 { font_size }
 
 fn text_height(line_count: u32, font_size: f32) -> f32 {
     line_count.to_f32() * line_height(font_size)
+}
+
+fn add_aligned_table_row(
+    builder: &mut LayoutBuilder,
+    bindings: &[&str],
+    action: &str,
+    style: &LayoutTextStyle,
+    action_min: f32,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight)
+            .child_gap(4.0)
+            .child_align_y(AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(2.0),
+                |builder| {
+                    for binding in bindings {
+                        builder.text(*binding, style.clone());
+                    }
+                },
+            );
+            builder.text("->", style.clone());
+            builder.with(
+                El::new()
+                    .width(Sizing::fit_min(action_min))
+                    .height(Sizing::FIT),
+                |builder| {
+                    builder.text(action, style.clone());
+                },
+            );
+        },
+    );
 }
 
 // ── Fixed sizing ─────────────────────────────────────────────────────────────
@@ -941,6 +982,76 @@ fn key_value_row_layout() {
     assert!(approx_eq(value.x, VIEWPORT - value_width));
 }
 
+#[test]
+fn fit_table_with_grow_rows_aligns_middle_column() {
+    let font_size = 10.0;
+    let style = LayoutTextStyle::new(font_size).no_wrap();
+    let action_min = text_width("Orbit", font_size);
+    let mut b = LayoutBuilder::new(200.0, 200.0);
+    b.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_gap(5.0)
+            .border(Border::new().between_children(1.0).color(Color::WHITE)),
+        |builder| {
+            add_aligned_table_row(
+                builder,
+                &["MMB drag", "Trackpad"],
+                "Orbit",
+                &style,
+                action_min,
+            );
+            add_aligned_table_row(
+                builder,
+                &["Shift+MMB drag", "Shift+trackpad"],
+                "Pan",
+                &style,
+                action_min,
+            );
+            add_aligned_table_row(
+                builder,
+                &["Wheel", "Ctrl+trackpad", "Pinch"],
+                "Zoom",
+                &style,
+                action_min,
+            );
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    let arrow_xs = result
+        .commands
+        .iter()
+        .filter_map(|command| match &command.kind {
+            RenderCommandKind::Text { text, .. } if text == "->" => Some(command.bounds.x),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(arrow_xs.len(), 3);
+    assert!(approx_eq(arrow_xs[0], arrow_xs[1]));
+    assert!(approx_eq(arrow_xs[1], arrow_xs[2]));
+
+    let divider_count = result
+        .commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.kind,
+                RenderCommandKind::Rectangle {
+                    source: RectangleSource::BetweenChildrenBorder,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(divider_count, 2);
+}
+
 // ── Scissor/clip ─────────────────────────────────────────────────────────────
 
 #[test]
@@ -1624,10 +1735,9 @@ fn grow_body_compression_20_rows() {
     // Header: GROW(10..20), content = 18 (4+10+4 padding + 10px text) → 18.
     // Divider: Fixed(4) → 4.
     // Body: GROW, 20 rows of text → content height 248.
-    // Content overflows the panel (18 + 4 + 248 = 270 > 134). Clay handles this
-    // by keeping the content height and culling off-screen render commands rather
-    // than compressing the body. This matches Clay's `CloseElement` behavior where
-    // GROW elements are initialized from their children's content size.
+    // Content overflows the panel (18 + 4 + 248 = 270 > 134). The layout
+    // engine keeps the content height rather than compressing the body;
+    // render-side systems decide what is visible in the current viewport.
     let header = &result.computed[1];
     let divider = &result.computed[8];
     let body = &result.computed[9];

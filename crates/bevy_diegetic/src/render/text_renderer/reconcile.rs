@@ -98,19 +98,25 @@ pub(super) fn reconcile_panel_text_children(
         let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         let clip_rects = clip::compute_clip_rects(&result.commands);
+        let viewport = clip::panel_viewport(panel);
         let text_commands: Vec<_> = result
             .commands
             .iter()
             .enumerate()
             .filter_map(|(cmd_index, cmd)| match &cmd.kind {
-                RenderCommandKind::Text { text, config } => Some((
-                    cmd.element_idx,
-                    cmd_index,
-                    text.clone(),
-                    config.clone(),
-                    cmd.bounds,
-                    clip_rects[cmd_index],
-                )),
+                RenderCommandKind::Text { text, config } => {
+                    let active_clip =
+                        clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)
+                            .unwrap_or_else(clip::empty_clip);
+                    Some((
+                        cmd.element_idx,
+                        cmd_index,
+                        text.clone(),
+                        config.clone(),
+                        cmd.bounds,
+                        active_clip,
+                    ))
+                },
                 _ => None,
             })
             .collect();
@@ -136,7 +142,7 @@ pub(super) fn reconcile_panel_text_children(
                 scale_y,
                 anchor_x,
                 anchor_y,
-                clip_rect: *clip,
+                clip_rect: Some(*clip),
             };
 
             let key = (*element_idx, *cmd_index);
@@ -200,25 +206,21 @@ pub(super) fn reconcile_panel_image_children(
         let is_geometry = panel.render_mode() == RenderMode::Geometry;
 
         let clip_rects = clip::compute_clip_rects(&result.commands);
+        let viewport = clip::panel_viewport(panel);
         let image_commands: Vec<_> = result
             .commands
             .iter()
             .enumerate()
             .filter_map(|(cmd_index, cmd)| match &cmd.kind {
                 RenderCommandKind::Image { handle, tint } => {
-                    let clip = clip_rects[cmd_index];
-                    if clip.is_some_and(|active_clip| cmd.bounds.intersect(&active_clip).is_none())
-                    {
-                        None
-                    } else {
-                        Some((
-                            cmd_index,
-                            cmd.element_idx,
-                            handle.clone(),
-                            *tint,
-                            cmd.bounds,
-                        ))
-                    }
+                    clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
+                    Some((
+                        cmd_index,
+                        cmd.element_idx,
+                        handle.clone(),
+                        *tint,
+                        cmd.bounds,
+                    ))
                 },
                 _ => None,
             })

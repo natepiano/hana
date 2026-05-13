@@ -41,7 +41,6 @@ use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::FitOverlay;
-use bevy_lagrange::ForceUpdate;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;

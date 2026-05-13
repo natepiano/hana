@@ -60,8 +60,8 @@ pub struct ComputedLayout {
 /// let result = engine.compute(&tree, 800.0, 600.0, 1.0);
 /// ```
 ///
-/// Viewport culling is always enabled — elements whose bounding box lies
-/// entirely outside the viewport are omitted from the render command list.
+/// The layout result keeps a complete render-command stream. Render-side
+/// systems decide which commands are visible in the current viewport.
 pub struct LayoutEngine {
     measure_text: MeasureTextFn,
 }
@@ -116,7 +116,8 @@ impl LayoutEngine {
         // Phase 3: Size along Y axis (BFS top-down) with wrap-corrected heights.
         sizing::size_along_axis(tree, &mut computed, root, Axis::Y, viewport_height);
 
-        // Phase 4: Position elements and generate render commands (DFS).
+        // Phase 4: Position elements and generate the complete render
+        // command stream (DFS).
         let commands = positioning::position_and_render(
             tree,
             &mut computed,

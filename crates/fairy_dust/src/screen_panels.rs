@@ -6,6 +6,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -62,11 +63,12 @@ impl DescriptionPanel {
 }
 
 /// A compact top-left title bar for example-level controls.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct TitleBar {
-    anchor:   Anchor,
-    title:    String,
-    controls: Vec<String>,
+    anchor:          Anchor,
+    title:           String,
+    controls:        Vec<String>,
+    active_controls: Vec<String>,
 }
 
 impl TitleBar {
@@ -74,9 +76,10 @@ impl TitleBar {
     #[must_use]
     pub fn new(title: impl Into<String>) -> Self {
         Self {
-            anchor:   Anchor::TopLeft,
-            title:    title.into(),
-            controls: Vec::new(),
+            anchor:          Anchor::TopLeft,
+            title:           title.into(),
+            controls:        Vec::new(),
+            active_controls: Vec::new(),
         }
     }
 
@@ -94,11 +97,63 @@ impl TitleBar {
         self
     }
 
+    /// Adds a compact control label that starts highlighted.
+    #[must_use]
+    pub fn active_control(mut self, control: impl Into<String>) -> Self {
+        let control = control.into();
+        self.controls.push(control.clone());
+        self.active_controls.push(control);
+        self
+    }
+
     /// Adds multiple compact control labels.
     #[must_use]
     pub fn controls(mut self, controls: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.controls.extend(controls.into_iter().map(Into::into));
         self
+    }
+}
+
+/// Mutable highlight state for a spawned [`TitleBar`].
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct TitleBarControlState {
+    active_controls: Vec<String>,
+}
+
+impl TitleBarControlState {
+    fn from_title_bar(title_bar: &TitleBar) -> Self {
+        Self {
+            active_controls: title_bar.active_controls.clone(),
+        }
+    }
+
+    /// Sets whether a control label is highlighted.
+    pub fn set_active(&mut self, control: &str, active: bool) -> bool {
+        let Some(index) = self
+            .active_controls
+            .iter()
+            .position(|active_control| active_control == control)
+        else {
+            if active {
+                self.active_controls.push(control.to_string());
+            }
+            return active;
+        };
+
+        if active {
+            return false;
+        }
+
+        self.active_controls.remove(index);
+        true
+    }
+
+    /// Returns whether a control label is highlighted.
+    #[must_use]
+    pub fn is_active(&self, control: &str) -> bool {
+        self.active_controls
+            .iter()
+            .any(|active_control| active_control == control)
     }
 }
 
@@ -108,26 +163,26 @@ struct DescriptionPanelMarker;
 #[derive(Component)]
 struct TitleBarMarker;
 
-const RADIUS: Px = Px(8.0);
+const RADIUS: Px = Px(12.0);
 const FRAME_PAD: Px = Px(2.0);
 const BORDER: Px = Px(2.0);
 const INNER_PAD: Px = Px(10.0);
 const INSET: Px = Px(FRAME_PAD.0 + BORDER.0);
 const INNER_RADIUS: Px = Px(RADIUS.0 - INSET.0);
 
-const TITLE_SIZE: Pt = Pt(16.0);
+const TITLE_SIZE: Pt = Pt(14.0);
 const BODY_SIZE: Pt = Pt(11.0);
 const CONTROL_SIZE: Pt = Pt(12.0);
 
 const DESCRIPTION_WIDTH: Px = Px(330.0);
 
-const FRAME_BG: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
-const INNER_BG: Color = Color::srgba(0.02, 0.03, 0.07, 0.84);
+const INNER_BG: Color = Color::srgba(0.02, 0.03, 0.07, 0.50);
 const BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
 const BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
 const BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-const CONTROL_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
+const CONTROL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
+const CONTROL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
 
 pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
@@ -139,6 +194,7 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
 
 pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     ensure_plugin(app, DiegeticUiPlugin);
+    app.add_systems(PostUpdate, refresh_changed_title_bar);
     app.add_systems(Startup, move |mut commands: Commands| {
         spawn_title_bar(&mut commands, &title_bar);
     });
@@ -165,22 +221,41 @@ fn spawn_description_panel(commands: &mut Commands, panel: &DescriptionPanel) {
 }
 
 fn spawn_title_bar(commands: &mut Commands, title_bar: &TitleBar) {
+    let state = TitleBarControlState::from_title_bar(title_bar);
     let unlit = unlit_panel_material();
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(title_bar.anchor)
         .material(unlit.clone())
         .text_material(unlit)
-        .layout(|builder| build_title_bar_layout(builder, title_bar))
+        .with_tree(build_title_bar_tree(title_bar, &state))
         .build();
 
     match panel {
         Ok(panel) => {
-            commands.spawn((TitleBarMarker, panel, Transform::default()));
+            commands.spawn((
+                TitleBarMarker,
+                title_bar.clone(),
+                state,
+                panel,
+                Transform::default(),
+            ));
         },
         Err(error) => {
             error!("fairy_dust: failed to build title bar: {error}");
         },
+    }
+}
+
+fn refresh_changed_title_bar(
+    mut commands: Commands,
+    title_bars: Query<
+        (Entity, &TitleBar, &TitleBarControlState),
+        Or<(Changed<TitleBar>, Changed<TitleBarControlState>)>,
+    >,
+) {
+    for (entity, title_bar, state) in &title_bars {
+        commands.set_tree(entity, build_title_bar_tree(title_bar, state));
     }
 }
 
@@ -211,9 +286,23 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
     });
 }
 
-fn build_title_bar_layout(builder: &mut LayoutBuilder, title_bar: &TitleBar) {
+fn build_title_bar_tree(
+    title_bar: &TitleBar,
+    state: &TitleBarControlState,
+) -> bevy_diegetic::LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    build_title_bar_layout(&mut builder, title_bar, state);
+    builder.build()
+}
+
+fn build_title_bar_layout(
+    builder: &mut LayoutBuilder,
+    title_bar: &TitleBar,
+    state: &TitleBarControlState,
+) {
     let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_COLOR);
+    let inactive_control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
+    let active_control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
 
     panel_frame(builder, Sizing::FIT, |builder| {
         builder.with(
@@ -226,7 +315,12 @@ fn build_title_bar_layout(builder: &mut LayoutBuilder, title_bar: &TitleBar) {
                 builder.text(title_bar.title.to_uppercase(), title);
                 for control_label in &title_bar.controls {
                     title_separator(builder);
-                    builder.text(control_label, control.clone());
+                    let control = if state.is_active(control_label) {
+                        active_control.clone()
+                    } else {
+                        inactive_control.clone()
+                    };
+                    builder.text(control_label, control);
                 }
             },
         );
@@ -244,7 +338,6 @@ fn panel_frame(
             .height(Sizing::FIT)
             .padding(Padding::all(FRAME_PAD))
             .corner_radius(CornerRadius::all(RADIUS))
-            .background(FRAME_BG)
             .border(Border::all(BORDER, BORDER_ACCENT)),
         |builder| {
             builder.with(
@@ -269,4 +362,33 @@ fn title_separator(builder: &mut LayoutBuilder) {
             .background(DIVIDER_COLOR),
         |_| {},
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn title_bar_control_state_tracks_active_labels() {
+        let mut state = TitleBarControlState::default();
+
+        assert!(state.set_active("H Home", true));
+        assert!(state.is_active("H Home"));
+        assert!(!state.set_active("H Home", true));
+
+        assert!(state.set_active("H Home", false));
+        assert!(!state.is_active("H Home"));
+        assert!(!state.set_active("H Home", false));
+    }
+
+    #[test]
+    fn title_bar_can_seed_active_controls() {
+        let title_bar = TitleBar::new("Demo")
+            .control("A Action")
+            .active_control("T Toggle");
+        let state = TitleBarControlState::from_title_bar(&title_bar);
+
+        assert!(!state.is_active("A Action"));
+        assert!(state.is_active("T Toggle"));
+    }
 }

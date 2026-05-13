@@ -11,15 +11,12 @@ use bevy::input::gamepad::Gamepad;
 use bevy::prelude::*;
 use bevy_lagrange::CameraInputGamepadSelectionPolicy;
 use bevy_lagrange::CameraInputRoutingConfig;
-use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamHeldBinding;
 use bevy_lagrange::OrbitCamInputBinding;
-use bevy_lagrange::OrbitCamInteractionKind;
 use fairy_dust::CameraGuidance;
-use fairy_dust::CameraGuidanceRow;
 
 #[derive(Component)]
 struct GamepadStatus;
@@ -43,18 +40,6 @@ fn gamepad_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .zoom(triggers)
         .gamepad(CameraInputGamepadSelectionPolicy::Active)
         .build()
-}
-
-fn gamepad_guidance() -> CameraGuidance {
-    CameraGuidance::custom([
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, "Right stick -> Orbit")
-            .when_sources(CameraInteractionSources::GAMEPAD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, "Left stick + L1 -> Pan")
-            .when_sources(CameraInteractionSources::GAMEPAD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "Triggers -> Zoom")
-            .when_sources(CameraInteractionSources::GAMEPAD),
-    ])
-    .with_title("Gamepad Bindings")
 }
 
 fn spawn_status(mut commands: Commands) {
@@ -96,7 +81,13 @@ fn main() {
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .with_orbit_cam_bundle(common::configure_camera, (bindings, gamepad_guidance()))
+        .with_orbit_cam_bundle(
+            common::configure_camera,
+            (
+                bindings,
+                CameraGuidance::auto().with_title("Gamepad Bindings"),
+            ),
+        )
         .with_camera_guidance_panel()
         .add_systems(Startup, (common::spawn_scene, spawn_status))
         .add_systems(Update, update_status)

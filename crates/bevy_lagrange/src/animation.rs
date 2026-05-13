@@ -14,7 +14,6 @@ use bevy::prelude::*;
 use bevy_kana::Displacement;
 use bevy_kana::Position;
 
-use super::ForceUpdate;
 use super::OrbitCam;
 use super::components::CameraInputInterruptBehavior;
 use super::constants::EXTERNAL_INPUT_TOLERANCE;
@@ -347,7 +346,6 @@ fn handle_camera_input_interrupt(
                 pan_orbit.target_yaw = yaw;
                 pan_orbit.target_pitch = pitch;
                 pan_orbit.target_radius = radius;
-                pan_orbit.force_update = ForceUpdate::Pending;
             }
             // Fire normal end events
             commands
@@ -392,7 +390,6 @@ fn handle_ready_state(
         pan_orbit.target_radius = target_radius;
         pan_orbit.target_yaw = target_yaw;
         pan_orbit.target_pitch = target_pitch;
-        pan_orbit.force_update = ForceUpdate::Pending;
 
         commands.trigger(CameraMoveEnd {
             camera:      entity,
@@ -486,7 +483,6 @@ fn handle_in_progress(
     pan_orbit.target_radius = (canonical_radius - start.radius).mul_add(t_interp, start.radius);
     pan_orbit.target_yaw = yaw_diff.mul_add(t_interp, start.yaw);
     pan_orbit.target_pitch = pitch_diff.mul_add(t_interp, start.pitch);
-    pan_orbit.force_update = ForceUpdate::Pending;
 
     // Save what we wrote so we can detect external changes next frame
     last_written.focus = Position(pan_orbit.target_focus);

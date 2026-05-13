@@ -57,14 +57,15 @@ pub enum InitializationState {
     Complete,
 }
 
-/// Whether to force a transform update this frame regardless of input.
+/// One-shot controller request for recalculating the camera transform.
+#[doc(hidden)]
 #[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
-pub enum ForceUpdate {
-    /// No forced update.
+pub enum OrbitCamUpdateRequest {
+    /// No forced update was requested.
     #[default]
-    Idle,
-    /// Force a transform update this frame, then return to `Idle`.
-    Pending,
+    None,
+    /// Force one transform update on the next controller pass.
+    ForceUpdate,
 }
 
 /// Which time source drives camera smoothing.
@@ -249,11 +250,9 @@ pub struct OrbitCam {
     /// initial position.
     /// Defaults to `InitializationState::Pending`.
     pub initialization:      InitializationState,
-    /// Whether to update the camera's transform regardless of whether there are any
-    /// changes/input. Set to `ForceUpdate::Pending` if you want to modify values directly.
-    /// This will be automatically set back to `ForceUpdate::Idle` after one frame.
-    /// Defaults to `ForceUpdate::Idle`.
-    pub force_update:        ForceUpdate,
+    /// One-shot update request used by [`OrbitCam::force_update`].
+    #[doc(hidden)]
+    pub update_request:      OrbitCamUpdateRequest,
     /// Axis order definition. This can be used to e.g. define a different default
     /// up direction. The default up is Y, but if you want the camera rotated.
     /// The axis can be switched.
@@ -291,7 +290,7 @@ impl Default for OrbitCam {
             focus_bounds_shape:  None,
             zoom_upper_limit:    None,
             zoom_lower_limit:    DEFAULT_ZOOM_LOWER_LIMIT,
-            force_update:        ForceUpdate::Idle,
+            update_request:      OrbitCamUpdateRequest::None,
             axis:                [Vec3::X, Vec3::Y, Vec3::Z],
             time_source:         TimeSource::Virtual,
         }
@@ -299,6 +298,19 @@ impl Default for OrbitCam {
 }
 
 impl OrbitCam {
+    /// Requests one transform update on the next controller pass.
+    ///
+    /// Use this after mutating current camera state or projection state directly,
+    /// when no target-value change would otherwise make the controller recalculate
+    /// the transform.
+    pub const fn force_update(&mut self) {
+        self.update_request = OrbitCamUpdateRequest::ForceUpdate;
+    }
+
+    pub(crate) fn consume_update_request(&mut self) -> OrbitCamUpdateRequest {
+        core::mem::take(&mut self.update_request)
+    }
+
     pub(super) const fn clamp_yaw(&self, yaw: f32) -> f32 {
         clamp_optional(yaw, self.yaw_lower_limit, self.yaw_upper_limit)
     }

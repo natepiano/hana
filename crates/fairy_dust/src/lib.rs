@@ -45,6 +45,7 @@ pub use camera_control_panel::CameraGuidanceRow;
 use primitive::PrimitiveConfig;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
+pub use screen_panels::TitleBarControlState;
 
 mod brp_extras;
 mod camera_control_panel;

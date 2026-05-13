@@ -8,6 +8,44 @@
 use crate::layout::BoundingBox;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
+use crate::panel::DiegeticPanel;
+
+/// Returns the panel's layout-space viewport.
+pub(super) const fn panel_viewport(panel: &DiegeticPanel) -> BoundingBox {
+    BoundingBox {
+        x:      0.0,
+        y:      0.0,
+        width:  panel.width(),
+        height: panel.height(),
+    }
+}
+
+/// Returns the visible clip rect for a command after applying both the
+/// panel viewport and the active scissor clip.
+///
+/// Returns `None` when the command is fully outside the effective clip.
+pub(super) fn effective_clip(
+    command_bounds: BoundingBox,
+    scissor_clip: Option<BoundingBox>,
+    viewport: BoundingBox,
+) -> Option<BoundingBox> {
+    let clip = match scissor_clip {
+        Some(scissor) => scissor.intersect(&viewport)?,
+        None => viewport,
+    };
+    command_bounds.intersect(&clip).map(|_| clip)
+}
+
+/// A zero-area clip rect used for retained children that exist in layout
+/// but are fully outside the current viewport.
+pub(super) const fn empty_clip() -> BoundingBox {
+    BoundingBox {
+        x:      0.0,
+        y:      0.0,
+        width:  0.0,
+        height: 0.0,
+    }
+}
 
 /// Computes the active clip rect for each render command.
 ///
@@ -179,5 +217,42 @@ mod tests {
         assert!((deepest.y - 80.0).abs() < f32::EPSILON);
         assert!((deepest.width - 120.0).abs() < f32::EPSILON);
         assert!((deepest.height - 120.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn effective_clip_uses_viewport_without_scissor() {
+        let viewport = bbox(0.0, 0.0, 100.0, 80.0);
+        let command = bbox(10.0, 10.0, 20.0, 20.0);
+
+        assert_eq!(effective_clip(command, None, viewport), Some(viewport));
+    }
+
+    #[test]
+    fn effective_clip_intersects_scissor_with_viewport() {
+        let viewport = bbox(0.0, 0.0, 100.0, 80.0);
+        let scissor = bbox(50.0, 20.0, 100.0, 100.0);
+        let command = bbox(60.0, 30.0, 10.0, 10.0);
+
+        assert_eq!(
+            effective_clip(command, Some(scissor), viewport),
+            Some(bbox(50.0, 20.0, 50.0, 60.0))
+        );
+    }
+
+    #[test]
+    fn effective_clip_returns_none_when_command_outside_viewport() {
+        let viewport = bbox(0.0, 0.0, 100.0, 80.0);
+        let command = bbox(120.0, 10.0, 20.0, 20.0);
+
+        assert_eq!(effective_clip(command, None, viewport), None);
+    }
+
+    #[test]
+    fn effective_clip_returns_none_when_scissor_misses_viewport() {
+        let viewport = bbox(0.0, 0.0, 100.0, 80.0);
+        let scissor = bbox(150.0, 20.0, 20.0, 20.0);
+        let command = bbox(10.0, 10.0, 20.0, 20.0);
+
+        assert_eq!(effective_clip(command, Some(scissor), viewport), None);
     }
 }

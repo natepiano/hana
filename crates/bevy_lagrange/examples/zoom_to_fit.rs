@@ -19,7 +19,6 @@ use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 use bevy_lagrange::FitOverlay;
-use bevy_lagrange::ForceUpdate;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
@@ -161,7 +160,6 @@ fn keyboard_input(
         orbit_cam.target_yaw = f32::atan2(START_POS.x, START_POS.z);
         orbit_cam.target_pitch = f32::asin(START_POS.y / radius);
         orbit_cam.target_radius = radius;
-        orbit_cam.force_update = ForceUpdate::Pending;
         info!("Camera reset");
     }
 }

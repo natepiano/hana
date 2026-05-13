@@ -4,14 +4,11 @@ mod common;
 
 use bevy::prelude::*;
 use bevy_lagrange::CameraInputRoutingConfig;
-use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamInputBinding;
-use bevy_lagrange::OrbitCamInteractionKind;
 use fairy_dust::CameraGuidance;
-use fairy_dust::CameraGuidanceRow;
 
 fn keyboard_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
     let orbit_keys = OrbitCamInputBinding::cardinal_keys(
@@ -35,18 +32,6 @@ fn keyboard_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .build()
 }
 
-fn keyboard_guidance() -> CameraGuidance {
-    CameraGuidance::custom([
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, "Arrows -> Orbit")
-            .when_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, "WASD -> Pan")
-            .when_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "+ / - -> Zoom")
-            .when_sources(CameraInteractionSources::KEYBOARD),
-    ])
-    .with_title("Keyboard Bindings")
-}
-
 fn main() {
     let Ok(bindings) = keyboard_bindings() else {
         error!("keyboard camera bindings failed to validate");
@@ -58,7 +43,13 @@ fn main() {
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .with_orbit_cam_bundle(common::configure_camera, (bindings, keyboard_guidance()))
+        .with_orbit_cam_bundle(
+            common::configure_camera,
+            (
+                bindings,
+                CameraGuidance::auto().with_title("Keyboard Bindings"),
+            ),
+        )
         .with_camera_guidance_panel()
         .add_systems(Startup, common::spawn_scene)
         .run();

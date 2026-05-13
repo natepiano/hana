@@ -9,10 +9,7 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_orbit_cam_bundle(
             common::configure_camera,
-            (
-                OrbitCamPreset::SimpleMouse,
-                CameraGuidance::for_preset(OrbitCamPreset::SimpleMouse),
-            ),
+            (OrbitCamPreset::SimpleMouse, CameraGuidance::auto()),
         )
         .with_camera_guidance_panel()
         .add_systems(bevy::prelude::Startup, common::spawn_scene)

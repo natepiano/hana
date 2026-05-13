@@ -21,16 +21,15 @@ struct ManualCamera;
 
 fn manual_guidance() -> CameraGuidance {
     CameraGuidance::custom([
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, "Arrows -> Manual orbit")
-            .when_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, "WASD -> Manual pan")
-            .when_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "+ / - -> Manual zoom")
-            .when_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "M -> Manual active")
-            .when_sources(CameraInteractionSources::MANUAL),
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, "Arrows")
+            .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, "WASD")
+            .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "+ / -")
+            .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "M")
+            .with_camera_interaction_sources(CameraInteractionSources::MANUAL),
     ])
-    .with_title("Manual Input")
 }
 
 fn write_manual_input(

@@ -4,7 +4,6 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_lagrange::ForceUpdate;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_window_manager::WindowManagerPlugin;
@@ -112,9 +111,5 @@ fn camera_follow(
         && let Ok(cube_transform) = cube_query.single()
     {
         orbit_cam.target_focus = cube_transform.translation;
-        // Whenever changing properties manually like this, it's necessary to force
-        // `OrbitCam` to update this frame (by default it only updates when there are
-        // input events).
-        orbit_cam.force_update = ForceUpdate::Pending;
     }
 }

@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_kana::Position;
 
-use crate::orbit_cam::ForceUpdate;
 use crate::orbit_cam::OrbitCam;
 
 /// Parameters for an instant orbital snap.
@@ -32,7 +31,7 @@ pub(super) fn snap_to_orbit(
         orbit_cam.pitch = Some(pitch);
         orbit_cam.target_pitch = pitch;
     }
-    orbit_cam.force_update = ForceUpdate::Pending;
+    orbit_cam.force_update();
 
     emit_events(commands);
 }

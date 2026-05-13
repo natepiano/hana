@@ -3,7 +3,6 @@
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_lagrange::ForceUpdate;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamSystemSet;
@@ -86,6 +85,6 @@ fn switch_projection(
             return;
         };
         std::mem::swap(&mut *next_projection, &mut *projection);
-        camera.force_update = ForceUpdate::Pending;
+        camera.force_update();
     }
 }

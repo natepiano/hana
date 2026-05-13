@@ -7,6 +7,7 @@ use bevy::window::WindowRef;
 
 use crate::CameraInputInterruptBehavior;
 use crate::CameraMoveList;
+use crate::OrbitCam;
 #[cfg(feature = "bevy_egui")]
 use crate::egui::BlockOnEguiFocus;
 #[cfg(feature = "bevy_egui")]
@@ -350,7 +351,7 @@ fn collect_camera_snapshots_impl(
     world: &mut World,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> Vec<CameraRoutingSnapshot> {
-    let mut query = world.query::<(
+    let mut query = world.query_filtered::<(
         Entity,
         &Camera,
         &RenderTarget,
@@ -359,7 +360,7 @@ fn collect_camera_snapshots_impl(
         Option<&CameraMoveList>,
         Option<&CameraInputInterruptBehavior>,
         Option<&CameraInputSurfaceMetrics>,
-    )>();
+    ), With<OrbitCam>>();
 
     query
         .iter(world)
@@ -390,7 +391,7 @@ fn collect_camera_snapshots_impl(
     let egui_blocks_all = world
         .get_resource::<EguiWantsFocus>()
         .is_some_and(|focus| focus.prev || focus.curr);
-    let mut query = world.query::<(
+    let mut query = world.query_filtered::<(
         Entity,
         &Camera,
         &RenderTarget,
@@ -400,7 +401,7 @@ fn collect_camera_snapshots_impl(
         Option<&CameraInputInterruptBehavior>,
         Option<&CameraInputSurfaceMetrics>,
         Option<&BlockOnEguiFocus>,
-    )>();
+    ), With<OrbitCam>>();
 
     query
         .iter(world)
@@ -603,6 +604,15 @@ mod tests {
             .id()
     }
 
+    fn spawn_non_orbit_camera(world: &mut World, order: isize) -> Entity {
+        world
+            .spawn((
+                Camera { order, ..default() },
+                RenderTarget::Window(WindowRef::Primary),
+            ))
+            .id()
+    }
+
     #[test]
     fn explicit_routing_config_applies_in_preinput() {
         let mut app = test_app();
@@ -671,6 +681,28 @@ mod tests {
                 .resource::<ResolvedOrbitCamInputRoute>()
                 .routed_camera,
             Some(camera)
+        );
+    }
+
+    #[test]
+    fn non_orbit_cameras_do_not_count_as_routing_targets() {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let overlay = spawn_non_orbit_camera(app.world_mut(), 1);
+        app.insert_resource(
+            CameraInputRoutingConfig::cursor_hit_test()
+                .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
+        );
+
+        app.update();
+
+        let resolved = app.world().resource::<ResolvedOrbitCamInputRoute>();
+        assert_eq!(resolved.routed_camera, Some(camera));
+        assert!(!resolved.metrics.contains_key(&overlay));
+        assert!(
+            app.world()
+                .get::<OrbitCamInputContextGated>(overlay)
+                .is_none()
         );
     }
 

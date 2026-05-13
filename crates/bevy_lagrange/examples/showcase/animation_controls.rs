@@ -184,7 +184,7 @@ pub(crate) fn toggle_projection(
             },
             Projection::Custom(_) => {},
         }
-        orbit_camera.force_update = ForceUpdate::Pending;
+        orbit_camera.force_update();
     }
     if logged {
         *pending_fit = true;

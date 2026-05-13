@@ -44,10 +44,7 @@ impl Plugin for ScreenSpacePlugin {
             .add_observer(cleanup_screen_space_view)
             .add_systems(
                 Update,
-                (
-                    position_screen_space_panels.before(PanelSystems::ComputeLayout),
-                    finalize_screen_space_panel_positions.after(PanelSystems::ComputeLayout),
-                ),
+                position_screen_space_panels.after(PanelSystems::ResolveWorldFit),
             )
             .add_systems(PostUpdate, propagate_screen_space_render_layers);
     }
@@ -55,8 +52,8 @@ impl Plugin for ScreenSpacePlugin {
 
 /// Positions and sizes screen-space panels relative to the window.
 ///
-/// Runs before `compute_panel_layouts` so that any dimension changes
-/// trigger layout recomputation via Bevy change detection.
+/// Runs after the panel layout sequence so `Fit` panels are placed from
+/// their measured dimensions instead of the temporary build-time size.
 fn position_screen_space_panels(
     windows: Query<&Window>,
     mut panels: Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
@@ -64,23 +61,6 @@ fn position_screen_space_panels(
     let Ok(window) = windows.single() else {
         return;
     };
-    resolve_and_position_screen_space_panels(window, &mut panels);
-}
-
-fn finalize_screen_space_panel_positions(
-    windows: Query<&Window>,
-    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
-) {
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    resolve_and_position_screen_space_panels(window, &mut panels);
-}
-
-fn resolve_and_position_screen_space_panels(
-    window: &Window,
-    panels: &mut Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
-) {
     let window_width = window.width();
     let window_height = window.height();
     if window_width <= 0.0 || window_height <= 0.0 {
@@ -89,8 +69,8 @@ fn resolve_and_position_screen_space_panels(
     let half_width = window_width / 2.0;
     let half_height = window_height / 2.0;
 
-    for (mut transform, mut panel, computed) in panels.iter_mut() {
-        let &CoordinateSpace::Screen {
+    for (mut transform, mut panel, computed) in &mut panels {
+        let CoordinateSpace::Screen {
             position,
             width,
             height,
@@ -99,6 +79,9 @@ fn resolve_and_position_screen_space_panels(
         else {
             continue;
         };
+        let position = *position;
+        let width = *width;
+        let height = *height;
         let (content_width, content_height) = (computed.content_width(), computed.content_height());
 
         let new_width = resolve_screen_axis(width, window_width, content_width, panel.width());
@@ -341,9 +324,19 @@ fn cleanup_screen_space_view(
 
 #[cfg(test)]
 mod tests {
+    use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
+    use bevy::window::Window;
+
+    use super::ScreenSpacePlugin;
     use super::resolve_screen_axis;
+    use crate::Anchor;
+    use crate::Fit;
     use crate::layout::Dimension;
     use crate::layout::Sizing;
+    use crate::panel::ComputedDiegeticPanel;
+    use crate::panel::DiegeticPanel;
+    use crate::panel::PanelSystems;
 
     fn px(value: f32) -> Dimension { Dimension { value, unit: None } }
 
@@ -353,6 +346,66 @@ mod tests {
             (actual - expected).abs() < 1e-4,
             "expected {expected}, got {actual}",
         );
+    }
+
+    fn write_known_content_size(
+        mut panels: Query<&mut ComputedDiegeticPanel, With<DiegeticPanel>>,
+    ) {
+        for mut panel in &mut panels {
+            panel.set_content_size(240.0, 80.0);
+        }
+    }
+
+    #[test]
+    fn bottom_right_fit_panel_uses_layout_content_size_in_first_update() -> Result<(), &'static str>
+    {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800_u32, 600_u32).into(),
+                ..Default::default()
+            },
+            PrimaryWindow,
+        ));
+        app.configure_sets(
+            Update,
+            PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
+        );
+        app.add_systems(
+            Update,
+            write_known_content_size.in_set(PanelSystems::ComputeLayout),
+        );
+        app.add_plugins(ScreenSpacePlugin);
+
+        let Ok(panel) = DiegeticPanel::screen()
+            .size(Fit, Fit)
+            .anchor(Anchor::BottomRight)
+            .layout(|_| {})
+            .build()
+        else {
+            return Err("Fit screen panel should build");
+        };
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let Some(panel_component) = app.world().get::<DiegeticPanel>(panel) else {
+            return Err("panel should still exist");
+        };
+        assert_close(panel_component.width(), 240.0);
+        assert_close(panel_component.height(), 80.0);
+        let (anchor_x, anchor_y) = panel_component.anchor_offsets();
+        assert_close(anchor_x, 240.0);
+        assert_close(anchor_y, 80.0);
+
+        let Some(transform) = app.world().get::<Transform>(panel) else {
+            return Err("panel should have a transform");
+        };
+        assert_close(transform.translation.x, 400.0);
+        assert_close(transform.translation.y, -300.0);
+
+        Ok(())
     }
 
     /// Fixed pixel value is returned unchanged regardless of window, content,

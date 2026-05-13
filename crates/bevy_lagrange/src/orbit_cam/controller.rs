@@ -4,9 +4,9 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 
 use super::CameraOrientation;
-use super::ForceUpdate;
 use super::InitializationState;
 use super::OrbitCam;
+use super::OrbitCamUpdateRequest;
 use super::OrbitDragState;
 use super::TimeSource;
 use super::UpsideDownPolicy;
@@ -243,7 +243,6 @@ fn smooth_and_update_transform(
     orbit_cam.pitch = Some(new_pitch);
     orbit_cam.radius = Some(new_radius);
     orbit_cam.focus = *new_focus;
-    orbit_cam.force_update = ForceUpdate::Idle;
 }
 
 /// Main system for processing input and converting to transformations
@@ -330,12 +329,13 @@ pub fn orbit_cam(
             continue;
         };
 
+        let update_request = orbit_cam.consume_update_request();
         #[allow(
             clippy::float_cmp,
             reason = "lerp_and_snap produces bitwise-identical values on convergence"
         )]
         let needs_update = has_moved
-            || orbit_cam.force_update != ForceUpdate::Idle
+            || update_request == OrbitCamUpdateRequest::ForceUpdate
             || orbit_cam.target_yaw != yaw
             || orbit_cam.target_pitch != pitch
             || orbit_cam.target_radius != radius
