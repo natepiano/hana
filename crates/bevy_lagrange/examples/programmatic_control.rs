@@ -75,7 +75,7 @@ impl CameraSmoothness {
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
-        .with_orbit_cam_bundle(
+        .with_orbit_cam(
             configure_camera,
             (ProgrammaticCamera, OrbitCamPreset::BlenderLike),
         )

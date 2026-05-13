@@ -42,7 +42,7 @@ fn main() {
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .with_orbit_cam_bundle(common::configure_camera, bindings)
+        .with_orbit_cam(common::configure_camera, bindings)
         .with_camera_control_panel()
         .add_systems(Startup, common::spawn_scene)
         .run();

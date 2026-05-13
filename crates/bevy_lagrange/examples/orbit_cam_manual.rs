@@ -104,7 +104,7 @@ const fn signed_vec2(x_axis: (bool, bool), y_axis: (bool, bool), amount: f32) ->
 
 fn main() {
     fairy_dust::sprinkle_example()
-        .with_orbit_cam_bundle(
+        .with_orbit_cam(
             common::configure_camera,
             (OrbitCamManual, ManualCamera, manual_guidance()),
         )

@@ -26,7 +26,6 @@ use bevy_lagrange::ZoomToFit;
 use fairy_dust::Anchor;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
-use fairy_dust::TitleBarControlState;
 use fairy_dust::cube_face_text;
 
 const FIT_DURATION: Duration = Duration::from_millis(800);
@@ -73,7 +72,7 @@ fn main() {
         .color(REFERENCE_CUBE_COLOR)
         .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
         .face_text(Face::Front, REFERENCE_LABEL, LABEL_SIZE, LABEL_COLOR)
-        .with_orbit_cam_bundle(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam(|_| {}, OrbitCamPreset::BlenderLike)
         .with_camera_home(
             Transform::from_translation(REFERENCE_CUBE_TRANSLATION)
                 .with_scale(Vec3::splat(HOME_FRAME_SIZE)),
@@ -86,13 +85,20 @@ fn main() {
                 .control(LOOK_CONTROL)
                 .control(LOOK_AND_ZOOM_CONTROL),
         )
+        .wire_chip_to_events::<ZoomBegin, ZoomEnd>(ZOOM_CONTROL)
+        .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+            LOOK_CONTROL,
+            |e| e.source == AnimationSource::LookAt,
+            |e| e.source == AnimationSource::LookAt,
+        )
+        .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+            LOOK_AND_ZOOM_CONTROL,
+            |e| e.source == AnimationSource::LookAtAndZoomToFit,
+            |e| e.source == AnimationSource::LookAtAndZoomToFit,
+        )
         .with_camera_control_panel()
         .add_systems(Startup, spawn_target)
         .add_systems(Update, keyboard_input)
-        .add_observer(on_zoom_begin)
-        .add_observer(on_zoom_end)
-        .add_observer(on_animation_begin)
-        .add_observer(on_animation_end)
         .run();
 }
 
@@ -149,59 +155,5 @@ fn keyboard_input(
                 .margin(FIT_MARGIN)
                 .duration(FIT_DURATION),
         );
-    }
-}
-
-fn on_zoom_begin(
-    trigger: On<ZoomBegin>,
-    target: Option<Res<TargetEntity>>,
-    mut bars: Query<&mut TitleBarControlState>,
-) {
-    let Some(target) = target else {
-        return;
-    };
-    if trigger.target != target.0 {
-        return;
-    }
-    for mut bar in &mut bars {
-        bar.set_active(ZOOM_CONTROL, true);
-    }
-}
-
-fn on_zoom_end(
-    trigger: On<ZoomEnd>,
-    target: Option<Res<TargetEntity>>,
-    mut bars: Query<&mut TitleBarControlState>,
-) {
-    let Some(target) = target else {
-        return;
-    };
-    if trigger.target != target.0 {
-        return;
-    }
-    for mut bar in &mut bars {
-        bar.set_active(ZOOM_CONTROL, false);
-    }
-}
-
-fn on_animation_begin(trigger: On<AnimationBegin>, mut bars: Query<&mut TitleBarControlState>) {
-    let control = match trigger.source {
-        AnimationSource::LookAt => LOOK_CONTROL,
-        AnimationSource::LookAtAndZoomToFit => LOOK_AND_ZOOM_CONTROL,
-        _ => return,
-    };
-    for mut bar in &mut bars {
-        bar.set_active(control, true);
-    }
-}
-
-fn on_animation_end(trigger: On<AnimationEnd>, mut bars: Query<&mut TitleBarControlState>) {
-    let control = match trigger.source {
-        AnimationSource::LookAt => LOOK_CONTROL,
-        AnimationSource::LookAtAndZoomToFit => LOOK_AND_ZOOM_CONTROL,
-        _ => return,
-    };
-    for mut bar in &mut bars {
-        bar.set_active(control, false);
     }
 }

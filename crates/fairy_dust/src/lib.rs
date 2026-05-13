@@ -40,6 +40,7 @@ use bevy::ecs::system::ScheduleSystem;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 pub use bevy_diegetic::Anchor;
+use bevy_diegetic::DiegeticUiPlugin;
 pub use bevy_lagrange::OrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
@@ -108,8 +109,23 @@ pub struct CameraHomeBuilder<S> {
     config: CameraHomeConfig,
 }
 
+/// Builder returned by [`SprinkleBuilder::with_title_bar`] for wiring chip
+/// highlights to event lifecycles. Chip-wiring methods are only reachable
+/// through this type, so calling [`Self::wire_chip_to_events`] is a compile
+/// error when no title bar has been installed.
+///
+/// Calling a non-wiring builder method finalizes the title bar configuration
+/// and returns to the normal [`SprinkleBuilder`] chain.
+pub struct TitleBarBuilder<S> {
+    parent: SprinkleBuilder<S>,
+}
+
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.
+///
+/// [`bevy_diegetic::DiegeticUiPlugin`] is registered unconditionally so any
+/// example can spawn `WorldText` or `DiegeticPanel` without an explicit
+/// `add_plugins` call.
 ///
 /// The Ctrl+Shift+R hot-restart shortcut is wired up unconditionally — when
 /// pressed, the example process re-execs itself via a trampoline so source
@@ -125,6 +141,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
         filter: LOG_FILTER.to_string(),
         ..LogPlugin::default()
     }));
+    ensure_plugin(&mut app, DiegeticUiPlugin);
     restart::install(&mut app);
     SprinkleBuilder {
         app,
@@ -194,11 +211,13 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
-    /// Spawn a compact top-left title bar for example controls.
+    /// Spawn a compact top-left title bar for example controls and switch to
+    /// a [`TitleBarBuilder`] so chip highlights can be wired to event
+    /// lifecycles.
     #[must_use]
-    pub fn with_title_bar(mut self, title_bar: TitleBar) -> Self {
+    pub fn with_title_bar(mut self, title_bar: TitleBar) -> TitleBarBuilder<S> {
         screen_panels::install_title_bar(&mut self.app, title_bar);
-        self
+        TitleBarBuilder { parent: self }
     }
 
     /// Begin configuring a generalized camera "home" pose.
@@ -374,7 +393,7 @@ impl<S> PrimitiveBuilder<S> {
 
     /// Finalizes the current primitive and adds an example title bar.
     #[must_use]
-    pub fn with_title_bar(self, title_bar: TitleBar) -> SprinkleBuilder<S> {
+    pub fn with_title_bar(self, title_bar: TitleBar) -> TitleBarBuilder<S> {
         self.finish().with_title_bar(title_bar)
     }
 
@@ -453,11 +472,7 @@ impl SprinkleBuilder<NoOrbitCam> {
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
     /// insert extra camera-side components such as `OrbitCamPreset`,
     /// `OrbitCamBindings`, `OrbitCamManual`, or [`CameraGuidance`].
-    pub fn with_orbit_cam_bundle<F, B>(
-        mut self,
-        configure: F,
-        bundle: B,
-    ) -> SprinkleBuilder<WithOrbitCam>
+    pub fn with_orbit_cam<F, B>(mut self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
         B: Bundle + Send + Sync + 'static,
@@ -482,16 +497,12 @@ impl PrimitiveBuilder<NoOrbitCam> {
 
     /// Finalizes the current primitive, adds `LagrangePlugin`, spawns an
     /// `OrbitCam`, and inserts extra camera-side components.
-    pub fn with_orbit_cam_bundle<F, B>(
-        self,
-        configure: F,
-        bundle: B,
-    ) -> SprinkleBuilder<WithOrbitCam>
+    pub fn with_orbit_cam<F, B>(self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
         B: Bundle + Send + Sync + 'static,
     {
-        self.finish().with_orbit_cam_bundle(configure, bundle)
+        self.finish().with_orbit_cam(configure, bundle)
     }
 }
 
@@ -569,7 +580,7 @@ impl<S> CameraHomeBuilder<S> {
 
     /// Finalizes the current home registration and adds an example title bar.
     #[must_use]
-    pub fn with_title_bar(self, title_bar: TitleBar) -> SprinkleBuilder<S> {
+    pub fn with_title_bar(self, title_bar: TitleBar) -> TitleBarBuilder<S> {
         self.finish().with_title_bar(title_bar)
     }
 
@@ -642,13 +653,206 @@ impl CameraHomeBuilder<NoOrbitCam> {
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
         B: Bundle + Send + Sync + 'static,
     {
-        self.finish().with_orbit_cam_bundle(configure, bundle)
+        self.finish().with_orbit_cam(configure, bundle)
     }
 }
 
 impl CameraHomeBuilder<WithOrbitCam> {
     /// Finalizes the current home registration and adds stable transparency to the
     /// spawned `OrbitCam`.
+    #[must_use]
+    pub fn with_stable_transparency(self) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_stable_transparency()
+    }
+}
+
+impl<S> TitleBarBuilder<S> {
+    /// Toggles `chip` active on `Begin` and inactive on `End` for any event
+    /// of those types. Use this when only one chip cares about the event.
+    /// For multi-chip discrimination (e.g. `AnimationBegin` shared by
+    /// `LookAt` and `LookAtAndZoomToFit`), use
+    /// [`Self::wire_chip_to_events_filtered`] instead.
+    #[must_use]
+    pub fn wire_chip_to_events<Begin, End>(mut self, chip: impl Into<String>) -> Self
+    where
+        Begin: bevy::ecs::event::Event,
+        End: bevy::ecs::event::Event,
+    {
+        let chip = chip.into();
+        let activate = chip.clone();
+        self.parent.app.add_observer(
+            move |_: On<Begin>, mut bars: Query<&mut TitleBarControlState>| {
+                for mut bar in &mut bars {
+                    bar.set_active(&activate, true);
+                }
+            },
+        );
+        let deactivate = chip;
+        self.parent.app.add_observer(
+            move |_: On<End>, mut bars: Query<&mut TitleBarControlState>| {
+                for mut bar in &mut bars {
+                    bar.set_active(&deactivate, false);
+                }
+            },
+        );
+        self
+    }
+
+    /// Like [`Self::wire_chip_to_events`], but each filter decides whether a
+    /// given event applies to this chip. Return `false` to ignore.
+    #[must_use]
+    pub fn wire_chip_to_events_filtered<Begin, End, FStart, FEnd>(
+        mut self,
+        chip: impl Into<String>,
+        start_filter: FStart,
+        end_filter: FEnd,
+    ) -> Self
+    where
+        Begin: bevy::ecs::event::Event,
+        End: bevy::ecs::event::Event,
+        FStart: Fn(&Begin) -> bool + Send + Sync + 'static,
+        FEnd: Fn(&End) -> bool + Send + Sync + 'static,
+    {
+        let chip = chip.into();
+        let activate = chip.clone();
+        self.parent.app.add_observer(
+            move |trigger: On<Begin>, mut bars: Query<&mut TitleBarControlState>| {
+                if !start_filter(&trigger) {
+                    return;
+                }
+                for mut bar in &mut bars {
+                    bar.set_active(&activate, true);
+                }
+            },
+        );
+        let deactivate = chip;
+        self.parent.app.add_observer(
+            move |trigger: On<End>, mut bars: Query<&mut TitleBarControlState>| {
+                if !end_filter(&trigger) {
+                    return;
+                }
+                for mut bar in &mut bars {
+                    bar.set_active(&deactivate, false);
+                }
+            },
+        );
+        self
+    }
+
+    fn finish(self) -> SprinkleBuilder<S> { self.parent }
+
+    /// Finalizes the title bar and starts configuring a ground plane.
+    #[must_use]
+    pub fn with_ground_plane(self) -> PrimitiveBuilder<S> { self.finish().with_ground_plane() }
+
+    /// Finalizes the title bar and starts configuring a cube.
+    #[must_use]
+    pub fn with_cube(self) -> PrimitiveBuilder<S> { self.finish().with_cube() }
+
+    /// Finalizes the title bar and adds window position persistence.
+    #[must_use]
+    pub fn with_save_window_position(self) -> SprinkleBuilder<S> {
+        self.finish().with_save_window_position()
+    }
+
+    /// Finalizes the title bar and adds BRP extras.
+    #[must_use]
+    pub fn with_brp_extras(self) -> SprinkleBuilder<S> { self.finish().with_brp_extras() }
+
+    /// Finalizes the title bar and adds the smart camera control panel.
+    #[must_use]
+    pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
+        self.finish().with_camera_control_panel()
+    }
+
+    /// Finalizes the title bar and adds studio lighting.
+    #[must_use]
+    pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
+
+    /// Finalizes the title bar and adds an example description panel.
+    #[must_use]
+    pub fn with_description_panel(self, panel: DescriptionPanel) -> SprinkleBuilder<S> {
+        self.finish().with_description_panel(panel)
+    }
+
+    /// Finalizes the title bar and installs another title bar.
+    #[must_use]
+    pub fn with_title_bar(self, title_bar: TitleBar) -> TitleBarBuilder<S> {
+        self.finish().with_title_bar(title_bar)
+    }
+
+    /// Finalizes the title bar and starts configuring a camera home pose.
+    #[must_use]
+    pub fn with_camera_home(self, transform: Transform) -> CameraHomeBuilder<S> {
+        self.finish().with_camera_home(transform)
+    }
+
+    /// Finalizes the title bar and mirrors [`App::add_plugins`].
+    #[must_use]
+    pub fn add_plugins<M>(self, plugins: impl Plugins<M>) -> SprinkleBuilder<S> {
+        self.finish().add_plugins(plugins)
+    }
+
+    /// Finalizes the title bar and mirrors [`App::add_systems`].
+    #[must_use]
+    pub fn add_systems<M>(
+        self,
+        schedule: impl ScheduleLabel,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> SprinkleBuilder<S> {
+        self.finish().add_systems(schedule, systems)
+    }
+
+    /// Finalizes the title bar and mirrors [`App::add_observer`].
+    #[must_use]
+    pub fn add_observer<E, B, M, I>(self, observer: I) -> SprinkleBuilder<S>
+    where
+        E: bevy::ecs::event::Event,
+        B: Bundle,
+        I: bevy::ecs::system::IntoObserverSystem<E, B, M>,
+    {
+        self.finish().add_observer(observer)
+    }
+
+    /// Finalizes the title bar and mirrors [`App::init_resource`].
+    #[must_use]
+    pub fn init_resource<R: Resource + FromWorld>(self) -> SprinkleBuilder<S> {
+        self.finish().init_resource::<R>()
+    }
+
+    /// Finalizes the title bar and mirrors [`App::insert_resource`].
+    #[must_use]
+    pub fn insert_resource<R: Resource>(self, resource: R) -> SprinkleBuilder<S> {
+        self.finish().insert_resource(resource)
+    }
+
+    /// Finalizes the title bar and runs the configured app.
+    pub fn run(self) -> AppExit { self.finish().run() }
+}
+
+impl TitleBarBuilder<NoOrbitCam> {
+    /// Finalizes the title bar, adds `LagrangePlugin`, and spawns an `OrbitCam`.
+    pub fn with_orbit_cam_configured<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_configured(configure)
+    }
+
+    /// Finalizes the title bar, adds `LagrangePlugin`, spawns an `OrbitCam`,
+    /// and inserts extra camera-side components.
+    pub fn with_orbit_cam<F, B>(self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam(configure, bundle)
+    }
+}
+
+impl TitleBarBuilder<WithOrbitCam> {
+    /// Finalizes the title bar and adds stable transparency to the spawned
+    /// `OrbitCam`.
     #[must_use]
     pub fn with_stable_transparency(self) -> SprinkleBuilder<WithOrbitCam> {
         self.finish().with_stable_transparency()
