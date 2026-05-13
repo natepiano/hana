@@ -175,17 +175,22 @@ fn apply_pan_input(
 }
 
 /// Applies scroll/zoom input to target radius. Returns `true` if the camera moved.
+//
+// Multiplicative (exponential) zoom: one out-tick is the exact inverse of one
+// in-tick at any radius. Additive `radius *= (1 ± k)` would feel symmetric
+// for a single tick but compounds asymmetrically — zoom-out lags zoom-in
+// once you're close.
 fn apply_scroll_input(scroll_line: f32, scroll_pixel: f32, orbit_cam: &mut OrbitCam) -> bool {
     if (scroll_line + scroll_pixel).abs() > 0.0 {
-        let line_delta = -scroll_line * orbit_cam.target_radius * SCROLL_ZOOM_FACTOR;
-        let pixel_delta = -scroll_pixel * orbit_cam.target_radius * SCROLL_ZOOM_FACTOR;
+        let line_factor = (-scroll_line * SCROLL_ZOOM_FACTOR).exp();
+        let pixel_factor = (-scroll_pixel * SCROLL_ZOOM_FACTOR).exp();
 
-        orbit_cam.target_radius += line_delta + pixel_delta;
+        orbit_cam.target_radius *= line_factor * pixel_factor;
 
-        // Pixel-based scrolling is added directly to the current value (already smooth)
+        // Pixel-based scrolling is applied directly to the current value (already smooth)
         orbit_cam.radius = orbit_cam
             .radius
-            .map(|value| orbit_cam.clamp_zoom(value + pixel_delta));
+            .map(|value| orbit_cam.clamp_zoom(value * pixel_factor));
 
         return true;
     }
