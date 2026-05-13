@@ -552,6 +552,7 @@ fn control_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamMouseDrag;
 
@@ -573,8 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_bindings_override_preset_summary() -> Result<(), super::super::OrbitCamBindingsError>
-    {
+    fn custom_bindings_override_preset_summary() -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBindings::builder()
             .orbit(OrbitCamMouseDrag::new(MouseButton::Right))
             .build()?;
@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_bindings_show_key_groups() -> Result<(), super::super::OrbitCamBindingsError> {
+    fn keyboard_bindings_show_key_groups() -> Result<(), OrbitCamBindingsError> {
         let orbit_keys = OrbitCamInputBinding::cardinal_keys(
             KeyCode::ArrowUp,
             KeyCode::ArrowRight,
@@ -621,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn manual_summary_wins_over_other_modes() -> Result<(), super::super::OrbitCamBindingsError> {
+    fn manual_summary_wins_over_other_modes() -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBindings::builder()
             .orbit(OrbitCamMouseDrag::new(MouseButton::Right))
             .build()?;

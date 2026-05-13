@@ -295,6 +295,7 @@ mod tests {
 
     use super::*;
     use crate::OrbitCam;
+    use crate::input::CameraInputDisabled;
     use crate::input::CameraInputRoutingConfig;
     use crate::input::OrbitCamManual;
     use crate::input::OrbitCamPreset;
@@ -493,7 +494,7 @@ mod tests {
         app.update();
         app.world_mut()
             .entity_mut(camera)
-            .insert(super::super::CameraInputDisabled);
+            .insert(CameraInputDisabled);
         update_input(&mut app, camera, |input| {
             input.orbit_active_with_sources(CameraInteractionSources::MOUSE);
         })?;

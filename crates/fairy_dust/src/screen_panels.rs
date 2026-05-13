@@ -13,6 +13,7 @@ use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
@@ -286,10 +287,7 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
     });
 }
 
-fn build_title_bar_tree(
-    title_bar: &TitleBar,
-    state: &TitleBarControlState,
-) -> bevy_diegetic::LayoutTree {
+fn build_title_bar_tree(title_bar: &TitleBar, state: &TitleBarControlState) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     build_title_bar_layout(&mut builder, title_bar, state);
     builder.build()

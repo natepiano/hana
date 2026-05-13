@@ -450,7 +450,8 @@ mod tests {
     use super::*;
     use crate::input::OrbitCamInputModeDescriptor;
     use crate::input::OrbitCamInputModeRejected;
-    use crate::input::bindings::invalid_bindings_descriptor_for_tests;
+    use crate::input::OrbitCamManualInputWriter;
+    use crate::input::bindings;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
     #[derive(Resource)]
@@ -554,7 +555,9 @@ mod tests {
                 OrbitCamInput::default(),
                 OrbitCamPreset::BlenderLike,
                 OrbitCamInputModeDescriptor {
-                    mode: OrbitCamInputMode::Bindings(invalid_bindings_descriptor_for_tests()),
+                    mode: OrbitCamInputMode::Bindings(
+                        bindings::invalid_bindings_descriptor_for_tests(),
+                    ),
                 },
             ))
             .id();
@@ -577,7 +580,7 @@ mod tests {
     }
 
     fn write_manual_test_input(
-        mut writer: super::super::OrbitCamManualInputWriter,
+        mut writer: OrbitCamManualInputWriter,
         cameras: Res<ManualWriterTestCamera>,
         mut result: ResMut<ManualWriterTestResult>,
     ) {

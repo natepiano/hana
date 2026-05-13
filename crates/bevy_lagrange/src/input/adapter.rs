@@ -4,10 +4,12 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::input::mouse::AccumulatedMouseScroll;
 use bevy::input::mouse::MouseScrollUnit;
 use bevy::prelude::*;
+use bevy_enhanced_input::prelude::Accumulation;
 use bevy_enhanced_input::prelude::Action;
 use bevy_enhanced_input::prelude::ActionMock;
 use bevy_enhanced_input::prelude::ActionOf;
 use bevy_enhanced_input::prelude::ActionSettings;
+use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::Actions;
 use bevy_enhanced_input::prelude::Binding;
 use bevy_enhanced_input::prelude::BindingOf;
@@ -50,9 +52,8 @@ use super::actions::OrbitCamOrbitEngagedAction;
 use super::actions::OrbitCamPanEngagedAction;
 use super::actions::OrbitCamZoomEngagedAction;
 use super::mod_keys_pressed;
-use super::modes::input_installation_has_placeholder;
-use super::modes::installed_input_entities;
-use super::modes::replace_installed_input_entities;
+use super::modes;
+use super::modes::OrbitCamInputInstallationOf;
 use crate::constants::BUTTON_ZOOM_SCALE;
 use crate::constants::PINCH_GESTURE_AMPLIFICATION;
 use crate::constants::PIXEL_SCROLL_SCALE;
@@ -131,8 +132,9 @@ fn clear_replaced_or_manual_installations(world: &mut World) {
     let cameras = query.iter(world).collect::<Vec<_>>();
 
     for camera in cameras {
-        let installed_entities = installed_input_entities(world, camera);
-        if installed_entities.is_empty() || input_installation_has_placeholder(world, camera) {
+        let installed_entities = modes::installed_input_entities(world, camera);
+        if installed_entities.is_empty() || modes::input_installation_has_placeholder(world, camera)
+        {
             clear_enhanced_input_components(world, camera);
         }
     }
@@ -159,7 +161,7 @@ fn install_enhanced_input_entities(world: &mut World) {
     ), With<OrbitCam>>();
     let cameras = query
         .iter(world)
-        .filter(|(camera, _, _)| input_installation_has_placeholder(world, *camera))
+        .filter(|(camera, _, _)| modes::input_installation_has_placeholder(world, *camera))
         .map(|(camera, preset, bindings)| (camera, preset.copied(), bindings.cloned()))
         .collect::<Vec<_>>();
 
@@ -173,7 +175,7 @@ fn install_enhanced_input_entities(world: &mut World) {
             continue;
         };
 
-        for installed_entity in installed_input_entities(world, camera) {
+        for installed_entity in modes::installed_input_entities(world, camera) {
             let _ = world.despawn(installed_entity);
         }
 
@@ -188,7 +190,7 @@ fn install_enhanced_input_entities(world: &mut World) {
             installation.actions,
             OrbitCamAdapterFrameSources::default(),
         ));
-        replace_installed_input_entities(world, camera, installation.entities);
+        modes::replace_installed_input_entities(world, camera, installation.entities);
     }
 
     let mut diagnostics = world.resource_mut::<OrbitCamAdapterDiagnostics>();
@@ -300,14 +302,14 @@ fn spawn_action<A: InputAction>(world: &mut World, camera: Entity) -> Entity {
             Action::<A>::new(),
             ActionOf::<OrbitCamInputContext>::new(camera),
             action_settings(),
-            super::modes::OrbitCamInputInstallationOf(camera),
+            OrbitCamInputInstallationOf(camera),
         ))
         .id()
 }
 
 const fn action_settings() -> ActionSettings {
     ActionSettings {
-        accumulation:  bevy_enhanced_input::prelude::Accumulation::Cumulative,
+        accumulation:  Accumulation::Cumulative,
         require_reset: false,
         consume_input: false,
     }
@@ -343,7 +345,7 @@ fn spawn_binding(
     action: Entity,
     binding_descriptor: &InputBindingDescriptor,
 ) -> Vec<Entity> {
-    let installation = super::modes::OrbitCamInputInstallationOf(camera);
+    let installation = OrbitCamInputInstallationOf(camera);
     binding_descriptor
         .entries_slice()
         .iter()
@@ -356,7 +358,7 @@ fn spawn_binding(
 fn spawn_binding_entry(
     world: &mut World,
     action: Entity,
-    installation: super::modes::OrbitCamInputInstallationOf,
+    installation: OrbitCamInputInstallationOf,
     binding: Binding,
     transform: InputBindingTransform,
 ) -> Entity {
@@ -377,7 +379,7 @@ fn spawn_binding_entry(
 fn spawn_single_binding(
     world: &mut World,
     action: Entity,
-    installation: super::modes::OrbitCamInputInstallationOf,
+    installation: OrbitCamInputInstallationOf,
     binding: Binding,
 ) -> Entity {
     world.spawn((binding, BindingOf(action), installation)).id()
@@ -386,7 +388,7 @@ fn spawn_single_binding(
 fn spawn_modified_binding(
     world: &mut World,
     action: Entity,
-    installation: super::modes::OrbitCamInputInstallationOf,
+    installation: OrbitCamInputInstallationOf,
     binding: Binding,
     modifier: Negate,
 ) -> Entity {
@@ -398,7 +400,7 @@ fn spawn_modified_binding(
 fn spawn_swizzled_binding(
     world: &mut World,
     action: Entity,
-    installation: super::modes::OrbitCamInputInstallationOf,
+    installation: OrbitCamInputInstallationOf,
     binding: Binding,
 ) -> Entity {
     world
@@ -409,7 +411,7 @@ fn spawn_swizzled_binding(
 fn spawn_swizzled_modified_binding(
     world: &mut World,
     action: Entity,
-    installation: super::modes::OrbitCamInputInstallationOf,
+    installation: OrbitCamInputInstallationOf,
     binding: Binding,
     modifier: Negate,
 ) -> Entity {
@@ -884,7 +886,7 @@ fn set_mock(
     mocks: &mut Query<&mut ActionMock>,
     action: Entity,
     state: TriggerState,
-    value: impl Into<bevy_enhanced_input::prelude::ActionValue>,
+    value: impl Into<ActionValue>,
 ) {
     if let Ok(mut mock) = mocks.get_mut(action) {
         *mock = ActionMock::new(state, value, MockSpan::once());
@@ -1146,6 +1148,7 @@ mod tests {
 
     use super::*;
     use crate::enhanced_input::LagrangeEnhancedInputPlugin;
+    use crate::input::CameraInputDisabled;
     use crate::input::CameraInputRoutingConfig;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInputBinding;
@@ -1220,8 +1223,11 @@ mod tests {
                 .get::<OrbitCamInputActionEntities>(camera)
                 .is_some()
         );
-        assert!(installed_input_entities(app.world(), camera).len() > 1);
-        assert!(!input_installation_has_placeholder(app.world(), camera));
+        assert!(modes::installed_input_entities(app.world(), camera).len() > 1);
+        assert!(!modes::input_installation_has_placeholder(
+            app.world(),
+            camera
+        ));
     }
 
     #[test]
@@ -1673,7 +1679,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(camera)
-            .insert(super::super::CameraInputDisabled);
+            .insert(CameraInputDisabled);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
             unit:  MouseScrollUnit::Line,
             delta: Vec2::new(0.0, 3.0),

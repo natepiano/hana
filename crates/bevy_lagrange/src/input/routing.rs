@@ -5,6 +5,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 
+use super::CameraInputDisabled;
+use super::CameraInputSurfaceMetrics;
+use super::CameraInteractionSources;
+use super::OrbitCamInputModeReplaced;
+use super::OrbitCamManual;
 use crate::CameraInputInterruptBehavior;
 use crate::CameraMoveList;
 use crate::OrbitCam;
@@ -12,11 +17,6 @@ use crate::OrbitCam;
 use crate::egui::BlockOnEguiFocus;
 #[cfg(feature = "bevy_egui")]
 use crate::egui::EguiWantsFocus;
-use crate::input::CameraInputDisabled;
-use crate::input::CameraInputSurfaceMetrics;
-use crate::input::CameraInteractionSources;
-use crate::input::OrbitCamInputModeReplaced;
-use crate::input::OrbitCamManual;
 use crate::system_sets::OrbitCamInputInternalSet;
 
 /// Camera input routing mode.

@@ -1,4 +1,7 @@
+use std::error::Error;
 use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
@@ -885,8 +888,8 @@ impl OrbitCamBindingsError {
     }
 }
 
-impl fmt::Display for OrbitCamBindingsError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for OrbitCamBindingsError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingSources => formatter.write_str("binding source metadata is missing"),
             Self::HeldMotionMissingEngagement { action } => {
@@ -911,7 +914,7 @@ impl fmt::Display for OrbitCamBindingsError {
     }
 }
 
-impl std::error::Error for OrbitCamBindingsError {}
+impl Error for OrbitCamBindingsError {}
 
 #[derive(Clone, Debug, PartialEq, Reflect)]
 struct HeldBindingDescriptor {
