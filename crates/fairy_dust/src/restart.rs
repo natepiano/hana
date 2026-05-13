@@ -26,11 +26,6 @@ use crate::ensure_plugin;
 const TRAMPOLINE_ENV: &str = "FAIRY_DUST_RESTART_TRAMPOLINE";
 const TRAMPOLINE_SLEEP: Duration = Duration::from_millis(500);
 
-/// Marker resource: read by the title-bar installer to decide whether to
-/// prepend the restart chip.
-#[derive(Resource)]
-pub(crate) struct RestartRegistered;
-
 #[derive(Component)]
 struct FairyDustRestartContext;
 
@@ -40,11 +35,7 @@ event!(RestartEvent);
 static RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn install(app: &mut App) {
-    if app.world().contains_resource::<RestartRegistered>() {
-        return;
-    }
     RESTART_REQUESTED.store(false, Ordering::SeqCst);
-    app.insert_resource(RestartRegistered);
     ensure_plugin(app, EnhancedInputPlugin);
     app.add_input_context::<FairyDustRestartContext>();
     app.add_systems(Startup, spawn_restart_action);

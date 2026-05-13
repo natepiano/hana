@@ -24,27 +24,37 @@ use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::Anchor;
+use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControlState;
+use fairy_dust::cube_face_text;
 
 const FIT_DURATION: Duration = Duration::from_millis(800);
 const FIT_MARGIN: f32 = 0.15;
 const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
 
-const HOME_FRAMED_REGION: Vec3 = Vec3::new(4.0, 1.5, 2.5);
 const HOME_PITCH: f32 = 0.46;
 
+const CUBE_SIZE: f32 = 1.0;
+const CUBE_Y: f32 = CUBE_SIZE / 2.0 + 0.05;
+const CUBE_X_OFFSET: f32 = 8.0 / 6.0;
+
+const HOME_FRAME_SIZE: f32 = CUBE_SIZE * 3.5;
+
 const REFERENCE_CUBE_COLOR: Color = Color::srgb(0.5, 0.5, 0.5);
-const REFERENCE_CUBE_SIZE: f32 = 0.5;
-const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.3, 0.0);
+const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(-CUBE_X_OFFSET, CUBE_Y, 0.0);
 
 const TARGET_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
-const TARGET_SIZE: f32 = 1.0;
-const TARGET_TRANSLATION: Vec3 = Vec3::new(3.5, 0.55, 0.0);
+const TARGET_TRANSLATION: Vec3 = Vec3::new(CUBE_X_OFFSET, CUBE_Y, 0.0);
 
 const ZOOM_CONTROL: &str = "Z ZoomToFit";
 const LOOK_CONTROL: &str = "L LookAt";
 const LOOK_AND_ZOOM_CONTROL: &str = "K LookAtAndZoomToFit";
+
+const REFERENCE_LABEL: &str = "Home";
+const TARGET_LABEL: &str = "Look At Me";
+const LABEL_SIZE: f32 = 0.15;
+const LABEL_COLOR: Color = Color::srgb(0.05, 0.05, 0.1);
 
 #[derive(Component)]
 struct Target;
@@ -56,15 +66,18 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
-        .with_restart_key()
         .with_studio_lighting()
         .with_ground_plane()
         .with_cube()
-        .size(REFERENCE_CUBE_SIZE)
+        .size(CUBE_SIZE)
         .color(REFERENCE_CUBE_COLOR)
         .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
+        .face_text(Face::Front, REFERENCE_LABEL, LABEL_SIZE, LABEL_COLOR)
         .with_orbit_cam_bundle(|_| {}, OrbitCamPreset::BlenderLike)
-        .with_camera_home(Transform::from_translation(Vec3::ZERO).with_scale(HOME_FRAMED_REGION))
+        .with_camera_home(
+            Transform::from_translation(REFERENCE_CUBE_TRANSLATION)
+                .with_scale(Vec3::splat(HOME_FRAME_SIZE)),
+        )
         .pitch(HOME_PITCH)
         .with_title_bar(
             TitleBar::new("Controls")
@@ -90,11 +103,20 @@ fn spawn_target(
 ) {
     let entity = commands
         .spawn((
-            Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(TARGET_SIZE)))),
+            Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(CUBE_SIZE)))),
             MeshMaterial3d(materials.add(StandardMaterial::from(TARGET_COLOR))),
             Transform::from_translation(TARGET_TRANSLATION),
             Target,
         ))
+        .with_children(|parent| {
+            parent.spawn(cube_face_text(
+                Face::Front,
+                TARGET_LABEL,
+                CUBE_SIZE,
+                LABEL_SIZE,
+                LABEL_COLOR,
+            ));
+        })
         .id();
     commands.insert_resource(TargetEntity(entity));
 }

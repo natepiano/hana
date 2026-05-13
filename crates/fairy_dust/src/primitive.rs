@@ -1,8 +1,83 @@
 //! Capability: simple scene primitives for examples.
 
-use bevy::prelude::*;
+use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::PI;
 
-/// Primitive shape spawned by [`crate::SprinkleBuilder`] scene helpers.
+use bevy::prelude::*;
+use bevy_diegetic::GlyphSidedness;
+use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
+
+/// Names a single face of an axis-aligned cube.
+///
+/// Used by [`PrimitiveBuilder::face_text`](crate::PrimitiveBuilder::face_text)
+/// and [`cube_face_text`] to place a centered `WorldText` label on one face
+/// of a cube.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Face {
+    /// +Z face.
+    Front,
+    /// -Z face.
+    Back,
+    /// -X face.
+    Left,
+    /// +X face.
+    Right,
+    /// +Y face.
+    Top,
+    /// -Y face.
+    Bottom,
+}
+
+impl Face {
+    /// Local transform for a label centered on this face of a cube whose
+    /// half-extent (size / 2) is `half_extent`. The text is offset slightly
+    /// outward to avoid z-fighting with the cube surface.
+    fn local_transform(self, half_extent: f32) -> Transform {
+        const OFFSET: f32 = 0.001;
+        let face_pos = half_extent + OFFSET;
+        match self {
+            Self::Front => Transform::from_xyz(0.0, 0.0, face_pos),
+            Self::Back => {
+                Transform::from_xyz(0.0, 0.0, -face_pos).with_rotation(Quat::from_rotation_y(PI))
+            },
+            Self::Right => Transform::from_xyz(face_pos, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(FRAC_PI_2)),
+            Self::Left => Transform::from_xyz(-face_pos, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(-FRAC_PI_2)),
+            Self::Top => Transform::from_xyz(0.0, face_pos, 0.0)
+                .with_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
+            Self::Bottom => Transform::from_xyz(0.0, -face_pos, 0.0)
+                .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
+        }
+    }
+}
+
+/// Bundle that renders a single line of [`WorldText`] centered on one face of
+/// a cube. Spawn as a child of the cube entity (or independently using the
+/// cube's transform as a parent).
+///
+/// Use this when you spawn a cube manually with `commands.spawn`. For cubes
+/// built through [`PrimitiveBuilder`](crate::PrimitiveBuilder), prefer
+/// [`PrimitiveBuilder::face_text`](crate::PrimitiveBuilder::face_text).
+#[must_use]
+pub fn cube_face_text(
+    face: Face,
+    text: impl Into<String>,
+    cube_size: f32,
+    text_size: f32,
+    color: Color,
+) -> impl Bundle {
+    (
+        WorldText::new(text),
+        WorldTextStyle::new(text_size)
+            .with_color(color)
+            .with_sidedness(GlyphSidedness::OneSided),
+        face.local_transform(cube_size * 0.5),
+    )
+}
+
+/// Mesh kind spawned by [`crate::SprinkleBuilder`] scene helpers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrimitiveKind {
     /// A square ground plane in the XZ plane.
@@ -11,14 +86,23 @@ pub(crate) enum PrimitiveKind {
     Cube,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct FaceTextSpec {
+    pub(crate) face:      Face,
+    pub(crate) text:      String,
+    pub(crate) text_size: f32,
+    pub(crate) color:     Color,
+}
+
 /// Configuration shared by all simple scene primitives.
 #[derive(Clone, Debug)]
 pub(crate) struct PrimitiveConfig {
-    kind:      PrimitiveKind,
-    size:      f32,
-    color:     Color,
-    material:  Option<StandardMaterial>,
-    transform: Option<Transform>,
+    kind:       PrimitiveKind,
+    size:       f32,
+    color:      Color,
+    material:   Option<StandardMaterial>,
+    transform:  Option<Transform>,
+    face_texts: Vec<FaceTextSpec>,
 }
 
 const GROUND_PLANE_METALLIC: f32 = 0.0;
@@ -29,21 +113,23 @@ const GROUND_PLANE_ALPHA: f32 = 0.78;
 impl PrimitiveConfig {
     pub(crate) const fn ground_plane() -> Self {
         Self {
-            kind:      PrimitiveKind::GroundPlane,
-            size:      8.0,
-            color:     Color::srgb(0.125, 0.14, 0.16),
-            material:  None,
-            transform: None,
+            kind:       PrimitiveKind::GroundPlane,
+            size:       8.0,
+            color:      Color::srgb(0.125, 0.14, 0.16),
+            material:   None,
+            transform:  None,
+            face_texts: Vec::new(),
         }
     }
 
     pub(crate) const fn cube() -> Self {
         Self {
-            kind:      PrimitiveKind::Cube,
-            size:      1.0,
-            color:     Color::srgb(0.8, 0.7, 0.6),
-            material:  None,
-            transform: None,
+            kind:       PrimitiveKind::Cube,
+            size:       1.0,
+            color:      Color::srgb(0.8, 0.7, 0.6),
+            material:   None,
+            transform:  None,
+            face_texts: Vec::new(),
         }
     }
 
@@ -59,6 +145,8 @@ impl PrimitiveConfig {
     pub(crate) const fn set_transform(&mut self, transform: Transform) {
         self.transform = Some(transform);
     }
+
+    pub(crate) fn push_face_text(&mut self, spec: FaceTextSpec) { self.face_texts.push(spec); }
 }
 
 pub(crate) fn install(app: &mut App, config: PrimitiveConfig) {
@@ -92,11 +180,26 @@ fn spawn_primitive(
         PrimitiveKind::Cube => Transform::from_xyz(0.0, config.size * 0.5, 0.0),
     });
 
-    commands.spawn((
+    let cube_size = config.size;
+    let face_texts = config.face_texts;
+    let mut entity = commands.spawn((
         Mesh3d(meshes.add(mesh)),
         MeshMaterial3d(materials.add(material)),
         transform,
     ));
+    if !face_texts.is_empty() {
+        entity.with_children(|parent| {
+            for spec in face_texts {
+                parent.spawn(cube_face_text(
+                    spec.face,
+                    spec.text,
+                    cube_size,
+                    spec.text_size,
+                    spec.color,
+                ));
+            }
+        });
+    }
 }
 
 fn default_material(kind: PrimitiveKind, color: Color) -> StandardMaterial {

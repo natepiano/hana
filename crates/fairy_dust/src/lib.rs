@@ -44,7 +44,10 @@ pub use bevy_lagrange::OrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
 use camera_home::CameraHomeConfig;
+pub use primitive::Face;
+use primitive::FaceTextSpec;
 use primitive::PrimitiveConfig;
+pub use primitive::cube_face_text;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
 pub use screen_panels::TitleBarControlState;
@@ -108,10 +111,12 @@ pub struct CameraHomeBuilder<S> {
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.
 ///
-/// If this process was spawned as a restart trampoline (see
-/// [`SprinkleBuilder::with_restart_key`]), this function never returns —
-/// it sleeps so the parent process is fully reaped, then `exec`s the same
-/// binary without the trampoline marker.
+/// The Ctrl+Shift+R hot-restart shortcut is wired up unconditionally — when
+/// pressed, the example process re-execs itself via a trampoline so source
+/// changes picked up by a parallel `cargo build` take effect immediately.
+/// If this process was spawned as the trampoline, this function never
+/// returns — it sleeps so the parent is fully reaped, then `exec`s the
+/// same binary without the trampoline marker.
 #[must_use]
 pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     restart::handle_trampoline_if_active();
@@ -120,6 +125,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
         filter: LOG_FILTER.to_string(),
         ..LogPlugin::default()
     }));
+    restart::install(&mut app);
     SprinkleBuilder {
         app,
         _state: PhantomData,
@@ -192,17 +198,6 @@ impl<S> SprinkleBuilder<S> {
     #[must_use]
     pub fn with_title_bar(mut self, title_bar: TitleBar) -> Self {
         screen_panels::install_title_bar(&mut self.app, title_bar);
-        self
-    }
-
-    /// Enable `Ctrl+Shift+R` to re-exec the current example binary.
-    ///
-    /// Binds the shortcut through `bevy_enhanced_input` (via `bevy_kana`
-    /// action/event macros). If a title bar is installed, a
-    /// `Ctrl+Shift+R Restart` chip is prepended automatically.
-    #[must_use]
-    pub fn with_restart_key(mut self) -> Self {
-        restart::install(&mut self.app);
         self
     }
 
@@ -319,6 +314,30 @@ impl<S> PrimitiveBuilder<S> {
         self
     }
 
+    /// Adds a centered [`bevy_diegetic::WorldText`] label to one face of a
+    /// cube primitive. The label inherits the cube's `Transform` as parent,
+    /// is sized in world meters by `text_size`, and uses one-sided glyphs.
+    ///
+    /// Only meaningful for cube primitives; on a ground plane the label is
+    /// still attached as a child but its placement uses the cube face math
+    /// and may not be what you want.
+    #[must_use]
+    pub fn face_text(
+        mut self,
+        face: Face,
+        text: impl Into<String>,
+        text_size: f32,
+        color: Color,
+    ) -> Self {
+        self.config.push_face_text(FaceTextSpec {
+            face,
+            text: text.into(),
+            text_size,
+            color,
+        });
+        self
+    }
+
     /// Finalizes the current primitive and starts configuring a ground plane.
     #[must_use]
     pub fn with_ground_plane(self) -> Self { self.finish().with_ground_plane() }
@@ -342,10 +361,6 @@ impl<S> PrimitiveBuilder<S> {
     pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
         self.finish().with_camera_control_panel()
     }
-
-    /// Finalizes the current primitive and enables the `Ctrl+Shift+R` restart key.
-    #[must_use]
-    pub fn with_restart_key(self) -> SprinkleBuilder<S> { self.finish().with_restart_key() }
 
     /// Finalizes the current primitive and adds studio lighting.
     #[must_use]
@@ -541,10 +556,6 @@ impl<S> CameraHomeBuilder<S> {
     pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
         self.finish().with_camera_control_panel()
     }
-
-    /// Finalizes the current home registration and enables the `Ctrl+Shift+R` restart key.
-    #[must_use]
-    pub fn with_restart_key(self) -> SprinkleBuilder<S> { self.finish().with_restart_key() }
 
     /// Finalizes the current home registration and adds studio lighting.
     #[must_use]
