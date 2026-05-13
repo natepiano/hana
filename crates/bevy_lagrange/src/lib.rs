@@ -11,7 +11,7 @@ mod events;
 mod fit;
 #[cfg(feature = "fit_overlay")]
 mod fit_overlay;
-pub mod input;
+mod input;
 mod observers;
 mod orbit_cam;
 mod orbital_math;
@@ -139,6 +139,7 @@ pub use input::PanDelta;
 pub use input::SmoothZoomDelta;
 pub use input::ZoomDirection;
 pub use input::describe_orbit_cam_controls;
+pub use input::validate_bindings;
 use observers::ObserverPlugin;
 pub use orbit_cam::FocusBoundsShape;
 pub use orbit_cam::InitializationState;

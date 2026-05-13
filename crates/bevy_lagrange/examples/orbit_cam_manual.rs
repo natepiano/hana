@@ -108,7 +108,7 @@ fn main() {
             common::configure_camera,
             (OrbitCamManual, ManualCamera, manual_guidance()),
         )
-        .with_camera_guidance_panel()
+        .with_camera_control_panel()
         .add_systems(Startup, common::spawn_scene)
         .add_systems(
             PreUpdate,

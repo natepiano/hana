@@ -13,14 +13,14 @@ const GROUND_COLOR: Color = Color::srgb(0.28, 0.42, 0.34);
 const GROUND_SIZE: f32 = 7.0;
 const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
 
-pub(crate) const fn configure_camera(camera: &mut OrbitCam) {
+pub(super) const fn configure_camera(camera: &mut OrbitCam) {
     camera.focus = CAMERA_FOCUS;
     camera.yaw = Some(CAMERA_YAW);
     camera.pitch = Some(CAMERA_PITCH);
     camera.radius = Some(CAMERA_RADIUS);
 }
 
-pub(crate) fn spawn_scene(
+pub(super) fn spawn_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,

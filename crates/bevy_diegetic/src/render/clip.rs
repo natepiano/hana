@@ -12,11 +12,12 @@ use crate::panel::DiegeticPanel;
 
 /// Returns the panel's layout-space viewport.
 pub(super) const fn panel_viewport(panel: &DiegeticPanel) -> BoundingBox {
+    let layout_to_points = panel.layout_unit().to_points();
     BoundingBox {
         x:      0.0,
         y:      0.0,
-        width:  panel.width(),
-        height: panel.height(),
+        width:  panel.width() * layout_to_points,
+        height: panel.height() * layout_to_points,
     }
 }
 
@@ -88,7 +89,10 @@ mod tests {
     use bevy::color::Color;
 
     use super::*;
+    use crate::layout::Mm;
     use crate::layout::RectangleSource;
+    use crate::layout::Unit;
+    use crate::panel::DiegeticPanel;
 
     fn bbox(x: f32, y: f32, width: f32, height: f32) -> BoundingBox {
         BoundingBox {
@@ -254,5 +258,18 @@ mod tests {
         let command = bbox(10.0, 10.0, 20.0, 20.0);
 
         assert_eq!(effective_clip(command, Some(scissor), viewport), None);
+    }
+
+    #[test]
+    fn panel_viewport_uses_layout_points_for_world_units() {
+        let panel = DiegeticPanel::world()
+            .size(Mm(210.0), Mm(297.0))
+            .build()
+            .unwrap();
+        let viewport = panel_viewport(&panel);
+        let mm_to_points = Unit::Millimeters.to_points();
+
+        assert!(210.0f32.mul_add(-mm_to_points, viewport.width).abs() < f32::EPSILON);
+        assert!(297.0f32.mul_add(-mm_to_points, viewport.height).abs() < f32::EPSILON);
     }
 }

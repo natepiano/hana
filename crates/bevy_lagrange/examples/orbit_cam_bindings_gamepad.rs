@@ -16,7 +16,6 @@ use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamHeldBinding;
 use bevy_lagrange::OrbitCamInputBinding;
-use fairy_dust::CameraGuidance;
 
 #[derive(Component)]
 struct GamepadStatus;
@@ -81,14 +80,8 @@ fn main() {
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .with_orbit_cam_bundle(
-            common::configure_camera,
-            (
-                bindings,
-                CameraGuidance::auto().with_title("Gamepad Bindings"),
-            ),
-        )
-        .with_camera_guidance_panel()
+        .with_orbit_cam_bundle(common::configure_camera, bindings)
+        .with_camera_control_panel()
         .add_systems(Startup, (common::spawn_scene, spawn_status))
         .add_systems(Update, update_status)
         .run();

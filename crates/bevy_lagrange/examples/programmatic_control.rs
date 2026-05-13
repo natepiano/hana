@@ -4,28 +4,24 @@ use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
-use fairy_dust::CameraGuidance;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControlState;
 
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5, 0.0);
+const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + 0.2, 0.0);
 
-const GROUND_COLOR: Color = Color::srgb(0.28, 0.42, 0.34);
 const GROUND_SIZE: f32 = 8.0;
 
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5, 0.0);
-const HOME_PITCH: f32 = 0.45;
+const HOME_PITCH: f32 = 0.42;
 const HOME_RADIUS: f32 = 6.0;
-const HOME_YAW: f32 = 0.65;
+const HOME_YAW: f32 = -0.85;
 const HOME_CONTROL: &str = "H Home";
 const HOME_SMOOTHNESS: f32 = 0.35;
 const HOME_FOCUS_EPSILON: f32 = 0.01;
 const HOME_ORBIT_EPSILON: f32 = 0.01;
-
-const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
 
 #[derive(Component)]
 struct ProgrammaticCamera;
@@ -81,15 +77,11 @@ fn main() {
         .with_brp_extras()
         .with_orbit_cam_bundle(
             configure_camera,
-            (
-                ProgrammaticCamera,
-                OrbitCamPreset::BlenderLike,
-                CameraGuidance::auto().with_anchor(Anchor::BottomRight),
-            ),
+            (ProgrammaticCamera, OrbitCamPreset::BlenderLike),
         )
         .with_ground_plane()
         .size(GROUND_SIZE)
-        .color(GROUND_COLOR)
+        .with_studio_lighting()
         .with_cube()
         .size(CUBE_SIZE)
         .color(CUBE_COLOR)
@@ -100,9 +92,8 @@ fn main() {
                 .control(HOME_CONTROL),
         )
         .with_description_panel(description_panel())
-        .with_camera_guidance_panel()
+        .with_camera_control_panel()
         .init_resource::<HomeReset>()
-        .add_systems(Startup, spawn_light)
         .add_systems(Update, (home_camera, update_home_reset).chain())
         .run();
 }
@@ -120,16 +111,6 @@ fn description_panel() -> DescriptionPanel {
         .line("Press H to home the camera")
         .line("The `home_camera` system, reads the keypress and mutates `target_focus`, `target_yaw`, `target_pitch`, and `target_radius` directly on the `OrbitCam`.")
         .line("`OrbitCam` then lerps to the home destination.")
-}
-
-fn spawn_light(mut commands: Commands) {
-    commands.spawn((
-        PointLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_translation(LIGHT_TRANSLATION),
-    ));
 }
 
 fn home_camera(

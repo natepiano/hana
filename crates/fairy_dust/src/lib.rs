@@ -49,6 +49,7 @@ pub use screen_panels::TitleBarControlState;
 
 mod brp_extras;
 mod camera_control_panel;
+mod lighting;
 mod orbit_cam;
 mod primitive;
 mod save_window_position;
@@ -125,22 +126,21 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
-    /// Spawn a static screen-space panel anchored bottom-right that documents
-    /// the default `bevy_lagrange::OrbitCam` controls.
+    /// Enable smart screen-space camera control panels for `OrbitCam` cameras.
     ///
-    /// Pulls in `DiegeticUiPlugin` and `MeshPickingPlugin` if not already
-    /// present.
+    /// Cameras without an explicit [`CameraGuidance`] component get
+    /// [`CameraGuidance::auto()`], so the panel reflects the effective preset
+    /// or binding configuration and highlights active interactions.
     #[must_use]
     pub fn with_camera_control_panel(mut self) -> Self {
         camera_control_panel::install(&mut self.app);
         self
     }
 
-    /// Enable data-driven camera guidance panels for cameras that carry
-    /// [`CameraGuidance`].
+    /// Add a reusable key/fill/rim lighting setup for simple example scenes.
     #[must_use]
-    pub fn with_camera_guidance_panel(mut self) -> Self {
-        camera_control_panel::install_guidance(&mut self.app);
+    pub fn with_studio_lighting(mut self) -> Self {
+        lighting::install(&mut self.app);
         self
     }
 
@@ -268,17 +268,15 @@ impl<S> PrimitiveBuilder<S> {
     #[must_use]
     pub fn with_brp_extras(self) -> SprinkleBuilder<S> { self.finish().with_brp_extras() }
 
-    /// Finalizes the current primitive and adds the static camera control panel.
+    /// Finalizes the current primitive and adds the smart camera control panel.
     #[must_use]
     pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
         self.finish().with_camera_control_panel()
     }
 
-    /// Finalizes the current primitive and enables camera guidance panels.
+    /// Finalizes the current primitive and adds studio lighting.
     #[must_use]
-    pub fn with_camera_guidance_panel(self) -> SprinkleBuilder<S> {
-        self.finish().with_camera_guidance_panel()
-    }
+    pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
 
     /// Finalizes the current primitive and adds an example description panel.
     #[must_use]

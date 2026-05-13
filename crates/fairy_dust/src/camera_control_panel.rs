@@ -1,4 +1,4 @@
-//! Capability: screen-space `bevy_diegetic` camera guidance panels for
+//! Capability: screen-space `bevy_diegetic` camera control panels for
 //! `bevy_lagrange::OrbitCam` examples.
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
@@ -23,6 +23,7 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamControlRow;
 use bevy_lagrange::OrbitCamControlSummary;
@@ -37,7 +38,7 @@ use bevy_lagrange::describe_orbit_cam_controls;
 
 use crate::ensure_plugin;
 
-/// Data-driven camera guidance shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
+/// Data-driven camera control metadata shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
 /// examples.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CameraGuidance {
@@ -188,9 +189,6 @@ impl From<OrbitCamControlRow> for CameraGuidanceRow {
             .with_camera_interaction_sources(row.camera_interaction_sources)
     }
 }
-
-#[derive(Component)]
-struct StaticCameraControlPanel;
 
 #[derive(Component)]
 struct CameraGuidancePanel {
@@ -405,16 +403,12 @@ const ACTION_COLUMN_MIN_WIDTH: Px = Px(46.0);
 
 pub(crate) fn install(app: &mut App) {
     ensure_panel_plugins(app);
-    app.add_systems(Startup, spawn_static_panel);
-}
-
-pub(crate) fn install_guidance(app: &mut App) {
-    ensure_panel_plugins(app);
     app.add_systems(
         PostUpdate,
         (refresh_changed_guidance_snapshot, refresh_guidance_display),
     );
-    app.add_observer(spawn_guidance_panel_on_add)
+    app.add_observer(attach_default_guidance_on_orbit_cam_add)
+        .add_observer(spawn_guidance_panel_on_add)
         .add_observer(refresh_on_interaction_started)
         .add_observer(refresh_on_interaction_ended)
         .add_observer(refresh_on_sources_changed);
@@ -425,23 +419,14 @@ fn ensure_panel_plugins(app: &mut App) {
     ensure_plugin(app, MeshPickingPlugin);
 }
 
-fn spawn_static_panel(mut commands: Commands) {
-    let unlit = unlit_panel_material();
-    let panel = DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(Anchor::BottomRight)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .layout(build_static_layout)
-        .build();
-
-    match panel {
-        Ok(panel) => {
-            commands.spawn((StaticCameraControlPanel, panel, Transform::default()));
-        },
-        Err(error) => {
-            error!("fairy_dust: failed to build camera control panel: {error}");
-        },
+fn attach_default_guidance_on_orbit_cam_add(
+    trigger: On<Add, OrbitCam>,
+    mut commands: Commands,
+    cameras: Query<(), (With<OrbitCam>, Without<CameraGuidance>)>,
+) {
+    let camera = trigger.entity;
+    if cameras.get(camera).is_ok() {
+        commands.entity(camera).insert(CameraGuidance::auto());
     }
 }
 
@@ -482,7 +467,7 @@ fn spawn_guidance_panel_on_add(
             ));
         },
         Err(error) => {
-            error!("fairy_dust: failed to build camera guidance panel: {error}");
+            error!("fairy_dust: failed to build camera control panel: {error}");
         },
     }
 }
@@ -605,12 +590,6 @@ fn unlit_panel_material() -> StandardMaterial {
         unlit: true,
         ..default_panel_material()
     }
-}
-
-fn build_static_layout(builder: &mut LayoutBuilder) {
-    let guidance = CameraGuidance::for_preset(OrbitCamPreset::SimpleMouse);
-    let snapshot = resolve_guidance_snapshot(&guidance, None, None, None);
-    build_guidance_layout(builder, &snapshot, CameraGuidanceDisplay::default());
 }
 
 fn build_guidance_tree(

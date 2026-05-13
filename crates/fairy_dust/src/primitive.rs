@@ -21,12 +21,17 @@ pub(crate) struct PrimitiveConfig {
     transform: Option<Transform>,
 }
 
+const GROUND_PLANE_METALLIC: f32 = 0.0;
+const GROUND_PLANE_REFLECTANCE: f32 = 0.45;
+const GROUND_PLANE_ROUGHNESS: f32 = 0.40;
+const GROUND_PLANE_ALPHA: f32 = 0.78;
+
 impl PrimitiveConfig {
     pub(crate) const fn ground_plane() -> Self {
         Self {
             kind:      PrimitiveKind::GroundPlane,
             size:      8.0,
-            color:     Color::srgb(0.28, 0.42, 0.34),
+            color:     Color::srgb(0.125, 0.14, 0.16),
             material:  None,
             transform: None,
         }
@@ -79,10 +84,9 @@ fn spawn_primitive(
         },
         PrimitiveKind::Cube => Mesh::from(Cuboid::from_size(Vec3::splat(config.size))),
     };
-    let material = config.material.unwrap_or_else(|| StandardMaterial {
-        base_color: config.color,
-        ..default()
-    });
+    let material = config
+        .material
+        .unwrap_or_else(|| default_material(config.kind, config.color));
     let transform = config.transform.unwrap_or_else(|| match config.kind {
         PrimitiveKind::GroundPlane => Transform::default(),
         PrimitiveKind::Cube => Transform::from_xyz(0.0, config.size * 0.5, 0.0),
@@ -93,4 +97,23 @@ fn spawn_primitive(
         MeshMaterial3d(materials.add(material)),
         transform,
     ));
+}
+
+fn default_material(kind: PrimitiveKind, color: Color) -> StandardMaterial {
+    match kind {
+        PrimitiveKind::GroundPlane => StandardMaterial {
+            base_color: color.with_alpha(GROUND_PLANE_ALPHA),
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            cull_mode: None,
+            metallic: GROUND_PLANE_METALLIC,
+            reflectance: GROUND_PLANE_REFLECTANCE,
+            perceptual_roughness: GROUND_PLANE_ROUGHNESS,
+            ..default()
+        },
+        PrimitiveKind::Cube => StandardMaterial {
+            base_color: color,
+            ..default()
+        },
+    }
 }
