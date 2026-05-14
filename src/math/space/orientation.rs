@@ -1,9 +1,9 @@
-use std::ops::Deref;
 use std::ops::Mul;
 use std::ops::MulAssign;
 
 use bevy::math::Quat;
 use bevy::math::Vec3;
+use bevy::prelude::Deref;
 use bevy::reflect::Reflect;
 
 /// A rotation in 3D space.
@@ -27,7 +27,7 @@ use bevy::reflect::Reflect;
 /// let rotated = orientation * Vec3::X;
 /// assert!((rotated - Vec3::NEG_Z).length() < 1e-6);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Default, Reflect)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deref, Reflect)]
 pub struct Orientation(pub Quat);
 
 impl Orientation {
@@ -49,12 +49,6 @@ impl Orientation {
     /// angular differences.
     #[must_use]
     pub fn lerp(self, other: Self, t: f32) -> Self { Self(self.0.lerp(other.0, t)) }
-}
-
-impl Deref for Orientation {
-    type Target = Quat;
-
-    fn deref(&self) -> &Quat { &self.0 }
 }
 
 impl From<Quat> for Orientation {

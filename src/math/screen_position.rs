@@ -1,6 +1,5 @@
 use std::ops::Add;
 use std::ops::AddAssign;
-use std::ops::Deref;
 use std::ops::Div;
 use std::ops::DivAssign;
 use std::ops::Mul;
@@ -10,6 +9,7 @@ use std::ops::Sub;
 use std::ops::SubAssign;
 
 use bevy::math::Vec2;
+use bevy::prelude::Deref;
 use bevy::reflect::Reflect;
 
 /// Pixel-space coordinates on screen.
@@ -28,7 +28,7 @@ use bevy::reflect::Reflect;
 /// let moved = cursor + offset;
 /// assert_eq!(moved.x, 650.0);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Default, Reflect)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deref, Reflect)]
 pub struct ScreenPosition(pub Vec2);
 
 impl ScreenPosition {
@@ -39,12 +39,6 @@ impl ScreenPosition {
     /// Consumes `self` and returns the inner `Vec2`.
     #[must_use]
     pub const fn into_inner(self) -> Vec2 { self.0 }
-}
-
-impl Deref for ScreenPosition {
-    type Target = Vec2;
-
-    fn deref(&self) -> &Vec2 { &self.0 }
 }
 
 impl From<Vec2> for ScreenPosition {

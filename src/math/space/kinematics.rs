@@ -1,6 +1,5 @@
 use std::ops::Add;
 use std::ops::AddAssign;
-use std::ops::Deref;
 use std::ops::Div;
 use std::ops::DivAssign;
 use std::ops::Mul;
@@ -10,6 +9,7 @@ use std::ops::Sub;
 use std::ops::SubAssign;
 
 use bevy::math::Vec3;
+use bevy::prelude::Deref;
 use bevy::reflect::Reflect;
 
 /// Generates a semantic newtype wrapper around a math primitive.
@@ -36,7 +36,7 @@ macro_rules! semantic_newtype {
         $name:ident, $inner:ty
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Default, Reflect)]
+        #[derive(Debug, Clone, Copy, PartialEq, Default, Deref, Reflect)]
         pub struct $name(pub $inner);
 
         impl $name {
@@ -66,14 +66,6 @@ macro_rules! semantic_newtype {
             #[must_use]
             pub fn lerp(self, other: impl Into<Self>, t: f32) -> Self {
                 Self(self.0.lerp(other.into().0, t))
-            }
-        }
-
-        impl Deref for $name {
-            type Target = $inner;
-
-            fn deref(&self) -> &$inner {
-                &self.0
             }
         }
 
