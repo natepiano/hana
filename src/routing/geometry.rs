@@ -95,10 +95,8 @@ pub struct CableSegment {
     pub length:      f32,
 }
 
-impl CableSegment {
-    /// Create a segment from points, computing tangents and arc lengths.
-    #[must_use]
-    pub fn from_points(points: Vec<Vec3>) -> Self {
+impl From<Vec<Vec3>> for CableSegment {
+    fn from(points: Vec<Vec3>) -> Self {
         if points.is_empty() {
             return Self::default();
         }
@@ -137,7 +135,9 @@ impl CableSegment {
             length: cumulative,
         }
     }
+}
 
+impl CableSegment {
     /// Create a segment by evenly sampling `n` points along a straight line.
     #[must_use]
     pub fn straight_line(start: impl Into<Vec3>, end: impl Into<Vec3>, n: usize) -> Self {
@@ -150,7 +150,7 @@ impl CableSegment {
                 start.lerp(end, t)
             })
             .collect();
-        Self::from_points(points)
+        points.into()
     }
 }
 

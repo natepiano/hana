@@ -295,7 +295,7 @@ fn cable_segment_from_points_computes_correct_arc_lengths() {
         Vec3::new(1.0, 1.0, 0.0),
         Vec3::new(1.0, 1.0, 1.0),
     ];
-    let segment = CableSegment::from_points(points);
+    let segment = CableSegment::from(points);
 
     // Arc lengths: 0, 1, 2, 3
     assert_eq!(segment.arc_lengths.len(), 4);
@@ -312,7 +312,7 @@ fn cable_segment_from_points_computes_correct_arc_lengths() {
 
 #[test]
 fn cable_segment_from_points_single_point() {
-    let segment = CableSegment::from_points(vec![Vec3::new(1.0, 2.0, 3.0)]);
+    let segment = CableSegment::from(vec![Vec3::new(1.0, 2.0, 3.0)]);
 
     assert_eq!(segment.points.len(), 1);
     assert_eq!(segment.tangents.len(), 1);
@@ -327,7 +327,7 @@ fn cable_segment_from_points_single_point() {
 
 #[test]
 fn cable_segment_from_points_empty() {
-    let segment = CableSegment::from_points(vec![]);
+    let segment = CableSegment::from(Vec::<Vec3>::new());
 
     assert!(segment.points.is_empty());
     assert!(segment.tangents.is_empty());

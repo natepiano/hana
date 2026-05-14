@@ -130,7 +130,7 @@ pub fn sample_3d(
 
     // Degenerate: endpoints are the same point
     if chord_length < MIN_SEGMENT_LENGTH {
-        return CableSegment::from_points(vec![start; n]);
+        return vec![start; n].into();
     }
 
     let clamped_slack = slack.max(1.0);
@@ -213,7 +213,7 @@ pub fn sample_3d(
         })
         .collect();
 
-    CableSegment::from_points(points)
+    points.into()
 }
 
 /// Fallback for degenerate cases: straight line between two points.
@@ -252,7 +252,7 @@ fn sample_vertical_hang(
         }))
         .collect();
 
-    CableSegment::from_points(points)
+    points.into()
 }
 
 /// Parabolic approximation when Newton's method fails to find a catenary parameter.
@@ -277,7 +277,7 @@ fn sample_parabolic_fallback(
         })
         .collect();
 
-    CableSegment::from_points(points)
+    points.into()
 }
 
 /// Solver that computes catenary curves between cable endpoints.
