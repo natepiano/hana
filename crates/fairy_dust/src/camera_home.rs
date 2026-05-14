@@ -16,12 +16,20 @@ use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 
 use crate::orbit_cam::FairyDustOrbitCam;
+use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
 
 pub(crate) const HOME_CONTROL: &str = "H Home";
 pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
 pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
 const HOME_KEY: KeyCode = KeyCode::KeyH;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum InitialAnimateState {
+    #[default]
+    Pending,
+    Fired,
+}
 
 #[derive(Component)]
 struct CameraHomeMarker;
@@ -70,9 +78,9 @@ fn trigger_initial_animate(
     home: Option<Res<CameraHomeEntity>>,
     config: Res<CameraHomeConfig>,
     cameras: Query<Entity, With<FairyDustOrbitCam>>,
-    mut fired: Local<bool>,
+    mut state: Local<InitialAnimateState>,
 ) {
-    if *fired {
+    if *state == InitialAnimateState::Fired {
         return;
     }
     let Some(home) = home else {
@@ -88,7 +96,7 @@ fn trigger_initial_animate(
             .margin(config.margin)
             .duration(Duration::ZERO),
     );
-    *fired = true;
+    *state = InitialAnimateState::Fired;
 }
 
 fn handle_home_key(
@@ -125,7 +133,7 @@ fn on_home_animation_begin(
         return;
     }
     for mut bar in &mut bars {
-        bar.set_active(HOME_CONTROL, true);
+        bar.set_active(HOME_CONTROL, ControlActivation::Active);
     }
 }
 
@@ -138,6 +146,6 @@ fn on_home_animation_end(
         return;
     }
     for mut bar in &mut bars {
-        bar.set_active(HOME_CONTROL, false);
+        bar.set_active(HOME_CONTROL, ControlActivation::Inactive);
     }
 }

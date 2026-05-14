@@ -1,12 +1,12 @@
 //! Demonstrates app-authored camera control through direct `OrbitCam` target fields.
 
 use bevy::prelude::*;
+use bevy_kana::event;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
-use fairy_dust::TitleBarControlState;
 
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_SIZE: f32 = 1.0;
@@ -22,6 +22,15 @@ const HOME_CONTROL: &str = "H Home";
 const HOME_SMOOTHNESS: f32 = 0.35;
 const HOME_FOCUS_EPSILON: f32 = 0.01;
 const HOME_ORBIT_EPSILON: f32 = 0.01;
+
+event!(
+    /// Fires when the example begins driving the camera toward home.
+    HomeAnimationBegin
+);
+event!(
+    /// Fires when the camera reaches home or the user takes manual control.
+    HomeAnimationEnd
+);
 
 #[derive(Component)]
 struct ProgrammaticCamera;
@@ -91,6 +100,7 @@ fn main() {
                 .with_anchor(Anchor::TopLeft)
                 .control(HOME_CONTROL),
         )
+        .wire_chip_to_events::<HomeAnimationBegin, HomeAnimationEnd>(HOME_CONTROL)
         .with_description_panel(description_panel())
         .with_camera_control_panel()
         .init_resource::<HomeReset>()
@@ -114,10 +124,10 @@ fn description_panel() -> DescriptionPanel {
 }
 
 fn home_camera(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut reset: ResMut<HomeReset>,
     mut camera: Single<&mut OrbitCam, With<ProgrammaticCamera>>,
-    mut title_bars: Query<&mut TitleBarControlState>,
 ) {
     if !keys.just_pressed(KeyCode::KeyH) {
         return;
@@ -128,13 +138,13 @@ fn home_camera(
     camera.target_yaw = HOME_YAW;
     camera.target_pitch = HOME_PITCH;
     camera.target_radius = HOME_RADIUS;
-    set_home_control_active(&mut title_bars, true);
+    commands.trigger(HomeAnimationBegin);
 }
 
 fn update_home_reset(
+    mut commands: Commands,
     mut reset: ResMut<HomeReset>,
     mut cameras: Query<&mut OrbitCam, With<ProgrammaticCamera>>,
-    mut title_bars: Query<&mut TitleBarControlState>,
 ) {
     if !reset.is_active() {
         return;
@@ -146,13 +156,7 @@ fn update_home_reset(
 
     if !camera_targets_home(&camera) || camera_at_home(&camera) {
         reset.finish(&mut camera);
-        set_home_control_active(&mut title_bars, false);
-    }
-}
-
-fn set_home_control_active(title_bars: &mut Query<&mut TitleBarControlState>, active: bool) {
-    for mut title_bar in title_bars {
-        title_bar.set_active(HOME_CONTROL, active);
+        commands.trigger(HomeAnimationEnd);
     }
 }
 

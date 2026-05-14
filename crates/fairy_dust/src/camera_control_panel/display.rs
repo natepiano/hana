@@ -9,12 +9,29 @@ use bevy_lagrange::OrbitCamInteractionState;
 
 const SOURCE_HOLD_SECONDS: f32 = 0.15;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum RenderState {
+    #[default]
+    Idle,
+    Pending,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DisplayChange {
+    Unchanged,
+    Changed,
+}
+
+impl DisplayChange {
+    const fn is_changed(self) -> bool { matches!(self, Self::Changed) }
+}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(super) struct CameraGuidanceDisplayState {
     orbit:                   CameraGuidanceDisplaySlot,
     pan:                     CameraGuidanceDisplaySlot,
     zoom:                    CameraGuidanceDisplaySlot,
-    pub(super) needs_render: bool,
+    pub(super) render_state: RenderState,
 }
 
 impl Default for CameraGuidanceDisplayState {
@@ -27,7 +44,7 @@ impl CameraGuidanceDisplayState {
             orbit:        CameraGuidanceDisplaySlot::active(display.orbit),
             pan:          CameraGuidanceDisplaySlot::active(display.pan),
             zoom:         CameraGuidanceDisplaySlot::active(display.zoom),
-            needs_render: false,
+            render_state: RenderState::Idle,
         }
     }
 
@@ -48,9 +65,8 @@ impl CameraGuidanceDisplayState {
         let Some(slot) = self.slot_mut(kind) else {
             return;
         };
-        let changed = slot.activate(sources, now);
-        if changed {
-            self.needs_render = true;
+        if slot.activate(sources, now) == DisplayChange::Changed {
+            self.render_state = RenderState::Pending;
         }
     }
 
@@ -63,16 +79,17 @@ impl CameraGuidanceDisplayState {
         let Some(slot) = self.slot_mut(kind) else {
             return;
         };
-        let changed = slot.hold(sources, now);
-        if changed {
-            self.needs_render = true;
+        if slot.hold(sources, now) == DisplayChange::Changed {
+            self.render_state = RenderState::Pending;
         }
     }
 
     pub(super) fn expire_held_sources(&mut self, now: f32) {
-        let expired = self.orbit.expire(now) | self.pan.expire(now) | self.zoom.expire(now);
-        if expired {
-            self.needs_render = true;
+        let orbit = self.orbit.expire(now);
+        let pan = self.pan.expire(now);
+        let zoom = self.zoom.expire(now);
+        if orbit.is_changed() || pan.is_changed() || zoom.is_changed() {
+            self.render_state = RenderState::Pending;
         }
     }
 
@@ -109,7 +126,7 @@ impl CameraGuidanceDisplaySlot {
         self.active_sources.union(self.held_sources)
     }
 
-    fn activate(&mut self, sources: CameraInteractionSources, now: f32) -> bool {
+    fn activate(&mut self, sources: CameraInteractionSources, now: f32) -> DisplayChange {
         let before = self.sources();
         let inactive_sources = self.active_sources.difference(sources);
 
@@ -125,10 +142,14 @@ impl CameraGuidanceDisplaySlot {
             self.held_until = None;
         }
 
-        before != self.sources()
+        if before == self.sources() {
+            DisplayChange::Unchanged
+        } else {
+            DisplayChange::Changed
+        }
     }
 
-    fn hold(&mut self, sources: CameraInteractionSources, now: f32) -> bool {
+    fn hold(&mut self, sources: CameraInteractionSources, now: f32) -> DisplayChange {
         let before = self.sources();
 
         self.active_sources = self.active_sources.difference(sources);
@@ -137,21 +158,25 @@ impl CameraGuidanceDisplaySlot {
             self.held_until = Some(now + SOURCE_HOLD_SECONDS);
         }
 
-        before != self.sources()
+        if before == self.sources() {
+            DisplayChange::Unchanged
+        } else {
+            DisplayChange::Changed
+        }
     }
 
-    fn expire(&mut self, now: f32) -> bool {
+    fn expire(&mut self, now: f32) -> DisplayChange {
         if self.held_until.is_none_or(|held_until| now < held_until) {
-            return false;
+            return DisplayChange::Unchanged;
         }
 
         self.held_until = None;
         if self.held_sources.is_empty() {
-            return false;
+            return DisplayChange::Unchanged;
         }
 
         self.held_sources = CameraInteractionSources::NONE;
-        true
+        DisplayChange::Changed
     }
 }
 
@@ -198,29 +223,29 @@ mod tests {
             CameraInteractionSources::SMOOTH_SCROLL,
             1.0,
         );
-        assert!(display.needs_render);
+        assert_eq!(display.render_state, RenderState::Pending);
         assert_eq!(
             display.display().orbit,
             CameraInteractionSources::SMOOTH_SCROLL
         );
 
-        display.needs_render = false;
+        display.render_state = RenderState::Idle;
         display.hold(
             OrbitCamInteractionKind::Orbit,
             CameraInteractionSources::SMOOTH_SCROLL,
             1.0,
         );
-        assert!(!display.needs_render);
+        assert_eq!(display.render_state, RenderState::Idle);
 
         display.expire_held_sources(1.14);
-        assert!(!display.needs_render);
+        assert_eq!(display.render_state, RenderState::Idle);
         assert_eq!(
             display.display().orbit,
             CameraInteractionSources::SMOOTH_SCROLL
         );
 
         display.expire_held_sources(1.15);
-        assert!(display.needs_render);
+        assert_eq!(display.render_state, RenderState::Pending);
         assert!(display.display().orbit.is_empty());
     }
 
@@ -233,7 +258,7 @@ mod tests {
             CameraInteractionSources::SMOOTH_SCROLL,
             1.0,
         );
-        display.needs_render = false;
+        display.render_state = RenderState::Idle;
         display.hold(
             OrbitCamInteractionKind::Orbit,
             CameraInteractionSources::SMOOTH_SCROLL,
@@ -250,7 +275,7 @@ mod tests {
             1.1,
         );
 
-        assert!(!display.needs_render);
+        assert_eq!(display.render_state, RenderState::Idle);
         assert_eq!(
             display.display().orbit,
             CameraInteractionSources::SMOOTH_SCROLL
@@ -266,40 +291,40 @@ mod tests {
             CameraInteractionSources::MOUSE,
             1.0,
         );
-        display.needs_render = false;
+        display.render_state = RenderState::Idle;
 
         display.activate(
             OrbitCamInteractionKind::Orbit,
             CameraInteractionSources::SMOOTH_SCROLL,
             1.05,
         );
-        assert!(display.needs_render);
+        assert_eq!(display.render_state, RenderState::Pending);
         assert_eq!(
             display.display().orbit,
             CameraInteractionSources::MOUSE.union(CameraInteractionSources::SMOOTH_SCROLL)
         );
 
-        display.needs_render = false;
+        display.render_state = RenderState::Idle;
         display.activate(
             OrbitCamInteractionKind::Orbit,
             CameraInteractionSources::MOUSE,
             1.1,
         );
-        assert!(!display.needs_render);
+        assert_eq!(display.render_state, RenderState::Idle);
         assert_eq!(
             display.display().orbit,
             CameraInteractionSources::MOUSE.union(CameraInteractionSources::SMOOTH_SCROLL)
         );
 
         display.expire_held_sources(1.24);
-        assert!(!display.needs_render);
+        assert_eq!(display.render_state, RenderState::Idle);
         assert_eq!(
             display.display().orbit,
             CameraInteractionSources::MOUSE.union(CameraInteractionSources::SMOOTH_SCROLL)
         );
 
         display.expire_held_sources(1.25);
-        assert!(display.needs_render);
+        assert_eq!(display.render_state, RenderState::Pending);
         assert_eq!(display.display().orbit, CameraInteractionSources::MOUSE);
     }
 }

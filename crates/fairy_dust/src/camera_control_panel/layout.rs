@@ -17,6 +17,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamInteractionKind;
 
+use super::config::SourceVisibility;
 use super::display::CameraGuidanceDisplay;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
@@ -25,6 +26,8 @@ use crate::theme::BORDER_ACCENT;
 use crate::theme::BORDER_DIM;
 use crate::theme::FRAME_PAD;
 use crate::theme::INNER_BG;
+use crate::theme::INNER_BORDER_WIDTH;
+use crate::theme::INNER_PAD;
 use crate::theme::INNER_RADIUS;
 use crate::theme::RADIUS;
 use crate::theme::TITLE_COLOR;
@@ -38,6 +41,7 @@ const LABEL_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
 const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 const SOURCE_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.95);
 
+const GUIDANCE_CHILD_GAP: Px = Px(5.0);
 const TABLE_COLUMN_GAP: f32 = 8.0;
 const TABLE_ROW_GAP: f32 = 3.0;
 const TABLE_GROUP_GAP: f32 = 7.0;
@@ -94,11 +98,11 @@ fn build_guidance_layout(
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
                     .direction(Direction::TopToBottom)
-                    .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(5.0))
+                    .padding(Padding::all(INNER_PAD))
+                    .child_gap(GUIDANCE_CHILD_GAP)
                     .corner_radius(CornerRadius::all(INNER_RADIUS))
                     .background(INNER_BG)
-                    .border(Border::all(Px(1.0), BORDER_DIM)),
+                    .border(Border::all(INNER_BORDER_WIDTH, BORDER_DIM)),
                 |builder| {
                     builder.text(format!("CAMERA: {}", snapshot.camera_label), title.clone());
                     builder.text(
@@ -106,7 +110,7 @@ fn build_guidance_layout(
                         header.clone(),
                     );
                     build_guidance_table(builder, snapshot, display, &label, &active);
-                    if snapshot.show_sources {
+                    if snapshot.show_sources == SourceVisibility::Visible {
                         builder.with(
                             El::new()
                                 .width(Sizing::GROW)

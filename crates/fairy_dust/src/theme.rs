@@ -9,6 +9,8 @@ pub(crate) const FRAME_PAD: Px = Px(2.0);
 pub(crate) const BORDER: Px = Px(2.0);
 pub(crate) const INSET: Px = Px(FRAME_PAD.0 + BORDER.0);
 pub(crate) const INNER_RADIUS: Px = Px(RADIUS.0 - INSET.0);
+pub(crate) const INNER_PAD: Px = Px(10.0);
+pub(crate) const INNER_BORDER_WIDTH: Px = Px(1.0);
 
 pub(crate) const TITLE_SIZE: Pt = Pt(14.0);
 

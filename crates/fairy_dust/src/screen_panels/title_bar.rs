@@ -25,6 +25,10 @@ use crate::camera_home::CameraHomeConfig;
 use crate::theme::TITLE_COLOR;
 use crate::theme::TITLE_SIZE;
 
+const SEPARATOR_HEIGHT: Px = Px(18.0);
+const SEPARATOR_WIDTH: Px = Px(1.0);
+const TITLE_BAR_CHILD_GAP: Px = Px(10.0);
+
 /// A compact top-left title bar for example-level controls.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct TitleBar {
@@ -77,6 +81,15 @@ impl TitleBar {
     }
 }
 
+/// Whether a control label should be highlighted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlActivation {
+    /// Highlight the control.
+    Active,
+    /// Clear the control's highlight.
+    Inactive,
+}
+
 /// Mutable highlight state for a spawned [`TitleBar`].
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct TitleBarControlState {
@@ -90,25 +103,20 @@ impl TitleBarControlState {
         }
     }
 
-    /// Sets whether a control label is highlighted.
-    pub fn set_active(&mut self, control: &str, active: bool) -> bool {
-        let Some(index) = self
+    /// Sets whether a control label is highlighted. Repeated calls in the same
+    /// state are no-ops.
+    pub fn set_active(&mut self, control: &str, activation: ControlActivation) {
+        let position = self
             .active_controls
             .iter()
-            .position(|active_control| active_control == control)
-        else {
-            if active {
-                self.active_controls.push(control.to_string());
-            }
-            return active;
-        };
-
-        if active {
-            return false;
+            .position(|active_control| active_control == control);
+        match (position, activation) {
+            (None, ControlActivation::Active) => self.active_controls.push(control.to_string()),
+            (Some(index), ControlActivation::Inactive) => {
+                self.active_controls.remove(index);
+            },
+            (None, ControlActivation::Inactive) | (Some(_), ControlActivation::Active) => {},
         }
-
-        self.active_controls.remove(index);
-        true
     }
 
     /// Returns whether a control label is highlighted.
@@ -200,7 +208,7 @@ fn build_title_bar_layout(
             El::new()
                 .width(Sizing::GROW)
                 .direction(Direction::LeftToRight)
-                .child_gap(Px(10.0))
+                .child_gap(TITLE_BAR_CHILD_GAP)
                 .child_align_y(AlignY::Center),
             |builder| {
                 builder.text(title_bar.title.to_uppercase(), title);
@@ -221,8 +229,8 @@ fn build_title_bar_layout(
 fn title_separator(builder: &mut LayoutBuilder) {
     builder.with(
         El::new()
-            .width(Sizing::fixed(Px(1.0)))
-            .height(Sizing::fixed(Px(18.0)))
+            .width(Sizing::fixed(SEPARATOR_WIDTH))
+            .height(Sizing::fixed(SEPARATOR_HEIGHT))
             .background(DIVIDER_COLOR),
         |_| {},
     );
@@ -236,13 +244,18 @@ mod tests {
     fn title_bar_control_state_tracks_active_labels() {
         let mut state = TitleBarControlState::default();
 
-        assert!(state.set_active("H Home", true));
+        state.set_active("H Home", ControlActivation::Active);
         assert!(state.is_active("H Home"));
-        assert!(!state.set_active("H Home", true));
 
-        assert!(state.set_active("H Home", false));
+        // Repeat Active must be a no-op — otherwise the duplicate would survive
+        // the single Inactive below and `is_active` would still return true.
+        state.set_active("H Home", ControlActivation::Active);
+        state.set_active("H Home", ControlActivation::Inactive);
         assert!(!state.is_active("H Home"));
-        assert!(!state.set_active("H Home", false));
+
+        // Repeat Inactive on an empty list must be a no-op.
+        state.set_active("H Home", ControlActivation::Inactive);
+        assert!(!state.is_active("H Home"));
     }
 
     #[test]

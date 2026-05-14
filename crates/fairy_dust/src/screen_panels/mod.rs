@@ -12,24 +12,25 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 
+use super::theme::BORDER;
+use super::theme::BORDER_ACCENT;
+use super::theme::BORDER_DIM;
+use super::theme::FRAME_PAD;
+use super::theme::INNER_BG;
+use super::theme::INNER_BORDER_WIDTH;
+use super::theme::INNER_PAD;
+use super::theme::INNER_RADIUS;
+use super::theme::RADIUS;
 use crate::camera_home::CameraHomeConfig;
 use crate::ensure_plugin;
-use crate::theme::BORDER;
-use crate::theme::BORDER_ACCENT;
-use crate::theme::BORDER_DIM;
-use crate::theme::FRAME_PAD;
-use crate::theme::INNER_BG;
-use crate::theme::INNER_RADIUS;
-use crate::theme::RADIUS;
 
 mod description;
 mod title_bar;
 
 pub use description::DescriptionPanel;
+pub(crate) use title_bar::ControlActivation;
 pub use title_bar::TitleBar;
-pub use title_bar::TitleBarControlState;
-
-const INNER_PAD: Px = Px(10.0);
+pub(crate) use title_bar::TitleBarControlState;
 
 const BODY_SIZE: Pt = Pt(11.0);
 const CONTROL_SIZE: Pt = Pt(12.0);
@@ -86,7 +87,7 @@ fn panel_frame(
                     .padding(Padding::all(INNER_PAD))
                     .corner_radius(CornerRadius::all(INNER_RADIUS))
                     .background(INNER_BG)
-                    .border(Border::all(Px(1.0), BORDER_DIM)),
+                    .border(Border::all(INNER_BORDER_WIDTH, BORDER_DIM)),
                 content,
             );
         },

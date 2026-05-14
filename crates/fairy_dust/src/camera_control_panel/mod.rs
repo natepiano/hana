@@ -25,8 +25,10 @@ mod snapshot;
 
 pub use config::CameraGuidance;
 pub use config::CameraGuidanceRow;
+pub use config::SourceVisibility;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
+use display::RenderState;
 use layout::build_guidance_tree;
 use layout::unlit_panel_material;
 use snapshot::CameraGuidanceSnapshot;
@@ -212,11 +214,11 @@ fn refresh_guidance_display(
 ) {
     for (panel, snapshot, mut display) in &mut panels {
         display.expire_held_sources(time.elapsed_secs());
-        if !display.needs_render {
+        if display.render_state == RenderState::Idle {
             continue;
         }
 
         commands.set_tree(panel, build_guidance_tree(snapshot, display.display()));
-        display.needs_render = false;
+        display.render_state = RenderState::Idle;
     }
 }

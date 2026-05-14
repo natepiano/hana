@@ -5,24 +5,51 @@ use bevy::light::DirectionalLightShadowMap;
 use bevy::light::GlobalAmbientLight;
 use bevy::prelude::*;
 
-const SHADOW_MAP_SIZE: usize = 4096;
-const TARGET: Vec3 = Vec3::new(0.0, 0.45, 0.0);
-const GROUND_ACCENT_POS: Vec3 = Vec3::new(-2.0, 1.15, 1.85);
+// ambient
+const AMBIENT_BRIGHTNESS: f32 = 95.0;
+const AMBIENT_COLOR: Color = Color::srgb(0.55, 0.62, 0.76);
 
-const KEY_LIGHT_POS: Vec3 = Vec3::new(-3.5, 7.0, 4.8);
+// cascade shadow
+const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
+const CASCADE_MAX_DISTANCE: f32 = 18.0;
+const CASCADE_MIN_DISTANCE: f32 = 0.1;
+
+// clear color
+const CLEAR_COLOR: Color = Color::srgb(0.012, 0.014, 0.018);
+
+// fill light
+const FILL_LIGHT_ILLUMINANCE: f32 = 1_400.0;
 const FILL_LIGHT_POS: Vec3 = Vec3::new(4.5, 4.0, -3.5);
+
+// key light
+const KEY_LIGHT_ILLUMINANCE: f32 = 13_500.0;
+const KEY_LIGHT_POS: Vec3 = Vec3::new(-3.5, 7.0, 4.8);
+const KEY_SHADOW_DEPTH_BIAS: f32 = 0.03;
+const KEY_SHADOW_NORMAL_BIAS: f32 = 0.7;
+
+// point light
+const POINT_LIGHT_COLOR: Color = Color::srgb(0.45, 0.68, 1.0);
+const POINT_LIGHT_INTENSITY: f32 = 1_900.0;
+const POINT_LIGHT_POS: Vec3 = Vec3::new(-2.0, 1.15, 1.85);
+const POINT_LIGHT_RANGE: f32 = 6.0;
+
+// shadow map
+const SHADOW_MAP_SIZE: usize = 4096;
+
+// target
+const TARGET: Vec3 = Vec3::new(0.0, 0.45, 0.0);
 
 #[derive(Component)]
 struct FairyDustStudioLight;
 
 pub(crate) fn install(app: &mut App) {
-    app.insert_resource(ClearColor(Color::srgb(0.012, 0.014, 0.018)))
+    app.insert_resource(ClearColor(CLEAR_COLOR))
         .insert_resource(DirectionalLightShadowMap {
             size: SHADOW_MAP_SIZE,
         })
         .insert_resource(GlobalAmbientLight {
-            color:                      Color::srgb(0.55, 0.62, 0.76),
-            brightness:                 95.0,
+            color:                      AMBIENT_COLOR,
+            brightness:                 AMBIENT_BRIGHTNESS,
             affects_lightmapped_meshes: false,
         })
         .add_systems(Startup, spawn_studio_lights);
@@ -32,16 +59,16 @@ fn spawn_studio_lights(mut commands: Commands) {
     commands.spawn((
         FairyDustStudioLight,
         DirectionalLight {
-            illuminance: 13_500.0,
+            illuminance: KEY_LIGHT_ILLUMINANCE,
             shadows_enabled: true,
-            shadow_depth_bias: 0.03,
-            shadow_normal_bias: 0.7,
+            shadow_depth_bias: KEY_SHADOW_DEPTH_BIAS,
+            shadow_normal_bias: KEY_SHADOW_NORMAL_BIAS,
             ..default()
         },
         CascadeShadowConfigBuilder {
-            minimum_distance: 0.1,
-            maximum_distance: 18.0,
-            first_cascade_far_bound: 6.0,
+            minimum_distance: CASCADE_MIN_DISTANCE,
+            maximum_distance: CASCADE_MAX_DISTANCE,
+            first_cascade_far_bound: CASCADE_FIRST_FAR_BOUND,
             ..default()
         }
         .build(),
@@ -51,7 +78,7 @@ fn spawn_studio_lights(mut commands: Commands) {
     commands.spawn((
         FairyDustStudioLight,
         DirectionalLight {
-            illuminance: 1_400.0,
+            illuminance: FILL_LIGHT_ILLUMINANCE,
             shadows_enabled: false,
             ..default()
         },
@@ -61,12 +88,12 @@ fn spawn_studio_lights(mut commands: Commands) {
     commands.spawn((
         FairyDustStudioLight,
         PointLight {
-            color: Color::srgb(0.45, 0.68, 1.0),
-            intensity: 1_900.0,
-            range: 6.0,
+            color: POINT_LIGHT_COLOR,
+            intensity: POINT_LIGHT_INTENSITY,
+            range: POINT_LIGHT_RANGE,
             shadows_enabled: false,
             ..default()
         },
-        Transform::from_translation(GROUND_ACCENT_POS),
+        Transform::from_translation(POINT_LIGHT_POS),
     ));
 }

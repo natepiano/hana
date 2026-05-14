@@ -10,7 +10,7 @@
 //! without the env var, becoming a clean new instance.
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -32,10 +32,25 @@ struct FairyDustRestartContext;
 action!(Restart);
 event!(RestartEvent);
 
-static RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RestartState {
+    Idle,
+    Requested,
+}
+
+impl RestartState {
+    const fn to_u8(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            Self::Requested => 1,
+        }
+    }
+}
+
+static RESTART_STATE: AtomicU8 = AtomicU8::new(RestartState::Idle.to_u8());
 
 pub(crate) fn install(app: &mut App) {
-    RESTART_REQUESTED.store(false, Ordering::SeqCst);
+    RESTART_STATE.store(RestartState::Idle.to_u8(), Ordering::SeqCst);
     ensure_plugin(app, EnhancedInputPlugin);
     app.add_input_context::<FairyDustRestartContext>();
     app.add_systems(Startup, spawn_restart_action);
@@ -55,14 +70,14 @@ fn spawn_restart_action(mut commands: Commands) {
 }
 
 fn request_restart(mut exit: MessageWriter<AppExit>) {
-    RESTART_REQUESTED.store(true, Ordering::SeqCst);
+    RESTART_STATE.store(RestartState::Requested.to_u8(), Ordering::SeqCst);
     exit.write(AppExit::Success);
 }
 
 /// Spawn a trampoline copy of the current binary if a `Ctrl+Shift+R` press
 /// requested it.
 pub(crate) fn perform_restart_if_requested() {
-    if !RESTART_REQUESTED.load(Ordering::SeqCst) {
+    if RESTART_STATE.load(Ordering::SeqCst) != RestartState::Requested.to_u8() {
         return;
     }
     do_restart();

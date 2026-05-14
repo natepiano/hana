@@ -105,17 +105,23 @@ pub(crate) struct PrimitiveConfig {
     face_texts: Vec<FaceTextSpec>,
 }
 
+// cube defaults
+const CUBE_DEFAULT_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+
+// ground plane defaults
+const GROUND_PLANE_ALPHA: f32 = 0.78;
+const GROUND_PLANE_DEFAULT_COLOR: Color = Color::srgb(0.125, 0.14, 0.16);
+const GROUND_PLANE_DEFAULT_SIZE: f32 = 8.0;
 const GROUND_PLANE_METALLIC: f32 = 0.0;
 const GROUND_PLANE_REFLECTANCE: f32 = 0.45;
 const GROUND_PLANE_ROUGHNESS: f32 = 0.40;
-const GROUND_PLANE_ALPHA: f32 = 0.78;
 
 impl PrimitiveConfig {
     pub(crate) const fn ground_plane() -> Self {
         Self {
             kind:       PrimitiveKind::GroundPlane,
-            size:       8.0,
-            color:      Color::srgb(0.125, 0.14, 0.16),
+            size:       GROUND_PLANE_DEFAULT_SIZE,
+            color:      GROUND_PLANE_DEFAULT_COLOR,
             material:   None,
             transform:  None,
             face_texts: Vec::new(),
@@ -126,7 +132,7 @@ impl PrimitiveConfig {
         Self {
             kind:       PrimitiveKind::Cube,
             size:       1.0,
-            color:      Color::srgb(0.8, 0.7, 0.6),
+            color:      CUBE_DEFAULT_COLOR,
             material:   None,
             transform:  None,
             face_texts: Vec::new(),

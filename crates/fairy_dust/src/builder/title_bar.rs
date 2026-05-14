@@ -13,6 +13,7 @@ use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
+use crate::screen_panels::ControlActivation;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 use crate::screen_panels::TitleBarControlState;
@@ -34,7 +35,7 @@ impl<S> TitleBarBuilder<S> {
         self.parent.app.add_observer(
             move |_: On<Begin>, mut bars: Query<&mut TitleBarControlState>| {
                 for mut bar in &mut bars {
-                    bar.set_active(&activate, true);
+                    bar.set_active(&activate, ControlActivation::Active);
                 }
             },
         );
@@ -42,7 +43,7 @@ impl<S> TitleBarBuilder<S> {
         self.parent.app.add_observer(
             move |_: On<End>, mut bars: Query<&mut TitleBarControlState>| {
                 for mut bar in &mut bars {
-                    bar.set_active(&deactivate, false);
+                    bar.set_active(&deactivate, ControlActivation::Inactive);
                 }
             },
         );
@@ -72,7 +73,7 @@ impl<S> TitleBarBuilder<S> {
                     return;
                 }
                 for mut bar in &mut bars {
-                    bar.set_active(&activate, true);
+                    bar.set_active(&activate, ControlActivation::Active);
                 }
             },
         );
@@ -83,7 +84,7 @@ impl<S> TitleBarBuilder<S> {
                     return;
                 }
                 for mut bar in &mut bars {
-                    bar.set_active(&deactivate, false);
+                    bar.set_active(&deactivate, ControlActivation::Inactive);
                 }
             },
         );

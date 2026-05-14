@@ -14,6 +14,7 @@ use bevy_lagrange::describe_orbit_cam_controls;
 use super::config::CameraGuidance;
 use super::config::CameraGuidanceContent;
 use super::config::CameraGuidanceRow;
+use super::config::SourceVisibility;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(super) struct CameraGuidanceSnapshot {
@@ -21,7 +22,7 @@ pub(super) struct CameraGuidanceSnapshot {
     pub(super) mode_label:   String,
     pub(super) mode_value:   String,
     pub(super) rows:         Vec<CameraGuidanceRow>,
-    pub(super) show_sources: bool,
+    pub(super) show_sources: SourceVisibility,
 }
 
 pub(super) fn resolve_guidance_snapshot(

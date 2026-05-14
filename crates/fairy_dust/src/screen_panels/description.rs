@@ -19,6 +19,8 @@ use super::unlit_panel_material;
 use crate::theme::TITLE_COLOR;
 use crate::theme::TITLE_SIZE;
 
+const DESCRIPTION_CHILD_GAP: Px = Px(6.0);
+
 /// A static side panel that explains what an example demonstrates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DescriptionPanel {
@@ -92,7 +94,7 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
             El::new()
                 .width(Sizing::GROW)
                 .direction(Direction::TopToBottom)
-                .child_gap(Px(6.0)),
+                .child_gap(DESCRIPTION_CHILD_GAP),
             |builder| {
                 builder.text(panel.title.to_uppercase(), title);
                 for line in &panel.lines {

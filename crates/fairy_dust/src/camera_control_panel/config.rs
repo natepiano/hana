@@ -9,6 +9,15 @@ use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::describe_orbit_cam_controls;
 
+/// Whether active source labels are rendered in the guidance panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceVisibility {
+    /// Source labels are rendered.
+    Visible,
+    /// Source labels are hidden.
+    Hidden,
+}
+
 /// Data-driven camera control metadata shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
 /// examples.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -18,7 +27,7 @@ pub struct CameraGuidance {
     pub(super) mode_label:   Option<String>,
     pub(super) mode_value:   Option<String>,
     pub(super) content:      CameraGuidanceContent,
-    pub(super) show_sources: bool,
+    pub(super) show_sources: SourceVisibility,
 }
 
 impl Default for CameraGuidance {
@@ -35,7 +44,7 @@ impl CameraGuidance {
             mode_label:   None,
             mode_value:   None,
             content:      CameraGuidanceContent::Auto,
-            show_sources: true,
+            show_sources: SourceVisibility::Visible,
         }
     }
 
@@ -54,7 +63,7 @@ impl CameraGuidance {
             mode_label:   None,
             mode_value:   None,
             content:      CameraGuidanceContent::Rows(rows.into_iter().collect()),
-            show_sources: true,
+            show_sources: SourceVisibility::Visible,
         }
     }
 
@@ -74,7 +83,7 @@ impl CameraGuidance {
 
     /// Controls whether active source labels are rendered.
     #[must_use]
-    pub const fn with_source_flags(mut self, show_sources: bool) -> Self {
+    pub const fn with_source_flags(mut self, show_sources: SourceVisibility) -> Self {
         self.show_sources = show_sources;
         self
     }
@@ -99,7 +108,7 @@ impl CameraGuidance {
             content:      CameraGuidanceContent::Rows(
                 summary.rows.into_iter().map(Into::into).collect(),
             ),
-            show_sources: true,
+            show_sources: SourceVisibility::Visible,
         }
     }
 }

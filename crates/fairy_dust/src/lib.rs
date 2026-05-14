@@ -45,11 +45,11 @@ pub use builder::TitleBarBuilder;
 pub use builder::WithOrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
+pub use camera_control_panel::SourceVisibility;
 pub use primitive::Face;
 pub use primitive::cube_face_text;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
-pub use screen_panels::TitleBarControlState;
 
 mod brp_extras;
 mod builder;
