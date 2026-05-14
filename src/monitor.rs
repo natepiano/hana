@@ -53,7 +53,9 @@ pub(crate) fn update_current_monitor(
         let (monitor_info, source) = match (winit_result, position_result, existing) {
             (Some(info), _, _) => (info, MONITOR_SOURCE_WINIT),
             (_, Some(info), _) => (info, MONITOR_SOURCE_POSITION),
-            (_, _, Some(current_monitor)) => (current_monitor.monitor, MONITOR_SOURCE_EXISTING),
+            (_, _, Some(current_monitor)) => {
+                (current_monitor.monitor_info, MONITOR_SOURCE_EXISTING)
+            },
             _ => (*monitors.first(), MONITOR_SOURCE_FALLBACK),
         };
 
@@ -61,13 +63,13 @@ pub(crate) fn update_current_monitor(
         let effective_mode = compute_effective_mode(window, &monitor_info, &monitors);
 
         let new_current = CurrentMonitor {
-            monitor: monitor_info,
+            monitor_info,
             effective_mode,
         };
 
         // Only insert if changed to avoid unnecessary change detection triggers
         let changed = existing.is_none_or(|current_monitor| {
-            current_monitor.monitor.index != new_current.monitor.index
+            current_monitor.monitor_info.index != new_current.monitor_info.index
                 || current_monitor.effective_mode != new_current.effective_mode
         });
 

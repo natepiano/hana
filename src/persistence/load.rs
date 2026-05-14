@@ -13,8 +13,8 @@ use super::constants::RON_EXTENSION;
 use super::format;
 use super::format::WindowKey;
 #[cfg(test)]
-use super::state::SavedWindowMode;
-use super::state::WindowState;
+use super::window_state::SavedWindowMode;
+use super::window_state::WindowState;
 use crate::constants::STATE_FILE;
 
 /// Get the default state file path using the executable name.
@@ -73,13 +73,13 @@ mod tests {
 
     fn sample_state() -> WindowState {
         WindowState {
-            logical_position: Some((10, 20)),
-            logical_width:    800,
-            logical_height:   600,
-            scale:            DEFAULT_SCALE_FACTOR,
-            monitor:          0,
-            mode:             SavedWindowMode::Windowed,
-            app_name:         "test-app".to_string(),
+            logical_position:  Some((10, 20)),
+            logical_width:     800,
+            logical_height:    600,
+            scale:             DEFAULT_SCALE_FACTOR,
+            monitor:           0,
+            saved_window_mode: SavedWindowMode::Windowed,
+            app_name:          "test-app".to_string(),
         }
     }
 

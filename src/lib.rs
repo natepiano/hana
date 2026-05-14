@@ -89,9 +89,9 @@ impl WindowManagerPlugin {
     #[expect(clippy::expect_used, reason = "fail fast if path cannot be determined")]
     pub fn with_app_name(app_name: impl Into<String>) -> impl Plugin {
         WindowManagerPluginCustomPath {
-            path:        persistence::get_state_path_for_app(&app_name.into())
+            path:                       persistence::get_state_path_for_app(&app_name.into())
                 .expect("Could not determine state file path"),
-            persistence: ManagedWindowPersistence::default(),
+            managed_window_persistence: ManagedWindowPersistence::default(),
         }
     }
 
@@ -99,8 +99,8 @@ impl WindowManagerPlugin {
     #[must_use]
     pub fn with_path(path: impl Into<PathBuf>) -> impl Plugin {
         WindowManagerPluginCustomPath {
-            path:        path.into(),
-            persistence: ManagedWindowPersistence::default(),
+            path:                       path.into(),
+            managed_window_persistence: ManagedWindowPersistence::default(),
         }
     }
 
@@ -111,11 +111,11 @@ impl WindowManagerPlugin {
     /// Panics if the config directory cannot be determined.
     #[must_use]
     #[expect(clippy::expect_used, reason = "fail fast if path cannot be determined")]
-    pub fn with_persistence(persistence: ManagedWindowPersistence) -> impl Plugin {
+    pub fn with_persistence(managed_window_persistence: ManagedWindowPersistence) -> impl Plugin {
         WindowManagerPluginCustomPath {
             path: persistence::get_default_state_path()
                 .expect("Could not determine state file path"),
-            persistence,
+            managed_window_persistence,
         }
     }
 }
@@ -124,23 +124,23 @@ impl Plugin for WindowManagerPlugin {
     #[expect(clippy::expect_used, reason = "fail fast if path cannot be determined")]
     fn build(&self, app: &mut App) {
         app.add_plugins(WindowManagerPluginCustomPath {
-            path:        persistence::get_default_state_path()
+            path:                       persistence::get_default_state_path()
                 .expect("Could not determine state file path"),
-            persistence: ManagedWindowPersistence::default(),
+            managed_window_persistence: ManagedWindowPersistence::default(),
         });
     }
 }
 
 /// Plugin variant with a custom state file path.
 struct WindowManagerPluginCustomPath {
-    path:        PathBuf,
-    persistence: ManagedWindowPersistence,
+    path:                       PathBuf,
+    managed_window_persistence: ManagedWindowPersistence,
 }
 
 impl Plugin for WindowManagerPluginCustomPath {
     fn build(&self, app: &mut App) {
         let path = self.path.clone();
-        let persistence = self.persistence.clone();
+        let managed_window_persistence = self.managed_window_persistence.clone();
 
         let platform = Platform::detect();
         app.insert_resource(platform);
@@ -192,7 +192,7 @@ impl Plugin for WindowManagerPluginCustomPath {
                 path,
                 loaded_states: HashMap::new(),
             })
-            .insert_resource(persistence)
+            .insert_resource(managed_window_persistence)
             .init_resource::<ManagedWindowRegistry>()
             .add_observer(observers::on_managed_window_added)
             .add_observer(observers::on_managed_window_removed)

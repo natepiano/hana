@@ -30,10 +30,11 @@ pub(crate) fn on_set_borderless_fullscreen(
         return;
     };
     let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor:        *monitors.first(),
+        monitor_info:   *monitors.first(),
         effective_mode: window.mode,
     });
-    window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Index(monitor.monitor.index));
+    window.mode =
+        WindowMode::BorderlessFullscreen(MonitorSelection::Index(monitor.monitor_info.index));
 }
 
 pub(crate) fn on_set_windowed(_trigger: On<SetWindowed>, mut windows: Query<&mut Window>) {
@@ -55,20 +56,20 @@ pub(crate) fn on_set_exclusive_fullscreen(
         return;
     };
     let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor:        *monitors.first(),
+        monitor_info:   *monitors.first(),
         effective_mode: window.mode,
     });
 
     let video_modes: Vec<VideoMode> = bevy_monitors
         .iter()
         .find(|(_, bevy_monitor)| {
-            bevy_monitor.physical_position == monitor.monitor.physical_position
+            bevy_monitor.physical_position == monitor.monitor_info.physical_position
         })
         .map(|(_, bevy_monitor)| bevy_monitor.video_modes.clone())
         .unwrap_or_default();
 
     let selected_idx = selected
-        .get(monitor.monitor.index)
+        .get(monitor.monitor_info.index)
         .min(video_modes.len().saturating_sub(1));
     let video_mode_selection = video_modes
         .get(selected_idx)
@@ -77,7 +78,7 @@ pub(crate) fn on_set_exclusive_fullscreen(
         });
 
     window.mode = WindowMode::Fullscreen(
-        MonitorSelection::Index(monitor.monitor.index),
+        MonitorSelection::Index(monitor.monitor_info.index),
         video_mode_selection,
     );
 }

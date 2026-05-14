@@ -121,7 +121,7 @@ pub fn init_winit_info(
             );
 
             commands.entity(*window_entity).insert(CurrentMonitor {
-                monitor:        starting_monitor,
+                monitor_info:   starting_monitor,
                 effective_mode: WindowMode::Windowed,
             });
 
@@ -164,7 +164,7 @@ pub fn load_target_position(
         state.logical_height,
         state.scale,
         state.monitor,
-        state.mode
+        state.saved_window_mode
     );
 
     let starting_monitor_index = winit_info.starting_monitor_index;
@@ -177,7 +177,10 @@ pub fn load_target_position(
         state.logical_position,
         &monitors,
     );
-    if matches!(resolved.source, MonitorResolutionSource::FallbackToPrimary) {
+    if matches!(
+        resolved.monitor_resolution_source,
+        MonitorResolutionSource::FallbackToPrimary
+    ) {
         warn!(
             "[load_target_position] Target monitor {} not found, falling back to monitor 0",
             state.monitor
@@ -186,7 +189,7 @@ pub fn load_target_position(
 
     let target = target_position::compute_target_position(
         &state,
-        resolved.info,
+        resolved.monitor_info,
         resolved.logical_position,
         winit_info.physical_decoration(),
         starting_scale,
@@ -199,7 +202,7 @@ pub fn load_target_position(
     );
 
     #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
-    if matches!(state.mode, SavedWindowMode::Fullscreen { .. }) {
+    if matches!(state.saved_window_mode, SavedWindowMode::Fullscreen { .. }) {
         debug!(
             "[load_target_position] Windows exclusive fullscreen: showing window for surface creation"
         );
@@ -212,7 +215,7 @@ pub fn load_target_position(
     }
 
     let entity = *window_entity;
-    let is_fullscreen = state.mode.is_fullscreen();
+    let is_fullscreen = state.saved_window_mode.is_fullscreen();
     commands.entity(entity).insert(target);
 
     if is_fullscreen || !platform.needs_frame_compensation() {
@@ -238,7 +241,7 @@ pub fn move_to_target_monitor(
         return;
     };
 
-    if !target.mode.is_fullscreen() {
+    if !target.saved_window_mode.is_fullscreen() {
         return;
     }
 

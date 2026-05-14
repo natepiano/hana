@@ -43,9 +43,9 @@ use serde::Serialize;
 
 use super::constants::PERSISTED_STATE_VERSION_V1;
 #[cfg(test)]
-use super::state::SavedVideoMode;
-use super::state::SavedWindowMode;
-use super::state::WindowState;
+use super::window_state::SavedVideoMode;
+use super::window_state::SavedWindowMode;
+use super::window_state::WindowState;
 use crate::constants::CURRENT_STATE_VERSION;
 use crate::constants::DEFAULT_SCALE_FACTOR;
 use crate::constants::PRIMARY_WINDOW_KEY;
@@ -70,8 +70,10 @@ impl Display for WindowKey {
 /// One persisted key/state pair in v1.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct PersistedEntry {
-    pub key:   WindowKey,
-    pub state: WindowState,
+    #[serde(rename = "key")]
+    pub window_key:   WindowKey,
+    #[serde(rename = "state")]
+    pub window_state: WindowState,
 }
 
 /// Versioned persisted state format.
@@ -119,28 +121,29 @@ pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> 
 #[derive(Debug, Clone, Deserialize)]
 struct WindowStateV1 {
     #[serde(rename = "position")]
-    logical_position: Option<(i32, i32)>,
+    logical_position:  Option<(i32, i32)>,
     #[serde(rename = "width")]
-    logical_width:    u32,
+    logical_width:     u32,
     #[serde(rename = "height")]
-    logical_height:   u32,
-    monitor_index:    usize,
-    mode:             SavedWindowMode,
+    logical_height:    u32,
+    monitor_index:     usize,
+    #[serde(rename = "mode")]
+    saved_window_mode: SavedWindowMode,
     #[serde(default)]
-    app_name:         String,
+    app_name:          String,
 }
 
 impl WindowStateV1 {
     /// Convert to current `WindowState`, treating v1 values as logical (assumes scale 1.0).
     fn into_current(self) -> WindowState {
         WindowState {
-            logical_position: self.logical_position,
-            logical_width:    self.logical_width,
-            logical_height:   self.logical_height,
-            scale:            DEFAULT_SCALE_FACTOR,
-            monitor:          self.monitor_index,
-            mode:             self.mode,
-            app_name:         self.app_name,
+            logical_position:  self.logical_position,
+            logical_width:     self.logical_width,
+            logical_height:    self.logical_height,
+            scale:             DEFAULT_SCALE_FACTOR,
+            monitor:           self.monitor_index,
+            saved_window_mode: self.saved_window_mode,
+            app_name:          self.app_name,
         }
     }
 }
@@ -148,8 +151,10 @@ impl WindowStateV1 {
 /// v1 persisted entry (uses `WindowStateV1`).
 #[derive(Debug, Clone, Deserialize)]
 struct PersistedEntryV1 {
-    key:   WindowKey,
-    state: WindowStateV1,
+    #[serde(rename = "key")]
+    window_key:   WindowKey,
+    #[serde(rename = "state")]
+    window_state: WindowStateV1,
 }
 
 /// v1 persisted state wrapper.
@@ -175,12 +180,12 @@ fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
     let mut states = HashMap::with_capacity(v1.entries.len());
     for entry in v1.entries {
         if states
-            .insert(entry.key.clone(), entry.state.into_current())
+            .insert(entry.window_key.clone(), entry.window_state.into_current())
             .is_some()
         {
             warn!(
                 "[decode] Invalid persisted state: duplicate key \"{}\"",
-                entry.key
+                entry.window_key
             );
             return None;
         }
@@ -194,10 +199,13 @@ fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
     let persisted = from_str::<PersistedState>(contents).ok()?;
     let mut states = HashMap::with_capacity(persisted.entries.len());
     for entry in persisted.entries {
-        if states.insert(entry.key.clone(), entry.state).is_some() {
+        if states
+            .insert(entry.window_key.clone(), entry.window_state)
+            .is_some()
+        {
             warn!(
                 "[decode] Invalid persisted state: duplicate key \"{}\"",
-                entry.key
+                entry.window_key
             );
             return None;
         }
@@ -211,11 +219,11 @@ pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String,
     let mut entries: Vec<PersistedEntry> = states
         .iter()
         .map(|(key, state)| PersistedEntry {
-            key:   key.clone(),
-            state: state.clone(),
+            window_key:   key.clone(),
+            window_state: state.clone(),
         })
         .collect();
-    entries.sort_by(|a, b| a.key.cmp(&b.key));
+    entries.sort_by(|a, b| a.window_key.cmp(&b.window_key));
 
     let persisted = PersistedState {
         version: CURRENT_STATE_VERSION,
@@ -248,13 +256,13 @@ mod tests {
 
     fn sample_state() -> WindowState {
         WindowState {
-            logical_position: Some((10, 20)),
-            logical_width:    800,
-            logical_height:   600,
-            scale:            DEFAULT_SCALE_FACTOR,
-            monitor:          1,
-            mode:             SavedWindowMode::Windowed,
-            app_name:         "test-app".to_string(),
+            logical_position:  Some((10, 20)),
+            logical_width:     800,
+            logical_height:    600,
+            scale:             DEFAULT_SCALE_FACTOR,
+            monitor:           1,
+            saved_window_mode: SavedWindowMode::Windowed,
+            app_name:          "test-app".to_string(),
         }
     }
 
@@ -264,12 +272,12 @@ mod tests {
             version: CURRENT_STATE_VERSION,
             entries: vec![
                 PersistedEntry {
-                    key:   WindowKey::Primary,
-                    state: sample_state(),
+                    window_key:   WindowKey::Primary,
+                    window_state: sample_state(),
                 },
                 PersistedEntry {
-                    key:   WindowKey::Managed("primary".to_string()),
-                    state: WindowState {
+                    window_key:   WindowKey::Managed("primary".to_string()),
+                    window_state: WindowState {
                         logical_position: Some((30, 40)),
                         ..sample_state()
                     },
@@ -354,12 +362,12 @@ mod tests {
             version: CURRENT_STATE_VERSION,
             entries: vec![
                 PersistedEntry {
-                    key:   WindowKey::Primary,
-                    state: sample_state(),
+                    window_key:   WindowKey::Primary,
+                    window_state: sample_state(),
                 },
                 PersistedEntry {
-                    key:   WindowKey::Primary,
-                    state: sample_state(),
+                    window_key:   WindowKey::Primary,
+                    window_state: sample_state(),
                 },
             ],
         };
@@ -435,7 +443,7 @@ mod tests {
             assert_eq!(state.logical_height, 1200);
             assert!((state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
             assert_eq!(state.monitor, 0);
-            assert_eq!(state.mode, SavedWindowMode::Windowed);
+            assert_eq!(state.saved_window_mode, SavedWindowMode::Windowed);
             assert_eq!(state.app_name, "restore_window");
         }
 
@@ -451,7 +459,10 @@ mod tests {
             assert_eq!(state.logical_position, Some((0, 0)));
             assert_eq!(state.logical_width, 3456);
             assert_eq!(state.logical_height, 2234);
-            assert_eq!(state.mode, SavedWindowMode::BorderlessFullscreen);
+            assert_eq!(
+                state.saved_window_mode,
+                SavedWindowMode::BorderlessFullscreen
+            );
         }
 
         #[test]
@@ -467,7 +478,7 @@ mod tests {
             assert_eq!(state.logical_width, 1920);
             assert_eq!(state.logical_height, 1200);
             assert_eq!(
-                state.mode,
+                state.saved_window_mode,
                 SavedWindowMode::Fullscreen {
                     video_mode: Some(SavedVideoMode {
                         physical_size:           UVec2::new(1920, 1200),
@@ -507,13 +518,13 @@ mod tests {
             (
                 WindowKey::Managed("inspector".to_string()),
                 WindowState {
-                    logical_position: Some((100, 200)),
-                    logical_width:    1024,
-                    logical_height:   768,
-                    scale:            2.0,
-                    monitor:          0,
-                    mode:             SavedWindowMode::Windowed,
-                    app_name:         "test-app".to_string(),
+                    logical_position:  Some((100, 200)),
+                    logical_width:     1024,
+                    logical_height:    768,
+                    scale:             2.0,
+                    monitor:           0,
+                    saved_window_mode: SavedWindowMode::Windowed,
+                    app_name:          "test-app".to_string(),
                 },
             ),
         ]);

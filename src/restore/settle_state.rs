@@ -50,7 +50,7 @@ impl SettleState {
 struct SettleSnapshot {
     physical_position: Option<IVec2>,
     physical_size:     UVec2,
-    mode:              WindowMode,
+    window_mode:       WindowMode,
     monitor:           usize,
 }
 
@@ -77,9 +77,9 @@ fn build_actual_snapshot(
         SettleSnapshot {
             physical_position,
             physical_size,
-            mode: window.mode,
+            window_mode: window.mode,
             monitor: current_monitor.map_or(PRIMARY_MONITOR_INDEX, |current_monitor| {
-                current_monitor.monitor.index
+                current_monitor.monitor_info.index
             }),
         },
         f64::from(window.resolution.scale_factor()),
@@ -102,7 +102,7 @@ fn check_settle_matches(
     actual: &SettleSnapshot,
     platform: Platform,
 ) -> SettleComparison {
-    let is_fullscreen = target.mode.is_fullscreen();
+    let is_fullscreen = target.saved_window_mode.is_fullscreen();
     // Skip position comparison when:
     // - fullscreen (window fills monitor; saved position is irrelevant)
     // - no saved position (window was anchored via `WindowPosition::Centered`; the resulting `At`
@@ -113,7 +113,7 @@ fn check_settle_matches(
         || !platform.position_reliable_for_settle();
     let position_matches = skip_position || target_physical_position == actual.physical_position;
     let size_match = is_fullscreen || target_physical_size == actual.physical_size;
-    let mode_match = platform.modes_match(target_mode, actual.mode);
+    let mode_match = platform.modes_match(target_mode, actual.window_mode);
     let monitor_match = target_monitor == actual.monitor;
     SettleComparison {
         position: position_matches.into(),
@@ -235,7 +235,9 @@ pub fn check_restore_settling(
     platform: Res<Platform>,
 ) {
     for (entity, mut target, window, current_monitor) in &mut windows {
-        let target_mode = target.mode.to_window_mode(target.monitor_index);
+        let target_mode = target
+            .saved_window_mode
+            .to_window_mode(target.monitor_index);
         let target_physical_size = target.physical_size;
         let target_logical_size = target.logical_size;
         let target_monitor = target.monitor_index;
@@ -301,7 +303,7 @@ pub fn check_restore_settling(
             comparison.mode.is_match(),
             comparison.monitor.is_match(),
             current_snapshot.physical_size,
-            current_snapshot.mode,
+            current_snapshot.window_mode,
             current_snapshot.monitor,
         );
 
@@ -310,7 +312,7 @@ pub fn check_restore_settling(
             logical_position:  target_logical_position,
             physical_size:     target_physical_size,
             logical_size:      target_logical_size,
-            mode:              target_mode,
+            window_mode:       target_mode,
             monitor:           target_monitor,
             scale:             expected_scale,
         };
@@ -360,7 +362,7 @@ struct SettleTarget {
     logical_position:  Option<IVec2>,
     logical_size:      UVec2,
     physical_size:     UVec2,
-    mode:              WindowMode,
+    window_mode:       WindowMode,
     monitor:           usize,
     scale:             f64,
 }
@@ -387,7 +389,7 @@ fn emit_settle_success(
             logical_position: target.logical_position,
             logical_size: target.logical_size,
             physical_size: target.physical_size,
-            mode: target.mode,
+            mode: target.window_mode,
             monitor_index: target.monitor,
         })
         .remove::<TargetPosition>()
@@ -415,8 +417,8 @@ fn emit_settle_mismatch(
         actual.snapshot.physical_position,
         target.physical_size,
         actual.snapshot.physical_size,
-        target.mode,
-        actual.snapshot.mode,
+        target.window_mode,
+        actual.snapshot.window_mode,
         target.monitor,
         actual.snapshot.monitor,
         target.scale,
@@ -441,8 +443,8 @@ fn emit_settle_mismatch(
             actual_physical_size: actual.snapshot.physical_size,
             expected_logical_size: target.logical_size,
             actual_logical_size: actual.logical_size,
-            expected_mode: target.mode,
-            actual_mode: actual.snapshot.mode,
+            expected_mode: target.window_mode,
+            actual_mode: actual.snapshot.window_mode,
             expected_monitor: target.monitor,
             actual_monitor: actual.snapshot.monitor,
             expected_scale: target.scale,

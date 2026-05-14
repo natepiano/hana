@@ -697,7 +697,7 @@ pub(crate) fn update_primary_display(
             for (managed_window, managed, current_monitor) in &managed_query {
                 let monitor = current_monitor.map_or_else(
                     || *monitors.first(),
-                    |current_monitor| current_monitor.monitor,
+                    |current_monitor| current_monitor.monitor_info,
                 );
                 let position = match managed_window.position {
                     WindowPosition::At(managed_position) => {
@@ -749,7 +749,7 @@ pub(crate) fn update_secondary_displays(
             continue;
         };
         let monitor_info = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-            monitor:        *monitors.first(),
+            monitor_info:   *monitors.first(),
             effective_mode: window.mode,
         });
 

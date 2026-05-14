@@ -102,7 +102,7 @@ pub(crate) fn handle_window_mode_input(
     };
 
     let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor:        *monitors.first(),
+        monitor_info:   *monitors.first(),
         effective_mode: window.mode,
     });
 

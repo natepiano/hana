@@ -134,7 +134,7 @@ pub(crate) fn on_managed_window_added(
             logical_height: window.height().to_u32(),
             scale: monitor.scale,
             monitor: monitor.index,
-            mode: SavedWindowMode::Windowed,
+            saved_window_mode: SavedWindowMode::Windowed,
             app_name: String::new(),
         };
 
@@ -261,7 +261,7 @@ pub(crate) fn on_managed_window_load(
         saved_state.logical_height,
         saved_state.scale,
         saved_state.monitor,
-        saved_state.mode
+        saved_state.saved_window_mode
     );
 
     let Some(winit_info) = winit_info else {
@@ -322,7 +322,7 @@ fn restore_managed_window(
         monitors,
     );
     if matches!(
-        resolved.source,
+        resolved.monitor_resolution_source,
         restore::MonitorResolutionSource::FallbackToPrimary
     ) {
         warn!(
@@ -338,7 +338,7 @@ fn restore_managed_window(
     // target monitor.
     let target = restore::compute_target_position(
         saved_state,
-        resolved.info,
+        resolved.monitor_info,
         resolved.logical_position,
         physical_decoration,
         primary_scale,
@@ -355,13 +355,13 @@ fn restore_managed_window(
         target.physical_size.x,
         target.physical_size.y,
         target.monitor_index,
-        resolved.info.physical_position.x,
-        resolved.info.physical_position.y,
-        resolved.info.physical_size.x,
-        resolved.info.physical_size.y,
+        resolved.monitor_info.physical_position.x,
+        resolved.monitor_info.physical_position.y,
+        resolved.monitor_info.physical_size.x,
+        resolved.monitor_info.physical_size.y,
     );
 
-    let is_fullscreen = saved_state.mode.is_fullscreen();
+    let is_fullscreen = saved_state.saved_window_mode.is_fullscreen();
     commands.entity(entity).insert(target);
 
     // Insert `X11FrameCompensated` for platforms that don't need compensation.

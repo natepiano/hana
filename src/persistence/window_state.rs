@@ -104,19 +104,20 @@ impl From<&WindowMode> for SavedWindowMode {
 pub struct WindowState {
     /// Top-left corner of the window content area in logical pixels.
     /// `None` on Wayland where clients cannot access window position.
-    pub logical_position: Option<(i32, i32)>,
+    pub logical_position:  Option<(i32, i32)>,
     /// Content area width in logical pixels (excludes window decoration).
-    pub logical_width:    u32,
+    pub logical_width:     u32,
     /// Content area height in logical pixels (excludes window decoration).
-    pub logical_height:   u32,
+    pub logical_height:    u32,
     /// Scale factor of the monitor at save time (informational, not used during restore).
     #[serde(default = "default_monitor_scale", rename = "monitor_scale")]
-    pub scale:            f64,
+    pub scale:             f64,
     #[serde(rename = "monitor_index")]
-    pub monitor:          usize,
-    pub mode:             SavedWindowMode,
+    pub monitor:           usize,
+    #[serde(rename = "mode")]
+    pub saved_window_mode: SavedWindowMode,
     #[serde(default)]
-    pub app_name:         String,
+    pub app_name:          String,
 }
 
 /// Default monitor scale for deserialization of legacy files missing the field.

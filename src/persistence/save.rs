@@ -22,8 +22,8 @@ use bevy_kana::ToU32;
 use super::format;
 use super::format::WindowKey;
 use super::load;
-use super::state::SavedWindowMode;
-use super::state::WindowState;
+use super::window_state::SavedWindowMode;
+use super::window_state::WindowState;
 use crate::ManagedWindow;
 use crate::ManagedWindowPersistence;
 use crate::config::RestoreWindowConfig;
@@ -57,7 +57,7 @@ pub fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {
 pub struct CachedWindowState {
     physical_position: Option<IVec2>,
     logical_size:      UVec2,
-    mode:              Option<SavedWindowMode>,
+    saved_window_mode: Option<SavedWindowMode>,
     monitor:           Option<usize>,
 }
 
@@ -125,7 +125,7 @@ pub fn save_active_window_state(
             },
             |m| (m.index, m.scale),
         );
-        let mode: SavedWindowMode =
+        let saved_window_mode: SavedWindowMode =
             existing_monitor.map_or_else(|| (&window.mode).into(), |m| (&m.effective_mode).into());
         let logical_position = physical_position.map(|p| {
             let logical_x = (f64::from(p.x) / monitor_scale).round().to_i32();
@@ -140,7 +140,7 @@ pub fn save_active_window_state(
                 logical_height: window.resolution.height().to_u32(),
                 scale: monitor_scale,
                 monitor: monitor_index,
-                mode,
+                saved_window_mode,
                 app_name: app_name.clone(),
             },
         );
@@ -184,7 +184,7 @@ fn persist_remember_all(
             continue;
         };
 
-        if let Some(mode) = &entry.mode {
+        if let Some(saved_window_mode) = &entry.saved_window_mode {
             let monitor_index = entry.monitor.unwrap_or(PRIMARY_MONITOR_INDEX);
             let monitor_scale = monitors
                 .by_index(monitor_index)
@@ -202,7 +202,7 @@ fn persist_remember_all(
                     logical_height: entry.logical_size.y,
                     scale: monitor_scale,
                     monitor: monitor_index,
-                    mode: mode.clone(),
+                    saved_window_mode: saved_window_mode.clone(),
                     app_name: app_name.clone(),
                 },
             );
@@ -280,7 +280,7 @@ pub fn save_window_state(
             },
             |m| (m.index, m.scale),
         );
-        let mode: SavedWindowMode =
+        let saved_window_mode: SavedWindowMode =
             existing_monitor.map_or_else(|| (&window.mode).into(), |m| (&m.effective_mode).into());
 
         let entry = cached.entry(window_entity).or_default();
@@ -288,14 +288,14 @@ pub fn save_window_state(
         // Only save if position, size, or mode actually changed
         let position_changed = entry.physical_position != physical_position;
         let size_changed = entry.logical_size != UVec2::new(logical_width, logical_height);
-        let mode_changed = entry.mode.as_ref() != Some(&mode);
+        let mode_changed = entry.saved_window_mode.as_ref() != Some(&saved_window_mode);
         let monitor_changed = entry.monitor != Some(monitor_index);
         if !position_changed && !size_changed && !mode_changed && !monitor_changed {
             continue;
         }
 
         debug!(
-            "[save_window_state] [{key}] SAVE DETAIL: position={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} resolution_scale={resolution_scale} monitor={monitor_index} mode={mode:?}",
+            "[save_window_state] [{key}] SAVE DETAIL: position={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} resolution_scale={resolution_scale} monitor={monitor_index} mode={saved_window_mode:?}",
         );
 
         // Log monitor transitions with detailed info
@@ -313,13 +313,13 @@ pub fn save_window_state(
         // Update cache
         entry.physical_position = physical_position;
         entry.logical_size = UVec2::new(logical_width, logical_height);
-        entry.mode = Some(mode.clone());
+        entry.saved_window_mode = Some(saved_window_mode.clone());
         entry.monitor = Some(monitor_index);
 
         state_write = StateWrite::Needed;
 
         debug!(
-            "[save_window_state] [{key}] position={physical_position:?} logical={logical_width}x{logical_height} physical={physical_width}x{physical_height} monitor={monitor_index} scale={monitor_scale} mode={mode:?}",
+            "[save_window_state] [{key}] position={physical_position:?} logical={logical_width}x{logical_height} physical={physical_width}x{physical_height} monitor={monitor_index} scale={monitor_scale} mode={saved_window_mode:?}",
         );
     }
 

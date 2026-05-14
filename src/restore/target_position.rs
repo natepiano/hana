@@ -28,9 +28,9 @@ pub enum MonitorResolutionSource {
 }
 
 pub struct ResolvedMonitor<'a> {
-    pub info:             &'a MonitorInfo,
-    pub logical_position: Option<(i32, i32)>,
-    pub source:           MonitorResolutionSource,
+    pub monitor_info:              &'a MonitorInfo,
+    pub logical_position:          Option<(i32, i32)>,
+    pub monitor_resolution_source: MonitorResolutionSource,
 }
 
 /// Resolve the target monitor from saved state and return an adjusted saved position.
@@ -42,14 +42,14 @@ pub fn resolve_target_monitor_and_position(
 ) -> ResolvedMonitor<'_> {
     monitors.by_index(saved_monitor_index).map_or_else(
         || ResolvedMonitor {
-            info:             monitors.first(),
-            logical_position: None,
-            source:           MonitorResolutionSource::FallbackToPrimary,
+            monitor_info:              monitors.first(),
+            logical_position:          None,
+            monitor_resolution_source: MonitorResolutionSource::FallbackToPrimary,
         },
-        |info| ResolvedMonitor {
-            info,
+        |monitor_info| ResolvedMonitor {
+            monitor_info,
             logical_position: logical_saved_position,
-            source: MonitorResolutionSource::Requested,
+            monitor_resolution_source: MonitorResolutionSource::Requested,
         },
     )
 }
@@ -188,7 +188,7 @@ pub struct TargetPosition {
     /// Strategy for handling scale factor differences between monitors.
     pub scale_strategy:      MonitorScaleStrategy,
     /// Window mode to restore.
-    pub mode:                SavedWindowMode,
+    pub saved_window_mode:   SavedWindowMode,
     /// Target monitor index for fullscreen restore.
     /// On non-Wayland platforms, this could be derived from position, but Wayland
     /// doesn't provide window position, so we store it explicitly.
@@ -284,10 +284,10 @@ pub fn compute_target_position(
         target_scale,
         starting_scale,
         scale_strategy: platform.scale_strategy(starting_scale, target_scale),
-        mode: saved_state.mode.clone(),
+        saved_window_mode: saved_state.saved_window_mode.clone(),
         monitor_index: target_info.index,
         fullscreen_state: saved_state
-            .mode
+            .saved_window_mode
             .is_fullscreen()
             .then_some(platform.fullscreen_restore_state()),
         settle_state: None,
@@ -342,17 +342,17 @@ fn clamp_position_to_monitor(
 
 /// Apply the initial window move to the target monitor.
 fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
-    if target.mode.is_fullscreen() {
+    if target.saved_window_mode.is_fullscreen() {
         if let Some(physical_position) = target.physical_position {
             debug!(
                 "[apply_initial_move] Moving to target position {:?} for fullscreen mode {:?}",
-                physical_position, target.mode
+                physical_position, target.saved_window_mode
             );
             window.position = WindowPosition::At(physical_position);
         } else {
             debug!(
                 "[apply_initial_move] No saved position, fullscreen mode {:?} targets monitor {} via WindowMode",
-                target.mode, target.monitor_index
+                target.saved_window_mode, target.monitor_index
             );
         }
         return;
@@ -605,19 +605,19 @@ fn apply_fullscreen_restore(target: &TargetPosition, window: &mut Window, platfo
     let monitor_index = target.monitor_index;
 
     let window_mode = if platform.exclusive_fullscreen_fallback()
-        && matches!(target.mode, SavedWindowMode::Fullscreen { .. })
+        && matches!(target.saved_window_mode, SavedWindowMode::Fullscreen { .. })
     {
         warn!(
             "Exclusive fullscreen is not supported on Wayland, restoring as BorderlessFullscreen"
         );
         WindowMode::BorderlessFullscreen(MonitorSelection::Index(monitor_index))
     } else {
-        target.mode.to_window_mode(monitor_index)
+        target.saved_window_mode.to_window_mode(monitor_index)
     };
 
     debug!(
         "[Restore] Applying fullscreen mode {:?} on monitor {} -> WindowMode::{:?}",
-        target.mode, monitor_index, window_mode
+        target.saved_window_mode, monitor_index, window_mode
     );
     debug!(
         "[Restore] Current window state: position={:?} mode={:?}",
@@ -632,10 +632,10 @@ fn try_apply_restore(
     window: &mut Window,
     platform: Platform,
 ) -> RestoreStatus {
-    if target.mode.is_fullscreen() {
+    if target.saved_window_mode.is_fullscreen() {
         debug!(
             "[try_apply_restore] fullscreen: mode={:?} target_monitor={} current_physical={}x{} current_mode={:?} current_position={:?}",
-            target.mode,
+            target.saved_window_mode,
             target.monitor_index,
             window.physical_width(),
             window.physical_height(),

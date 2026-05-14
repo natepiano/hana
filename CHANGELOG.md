@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Breaking:** `CurrentMonitor.monitor` field renamed to `monitor_info`.
 - **Breaking:** `WindowRestored` event fields renamed to explicitly qualify pixel units: `position` → `physical_position`, `size` → `physical_size`. `logical_size` unchanged.
 - **Breaking:** `WindowRestoreMismatch` event fields renamed: `expected_position`/`actual_position` → `expected_physical_position`/`actual_physical_position`; `expected_size`/`actual_size` → `expected_physical_size`/`actual_physical_size`. `expected_logical_size`/`actual_logical_size` unchanged.
 - **Breaking:** `TargetPosition` component fields reshaped (visible via BRP reflection): `position` → `physical_position` + new `logical_position`; `width`/`height`/`logical_width`/`logical_height` → `physical_size`/`logical_size` (`UVec2` pairs); `target_monitor_index` → `monitor_index`.

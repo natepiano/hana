@@ -64,7 +64,7 @@ pub struct Monitors {
 #[reflect(Component)]
 pub struct CurrentMonitor {
     /// The monitor this window is currently on.
-    pub monitor:        MonitorInfo,
+    pub monitor_info:   MonitorInfo,
     /// The effective window mode, accounting for OS-level fullscreen changes.
     pub effective_mode: WindowMode,
 }
@@ -72,7 +72,7 @@ pub struct CurrentMonitor {
 impl Deref for CurrentMonitor {
     type Target = MonitorInfo;
 
-    fn deref(&self) -> &Self::Target { &self.monitor }
+    fn deref(&self) -> &Self::Target { &self.monitor_info }
 }
 
 impl Monitors {
@@ -240,8 +240,8 @@ fn update_monitors(
                 "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
                 frame_count.0,
                 monitors_resource.list.len(),
-                current_monitor.monitor.index,
-                current_monitor.monitor.scale,
+                current_monitor.monitor_info.index,
+                current_monitor.monitor_info.scale,
             );
         } else {
             debug!(
