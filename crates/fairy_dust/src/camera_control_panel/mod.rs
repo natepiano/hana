@@ -37,7 +37,7 @@ struct CameraGuidancePanel {
     camera: Entity,
 }
 
-pub fn install(app: &mut App) {
+pub(crate) fn install(app: &mut App) {
     ensure_panel_plugins(app);
     app.add_systems(
         PostUpdate,
