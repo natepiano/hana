@@ -16,8 +16,8 @@ use super::BODY_SIZE;
 use super::DESCRIPTION_WIDTH;
 use super::panel_frame;
 use super::unlit_panel_material;
-use crate::ui::theme::TITLE_COLOR;
-use crate::ui::theme::TITLE_SIZE;
+use crate::theme::TITLE_COLOR;
+use crate::theme::TITLE_SIZE;
 
 /// A static side panel that explains what an example demonstrates.
 #[derive(Clone, Debug, PartialEq, Eq)]

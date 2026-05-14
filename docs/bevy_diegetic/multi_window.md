@@ -374,12 +374,34 @@ hierarchy convention that other crates might not expect.
 
 ### Phase 0 — capture the baseline
 
-- Run every `bevy_diegetic` example. Confirm screen-space panels render
-  correctly. Capture screenshots into `/tmp/multi_window_phase0/` keyed
-  by example name. These are the "no regression" reference.
-- Run `cargo nextest run -p bevy_diegetic`. Note any pre-existing failures.
+Test baseline (already recorded): `cargo nextest run -p bevy_diegetic`
+on `main` at commit `990b3f2` — **189 passed, 1 skipped, 0 failed**.
+Phase 1+ keeps this number stable.
 
-**Exit:** baseline captured; we know what "good" looks like.
+Examples at risk of visual regression (the only ones that use
+screen-space panels — directly or via fairy_dust's `TitleBar`):
+
+- `screen_space.rs` — canonical screen-space demo
+- `panel_rendering.rs`
+- `world_text.rs`
+- `sdf.rs`
+- `typography.rs`
+- `units.rs`
+- `text_alpha.rs`
+- `taa_shimmer.rs`
+
+The other 11 examples (`atlas_pages`, `dimensions`, `font_features`,
+`font_loading`, `hue_offset`, `paper_sizes`, `preload_text`, `shadows`,
+`side_by_side`, `sizes`, `text_stress`) are pure world-space and not
+affected by anything in this plan.
+
+Baseline-capture strategy: this work happens on a worktree
+(`../bevy_hana_multicam`, branch `feat/multicam`). The `main` checkout
+at `/Users/natemccoy/rust/bevy_hana` stays clean and is used to launch
+any of the 8 at-risk examples on demand when a phase needs a visual
+comparison. No screenshots are captured up front.
+
+**Exit:** baseline numbers recorded above; at-risk example list known.
 
 ### Phase 1 — add the `window` field, default `Primary`
 
@@ -488,16 +510,19 @@ consumers like `viewports_windows.rs`.
 
 ## Test plan summary
 
-1. Phase 0 captures screenshots of every `bevy_diegetic` example,
-   retained until Phase 5 ships.
-2. After each phase: `cargo nextest run -p bevy_diegetic` clean, plus
-   manual side-by-side comparison of the affected examples against the
-   Phase 0 screenshots — no automated visual diff tool is required.
-3. New unit tests added in phases 2 and 3 above.
+1. Phase 0 baseline: `cargo nextest run -p bevy_diegetic` clean at
+   189 / 1 skipped / 0 failed on commit `990b3f2`. The 8 at-risk
+   examples are listed in Phase 0 above.
+2. After each phase: `cargo nextest run -p bevy_diegetic` clean. For
+   any phase that could affect rendering, launch the relevant at-risk
+   example from the `main` checkout (`/Users/natemccoy/rust/bevy_hana`)
+   and side-by-side against the same example built from
+   `feat/multicam`. No automated visual diff tool.
+3. New unit tests added in phases 2 and 3.
 4. New `two_window_panels.rs` example added in phase 5.
-5. Final check: `cargo build --workspace` and re-run a representative
-   downstream example (`zoom_to_fit`, `world_text`) to confirm nothing
-   downstream broke.
+5. Final check: `cargo build --workspace` and re-run `zoom_to_fit`
+   plus a screen-panel-using example (e.g. `world_text`) to confirm
+   nothing downstream broke.
 
 ## Files touched
 

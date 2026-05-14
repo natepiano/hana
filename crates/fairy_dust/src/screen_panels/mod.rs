@@ -14,13 +14,13 @@ use bevy_diegetic::default_panel_material;
 
 use crate::camera_home::CameraHomeConfig;
 use crate::ensure_plugin;
-use crate::ui::theme::BORDER;
-use crate::ui::theme::BORDER_ACCENT;
-use crate::ui::theme::BORDER_DIM;
-use crate::ui::theme::FRAME_PAD;
-use crate::ui::theme::INNER_BG;
-use crate::ui::theme::INNER_RADIUS;
-use crate::ui::theme::RADIUS;
+use crate::theme::BORDER;
+use crate::theme::BORDER_ACCENT;
+use crate::theme::BORDER_DIM;
+use crate::theme::FRAME_PAD;
+use crate::theme::INNER_BG;
+use crate::theme::INNER_RADIUS;
+use crate::theme::RADIUS;
 
 mod description;
 mod title_bar;
@@ -41,14 +41,14 @@ const CONTROL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 const CONTROL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
 
-pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
+pub fn install_description(app: &mut App, panel: DescriptionPanel) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(Startup, move |mut commands: Commands| {
         description::spawn_description_panel(&mut commands, &panel);
     });
 }
 
-pub(crate) fn install_title_bar(app: &mut App, bar: TitleBar) {
+pub fn install_title_bar(app: &mut App, bar: TitleBar) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(PostUpdate, title_bar::refresh_changed_title_bar);
     app.add_systems(

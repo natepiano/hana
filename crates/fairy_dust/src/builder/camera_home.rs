@@ -16,8 +16,8 @@ use super::SprinkleBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::camera_home;
-use crate::ui::screen_panels::DescriptionPanel;
-use crate::ui::screen_panels::TitleBar;
+use crate::screen_panels::DescriptionPanel;
+use crate::screen_panels::TitleBar;
 
 impl<S> CameraHomeBuilder<S> {
     /// Sets the home pose yaw in radians.

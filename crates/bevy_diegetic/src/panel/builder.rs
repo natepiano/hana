@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::window::WindowRef;
 use sealed::CanBuild;
 
 use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
@@ -147,6 +148,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
                     height:        Sizing::fixed(Px(0.0)),
                     camera_order:  DEFAULT_SCREEN_SPACE_CAMERA_ORDER,
                     render_layers: RenderLayers::layer(DEFAULT_SCREEN_SPACE_RENDER_LAYER),
+                    window:        WindowRef::Primary,
                 },
                 ..BuilderData::default()
             },
@@ -449,6 +451,21 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
             *render_layers = layers;
         }
         self
+    }
+
+    /// Pins the panel to a specific window. Default: [`WindowRef::Primary`].
+    #[must_use]
+    pub const fn window(mut self, window: WindowRef) -> Self {
+        if let CoordinateSpace::Screen { window: w, .. } = &mut self.data.coordinate_space {
+            *w = window;
+        }
+        self
+    }
+
+    /// Sugar for [`Self::window`] with [`WindowRef::Entity`].
+    #[must_use]
+    pub const fn window_entity(self, entity: Entity) -> Self {
+        self.window(WindowRef::Entity(entity))
     }
 }
 

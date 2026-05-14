@@ -22,8 +22,8 @@ use super::panel_frame;
 use super::unlit_panel_material;
 use crate::camera_home;
 use crate::camera_home::CameraHomeConfig;
-use crate::ui::theme::TITLE_COLOR;
-use crate::ui::theme::TITLE_SIZE;
+use crate::theme::TITLE_COLOR;
+use crate::theme::TITLE_SIZE;
 
 /// A compact top-left title bar for example-level controls.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]

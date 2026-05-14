@@ -18,19 +18,17 @@ use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamInteractionKind;
 
 use super::display::CameraGuidanceDisplay;
+use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
-use super::snapshot::kind_label;
-use super::snapshot::row_active;
-use super::snapshot::source_label;
-use crate::ui::theme::BORDER;
-use crate::ui::theme::BORDER_ACCENT;
-use crate::ui::theme::BORDER_DIM;
-use crate::ui::theme::FRAME_PAD;
-use crate::ui::theme::INNER_BG;
-use crate::ui::theme::INNER_RADIUS;
-use crate::ui::theme::RADIUS;
-use crate::ui::theme::TITLE_COLOR;
-use crate::ui::theme::TITLE_SIZE;
+use crate::theme::BORDER;
+use crate::theme::BORDER_ACCENT;
+use crate::theme::BORDER_DIM;
+use crate::theme::FRAME_PAD;
+use crate::theme::INNER_BG;
+use crate::theme::INNER_RADIUS;
+use crate::theme::RADIUS;
+use crate::theme::TITLE_COLOR;
+use crate::theme::TITLE_SIZE;
 
 const HEADER_SIZE: Pt = Pt(12.0);
 const LABEL_SIZE: Pt = Pt(11.0);
@@ -115,7 +113,7 @@ fn build_guidance_layout(
                                 .height(Sizing::FIT)
                                 .child_align_x(AlignX::Center),
                             |builder| {
-                                builder.text(source_label(display.all_sources()), source);
+                                builder.text(snapshot::source_label(display.all_sources()), source);
                             },
                         );
                     }
@@ -173,7 +171,9 @@ fn build_guidance_group(
         return;
     }
 
-    let group_active = rows.iter().any(|row| row_active(row, active_sources));
+    let group_active = rows
+        .iter()
+        .any(|row| snapshot::row_active(row, active_sources));
     let action_style = if group_active { active } else { label };
 
     builder.with(
@@ -192,7 +192,7 @@ fn build_guidance_group(
                     .child_gap(Px(TABLE_ROW_GAP)),
                 |builder| {
                     for row in rows {
-                        let binding_style = if row_active(row, active_sources) {
+                        let binding_style = if snapshot::row_active(row, active_sources) {
                             active
                         } else {
                             label
@@ -207,7 +207,7 @@ fn build_guidance_group(
                     .width(Sizing::fit_min(ACTION_COLUMN_MIN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(kind_label(kind), action_style.clone());
+                    builder.text(snapshot::kind_label(kind), action_style.clone());
                 },
             );
         },

@@ -115,3 +115,6 @@ name = "screen_space"
 
 [[example]]
 name = "taa_shimmer"
+
+[[example]]
+name = "two_window_panels"

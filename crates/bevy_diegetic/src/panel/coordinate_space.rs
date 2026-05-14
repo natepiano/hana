@@ -7,6 +7,7 @@
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::window::WindowRef;
 
 use crate::layout::Dimension;
 use crate::layout::Sizing;
@@ -94,6 +95,9 @@ pub enum CoordinateSpace {
         /// Render layers for isolation from the scene camera.
         /// Default: `RenderLayers::layer(31)`.
         render_layers: RenderLayers,
+        /// Window this panel renders into. Defaults to `WindowRef::Primary`.
+        /// Use `WindowRef::Entity(..)` to pin a panel to a specific window.
+        window:        WindowRef,
     },
 }
 

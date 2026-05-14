@@ -16,8 +16,8 @@ use super::WithOrbitCam;
 use crate::primitive;
 use crate::primitive::Face;
 use crate::primitive::FaceTextSpec;
-use crate::ui::screen_panels::DescriptionPanel;
-use crate::ui::screen_panels::TitleBar;
+use crate::screen_panels::DescriptionPanel;
+use crate::screen_panels::TitleBar;
 
 impl<S> PrimitiveBuilder<S> {
     /// Sets the primitive size.

@@ -16,6 +16,7 @@ use super::SprinkleBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::brp_extras;
+use crate::camera_control_panel;
 use crate::camera_home;
 use crate::camera_home::CameraHomeConfig;
 use crate::lighting;
@@ -23,11 +24,10 @@ use crate::orbit_cam;
 use crate::primitive::PrimitiveConfig;
 use crate::restart;
 use crate::save_window_position;
+use crate::screen_panels;
+use crate::screen_panels::DescriptionPanel;
+use crate::screen_panels::TitleBar;
 use crate::transparency;
-use crate::ui::camera_control_panel;
-use crate::ui::screen_panels;
-use crate::ui::screen_panels::DescriptionPanel;
-use crate::ui::screen_panels::TitleBar;
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.

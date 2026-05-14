@@ -43,24 +43,26 @@ pub use builder::PrimitiveBuilder;
 pub use builder::SprinkleBuilder;
 pub use builder::TitleBarBuilder;
 pub use builder::WithOrbitCam;
+pub use camera_control_panel::CameraGuidance;
+pub use camera_control_panel::CameraGuidanceRow;
 pub use primitive::Face;
 pub use primitive::cube_face_text;
-pub use ui::camera_control_panel::CameraGuidance;
-pub use ui::camera_control_panel::CameraGuidanceRow;
-pub use ui::screen_panels::DescriptionPanel;
-pub use ui::screen_panels::TitleBar;
-pub use ui::screen_panels::TitleBarControlState;
+pub use screen_panels::DescriptionPanel;
+pub use screen_panels::TitleBar;
+pub use screen_panels::TitleBarControlState;
 
 mod brp_extras;
 mod builder;
+mod camera_control_panel;
 mod camera_home;
 mod lighting;
 mod orbit_cam;
 mod primitive;
 mod restart;
 mod save_window_position;
+mod screen_panels;
+mod theme;
 mod transparency;
-mod ui;
 
 /// Default `tracing` filter applied by [`sprinkle_example`].
 ///

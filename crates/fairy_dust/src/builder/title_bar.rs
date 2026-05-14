@@ -13,9 +13,9 @@ use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
-use crate::ui::screen_panels::DescriptionPanel;
-use crate::ui::screen_panels::TitleBar;
-use crate::ui::screen_panels::TitleBarControlState;
+use crate::screen_panels::DescriptionPanel;
+use crate::screen_panels::TitleBar;
+use crate::screen_panels::TitleBarControlState;
 
 impl<S> TitleBarBuilder<S> {
     /// Toggles `chip` active on `Begin` and inactive on `End` for any event
@@ -128,7 +128,7 @@ impl<S> TitleBarBuilder<S> {
 
     /// Finalizes the title bar and installs another title bar.
     #[must_use]
-    pub fn with_title_bar(self, title_bar: TitleBar) -> TitleBarBuilder<S> {
+    pub fn with_title_bar(self, title_bar: TitleBar) -> Self {
         self.finish().with_title_bar(title_bar)
     }
 

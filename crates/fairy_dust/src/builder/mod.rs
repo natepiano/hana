@@ -56,9 +56,11 @@ pub struct CameraHomeBuilder<S> {
 }
 
 /// Builder returned by [`SprinkleBuilder::with_title_bar`] for wiring chip
-/// highlights to event lifecycles. Chip-wiring methods are only reachable
-/// through this type, so calling [`Self::wire_chip_to_events`] is a compile
-/// error when no title bar has been installed.
+/// highlights to event lifecycles.
+///
+/// Chip-wiring methods are only reachable through this type, so calling
+/// [`Self::wire_chip_to_events`] is a compile error when no title bar has
+/// been installed.
 ///
 /// Calling a non-wiring builder method finalizes the title bar configuration
 /// and returns to the normal [`SprinkleBuilder`] chain.
