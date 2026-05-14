@@ -17,6 +17,8 @@ use crate::OrbitCam;
 use crate::egui::BlockOnEguiFocus;
 #[cfg(feature = "bevy_egui")]
 use crate::egui::EguiWantsFocus;
+#[cfg(feature = "bevy_egui")]
+use crate::egui::FocusFrame;
 use crate::system_sets::OrbitCamInputInternalSet;
 
 /// Camera input routing mode.
@@ -196,7 +198,28 @@ impl OrbitCamInputBlockers {
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct OrbitCamInputContextGated {
-    pub(crate) allowed: bool,
+    pub(crate) context_gate: ContextGate,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ContextGate {
+    Allowed,
+    #[default]
+    Blocked,
+}
+
+impl ContextGate {
+    pub(crate) const fn is_allowed(self) -> bool { matches!(self, Self::Allowed) }
+}
+
+impl From<bool> for ContextGate {
+    fn from(allowed: bool) -> Self {
+        if allowed {
+            Self::Allowed
+        } else {
+            Self::Blocked
+        }
+    }
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
@@ -301,7 +324,7 @@ fn resolve_camera_input_routing(world: &mut World) {
         world.entity_mut(snapshot.entity).insert((
             blockers,
             OrbitCamInputContextGated {
-                allowed: !blockers.is_blocked(),
+                context_gate: ContextGate::from(!blockers.is_blocked()),
             },
         ));
         resolved.metrics.insert(snapshot.entity, snapshot.metrics);
@@ -375,7 +398,7 @@ fn collect_camera_snapshots_impl(
                     move_list,
                     interrupt,
                     explicit_metrics,
-                    false,
+                    EguiBlockState::Open,
                     windows,
                 )
             },
@@ -388,9 +411,9 @@ fn collect_camera_snapshots_impl(
     world: &mut World,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> Vec<CameraRoutingSnapshot> {
-    let egui_blocks_all = world
-        .get_resource::<EguiWantsFocus>()
-        .is_some_and(|focus| focus.prev || focus.curr);
+    let egui_blocks_all = world.get_resource::<EguiWantsFocus>().is_some_and(|focus| {
+        matches!(focus.previous, FocusFrame::Wants) || matches!(focus.current, FocusFrame::Wants)
+    });
     let mut query = world.query_filtered::<(
         Entity,
         &Camera,
@@ -426,12 +449,22 @@ fn collect_camera_snapshots_impl(
                     move_list,
                     interrupt,
                     explicit_metrics,
-                    egui_blocks_all && block_on_egui.is_some(),
+                    EguiBlockState::from(egui_blocks_all && block_on_egui.is_some()),
                     windows,
                 )
             },
         )
         .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EguiBlockState {
+    Blocked,
+    Open,
+}
+
+impl From<bool> for EguiBlockState {
+    fn from(blocked: bool) -> Self { if blocked { Self::Blocked } else { Self::Open } }
 }
 
 fn camera_snapshot(
@@ -443,7 +476,7 @@ fn camera_snapshot(
     move_list: Option<&CameraMoveList>,
     interrupt: Option<&CameraInputInterruptBehavior>,
     explicit_metrics: Option<&CameraInputSurfaceMetrics>,
-    egui_blocked: bool,
+    egui_block_state: EguiBlockState,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> CameraRoutingSnapshot {
     let window = window_snapshot(target, windows);
@@ -457,7 +490,10 @@ fn camera_snapshot(
     flags.set(CameraRoutingSnapshotFlags::ACTIVE, camera.is_active);
     flags.set(CameraRoutingSnapshotFlags::MANUAL, manual.is_some());
     flags.set(CameraRoutingSnapshotFlags::DISABLED, disabled.is_some());
-    flags.set(CameraRoutingSnapshotFlags::EGUI_BLOCKED, egui_blocked);
+    flags.set(
+        CameraRoutingSnapshotFlags::EGUI_BLOCKED,
+        matches!(egui_block_state, EguiBlockState::Blocked),
+    );
     flags.set(CameraRoutingSnapshotFlags::ANIMATION_IGNORE, animation);
     flags.set(CameraRoutingSnapshotFlags::CURSOR_HIT, cursor_hit);
 
@@ -771,8 +807,8 @@ mod tests {
         assert_eq!(
             app.world()
                 .get::<OrbitCamInputContextGated>(camera)
-                .map(|gated| gated.allowed),
-            Some(false)
+                .map(|gated| gated.context_gate),
+            Some(ContextGate::Blocked)
         );
     }
 }

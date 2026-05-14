@@ -42,7 +42,9 @@ use super::OrbitCamTouchBinding;
 use super::OrbitCamTrackpadScroll;
 use super::OrbitCamZoomCoarseAction;
 use super::OrbitCamZoomSmoothAction;
+use super::PinchGestureZoom;
 use super::ResolvedOrbitCamInputRoute;
+use super::WheelZoomPolarity;
 use super::ZoomDirection;
 use super::actions::OrbitCamAdapterOrbitAction;
 use super::actions::OrbitCamAdapterPanAction;
@@ -456,8 +458,9 @@ fn apply_context_gating(world: &mut World) {
     let updates = query
         .iter(world)
         .filter_map(|(camera, gated, current)| {
-            let desired = ContextActivity::<OrbitCamInputContext>::new(gated.allowed);
-            if current.is_none_or(|current| **current != gated.allowed) {
+            let allowed = gated.context_gate.is_allowed();
+            let desired = ContextActivity::<OrbitCamInputContext>::new(allowed);
+            if current.is_none_or(|current| **current != allowed) {
                 Some((camera, desired))
             } else {
                 None
@@ -523,7 +526,7 @@ fn inject_adapter_actions(
             || route
                 .blockers_for(camera)
                 .is_some_and(super::routing::OrbitCamInputBlockers::is_blocked)
-            || gated.is_some_and(|gated| !gated.allowed)
+            || gated.is_some_and(|gated| !gated.context_gate.is_allowed())
         {
             clear_adapter_mocks(actions, &mut mocks);
             continue;
@@ -589,7 +592,7 @@ fn apply_mouse_wheel_zoom_contribution(
         return;
     }
 
-    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings, mouse_wheel_zoom.inverted);
+    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings, mouse_wheel_zoom.polarity);
     contributions.sources.zoom_coarse = contributions
         .sources
         .zoom_coarse
@@ -622,8 +625,11 @@ fn apply_trackpad_scroll_contribution(
                 .union(CameraInteractionSources::SMOOTH_SCROLL);
         },
         Some(TrackpadScrollTarget::Zoom) => {
-            contributions.zoom_smooth +=
-                zoom_signed(scroll.delta.y * PIXEL_SCROLL_SCALE, bindings, false);
+            contributions.zoom_smooth += zoom_signed(
+                scroll.delta.y * PIXEL_SCROLL_SCALE,
+                bindings,
+                WheelZoomPolarity::Normal,
+            );
             contributions.sources.zoom_smooth = contributions
                 .sources
                 .zoom_smooth
@@ -712,12 +718,18 @@ fn apply_pinch_contribution(
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
 ) {
-    if !bindings.pinch_zoom() || pinch == 0.0 || pinch_suppressed(bindings, keyboard, mouse_buttons)
+    if !matches!(bindings.pinch_zoom(), PinchGestureZoom::Enabled)
+        || pinch == 0.0
+        || pinch_suppressed(bindings, keyboard, mouse_buttons)
     {
         return;
     }
 
-    contributions.zoom_smooth += zoom_signed(pinch * PINCH_GESTURE_AMPLIFICATION, bindings, false);
+    contributions.zoom_smooth += zoom_signed(
+        pinch * PINCH_GESTURE_AMPLIFICATION,
+        bindings,
+        WheelZoomPolarity::Normal,
+    );
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
@@ -807,7 +819,7 @@ fn apply_touch_contribution(
             .union(CameraInteractionSources::TOUCH);
     }
     if zoom != 0.0 {
-        contributions.zoom_smooth += zoom_signed(zoom, bindings, false);
+        contributions.zoom_smooth += zoom_signed(zoom, bindings, WheelZoomPolarity::Normal);
         contributions.sources.zoom_smooth = contributions
             .sources
             .zoom_smooth
@@ -835,15 +847,22 @@ fn apply_button_drag_zoom_contribution(
         OrbitCamButtonDragZoomAxis::Y => -mouse_motion.y,
         OrbitCamButtonDragZoomAxis::XY => mouse_motion.x - mouse_motion.y,
     };
-    contributions.zoom_smooth += zoom_signed(delta * BUTTON_ZOOM_SCALE, bindings, false);
+    contributions.zoom_smooth += zoom_signed(
+        delta * BUTTON_ZOOM_SCALE,
+        bindings,
+        WheelZoomPolarity::Normal,
+    );
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
         .union(CameraInteractionSources::MOUSE);
 }
 
-fn zoom_signed(value: f32, bindings: &OrbitCamBindings, inverted: bool) -> f32 {
-    let wheel_sign = if inverted { -1.0 } else { 1.0 };
+fn zoom_signed(value: f32, bindings: &OrbitCamBindings, polarity: WheelZoomPolarity) -> f32 {
+    let wheel_sign = match polarity {
+        WheelZoomPolarity::Normal => 1.0,
+        WheelZoomPolarity::Inverted => -1.0,
+    };
     let zoom_sign = match bindings.zoom_direction() {
         ZoomDirection::Normal => 1.0,
         ZoomDirection::Reversed => -1.0,
@@ -940,7 +959,7 @@ fn resolve_actions_into_orbit_cam_input(
             || route
                 .blockers_for(camera)
                 .is_some_and(super::routing::OrbitCamInputBlockers::is_blocked)
-            || gated.is_some_and(|gated| !gated.allowed)
+            || gated.is_some_and(|gated| !gated.context_gate.is_allowed())
         {
             continue;
         }
@@ -951,21 +970,21 @@ fn resolve_actions_into_orbit_cam_input(
         let pan_overrides_orbit =
             pan_overrides_orbit(&bindings.0, keyboard.as_deref(), mouse_buttons.as_deref());
         let orbit_sources = held_sources_for_state(
-            orbit_engaged,
+            HeldEngagement::from(orbit_engaged),
             bindings.0.orbit().entries(),
             actions.orbit_sources,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
         );
         let pan_sources = held_sources_for_state(
-            pan_engaged,
+            HeldEngagement::from(pan_engaged),
             bindings.0.pan().entries(),
             actions.pan_sources,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
         );
         let zoom_smooth_sources = held_sources_for_state(
-            zoom_engaged,
+            HeldEngagement::from(zoom_engaged),
             bindings.0.zoom_smooth().entries(),
             actions.zoom_smooth_sources,
             keyboard.as_deref(),
@@ -1051,14 +1070,24 @@ struct BoolActionQueries<'w, 's> {
     zoom:  Query<'w, 's, &'static Action<OrbitCamZoomEngagedAction>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HeldEngagement {
+    Engaged,
+    Idle,
+}
+
+impl From<bool> for HeldEngagement {
+    fn from(engaged: bool) -> Self { if engaged { Self::Engaged } else { Self::Idle } }
+}
+
 fn held_sources_for_state<A: HeldCameraAction>(
-    engaged: bool,
+    engagement: HeldEngagement,
     entries: &[HeldActionBindingEntry<A>],
     fallback: CameraInteractionSources,
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> CameraInteractionSources {
-    if !engaged {
+    if matches!(engagement, HeldEngagement::Idle) {
         return CameraInteractionSources::NONE;
     }
 

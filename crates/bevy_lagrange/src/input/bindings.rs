@@ -79,11 +79,21 @@ pub struct OrbitCamBindings {
     trackpad_pan:     Vec<OrbitCamTrackpadScroll>,
     trackpad_zoom:    Vec<OrbitCamTrackpadScroll>,
     mouse_wheel_zoom: Option<OrbitCamMouseWheelZoom>,
-    pinch_zoom:       bool,
+    pinch_zoom:       PinchGestureZoom,
     touch:            Option<OrbitCamTouchBinding>,
     gamepad:          CameraInputGamepadSelectionPolicy,
     zoom_direction:   ZoomDirection,
     button_drag_zoom: Option<OrbitCamButtonDragZoom>,
+}
+
+/// Whether the pinch gesture is wired up as a zoom input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum PinchGestureZoom {
+    /// Pinch gestures contribute to zoom.
+    Enabled,
+    /// Pinch gestures are ignored.
+    #[default]
+    Disabled,
 }
 
 impl OrbitCamBindings {
@@ -125,7 +135,7 @@ impl OrbitCamBindings {
 
     /// Returns whether pinch zoom is enabled.
     #[must_use]
-    pub const fn pinch_zoom(&self) -> bool { self.pinch_zoom }
+    pub const fn pinch_zoom(&self) -> PinchGestureZoom { self.pinch_zoom }
 
     /// Returns touch policy.
     #[must_use]
@@ -155,7 +165,7 @@ pub struct OrbitCamBindingsDescriptor {
     trackpad_pan:     Vec<OrbitCamTrackpadScroll>,
     trackpad_zoom:    Vec<OrbitCamTrackpadScroll>,
     mouse_wheel_zoom: Option<OrbitCamMouseWheelZoom>,
-    pinch_zoom:       bool,
+    pinch_zoom:       PinchGestureZoom,
     touch:            Option<OrbitCamTouchBinding>,
     gamepad:          CameraInputGamepadSelectionPolicy,
     zoom_direction:   ZoomDirection,
@@ -229,7 +239,7 @@ impl OrbitCamBindingsBuilder {
                 self.descriptor.mouse_wheel_zoom = Some(binding);
             },
             OrbitCamZoomBinding::Pinch(_) => {
-                self.descriptor.pinch_zoom = true;
+                self.descriptor.pinch_zoom = PinchGestureZoom::Enabled;
             },
             OrbitCamZoomBinding::ButtonDrag(binding) => {
                 self.descriptor.button_drag_zoom = Some(binding);
@@ -588,8 +598,18 @@ impl OrbitCamTrackpadScroll {
 /// Mouse-wheel zoom binding.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub struct OrbitCamMouseWheelZoom {
-    /// Whether to invert the wheel value before applying zoom direction.
-    pub inverted: bool,
+    /// Wheel polarity applied before zoom direction.
+    pub polarity: WheelZoomPolarity,
+}
+
+/// Wheel polarity applied before zoom direction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum WheelZoomPolarity {
+    /// Wheel value passes through unchanged.
+    #[default]
+    Normal,
+    /// Wheel value is negated before zoom direction is applied.
+    Inverted,
 }
 
 /// Pinch gesture zoom binding.
@@ -1207,7 +1227,7 @@ mod tests {
         let simple = OrbitCamPreset::SimpleMouse.to_bindings()?;
         assert!(simple.mouse_wheel_zoom().is_some());
         assert_eq!(simple.trackpad_zoom().len(), 1);
-        assert!(simple.pinch_zoom());
+        assert_eq!(simple.pinch_zoom(), PinchGestureZoom::Enabled);
         assert!(simple.touch().is_none());
 
         let blender = OrbitCamPreset::BlenderLike.to_bindings()?;
@@ -1217,7 +1237,7 @@ mod tests {
         assert_eq!(blender.trackpad_pan().len(), 1);
         assert_eq!(blender.trackpad_zoom().len(), 1);
         assert!(blender.mouse_wheel_zoom().is_some());
-        assert!(blender.pinch_zoom());
+        assert_eq!(blender.pinch_zoom(), PinchGestureZoom::Enabled);
 
         let [pan] = blender.pan().entries() else {
             assert_eq!(blender.pan().entries().len(), 1);
@@ -1242,7 +1262,7 @@ mod tests {
         assert!(bindings.trackpad_orbit().is_empty());
         assert!(bindings.trackpad_pan().is_empty());
         assert!(bindings.trackpad_zoom().is_empty());
-        assert!(!bindings.pinch_zoom());
+        assert_eq!(bindings.pinch_zoom(), PinchGestureZoom::Disabled);
         assert!(bindings.mouse_wheel_zoom().is_none());
 
         Ok(())

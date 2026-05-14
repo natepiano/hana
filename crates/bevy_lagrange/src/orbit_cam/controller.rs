@@ -4,6 +4,7 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 
 use super::CameraOrientation;
+use super::DragActivity;
 use super::InitializationState;
 use super::OrbitCam;
 use super::OrbitCamUpdateRequest;
@@ -284,15 +285,15 @@ pub fn orbit_cam(
 
         // Only check for upside down when orbiting started or ended this frame,
         // so we don't reverse the yaw direction while the user is still dragging
-        let orbit_active = input.orbit != Vec2::ZERO;
-        if orbit_active != drag_state.orbit_active {
+        let orbit_drag = DragActivity::from(input.orbit != Vec2::ZERO);
+        if orbit_drag != drag_state.orbit_drag {
             let world_up = orbit_cam.axis[1];
             drag_state.orientation = if transform.up().dot(world_up) < 0.0 {
                 CameraOrientation::UpsideDown
             } else {
                 CameraOrientation::Normal
             };
-            drag_state.orbit_active = orbit_active;
+            drag_state.orbit_drag = orbit_drag;
         }
 
         let mut has_moved = apply_orbit_input(

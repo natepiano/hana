@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Replace owned `bool` fields and accessors on `bevy_lagrange` input types with dedicated enums (`WheelZoomPolarity`, `PinchGestureZoom`, `CameraMotion`, `FocusFrame`); renames `EguiWantsFocus.prev`/`curr` to `previous`/`current` (breaking).
 - Replaced legacy raw `OrbitCam` input fields with input-mode components:
   `OrbitCamPreset`, `OrbitCamBindings`, and `OrbitCamManual`.
 - Replaced manual active-camera setup for render-to-texture with

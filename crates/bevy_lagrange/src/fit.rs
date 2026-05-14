@@ -14,6 +14,7 @@ use bevy_kana::Position;
 use super::constants::CENTERING_MAX_ITERATIONS;
 use super::constants::CENTERING_TOLERANCE;
 use super::constants::DEGENERATE_EXTENT_THRESHOLD;
+use super::constants::HORIZONTAL_DIMENSION_LABEL;
 use super::constants::INITIAL_RADIUS_MULTIPLIER;
 use super::constants::MAX_ITERATIONS;
 use super::constants::MAX_MARGIN;
@@ -21,6 +22,7 @@ use super::constants::MAX_RADIUS_MULTIPLIER;
 use super::constants::MIN_MARGIN;
 use super::constants::MIN_RADIUS_MULTIPLIER;
 use super::constants::TOLERANCE;
+use super::constants::VERTICAL_DIMENSION_LABEL;
 use super::projection;
 use super::projection::ProjectionMode;
 use super::projection::ScreenSpaceBounds;
@@ -213,13 +215,29 @@ const fn find_constraining_margin(
     let horizontal_extent = bounds.max_normalized_x - bounds.min_normalized_x;
 
     if vertical_extent < DEGENERATE_EXTENT_THRESHOLD {
-        (horizontal_min_margin, target_margin_x, "horizontal")
+        (
+            horizontal_min_margin,
+            target_margin_x,
+            HORIZONTAL_DIMENSION_LABEL,
+        )
     } else if horizontal_extent < DEGENERATE_EXTENT_THRESHOLD {
-        (vertical_min_margin, target_margin_y, "vertical")
+        (
+            vertical_min_margin,
+            target_margin_y,
+            VERTICAL_DIMENSION_LABEL,
+        )
     } else if horizontal_min_margin < vertical_min_margin {
-        (horizontal_min_margin, target_margin_x, "horizontal")
+        (
+            horizontal_min_margin,
+            target_margin_x,
+            HORIZONTAL_DIMENSION_LABEL,
+        )
     } else {
-        (vertical_min_margin, target_margin_y, "vertical")
+        (
+            vertical_min_margin,
+            target_margin_y,
+            VERTICAL_DIMENSION_LABEL,
+        )
     }
 }
 

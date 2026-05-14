@@ -15,8 +15,29 @@ use super::OrbitCamManual;
 use super::OrbitCamPreset;
 use super::OrbitCamTouchBinding;
 use super::OrbitCamTrackpadScroll;
+use super::PinchGestureZoom;
 use super::bindings::InputBindingDescriptor;
 use super::bindings::InputBindingEntry;
+use super::constants::APP_AUTHORED_INPUT_ROW_LABEL;
+use super::constants::BINDINGS_MODE_LABEL;
+use super::constants::CUSTOM_MODE_VALUE;
+use super::constants::GAMEPAD_BINDING_SOURCE_LABEL;
+use super::constants::GAMEPAD_BINDINGS_ROW_LABEL;
+use super::constants::INPUT_BINDING_SOURCE_LABEL;
+use super::constants::INPUT_MODE_LABEL;
+use super::constants::KEYBOARD_BINDING_SOURCE_LABEL;
+use super::constants::MANUAL_INPUT_SOURCE_LABEL;
+use super::constants::MANUAL_MODE_VALUE;
+use super::constants::MOUSE_BINDING_SOURCE_LABEL;
+use super::constants::MOUSE_DESCRIPTOR_LABEL;
+use super::constants::ONE_FINGER_TOUCH_ROW_LABEL;
+use super::constants::ORBIT_CAM_CAMERA_LABEL;
+use super::constants::PINCH_SOURCE_LABEL;
+use super::constants::PRESET_MODE_LABEL;
+use super::constants::TOUCH_SOURCE_LABEL;
+use super::constants::TRACKPAD_SOURCE_LABEL;
+use super::constants::TWO_FINGER_TOUCH_ROW_LABEL;
+use super::constants::WHEEL_SOURCE_LABEL;
 
 /// Point-in-time display summary of the controls configured for an `OrbitCam`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -55,7 +76,7 @@ pub fn describe_orbit_cam_controls(
     }
 
     if let Some(bindings) = bindings {
-        return describe_bindings("Bindings", "Custom", bindings);
+        return describe_bindings(BINDINGS_MODE_LABEL, CUSTOM_MODE_VALUE, bindings);
     }
 
     let preset = preset.copied().unwrap_or_default();
@@ -65,10 +86,10 @@ pub fn describe_orbit_cam_controls(
 fn describe_preset(preset: OrbitCamPreset) -> OrbitCamControlSummary {
     let mode_value = preset_mode_value(preset);
     match preset.to_bindings() {
-        Ok(bindings) => describe_bindings("Preset", mode_value, &bindings),
+        Ok(bindings) => describe_bindings(PRESET_MODE_LABEL, mode_value, &bindings),
         Err(_) => OrbitCamControlSummary {
-            camera_label: "OrbitCam".to_string(),
-            mode_label:   "Preset".to_string(),
+            camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
+            mode_label:   PRESET_MODE_LABEL.to_string(),
             mode_value:   mode_value.to_string(),
             rows:         Vec::new(),
         },
@@ -77,23 +98,23 @@ fn describe_preset(preset: OrbitCamPreset) -> OrbitCamControlSummary {
 
 fn describe_manual_controls() -> OrbitCamControlSummary {
     OrbitCamControlSummary {
-        camera_label: "OrbitCam".to_string(),
-        mode_label:   "Input".to_string(),
-        mode_value:   "Manual".to_string(),
+        camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
+        mode_label:   INPUT_MODE_LABEL.to_string(),
+        mode_value:   MANUAL_MODE_VALUE.to_string(),
         rows:         vec![
             control_row(
                 OrbitCamInteractionKind::Orbit,
-                "App-authored input",
+                APP_AUTHORED_INPUT_ROW_LABEL,
                 CameraInteractionSources::MANUAL,
             ),
             control_row(
                 OrbitCamInteractionKind::Pan,
-                "App-authored input",
+                APP_AUTHORED_INPUT_ROW_LABEL,
                 CameraInteractionSources::MANUAL,
             ),
             control_row(
                 OrbitCamInteractionKind::Zoom,
-                "App-authored input",
+                APP_AUTHORED_INPUT_ROW_LABEL,
                 CameraInteractionSources::MANUAL,
             ),
         ],
@@ -155,7 +176,7 @@ fn describe_bindings(
     if bindings.mouse_wheel_zoom().is_some() {
         rows.push(control_row(
             OrbitCamInteractionKind::Zoom,
-            "Wheel",
+            WHEEL_SOURCE_LABEL,
             CameraInteractionSources::WHEEL,
         ));
     }
@@ -172,10 +193,10 @@ fn describe_bindings(
         rows.push(describe_button_drag(button_drag));
     }
 
-    if bindings.pinch_zoom() {
+    if matches!(bindings.pinch_zoom(), PinchGestureZoom::Enabled) {
         rows.push(control_row(
             OrbitCamInteractionKind::Zoom,
-            "Pinch",
+            PINCH_SOURCE_LABEL,
             CameraInteractionSources::PINCH,
         ));
     }
@@ -192,13 +213,13 @@ fn describe_bindings(
     {
         rows.push(control_row(
             OrbitCamInteractionKind::Orbit,
-            "Gamepad bindings",
+            GAMEPAD_BINDINGS_ROW_LABEL,
             CameraInteractionSources::GAMEPAD,
         ));
     }
 
     OrbitCamControlSummary {
-        camera_label: "OrbitCam".to_string(),
+        camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
         mode_label: mode_label.to_string(),
         mode_value: mode_value.to_string(),
         rows,
@@ -243,14 +264,14 @@ fn describe_button_drag(button_drag: OrbitCamButtonDragZoom) -> OrbitCamControlR
 fn describe_touch(touch: OrbitCamTouchBinding) -> Vec<OrbitCamControlRow> {
     match touch {
         OrbitCamTouchBinding::OneFingerOrbit => vec![
-            touch_row(OrbitCamInteractionKind::Orbit, "One finger touch"),
-            touch_row(OrbitCamInteractionKind::Pan, "Two finger touch"),
-            touch_row(OrbitCamInteractionKind::Zoom, "Two finger touch"),
+            touch_row(OrbitCamInteractionKind::Orbit, ONE_FINGER_TOUCH_ROW_LABEL),
+            touch_row(OrbitCamInteractionKind::Pan, TWO_FINGER_TOUCH_ROW_LABEL),
+            touch_row(OrbitCamInteractionKind::Zoom, TWO_FINGER_TOUCH_ROW_LABEL),
         ],
         OrbitCamTouchBinding::TwoFingerOrbit => vec![
-            touch_row(OrbitCamInteractionKind::Pan, "One finger touch"),
-            touch_row(OrbitCamInteractionKind::Orbit, "Two finger touch"),
-            touch_row(OrbitCamInteractionKind::Zoom, "Two finger touch"),
+            touch_row(OrbitCamInteractionKind::Pan, ONE_FINGER_TOUCH_ROW_LABEL),
+            touch_row(OrbitCamInteractionKind::Orbit, TWO_FINGER_TOUCH_ROW_LABEL),
+            touch_row(OrbitCamInteractionKind::Zoom, TWO_FINGER_TOUCH_ROW_LABEL),
         ],
     }
 }
@@ -327,7 +348,7 @@ fn descriptor_stem(
             Binding::MouseWheel { .. } | Binding::MouseMotion { .. }
         )
     }) {
-        return "Mouse".to_string();
+        return MOUSE_DESCRIPTOR_LABEL.to_string();
     }
 
     source_stem(sources).to_string()
@@ -439,7 +460,7 @@ fn contains_key(keys: &[(KeyCode, ModKeys)], key: KeyCode) -> bool {
 
 fn trackpad_stem(mod_keys: ModKeys) -> String {
     if mod_keys.is_empty() {
-        "Trackpad".to_string()
+        TRACKPAD_SOURCE_LABEL.to_string()
     } else {
         format!("{}+trackpad", compact_mod_keys(mod_keys))
     }
@@ -510,23 +531,23 @@ fn debug_name(value: impl std::fmt::Debug, prefix: &str) -> String {
 
 const fn source_stem(sources: CameraInteractionSources) -> &'static str {
     if sources.contains(CameraInteractionSources::KEYBOARD) {
-        "Keyboard binding"
+        KEYBOARD_BINDING_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::GAMEPAD) {
-        "Gamepad binding"
+        GAMEPAD_BINDING_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::MOUSE) {
-        "Mouse binding"
+        MOUSE_BINDING_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::WHEEL) {
-        "Wheel"
+        WHEEL_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::SMOOTH_SCROLL) {
-        "Trackpad"
+        TRACKPAD_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::PINCH) {
-        "Pinch"
+        PINCH_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::TOUCH) {
-        "Touch"
+        TOUCH_SOURCE_LABEL
     } else if sources.contains(CameraInteractionSources::MANUAL) {
-        "Manual input"
+        MANUAL_INPUT_SOURCE_LABEL
     } else {
-        "Input binding"
+        INPUT_BINDING_SOURCE_LABEL
     }
 }
 

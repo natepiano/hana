@@ -39,6 +39,8 @@ pub use egui::BlockOnEguiFocus;
 pub use egui::EguiFocusIncludesHover;
 #[cfg(feature = "bevy_egui")]
 pub use egui::EguiWantsFocus;
+#[cfg(feature = "bevy_egui")]
+pub use egui::FocusFrame;
 use enhanced_input::LagrangeEnhancedInputPlugin;
 pub use events::AnimateToFit;
 pub use events::AnimationBegin;
@@ -74,6 +76,7 @@ pub use input::CameraInputRouting;
 pub use input::CameraInputRoutingConfig;
 pub use input::CameraInputSurfaceMetrics;
 pub use input::CameraInteractionSources;
+pub use input::CameraMotion;
 pub use input::CameraSemanticAction;
 pub use input::CoarseZoomDelta;
 pub use input::HeldActionBindingEntry;
@@ -136,7 +139,9 @@ pub use input::OrbitCamZoomSmoothAction;
 pub use input::OrbitCamZoomSmoothActionBindings;
 pub use input::OrbitDelta;
 pub use input::PanDelta;
+pub use input::PinchGestureZoom;
 pub use input::SmoothZoomDelta;
+pub use input::WheelZoomPolarity;
 pub use input::ZoomDirection;
 pub use input::describe_orbit_cam_controls;
 pub use input::validate_bindings;

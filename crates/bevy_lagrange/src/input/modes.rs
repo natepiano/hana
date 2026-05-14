@@ -23,11 +23,23 @@ pub(crate) struct OrbitCamInputModeReplaced {
     pub(crate) camera: Entity,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DefaultPresetInsertion {
+    Insert,
+    Skip,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InstallationReplacement {
+    Replace,
+    KeepExisting,
+}
+
 struct ModeReconciliation {
     camera:                Entity,
     selected:              ActiveInputMode,
-    insert_default_preset: bool,
-    replace_installation:  bool,
+    insert_default_preset: DefaultPresetInsertion,
+    replace_installation:  InstallationReplacement,
 }
 
 /// Manual input mode for an [`OrbitCam`].
@@ -315,8 +327,19 @@ fn reconcile_input_modes(world: &mut World) {
             ModeReconciliation {
                 camera,
                 selected,
-                insert_default_preset: mode_count == 0,
-                replace_installation: mode_count != 1 || selected_changed || installation.is_none(),
+                insert_default_preset: if mode_count == 0 {
+                    DefaultPresetInsertion::Insert
+                } else {
+                    DefaultPresetInsertion::Skip
+                },
+                replace_installation: if mode_count != 1
+                    || selected_changed
+                    || installation.is_none()
+                {
+                    InstallationReplacement::Replace
+                } else {
+                    InstallationReplacement::KeepExisting
+                },
             }
         })
         .collect::<Vec<_>>();
@@ -345,7 +368,10 @@ fn apply_mode_reconciliation(world: &mut World, reconciliation: ModeReconciliati
         let mut entity = world.entity_mut(reconciliation.camera);
         match reconciliation.selected {
             ActiveInputMode::Preset => {
-                if reconciliation.insert_default_preset {
+                if matches!(
+                    reconciliation.insert_default_preset,
+                    DefaultPresetInsertion::Insert
+                ) {
                     entity.insert(OrbitCamPreset::default());
                     warn!(
                         "restored default OrbitCam input mode for {:?}",
@@ -367,7 +393,10 @@ fn apply_mode_reconciliation(world: &mut World, reconciliation: ModeReconciliati
         }
     }
 
-    if reconciliation.replace_installation {
+    if matches!(
+        reconciliation.replace_installation,
+        InstallationReplacement::Replace
+    ) {
         clear_orbit_cam_input(world, reconciliation.camera);
         replace_input_installation(world, reconciliation.camera, reconciliation.selected);
         world

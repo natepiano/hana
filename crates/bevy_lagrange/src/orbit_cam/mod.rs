@@ -81,8 +81,19 @@ pub enum TimeSource {
 /// Internal per-camera state used to keep orbit direction stable during a drag.
 #[derive(Component, Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OrbitDragState {
-    orientation:  CameraOrientation,
-    orbit_active: bool,
+    orientation: CameraOrientation,
+    orbit_drag:  DragActivity,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum DragActivity {
+    Active,
+    #[default]
+    Idle,
+}
+
+impl From<bool> for DragActivity {
+    fn from(active: bool) -> Self { if active { Self::Active } else { Self::Idle } }
 }
 
 /// Whether the camera was latched as upside down when orbit dragging started.

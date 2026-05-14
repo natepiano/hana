@@ -10,13 +10,23 @@ use bevy_egui::EguiContext;
 /// where both egui and the camera are using the input events, which is not desirable.
 ///
 /// This is re-exported in case it's useful. I recommend only using input events if both
-/// `prev` and `curr` are false.
+/// `previous` and `current` are [`FocusFrame::Open`].
 #[derive(Resource, PartialEq, Eq, Default)]
 pub struct EguiWantsFocus {
-    /// Whether egui wanted focus on the previous frame
-    pub prev: bool,
-    /// Whether egui wants focus on the current frame
-    pub curr: bool,
+    /// Whether egui wanted focus on the previous frame.
+    pub previous: FocusFrame,
+    /// Whether egui wants focus on the current frame.
+    pub current:  FocusFrame,
+}
+
+/// Per-frame egui focus state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum FocusFrame {
+    /// Egui wants focus this frame.
+    Wants,
+    /// Egui does not want focus this frame.
+    #[default]
+    Open,
 }
 
 /// Controls whether merely hovering over an egui panel/window prevents `OrbitCam`
@@ -58,8 +68,12 @@ pub(crate) fn check_egui_wants_focus(
     }
 
     let new_egui_wants_focus = EguiWantsFocus {
-        prev: wants_focus.curr,
-        curr: new_wants_focus,
+        previous: wants_focus.current,
+        current:  if new_wants_focus {
+            FocusFrame::Wants
+        } else {
+            FocusFrame::Open
+        },
     };
     wants_focus.set_if_neq(new_egui_wants_focus);
 }

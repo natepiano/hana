@@ -32,6 +32,10 @@ pub(crate) const MIN_RADIUS_MULTIPLIER: f32 = 0.1;
 /// Convergence tolerance (0.1% of search range).
 pub(crate) const TOLERANCE: f32 = 0.001;
 
+// fit dimension labels (used in debug log output of find_constraining_margin)
+pub(crate) const HORIZONTAL_DIMENSION_LABEL: &str = "horizontal";
+pub(crate) const VERTICAL_DIMENSION_LABEL: &str = "vertical";
+
 // input constants
 /// Conversion factor from mouse drag delta to scroll-equivalent zoom input.
 pub(crate) const BUTTON_ZOOM_SCALE: f32 = 0.03;
