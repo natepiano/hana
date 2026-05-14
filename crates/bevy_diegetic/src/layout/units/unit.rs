@@ -1,6 +1,6 @@
 use bevy::prelude::Reflect;
 
-use crate::layout::constants::MIN_CUSTOM_MPU;
+use crate::layout::constants::MIN_CUSTOM_METERS_PER_UNIT;
 use crate::layout::constants::PIXELS_PER_INCH;
 
 /// Physical unit for interpreting numeric dimensions.
@@ -59,11 +59,11 @@ impl Unit {
             // 96 DPI convention: 1 point = 96/72 pixels ≈ 1.333 pixels.
             Self::Pixels => 0.0254 / PIXELS_PER_INCH,
             Self::Inches => 0.0254,
-            Self::Custom(mpu) => {
-                if mpu < MIN_CUSTOM_MPU {
-                    MIN_CUSTOM_MPU
+            Self::Custom(meters_per_unit) => {
+                if meters_per_unit < MIN_CUSTOM_METERS_PER_UNIT {
+                    MIN_CUSTOM_METERS_PER_UNIT
                 } else {
-                    mpu
+                    meters_per_unit
                 }
             },
         }

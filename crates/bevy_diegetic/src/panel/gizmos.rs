@@ -6,7 +6,10 @@ use bevy::prelude::*;
 
 use super::constants::DEBUG_TEXT_GIZMO_COLOR;
 use super::constants::DEBUG_TEXT_GIZMO_LINE_WIDTH;
+use super::constants::FALLBACK_PIXELS_PER_METER;
+use super::constants::GIZMO_LINE_JOINT_SEGMENTS;
 use super::constants::LAYOUT_GIZMO_LINE_WIDTH;
+use super::constants::MIN_BORDER_LINE_WIDTH_PIXELS;
 use super::coordinate_space::RenderMode;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
@@ -63,7 +66,7 @@ fn pixels_per_meter(cameras: &Query<(&Camera, &Projection)>) -> f32 {
                 Projection::Custom(_) => None,
             }
         })
-        .unwrap_or(1000.0)
+        .unwrap_or(FALLBACK_PIXELS_PER_METER)
 }
 
 enum GizmoChildMarker {
@@ -101,7 +104,7 @@ fn spawn_rect_gizmo(
         line_config: GizmoLineConfig {
             width: rect.line_width,
             perspective: false,
-            joints: GizmoLineJoint::Round(8),
+            joints: GizmoLineJoint::Round(GIZMO_LINE_JOINT_SEGMENTS),
             ..default()
         },
         ..default()
@@ -206,9 +209,10 @@ pub(super) fn render_layout_gizmos(
                             + border.bottom.value)
                             / 4.0;
                         let border_px = if is_screen_space {
-                            avg_border_pts.max(1.0)
+                            avg_border_pts.max(MIN_BORDER_LINE_WIDTH_PIXELS)
                         } else {
-                            (avg_border_pts * points_to_world * screen_pixels_per_meter).max(1.0)
+                            (avg_border_pts * points_to_world * screen_pixels_per_meter)
+                                .max(MIN_BORDER_LINE_WIDTH_PIXELS)
                         };
                         spawn_rect_gizmo(
                             &mut commands,

@@ -16,13 +16,21 @@ pub(super) const MIN_PANEL_WORLD_HEIGHT: f32 = 1.0;
 /// than this.
 pub(super) const PANEL_RESIZE_EPSILON: f32 = 0.001;
 
-// debug gizmos
+// gizmos
 /// Color used for text-bound debug gizmos.
 pub(super) const DEBUG_TEXT_GIZMO_COLOR: Color = Color::srgba(0.9, 0.9, 0.2, 0.2);
 /// Line width for text-bound debug gizmos, in pixels.
 pub(super) const DEBUG_TEXT_GIZMO_LINE_WIDTH: f32 = 1.0;
+/// Pixels-per-meter fallback used when the camera projection cannot be sampled
+/// (no camera available, or `Projection::Custom` provides no usable scale).
+pub(super) const FALLBACK_PIXELS_PER_METER: f32 = 1000.0;
+/// Per-corner segment count for rounded gizmo line joints — controls
+/// smoothness of corner curvature on panel border outlines.
+pub(super) const GIZMO_LINE_JOINT_SEGMENTS: u32 = 8;
 /// Line width for layout gizmos, in pixels.
 pub(super) const LAYOUT_GIZMO_LINE_WIDTH: f32 = 1.0;
+/// Minimum on-screen border line width, in pixels.
+pub(super) const MIN_BORDER_LINE_WIDTH_PIXELS: f32 = 1.0;
 
 // diagnostic paths
 pub(super) const DIAG_ATLAS_ACTIVE_JOBS: DiagnosticPath =

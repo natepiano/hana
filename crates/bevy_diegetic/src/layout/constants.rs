@@ -29,7 +29,7 @@ pub(super) const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// Units smaller than a typographic point would cause font sizes to shrink
 /// below 1.0 when converted to points for the layout engine, hitting parley's
 /// integer quantization and producing incorrect baselines.
-pub(super) const MIN_CUSTOM_MPU: f32 = 0.0254 / 72.0;
+pub(super) const MIN_CUSTOM_METERS_PER_UNIT: f32 = 0.0254 / 72.0;
 
 /// Logical pixels per inch at the standard CSS / web typography resolution.
 ///

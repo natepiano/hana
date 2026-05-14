@@ -322,7 +322,7 @@ impl DiegeticPanel {
     /// coordinates relative to the anchor point.
     ///
     /// Layout local position = `(layout_x * scale - x_offset, -layout_y * scale + y_offset)`
-    /// where `scale` is `points_mpu`.
+    /// where `scale` is `points_to_world()`.
     ///
     /// Screen panels render under an orthographic camera where 1 world
     /// unit = 1 logical pixel, so anchor offsets are computed directly
