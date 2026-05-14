@@ -21,7 +21,7 @@ pub(crate) enum CableSystems {
 
 /// Cables queued for geometry recomputation this frame. Drained by
 /// [`recompute_dirty_cables`].
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Deref, DerefMut)]
 pub(super) struct DirtyCables(pub(super) EntityHashSet);
 
 pub(super) struct ComputePlugin;
@@ -59,7 +59,7 @@ fn queue_changed_cables(
     mut dirty_cables: ResMut<DirtyCables>,
 ) {
     for cable_entity in &cables {
-        dirty_cables.0.insert(cable_entity);
+        dirty_cables.insert(cable_entity);
     }
 }
 
@@ -70,7 +70,7 @@ fn queue_endpoint_changes(
     mut dirty_cables: ResMut<DirtyCables>,
 ) {
     for child_of in &endpoints {
-        dirty_cables.0.insert(child_of.parent());
+        dirty_cables.insert(child_of.parent());
     }
 }
 
@@ -85,7 +85,7 @@ fn queue_attached_target_moves(
             let Ok(child_of) = endpoint_parents.get(endpoint) else {
                 continue;
             };
-            dirty_cables.0.insert(child_of.parent());
+            dirty_cables.insert(child_of.parent());
         }
     }
 }
@@ -102,7 +102,7 @@ fn recompute_dirty_cables(
     )>,
     transforms: Query<&GlobalTransform>,
 ) {
-    for cable_entity in dirty_cables.0.drain() {
+    for cable_entity in dirty_cables.drain() {
         recompute_cable_route(
             cable_entity,
             &mut commands,

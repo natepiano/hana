@@ -234,7 +234,7 @@ pub(super) fn on_endpoint_detached(
                 apply_solver_detach_response(&mut cable.solver);
             }
 
-            dirty_cables.0.insert(child_of.parent());
+            dirty_cables.insert(child_of.parent());
         },
         DetachPolicy::Despawn => {
             let cable_entity = child_of.parent();
