@@ -17,7 +17,6 @@ use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::brp_extras;
 use crate::camera_control_panel;
-use crate::camera_home;
 use crate::camera_home::CameraHomeConfig;
 use crate::lighting;
 use crate::orbit_cam;
@@ -115,8 +114,8 @@ impl<S> SprinkleBuilder<S> {
                 transform,
                 yaw: 0.0,
                 pitch: 0.0,
-                duration: camera_home::HOME_DEFAULT_DURATION,
-                margin: camera_home::HOME_DEFAULT_MARGIN,
+                duration: crate::constants::HOME_DEFAULT_DURATION,
+                margin: crate::constants::HOME_DEFAULT_MARGIN,
             },
         }
     }

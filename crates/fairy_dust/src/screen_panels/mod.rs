@@ -1,5 +1,9 @@
 //! Capability: small screen-space panels for examples.
 
+mod constants;
+mod description;
+mod title_bar;
+
 use bevy::prelude::*;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
@@ -7,40 +11,24 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
-use bevy_diegetic::Pt;
-use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
-
-use super::theme::BORDER;
-use super::theme::BORDER_ACCENT;
-use super::theme::BORDER_DIM;
-use super::theme::FRAME_PAD;
-use super::theme::INNER_BG;
-use super::theme::INNER_BORDER_WIDTH;
-use super::theme::INNER_PAD;
-use super::theme::INNER_RADIUS;
-use super::theme::RADIUS;
-use crate::camera_home::CameraHomeConfig;
-use crate::ensure_plugin;
-
-mod description;
-mod title_bar;
-
 pub use description::DescriptionPanel;
 pub(crate) use title_bar::ControlActivation;
 pub use title_bar::TitleBar;
 pub(crate) use title_bar::TitleBarControlState;
 
-const BODY_SIZE: Pt = Pt(11.0);
-const CONTROL_SIZE: Pt = Pt(12.0);
-
-const DESCRIPTION_WIDTH: Px = Px(330.0);
-
-const BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-const CONTROL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
-const CONTROL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
+use crate::camera_home::CameraHomeConfig;
+use crate::constants::BORDER;
+use crate::constants::BORDER_ACCENT;
+use crate::constants::BORDER_DIM;
+use crate::constants::FRAME_PAD;
+use crate::constants::INNER_BG;
+use crate::constants::INNER_BORDER_WIDTH;
+use crate::constants::INNER_PAD;
+use crate::constants::INNER_RADIUS;
+use crate::constants::RADIUS;
+use crate::ensure_plugin;
 
 pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
     ensure_plugin(app, DiegeticUiPlugin);

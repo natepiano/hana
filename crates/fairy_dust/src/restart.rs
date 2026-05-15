@@ -12,7 +12,6 @@
 use std::path::Path;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use bevy::app::AppExit;
 use bevy::prelude::*;
@@ -21,10 +20,9 @@ use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
 
+use crate::constants::TRAMPOLINE_ENV;
+use crate::constants::TRAMPOLINE_SLEEP;
 use crate::ensure_plugin;
-
-const TRAMPOLINE_ENV: &str = "FAIRY_DUST_RESTART_TRAMPOLINE";
-const TRAMPOLINE_SLEEP: Duration = Duration::from_millis(500);
 
 #[derive(Component)]
 struct FairyDustRestartContext;

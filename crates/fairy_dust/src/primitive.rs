@@ -8,6 +8,16 @@ use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 
+use crate::constants::CUBE_DEFAULT_COLOR;
+use crate::constants::CUBE_DEFAULT_SIZE;
+use crate::constants::FACE_TEXT_Z_OFFSET;
+use crate::constants::GROUND_PLANE_ALPHA;
+use crate::constants::GROUND_PLANE_DEFAULT_COLOR;
+use crate::constants::GROUND_PLANE_DEFAULT_SIZE;
+use crate::constants::GROUND_PLANE_METALLIC;
+use crate::constants::GROUND_PLANE_REFLECTANCE;
+use crate::constants::GROUND_PLANE_ROUGHNESS;
+
 /// Names a single face of an axis-aligned cube.
 ///
 /// Used by [`PrimitiveBuilder::face_text`](crate::PrimitiveBuilder::face_text)
@@ -34,8 +44,7 @@ impl Face {
     /// half-extent (size / 2) is `half_extent`. The text is offset slightly
     /// outward to avoid z-fighting with the cube surface.
     fn local_transform(self, half_extent: f32) -> Transform {
-        const OFFSET: f32 = 0.001;
-        let face_pos = half_extent + OFFSET;
+        let face_pos = half_extent + FACE_TEXT_Z_OFFSET;
         match self {
             Self::Front => Transform::from_xyz(0.0, 0.0, face_pos),
             Self::Back => {
@@ -105,17 +114,6 @@ pub(crate) struct PrimitiveConfig {
     face_texts: Vec<FaceTextSpec>,
 }
 
-// cube defaults
-const CUBE_DEFAULT_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
-
-// ground plane defaults
-const GROUND_PLANE_ALPHA: f32 = 0.78;
-const GROUND_PLANE_DEFAULT_COLOR: Color = Color::srgb(0.125, 0.14, 0.16);
-const GROUND_PLANE_DEFAULT_SIZE: f32 = 8.0;
-const GROUND_PLANE_METALLIC: f32 = 0.0;
-const GROUND_PLANE_REFLECTANCE: f32 = 0.45;
-const GROUND_PLANE_ROUGHNESS: f32 = 0.40;
-
 impl PrimitiveConfig {
     pub(crate) const fn ground_plane() -> Self {
         Self {
@@ -131,7 +129,7 @@ impl PrimitiveConfig {
     pub(crate) const fn cube() -> Self {
         Self {
             kind:       PrimitiveKind::Cube,
-            size:       1.0,
+            size:       CUBE_DEFAULT_SIZE,
             color:      CUBE_DEFAULT_COLOR,
             material:   None,
             transform:  None,

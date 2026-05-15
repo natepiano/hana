@@ -8,18 +8,16 @@ use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
-use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 
-use super::BODY_COLOR;
-use super::BODY_SIZE;
-use super::DESCRIPTION_WIDTH;
+use super::constants::BODY_COLOR;
+use super::constants::BODY_SIZE;
+use super::constants::DESCRIPTION_CHILD_GAP;
+use super::constants::DESCRIPTION_WIDTH;
 use super::panel_frame;
 use super::unlit_panel_material;
-use crate::theme::TITLE_COLOR;
-use crate::theme::TITLE_SIZE;
-
-const DESCRIPTION_CHILD_GAP: Px = Px(6.0);
+use crate::constants::TITLE_COLOR;
+use crate::constants::TITLE_SIZE;
 
 /// A static side panel that explains what an example demonstrates.
 #[derive(Clone, Debug, PartialEq, Eq)]

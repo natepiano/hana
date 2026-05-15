@@ -7,7 +7,7 @@ use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionState;
 
-const SOURCE_HOLD_SECONDS: f32 = 0.15;
+use super::constants::SOURCE_HOLD_SECONDS;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum RenderState {

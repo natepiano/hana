@@ -11,23 +11,21 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 
-use super::CONTROL_ACTIVE_COLOR;
-use super::CONTROL_INACTIVE_COLOR;
-use super::CONTROL_SIZE;
-use super::DIVIDER_COLOR;
+use super::constants::CONTROL_ACTIVE_COLOR;
+use super::constants::CONTROL_INACTIVE_COLOR;
+use super::constants::CONTROL_SIZE;
+use super::constants::DIVIDER_COLOR;
+use super::constants::SEPARATOR_HEIGHT;
+use super::constants::SEPARATOR_WIDTH;
+use super::constants::TITLE_BAR_CHILD_GAP;
 use super::panel_frame;
 use super::unlit_panel_material;
-use crate::camera_home;
 use crate::camera_home::CameraHomeConfig;
-use crate::theme::TITLE_COLOR;
-use crate::theme::TITLE_SIZE;
-
-const SEPARATOR_HEIGHT: Px = Px(18.0);
-const SEPARATOR_WIDTH: Px = Px(1.0);
-const TITLE_BAR_CHILD_GAP: Px = Px(10.0);
+use crate::constants::HOME_CONTROL;
+use crate::constants::TITLE_COLOR;
+use crate::constants::TITLE_SIZE;
 
 /// A compact top-left title bar for example-level controls.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -137,14 +135,8 @@ pub(super) fn spawn_title_bar_with_home_chip(
     home: Option<&CameraHomeConfig>,
 ) {
     let mut bar = title_bar.clone();
-    if home.is_some()
-        && !bar
-            .controls
-            .iter()
-            .any(|control| control == camera_home::HOME_CONTROL)
-    {
-        bar.controls
-            .insert(0, camera_home::HOME_CONTROL.to_string());
+    if home.is_some() && !bar.controls.iter().any(|control| control == HOME_CONTROL) {
+        bar.controls.insert(0, HOME_CONTROL.to_string());
     }
     spawn_title_bar(commands, &bar);
 }

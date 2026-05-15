@@ -11,42 +11,39 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
-use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamInteractionKind;
 
 use super::config::SourceVisibility;
+use super::constants::ACTION_COLUMN_MIN_WIDTH;
+use super::constants::ACTIVE_COLOR;
+use super::constants::GUIDANCE_CHILD_GAP;
+use super::constants::HEADER_COLOR;
+use super::constants::HEADER_SIZE;
+use super::constants::LABEL_COLOR;
+use super::constants::LABEL_SIZE;
+use super::constants::SOURCE_COLOR;
+use super::constants::TABLE_ACTION_ARROW;
+use super::constants::TABLE_COLUMN_GAP;
+use super::constants::TABLE_DIVIDER_WIDTH;
+use super::constants::TABLE_GROUP_GAP;
+use super::constants::TABLE_ROW_GAP;
 use super::display::CameraGuidanceDisplay;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
-use crate::theme::BORDER;
-use crate::theme::BORDER_ACCENT;
-use crate::theme::BORDER_DIM;
-use crate::theme::FRAME_PAD;
-use crate::theme::INNER_BG;
-use crate::theme::INNER_BORDER_WIDTH;
-use crate::theme::INNER_PAD;
-use crate::theme::INNER_RADIUS;
-use crate::theme::RADIUS;
-use crate::theme::TITLE_COLOR;
-use crate::theme::TITLE_SIZE;
-
-const HEADER_SIZE: Pt = Pt(12.0);
-const LABEL_SIZE: Pt = Pt(11.0);
-
-const HEADER_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
-const LABEL_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
-const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
-const SOURCE_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.95);
-
-const GUIDANCE_CHILD_GAP: Px = Px(5.0);
-const TABLE_COLUMN_GAP: f32 = 8.0;
-const TABLE_ROW_GAP: f32 = 3.0;
-const TABLE_GROUP_GAP: f32 = 7.0;
-const TABLE_DIVIDER_WIDTH: Px = Px(1.0);
-const ACTION_COLUMN_MIN_WIDTH: Px = Px(46.0);
+use crate::constants::BORDER;
+use crate::constants::BORDER_ACCENT;
+use crate::constants::BORDER_DIM;
+use crate::constants::FRAME_PAD;
+use crate::constants::INNER_BG;
+use crate::constants::INNER_BORDER_WIDTH;
+use crate::constants::INNER_PAD;
+use crate::constants::INNER_RADIUS;
+use crate::constants::RADIUS;
+use crate::constants::TITLE_COLOR;
+use crate::constants::TITLE_SIZE;
 
 pub(super) fn unlit_panel_material() -> StandardMaterial {
     StandardMaterial {
@@ -110,7 +107,7 @@ fn build_guidance_layout(
                         header.clone(),
                     );
                     build_guidance_table(builder, snapshot, display, &label, &active);
-                    if snapshot.show_sources == SourceVisibility::Visible {
+                    if snapshot.source_visibility == SourceVisibility::Visible {
                         builder.with(
                             El::new()
                                 .width(Sizing::GROW)
@@ -205,7 +202,7 @@ fn build_guidance_group(
                     }
                 },
             );
-            builder.text("->", action_style.clone());
+            builder.text(TABLE_ACTION_ARROW, action_style.clone());
             builder.with(
                 El::new()
                     .width(Sizing::fit_min(ACTION_COLUMN_MIN_WIDTH))

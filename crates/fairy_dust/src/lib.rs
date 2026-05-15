@@ -30,6 +30,19 @@
 //! HUD panels) ensure the required plugin is registered exactly once via
 //! [`ensure_plugin`], regardless of how many capabilities pull it in.
 
+mod brp_extras;
+mod builder;
+mod camera_control_panel;
+mod camera_home;
+mod constants;
+mod lighting;
+mod orbit_cam;
+mod primitive;
+mod restart;
+mod save_window_position;
+mod screen_panels;
+mod transparency;
+
 use std::marker::PhantomData;
 
 use bevy::log::LogPlugin;
@@ -46,29 +59,11 @@ pub use builder::WithOrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
 pub use camera_control_panel::SourceVisibility;
+pub use constants::LOG_FILTER;
 pub use primitive::Face;
 pub use primitive::cube_face_text;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
-
-mod brp_extras;
-mod builder;
-mod camera_control_panel;
-mod camera_home;
-mod lighting;
-mod orbit_cam;
-mod primitive;
-mod restart;
-mod save_window_position;
-mod screen_panels;
-mod theme;
-mod transparency;
-
-/// Default `tracing` filter applied by [`sprinkle_example`].
-///
-/// Quiets the most common chatty crates (`wgpu`, `naga`) while leaving the
-/// rest at `info` so example-side `info!`/`warn!` calls remain visible.
-pub const LOG_FILTER: &str = "info,wgpu=error,naga=error,bevy_winit=warn,bevy_render=warn";
 
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.

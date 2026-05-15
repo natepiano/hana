@@ -15,14 +15,11 @@ use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 
+use crate::constants::HOME_CONTROL;
+use crate::constants::HOME_KEY;
 use crate::orbit_cam::FairyDustOrbitCam;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
-
-pub(crate) const HOME_CONTROL: &str = "H Home";
-pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
-pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
-const HOME_KEY: KeyCode = KeyCode::KeyH;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum InitialAnimateState {

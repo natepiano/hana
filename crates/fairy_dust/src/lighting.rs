@@ -5,39 +5,24 @@ use bevy::light::DirectionalLightShadowMap;
 use bevy::light::GlobalAmbientLight;
 use bevy::prelude::*;
 
-// ambient
-const AMBIENT_BRIGHTNESS: f32 = 95.0;
-const AMBIENT_COLOR: Color = Color::srgb(0.55, 0.62, 0.76);
-
-// cascade shadow
-const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
-const CASCADE_MAX_DISTANCE: f32 = 18.0;
-const CASCADE_MIN_DISTANCE: f32 = 0.1;
-
-// clear color
-const CLEAR_COLOR: Color = Color::srgb(0.012, 0.014, 0.018);
-
-// fill light
-const FILL_LIGHT_ILLUMINANCE: f32 = 1_400.0;
-const FILL_LIGHT_POS: Vec3 = Vec3::new(4.5, 4.0, -3.5);
-
-// key light
-const KEY_LIGHT_ILLUMINANCE: f32 = 13_500.0;
-const KEY_LIGHT_POS: Vec3 = Vec3::new(-3.5, 7.0, 4.8);
-const KEY_SHADOW_DEPTH_BIAS: f32 = 0.03;
-const KEY_SHADOW_NORMAL_BIAS: f32 = 0.7;
-
-// point light
-const POINT_LIGHT_COLOR: Color = Color::srgb(0.45, 0.68, 1.0);
-const POINT_LIGHT_INTENSITY: f32 = 1_900.0;
-const POINT_LIGHT_POS: Vec3 = Vec3::new(-2.0, 1.15, 1.85);
-const POINT_LIGHT_RANGE: f32 = 6.0;
-
-// shadow map
-const SHADOW_MAP_SIZE: usize = 4096;
-
-// target
-const TARGET: Vec3 = Vec3::new(0.0, 0.45, 0.0);
+use crate::constants::AMBIENT_BRIGHTNESS;
+use crate::constants::AMBIENT_COLOR;
+use crate::constants::CASCADE_FIRST_FAR_BOUND;
+use crate::constants::CASCADE_MAX_DISTANCE;
+use crate::constants::CASCADE_MIN_DISTANCE;
+use crate::constants::CLEAR_COLOR;
+use crate::constants::FILL_LIGHT_ILLUMINANCE;
+use crate::constants::FILL_LIGHT_POS;
+use crate::constants::KEY_LIGHT_ILLUMINANCE;
+use crate::constants::KEY_LIGHT_POS;
+use crate::constants::KEY_SHADOW_DEPTH_BIAS;
+use crate::constants::KEY_SHADOW_NORMAL_BIAS;
+use crate::constants::POINT_LIGHT_COLOR;
+use crate::constants::POINT_LIGHT_INTENSITY;
+use crate::constants::POINT_LIGHT_POS;
+use crate::constants::POINT_LIGHT_RANGE;
+use crate::constants::SHADOW_MAP_SIZE;
+use crate::constants::TARGET;
 
 #[derive(Component)]
 struct FairyDustStudioLight;

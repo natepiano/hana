@@ -22,12 +22,12 @@ pub enum SourceVisibility {
 /// examples.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CameraGuidance {
-    pub(super) anchor:       Anchor,
-    pub(super) title:        Option<String>,
-    pub(super) mode_label:   Option<String>,
-    pub(super) mode_value:   Option<String>,
-    pub(super) content:      CameraGuidanceContent,
-    pub(super) show_sources: SourceVisibility,
+    pub(super) anchor:            Anchor,
+    pub(super) title:             Option<String>,
+    pub(super) mode_label:        Option<String>,
+    pub(super) mode_value:        Option<String>,
+    pub(super) content:           CameraGuidanceContent,
+    pub(super) source_visibility: SourceVisibility,
 }
 
 impl Default for CameraGuidance {
@@ -39,12 +39,12 @@ impl CameraGuidance {
     #[must_use]
     pub const fn auto() -> Self {
         Self {
-            anchor:       Anchor::BottomRight,
-            title:        None,
-            mode_label:   None,
-            mode_value:   None,
-            content:      CameraGuidanceContent::Auto,
-            show_sources: SourceVisibility::Visible,
+            anchor:            Anchor::BottomRight,
+            title:             None,
+            mode_label:        None,
+            mode_value:        None,
+            content:           CameraGuidanceContent::Auto,
+            source_visibility: SourceVisibility::Visible,
         }
     }
 
@@ -58,12 +58,12 @@ impl CameraGuidance {
     #[must_use]
     pub fn custom(rows: impl IntoIterator<Item = CameraGuidanceRow>) -> Self {
         Self {
-            anchor:       Anchor::BottomRight,
-            title:        None,
-            mode_label:   None,
-            mode_value:   None,
-            content:      CameraGuidanceContent::Rows(rows.into_iter().collect()),
-            show_sources: SourceVisibility::Visible,
+            anchor:            Anchor::BottomRight,
+            title:             None,
+            mode_label:        None,
+            mode_value:        None,
+            content:           CameraGuidanceContent::Rows(rows.into_iter().collect()),
+            source_visibility: SourceVisibility::Visible,
         }
     }
 
@@ -83,8 +83,8 @@ impl CameraGuidance {
 
     /// Controls whether active source labels are rendered.
     #[must_use]
-    pub const fn with_source_flags(mut self, show_sources: SourceVisibility) -> Self {
-        self.show_sources = show_sources;
+    pub const fn with_source_visibility(mut self, source_visibility: SourceVisibility) -> Self {
+        self.source_visibility = source_visibility;
         self
     }
 
@@ -101,14 +101,14 @@ impl CameraGuidance {
 
     fn from_summary(summary: OrbitCamControlSummary) -> Self {
         Self {
-            anchor:       Anchor::BottomRight,
-            title:        Some(summary.camera_label),
-            mode_label:   Some(summary.mode_label),
-            mode_value:   Some(summary.mode_value),
-            content:      CameraGuidanceContent::Rows(
+            anchor:            Anchor::BottomRight,
+            title:             Some(summary.camera_label),
+            mode_label:        Some(summary.mode_label),
+            mode_value:        Some(summary.mode_value),
+            content:           CameraGuidanceContent::Rows(
                 summary.rows.into_iter().map(Into::into).collect(),
             ),
-            show_sources: SourceVisibility::Visible,
+            source_visibility: SourceVisibility::Visible,
         }
     }
 }

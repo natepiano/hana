@@ -1,6 +1,12 @@
 //! Capability: screen-space `bevy_diegetic` camera control panels for
 //! `bevy_lagrange::OrbitCam` examples.
 
+mod config;
+mod constants;
+mod display;
+mod layout;
+mod snapshot;
+
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanel;
@@ -15,14 +21,6 @@ use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
-
-use crate::ensure_plugin;
-
-mod config;
-mod display;
-mod layout;
-mod snapshot;
-
 pub use config::CameraGuidance;
 pub use config::CameraGuidanceRow;
 pub use config::SourceVisibility;
@@ -33,6 +31,8 @@ use layout::build_guidance_tree;
 use layout::unlit_panel_material;
 use snapshot::CameraGuidanceSnapshot;
 use snapshot::resolve_guidance_snapshot;
+
+use crate::ensure_plugin;
 
 #[derive(Component)]
 struct CameraGuidancePanel {

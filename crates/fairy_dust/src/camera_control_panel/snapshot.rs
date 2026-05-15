@@ -18,11 +18,11 @@ use super::config::SourceVisibility;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(super) struct CameraGuidanceSnapshot {
-    pub(super) camera_label: String,
-    pub(super) mode_label:   String,
-    pub(super) mode_value:   String,
-    pub(super) rows:         Vec<CameraGuidanceRow>,
-    pub(super) show_sources: SourceVisibility,
+    pub(super) camera_label:      String,
+    pub(super) mode_label:        String,
+    pub(super) mode_value:        String,
+    pub(super) rows:              Vec<CameraGuidanceRow>,
+    pub(super) source_visibility: SourceVisibility,
 }
 
 pub(super) fn resolve_guidance_snapshot(
@@ -39,14 +39,14 @@ pub(super) fn resolve_guidance_snapshot(
         CameraGuidanceContent::Rows(rows) => {
             let (mode_label, mode_value) = resolve_mode_labels(preset, bindings, manual);
             CameraGuidanceSnapshot {
-                camera_label: guidance
+                camera_label:      guidance
                     .title
                     .clone()
                     .unwrap_or_else(|| "OrbitCam".to_string()),
-                mode_label:   guidance.mode_label.clone().unwrap_or(mode_label),
-                mode_value:   guidance.mode_value.clone().unwrap_or(mode_value),
-                rows:         rows.clone(),
-                show_sources: guidance.show_sources,
+                mode_label:        guidance.mode_label.clone().unwrap_or(mode_label),
+                mode_value:        guidance.mode_value.clone().unwrap_or(mode_value),
+                rows:              rows.clone(),
+                source_visibility: guidance.source_visibility,
             }
         },
     }
@@ -57,11 +57,11 @@ fn snapshot_from_summary(
     summary: OrbitCamControlSummary,
 ) -> CameraGuidanceSnapshot {
     CameraGuidanceSnapshot {
-        camera_label: guidance.title.clone().unwrap_or(summary.camera_label),
-        mode_label:   summary.mode_label,
-        mode_value:   summary.mode_value,
-        rows:         summary.rows.into_iter().map(Into::into).collect(),
-        show_sources: guidance.show_sources,
+        camera_label:      guidance.title.clone().unwrap_or(summary.camera_label),
+        mode_label:        summary.mode_label,
+        mode_value:        summary.mode_value,
+        rows:              summary.rows.into_iter().map(Into::into).collect(),
+        source_visibility: guidance.source_visibility,
     }
 }
 
