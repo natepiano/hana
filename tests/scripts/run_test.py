@@ -641,7 +641,7 @@ def _monitor_scale(entity: JsonDict, env_vars: dict[str, str]) -> float:
     always correct.  Falls back to the window's reported scale_factor when
     env vars aren't available (e.g. no discovery env file).
     """
-    idx = json_str(extract_from_entity(entity, COMP_CURRENT_MONITOR, "monitor", "index"))
+    idx = json_str(extract_from_entity(entity, COMP_CURRENT_MONITOR, "monitor_info", "index"))
     if idx and f"MONITOR_{idx}_SCALE" in env_vars:
         return float(env_vars[f"MONITOR_{idx}_SCALE"])
     return float(json_str(extract_from_entity(entity, COMP_WINDOW, "resolution", "scale_factor")))
@@ -783,7 +783,7 @@ def validate_window(
             _check_field(key, "mode", exp_mode, actual_mode, prefix)
 
         elif field == "monitor_index":
-            actual_idx = json_str(extract_from_entity(entity, COMP_CURRENT_MONITOR, "monitor", "index"))
+            actual_idx = json_str(extract_from_entity(entity, COMP_CURRENT_MONITOR, "monitor_info", "index"))
             exp_idx = ron_values.get("monitor", "")
             _check_field(key, "monitor_index", exp_idx, actual_idx, prefix)
 
@@ -811,7 +811,7 @@ def wait_for_all_windows_settled(expected_count: int) -> None:
             result = brp.call("world.get_resources", {"resource": RES_SETTLED_COUNT})
             value = json_get(result, "result", "value")
             if isinstance(value, dict):
-                count = cast(JsonDict, value).get("count", 0)
+                count = cast(JsonDict, value).get("value", 0)
                 if isinstance(count, int) and count >= expected_count:
                     return
         except (URLError, OSError):
