@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_kana::ToF32;
+use bevy_render::Extract;
 use bevy_render::sync_world::MainEntity;
 use bevy_render::sync_world::MainEntityHashMap;
-use bevy_render::Extract;
 
 use super::constants::OWNER_ID_OFFSET;
 use super::outline::Outline;
