@@ -245,8 +245,8 @@ pub(crate) fn on_managed_window_load(
 
     // Check the startup snapshot — not the file, which may have been modified by
     // `on_managed_window_added` saving initial state for brand-new windows.
-    let key = WindowKey::Managed((*name).clone());
-    let Some(saved_state) = config.loaded_states.get(&key).cloned() else {
+    let window_key = WindowKey::Managed((*name).clone());
+    let Some(saved_state) = config.loaded_states.get(&window_key).cloned() else {
         debug!("[on_managed_window_load] No saved state for \"{name}\", showing window");
         if let Ok(mut window) = windows.get_mut(entity) {
             window.visible = true;

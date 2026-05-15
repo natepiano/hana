@@ -22,7 +22,7 @@ use crate::persistence::SavedWindowMode;
 use crate::persistence::WindowState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MonitorResolutionSource {
+pub(crate) enum MonitorResolutionSource {
     Requested,
     FallbackToPrimary,
 }
@@ -35,7 +35,7 @@ pub struct ResolvedMonitor<'a> {
 
 /// Resolve the target monitor from saved state and return an adjusted saved position.
 #[must_use]
-pub fn resolve_target_monitor_and_position(
+pub(crate) fn resolve_target_monitor_and_position(
     saved_monitor_index: usize,
     logical_saved_position: Option<(i32, i32)>,
     monitors: &Monitors,
@@ -64,7 +64,7 @@ pub fn resolve_target_monitor_and_position(
 /// By moving a 1x1 window to the final position first, we ensure the window is already
 /// at the correct location when we later apply size in `ApplySize`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum WindowRestoreState {
+pub(crate) enum WindowRestoreState {
     /// Initial state: window needs to be moved to the target monitor to trigger a scale change.
     /// Handled by `restore_windows` which calls `apply_initial_move` and transitions to
     /// `WaitingForScaleChange`. This unified entry point replaces the old separate paths
@@ -90,7 +90,7 @@ pub enum WindowRestoreState {
 /// position, the compositor may briefly honor it then revert. Splitting into
 /// separate frames ensures each change is processed independently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum FullscreenRestoreState {
+pub(crate) enum FullscreenRestoreState {
     /// Move window to target monitor position. Skipped on Wayland (no position).
     MoveToMonitor,
     /// Wait for compositor to process the position change (1 frame).
@@ -148,7 +148,7 @@ pub enum FullscreenRestoreState {
 ///   1. Move a 1x1 window to final position (compensated) to trigger scale change
 ///   2. After scale changes, apply size without compensation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-pub enum MonitorScaleStrategy {
+pub(crate) enum MonitorScaleStrategy {
     /// Same scale - apply position and size directly.
     ApplyUnchanged,
     /// Windows cross-DPI: position direct, size in two phases.
@@ -170,7 +170,7 @@ pub enum MonitorScaleStrategy {
 /// clamping calculations.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-pub struct TargetPosition {
+pub(crate) struct TargetPosition {
     /// Final clamped position (adjusted to fit within target monitor).
     /// None on Wayland where clients can't access window position.
     pub physical_position:   Option<IVec2>,
@@ -245,7 +245,7 @@ impl TargetPosition {
 
 /// Compute a `TargetPosition` from saved state and a resolved target monitor.
 #[must_use]
-pub fn compute_target_position(
+pub(crate) fn compute_target_position(
     saved_state: &WindowState,
     target_info: &MonitorInfo,
     logical_fallback_position: Option<(i32, i32)>,
@@ -456,7 +456,7 @@ fn begin_cross_dpi_restore(target: &mut TargetPosition, window: &mut Window) {
 }
 
 /// Apply pending window restore. Runs only when entities with `TargetPosition` exist.
-pub fn restore_windows(
+pub(crate) fn restore_windows(
     mut scale_changed_messages: MessageReader<WindowScaleFactorChanged>,
     mut windows: Query<(Entity, &mut TargetPosition, &mut Window), With<X11FrameCompensated>>,
     _: NonSendMarker,

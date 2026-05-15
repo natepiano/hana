@@ -17,7 +17,7 @@ use crate::constants::DEFAULT_SCALE_FACTOR;
 
 /// Saved video mode for exclusive fullscreen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Reflect)]
-pub struct SavedVideoMode {
+pub(crate) struct SavedVideoMode {
     pub physical_size:           UVec2,
     pub bit_depth:               u16,
     pub refresh_rate_millihertz: u32,
@@ -37,7 +37,7 @@ impl SavedVideoMode {
 
 /// Serializable window mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Reflect)]
-pub enum SavedWindowMode {
+pub(crate) enum SavedWindowMode {
     Windowed,
     BorderlessFullscreen,
     /// Exclusive fullscreen with optional specific video mode.
@@ -101,7 +101,7 @@ impl From<&WindowMode> for SavedWindowMode {
 /// `scale` records the scale factor of the monitor at save time. It is informational
 /// only — restore uses the target monitor's live scale factor, not this saved value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WindowState {
+pub(crate) struct WindowState {
     /// Top-left corner of the window content area in logical pixels.
     /// `None` on Wayland where clients cannot access window position.
     pub logical_position:  Option<(i32, i32)>,

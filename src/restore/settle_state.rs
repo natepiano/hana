@@ -170,7 +170,7 @@ enum ChangeHandling {
 fn detect_settle_change(
     settle: &mut SettleState,
     snapshot: SettleSnapshot,
-    key: &WindowKey,
+    window_key: &WindowKey,
     total_elapsed_ms: f32,
     timeout_state: TimeoutState,
 ) -> ChangeHandling {
@@ -178,7 +178,7 @@ fn detect_settle_change(
     if changed {
         if settle.last_snapshot.is_some() {
             debug!(
-                "[check_restore_settling] [{key}] {total_elapsed_ms:.0}ms: values changed, \
+                "[check_restore_settling] [{window_key}] {total_elapsed_ms:.0}ms: values changed, \
                  resetting stability timer"
             );
         }
@@ -218,7 +218,7 @@ fn resolve_window_key(
 ///
 /// Runs while `TargetPosition` entities exist (same gate as `restore_windows`).
 /// Only processes entities that have a `settle_state` set.
-pub fn check_restore_settling(
+pub(crate) fn check_restore_settling(
     mut commands: Commands,
     time: Res<Time>,
     mut windows: Query<
@@ -251,7 +251,7 @@ pub fn check_restore_settling(
             .position_available()
             .then_some(target.logical_position)
             .flatten();
-        let key = resolve_window_key(entity, &primary_query, &managed_query);
+        let window_key = resolve_window_key(entity, &primary_query, &managed_query);
         let (current_snapshot, actual_scale) =
             build_actual_snapshot(window, current_monitor, *platform);
 
@@ -273,7 +273,7 @@ pub fn check_restore_settling(
             detect_settle_change(
                 settle,
                 current_snapshot,
-                &key,
+                &window_key,
                 total_elapsed_ms,
                 timeout_state,
             ),
@@ -292,7 +292,7 @@ pub fn check_restore_settling(
             *platform,
         );
         debug!(
-            "[check_restore_settling] [{key}] {total_elapsed_ms:.0}ms (stable: {stability_elapsed_ms:.0}ms): \
+            "[check_restore_settling] [{window_key}] {total_elapsed_ms:.0}ms (stable: {stability_elapsed_ms:.0}ms): \
              position={} size={} mode={} monitor={} | \
              size: {target_physical_size} vs {}, \
              mode: {target_mode:?} vs {:?}, \
@@ -320,7 +320,7 @@ pub fn check_restore_settling(
             emit_settle_success(
                 &mut commands,
                 entity,
-                key,
+                window_key,
                 &settle_target,
                 total_elapsed_ms,
                 stability_elapsed_ms,
@@ -329,7 +329,7 @@ pub fn check_restore_settling(
             emit_settle_mismatch(
                 &mut commands,
                 entity,
-                key,
+                window_key,
                 &settle_target,
                 &build_settle_actual(window, current_snapshot, actual_scale),
                 total_elapsed_ms,
@@ -371,20 +371,20 @@ struct SettleTarget {
 fn emit_settle_success(
     commands: &mut Commands,
     entity: Entity,
-    key: WindowKey,
+    window_key: WindowKey,
     target: &SettleTarget,
     total_elapsed_ms: f32,
     stability_elapsed_ms: f32,
 ) {
     info!(
-        "[check_restore_settling] [{key}] Settled after {total_elapsed_ms:.0}ms \
+        "[check_restore_settling] [{window_key}] Settled after {total_elapsed_ms:.0}ms \
          (stable for {stability_elapsed_ms:.0}ms)"
     );
     commands
         .entity(entity)
         .trigger(|entity| WindowRestored {
             entity,
-            window_id: key,
+            window_id: window_key,
             physical_position: target.physical_position,
             logical_position: target.logical_position,
             logical_size: target.logical_size,
@@ -400,13 +400,13 @@ fn emit_settle_success(
 fn emit_settle_mismatch(
     commands: &mut Commands,
     entity: Entity,
-    key: WindowKey,
+    window_key: WindowKey,
     target: &SettleTarget,
     actual: &SettleActual,
     total_elapsed_ms: f32,
 ) {
     warn!(
-        "[check_restore_settling] [{key}] Settle timeout after {total_elapsed_ms:.0}ms — \
+        "[check_restore_settling] [{window_key}] Settle timeout after {total_elapsed_ms:.0}ms — \
         mismatch remains: \
          position: {:?} vs {:?}, \
          size: {} vs {}, \
@@ -434,7 +434,7 @@ fn emit_settle_mismatch(
         .entity(entity)
         .trigger(|entity| WindowRestoreMismatch {
             entity,
-            window_id: key,
+            window_id: window_key,
             expected_physical_position: target.physical_position,
             actual_physical_position: actual.snapshot.physical_position,
             expected_logical_position: target.logical_position,

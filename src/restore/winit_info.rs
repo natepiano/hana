@@ -26,7 +26,7 @@ struct WindowDecoration {
 
 /// Information from winit captured at startup.
 #[derive(Resource)]
-pub struct WinitInfo {
+pub(crate) struct WinitInfo {
     starting_monitor_index: usize,
     window_decoration:      WindowDecoration,
 }
@@ -50,7 +50,7 @@ impl WinitInfo {
 /// before restore proceeds. On other platforms/configurations, the token is
 /// inserted immediately during `load_target_position` since no compensation is needed.
 #[derive(Component)]
-pub struct X11FrameCompensated;
+pub(crate) struct X11FrameCompensated;
 
 /// Populate `WinitInfo` resource from winit (decoration and starting monitor).
 ///
@@ -58,7 +58,7 @@ pub struct X11FrameCompensated;
 ///
 /// Panics if no monitors are available (e.g., laptop lid closed at startup).
 /// Window management requires at least one monitor to function.
-pub fn init_winit_info(
+pub(crate) fn init_winit_info(
     mut commands: Commands,
     window_entity: Single<Entity, With<PrimaryWindow>>,
     monitors: Res<Monitors>,
@@ -134,7 +134,7 @@ pub fn init_winit_info(
 }
 
 /// Load saved window state and insert `TargetPosition` on the primary window entity.
-pub fn load_target_position(
+pub(crate) fn load_target_position(
     mut commands: Commands,
     window_entity: Single<Entity, With<PrimaryWindow>>,
     monitors: Res<Monitors>,
@@ -228,7 +228,7 @@ pub fn load_target_position(
 /// Body is platform-neutral Bevy code; only the `add_systems` registration in
 /// `lib.rs` is gated to Linux. The early `is_wayland` check makes the system
 /// inert on Wayland; non-Linux platforms never schedule it at all.
-pub fn move_to_target_monitor(
+pub(crate) fn move_to_target_monitor(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     targets: Query<&TargetPosition, With<PrimaryWindow>>,
     platform: Res<Platform>,
