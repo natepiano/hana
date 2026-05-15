@@ -79,7 +79,7 @@ fn main() {
         )
         .pitch(HOME_PITCH)
         .with_title_bar(
-            TitleBar::new("Controls")
+            TitleBar::new()
                 .with_anchor(Anchor::TopLeft)
                 .control(ZOOM_CONTROL)
                 .control(LOOK_CONTROL)

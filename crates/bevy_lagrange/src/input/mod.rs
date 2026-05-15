@@ -126,7 +126,7 @@ pub use routing::NoPositionFallback;
 pub(super) use routing::OrbitCamInputBlockers;
 pub(super) use routing::OrbitCamInputContextGated;
 pub(super) use routing::OrbitCamRoutingPlugin;
-pub(super) use routing::ResolvedOrbitCamInputRoute;
+pub use routing::ResolvedOrbitCamInputRoute;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;
 pub use state::OrbitCamInteractionState;

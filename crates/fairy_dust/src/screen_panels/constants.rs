@@ -24,3 +24,4 @@ pub(super) const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
 pub(super) const SEPARATOR_HEIGHT: Px = Px(18.0);
 pub(super) const SEPARATOR_WIDTH: Px = Px(1.0);
 pub(super) const TITLE_BAR_CHILD_GAP: Px = Px(10.0);
+pub(super) const TITLE_BAR_DEFAULT_TITLE: &str = "CONTROLS";

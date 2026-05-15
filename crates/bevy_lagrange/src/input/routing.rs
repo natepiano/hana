@@ -222,15 +222,24 @@ impl From<bool> for ContextGate {
     }
 }
 
+/// Result of the per-frame input routing pass: which `OrbitCam` (if any)
+/// currently owns input, plus the cursor-surface metrics and blocker reasons
+/// for every candidate camera.
+///
+/// Read this as a resource to discover the active camera — useful for
+/// multi-camera HUDs, per-camera home-key bindings, and any feature that
+/// needs to react to "which viewport is the cursor over."
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
-pub(crate) struct ResolvedOrbitCamInputRoute {
+pub struct ResolvedOrbitCamInputRoute {
     routed_camera: Option<Entity>,
     metrics:       HashMap<Entity, CameraInputSurfaceMetrics>,
     blockers:      HashMap<Entity, OrbitCamInputBlockers>,
 }
 
 impl ResolvedOrbitCamInputRoute {
-    pub(crate) const fn routed_camera(&self) -> Option<Entity> { self.routed_camera }
+    /// The `OrbitCam` entity currently receiving input, if any. Returns
+    /// `None` when the cursor is not over any orbit-camera viewport.
+    pub const fn routed_camera(&self) -> Option<Entity> { self.routed_camera }
 
     pub(crate) fn metrics_for(&self, camera: Entity) -> Option<CameraInputSurfaceMetrics> {
         self.metrics.get(&camera).copied()

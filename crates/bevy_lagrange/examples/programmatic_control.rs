@@ -96,7 +96,7 @@ fn main() {
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .with_title_bar(
-            TitleBar::new("Controls")
+            TitleBar::new()
                 .with_anchor(Anchor::TopLeft)
                 .control(HOME_CONTROL),
         )
@@ -116,7 +116,7 @@ const fn configure_camera(camera: &mut OrbitCam) {
 }
 
 fn description_panel() -> DescriptionPanel {
-    DescriptionPanel::new("Programmatic OrbitCam Control")
+    DescriptionPanel::new("PROGRAMMATIC ORBITCAM CONTROL")
         .with_anchor(Anchor::BottomLeft)
         .line("Press H to home the camera")
         .line("The `home_camera` system, reads the keypress and mutates `target_focus`, `target_yaw`, `target_pitch`, and `target_radius` directly on the `OrbitCam`.")

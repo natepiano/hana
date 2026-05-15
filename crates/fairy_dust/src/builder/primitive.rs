@@ -30,6 +30,18 @@ impl<S> PrimitiveBuilder<S> {
         self
     }
 
+    /// Inserts additional components on the spawned primitive entity.
+    ///
+    /// Useful for attaching markers or example-specific components without
+    /// dropping to a manual `commands.spawn`.
+    #[must_use]
+    pub fn insert<B: Bundle>(mut self, bundle: B) -> Self {
+        self.inserts.push(Box::new(move |entity| {
+            entity.insert(bundle);
+        }));
+        self
+    }
+
     /// Sets the primitive material base color.
     #[must_use]
     pub const fn color(mut self, color: Color) -> Self {
@@ -166,7 +178,7 @@ impl<S> PrimitiveBuilder<S> {
     pub fn run(self) -> AppExit { self.finish().run() }
 
     fn finish(mut self) -> SprinkleBuilder<S> {
-        primitive::install(&mut self.parent.app, self.config);
+        primitive::install(&mut self.parent.app, self.config, self.inserts);
         self.parent
     }
 }

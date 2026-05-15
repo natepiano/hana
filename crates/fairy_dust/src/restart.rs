@@ -102,7 +102,6 @@ pub(crate) fn handle_trampoline_if_active() {
 
 #[cfg(unix)]
 fn do_restart() {
-    use std::os::unix::process::CommandExt;
     let exe = match std::env::current_exe() {
         Ok(path) => path,
         Err(err) => {
@@ -111,23 +110,31 @@ fn do_restart() {
         },
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let err = std::process::Command::new(&exe)
+    match std::process::Command::new(&exe)
         .args(&args)
         .env(TRAMPOLINE_ENV, "1")
-        .exec();
-    eprintln!("fairy_dust: failed to exec trampoline: {err}");
-    std::process::exit(1);
+        .spawn()
+    {
+        Ok(_) => {},
+        Err(err) => {
+            eprintln!("fairy_dust: failed to spawn trampoline: {err}");
+            std::process::exit(1);
+        },
+    }
+    std::process::exit(0);
 }
 
 #[cfg(unix)]
 fn trampoline_relaunch(exe: &Path, args: &[String]) -> ! {
-    use std::os::unix::process::CommandExt;
-    let err = std::process::Command::new(exe)
+    match std::process::Command::new(exe)
         .args(args)
         .env_remove(TRAMPOLINE_ENV)
-        .exec();
-    eprintln!("fairy_dust: trampoline exec failed: {err}");
-    std::process::exit(1);
+        .spawn()
+    {
+        Ok(_) => {},
+        Err(err) => eprintln!("fairy_dust: trampoline relaunch failed: {err}"),
+    }
+    std::process::exit(0);
 }
 
 #[cfg(windows)]

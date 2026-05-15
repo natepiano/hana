@@ -8,10 +8,6 @@ use bevy::prelude::Vec3;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 
-// ambient
-pub(crate) const AMBIENT_BRIGHTNESS: f32 = 95.0;
-pub(crate) const AMBIENT_COLOR: Color = Color::srgb(0.55, 0.62, 0.76);
-
 // camera home
 pub(crate) const HOME_CONTROL: &str = "H Home";
 pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);

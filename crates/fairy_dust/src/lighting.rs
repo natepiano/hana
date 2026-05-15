@@ -2,11 +2,8 @@
 
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::light::DirectionalLightShadowMap;
-use bevy::light::GlobalAmbientLight;
 use bevy::prelude::*;
 
-use crate::constants::AMBIENT_BRIGHTNESS;
-use crate::constants::AMBIENT_COLOR;
 use crate::constants::CASCADE_FIRST_FAR_BOUND;
 use crate::constants::CASCADE_MAX_DISTANCE;
 use crate::constants::CASCADE_MIN_DISTANCE;
@@ -31,11 +28,6 @@ pub(crate) fn install(app: &mut App) {
     app.insert_resource(ClearColor(CLEAR_COLOR))
         .insert_resource(DirectionalLightShadowMap {
             size: SHADOW_MAP_SIZE,
-        })
-        .insert_resource(GlobalAmbientLight {
-            color:                      AMBIENT_COLOR,
-            brightness:                 AMBIENT_BRIGHTNESS,
-            affects_lightmapped_meshes: false,
         })
         .add_systems(Startup, spawn_studio_lights);
 }

@@ -20,6 +20,7 @@ use super::constants::DIVIDER_COLOR;
 use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
+use super::constants::TITLE_BAR_DEFAULT_TITLE;
 use super::panel_frame;
 use super::unlit_panel_material;
 use crate::camera_home::CameraHomeConfig;
@@ -39,13 +40,21 @@ pub struct TitleBar {
 impl TitleBar {
     /// Creates a title bar with the visible example title.
     #[must_use]
-    pub fn new(title: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
             anchor:          Anchor::TopLeft,
-            title:           title.into(),
+            title:           TITLE_BAR_DEFAULT_TITLE.to_string(),
             controls:        Vec::new(),
             active_controls: Vec::new(),
         }
+    }
+
+    /// Overrides the rendered title. Strings render literally — pass the
+    /// case you want displayed.
+    #[must_use]
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
     }
 
     /// Sets the title bar screen anchor.
@@ -203,7 +212,7 @@ fn build_title_bar_layout(
                 .child_gap(TITLE_BAR_CHILD_GAP)
                 .child_align_y(AlignY::Center),
             |builder| {
-                builder.text(title_bar.title.to_uppercase(), title);
+                builder.text(&title_bar.title, title);
                 for control_label in &title_bar.controls {
                     title_separator(builder);
                     let control = if state.is_active(control_label) {
@@ -252,7 +261,8 @@ mod tests {
 
     #[test]
     fn title_bar_can_seed_active_controls() {
-        let title_bar = TitleBar::new("Demo")
+        let title_bar = TitleBar::new()
+            .with_title("Demo")
             .control("A Action")
             .active_control("T Toggle");
         let state = TitleBarControlState::from_title_bar(&title_bar);

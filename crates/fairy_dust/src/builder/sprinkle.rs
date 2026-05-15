@@ -69,8 +69,9 @@ impl<S> SprinkleBuilder<S> {
     #[must_use]
     pub const fn with_ground_plane(self) -> PrimitiveBuilder<S> {
         PrimitiveBuilder {
-            parent: self,
-            config: PrimitiveConfig::ground_plane(),
+            parent:  self,
+            config:  PrimitiveConfig::ground_plane(),
+            inserts: Vec::new(),
         }
     }
 
@@ -78,8 +79,9 @@ impl<S> SprinkleBuilder<S> {
     #[must_use]
     pub const fn with_cube(self) -> PrimitiveBuilder<S> {
         PrimitiveBuilder {
-            parent: self,
-            config: PrimitiveConfig::cube(),
+            parent:  self,
+            config:  PrimitiveConfig::cube(),
+            inserts: Vec::new(),
         }
     }
 

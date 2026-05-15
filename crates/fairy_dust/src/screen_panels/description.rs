@@ -94,7 +94,7 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
                 .direction(Direction::TopToBottom)
                 .child_gap(DESCRIPTION_CHILD_GAP),
             |builder| {
-                builder.text(panel.title.to_uppercase(), title);
+                builder.text(&panel.title, title);
                 for line in &panel.lines {
                     builder.text(line, body.clone());
                 }

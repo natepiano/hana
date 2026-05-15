@@ -140,6 +140,7 @@ pub use input::OrbitCamZoomSmoothActionBindings;
 pub use input::OrbitDelta;
 pub use input::PanDelta;
 pub use input::PinchGestureZoom;
+pub use input::ResolvedOrbitCamInputRoute;
 pub use input::SmoothZoomDelta;
 pub use input::WheelZoomPolarity;
 pub use input::ZoomDirection;

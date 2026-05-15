@@ -10,11 +10,15 @@ use bevy::prelude::*;
 use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy::window::WindowResized;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_lagrange::LagrangePlugin;
+use std::collections::HashMap;
+
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use bevy_window_manager::ManagedWindow;
-use bevy_window_manager::WindowManagerPlugin;
+use fairy_dust::Anchor;
+use fairy_dust::Face;
+use fairy_dust::TitleBar;
 
 // camera
 const MINIMAP_CAMERA_ORDER: isize = 1;
@@ -25,12 +29,20 @@ const SECOND_WINDOW_CAMERA_TRANSLATION: Vec3 = Vec3::new(5.0, 1.5, 7.0);
 // cube
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 0.0);
+const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.8, 0.0);
+const FACE_LABEL_SIZE: f32 = 0.15;
+const FACE_LABEL_COLOR: Color = Color::srgb(0.9, 0.3, 0.1);
 
-// scene
-const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
-const GROUND_SIZE: f32 = 5.0;
-const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+// home pose (per camera)
+const PRIMARY_HOME_YAW: f32 = 0.0;
+const PRIMARY_HOME_PITCH: f32 = 0.46;
+const PRIMARY_HOME_RADIUS: f32 = 5.0;
+const MINIMAP_HOME_YAW: f32 = 0.0;
+const MINIMAP_HOME_PITCH: f32 = 1.4;
+const MINIMAP_HOME_RADIUS: f32 = 6.0;
+const SECOND_HOME_YAW: f32 = 0.8;
+const SECOND_HOME_PITCH: f32 = 0.4;
+const SECOND_HOME_RADIUS: f32 = 7.0;
 
 // viewport
 const MINIMAP_VIEWPORT_DIVISOR: u32 = 5;
@@ -40,63 +52,75 @@ const SECOND_WINDOW_NAME: &str = "second_window";
 const SECOND_WINDOW_TITLE: &str = "Second window";
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(LagrangePlugin)
-        .add_plugins(BrpExtrasPlugin::default())
-        .add_plugins(WindowManagerPlugin)
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_cube()
+        .size(CUBE_SIZE)
+        .color(CUBE_COLOR)
+        .transform(Transform::from_translation(CUBE_TRANSLATION))
+        .face_text(Face::Front, "FRONT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Back, "BACK", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Top, "TOP", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Bottom, "BOTTOM", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Left, "LEFT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Right, "RIGHT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .with_title_bar(
+            TitleBar::new()
+                .with_anchor(Anchor::TopLeft)
+                .control("H Home (active cam)"),
+        )
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (cleanup_cameras_on_window_close, set_camera_viewports),
+            (
+                cleanup_cameras_on_window_close,
+                set_camera_viewports,
+                home_on_keypress,
+            ),
         )
         .run();
 }
 
 fn orbit_cam_default() -> OrbitCam { OrbitCam::default() }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // Ground
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
-        MeshMaterial3d(materials.add(GROUND_COLOR)),
-    ));
-    // Cube
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE))),
-        MeshMaterial3d(materials.add(CUBE_COLOR)),
-        Transform::from_translation(CUBE_TRANSLATION),
-    ));
-    // Light
-    commands.spawn((
-        PointLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_translation(LIGHT_TRANSLATION),
-    ));
+#[derive(Clone, Copy)]
+struct HomePose {
+    focus:  Vec3,
+    yaw:    f32,
+    pitch:  f32,
+    radius: f32,
+}
 
+#[derive(Resource, Default)]
+struct CameraHomes(HashMap<Entity, HomePose>);
+
+fn setup(mut commands: Commands) {
     // --- Primary window: main camera ---
-    commands.spawn((
-        Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
-        orbit_cam_default(),
-    ));
+    let primary = commands
+        .spawn((
+            Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
+            orbit_cam_default(),
+            OrbitCamPreset::BlenderLike,
+        ))
+        .id();
 
     // --- Primary window: minimap viewport overlay ---
-    commands.spawn((
-        Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
-        Camera {
-            order: MINIMAP_CAMERA_ORDER,
-            clear_color: ClearColorConfig::None,
-            ..default()
-        },
-        orbit_cam_default(),
-        MinimapCamera,
-    ));
+    let minimap = commands
+        .spawn((
+            Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
+            Camera {
+                order: MINIMAP_CAMERA_ORDER,
+                clear_color: ClearColorConfig::None,
+                ..default()
+            },
+            orbit_cam_default(),
+            OrbitCamPreset::BlenderLike,
+            MinimapCamera,
+        ))
+        .id();
 
     // --- Second OS window ---
     let second_window = commands
@@ -111,12 +135,70 @@ fn setup(
         ))
         .id();
 
-    commands.spawn((
-        Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
-        Camera::default(),
-        RenderTarget::Window(WindowRef::Entity(second_window)),
-        orbit_cam_default(),
-    ));
+    let second = commands
+        .spawn((
+            Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
+            Camera::default(),
+            RenderTarget::Window(WindowRef::Entity(second_window)),
+            orbit_cam_default(),
+            OrbitCamPreset::BlenderLike,
+        ))
+        .id();
+
+    commands.insert_resource(CameraHomes(HashMap::from([
+        (
+            primary,
+            HomePose {
+                focus:  CUBE_TRANSLATION,
+                yaw:    PRIMARY_HOME_YAW,
+                pitch:  PRIMARY_HOME_PITCH,
+                radius: PRIMARY_HOME_RADIUS,
+            },
+        ),
+        (
+            minimap,
+            HomePose {
+                focus:  CUBE_TRANSLATION,
+                yaw:    MINIMAP_HOME_YAW,
+                pitch:  MINIMAP_HOME_PITCH,
+                radius: MINIMAP_HOME_RADIUS,
+            },
+        ),
+        (
+            second,
+            HomePose {
+                focus:  CUBE_TRANSLATION,
+                yaw:    SECOND_HOME_YAW,
+                pitch:  SECOND_HOME_PITCH,
+                radius: SECOND_HOME_RADIUS,
+            },
+        ),
+    ])));
+}
+
+/// Homes the camera the cursor is currently over to its stored pose.
+fn home_on_keypress(
+    keys: Res<ButtonInput<KeyCode>>,
+    route: Res<ResolvedOrbitCamInputRoute>,
+    homes: Res<CameraHomes>,
+    mut cams: Query<&mut OrbitCam>,
+) {
+    if !keys.just_pressed(KeyCode::KeyH) {
+        return;
+    }
+    let Some(cam) = route.routed_camera() else {
+        return;
+    };
+    let Some(&pose) = homes.0.get(&cam) else {
+        return;
+    };
+    let Ok(mut orbit) = cams.get_mut(cam) else {
+        return;
+    };
+    orbit.target_focus = pose.focus;
+    orbit.target_yaw = pose.yaw;
+    orbit.target_pitch = pose.pitch;
+    orbit.target_radius = pose.radius;
 }
 
 #[derive(Component)]

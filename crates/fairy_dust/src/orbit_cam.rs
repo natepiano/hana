@@ -1,14 +1,12 @@
-//! Capability: orbit-camera input via `bevy_lagrange::LagrangePlugin`,
-//! plus a spawned `OrbitCam` entity tagged with [`FairyDustOrbitCam`] so
-//! camera-attached capabilities (e.g. stable-transparency) can find it.
+//! Capability: spawn an `OrbitCam` entity tagged with [`FairyDustOrbitCam`]
+//! so camera-attached capabilities (e.g. stable-transparency) can find it.
+//! `LagrangePlugin` itself is installed unconditionally by
+//! [`crate::sprinkle_example`].
 
 use std::sync::Mutex;
 
 use bevy::prelude::*;
-use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-
-use crate::ensure_plugin;
 
 /// Marker on the `OrbitCam` entity spawned by
 /// [`crate::SprinkleBuilder::with_orbit_cam_configured`]. Other capabilities use this to find the
@@ -31,7 +29,6 @@ pub(crate) fn install_with_bundle<B>(
 ) where
     B: Bundle + Send + Sync + 'static,
 {
-    ensure_plugin(app, LagrangePlugin);
     let configure = Mutex::new(Some(configure));
     let bundle = Mutex::new(Some(bundle));
     app.add_systems(Startup, move |mut commands: Commands| {

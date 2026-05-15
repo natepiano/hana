@@ -7,9 +7,13 @@
 use std::marker::PhantomData;
 
 use bevy::app::App;
+use bevy::ecs::system::EntityCommands;
 
 use crate::camera_home::CameraHomeConfig;
 use crate::primitive::PrimitiveConfig;
+
+/// Boxed deferred-insert closure applied to a primitive entity at spawn time.
+pub(super) type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + Sync>;
 
 mod camera_home;
 mod primitive;
@@ -42,8 +46,9 @@ pub struct SprinkleBuilder<S> {
 /// Calling a non-primitive builder method finalizes the primitive and returns
 /// to the normal [`SprinkleBuilder`] chain.
 pub struct PrimitiveBuilder<S> {
-    pub(super) parent: SprinkleBuilder<S>,
-    pub(super) config: PrimitiveConfig,
+    pub(super) parent:  SprinkleBuilder<S>,
+    pub(super) config:  PrimitiveConfig,
+    pub(super) inserts: Vec<PrimitiveInsert>,
 }
 
 /// Builder returned while configuring a camera "home" pose.

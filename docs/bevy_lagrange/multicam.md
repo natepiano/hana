@@ -5,6 +5,64 @@ fairy_dust style, with first-class support for **multiple `OrbitCam`s** —
 each with its own home pose, its own column of guidance in a shared per-window
 panel, and an `H` key that homes only the camera currently receiving input.
 
+## Canonicalize matrix
+
+Each row maps a `docs/canonical_example.md` requirement to the current state
+of `viewports_windows.rs` and the work needed to close the gap. Rows are
+independent — pick one, do that chunk, ship.
+
+| # | Canonical item | Current viewports_windows state | Gap to close | Plan phase |
+|---|---|---|---|---|
+| 1 | `fairy_dust::sprinkle_example()` entry, `.run()` | Raw `App::new()` + four `add_plugins` calls | Switch plumbing to the `sprinkle_example()` chain | 5 |
+| 2 | `.with_brp_extras()` | Manual `BrpExtrasPlugin::default()` | Drop manual add, use builder | 5 |
+| 3 | `.with_save_window_position()` | Manual `WindowManagerPlugin` | Drop manual add, use builder | 5 |
+| 4 | `.with_studio_lighting()` | Single `PointLight` spawned by hand | Delete manual light, use builder | 5 |
+| 5 | `.with_ground_plane()` | Manual `Plane3d` (`GROUND_SIZE = 5.0`, green) | Delete manual ground, use builder (default 8×8, tan) | 5 |
+| 6 | `.with_cube()` builder | Manual `Cuboid` (size 1.0, tan, at origin) | Replace with builder; no face labels needed | 5 |
+| 7 | `.with_orbit_cam(...)` (singular) | Three `OrbitCam` entities spawned manually | Stay manual (multi-cam); add `Camera3d::default()` + explicit `Camera { order, clear_color }` per cam | 5 |
+| 8 | `.with_camera_home(...)` (singular) | No home; raw `Transform` only | Use new per-camera `CameraHome` component | 2 (build), 5 (apply) |
+| 9 | `.with_title_bar(...)` | None | Add `TitleBar::new("Viewports + windows")` with `H Home` chip | 5 |
+| 10 | `.with_camera_control_panel()` (singular) | None — singular wouldn't fit three cams across two windows | Use new **grouped** per-window panel | 3 (build), 4 (chip wiring), 5 (apply) |
+| 11 | `Ctrl+Shift+R` hot-restart | Not wired (raw `App::new()` skips fairy_dust) | Comes free with `sprinkle_example()` switch | 5 |
+| 12 | Manual-spawn justified only when fairy_dust can't express it | Cube/ground/light: unjustified. Cameras: justified | Delete cube/ground/light; keep camera spawns | 5 |
+
+### Out-of-canonical concerns specific to this example
+
+| # | Concern | Current state | Action | Plan phase |
+|---|---|---|---|---|
+| A | Multiple `OrbitCam`s sharing input routing | `ResolvedOrbitCamInputRoute` is `pub(crate)` | Promote to `pub`, expose `routed_camera()` | 1 |
+| B | Per-window screen-space panel | `DiegeticPanel::screen()` — previous attempt found this was the breaking point | Verify or extend; spawn one panel per render-target window | 3 (open question 1) |
+| C | `AnimationBegin`/`End` filterable by camera entity (for chip highlight) | Verify field present | Add `camera: Entity` field if missing | 4 |
+| D | Camera `order` / `clear_color` on viewport overlays | Set on minimap, missing on second-window cam | Add explicit `Camera { ... }` to all three cameras | 5 |
+
+## High-level walk: filling the matrix
+
+Reading the matrix as a checklist yields this order. Each step compiles and
+leaves `zoom_to_fit` / `world_text` running unchanged.
+
+1. **Promote one type to public (row A).** `ResolvedOrbitCamInputRoute` →
+   `pub`. No behavior change; everything below builds on it.
+2. **Add per-camera home capability (row 8).** New `fairy_dust::CameraHome`
+   component + observer. Single-camera `with_camera_home(...)` stays
+   untouched.
+3. **Add grouped guidance panel capability (rows 10, B).** New
+   `GroupedCameraGuidance` component + per-window panel. **Validate the
+   bevy_diegetic per-window screen-space path before committing** — this is
+   where the prior attempt died.
+4. **Add per-camera `H Home` chip wiring (rows 9, C).** Depends on (2) and
+   (3); may require a small `bevy_lagrange` field add.
+5. **Convert the example (rows 1–7, 11, 12, D).** Flip to the canonical
+   chain, delete manual ground/cube/light spawns, keep manual cameras,
+   add explicit `Camera3d` + `Camera { order, clear_color }` on each.
+6. **Update `docs/canonical_example.md`.** Add a "Multiple cameras /
+   windows" section cross-referencing the new capabilities.
+
+The risky step is **3**. If `bevy_diegetic` doesn't support a render-target
+override on screen-space panels, fixing that is a sub-task that lands before
+step 3 itself. Step 5 is reversible up to the moment of merge — the previous
+attempt's lesson is that "compiles cleanly" doesn't mean "renders correctly,"
+so step 5 needs a launched-window check, not just `cargo build`.
+
 ## Why this is risky and how this plan stays safe
 
 The previous attempt at this work left the example rendering completely black.

@@ -49,6 +49,7 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 pub use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticUiPlugin;
+use bevy_lagrange::LagrangePlugin;
 pub use bevy_lagrange::OrbitCam;
 pub use builder::CameraHomeBuilder;
 pub use builder::NoOrbitCam;
@@ -87,6 +88,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
         ..LogPlugin::default()
     }));
     ensure_plugin(&mut app, DiegeticUiPlugin);
+    ensure_plugin(&mut app, LagrangePlugin);
     restart::install(&mut app);
     SprinkleBuilder {
         app,

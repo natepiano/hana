@@ -2,7 +2,9 @@
 
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::PI;
+use std::sync::Mutex;
 
+use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::WorldText;
@@ -153,13 +155,28 @@ impl PrimitiveConfig {
     pub(crate) fn push_face_text(&mut self, spec: FaceTextSpec) { self.face_texts.push(spec); }
 }
 
-pub(crate) fn install(app: &mut App, config: PrimitiveConfig) {
+/// Boxed deferred-insert closure applied to a primitive entity at spawn time.
+pub(crate) type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + Sync>;
+
+pub(crate) fn install(app: &mut App, config: PrimitiveConfig, inserts: Vec<PrimitiveInsert>) {
+    let inserts_cell: Mutex<Option<Vec<PrimitiveInsert>>> = Mutex::new(Some(inserts));
     app.add_systems(
         Startup,
         move |mut commands: Commands,
               mut meshes: ResMut<Assets<Mesh>>,
               mut materials: ResMut<Assets<StandardMaterial>>| {
-            spawn_primitive(&mut commands, &mut meshes, &mut materials, config.clone());
+            let inserts = inserts_cell
+                .lock()
+                .expect("primitive install Startup runs once")
+                .take()
+                .unwrap_or_default();
+            spawn_primitive(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                config.clone(),
+                inserts,
+            );
         },
     );
 }
@@ -169,6 +186,7 @@ fn spawn_primitive(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     config: PrimitiveConfig,
+    inserts: Vec<PrimitiveInsert>,
 ) {
     let mesh = match config.kind {
         PrimitiveKind::GroundPlane => {
@@ -191,6 +209,9 @@ fn spawn_primitive(
         MeshMaterial3d(materials.add(material)),
         transform,
     ));
+    for insert in inserts {
+        insert(&mut entity);
+    }
     if !face_texts.is_empty() {
         entity.with_children(|parent| {
             for spec in face_texts {

@@ -37,7 +37,7 @@ fairy_dust::sprinkle_example()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
     .with_title_bar(
-        TitleBar::new("Controls")
+        TitleBar::new()
             .with_anchor(Anchor::TopLeft)
             .control("Z ZoomToFit")
             .control("L LookAt"),
@@ -64,9 +64,12 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 - `.with_ground_plane()` — default 8×8 translucent ground. Override `.size()`
   or `.color()` per example, but do not hand-roll a plane.
 - `.with_camera_control_panel()` — bottom-right camera controls HUD.
-- `.with_title_bar(TitleBar::new("Controls")...)` — top-left chip bar listing
-  the example's keyboard shortcuts. `H Home` is auto-prepended when
-  `.with_camera_home(...)` is used.
+- `.with_title_bar(TitleBar::new()...)` — top-left chip bar listing the
+  example's keyboard shortcuts. Title defaults to `"CONTROLS"`; override
+  with `.with_title("DEBUG")` if a specific example needs a different
+  label. Title and chip strings render literally (no auto-uppercasing) —
+  pass the case you want displayed (canonical convention: ALL CAPS).
+  `H Home` is auto-prepended when `.with_camera_home(...)` is used.
 - `Ctrl+Shift+R` hot-restart — wired up unconditionally inside
   `sprinkle_example()`; no builder call needed.
 

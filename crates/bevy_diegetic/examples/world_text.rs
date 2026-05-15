@@ -6,12 +6,13 @@
 //! labeled cube around the matching local axis; press `H` to return to the
 //! home camera pose.
 
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::Face;
 use fairy_dust::TitleBar;
 
 const HOME_FOCUS: Vec3 = Vec3::ZERO;
@@ -25,9 +26,12 @@ const Z_ROTATE_CONTROL: &str = "Z Rotate";
 
 const ROTATION_SPEED: f32 = 1.5;
 
-const GROUND_COLOR: Color = Color::srgba(0.08, 0.08, 0.08, 0.5);
-const GROUND_SIZE_X: f32 = 10.0;
-const GROUND_SIZE_Z: f32 = 6.0;
+const CUBE_SIZE: f32 = 1.0;
+const CUBE_TRANSLATION: Vec3 = Vec3::new(-2.5, 1.0, 2.5);
+const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_YAW: f32 = 20.0;
+const FACE_LABEL_SIZE: f32 = 0.20;
+const FACE_LABEL_COLOR: Color = Color::srgb(0.9, 0.3, 0.1);
 
 const ANCHOR_FRAME_COLOR: Color = Color::srgba(0.08, 0.08, 0.08, 0.18);
 const ANCHOR_FRAME_SIZE: Vec3 = Vec3::new(3.6, 2.0, 0.02);
@@ -70,18 +74,33 @@ fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
     fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_cube()
+        .size(CUBE_SIZE)
+        .color(CUBE_COLOR)
+        .transform(
+            Transform::from_translation(CUBE_TRANSLATION)
+                .with_rotation(Quat::from_rotation_y(CUBE_YAW.to_radians())),
+        )
+        .insert(DemoCube)
+        .face_text(Face::Front, "FRONT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Back, "BACK", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Top, "TOP", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Bottom, "BOTTOM", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Left, "LEFT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(Face::Right, "RIGHT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
         .with_orbit_cam(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_stable_transparency()
         .with_camera_home(
             Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
         )
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
-        .with_stable_transparency()
-        .with_save_window_position()
-        .with_brp_extras()
-        .with_camera_control_panel()
         .with_title_bar(
-            TitleBar::new("CONTROLS")
+            TitleBar::new()
                 .with_anchor(Anchor::TopLeft)
                 .control(X_ROTATE_CONTROL)
                 .control(Y_ROTATE_CONTROL)
@@ -102,6 +121,7 @@ fn main() {
             |e| e.axis == Vec3::Z,
             |e| e.axis == Vec3::Z,
         )
+        .with_camera_control_panel()
         .init_resource::<AnchorRotation>()
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_anchor_demo)
@@ -113,100 +133,8 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    spawn_ground(&mut commands, &mut meshes, &mut materials);
-    spawn_labeled_cube(&mut commands, &mut meshes, &mut materials);
     spawn_anchor_demo(&mut commands, &mut meshes, &mut materials);
     spawn_ground_text(&mut commands);
-    spawn_lighting(&mut commands);
-}
-
-/// Spawns the translucent ground plane.
-fn spawn_ground(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-) {
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE_X, GROUND_SIZE_Z))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: GROUND_COLOR,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            ..default()
-        })),
-    ));
-}
-
-/// Spawns a cube with `WorldText` labels on all six faces.
-fn spawn_labeled_cube(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-) {
-    commands
-        .spawn((
-            DemoCube,
-            Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.7, 0.6),
-                ..default()
-            })),
-            Transform::from_xyz(-2.5, 1.0, 2.5)
-                .with_rotation(Quat::from_rotation_y(20.0_f32.to_radians())),
-        ))
-        .with_children(|parent| {
-            let one_sided_face_style = WorldTextStyle::new(0.20)
-                .with_color(Color::srgb(0.9, 0.3, 0.1))
-                .with_sidedness(GlyphSidedness::OneSided);
-
-            // Front face (+Z).
-            parent.spawn((
-                WorldText::new("FRONT"),
-                one_sided_face_style.clone(),
-                Transform::from_xyz(0.0, 0.0, 0.501),
-            ));
-
-            // Back face (-Z).
-            parent.spawn((
-                WorldText::new("BACK"),
-                one_sided_face_style.clone(),
-                Transform::from_xyz(0.0, 0.0, -0.501)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
-            ));
-
-            // Top face (+Y).
-            parent.spawn((
-                WorldText::new("TOP"),
-                one_sided_face_style.clone(),
-                Transform::from_xyz(0.0, 0.501, 0.0)
-                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-            ));
-
-            // Bottom face (-Y).
-            parent.spawn((
-                WorldText::new("BOTTOM"),
-                one_sided_face_style.clone(),
-                Transform::from_xyz(0.0, -0.501, 0.0)
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-            ));
-
-            // Left face (-X).
-            parent.spawn((
-                WorldText::new("LEFT"),
-                one_sided_face_style.clone(),
-                Transform::from_xyz(-0.501, 0.0, 0.0)
-                    .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
-            ));
-
-            // Right face (+X).
-            parent.spawn((
-                WorldText::new("RIGHT"),
-                one_sided_face_style,
-                Transform::from_xyz(0.501, 0.0, 0.0)
-                    .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-            ));
-        });
 }
 
 /// Spawns the anchor demo: a translucent backdrop plane, title, instructions,
@@ -237,6 +165,7 @@ fn spawn_anchor_demo(
         })),
         Transform::from_translation(demo_center + demo_rotation * ANCHOR_FRAME_LOCAL_OFFSET)
             .with_rotation(demo_rotation),
+        NotShadowCaster,
     ));
 
     let sphere_mesh = meshes.add(Sphere::new(0.025));
@@ -256,14 +185,13 @@ fn spawn_anchor_demo(
             .with_rotation(demo_rotation),
     ));
 
-    // Instructions: red sphere marker + "= Transform translation".
     commands.spawn((
         Mesh3d(sphere_mesh.clone()),
         MeshMaterial3d(sphere_material.clone()),
         Transform::from_translation(demo_center + demo_rotation * Vec3::new(-0.60, 1.10, 0.01)),
     ));
     commands.spawn((
-        WorldText::new("= Transform translation"),
+        WorldText::new(" = Transform translation"),
         WorldTextStyle::new(0.10)
             .with_color(Color::WHITE)
             .with_anchor(Anchor::TopLeft),
@@ -313,36 +241,9 @@ fn spawn_anchor_demo(
 fn spawn_ground_text(commands: &mut Commands) {
     commands.spawn((
         WorldText::new("GROUND PLANE"),
-        WorldTextStyle::new(0.48)
-            .with_color(Color::srgb(0.9, 0.9, 0.1))
-            .with_sidedness(GlyphSidedness::OneSided),
+        WorldTextStyle::new(0.48).with_color(Color::srgb(0.9, 0.9, 0.1)),
         Transform::from_xyz(0.0, 0.001, 0.0)
             .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
-}
-
-/// Spawns ambient light and directional lights. The orbit camera is set up
-/// by `fairy_dust::with_orbit_cam` in `main`.
-fn spawn_lighting(commands: &mut Commands) {
-    commands.insert_resource(GlobalAmbientLight {
-        color:                      Color::WHITE,
-        brightness:                 1_000.0,
-        affects_lightmapped_meshes: true,
-    });
-
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-4.0, 8.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 
