@@ -31,15 +31,15 @@ pub enum CableEnd {
 #[reflect(Component)]
 pub struct CableEndpoint {
     /// Which end of the cable this represents.
-    pub end:                CableEnd,
+    pub end:           CableEnd,
     /// Position offset. World-space for world-attached, local-space for entity-attached.
-    pub offset:             Vec3,
+    pub offset:        Vec3,
     /// How to cap this end of the tube mesh.
-    pub cap_style:          Capping,
+    pub cap_style:     Capping,
     /// What happens when the target entity is despawned.
-    pub detach_policy:      DetachPolicy,
+    pub detach_policy: DetachPolicy,
     /// How the endpoint's [`AttachedTo`] target rotates to follow the cable's tangent.
-    pub endpoint_alignment: EndpointAlignment,
+    pub alignment:     EndpointAlignment,
 }
 
 impl CableEndpoint {
@@ -52,7 +52,7 @@ impl CableEndpoint {
             offset: offset.into(),
             cap_style: Capping::Round,
             detach_policy: DetachPolicy::Remain,
-            endpoint_alignment: EndpointAlignment::AsSpawned,
+            alignment: EndpointAlignment::AsSpawned,
         }
     }
 
@@ -72,8 +72,8 @@ impl CableEndpoint {
 
     /// Set the alignment mode for this endpoint's attached target.
     #[must_use]
-    pub const fn with_endpoint_alignment(mut self, endpoint_alignment: EndpointAlignment) -> Self {
-        self.endpoint_alignment = endpoint_alignment;
+    pub const fn with_alignment(mut self, alignment: EndpointAlignment) -> Self {
+        self.alignment = alignment;
         self
     }
 }
@@ -181,7 +181,7 @@ pub(super) fn on_endpoint_alignment_update(
         // Negate so the cable enters from the target's -Y side.
         let direction = -tangent;
 
-        let new_rotation = match endpoint.endpoint_alignment {
+        let new_rotation = match endpoint.alignment {
             EndpointAlignment::AsSpawned => continue,
             EndpointAlignment::Fixed => {
                 // `looking_to` orients -Z toward `direction` with Y up, so no roll.
