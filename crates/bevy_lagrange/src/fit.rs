@@ -48,6 +48,13 @@ pub(crate) enum Edge {
     Bottom,
 }
 
+/// Tracks whether the binary search ever saw projectable bounds.
+#[derive(Debug, Clone, Copy)]
+enum BoundsSearch {
+    NeverProjectable,
+    Projectable,
+}
+
 /// Successful fit output: camera orbit radius and centered focus point.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FitSolution {
@@ -258,7 +265,7 @@ fn binary_search_for_fit(
     let mut best_radius = object_radius * INITIAL_RADIUS_MULTIPLIER;
     let mut best_focus = Position(geometric_center);
     let mut best_error = f32::INFINITY;
-    let mut found_projectable_bounds = false;
+    let mut bounds_search = BoundsSearch::NeverProjectable;
 
     debug!("Binary search starting: range [{min_radius:.1}, {max_radius:.1}]");
 
@@ -293,7 +300,7 @@ fn binary_search_for_fit(
             min_radius = test_radius;
             continue;
         };
-        found_projectable_bounds = true;
+        bounds_search = BoundsSearch::Projectable;
 
         let (target_margin_x, target_margin_y) =
             calculate_target_margins(&bounds, params.zoom_multiplier);
@@ -330,7 +337,7 @@ fn binary_search_for_fit(
         }
     }
 
-    if !found_projectable_bounds {
+    if matches!(bounds_search, BoundsSearch::NeverProjectable) {
         return Err(FitError::PointsBehindCamera);
     }
 

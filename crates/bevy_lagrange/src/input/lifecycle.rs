@@ -23,6 +23,12 @@ enum LifecycleEvent {
     MetricsMissing(CameraInputMetricsMissing),
 }
 
+#[derive(Clone, Copy, Debug)]
+enum InputMetricStatus {
+    Complete,
+    Missing,
+}
+
 #[derive(Clone, Debug)]
 struct FinalizedInput {
     camera: Entity,
@@ -179,16 +185,16 @@ fn apply_metric_guard(
         return;
     };
 
-    let mut missing = false;
+    let mut status = InputMetricStatus::Complete;
     if metrics.camera_view_size.is_none() {
-        missing = true;
+        status = InputMetricStatus::Missing;
         push_missing_metric(camera, CameraInputMetricKind::CameraViewSize, events);
     }
     if metrics.input_surface_size.is_none() {
-        missing = true;
+        status = InputMetricStatus::Missing;
         push_missing_metric(camera, CameraInputMetricKind::InputSurfaceSize, events);
     }
-    if missing {
+    if matches!(status, InputMetricStatus::Missing) {
         input.clear_orbit().clear_pan();
     }
 }

@@ -56,7 +56,7 @@ pub(crate) fn check_egui_wants_focus(
 ) {
     // Check all egui contexts to see if any of them want focus. If any context wants focus,
     // we assume that's the one the user is interacting with and prevent camera input.
-    let mut new_wants_focus = false;
+    let mut current = FocusFrame::Open;
     for mut context in &mut contexts {
         let context = context.get_mut();
         let mut context_wants_focus =
@@ -64,16 +64,14 @@ pub(crate) fn check_egui_wants_focus(
         if *include_hover == EguiFocusIncludesHover::IncludeHover {
             context_wants_focus |= context.is_pointer_over_area();
         }
-        new_wants_focus |= context_wants_focus;
+        if context_wants_focus {
+            current = FocusFrame::Wants;
+        }
     }
 
     let new_egui_wants_focus = EguiWantsFocus {
         previous: wants_focus.current,
-        current:  if new_wants_focus {
-            FocusFrame::Wants
-        } else {
-            FocusFrame::Open
-        },
+        current,
     };
     wants_focus.set_if_neq(new_egui_wants_focus);
 }

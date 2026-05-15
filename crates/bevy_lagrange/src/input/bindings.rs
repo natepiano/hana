@@ -19,11 +19,10 @@ use super::OrbitCamZoomSmoothAction;
 use super::actions::OrbitCamOrbitEngagedAction;
 use super::actions::OrbitCamPanEngagedAction;
 use super::actions::OrbitCamZoomEngagedAction;
-
-const ORBIT_ACTION_NAME: &str = "OrbitCamOrbitAction";
-const PAN_ACTION_NAME: &str = "OrbitCamPanAction";
-const ZOOM_COARSE_ACTION_NAME: &str = "OrbitCamZoomCoarseAction";
-const ZOOM_SMOOTH_ACTION_NAME: &str = "OrbitCamZoomSmoothAction";
+use super::constants::ORBIT_ACTION_NAME;
+use super::constants::PAN_ACTION_NAME;
+use super::constants::ZOOM_COARSE_ACTION_NAME;
+use super::constants::ZOOM_SMOOTH_ACTION_NAME;
 
 /// Built-in orbit-camera input presets.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]

@@ -5,6 +5,7 @@ use bevy_kana::Displacement;
 use bevy_kana::Position;
 
 use super::constants::LOOK_AT_AND_ZOOM_TO_FIT_CONTEXT;
+use super::constants::LOOK_AT_AND_ZOOM_TO_FIT_LOOK_FRACTION;
 use super::fit_request;
 use super::fit_request::FitRequest;
 use super::snap_orbit;
@@ -19,8 +20,6 @@ use crate::events::LookAtAndZoomToFit;
 use crate::events::PlayAnimation;
 use crate::events::SetFitTarget;
 use crate::orbit_cam::OrbitCam;
-
-const LOOK_AT_AND_ZOOM_TO_FIT_LOOK_FRACTION: f32 = 0.4;
 
 /// Observer for `LookAt` event — rotates the camera in place to look at a target entity.
 /// The camera stays at its current world position; only the orbit pivot re-anchors.

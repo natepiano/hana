@@ -1,3 +1,9 @@
+// action names
+pub(super) const ORBIT_ACTION_NAME: &str = "OrbitCamOrbitAction";
+pub(super) const PAN_ACTION_NAME: &str = "OrbitCamPanAction";
+pub(super) const ZOOM_COARSE_ACTION_NAME: &str = "OrbitCamZoomCoarseAction";
+pub(super) const ZOOM_SMOOTH_ACTION_NAME: &str = "OrbitCamZoomSmoothAction";
+
 // camera labels
 pub(super) const ORBIT_CAM_CAMERA_LABEL: &str = "OrbitCam";
 
