@@ -420,7 +420,7 @@ fn adjust_overlap(
 
     let value = *current;
     for mut outline in &mut outline_query {
-        outline.overlap = value;
+        outline.overlap_mode = value;
     }
 }
 

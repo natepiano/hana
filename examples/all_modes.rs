@@ -376,12 +376,12 @@ fn toggle_overlap(
 
     let mut new_mode = None;
     for mut outline in &mut outlines {
-        let toggled = match outline.overlap {
+        let toggled = match outline.overlap_mode {
             OverlapMode::Merged => OverlapMode::Grouped,
             OverlapMode::Grouped => OverlapMode::PerMesh,
             OverlapMode::PerMesh => OverlapMode::Merged,
         };
-        outline.overlap = toggled;
+        outline.overlap_mode = toggled;
         new_mode = Some(toggled);
     }
 

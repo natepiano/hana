@@ -76,11 +76,11 @@ impl OutlineBuilder<JumpFloodState> {
         Outline {
             intensity:    self.intensity,
             width:        self.width,
-            overlap:      OverlapMode::Merged,
+            overlap_mode: OverlapMode::Merged,
             group_source: None,
             color:        self.color,
-            mode:         OutlineMethod::JumpFlood,
-            style:        LineStyle::Solid,
+            method:       OutlineMethod::JumpFlood,
+            line_style:   LineStyle::Solid,
             activity:     OutlineActivity::Enabled,
         }
     }
@@ -137,10 +137,10 @@ impl<M: HullModeState> OutlineBuilder<M> {
         Outline {
             intensity:    self.intensity,
             width:        self.width,
-            overlap:      self.overlap_mode,
+            overlap_mode: self.overlap_mode,
             color:        self.color,
-            mode:         M::MODE,
-            style:        LineStyle::Solid,
+            method:       M::MODE,
+            line_style:   LineStyle::Solid,
             activity:     OutlineActivity::Enabled,
             group_source: None,
         }

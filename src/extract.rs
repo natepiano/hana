@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_kana::ToF32;
-use bevy_render::Extract;
 use bevy_render::sync_world::MainEntity;
 use bevy_render::sync_world::MainEntityHashMap;
+use bevy_render::Extract;
 
 use super::constants::OWNER_ID_OFFSET;
 use super::outline::Outline;
@@ -141,7 +141,7 @@ pub(crate) struct ExtractedOutline {
 impl ExtractedOutline {
     pub(crate) fn from_main_world(entity: Entity, outline: &Outline) -> Self {
         let linear_color: LinearRgba = outline.color.into();
-        let owner_entity = match outline.overlap {
+        let owner_entity = match outline.overlap_mode {
             OverlapMode::Grouped => outline.group_source.unwrap_or(entity),
             _ => entity,
         };
@@ -149,10 +149,10 @@ impl ExtractedOutline {
             intensity:      outline.intensity,
             width:          outline.width,
             priority:       0.0,
-            overlap:        outline.overlap.as_shader_factor(),
+            overlap:        outline.overlap_mode.as_shader_factor(),
             owner_id:       owner_entity.index().index().to_f32() + OWNER_ID_OFFSET,
             color:          linear_color.to_vec4(),
-            outline_method: outline.mode,
+            outline_method: outline.method,
         }
     }
 }

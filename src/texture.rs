@@ -12,6 +12,7 @@ use bevy_render::texture::CachedTexture;
 use bevy_render::texture::TextureCache;
 
 use super::camera::OutlineCamera;
+use super::constants::MSAA_DISABLED_SAMPLE_COUNT;
 use super::constants::OUTLINE_DEPTH_TEXTURE_LABEL;
 use super::extract::ActiveOutlineModes;
 
@@ -81,7 +82,7 @@ pub(crate) fn prepare_flood_textures(
             label: None,
             size,
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: MSAA_DISABLED_SAMPLE_COUNT,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba32Float,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
@@ -93,7 +94,7 @@ pub(crate) fn prepare_flood_textures(
             label: Some(OUTLINE_DEPTH_TEXTURE_LABEL),
             size,
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: MSAA_DISABLED_SAMPLE_COUNT,
             dimension: TextureDimension::D2,
             format: CORE_3D_DEPTH_FORMAT,
             usage: TextureUsages::RENDER_ATTACHMENT  // For using as depth buffer

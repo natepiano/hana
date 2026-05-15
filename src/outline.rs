@@ -63,11 +63,11 @@ pub struct Outline {
     /// Multiplier applied to `color` in the shader. Values > 1.0 produce HDR glow via bloom.
     pub intensity:           f32,
     /// Which algorithm to use. See `OutlineMethod` for guidance.
-    pub mode:                OutlineMethod,
+    pub method:              OutlineMethod,
     /// How overlapping outlines from different entities interact.
-    pub overlap:             OverlapMode,
+    pub overlap_mode:        OverlapMode,
     /// Line style (currently only [`Solid`](LineStyle::Solid)).
-    pub style:               LineStyle,
+    pub line_style:          LineStyle,
     /// Whether this outline participates in extraction and rendering.
     pub activity:            OutlineActivity,
     /// Set internally by propagation. When [`Grouped`](OverlapMode::Grouped), all propagated
