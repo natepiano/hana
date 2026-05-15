@@ -21,7 +21,7 @@ use super::resolved::Resolved;
 /// for the child's `A::EntityOverride`) and two propagation systems in
 /// [`CascadeSet::Propagate`]: [`reconcile_panel_resolved`] followed by
 /// [`propagate_panel_to_children`].
-pub struct CascadePanelChildPlugin<A: CascadePanelChild>(PhantomData<A>);
+pub(crate) struct CascadePanelChildPlugin<A: CascadePanelChild>(PhantomData<A>);
 
 impl<A: CascadePanelChild> Default for CascadePanelChildPlugin<A> {
     fn default() -> Self { Self(PhantomData) }

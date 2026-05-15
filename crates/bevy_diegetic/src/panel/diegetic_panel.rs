@@ -432,7 +432,7 @@ fn set_tree_command(
 /// panel entity; [`compute_panel_layouts`](crate::panel::compute_layout)
 /// reads it to scale the layout tree's font sizes.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub struct PanelFontUnit(pub Unit);
+pub(crate) struct PanelFontUnit(pub Unit);
 
 impl CascadeTarget for PanelFontUnit {
     type Override = DiegeticPanel;

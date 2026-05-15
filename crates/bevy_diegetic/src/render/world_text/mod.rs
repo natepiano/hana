@@ -98,7 +98,7 @@ impl CascadeTarget for WorldTextAlpha {
 /// cascade (it is a raw meters-per-unit override that bypasses the
 /// [`Unit`] abstraction).
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub struct WorldFontUnit(pub Unit);
+pub(crate) struct WorldFontUnit(pub Unit);
 
 impl CascadeTarget for WorldFontUnit {
     type Override = WorldTextStyle;

@@ -252,7 +252,7 @@ fn smooth_and_update_transform(
 }
 
 /// Main system for processing input and converting to transformations
-pub fn orbit_cam(
+pub(crate) fn orbit_cam(
     route: Res<ResolvedOrbitCamInputRoute>,
     mut orbit_cameras: Query<(
         Entity,

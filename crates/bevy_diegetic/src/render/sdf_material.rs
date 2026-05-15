@@ -24,7 +24,7 @@ use crate::constants::EMBEDDED_SDF_PANEL_SHADER_PATH;
 
 /// The full SDF panel material type: `StandardMaterial` extended with
 /// SDF rounded rectangle rendering.
-pub type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelExtension>;
+pub(crate) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelExtension>;
 
 /// Uniform data for the SDF panel extension shader.
 #[derive(Clone, Debug, ShaderType)]
@@ -83,12 +83,13 @@ impl MaterialExtension for SdfPanelExtension {
 
 /// Rust-side selector for the SDF form used by the panel shader.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SdfPrimitiveKind {
+pub(crate) enum SdfPrimitiveKind {
     #[default]
     RoundedRect,
     Triangle,
     Circle,
     Diamond,
+    #[expect(dead_code, reason = "still experimenting with callout options")]
     LineSegment,
 }
 
@@ -105,7 +106,7 @@ impl From<SdfPrimitiveKind> for u32 {
 }
 
 /// Inputs for a rounded-rectangle panel material.
-pub struct SdfPanelMaterialInput {
+pub(crate) struct SdfPanelMaterialInput {
     pub half_size:        Vec2,
     pub mesh_half_size:   Vec2,
     pub corner_radii:     [f32; 4],
@@ -116,7 +117,7 @@ pub struct SdfPanelMaterialInput {
 }
 
 /// Inputs for a non-rectangular SDF material.
-pub struct SdfPrimitiveMaterialInput {
+pub(crate) struct SdfPrimitiveMaterialInput {
     pub half_size:          Vec2,
     pub mesh_half_size:     Vec2,
     pub corner_radii:       [f32; 4],
@@ -134,7 +135,7 @@ pub struct SdfPrimitiveMaterialInput {
 /// `base_color`) are preserved. `alpha_mode`, `double_sided`, and `cull_mode`
 /// are overridden for panel rendering.
 #[must_use]
-pub fn sdf_panel_material(
+pub(crate) fn sdf_panel_material(
     base: StandardMaterial,
     input: SdfPanelMaterialInput,
 ) -> SdfPanelMaterial {
@@ -156,7 +157,7 @@ pub fn sdf_panel_material(
 
 /// Creates a new [`SdfPanelMaterial`] with an explicit SDF selector.
 #[must_use]
-pub fn sdf_primitive_material(
+pub(crate) fn sdf_primitive_material(
     mut base: StandardMaterial,
     input: SdfPrimitiveMaterialInput,
 ) -> SdfPanelMaterial {

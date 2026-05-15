@@ -83,7 +83,7 @@ impl TitleBar {
 
 /// Whether a control label should be highlighted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ControlActivation {
+pub(crate) enum ControlActivation {
     /// Highlight the control.
     Active,
     /// Clear the control's highlight.
@@ -92,7 +92,7 @@ pub enum ControlActivation {
 
 /// Mutable highlight state for a spawned [`TitleBar`].
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
-pub struct TitleBarControlState {
+pub(crate) struct TitleBarControlState {
     active_controls: Vec<String>,
 }
 

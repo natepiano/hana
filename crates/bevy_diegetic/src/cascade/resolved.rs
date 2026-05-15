@@ -42,7 +42,7 @@ impl<T> CascadeAttribute for T where
 /// `Resolved<A>` lives on **both** the panel and every tier-1 child. The
 /// panel's copy represents the effective "default my children inherit"; each
 /// child's copy is the final rendered value.
-pub trait CascadePanelChild: CascadeAttribute {
+pub(crate) trait CascadePanelChild: CascadeAttribute {
     /// Tier-1 override component on the entity.
     type EntityOverride: Component;
     /// Tier-2 override component on the parent panel.
@@ -63,7 +63,7 @@ pub trait CascadePanelChild: CascadeAttribute {
 /// [`CascadePanelPlugin`](super::CascadePanelPlugin) when the override lives
 /// on a panel entity, [`CascadeEntityPlugin`](super::CascadeEntityPlugin)
 /// when it lives on an arbitrary entity.
-pub trait CascadeTarget: CascadeAttribute {
+pub(crate) trait CascadeTarget: CascadeAttribute {
     /// Component on the target entity carrying the tier-1 override.
     type Override: Component;
 
@@ -82,7 +82,7 @@ pub trait CascadeTarget: CascadeAttribute {
 /// `Changed<Resolved<A>>`.
 #[derive(Component, Reflect, Clone, Copy, Debug)]
 #[reflect(Component)]
-pub struct Resolved<A: CascadeAttribute>(pub A);
+pub(crate) struct Resolved<A: CascadeAttribute>(pub A);
 
 /// Resolve a 3-tier cascade from its raw inputs.
 pub(super) fn resolve_panel_child<A: CascadePanelChild>(

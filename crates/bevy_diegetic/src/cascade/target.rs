@@ -23,7 +23,7 @@ use super::resolved::Resolved;
 /// lives on a panel entity. Uses the same internals as
 /// [`CascadeEntityPlugin`]; the two plugin types exist so each attribute's
 /// registration site names the topology it targets.
-pub struct CascadePanelPlugin<A: CascadeTarget>(PhantomData<A>);
+pub(crate) struct CascadePanelPlugin<A: CascadeTarget>(PhantomData<A>);
 
 impl<A: CascadeTarget> Default for CascadePanelPlugin<A> {
     fn default() -> Self { Self(PhantomData) }
@@ -39,7 +39,7 @@ where
 /// Plugin that wires the 2-tier write paths for an attribute whose override
 /// lives on an arbitrary entity. Shares machinery with
 /// [`CascadePanelPlugin`]; see that plugin's doc for rationale.
-pub struct CascadeEntityPlugin<A: CascadeTarget>(PhantomData<A>);
+pub(crate) struct CascadeEntityPlugin<A: CascadeTarget>(PhantomData<A>);
 
 impl<A: CascadeTarget> Default for CascadeEntityPlugin<A> {
     fn default() -> Self { Self(PhantomData) }
