@@ -30,6 +30,14 @@ use super::Sizing;
 use super::Unit;
 use super::constants::INLINE_CHILDREN;
 
+/// Whether overflowing children are clipped to the parent's content box.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum ChildOverflow {
+    #[default]
+    Visible,
+    Clipped,
+}
+
 /// A single element in the layout tree.
 ///
 /// Elements are either containers (with children) or text leaves. The tree
@@ -56,8 +64,8 @@ pub(super) struct Element {
     pub(super) border:        Option<Border>,
     /// Corner radius for rounded backgrounds and borders.
     pub(super) corner_radius: CornerRadius,
-    /// Whether this element clips overflowing children.
-    pub(super) clip:          bool,
+    /// How this element handles overflowing children (`Visible` or `Clipped`).
+    pub(super) overflow:      ChildOverflow,
     /// Optional PBR material override for this element's surface (backgrounds, borders).
     /// When present, the rendering system uses this instead of the panel-level default.
     /// `base_color` is overridden by the layout color if both are set.
@@ -121,7 +129,7 @@ impl Default for Element {
             background:    None,
             border:        None,
             corner_radius: CornerRadius::ZERO,
-            clip:          false,
+            overflow:      ChildOverflow::Visible,
             material:      None,
             content:       ElementContent::Empty,
         }
@@ -366,7 +374,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         background,
         border,
         corner_radius,
-        clip,
+        overflow,
         material,
         content,
     } = element;
@@ -381,7 +389,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         background: n_background,
         border: n_border,
         corner_radius: n_corner_radius,
-        clip: n_clip,
+        overflow: n_overflow,
         material: n_material,
         content: n_content,
     } = next;
@@ -393,7 +401,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         || direction != n_direction
         || child_align_x != n_child_align_x
         || child_align_y != n_child_align_y
-        || clip != n_clip
+        || overflow != n_overflow
     {
         return LayoutTreeChange::LayoutAffecting;
     }

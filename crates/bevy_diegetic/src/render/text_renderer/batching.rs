@@ -37,6 +37,13 @@ pub(super) struct DiegeticTextMesh;
 #[derive(Component)]
 pub(super) struct DiegeticShadowProxy;
 
+/// Whether a spawned visible text mesh casts shadows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextMeshShadow {
+    Cast,
+    Suppress,
+}
+
 /// Key for grouping text quads that share the same material configuration.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct TextBatchKey {
@@ -341,8 +348,12 @@ fn spawn_batch_meshes(
                 GlyphShadowMode::Text | GlyphShadowMode::PunchOut
             )
         };
-        let suppress_shadow =
-            is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None;
+        let shadow_mode = if is_invisible || needs_proxy || key.shadow_mode == GlyphShadowMode::None
+        {
+            TextMeshShadow::Suppress
+        } else {
+            TextMeshShadow::Cast
+        };
 
         if !is_invisible {
             let mut material_context = VisibleMaterialContext {
@@ -363,7 +374,7 @@ fn spawn_batch_meshes(
                 context.panel_entity,
                 mesh_handle.clone(),
                 material_handle,
-                suppress_shadow,
+                shadow_mode,
                 &context.content_layer,
                 context.commands,
             );
@@ -449,28 +460,31 @@ fn spawn_visible_mesh(
     panel_entity: Entity,
     mesh_handle: Handle<Mesh>,
     material_handle: Handle<MsdfTextMaterial>,
-    suppress_shadow: bool,
+    shadow_mode: TextMeshShadow,
     content_layer: &RenderLayers,
     commands: &mut Commands,
 ) {
     let transform = Transform::from_xyz(0.0, 0.0, 0.0);
-    if suppress_shadow {
-        commands.entity(panel_entity).with_child((
-            DiegeticTextMesh,
-            NotShadowCaster,
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-            transform,
-            content_layer.clone(),
-        ));
-    } else {
-        commands.entity(panel_entity).with_child((
-            DiegeticTextMesh,
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-            transform,
-            content_layer.clone(),
-        ));
+    match shadow_mode {
+        TextMeshShadow::Suppress => {
+            commands.entity(panel_entity).with_child((
+                DiegeticTextMesh,
+                NotShadowCaster,
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                transform,
+                content_layer.clone(),
+            ));
+        },
+        TextMeshShadow::Cast => {
+            commands.entity(panel_entity).with_child((
+                DiegeticTextMesh,
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                transform,
+                content_layer.clone(),
+            ));
+        },
     }
 }
 

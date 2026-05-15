@@ -3,8 +3,10 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 
 use super::OverlayBoundingBox;
+use super::constants::LEFT_OUTER_ARROW_SLOT;
 use super::constants::NO_LINE_GAP_LABEL_PREFIX;
 use super::constants::OVERLAY_BOUNDING_BOX_NAME;
+use super::constants::RIGHT_OUTER_ARROW_SLOT;
 use super::pipeline::FontContext;
 use super::pipeline::GlyphExtents;
 use super::pipeline::OverlayAssets;
@@ -80,10 +82,10 @@ pub(super) fn spawn_metric_labels(
     };
 
     let left_1 = extents.first_left - extents.arrow_spacing;
-    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let left_2 = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
 
     let right_1 = extents.last_right + extents.arrow_spacing;
-    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+    let right_2 = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
 
     spawn_line_edge_labels(ctx, metric_lines, &style, left_2);
     spawn_left_arrow_labels(
@@ -171,8 +173,8 @@ pub(super) fn spawn_overlay_bounds_target(
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
     let top_y = line_metrics.top;
-    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
-    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+    let left_2 = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
+    let right_2 = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
 
     let line_height_anchor_x = left_2 - gap;
     let cap_height_anchor_x = right_2 + gap;

@@ -128,6 +128,13 @@ pub struct AsyncGlyphPollStats {
     pub worker_threads:  usize,
 }
 
+/// Whether a page's CPU pixel data has been modified since the last GPU sync.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AtlasPageState {
+    Clean,
+    Dirty,
+}
+
 /// A single page of the MSDF atlas texture.
 struct AtlasPage {
     /// Raw pixel data (RGBA8, row-major).
@@ -137,7 +144,7 @@ struct AtlasPage {
     /// Handle to the GPU image (populated after upload).
     image_handle: Option<Handle<Image>>,
     /// Whether the CPU pixel data has changed since last GPU sync.
-    dirty:        bool,
+    state:        AtlasPageState,
 }
 
 impl AtlasPage {
@@ -147,7 +154,7 @@ impl AtlasPage {
             pixels:       vec![0; pixel_count],
             allocator:    AtlasAllocator::new(size2(width.to_i32(), height.to_i32())),
             image_handle: None,
-            dirty:        false,
+            state:        AtlasPageState::Clean,
         }
     }
 }
@@ -279,7 +286,12 @@ impl MsdfAtlas {
 
     /// Returns the number of atlas pages with unsynced CPU-side changes.
     #[must_use]
-    pub fn dirty_page_count(&self) -> usize { self.pages.iter().filter(|p| p.dirty).count() }
+    pub fn dirty_page_count(&self) -> usize {
+        self.pages
+            .iter()
+            .filter(|p| matches!(p.state, AtlasPageState::Dirty))
+            .count()
+    }
 
     /// Looks up cached metrics for a glyph without triggering rasterization.
     ///
@@ -344,7 +356,7 @@ impl MsdfAtlas {
                 bevy::asset::RenderAssetUsages::default(),
             );
             page.image_handle = Some(images.add(image));
-            page.dirty = false;
+            page.state = AtlasPageState::Clean;
         }
     }
 
@@ -355,7 +367,7 @@ impl MsdfAtlas {
     /// change detection handles the actual GPU upload.
     pub fn sync_to_gpu(&mut self, images: &mut Assets<Image>) {
         for page in &mut self.pages {
-            if !page.dirty {
+            if matches!(page.state, AtlasPageState::Clean) {
                 continue;
             }
             if let Some(handle) = page.image_handle.as_ref() {
@@ -378,7 +390,7 @@ impl MsdfAtlas {
                 );
                 page.image_handle = Some(images.add(image));
             }
-            page.dirty = false;
+            page.state = AtlasPageState::Clean;
         }
     }
 
@@ -636,7 +648,7 @@ impl MsdfAtlas {
         };
 
         self.glyphs.insert(key, metrics);
-        page.dirty = true;
+        page.state = AtlasPageState::Dirty;
         Some(metrics)
     }
 

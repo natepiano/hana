@@ -10,6 +10,7 @@ use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::Direction;
 use crate::layout::LayoutTextStyle;
+use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
@@ -40,7 +41,7 @@ fn emit_up_traversal_commands(
         }
     }
 
-    if element.clip {
+    if matches!(element.overflow, ChildOverflow::Clipped) {
         commands.push(RenderCommand {
             bounds,
             kind: RenderCommandKind::ScissorEnd,
@@ -75,7 +76,7 @@ fn emit_down_traversal_commands(
     // must be balanced even when the parent is off-screen).
     // Clip to the border's inner edge — content can fill up to (but
     // not into) the border. Padding is inside this region.
-    if element.clip {
+    if matches!(element.overflow, ChildOverflow::Clipped) {
         let bt = element.border.as_ref().map_or(0.0, |b| b.top.value);
         let br = element.border.as_ref().map_or(0.0, |b| b.right.value);
         let bb = element.border.as_ref().map_or(0.0, |b| b.bottom.value);

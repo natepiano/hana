@@ -2,6 +2,9 @@ use bevy::prelude::*;
 
 use super::GlyphMetricVisibility;
 use super::TypographyOverlay;
+use super::constants::LEFT_OUTER_ARROW_SLOT;
+use super::constants::METRIC_RECT_WIDTH_SLOTS;
+use super::constants::RIGHT_OUTER_ARROW_SLOT;
 use super::labels;
 use super::pipeline::FontContext;
 use super::pipeline::GlyphExtents;
@@ -98,7 +101,7 @@ fn spawn_metric_line_panel(
         return;
     }
 
-    let width = 5.0_f32.mul_add(
+    let width = METRIC_RECT_WIDTH_SLOTS.mul_add(
         extents.arrow_spacing,
         extents.last_right - extents.first_left,
     );
@@ -120,7 +123,7 @@ fn spawn_metric_line_panel(
     material.alpha_mode = AlphaMode::Blend;
     material.unlit = true;
 
-    let x = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let x = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
     let line_metrics = font_context.line;
     let top_layout =
         if (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5 {
@@ -275,8 +278,8 @@ fn build_metric_gizmos(
         metric_lines.push((LABEL_BOTTOM, bottom_y));
     }
 
-    let left_outermost = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
-    let right_outermost = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+    let left_outermost = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
+    let right_outermost = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
     let line_x0 = left_outermost;
     let line_x1 = right_outermost;
 
@@ -299,7 +302,7 @@ fn build_metric_gizmos(
     let descent_world = scaling::layout_to_world_y(descent_y, anchor_y, scale);
 
     let left_1 = extents.first_left - extents.arrow_spacing;
-    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let left_2 = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
 
     let g = &mut arrows_gizmo;
     callouts::draw_dimension_arrow(
@@ -333,7 +336,7 @@ fn build_metric_gizmos(
         scaling::layout_to_world_y(baseline_y - font_metrics.cap_height, anchor_y, scale);
 
     let right_1 = extents.last_right + extents.arrow_spacing;
-    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+    let right_2 = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
 
     callouts::draw_dimension_arrow(
         g,
@@ -389,9 +392,9 @@ fn spawn_metric_arrow_callouts(
     );
 
     let left_1 = extents.first_left - extents.arrow_spacing;
-    let left_2 = 3.0_f32.mul_add(-extents.arrow_spacing, extents.first_left);
+    let left_2 = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
     let right_1 = extents.last_right + extents.arrow_spacing;
-    let right_2 = 2.0_f32.mul_add(extents.arrow_spacing, extents.last_right);
+    let right_2 = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
     let head = scaling::arrowhead_size(ctx.font_size, ctx.scale);
     let gap = scaling::arrow_gap(ctx.font_size, ctx.scale);
     let thickness = scaling::callout_line_thickness(ctx.overlay, ctx.font_size, ctx.scale);

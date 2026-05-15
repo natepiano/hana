@@ -40,6 +40,7 @@ use super::Direction;
 use super::LayoutTextStyle;
 use super::Padding;
 use super::Sizing;
+use super::element::ChildOverflow;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
@@ -62,7 +63,7 @@ pub struct El {
     background:    Option<Color>,
     border:        Option<Border>,
     corner_radius: CornerRadius,
-    clip:          bool,
+    overflow:      ChildOverflow,
     material:      Option<Box<StandardMaterial>>,
 }
 
@@ -164,9 +165,9 @@ impl El {
         self
     }
 
-    /// Enables clipping of overflowing children.
+    /// Sets overflow to `Clipped`; default is `Visible`.
     pub const fn clip(mut self) -> Self {
-        self.clip = true;
+        self.overflow = ChildOverflow::Clipped;
         self
     }
 
@@ -193,7 +194,7 @@ impl El {
             background: self.background,
             border: self.border,
             corner_radius: self.corner_radius,
-            clip: self.clip,
+            overflow: self.overflow,
             material: self.material,
             content,
         }

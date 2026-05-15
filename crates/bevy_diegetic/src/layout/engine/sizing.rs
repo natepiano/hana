@@ -4,6 +4,7 @@ use super::layout_engine::ComputedLayout;
 use crate::layout::Direction;
 use crate::layout::Sizing;
 use crate::layout::constants::LAYOUT_EPSILON;
+use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
@@ -270,7 +271,7 @@ fn size_children_along_axis(
     let mut to_distribute = available - content_size;
 
     // Overflow compression: largest-first heuristic.
-    if to_distribute < 0.0 && !parent_element.clip {
+    if to_distribute < 0.0 && matches!(parent_element.overflow, ChildOverflow::Visible) {
         compress_children(tree, computed, children, axis, &mut to_distribute);
     }
 
