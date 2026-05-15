@@ -160,9 +160,9 @@ mod tests {
     fn jump_flood_builds_correctly() {
         let outline = Outline::jump_flood(4.0).with_color(Color::WHITE).build();
 
-        assert_eq!(outline.mode, OutlineMethod::JumpFlood);
+        assert_eq!(outline.method, OutlineMethod::JumpFlood);
         assert!((outline.width - 4.0).abs() < f32::EPSILON);
-        assert_eq!(outline.overlap, OverlapMode::Merged);
+        assert_eq!(outline.overlap_mode, OverlapMode::Merged);
         assert_eq!(outline.activity, OutlineActivity::Enabled);
     }
 
@@ -172,9 +172,9 @@ mod tests {
             .with_overlap(OverlapMode::PerMesh)
             .build();
 
-        assert_eq!(outline.mode, OutlineMethod::ScreenHull);
+        assert_eq!(outline.method, OutlineMethod::ScreenHull);
         assert!((outline.width - 3.0).abs() < f32::EPSILON);
-        assert_eq!(outline.overlap, OverlapMode::PerMesh);
+        assert_eq!(outline.overlap_mode, OverlapMode::PerMesh);
     }
 
     #[test]
@@ -183,8 +183,8 @@ mod tests {
             .with_overlap(OverlapMode::Grouped)
             .build();
 
-        assert_eq!(outline.mode, OutlineMethod::WorldHull);
-        assert_eq!(outline.overlap, OverlapMode::Grouped);
+        assert_eq!(outline.method, OutlineMethod::WorldHull);
+        assert_eq!(outline.overlap_mode, OverlapMode::Grouped);
     }
 
     #[test]
