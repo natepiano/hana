@@ -61,7 +61,7 @@ pub(crate) struct CachedWindowDebug {
     physical_width:    u32,
     physical_height:   u32,
     mode:              Option<WindowMode>,
-    focus:             FocusState,
+    focus_state:       FocusState,
 }
 
 pub(crate) fn debug_window_changed(
@@ -74,8 +74,8 @@ pub(crate) fn debug_window_changed(
     let size_changed = cached.physical_width != window.physical_width()
         || cached.physical_height != window.physical_height();
     let mode_changed = cached.mode.as_ref() != Some(&window.mode);
-    let focus = FocusState::from(window.focused);
-    let focused_changed = cached.focus != focus;
+    let focus_state = FocusState::from(window.focused);
+    let focused_changed = cached.focus_state != focus_state;
 
     let mut changes = Vec::new();
     if position_changed {
@@ -97,7 +97,10 @@ pub(crate) fn debug_window_changed(
         changes.push(format!("mode: {:?} -> {:?}", cached.mode, window.mode));
     }
     if focused_changed {
-        changes.push(format!("focused: {:?} -> {:?}", cached.focus, focus));
+        changes.push(format!(
+            "focused: {:?} -> {:?}",
+            cached.focus_state, focus_state
+        ));
     }
 
     if !changes.is_empty() {
@@ -108,7 +111,7 @@ pub(crate) fn debug_window_changed(
     cached.physical_width = window.physical_width();
     cached.physical_height = window.physical_height();
     cached.mode = Some(window.mode);
-    cached.focus = focus;
+    cached.focus_state = focus_state;
 }
 
 pub(crate) fn debug_scale_factor_changed(mut messages: MessageReader<WindowScaleFactorChanged>) {

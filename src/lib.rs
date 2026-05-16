@@ -66,6 +66,7 @@ use monitors::MonitorPlugin;
 pub use monitors::Monitors;
 pub use persistence::WindowKey;
 pub use platform::Platform;
+use restore::RestorePlugin;
 
 /// The main plugin. See module docs for usage.
 ///
@@ -188,6 +189,7 @@ impl Plugin for WindowManagerPluginCustomPath {
         }
 
         app.add_plugins(MonitorPlugin)
+            .add_plugins(RestorePlugin)
             .insert_resource(RestoreWindowConfig {
                 path,
                 loaded_states: HashMap::new(),
@@ -196,22 +198,7 @@ impl Plugin for WindowManagerPluginCustomPath {
             .init_resource::<ManagedWindowRegistry>()
             .add_observer(observers::on_managed_window_added)
             .add_observer(observers::on_managed_window_removed)
-            .add_observer(observers::on_managed_window_load)
-            .add_systems(
-                PreStartup,
-                // X11 fullscreen: move window to target monitor before first event loop.
-                // Must be chained (not `.after()`) so `apply_deferred` runs between
-                // `load_target_position` and `move_to_target_monitor` — otherwise the
-                // `TargetPosition` component inserted via deferred commands won't exist yet.
-                // `move_to_target_monitor` self-guards on `platform.is_x11()`.
-                (
-                    restore::init_winit_info,
-                    restore::load_target_position,
-                    restore::move_to_target_monitor,
-                )
-                    .chain()
-                    .after(monitors::init_monitors),
-            );
+            .add_observer(observers::on_managed_window_load);
 
         // X11 frame extent compensation (W6 workaround, winit #4445).
         #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
@@ -220,16 +207,6 @@ impl Plugin for WindowManagerPluginCustomPath {
             x11_position_fix::compensate_target_position
                 .run_if(observers::has_restoring_windows)
                 .run_if(|p: Res<Platform>| p.is_x11()),
-        );
-
-        // Restore windows — processes all entities with `TargetPosition` + `X11FrameCompensated`
-        app.add_systems(
-            Update,
-            (
-                restore::restore_windows,
-                restore::check_restore_settling.after(restore::restore_windows),
-            )
-                .run_if(observers::has_restoring_windows),
         );
 
         // Unified monitor detection + save window state

@@ -316,13 +316,13 @@ fn restore_managed_window(
     primary_scale: f64,
     platform: Platform,
 ) {
-    let resolved = restore::resolve_target_monitor_and_position(
+    let resolved_monitor = restore::resolve_target_monitor_and_position(
         saved_state.monitor,
         saved_state.logical_position,
         monitors,
     );
     if matches!(
-        resolved.monitor_resolution_source,
+        resolved_monitor.monitor_resolution_source,
         restore::MonitorResolutionSource::FallbackToPrimary
     ) {
         warn!(
@@ -338,8 +338,8 @@ fn restore_managed_window(
     // target monitor.
     let target = restore::compute_target_position(
         saved_state,
-        resolved.monitor_info,
-        resolved.logical_position,
+        resolved_monitor.monitor_info,
+        resolved_monitor.logical_position,
         physical_decoration,
         primary_scale,
         platform,
@@ -355,10 +355,10 @@ fn restore_managed_window(
         target.physical_size.x,
         target.physical_size.y,
         target.monitor_index,
-        resolved.monitor_info.physical_position.x,
-        resolved.monitor_info.physical_position.y,
-        resolved.monitor_info.physical_size.x,
-        resolved.monitor_info.physical_size.y,
+        resolved_monitor.monitor_info.physical_position.x,
+        resolved_monitor.monitor_info.physical_position.y,
+        resolved_monitor.monitor_info.physical_size.x,
+        resolved_monitor.monitor_info.physical_size.y,
     );
 
     let is_fullscreen = saved_state.saved_window_mode.is_fullscreen();

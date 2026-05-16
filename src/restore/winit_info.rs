@@ -172,13 +172,13 @@ pub(crate) fn load_target_position(
         .by_index(starting_monitor_index)
         .map_or(DEFAULT_SCALE_FACTOR, |monitor| monitor.scale);
 
-    let resolved = target_position::resolve_target_monitor_and_position(
+    let resolved_monitor = target_position::resolve_target_monitor_and_position(
         state.monitor,
         state.logical_position,
         &monitors,
     );
     if matches!(
-        resolved.monitor_resolution_source,
+        resolved_monitor.monitor_resolution_source,
         MonitorResolutionSource::FallbackToPrimary
     ) {
         warn!(
@@ -189,16 +189,19 @@ pub(crate) fn load_target_position(
 
     let target = target_position::compute_target_position(
         &state,
-        resolved.monitor_info,
-        resolved.logical_position,
+        resolved_monitor.monitor_info,
+        resolved_monitor.logical_position,
         winit_info.physical_decoration(),
         starting_scale,
         *platform,
     );
 
     debug!(
-        "[load_target_position] Starting monitor={starting_monitor_index} scale={starting_scale}, Target monitor={} scale={}, strategy={:?}, position={:?}",
-        target.monitor_index, target.target_scale, target.scale_strategy, target.physical_position
+        "[load_target_position] Starting monitor={starting_monitor_index} scale={starting_scale}, Target monitor={} scale={}, monitor_scale_strategy={:?}, position={:?}",
+        target.monitor_index,
+        target.target_scale,
+        target.monitor_scale_strategy,
+        target.physical_position
     );
 
     #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
