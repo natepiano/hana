@@ -435,7 +435,8 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
         self
     }
 
-    /// Sets the overlay camera render order. Default: `1`.
+    /// Sets the overlay camera render order. Default: `100` (high enough that
+    /// user-spawned 3D viewport cameras don't collide).
     #[must_use]
     pub const fn camera_order(mut self, order: isize) -> Self {
         if let CoordinateSpace::Screen { camera_order, .. } = &mut self.data.coordinate_space {

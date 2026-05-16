@@ -4,8 +4,10 @@ use bevy::color::Color;
 use bevy::diagnostic::DiagnosticPath;
 
 // builder defaults
-/// Default camera render order for screen-space overlay panels.
-pub(super) const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 1;
+/// Default camera render order for screen-space overlay panels. Chosen high
+/// enough that user-spawned 3D viewport cameras (e.g. a minimap at order 1)
+/// don't collide with the screen-space camera on the primary window.
+pub(super) const DEFAULT_SCREEN_SPACE_CAMERA_ORDER: isize = 100;
 /// Default render layer for screen-space overlay panels.
 pub(super) const DEFAULT_SCREEN_SPACE_RENDER_LAYER: usize = 31;
 /// Minimum implicit world height assigned to fixed screen panels so that
