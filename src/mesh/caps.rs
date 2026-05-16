@@ -23,14 +23,14 @@ enum CapSide {
 
 /// Geometric parameters shared by all cap-generation helpers.
 struct CapContext<'a> {
-    center:    &'a Vec3,
-    direction: Vec3,
-    frame:     (Vec3, Vec3),
-    radius:    f32,
-    sides:     u32,
-    ring_base: u32,
-    faces:     &'a Faces,
-    winding:   WindingOrder,
+    center:        &'a Vec3,
+    direction:     Vec3,
+    frame:         (Vec3, Vec3),
+    radius:        f32,
+    sides:         u32,
+    ring_base:     u32,
+    faces:         &'a Faces,
+    winding_order: WindingOrder,
 }
 
 /// Add start and end caps to the tube mesh.
@@ -48,7 +48,7 @@ pub(super) fn add_end_caps(
     }
 
     let render_inside = matches!(config.tube.faces, Faces::Inside);
-    let start_winding = if render_inside {
+    let start_winding_order = if render_inside {
         WindingOrder::Standard
     } else {
         WindingOrder::Reversed
@@ -61,12 +61,12 @@ pub(super) fn add_end_caps(
         sides,
         ring_base: 0,
         faces: &config.tube.faces,
-        winding: start_winding,
+        winding_order: start_winding_order,
     };
     add_single_cap(&config.caps.start, &start_context, buffers);
 
     let last = point_count - 1;
-    let end_winding = if render_inside {
+    let end_winding_order = if render_inside {
         WindingOrder::Reversed
     } else {
         WindingOrder::Standard
@@ -79,7 +79,7 @@ pub(super) fn add_end_caps(
         sides,
         ring_base: (last * sides.to_usize()).to_u32(),
         faces: &config.tube.faces,
-        winding: end_winding,
+        winding_order: end_winding_order,
     };
     add_single_cap(&config.caps.end, &end_context, buffers);
 }
@@ -92,13 +92,13 @@ fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffe
 
     match style {
         Capping::Round => {
-            for &side in &[CapSide::Outside, CapSide::Inside] {
-                let needed = match side {
+            for &cap_side in &[CapSide::Outside, CapSide::Inside] {
+                let needed = match cap_side {
                     CapSide::Outside => needs_outside,
                     CapSide::Inside => needs_inside,
                 };
                 if needed {
-                    add_hemisphere_cap(context, cap_rings, side, buffers);
+                    add_hemisphere_cap(context, cap_rings, cap_side, buffers);
                 }
             }
         },
@@ -107,13 +107,13 @@ fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffe
                 direction: normal.unwrap_or(context.direction),
                 ..*context
             };
-            for &side in &[CapSide::Outside, CapSide::Inside] {
-                let needed = match side {
+            for &cap_side in &[CapSide::Outside, CapSide::Inside] {
+                let needed = match cap_side {
                     CapSide::Outside => needs_outside,
                     CapSide::Inside => needs_inside,
                 };
                 if needed {
-                    add_flat_cap(&flat_context, side, buffers);
+                    add_flat_cap(&flat_context, cap_side, buffers);
                 }
             }
         },
@@ -125,16 +125,16 @@ fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffe
 fn add_hemisphere_cap(
     context: &CapContext,
     cap_rings: u32,
-    side: CapSide,
+    cap_side: CapSide,
     buffers: &mut MeshBuffers,
 ) {
     let (frame_normal, binormal) = context.frame;
-    let (normal_sign, winding) = match side {
-        CapSide::Outside => (1.0_f32, context.winding),
+    let (normal_sign, winding_order) = match cap_side {
+        CapSide::Outside => (1.0_f32, context.winding_order),
         CapSide::Inside => (-1.0_f32, WindingOrder::Standard),
     };
 
-    let mut previous_ring_base = if matches!(side, CapSide::Inside) {
+    let mut previous_ring_base = if matches!(cap_side, CapSide::Inside) {
         let base = buffers.positions.len().to_u32();
         for j in 0..context.sides {
             let original_index = (context.ring_base + j).to_usize();
@@ -176,7 +176,7 @@ fn add_hemisphere_cap(
                 previous_ring_base + next,
                 ring_base + j,
                 ring_base + next,
-                winding,
+                winding_order,
             );
         }
 
@@ -198,15 +198,15 @@ fn add_hemisphere_cap(
             previous_ring_base + j,
             previous_ring_base + next,
             pole_index,
-            winding,
+            winding_order,
         );
     }
 }
 
 /// Add a flat disc cap to the mesh, connecting to an existing tube ring.
-fn add_flat_cap(context: &CapContext, side: CapSide, buffers: &mut MeshBuffers) {
-    let (cap_normal, winding) = match side {
-        CapSide::Outside => (context.direction.to_array(), context.winding),
+fn add_flat_cap(context: &CapContext, cap_side: CapSide, buffers: &mut MeshBuffers) {
+    let (cap_normal, winding_order) = match cap_side {
+        CapSide::Outside => (context.direction.to_array(), context.winding_order),
         CapSide::Inside => ((-context.direction).to_array(), WindingOrder::Reversed),
     };
 
@@ -230,7 +230,7 @@ fn add_flat_cap(context: &CapContext, side: CapSide, buffers: &mut MeshBuffers) 
             new_ring_base + j,
             new_ring_base + next,
             center_index,
-            winding,
+            winding_order,
         );
     }
 }

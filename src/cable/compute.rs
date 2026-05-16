@@ -167,14 +167,14 @@ fn recompute_cable_route(
         return;
     }
 
-    let request = RouteRequest {
+    let route_request = RouteRequest {
         start,
         end,
         obstacles: &cable.obstacles,
         resolution: cable.resolution,
     };
 
-    let cable_geometry = cable.solver.solve(&request);
+    let cable_geometry = cable.solver.solve(&route_request);
     commands.entity(cable_entity).insert(ComputedCableGeometry {
         cable_geometry: Some(cable_geometry),
     });

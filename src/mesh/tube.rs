@@ -31,20 +31,20 @@ struct TubePathData<'a> {
 
 /// Generate cross-section rings along the path and connect them with triangles.
 fn generate_tube_rings(
-    path: &TubePathData,
+    tube_path_data: &TubePathData,
     config: &CableMeshConfig,
     sides: u32,
     total_length: f32,
     out: &mut TubeMeshBuffers,
 ) {
-    for (i, ((point, ..), (frame_normal, binormal))) in path
+    for (i, ((point, ..), (frame_normal, binormal))) in tube_path_data
         .points
         .iter()
-        .zip(path.tangents)
-        .zip(path.frames)
+        .zip(tube_path_data.tangents)
+        .zip(tube_path_data.frames)
         .enumerate()
     {
-        let arc_u = path.arc_lengths[i] / total_length;
+        let arc_u = tube_path_data.arc_lengths[i] / total_length;
 
         for j in 0..sides {
             let angle = (j.to_f32() / sides.to_f32()) * TAU;
@@ -190,14 +190,14 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
     let mut indices = Vec::new();
     let mut inside_indices = Vec::new();
 
-    let path = TubePathData {
+    let tube_path_data = TubePathData {
         points:      &all_points,
         tangents:    &all_tangents,
         arc_lengths: &all_arc_lengths,
         frames:      &frames,
     };
     generate_tube_rings(
-        &path,
+        &tube_path_data,
         config,
         sides,
         total_length,

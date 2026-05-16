@@ -89,20 +89,20 @@ fn compute_elbow_at_corner(
     corner: Vec3,
     config: &CableMeshConfig,
     elbow_idx: usize,
-    params: &ElbowParams,
+    elbow_params: &ElbowParams,
 ) -> Option<ElbowMetadata> {
     let cos_angle = incoming_direction.dot(outgoing_direction).clamp(-1.0, 1.0);
-    if cos_angle >= params.angle_threshold_cos {
+    if cos_angle >= elbow_params.angle_threshold_cos {
         return None;
     }
 
-    if params.bend_radius < params.min_bend_radius {
+    if elbow_params.bend_radius < elbow_params.min_bend_radius {
         return None;
     }
 
     let theta = cos_angle.acos();
     let half_theta = theta * 0.5;
-    let fillet_reach = params.bend_radius * half_theta.tan();
+    let fillet_reach = elbow_params.bend_radius * half_theta.tan();
 
     let fillet_start = corner - incoming_direction * fillet_reach;
     let fillet_end = corner + outgoing_direction * fillet_reach;
@@ -137,7 +137,7 @@ pub(super) fn insert_knee_rings(
         return (points, tangents, arc_lengths);
     }
 
-    let params = ElbowParams::from(config);
+    let elbow_params = ElbowParams::from(config);
     let rings_per_right_angle = config.elbow.rings_per_right_angle;
     let mut output_points = Vec::with_capacity(point_count * 2);
     let mut output_arc_lengths = Vec::with_capacity(point_count * 2);
@@ -163,7 +163,7 @@ pub(super) fn insert_knee_rings(
             points[i],
             config,
             elbow_idx,
-            &params,
+            &elbow_params,
         ) else {
             output_points.push(points[i]);
             output_arc_lengths.push(arc_lengths[i]);
@@ -262,7 +262,7 @@ pub fn compute_elbow_metadata(
         );
     }
 
-    let params = ElbowParams::from(config);
+    let elbow_params = ElbowParams::from(config);
     let mut elbows = Vec::new();
     let mut elbow_idx = 0_usize;
 
@@ -276,7 +276,7 @@ pub fn compute_elbow_metadata(
             points[i],
             config,
             elbow_idx,
-            &params,
+            &elbow_params,
         ) {
             elbows.push(metadata);
             elbow_idx += 1;

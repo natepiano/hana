@@ -8,9 +8,15 @@ pub(super) enum WindingOrder {
 }
 
 /// Push a triangle with the requested winding.
-pub(super) fn push_triangle(indices: &mut Vec<u32>, a: u32, b: u32, c: u32, winding: WindingOrder) {
+pub(super) fn push_triangle(
+    indices: &mut Vec<u32>,
+    a: u32,
+    b: u32,
+    c: u32,
+    winding_order: WindingOrder,
+) {
     indices.push(a);
-    if matches!(winding, WindingOrder::Reversed) {
+    if matches!(winding_order, WindingOrder::Reversed) {
         indices.push(c);
         indices.push(b);
     } else {
@@ -26,10 +32,10 @@ pub(super) fn push_quad(
     b: u32,
     c: u32,
     d: u32,
-    winding: WindingOrder,
+    winding_order: WindingOrder,
 ) {
-    push_triangle(indices, a, b, c, winding);
-    push_triangle(indices, b, d, c, winding);
+    push_triangle(indices, a, b, c, winding_order);
+    push_triangle(indices, b, d, c, winding_order);
 }
 
 /// Mutable references to the mesh attribute buffers being built.

@@ -2,22 +2,14 @@ use bevy::prelude::*;
 
 use crate::cable::CableSystems;
 use crate::cable::ComputedCableGeometry;
-
-// cable gizmo constants
-const CABLE_GIZMO_COLOR: Color = Color::srgb(1.0, 0.6, 0.0);
-
-// segment boundary constants
-const SEGMENT_BOUNDARY_COLOR: Color = Color::srgb(1.0, 0.0, 0.0);
-const SEGMENT_BOUNDARY_DOT_SIZE: f32 = 0.03;
-
-// tangent constants
-const TANGENT_GIZMO_COLOR: Color = Color::srgb(1.0, 1.0, 0.0);
-const TANGENT_SAMPLING_INTERVAL: usize = 4;
-const TANGENT_VECTOR_SCALE: f32 = 0.1;
-
-// waypoint constants
-const WAYPOINT_DOT_COLOR: Color = Color::srgb(0.0, 1.0, 0.0);
-const WAYPOINT_DOT_SIZE: f32 = 0.05;
+use crate::constants::CABLE_GIZMO_COLOR;
+use crate::constants::SEGMENT_BOUNDARY_COLOR;
+use crate::constants::SEGMENT_BOUNDARY_DOT_SIZE;
+use crate::constants::TANGENT_GIZMO_COLOR;
+use crate::constants::TANGENT_SAMPLING_INTERVAL;
+use crate::constants::TANGENT_VECTOR_SCALE;
+use crate::constants::WAYPOINT_DOT_COLOR;
+use crate::constants::WAYPOINT_DOT_SIZE;
 
 /// Gizmo group for cable debug wireframes.
 ///
