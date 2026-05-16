@@ -1,3 +1,8 @@
+#![allow(
+    clippy::used_underscore_binding,
+    reason = "false positive on enum variant fields"
+)]
+
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
