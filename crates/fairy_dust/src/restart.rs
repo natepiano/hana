@@ -182,7 +182,7 @@ fn do_restart() {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn trampoline_relaunch(_exe: &Path, _args: &[String]) -> ! {
+fn trampoline_relaunch(_: &Path, _: &[String]) -> ! {
     eprintln!("fairy_dust: restart not supported on this platform");
     std::process::exit(1);
 }

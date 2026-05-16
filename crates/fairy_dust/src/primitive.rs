@@ -91,7 +91,7 @@ pub fn cube_face_text(
 
 /// Mesh kind spawned by [`crate::SprinkleBuilder`] scene helpers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PrimitiveKind {
+enum PrimitiveKind {
     /// A square ground plane in the XZ plane.
     GroundPlane,
     /// A cube centered on its transform.
@@ -157,7 +157,7 @@ impl PrimitiveConfig {
 }
 
 /// Boxed deferred-insert closure applied to a primitive entity at spawn time.
-pub(crate) type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + Sync>;
+type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + Sync>;
 
 pub(crate) fn install(app: &mut App, config: PrimitiveConfig, inserts: Vec<PrimitiveInsert>) {
     let inserts_cell: Mutex<Option<Vec<PrimitiveInsert>>> = Mutex::new(Some(inserts));
