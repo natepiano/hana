@@ -44,8 +44,8 @@ pub use egui::FocusFrame;
 use enhanced_input::LagrangeEnhancedInputPlugin;
 pub use events::AnimateToFit;
 pub use events::AnimationBegin;
-pub use events::AnimationCancelled;
 pub use events::AnimationEnd;
+pub use events::AnimationReason;
 pub use events::AnimationRejected;
 pub use events::AnimationSource;
 pub use events::CameraMoveBegin;
@@ -55,9 +55,9 @@ pub use events::LookAtAndZoomToFit;
 pub use events::PlayAnimation;
 pub use events::SetFitTarget;
 pub use events::ZoomBegin;
-pub use events::ZoomCancelled;
 pub use events::ZoomContext;
 pub use events::ZoomEnd;
+pub use events::ZoomReason;
 pub use events::ZoomToFit;
 #[cfg(feature = "fit_overlay")]
 pub use fit_overlay::FitTargetOverlayConfig;
@@ -282,8 +282,10 @@ mod tests {
 
     fn observe_animation_cancelled(world: &mut World, camera: Entity) {
         world.entity_mut(camera).observe(
-            |_event: On<AnimationCancelled>, mut counts: ResMut<AnimationEventCounts>| {
-                counts.cancelled += 1;
+            |event: On<AnimationEnd>, mut counts: ResMut<AnimationEventCounts>| {
+                if matches!(event.reason, AnimationReason::Cancelled { .. }) {
+                    counts.cancelled += 1;
+                }
             },
         );
     }

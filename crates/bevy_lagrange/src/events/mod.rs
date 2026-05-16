@@ -27,17 +27,18 @@
 //!
 //! # Emitted event data
 //!
-//! | Event                    | `camera` | `target` | `margin` | `duration` | `easing` | `source` | `camera_move` |
-//! |--------------------------|----------|----------|----------|------------|----------|----------|---------------|
-//! | [`ZoomBegin`]            | yes      | yes      | yes      | yes        | yes      | no       | no            |
-//! | [`ZoomEnd`]              | yes      | yes      | yes      | yes        | yes      | no       | no            |
-//! | [`ZoomCancelled`]        | yes      | yes      | yes      | yes        | yes      | no       | no            |
-//! | [`AnimationBegin`]       | yes      | no       | no       | no         | no       | yes      | no            |
-//! | [`AnimationEnd`]         | yes      | no       | no       | no         | no       | yes      | no            |
-//! | [`AnimationCancelled`]   | yes      | no       | no       | no         | no       | yes      | yes           |
-//! | [`AnimationRejected`]    | yes      | no       | no       | no         | no       | yes      | no            |
-//! | [`CameraMoveBegin`]      | yes      | no       | no       | no         | no       | no       | yes           |
-//! | [`CameraMoveEnd`]        | yes      | no       | no       | no         | no       | no       | yes           |
+//! | Event                    | `camera` | `target` | `margin` | `duration` | `easing` | `source` | `reason` |
+//! |--------------------------|----------|----------|----------|------------|----------|----------|----------|
+//! | [`ZoomBegin`]            | yes      | yes      | yes      | yes        | yes      | no       | no       |
+//! | [`ZoomEnd`]              | yes      | yes      | yes      | yes        | yes      | no       | yes      |
+//! | [`AnimationBegin`]       | yes      | no       | no       | no         | no       | yes      | no       |
+//! | [`AnimationEnd`]         | yes      | no       | no       | no         | no       | yes      | yes      |
+//! | [`AnimationRejected`]    | yes      | no       | no       | no         | no       | yes      | no       |
+//! | [`CameraMoveBegin`]      | yes      | no       | no       | no         | no       | no       | no       |
+//! | [`CameraMoveEnd`]        | yes      | no       | no       | no         | no       | no       | no       |
+//!
+//! `AnimationEnd` and `ZoomEnd` fire on either natural completion or
+//! cancellation — match on their `reason` field to distinguish.
 
 mod animation;
 mod constants;
@@ -46,8 +47,8 @@ mod look;
 mod zoom;
 
 pub use animation::AnimationBegin;
-pub use animation::AnimationCancelled;
 pub use animation::AnimationEnd;
+pub use animation::AnimationReason;
 pub use animation::AnimationRejected;
 pub use animation::AnimationSource;
 pub use animation::CameraMoveBegin;
@@ -58,7 +59,7 @@ pub use fit::SetFitTarget;
 pub use look::LookAt;
 pub use look::LookAtAndZoomToFit;
 pub use zoom::ZoomBegin;
-pub use zoom::ZoomCancelled;
 pub use zoom::ZoomContext;
 pub use zoom::ZoomEnd;
+pub use zoom::ZoomReason;
 pub use zoom::ZoomToFit;

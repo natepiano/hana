@@ -26,9 +26,11 @@ pub enum CameraInputInterruptBehavior {
     /// Disable camera input and keep animating uninterrupted.
     #[default]
     Ignore,
-    /// Stop the camera at its current position. Fires `AnimationCancelled` or `ZoomCancelled`.
+    /// Stop the camera at its current position. Fires `AnimationEnd` /
+    /// `ZoomEnd` with `reason: Cancelled`.
     Cancel,
-    /// Jump to the final queued position. Fires `AnimationEnd` or `ZoomEnd`.
+    /// Jump to the final queued position. Fires `AnimationEnd` / `ZoomEnd`
+    /// with `reason: Completed`.
     Complete,
 }
 

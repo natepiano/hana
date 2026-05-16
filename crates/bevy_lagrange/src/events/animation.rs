@@ -75,30 +75,33 @@ pub struct AnimationBegin {
     pub source: AnimationSource,
 }
 
-/// Emitted when a `CameraMoveList` finishes all its queued moves.
+/// Emitted when an animation stops running, either by completing naturally or
+/// by being cancelled. Inspect [`AnimationEnd::reason`] to distinguish.
 #[derive(EntityEvent, Reflect)]
 #[reflect(Event, FromReflect)]
 pub struct AnimationEnd {
-    /// The camera that finished animating.
+    /// The camera that stopped animating.
     #[event_target]
     pub camera: Entity,
     /// Whether this animation originated from `PlayAnimation`, `ZoomToFit`, `AnimateToFit`,
     /// `LookAt`, or `LookAtAndZoomToFit`.
     pub source: AnimationSource,
+    /// Why the animation stopped: completed naturally, or cancelled.
+    pub reason: AnimationReason,
 }
 
-/// Emitted when an animation is cancelled before completion.
-#[derive(EntityEvent, Reflect)]
-#[reflect(Event, FromReflect)]
-pub struct AnimationCancelled {
-    /// The camera whose animation was cancelled.
-    #[event_target]
-    pub camera:      Entity,
-    /// Whether this animation originated from `PlayAnimation`, `ZoomToFit`, `AnimateToFit`,
-    /// `LookAt`, or `LookAtAndZoomToFit`.
-    pub source:      AnimationSource,
-    /// The `CameraMove` that was in progress when cancelled.
-    pub camera_move: CameraMove,
+/// Why an [`AnimationEnd`] fired.
+#[derive(Clone, Debug, Reflect)]
+pub enum AnimationReason {
+    /// The animation queue ran to completion.
+    Completed,
+    /// The animation was interrupted before it could complete (either by
+    /// external camera input or by a new `PlayAnimation` superseding it).
+    Cancelled {
+        /// The [`CameraMove`] that was in progress when the animation was
+        /// cancelled.
+        interrupted_move: CameraMove,
+    },
 }
 
 /// Emitted when an incoming animation request is rejected.

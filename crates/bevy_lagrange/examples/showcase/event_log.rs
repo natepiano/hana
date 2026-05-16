@@ -226,9 +226,25 @@ pub(crate) fn log_animation_begin(event: On<AnimationBegin>, mut log: ResMut<Eve
 }
 
 pub(crate) fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLog>) {
-    log.push(format!("AnimationEnd\n  source={:?}", event.source));
-    if event.source != AnimationSource::ZoomToFit {
-        log.separator();
+    match &event.reason {
+        AnimationReason::Completed => {
+            log.push(format!(
+                "AnimationEnd\n  source={:?}\n  reason=Completed",
+                event.source
+            ));
+            if event.source != AnimationSource::ZoomToFit {
+                log.separator();
+            }
+        },
+        AnimationReason::Cancelled { interrupted_move } => {
+            log.push_error(format!(
+                "AnimationEnd\n  source={:?}\n  reason=Cancelled\n  move_translation={}\n  \
+                 move_focus={}",
+                event.source,
+                format_vec3(interrupted_move.translation()),
+                format_vec3(interrupted_move.focus()),
+            ));
+        },
     }
 }
 
@@ -255,22 +271,16 @@ pub(crate) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
     ));
 }
 
-pub(crate) fn log_zoom_end(_zoom_end: On<ZoomEnd>, mut log: ResMut<EventLog>) {
-    log.push("ZoomEnd".into());
-    log.separator();
-}
-
-pub(crate) fn log_animation_cancelled(event: On<AnimationCancelled>, mut log: ResMut<EventLog>) {
-    log.push_error(format!(
-        "AnimationCancelled\n  source={:?}\n  move_translation={}\n  move_focus={}",
-        event.source,
-        format_vec3(event.camera_move.translation()),
-        format_vec3(event.camera_move.focus()),
-    ));
-}
-
-pub(crate) fn log_zoom_cancelled(_zoom_cancelled: On<ZoomCancelled>, mut log: ResMut<EventLog>) {
-    log.push_error("ZoomCancelled".into());
+pub(crate) fn log_zoom_end(event: On<ZoomEnd>, mut log: ResMut<EventLog>) {
+    match event.reason {
+        ZoomReason::Completed => {
+            log.push("ZoomEnd\n  reason=Completed".into());
+            log.separator();
+        },
+        ZoomReason::Cancelled => {
+            log.push_error("ZoomEnd\n  reason=Cancelled".into());
+        },
+    }
 }
 
 pub(crate) fn log_animation_rejected(event: On<AnimationRejected>, mut log: ResMut<EventLog>) {

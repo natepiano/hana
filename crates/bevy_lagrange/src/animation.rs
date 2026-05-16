@@ -18,14 +18,14 @@ use super::OrbitCam;
 use super::components::CameraInputInterruptBehavior;
 use super::constants::EXTERNAL_INPUT_TOLERANCE;
 use super::constants::MILLIS_PER_SECOND;
-use super::events::AnimationCancelled;
 use super::events::AnimationEnd;
+use super::events::AnimationReason;
 use super::events::AnimationSource;
 use super::events::CameraMoveBegin;
 use super::events::CameraMoveEnd;
-use super::events::ZoomCancelled;
 use super::events::ZoomContext;
 use super::events::ZoomEnd;
+use super::events::ZoomReason;
 use super::input::OrbitCamInput;
 
 /// Tracks a zoom-to-fit operation routed through the animation system.
@@ -67,7 +67,7 @@ impl OrbitSnapshot {
 /// Two variants allow different ways to specify the target:
 /// - `ToPosition` — world-space translation + focus (for cinematic sequences)
 /// - `ToOrbit` — orbital parameters around a focus (for zoom-to-fit, avoids gimbal lock)
-#[derive(Clone, Reflect)]
+#[derive(Clone, Debug, Reflect)]
 pub enum CameraMove {
     /// Animate to a world-space position looking at a focus point.
     /// The animation system decomposes this into orbital parameters internally.
@@ -280,6 +280,7 @@ fn handle_empty_queue(
     commands.trigger(AnimationEnd {
         camera: entity,
         source,
+        reason: AnimationReason::Completed,
     });
     if let Some(marker) = zoom_marker {
         commands.entity(entity).remove::<ZoomAnimationMarker>();
@@ -289,6 +290,7 @@ fn handle_empty_queue(
             margin:   marker.0.margin,
             duration: marker.0.duration,
             easing:   marker.0.easing,
+            reason:   ZoomReason::Completed,
         });
     }
 }
@@ -317,23 +319,26 @@ fn handle_camera_input_interrupt(
     match interrupt_behavior {
         CameraInputInterruptBehavior::Ignore => CameraInputInterruptBehavior::Ignore,
         CameraInputInterruptBehavior::Cancel => {
-            // Stop where we are — fire cancelled events
+            // Stop where we are — fire end events with `Cancelled` reason
             commands
                 .entity(entity)
                 .remove::<(CameraMoveList, AnimationSourceMarker)>();
-            commands.trigger(AnimationCancelled {
+            commands.trigger(AnimationEnd {
                 camera: entity,
                 source,
-                camera_move: current_move.clone(),
+                reason: AnimationReason::Cancelled {
+                    interrupted_move: current_move.clone(),
+                },
             });
             if let Some(marker) = zoom_marker {
                 commands.entity(entity).remove::<ZoomAnimationMarker>();
-                commands.trigger(ZoomCancelled {
+                commands.trigger(ZoomEnd {
                     camera:   entity,
                     target:   marker.0.target,
                     margin:   marker.0.margin,
                     duration: marker.0.duration,
                     easing:   marker.0.easing,
+                    reason:   ZoomReason::Cancelled,
                 });
             }
             CameraInputInterruptBehavior::Cancel
@@ -354,6 +359,7 @@ fn handle_camera_input_interrupt(
             commands.trigger(AnimationEnd {
                 camera: entity,
                 source,
+                reason: AnimationReason::Completed,
             });
             if let Some(marker) = zoom_marker {
                 commands.entity(entity).remove::<ZoomAnimationMarker>();
@@ -363,6 +369,7 @@ fn handle_camera_input_interrupt(
                     margin:   marker.0.margin,
                     duration: marker.0.duration,
                     easing:   marker.0.easing,
+                    reason:   ZoomReason::Completed,
                 });
             }
             CameraInputInterruptBehavior::Complete
@@ -604,7 +611,7 @@ mod tests {
     #[derive(Resource, Default)]
     struct AnimationEventCounts {
         cancelled: usize,
-        ended:     usize,
+        completed: usize,
     }
 
     type TestResult = Result<(), &'static str>;
@@ -648,13 +655,9 @@ mod tests {
 
     fn observe_animation_events(world: &mut World, camera: Entity) {
         world.entity_mut(camera).observe(
-            |_event: On<AnimationCancelled>, mut counts: ResMut<AnimationEventCounts>| {
-                counts.cancelled += 1;
-            },
-        );
-        world.entity_mut(camera).observe(
-            |_event: On<AnimationEnd>, mut counts: ResMut<AnimationEventCounts>| {
-                counts.ended += 1;
+            |event: On<AnimationEnd>, mut counts: ResMut<AnimationEventCounts>| match event.reason {
+                AnimationReason::Cancelled { .. } => counts.cancelled += 1,
+                AnimationReason::Completed => counts.completed += 1,
             },
         );
     }
@@ -685,7 +688,7 @@ mod tests {
 
         let counts = app.world().resource::<AnimationEventCounts>();
         assert_eq!(counts.cancelled, 1);
-        assert_eq!(counts.ended, 0);
+        assert_eq!(counts.completed, 0);
         assert!(app.world().get::<CameraMoveList>(camera).is_none());
         Ok(())
     }
@@ -707,7 +710,7 @@ mod tests {
 
         let counts = app.world().resource::<AnimationEventCounts>();
         assert_eq!(counts.cancelled, 0);
-        assert_eq!(counts.ended, 1);
+        assert_eq!(counts.completed, 1);
         assert!(app.world().get::<CameraMoveList>(camera).is_none());
         assert!(
             !app.world()
@@ -741,7 +744,7 @@ mod tests {
 
         let counts = app.world().resource::<AnimationEventCounts>();
         assert_eq!(counts.cancelled, 0);
-        assert_eq!(counts.ended, 0);
+        assert_eq!(counts.completed, 0);
         assert!(app.world().get::<CameraMoveList>(camera).is_some());
         assert!(
             !app.world()

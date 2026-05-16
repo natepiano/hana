@@ -87,28 +87,12 @@ pub struct ZoomBegin {
     pub easing:   EaseFunction,
 }
 
-/// Emitted when a `ZoomToFit` operation completes.
+/// Emitted when a `ZoomToFit` operation stops, either by completing naturally
+/// or by being cancelled. Inspect [`ZoomEnd::reason`] to distinguish.
 #[derive(EntityEvent, Reflect)]
 #[reflect(Event, FromReflect)]
 pub struct ZoomEnd {
-    /// The camera that finished zooming.
-    #[event_target]
-    pub camera:   Entity,
-    /// The entity that was framed.
-    pub target:   Entity,
-    /// The margin from the triggering `ZoomToFit`.
-    pub margin:   f32,
-    /// The duration from the triggering `ZoomToFit`.
-    pub duration: Duration,
-    /// The easing curve from the triggering `ZoomToFit`.
-    pub easing:   EaseFunction,
-}
-
-/// Emitted when a `ZoomToFit` animation is cancelled before completion.
-#[derive(EntityEvent, Reflect)]
-#[reflect(Event, FromReflect)]
-pub struct ZoomCancelled {
-    /// The camera whose zoom was cancelled.
+    /// The camera that stopped zooming.
     #[event_target]
     pub camera:   Entity,
     /// The entity that was being framed.
@@ -119,4 +103,15 @@ pub struct ZoomCancelled {
     pub duration: Duration,
     /// The easing curve from the triggering `ZoomToFit`.
     pub easing:   EaseFunction,
+    /// Why the zoom stopped: completed naturally, or cancelled.
+    pub reason:   ZoomReason,
+}
+
+/// Why a [`ZoomEnd`] fired.
+#[derive(Clone, Copy, Debug, Reflect)]
+pub enum ZoomReason {
+    /// The zoom-to-fit animation ran to completion.
+    Completed,
+    /// The zoom-to-fit was interrupted before it could complete.
+    Cancelled,
 }

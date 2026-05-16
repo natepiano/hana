@@ -31,9 +31,9 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_kana::ToUsize;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
-use bevy_lagrange::AnimationCancelled;
 use bevy_lagrange::AnimationConflictPolicy;
 use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::AnimationReason;
 use bevy_lagrange::AnimationRejected;
 use bevy_lagrange::AnimationSource;
 use bevy_lagrange::CameraInputInterruptBehavior;
@@ -47,8 +47,8 @@ use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::ZoomBegin;
-use bevy_lagrange::ZoomCancelled;
 use bevy_lagrange::ZoomEnd;
+use bevy_lagrange::ZoomReason;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::ManagedWindow;
 use bevy_window_manager::WindowManagerPlugin;
@@ -137,12 +137,10 @@ fn main() {
         .add_observer(event_log::enable_log_on_initial_fit)
         .add_observer(event_log::log_animation_begin)
         .add_observer(event_log::log_animation_end)
-        .add_observer(event_log::log_animation_cancelled)
         .add_observer(event_log::log_camera_move_start)
         .add_observer(event_log::log_camera_move_end)
         .add_observer(event_log::log_zoom_begin)
         .add_observer(event_log::log_zoom_end)
-        .add_observer(event_log::log_zoom_cancelled)
         .add_observer(event_log::log_animation_rejected)
         .add_observer(second_window::on_second_window_removed)
         .run();

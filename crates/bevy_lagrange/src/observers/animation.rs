@@ -13,13 +13,15 @@ use crate::constants::DEFAULT_ORBIT_ANGLE;
 use crate::constants::DEFAULT_TARGET_RADIUS;
 use crate::constants::INSTANT_SMOOTHNESS;
 use crate::events::AnimationBegin;
-use crate::events::AnimationCancelled;
+use crate::events::AnimationEnd;
+use crate::events::AnimationReason;
 use crate::events::AnimationRejected;
 use crate::events::AnimationSource;
 use crate::events::PlayAnimation;
 use crate::events::ZoomBegin;
-use crate::events::ZoomCancelled;
 use crate::events::ZoomContext;
+use crate::events::ZoomEnd;
+use crate::events::ZoomReason;
 use crate::orbit_cam::OrbitCam;
 
 /// Component that stores camera runtime state values during animations.
@@ -139,20 +141,23 @@ pub(super) fn on_play_animation(
                                 duration: Duration::ZERO,
                                 easing:   EaseFunction::Linear,
                             });
-                    commands.trigger(AnimationCancelled {
+                    commands.trigger(AnimationEnd {
                         camera: entity,
                         source: in_flight_source,
-                        camera_move,
+                        reason: AnimationReason::Cancelled {
+                            interrupted_move: camera_move,
+                        },
                     });
                 }
                 if let Ok(marker) = marker_query.get(entity) {
                     commands.entity(entity).remove::<ZoomAnimationMarker>();
-                    commands.trigger(ZoomCancelled {
+                    commands.trigger(ZoomEnd {
                         camera:   entity,
                         target:   marker.0.target,
                         margin:   marker.0.margin,
                         duration: marker.0.duration,
                         easing:   marker.0.easing,
+                        reason:   ZoomReason::Cancelled,
                     });
                 }
             },

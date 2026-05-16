@@ -15,12 +15,14 @@ use crate::constants::MILLIS_PER_SECOND;
 use crate::events::AnimateToFit;
 use crate::events::AnimationBegin;
 use crate::events::AnimationEnd;
+use crate::events::AnimationReason;
 use crate::events::AnimationSource;
 use crate::events::PlayAnimation;
 use crate::events::SetFitTarget;
 use crate::events::ZoomBegin;
 use crate::events::ZoomContext;
 use crate::events::ZoomEnd;
+use crate::events::ZoomReason;
 use crate::events::ZoomToFit;
 use crate::orbit_cam::OrbitCam;
 
@@ -122,6 +124,7 @@ pub(super) fn on_zoom_to_fit(
                     margin,
                     duration: Duration::ZERO,
                     easing,
+                    reason: ZoomReason::Completed,
                 });
             },
         );
@@ -204,7 +207,11 @@ pub(super) fn on_animate_to_fit(
             |commands| {
                 let source = AnimationSource::AnimateToFit;
                 commands.trigger(AnimationBegin { camera, source });
-                commands.trigger(AnimationEnd { camera, source });
+                commands.trigger(AnimationEnd {
+                    camera,
+                    source,
+                    reason: AnimationReason::Completed,
+                });
             },
         );
     }

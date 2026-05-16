@@ -14,6 +14,7 @@ use crate::animation;
 use crate::animation::CameraMove;
 use crate::events::AnimationBegin;
 use crate::events::AnimationEnd;
+use crate::events::AnimationReason;
 use crate::events::AnimationSource;
 use crate::events::LookAt;
 use crate::events::LookAtAndZoomToFit;
@@ -74,7 +75,11 @@ pub(super) fn on_look_at(
             |commands| {
                 let source = AnimationSource::LookAt;
                 commands.trigger(AnimationBegin { camera, source });
-                commands.trigger(AnimationEnd { camera, source });
+                commands.trigger(AnimationEnd {
+                    camera,
+                    source,
+                    reason: AnimationReason::Completed,
+                });
             },
         );
     }
@@ -169,7 +174,11 @@ pub(super) fn on_look_at_and_zoom_to_fit(
             |commands| {
                 let source = AnimationSource::LookAtAndZoomToFit;
                 commands.trigger(AnimationBegin { camera, source });
-                commands.trigger(AnimationEnd { camera, source });
+                commands.trigger(AnimationEnd {
+                    camera,
+                    source,
+                    reason: AnimationReason::Completed,
+                });
             },
         );
     }
