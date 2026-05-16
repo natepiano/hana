@@ -18,17 +18,17 @@ use super::extract::ActiveOutlineModes;
 
 #[derive(Clone, Component)]
 pub(crate) struct FloodTextures {
-    pub(crate) ping_pong:     PingPongState,
+    pub(crate) ping_pong_state: PingPongState,
     // Textures for storing input-output of flood passes
-    pub(crate) input:         CachedTexture,
-    pub(crate) output:        CachedTexture,
+    pub(crate) input:           CachedTexture,
+    pub(crate) output:          CachedTexture,
     /// A dedicated depth texture for mesh outlines to later compare against
     /// global depth
-    pub(crate) outline_depth: Texture,
+    pub(crate) outline_depth:   Texture,
     /// Stores outline color and mesh data
-    pub(crate) appearance:    CachedTexture,
+    pub(crate) appearance:      CachedTexture,
     /// Stores per-mesh owner ID in x channel — only allocated when hull outlines are active
-    pub(crate) owner:         Option<CachedTexture>,
+    pub(crate) owner:           Option<CachedTexture>,
 }
 
 #[derive(Clone, Copy)]
@@ -39,21 +39,21 @@ pub(crate) enum PingPongState {
 
 impl FloodTextures {
     pub(crate) const fn input(&self) -> &CachedTexture {
-        match self.ping_pong {
+        match self.ping_pong_state {
             PingPongState::PrimaryInput => &self.input,
             PingPongState::SecondaryInput => &self.output,
         }
     }
 
     pub(crate) const fn output(&self) -> &CachedTexture {
-        match self.ping_pong {
+        match self.ping_pong_state {
             PingPongState::PrimaryInput => &self.output,
             PingPongState::SecondaryInput => &self.input,
         }
     }
 
     pub(crate) const fn swap_ping_pong(&mut self) {
-        self.ping_pong = match self.ping_pong {
+        self.ping_pong_state = match self.ping_pong_state {
             PingPongState::PrimaryInput => PingPongState::SecondaryInput,
             PingPongState::SecondaryInput => PingPongState::PrimaryInput,
         };
@@ -109,7 +109,7 @@ pub(crate) fn prepare_flood_textures(
         };
 
         commands.entity(entity).insert(FloodTextures {
-            ping_pong: PingPongState::PrimaryInput,
+            ping_pong_state: PingPongState::PrimaryInput,
             input: texture_cache.get(&render_device, texture_descriptor.clone()),
             output: texture_cache.get(&render_device, texture_descriptor.clone()),
             outline_depth,

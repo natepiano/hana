@@ -1,6 +1,7 @@
 //! Outlines on transparent meshes with adjustable alpha.
 
 use bevy::color::palettes::css::SILVER;
+use bevy::color::palettes::css::YELLOW;
 use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -106,7 +107,7 @@ fn setup(
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::default())),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 1.0, 0.0, TRANSPARENT_ALPHA),
+            base_color: Color::from(YELLOW).with_alpha(TRANSPARENT_ALPHA),
             alpha_mode: AlphaMode::Blend,
             ..default()
         })),
