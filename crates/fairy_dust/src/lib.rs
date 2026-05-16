@@ -63,6 +63,7 @@ pub use camera_control_panel::SourceVisibility;
 pub use constants::LOG_FILTER;
 pub use primitive::Face;
 pub use primitive::cube_face_text;
+pub use screen_panels::ControlActivation;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
 

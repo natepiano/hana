@@ -14,7 +14,7 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 pub use description::DescriptionPanel;
-pub(crate) use title_bar::ControlActivation;
+pub use title_bar::ControlActivation;
 pub use title_bar::TitleBar;
 pub(crate) use title_bar::TitleBarControlState;
 

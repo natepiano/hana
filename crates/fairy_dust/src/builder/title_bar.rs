@@ -50,6 +50,36 @@ impl<S> TitleBarBuilder<S> {
         self
     }
 
+    /// Mirrors the activation state of `chip` onto the value of `R`. The
+    /// extractor maps the current resource value to
+    /// [`ControlActivation::Active`] or [`ControlActivation::Inactive`]; the
+    /// chip is updated whenever `R` changes (including the first frame after
+    /// the resource is inserted). Use this for sticky toggles like
+    /// "debug outlines on/off" — pair an enum resource with a closure that
+    /// matches on its variants.
+    #[must_use]
+    pub fn wire_chip_to_state<R, F>(mut self, chip: impl Into<String>, extractor: F) -> Self
+    where
+        R: Resource,
+        F: Fn(&R) -> ControlActivation + Send + Sync + 'static,
+    {
+        let chip = chip.into();
+        self.parent.app.add_systems(
+            PostUpdate,
+            move |state: Option<Res<R>>, mut bars: Query<&mut TitleBarControlState>| {
+                let Some(state) = state else { return };
+                if !state.is_changed() {
+                    return;
+                }
+                let activation = extractor(&state);
+                for mut bar in &mut bars {
+                    bar.set_active(&chip, activation);
+                }
+            },
+        );
+        self
+    }
+
     /// Like [`Self::wire_chip_to_events`], but each filter decides whether a
     /// given event applies to this chip. Return `false` to ignore.
     #[must_use]

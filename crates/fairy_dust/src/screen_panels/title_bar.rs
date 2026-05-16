@@ -94,7 +94,7 @@ impl TitleBar {
 
 /// Whether a control label should be highlighted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ControlActivation {
+pub enum ControlActivation {
     /// Highlight the control.
     Active,
     /// Clear the control's highlight.
