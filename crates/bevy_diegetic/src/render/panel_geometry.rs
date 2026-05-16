@@ -326,6 +326,29 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
     let mesh_half_height = half_height + pad;
 
     // Convert layout-space clip rect to local quad coords (centered, Y-up).
+    //
+    // ── DO NOT REMOVE THE `± pad` EXPANSION BELOW ─────────────────────────
+    //
+    // Every element's mesh extends `SDF_AA_PADDING` beyond its SDF form so
+    // the shader's `smoothstep` exterior AA ramp has fragments to render on.
+    // The clip rect coming in from `clip::effective_clip` is bound to the
+    // panel viewport (or a tighter scissor), which sits *at* the SDF form
+    // boundary — i.e. exactly where the AA ramp needs to fade. Without the
+    // padding here, the shader's `discard` (in `sdf_panel.wgsl`) throws away
+    // every fragment in the AA region at panel/viewport edges, and the
+    // visible boundary collapses to the underlying polygon edge — a hard
+    // staircase with no MSAA to smooth it.
+    //
+    // Expanding the clip outward by `pad` lets the AA ramp survive while
+    // still clipping anything that's actually past the panel by more than
+    // 1mm of world space (the case the clip was added for: retained
+    // children that overflow after a panel shrink). The two regions don't
+    // conflict — they're separated by exactly `SDF_AA_PADDING`.
+    //
+    // If you find yourself "cleaning this up" because the `- pad` / `+ pad`
+    // look redundant or suspicious: run the `units` example, look at the
+    // ruler ticks, and you'll see the staircase return immediately.
+    // ──────────────────────────────────────────────────────────────────────
     let clip_rect = surface.clip_rect.map_or_else(
         || {
             bevy::math::Vec4::new(
@@ -342,7 +365,12 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
             // Layout Y-down → local Y-up.
             let top = -(clip_rect.y - cy) * context.points_to_world;
             let bottom = -(clip_rect.y + clip_rect.height - cy) * context.points_to_world;
-            bevy::math::Vec4::new(left, bottom.min(top), right, bottom.max(top))
+            bevy::math::Vec4::new(
+                left - pad,
+                bottom.min(top) - pad,
+                right + pad,
+                bottom.max(top) + pad,
+            )
         },
     );
 
