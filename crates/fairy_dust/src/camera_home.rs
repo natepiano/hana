@@ -10,10 +10,13 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
+use bevy::window::WindowResized;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::AnimationReason;
 use bevy_lagrange::AnimationSource;
+use bevy_lagrange::OrbitCamInteractionStarted;
 
 use crate::constants::HOME_CONTROL;
 use crate::constants::HOME_KEY;
@@ -45,12 +48,32 @@ pub(crate) struct CameraHomeConfig {
 #[derive(Resource)]
 struct CameraHomeEntity(Entity);
 
+/// Tracks whether the camera is still at the home pose. The window-resize
+/// refit only fires when this is `Yes`, so user-driven pan/zoom/orbit isn't
+/// undone by a resize.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AtHome {
+    #[default]
+    Yes,
+    No,
+}
+
 pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.insert_resource(config);
+    app.init_resource::<AtHome>();
     app.add_systems(Startup, spawn_home_marker);
-    app.add_systems(Update, (trigger_initial_animate, handle_home_key));
+    app.add_systems(
+        Update,
+        (
+            trigger_initial_animate,
+            handle_home_key,
+            refit_on_window_resized,
+        ),
+    );
     app.add_observer(on_home_animation_begin);
     app.add_observer(on_home_animation_end);
+    app.add_observer(on_non_home_animation_begin);
+    app.add_observer(on_user_interaction_started);
 }
 
 fn spawn_home_marker(
@@ -121,6 +144,36 @@ fn handle_home_key(
     );
 }
 
+fn refit_on_window_resized(
+    mut events: MessageReader<WindowResized>,
+    mut commands: Commands,
+    home: Option<Res<CameraHomeEntity>>,
+    config: Res<CameraHomeConfig>,
+    cameras: Query<Entity, With<FairyDustOrbitCam>>,
+    at_home: Res<AtHome>,
+) {
+    if events.is_empty() {
+        return;
+    }
+    events.clear();
+    if *at_home != AtHome::Yes {
+        return;
+    }
+    let Some(home) = home else {
+        return;
+    };
+    let Ok(camera) = cameras.single() else {
+        return;
+    };
+    commands.trigger(
+        AnimateToFit::new(camera, home.0)
+            .yaw(config.yaw)
+            .pitch(config.pitch)
+            .margin(config.margin)
+            .duration(Duration::ZERO),
+    );
+}
+
 fn on_home_animation_begin(
     trigger: On<AnimationBegin>,
     home: Option<Res<CameraHomeEntity>>,
@@ -138,6 +191,7 @@ fn on_home_animation_end(
     trigger: On<AnimationEnd>,
     home: Option<Res<CameraHomeEntity>>,
     mut bars: Query<&mut TitleBarControlState>,
+    mut at_home: ResMut<AtHome>,
 ) {
     if home.is_none() || trigger.source != AnimationSource::AnimateToFit {
         return;
@@ -145,4 +199,20 @@ fn on_home_animation_end(
     for mut bar in &mut bars {
         bar.set_active(HOME_CONTROL, ControlActivation::Inactive);
     }
+    if matches!(trigger.reason, AnimationReason::Completed) {
+        *at_home = AtHome::Yes;
+    }
+}
+
+fn on_non_home_animation_begin(trigger: On<AnimationBegin>, mut at_home: ResMut<AtHome>) {
+    if trigger.source != AnimationSource::AnimateToFit {
+        *at_home = AtHome::No;
+    }
+}
+
+fn on_user_interaction_started(
+    _trigger: On<OrbitCamInteractionStarted>,
+    mut at_home: ResMut<AtHome>,
+) {
+    *at_home = AtHome::No;
 }

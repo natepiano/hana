@@ -12,18 +12,13 @@
 
 use std::time::Duration;
 
-use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
@@ -34,19 +29,20 @@ use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
-use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
-use bevy_lagrange::CameraMove;
-use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::AnimationBegin;
+use bevy_lagrange::AnimationEnd;
+use bevy_lagrange::AnimationSource;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::PlayAnimation;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
-use bevy_window_manager::WindowManagerPlugin;
+use fairy_dust::ControlActivation;
+use fairy_dust::TitleBar;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
 const A4: PaperSize = PaperSize::A4;
@@ -74,38 +70,14 @@ const INDEX_LABEL_SIZE: Pt = Pt(10.0);
 const INDEX_CODE_SIZE: Pt = Pt(10.0);
 const INDEX_FOOTER_SIZE: Pt = Pt(8.0);
 
-// ── HUD ─────────────────────────────────────────────────────────────
-const HUD_HEIGHT: Px = Px(48.0);
-const HUD_PADDING: Px = Px(12.0);
-const HUD_GAP: Px = Px(14.0);
-const HUD_TITLE_SIZE: Pt = Pt(16.0);
-const HUD_HINT_SIZE: Pt = Pt(12.0);
-const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.80);
-const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
-const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
-const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
-const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
-const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
-const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
-const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
-
-// ── Camera help panel ──────────────────────────────────────────────
-const CAM_HELP_WIDTH: Px = Px(280.0);
-const CAM_HELP_HEIGHT: Px = Px(160.0);
-const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
-const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
-const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
-const CAM_HELP_RADIUS: Px = Px(15.0);
-const CAM_HELP_FRAME_PAD: Px = Px(2.0);
-const CAM_HELP_BORDER: Px = Px(2.0);
-const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
-const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
-
 // ── Scene layout ─────────────────────────────────────────────────────
 const GAP: Mm = Mm(15.0);
 const LIFT: Mm = Mm(55.0);
 const TITLE_GAP: Mm = Mm(8.0);
-const GROUND_MARGIN: Mm = Mm(60.0);
+/// Square edge length of the ground plane in meters. Sized to comfortably
+/// extend beyond the three-panel layout (~0.35m × 0.30m) without dominating
+/// the scene.
+const GROUND_PLANE_SIZE: f32 = 1.0;
 
 // ── Ruler ────────────────────────────────────────────────────────────
 const RULER_GAP: Mm = Mm(3.0);
@@ -138,12 +110,61 @@ const PANEL_RULER_QTR_TICK: In = In(0.12);
 const PANEL_RULER_IN_LABEL_GAP: In = In(0.0315);
 
 // ── Home / zoom ─────────────────────────────────────────────────────
-const HOME_FOCUS_Y: Mm = Mm(A4_HEIGHT.0 / 2.0 + LIFT.0);
 const HOME_PITCH: f32 = 0.1;
-const HOME_RADIUS: Mm = Mm(500.0);
 const HOME_YAW: f32 = 0.0;
+const HOME_DEPTH: f32 = 0.01;
+const HOME_MARGIN: f32 = 0.25;
 const ZOOM_DURATION_MS: u64 = 1000;
 const ZOOM_MARGIN: f32 = 0.08;
+
+/// Union AABB of the three world-space panels (A4 + business card + photo
+/// card). Mirrors the placement math in `setup`. The home cube sits at the
+/// AABB center with a scale equal to its dimensions; `with_camera_home`'s
+/// `.margin(HOME_MARGIN)` adds the breathing room.
+fn compute_home_transform() -> Transform {
+    let a4_w = f32::from(A4_WIDTH);
+    let a4_h = f32::from(A4_HEIGHT);
+    let card_w = f32::from(CARD_WIDTH);
+    let card_h = f32::from(CARD_HEIGHT);
+    let index_w = f32::from(INDEX_WIDTH);
+    let index_h = f32::from(INDEX_HEIGHT);
+    let gap = f32::from(GAP);
+    let lift = f32::from(LIFT);
+
+    let total_width = a4_w + gap + card_w;
+    let group_left = -total_width / 2.0;
+
+    let a4_x = group_left + a4_w / 2.0;
+    let a4_y = lift + a4_h / 2.0;
+
+    let card_x = group_left + a4_w + gap + card_w / 2.0;
+    let card_y = (a4_y + a4_h / 2.0) - card_h / 2.0;
+
+    let card_left = group_left + a4_w + gap;
+    let index_x = card_left + index_w / 2.0;
+    let index_y = lift + index_h / 2.0;
+
+    let aabb =
+        |cx: f32, cy: f32, w: f32, h: f32| (cx - w / 2.0, cx + w / 2.0, cy - h / 2.0, cy + h / 2.0);
+    let (a4l, a4r, a4b, a4t) = aabb(a4_x, a4_y, a4_w, a4_h);
+    let (cl, cr, cb, ct) = aabb(card_x, card_y, card_w, card_h);
+    let (il, ir, ib, it) = aabb(index_x, index_y, index_w, index_h);
+
+    let min_x = a4l.min(cl).min(il);
+    let max_x = a4r.max(cr).max(ir);
+    let min_y = a4b.min(cb).min(ib);
+    let max_y = a4t.max(ct).max(it);
+
+    Transform {
+        translation: Vec3::new(
+            f32::midpoint(min_x, max_x),
+            f32::midpoint(min_y, max_y),
+            0.0,
+        ),
+        scale: Vec3::new(max_x - min_x, max_y - min_y, HOME_DEPTH),
+        ..default()
+    }
+}
 
 // ── Colors ───────────────────────────────────────────────────────────
 const A4_DIM_COLOR: Color = Color::srgba(0.0, 0.0, 0.1, 1.0);
@@ -165,23 +186,48 @@ struct CardPanel;
 struct IndexPanel;
 
 #[derive(Component)]
-struct ControlsPanel;
-
-#[derive(Component)]
 struct PanelRuler;
 
-#[derive(Resource, Default)]
-struct DebugOutlines(bool);
-
-#[derive(Resource)]
-struct RulersVisible(bool);
-
-impl Default for RulersVisible {
-    fn default() -> Self { Self(true) }
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum DebugOutlines {
+    On,
+    #[default]
+    Off,
 }
 
-#[derive(Resource)]
-struct SceneBounds(Entity);
+impl DebugOutlines {
+    const fn is_on(self) -> bool { matches!(self, Self::On) }
+
+    const fn toggle(&mut self) {
+        *self = match *self {
+            Self::On => Self::Off,
+            Self::Off => Self::On,
+        };
+    }
+}
+
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum Rulers {
+    #[default]
+    Visible,
+    Hidden,
+}
+
+impl Rulers {
+    const fn toggle(&mut self) {
+        *self = match *self {
+            Self::Visible => Self::Hidden,
+            Self::Hidden => Self::Visible,
+        };
+    }
+}
+
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum CameraProjection {
+    #[default]
+    Perspective,
+    Orthographic,
+}
 
 fn build_panel_or_log(
     panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
@@ -197,33 +243,65 @@ fn build_panel_or_log(
 }
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            LagrangePlugin,
-            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-            WindowManagerPlugin,
-            MeshPickingPlugin,
-            DiegeticUiPlugin,
-        ))
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .size(GROUND_PLANE_SIZE)
+        .with_orbit_cam(
+            |cam| {
+                cam.zoom_lower_limit = 0.000_000_1;
+            },
+            OrbitCamPreset::BlenderLike,
+        )
+        .with_stable_transparency()
+        .with_camera_home(compute_home_transform())
+        .yaw(HOME_YAW)
+        .pitch(HOME_PITCH)
+        .duration(Duration::from_millis(ZOOM_DURATION_MS))
+        .margin(HOME_MARGIN)
+        .with_title_bar(
+            TitleBar::new()
+                .control("D Outlines")
+                .control("R Rulers")
+                .control("P Perspective")
+                .control("O Orthographic")
+                .control("Click to Zoom"),
+        )
+        .wire_chip_to_state::<DebugOutlines, _>("D Outlines", |state| match state {
+            DebugOutlines::On => ControlActivation::Active,
+            DebugOutlines::Off => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<Rulers, _>("R Rulers", |state| match state {
+            Rulers::Visible => ControlActivation::Active,
+            Rulers::Hidden => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<CameraProjection, _>("P Perspective", |state| match state {
+            CameraProjection::Perspective => ControlActivation::Active,
+            CameraProjection::Orthographic => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<CameraProjection, _>("O Orthographic", |state| match state {
+            CameraProjection::Orthographic => ControlActivation::Active,
+            CameraProjection::Perspective => ControlActivation::Inactive,
+        })
+        .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+            "Click to Zoom",
+            |event| event.source == AnimationSource::ZoomToFit,
+            |event| event.source == AnimationSource::ZoomToFit,
+        )
+        .with_camera_control_panel()
         .init_resource::<DebugOutlines>()
-        .init_resource::<RulersVisible>()
+        .init_resource::<Rulers>()
+        .init_resource::<CameraProjection>()
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_debug_outlines)
         .add_systems(Update, toggle_rulers)
         .add_systems(Update, toggle_projection)
-        .add_systems(Update, dynamic_near_far)
-        .add_systems(Update, update_controls_hud)
-        .add_systems(Update, home_camera)
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    windows: Query<&Window>,
-) {
+fn setup(mut commands: Commands) {
     let a4_width_meters = f32::from(A4_WIDTH);
     let a4_height_meters = f32::from(A4_HEIGHT);
     let card_width_m = f32::from(CARD_WIDTH);
@@ -284,20 +362,6 @@ fn setup(
         index_height_m,
         ruler_color,
     );
-
-    spawn_hud_panels(&mut commands, &windows);
-
-    // ── Ground plane ─────────────────────────────────────────────────
-    spawn_ground_plane(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        total_width,
-        a4_height_meters,
-    );
-
-    // ── Light + camera ───────────────────────────────────────────────
-    spawn_lights_and_camera(&mut commands, a4_height_meters);
 }
 
 fn spawn_a4_with_titles(
@@ -459,53 +523,6 @@ fn spawn_index_card_rulers(
     ));
 }
 
-fn spawn_hud_panels(commands: &mut Commands, windows: &Query<&Window>) {
-    let unlit_material = bevy_diegetic::default_panel_material();
-    let unlit = StandardMaterial {
-        unlit: true,
-        ..unlit_material
-    };
-    let _ = windows;
-    let Some(controls_panel) = build_panel_or_log(
-        DiegeticPanel::screen()
-            .size(Sizing::percent(1.0), Sizing::fixed(HUD_HEIGHT))
-            .anchor(Anchor::TopLeft)
-            .material(unlit.clone())
-            .text_material(unlit)
-            .layout(|b| {
-                build_controls_content(b, false, true, true);
-            })
-            .build(),
-        "controls HUD dimensions",
-    ) else {
-        return;
-    };
-
-    commands.spawn((ControlsPanel, controls_panel, Transform::default()));
-
-    let camera_help_material = StandardMaterial {
-        unlit: true,
-        ..bevy_diegetic::default_panel_material()
-    };
-    let Some(camera_help_panel) = build_panel_or_log(
-        DiegeticPanel::screen()
-            .size(
-                Sizing::fixed(CAM_HELP_WIDTH),
-                Sizing::fixed(CAM_HELP_HEIGHT),
-            )
-            .anchor(Anchor::BottomRight)
-            .material(camera_help_material.clone())
-            .text_material(camera_help_material)
-            .layout(build_camera_help)
-            .build(),
-        "camera help HUD dimensions",
-    ) else {
-        return;
-    };
-
-    commands.spawn((camera_help_panel, Transform::default()));
-}
-
 fn spawn_rulers(
     commands: &mut Commands,
     ruler_color: Color,
@@ -612,70 +629,6 @@ fn spawn_rulers(
     ));
 }
 
-fn spawn_ground_plane(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    total_width: f32,
-    page_height: f32,
-) {
-    let ground_margin = f32::from(GROUND_MARGIN);
-    let ground_width = (total_width + ground_margin) * 1.5;
-    let ground_height = page_height + ground_margin;
-    let ground = commands
-        .spawn((
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(ground_width, ground_height))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::srgb(0.12, 0.08, 0.06),
-                reflectance: 0.5,
-                perceptual_roughness: 0.6,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            })),
-        ))
-        .observe(on_ground_clicked)
-        .id();
-    commands.insert_resource(SceneBounds(ground));
-}
-
-fn spawn_lights_and_camera(commands: &mut Commands, page_height: f32) {
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 5_000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 500.0,
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    let mid_y = page_height / 2.0 + f32::from(LIFT);
-    commands.spawn((
-        OrbitCam {
-            focus: Vec3::new(0.0, mid_y, 0.0),
-            radius: Some(f32::from(HOME_RADIUS)),
-            yaw: Some(0.0),
-            pitch: Some(0.1),
-            zoom_sensitivity: 1.0,
-            zoom_lower_limit: 0.000_000_1,
-            ..default()
-        },
-        Projection::Perspective(PerspectiveProjection {
-            near: 0.001,
-            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
-            ..default()
-        }),
-    ));
-}
-
 const PERSPECTIVE_FOV: f32 = std::f32::consts::FRAC_PI_4;
 
 fn perspective_to_orthographic_radius(r: f32) -> f32 { r * (PERSPECTIVE_FOV / 2.0).tan() * 2.0 }
@@ -686,6 +639,7 @@ fn orthographic_to_perspective_radius(r: f32) -> f32 { r / ((PERSPECTIVE_FOV / 2
 fn toggle_projection(
     keys: Res<ButtonInput<KeyCode>>,
     mut cameras: Query<(&mut Projection, &mut OrbitCam)>,
+    mut projection_state: ResMut<CameraProjection>,
 ) {
     let to_perspective = keys.just_pressed(KeyCode::KeyP);
     let to_ortho = keys.just_pressed(KeyCode::KeyO);
@@ -706,6 +660,7 @@ fn toggle_projection(
                 ..OrthographicProjection::default_3d()
             });
             poc.force_update();
+            *projection_state = CameraProjection::Orthographic;
         } else if to_perspective && matches!(&*proj, Projection::Orthographic(_)) {
             let r = poc.radius.unwrap_or(1.0);
             let persp_r = orthographic_to_perspective_radius(r);
@@ -718,28 +673,7 @@ fn toggle_projection(
                 ..default()
             });
             poc.force_update();
-        }
-    }
-}
-
-/// Tightens near/far planes proportionally to camera radius.
-/// Keeps the near:far ratio constant regardless of zoom level,
-/// preventing depth clipping at close range.
-fn dynamic_near_far(mut cameras: Query<(&mut Projection, &mut OrbitCam)>) {
-    for (mut proj, mut poc) in &mut cameras {
-        if let Projection::Perspective(ref mut p) = *proj {
-            let radius = poc.radius.unwrap_or(1.0);
-
-            let new_near = (radius * 0.001).max(1e-6);
-            let new_far = (radius * 100.0).max(1000.0);
-
-            if (p.near - new_near).abs() > new_near * 0.1 || (p.far - new_far).abs() > new_far * 0.1
-            {
-                p.near = new_near;
-                p.far = new_far;
-                p.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -new_near);
-                poc.force_update();
-            }
+            *projection_state = CameraProjection::Perspective;
         }
     }
 }
@@ -757,8 +691,8 @@ fn toggle_debug_outlines(
     if !keys.just_pressed(KeyCode::KeyD) {
         return;
     }
-    debug.0 = !debug.0;
-    let on = debug.0;
+    debug.toggle();
+    let on = debug.is_on();
     bevy::log::info!("debug outlines: {on}");
 
     for entity in &a4_panels {
@@ -774,17 +708,16 @@ fn toggle_debug_outlines(
 
 fn toggle_rulers(
     keys: Res<ButtonInput<KeyCode>>,
-    mut rulers_visible: ResMut<RulersVisible>,
+    mut rulers_state: ResMut<Rulers>,
     mut rulers: Query<&mut Visibility, With<PanelRuler>>,
 ) {
     if !keys.just_pressed(KeyCode::KeyR) {
         return;
     }
-    rulers_visible.0 = !rulers_visible.0;
-    let vis = if rulers_visible.0 {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
+    rulers_state.toggle();
+    let vis = match *rulers_state {
+        Rulers::Visible => Visibility::Inherited,
+        Rulers::Hidden => Visibility::Hidden,
     };
     for mut visibility in &mut rulers {
         *visibility = vis;
@@ -1760,253 +1693,6 @@ fn index_row(
     );
 }
 
-fn build_controls_tree(debug: bool, rulers: bool, perspective: bool) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(HUD_HEIGHT)),
-    );
-    build_controls_content(&mut builder, debug, rulers, perspective);
-    builder.build()
-}
-
-fn build_controls_content(b: &mut LayoutBuilder, debug: bool, rulers: bool, perspective: bool) {
-    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(Px(2.0)))
-            .background(HUD_FRAME_BACKGROUND)
-            .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .padding(Padding::new(Px(8.0), HUD_PADDING, Px(8.0), HUD_PADDING))
-                    .child_gap(HUD_GAP)
-                    .child_align_y(AlignY::Center)
-                    .clip()
-                    .background(HUD_BACKGROUND)
-                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
-                |b| {
-                    b.text("CONTROLS", title);
-                    hud_separator(b);
-
-                    b.text(
-                        "H Home",
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_INACTIVE_COLOR),
-                    );
-                    hud_separator(b);
-
-                    let rulers_label = if rulers {
-                        "R Rulers On"
-                    } else {
-                        "R Rulers Off"
-                    };
-                    let rulers_color = if rulers {
-                        HUD_ACTIVE_COLOR
-                    } else {
-                        HUD_INACTIVE_COLOR
-                    };
-                    b.text(
-                        rulers_label,
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(rulers_color),
-                    );
-                    hud_separator(b);
-
-                    let persp_color = if perspective {
-                        HUD_ACTIVE_COLOR
-                    } else {
-                        HUD_INACTIVE_COLOR
-                    };
-                    b.text(
-                        "P Perspective",
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(persp_color),
-                    );
-                    hud_separator(b);
-                    let ortho_color = if perspective {
-                        HUD_INACTIVE_COLOR
-                    } else {
-                        HUD_ACTIVE_COLOR
-                    };
-                    b.text(
-                        "O Orthographic",
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(ortho_color),
-                    );
-                    hud_separator(b);
-
-                    let debug_label = if debug {
-                        "D Outlines On"
-                    } else {
-                        "D Outlines Off"
-                    };
-                    let debug_color = if debug {
-                        HUD_ACTIVE_COLOR
-                    } else {
-                        HUD_INACTIVE_COLOR
-                    };
-                    b.text(
-                        debug_label,
-                        LayoutTextStyle::new(HUD_HINT_SIZE).with_color(debug_color),
-                    );
-                },
-            );
-        },
-    );
-}
-
-fn build_camera_help(b: &mut LayoutBuilder) {
-    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
-    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
-
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(CAM_HELP_FRAME_PAD))
-            .corner_radius(CornerRadius::new(
-                CAM_HELP_RADIUS,
-                Px(0.0),
-                CAM_HELP_RADIUS,
-                Px(0.0),
-            ))
-            .background(HUD_FRAME_BACKGROUND)
-            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(6.0))
-                    .corner_radius(CornerRadius::new(
-                        CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
-                        CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
-                    ))
-                    .background(HUD_BACKGROUND)
-                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
-                |b| {
-                    b.text("CAMERA", title);
-
-                    // Two columns: Mouse | Trackpad
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(Px(12.0)),
-                        |b| {
-                            // Mouse column
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Mouse", header.clone());
-                                    b.text("MMB drag \u{2192} Orbit", label.clone());
-                                    b.text("Shift+MMB \u{2192} Pan", label.clone());
-                                    b.text("Scroll \u{2192} Zoom", label.clone());
-                                },
-                            );
-
-                            // Divider
-                            b.with(
-                                El::new()
-                                    .width(Sizing::fixed(Px(1.0)))
-                                    .height(Sizing::GROW)
-                                    .background(HUD_DIVIDER_COLOR),
-                                |_| {},
-                            );
-
-                            // Trackpad column
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Trackpad", header.clone());
-                                    b.text("Scroll \u{2192} Orbit", label.clone());
-                                    b.text("Shift+Scroll \u{2192} Pan", label.clone());
-                                    b.text("Ctrl+Scroll \u{2192} Zoom", label.clone());
-                                    b.text("Pinch \u{2192} Zoom", label.clone());
-                                },
-                            );
-                        },
-                    );
-                },
-            );
-        },
-    );
-}
-
-fn hud_separator(b: &mut LayoutBuilder) {
-    b.with(
-        El::new()
-            .width(Sizing::fixed(Px(1.0)))
-            .height(Sizing::GROW)
-            .background(HUD_DIVIDER_COLOR),
-        |_| {},
-    );
-}
-
-fn update_controls_hud(
-    huds: Query<Entity, With<ControlsPanel>>,
-    debug: Res<DebugOutlines>,
-    rulers: Res<RulersVisible>,
-    cameras: Query<&Projection>,
-    mut commands: Commands,
-    mut previous_state: Local<(bool, bool, bool)>,
-) {
-    let perspective = cameras
-        .iter()
-        .any(|p| matches!(p, Projection::Perspective(_)));
-
-    let state = (debug.0, rulers.0, perspective);
-    if *previous_state == state {
-        return;
-    }
-    *previous_state = state;
-
-    for entity in &huds {
-        commands.set_tree(entity, build_controls_tree(debug.0, rulers.0, perspective));
-    }
-}
-
-// ── Home camera ─────────────────────────────────────────────────────
-
-fn home_camera(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyH) {
-        return;
-    }
-    for camera in &cameras {
-        commands.trigger(PlayAnimation::new(
-            camera,
-            [CameraMove::ToOrbit {
-                focus:    Vec3::new(0.0, f32::from(HOME_FOCUS_Y), 0.0),
-                yaw:      HOME_YAW,
-                pitch:    HOME_PITCH,
-                radius:   f32::from(HOME_RADIUS),
-                duration: Duration::from_millis(ZOOM_DURATION_MS),
-                easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
-            }],
-        ));
-    }
-}
-
 // ── Click handlers ───────────────────────────────────────────────────
 
 fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
@@ -2017,18 +1703,6 @@ fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     let camera = click.hit.camera;
     commands.trigger(
         ZoomToFit::new(camera, click.entity)
-            .margin(ZOOM_MARGIN)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-    );
-}
-
-fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: Res<SceneBounds>) {
-    if click.button != PointerButton::Primary {
-        return;
-    }
-    let camera = click.hit.camera;
-    commands.trigger(
-        ZoomToFit::new(camera, scene.0)
             .margin(ZOOM_MARGIN)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );

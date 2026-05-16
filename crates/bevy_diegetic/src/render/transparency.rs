@@ -51,15 +51,14 @@ use crate::screen_space::ScreenSpaceCamera;
 /// with an OIT camera, for the entire time `StableTransparency` is present:
 ///
 /// 1. **OIT camera turns on**: [`on_stable_transparency_added`] inserts
-///    `OrderIndependentTransparencySettings` + `Msaa::Off` on the OIT camera,
-///    and propagates `Msaa::Off` to every existing `ScreenSpaceCamera`.
-/// 2. **Screen-space camera spawns later** (e.g. when a `DiegeticPanel::screen()`
-///    triggers `setup_screen_space_view`): [`on_screen_space_camera_added`]
-///    detects the active OIT camera and forces `Msaa::Off` on the new
-///    overlay camera before it can render with a default-MSAA pipeline.
-/// 3. **OIT camera turns off**: [`on_stable_transparency_removed`] strips
-///    OIT and restores `Msaa::default()` on both the OIT camera and every
-///    `ScreenSpaceCamera`.
+///    `OrderIndependentTransparencySettings` + `Msaa::Off` on the OIT camera, and propagates
+///    `Msaa::Off` to every existing `ScreenSpaceCamera`.
+/// 2. **Screen-space camera spawns later** (e.g. when a `DiegeticPanel::screen()` triggers
+///    `setup_screen_space_view`): [`on_screen_space_camera_added`] detects the active OIT camera
+///    and forces `Msaa::Off` on the new overlay camera before it can render with a default-MSAA
+///    pipeline.
+/// 3. **OIT camera turns off**: [`on_stable_transparency_removed`] strips OIT and restores
+///    `Msaa::default()` on both the OIT camera and every `ScreenSpaceCamera`.
 ///
 /// Net effect: do not set `Msaa` manually on a camera that lives alongside
 /// a `StableTransparency` camera on the same window — this module will
