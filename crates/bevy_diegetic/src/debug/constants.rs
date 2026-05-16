@@ -26,6 +26,18 @@ pub(super) const ARROW_SPACING_RATIO: f32 = 0.28;
 /// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
 pub(super) const ARROWHEAD_RATIO: f32 = 0.017;
 
+/// Minimum world-unit thickness for bounding-box borders and callout
+/// lines, expressed as a fraction of `font_size * scale`.
+pub(super) const BBOX_MIN_WORLD_RATIO: f32 = 0.0025;
+
+/// Length of each dash segment in the advancement bracket, expressed
+/// as a fraction of the column spacing.
+pub(super) const BRACKET_DASH_RATIO: f32 = 0.125;
+
+/// Length of the gap between dash segments in the advancement
+/// bracket, expressed as a fraction of the column spacing.
+pub(super) const BRACKET_GAP_RATIO: f32 = BRACKET_DASH_RATIO / 2.0;
+
 /// Radius of origin/advancement dots relative to font size.
 /// Multiplied by `font_size * LAYOUT_TO_WORLD` at usage to get world units.
 pub(super) const DOT_RADIUS_RATIO: f32 = 0.01;
@@ -75,6 +87,10 @@ pub(super) const LABEL_X_HEIGHT: &str = "x-height";
 // line widths
 /// Default line width for overlay gizmos (in pixels).
 pub(super) const DEFAULT_LINE_WIDTH: f32 = 0.5;
+
+/// Multiplier applied to `bbox_border_width` to derive the border
+/// width for horizontal metric lines.
+pub(super) const METRIC_LINE_BORDER_MULT: f32 = 1.5;
 
 /// Line width for metric lines, bounding boxes, and callout backgrounds.
 pub(super) const THIN_LINE_WIDTH: f32 = 1.0;

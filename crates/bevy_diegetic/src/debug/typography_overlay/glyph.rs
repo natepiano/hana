@@ -14,6 +14,9 @@ use super::scaling;
 use crate::callouts;
 use crate::debug::constants::BASELINE_COLOR;
 use crate::debug::constants::BBOX_COLOR;
+use crate::debug::constants::BBOX_MIN_WORLD_RATIO;
+use crate::debug::constants::BRACKET_DASH_RATIO;
+use crate::debug::constants::BRACKET_GAP_RATIO;
 use crate::debug::constants::CALLOUT_Z_OFFSET;
 use crate::debug::constants::LABEL_ADVANCEMENT;
 use crate::debug::constants::LABEL_BOUNDING_BOX;
@@ -129,7 +132,7 @@ fn spawn_bounding_box_callout(
     bbox_color: Color,
 ) {
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;
-    let callout_thickness = scaling::font_scale(ctx.font_size, ctx.scale) * 0.0025;
+    let callout_thickness = scaling::font_scale(ctx.font_size, ctx.scale) * BBOX_MIN_WORLD_RATIO;
     let z = CALLOUT_Z_OFFSET;
 
     let Some(last) = computed.glyph_rects.last() else {
@@ -308,8 +311,8 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     // above the origin/advance dots on the baseline.
     let tick_above = geometry.dot_radius.mul_add(3.0, geometry.origin_y);
     let tick_below = arrow_y - head;
-    let dash_len = geometry.spacing * 0.125;
-    let gap_len = geometry.spacing * 0.125 / 2.0;
+    let dash_len = geometry.spacing * BRACKET_DASH_RATIO;
+    let gap_len = geometry.spacing * BRACKET_GAP_RATIO;
     spawn_dashed_callout_line(
         ctx,
         &DashedLine {
@@ -361,15 +364,15 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     );
 
     // "Advancement" label centered below the arrow.
-    let adv_mid_x = f32::midpoint(geometry.origin_x, geometry.advance_end_x);
-    let adv_label_y = geometry.spacing.mul_add(-0.5, arrow_y);
+    let advance_mid_x = f32::midpoint(geometry.origin_x, geometry.advance_end_x);
+    let advance_label_y = geometry.spacing.mul_add(-0.5, arrow_y);
     ctx.commands.entity(ctx.entity).with_child((
         WorldText::new(LABEL_ADVANCEMENT),
         WorldTextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::TopCenter)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
-        Transform::from_xyz(adv_mid_x, adv_label_y, geometry.z),
+        Transform::from_xyz(advance_mid_x, advance_label_y, geometry.z),
     ));
 }
 

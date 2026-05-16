@@ -2,8 +2,10 @@ use super::TypographyOverlay;
 use crate::debug::constants::ARROW_GAP_RATIO;
 use crate::debug::constants::ARROW_SPACING_RATIO;
 use crate::debug::constants::ARROWHEAD_RATIO;
+use crate::debug::constants::BBOX_MIN_WORLD_RATIO;
 use crate::debug::constants::DOT_RADIUS_RATIO;
 use crate::debug::constants::LABEL_GAP_RATIO;
+use crate::debug::constants::METRIC_LINE_BORDER_MULT;
 use crate::debug::constants::THIN_LINE_WIDTH;
 
 /// Convert layout Y-down to world Y-up, with anchor offset.
@@ -45,7 +47,7 @@ pub(super) fn label_gap(font_size: f32, scale: f32) -> f32 {
 
 /// Border width for panel-backed glyph boxes in world units.
 pub(super) fn bbox_border_width(overlay: &TypographyOverlay, font_size: f32, scale: f32) -> f32 {
-    let min_world = font_scale(font_size, scale) * 0.0025;
+    let min_world = font_scale(font_size, scale) * BBOX_MIN_WORLD_RATIO;
     let from_line_width = overlay.line_width.max(THIN_LINE_WIDTH) * min_world;
     from_line_width.max(min_world)
 }
@@ -65,5 +67,5 @@ pub(super) fn metric_line_border_width(
     font_size: f32,
     scale: f32,
 ) -> f32 {
-    1.5 * bbox_border_width(overlay, font_size, scale)
+    METRIC_LINE_BORDER_MULT * bbox_border_width(overlay, font_size, scale)
 }
