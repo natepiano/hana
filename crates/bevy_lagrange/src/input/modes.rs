@@ -307,8 +307,7 @@ fn reconcile_input_modes(world: &mut World) {
     let reconciliations = query
         .iter(world)
         .map(|(camera, preset, bindings, manual, installation)| {
-            let selected =
-                select_input_mode(preset.as_deref(), bindings.as_deref(), manual.as_deref());
+            let selected = select_input_mode(bindings.as_deref(), manual.as_deref());
             let mode_count = usize::from(preset.is_some())
                 + usize::from(bindings.is_some())
                 + usize::from(manual.is_some());
@@ -350,7 +349,6 @@ fn reconcile_input_modes(world: &mut World) {
 }
 
 const fn select_input_mode(
-    _preset: Option<&OrbitCamPreset>,
     bindings: Option<&OrbitCamBindings>,
     manual: Option<&OrbitCamManual>,
 ) -> ActiveInputMode {

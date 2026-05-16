@@ -8,7 +8,6 @@ use crate::animation::CameraMove;
 use crate::animation::CameraMoveList;
 use crate::animation::ZoomAnimationMarker;
 use crate::components::AnimationConflictPolicy;
-use crate::components::CameraInputInterruptBehavior;
 use crate::constants::DEFAULT_ORBIT_ANGLE;
 use crate::constants::DEFAULT_TARGET_RADIUS;
 use crate::constants::INSTANT_SMOOTHNESS;
@@ -42,7 +41,6 @@ fn stash_camera_state(
     entity: Entity,
     camera: &mut OrbitCam,
     existing_stash: Option<&OrbitCamStash>,
-    _interrupt_behavior: CameraInputInterruptBehavior,
 ) {
     if existing_stash.is_none() {
         let stash = OrbitCamStash {
@@ -89,7 +87,6 @@ pub(super) fn on_play_animation(
     mut camera_query: Query<(
         &mut OrbitCam,
         Option<&OrbitCamStash>,
-        Option<&CameraInputInterruptBehavior>,
         Option<&AnimationConflictPolicy>,
     )>,
     move_list_query: Query<&CameraMoveList>,
@@ -104,13 +101,10 @@ pub(super) fn on_play_animation(
         start.source
     };
 
-    let Ok((mut camera, existing_stash, interrupt_behavior, conflict_policy)) =
-        camera_query.get_mut(entity)
-    else {
+    let Ok((mut camera, existing_stash, conflict_policy)) = camera_query.get_mut(entity) else {
         return;
     };
 
-    let interrupt_behavior = interrupt_behavior.copied().unwrap_or_default();
     let policy = conflict_policy.copied().unwrap_or_default();
     let has_in_flight = move_list_query.get(entity).is_ok();
 
@@ -173,13 +167,7 @@ pub(super) fn on_play_animation(
         source,
     });
 
-    stash_camera_state(
-        &mut commands,
-        entity,
-        &mut camera,
-        existing_stash,
-        interrupt_behavior,
-    );
+    stash_camera_state(&mut commands, entity, &mut camera, existing_stash);
 
     commands
         .entity(entity)
@@ -194,25 +182,14 @@ pub(super) fn on_play_animation(
 pub(super) fn on_camera_move_list_added(
     add: On<Add, CameraMoveList>,
     mut commands: Commands,
-    mut camera_query: Query<(
-        &mut OrbitCam,
-        Option<&OrbitCamStash>,
-        Option<&CameraInputInterruptBehavior>,
-    )>,
+    mut camera_query: Query<(&mut OrbitCam, Option<&OrbitCamStash>)>,
 ) {
     let entity = add.entity;
-    let Ok((mut camera, existing_stash, interrupt_behavior)) = camera_query.get_mut(entity) else {
+    let Ok((mut camera, existing_stash)) = camera_query.get_mut(entity) else {
         return;
     };
-    let interrupt_behavior = interrupt_behavior.copied().unwrap_or_default();
 
-    stash_camera_state(
-        &mut commands,
-        entity,
-        &mut camera,
-        existing_stash,
-        interrupt_behavior,
-    );
+    stash_camera_state(&mut commands, entity, &mut camera, existing_stash);
 }
 
 /// Observer that restores camera runtime state when `CameraMoveList` is removed.

@@ -1482,7 +1482,7 @@ mod tests {
             .build()
             .map_err(|_| "bindings should validate")?;
         let routed = spawn_camera(app.world_mut(), bindings);
-        let _non_routed = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
         route_to(&mut app, routed);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()

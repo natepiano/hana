@@ -203,10 +203,7 @@ impl OrbitCamBindingsBuilder {
     #[must_use]
     pub fn orbit(mut self, binding: impl Into<OrbitCamOrbitBinding>) -> Self {
         match binding.into() {
-            OrbitCamOrbitBinding::Held(binding) => self
-                .descriptor
-                .orbit
-                .push(HeldBindingDescriptor::from_held_binding(binding)),
+            OrbitCamOrbitBinding::Held(binding) => self.descriptor.orbit.push(binding.into()),
             OrbitCamOrbitBinding::Trackpad(binding) => self.descriptor.trackpad_orbit.push(binding),
         }
         self
@@ -216,10 +213,7 @@ impl OrbitCamBindingsBuilder {
     #[must_use]
     pub fn pan(mut self, binding: impl Into<OrbitCamPanBinding>) -> Self {
         match binding.into() {
-            OrbitCamPanBinding::Held(binding) => self
-                .descriptor
-                .pan
-                .push(HeldBindingDescriptor::from_held_binding(binding)),
+            OrbitCamPanBinding::Held(binding) => self.descriptor.pan.push(binding.into()),
             OrbitCamPanBinding::Trackpad(binding) => self.descriptor.trackpad_pan.push(binding),
         }
         self
@@ -229,10 +223,9 @@ impl OrbitCamBindingsBuilder {
     #[must_use]
     pub fn zoom(mut self, binding: impl Into<OrbitCamZoomBinding>) -> Self {
         match binding.into() {
-            OrbitCamZoomBinding::Held(binding) => self
-                .descriptor
-                .zoom_smooth
-                .push(HeldBindingDescriptor::from_held_binding(binding)),
+            OrbitCamZoomBinding::Held(binding) => {
+                self.descriptor.zoom_smooth.push(binding.into());
+            },
             OrbitCamZoomBinding::Trackpad(binding) => self.descriptor.trackpad_zoom.push(binding),
             OrbitCamZoomBinding::MouseWheel(binding) => {
                 self.descriptor.mouse_wheel_zoom = Some(binding);
@@ -944,8 +937,8 @@ struct HeldBindingDescriptor {
     route:              BindingRoutePolicy,
 }
 
-impl HeldBindingDescriptor {
-    fn from_held_binding(binding: OrbitCamHeldBinding) -> Self {
+impl From<OrbitCamHeldBinding> for HeldBindingDescriptor {
+    fn from(binding: OrbitCamHeldBinding) -> Self {
         Self {
             motion:             binding.motion.descriptor(),
             engagement:         Some(binding.engagement.descriptor()),
