@@ -4,14 +4,15 @@
 //! The primary window has a full-size view and a minimap overlay in the
 //! top-right corner. A second OS window shows a separate camera angle.
 
+use std::collections::HashMap;
+
 use bevy::camera::RenderTarget;
 use bevy::camera::Viewport;
 use bevy::prelude::*;
 use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy::window::WindowResized;
-use std::collections::HashMap;
-
+use bevy_kana::event;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
@@ -44,6 +45,12 @@ const SECOND_HOME_YAW: f32 = 0.8;
 const SECOND_HOME_PITCH: f32 = 0.4;
 const SECOND_HOME_RADIUS: f32 = 7.0;
 
+// home animation
+const HOME_CONTROL: &str = "H Home (active cam)";
+const HOME_FOCUS_EPSILON: f32 = 0.01;
+const HOME_ORBIT_EPSILON: f32 = 0.01;
+const HOME_SMOOTHNESS: f32 = 0.35;
+
 // viewport
 const MINIMAP_VIEWPORT_DIVISOR: u32 = 5;
 
@@ -70,15 +77,18 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .with_anchor(Anchor::TopLeft)
-                .control("H Home (active cam)"),
+                .control(HOME_CONTROL),
         )
+        .wire_chip_to_events::<HomeAnimationBegin, HomeAnimationEnd>(HOME_CONTROL)
+        .with_camera_control_panel()
+        .init_resource::<HomeReset>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 cleanup_cameras_on_window_close,
                 set_camera_viewports,
-                home_on_keypress,
+                (home_on_keypress, update_home_reset).chain(),
             ),
         )
         .run();
@@ -101,6 +111,7 @@ fn setup(mut commands: Commands) {
     // --- Primary window: main camera ---
     let primary = commands
         .spawn((
+            Name::new("Main"),
             Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
             orbit_cam_default(),
             OrbitCamPreset::BlenderLike,
@@ -110,6 +121,7 @@ fn setup(mut commands: Commands) {
     // --- Primary window: minimap viewport overlay ---
     let minimap = commands
         .spawn((
+            Name::new("Minimap"),
             Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
             Camera {
                 order: MINIMAP_CAMERA_ORDER,
@@ -137,6 +149,7 @@ fn setup(mut commands: Commands) {
 
     let second = commands
         .spawn((
+            Name::new("Second window"),
             Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
             Camera::default(),
             RenderTarget::Window(WindowRef::Entity(second_window)),
@@ -176,11 +189,16 @@ fn setup(mut commands: Commands) {
     ])));
 }
 
-/// Homes the camera the cursor is currently over to its stored pose.
+/// Homes the camera the cursor is currently over to its stored pose. The
+/// smoothness snapshot + `HomeAnimationBegin` trigger feed the chip-wiring
+/// machinery at the bottom of the file — the multi-cam routing decision is
+/// the only interesting line here.
 fn home_on_keypress(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     route: Res<ResolvedOrbitCamInputRoute>,
     homes: Res<CameraHomes>,
+    mut reset: ResMut<HomeReset>,
     mut cams: Query<&mut OrbitCam>,
 ) {
     if !keys.just_pressed(KeyCode::KeyH) {
@@ -195,10 +213,21 @@ fn home_on_keypress(
     let Ok(mut orbit) = cams.get_mut(cam) else {
         return;
     };
+    let was_empty = reset.animating.is_empty();
+    reset
+        .animating
+        .entry(cam)
+        .or_insert_with(|| CameraSmoothness::from_camera(&orbit));
+    orbit.orbit_smoothness = HOME_SMOOTHNESS;
+    orbit.pan_smoothness = HOME_SMOOTHNESS;
+    orbit.zoom_smoothness = HOME_SMOOTHNESS;
     orbit.target_focus = pose.focus;
     orbit.target_yaw = pose.yaw;
     orbit.target_pitch = pose.pitch;
     orbit.target_radius = pose.radius;
+    if was_empty {
+        commands.trigger(HomeAnimationBegin);
+    }
 }
 
 #[derive(Component)]
@@ -236,4 +265,107 @@ fn set_camera_viewports(
             ..default()
         });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Chip-wiring machinery.
+//
+// Everything below exists so the `H Home (active cam)` chip in the title bar
+// lights up while a home animation is in flight and goes dark when it
+// finishes. The pattern mirrors `programmatic_control.rs`, adapted for
+// multiple cameras — at most one chip is ever active, even if several
+// cameras are animating, because the title bar has only one chip total.
+// ---------------------------------------------------------------------------
+
+event!(
+    /// Fires when the first camera in an idle batch starts animating to home.
+    HomeAnimationBegin
+);
+event!(
+    /// Fires when the last camera in the active batch reaches home or is
+    /// overridden by the user.
+    HomeAnimationEnd
+);
+
+#[derive(Clone, Copy)]
+struct CameraSmoothness {
+    orbit: f32,
+    pan:   f32,
+    zoom:  f32,
+}
+
+impl CameraSmoothness {
+    const fn from_camera(camera: &OrbitCam) -> Self {
+        Self {
+            orbit: camera.orbit_smoothness,
+            pan:   camera.pan_smoothness,
+            zoom:  camera.zoom_smoothness,
+        }
+    }
+
+    const fn apply(self, camera: &mut OrbitCam) {
+        camera.orbit_smoothness = self.orbit;
+        camera.pan_smoothness = self.pan;
+        camera.zoom_smoothness = self.zoom;
+    }
+}
+
+#[derive(Resource, Default)]
+struct HomeReset {
+    animating: HashMap<Entity, CameraSmoothness>,
+}
+
+/// Per frame: for each camera animating home, finish it if the camera has
+/// arrived or the user overrode the target. Fires `HomeAnimationEnd` when
+/// the map empties.
+fn update_home_reset(
+    mut commands: Commands,
+    mut reset: ResMut<HomeReset>,
+    homes: Res<CameraHomes>,
+    mut cams: Query<&mut OrbitCam>,
+) {
+    if reset.animating.is_empty() {
+        return;
+    }
+    let finished: Vec<Entity> = reset
+        .animating
+        .keys()
+        .copied()
+        .filter(|cam| {
+            let Some(pose) = homes.0.get(cam) else {
+                return true;
+            };
+            let Ok(orbit) = cams.get(*cam) else {
+                return true;
+            };
+            !camera_targets_home(orbit, pose) || camera_at_home(orbit, pose)
+        })
+        .collect();
+    for cam in finished {
+        if let Some(smoothness) = reset.animating.remove(&cam)
+            && let Ok(mut orbit) = cams.get_mut(cam)
+        {
+            smoothness.apply(&mut orbit);
+        }
+    }
+    if reset.animating.is_empty() {
+        commands.trigger(HomeAnimationEnd);
+    }
+}
+
+fn camera_targets_home(camera: &OrbitCam, pose: &HomePose) -> bool {
+    camera.target_focus.distance(pose.focus) <= HOME_FOCUS_EPSILON
+        && (camera.target_yaw - pose.yaw).abs() <= HOME_ORBIT_EPSILON
+        && (camera.target_pitch - pose.pitch).abs() <= HOME_ORBIT_EPSILON
+        && (camera.target_radius - pose.radius).abs() <= HOME_FOCUS_EPSILON
+}
+
+fn camera_at_home(camera: &OrbitCam, pose: &HomePose) -> bool {
+    let (Some(yaw), Some(pitch), Some(radius)) = (camera.yaw, camera.pitch, camera.radius) else {
+        return false;
+    };
+    camera.focus.distance(pose.focus) <= HOME_FOCUS_EPSILON
+        && (yaw - pose.yaw).abs() <= HOME_ORBIT_EPSILON
+        && (pitch - pose.pitch).abs() <= HOME_ORBIT_EPSILON
+        && (radius - pose.radius).abs() <= HOME_FOCUS_EPSILON
 }

@@ -5,7 +5,6 @@
 use bevy::prelude::*;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamControlSummary;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
@@ -26,42 +25,40 @@ pub(super) struct CameraGuidanceSnapshot {
 }
 
 pub(super) fn resolve_guidance_snapshot(
-    guidance: &CameraGuidance,
+    name: Option<&Name>,
+    guidance: Option<&CameraGuidance>,
     preset: Option<&OrbitCamPreset>,
     bindings: Option<&OrbitCamBindings>,
     manual: Option<&OrbitCamManual>,
 ) -> CameraGuidanceSnapshot {
-    match &guidance.content {
-        CameraGuidanceContent::Auto => {
-            let summary = describe_orbit_cam_controls(preset, bindings, manual);
-            snapshot_from_summary(guidance, summary)
-        },
-        CameraGuidanceContent::Rows(rows) => {
-            let (mode_label, mode_value) = resolve_mode_labels(preset, bindings, manual);
-            CameraGuidanceSnapshot {
-                camera_label:      guidance
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| "OrbitCam".to_string()),
-                mode_label:        guidance.mode_label.clone().unwrap_or(mode_label),
-                mode_value:        guidance.mode_value.clone().unwrap_or(mode_value),
-                rows:              rows.clone(),
-                source_visibility: guidance.source_visibility,
-            }
-        },
-    }
-}
+    let name_label = name.map(|n| n.as_str().to_string());
+    let title_label = guidance.and_then(|g| g.title.clone());
+    let source_visibility = guidance.map_or(SourceVisibility::Visible, |g| g.source_visibility);
+    let explicit = guidance.and_then(|g| match &g.content {
+        CameraGuidanceContent::Auto => None,
+        CameraGuidanceContent::Rows(rows) => Some((g, rows.clone())),
+    });
 
-fn snapshot_from_summary(
-    guidance: &CameraGuidance,
-    summary: OrbitCamControlSummary,
-) -> CameraGuidanceSnapshot {
+    if let Some((guidance, rows)) = explicit {
+        let (mode_label, mode_value) = resolve_mode_labels(preset, bindings, manual);
+        return CameraGuidanceSnapshot {
+            camera_label: name_label
+                .or(title_label)
+                .unwrap_or_else(|| "OrbitCam".to_string()),
+            mode_label: guidance.mode_label.clone().unwrap_or(mode_label),
+            mode_value: guidance.mode_value.clone().unwrap_or(mode_value),
+            rows,
+            source_visibility,
+        };
+    }
+
+    let summary = describe_orbit_cam_controls(preset, bindings, manual);
     CameraGuidanceSnapshot {
-        camera_label:      guidance.title.clone().unwrap_or(summary.camera_label),
-        mode_label:        summary.mode_label,
-        mode_value:        summary.mode_value,
-        rows:              summary.rows.into_iter().map(Into::into).collect(),
-        source_visibility: guidance.source_visibility,
+        camera_label: name_label.or(title_label).unwrap_or(summary.camera_label),
+        mode_label: summary.mode_label,
+        mode_value: summary.mode_value,
+        rows: summary.rows.into_iter().map(Into::into).collect(),
+        source_visibility,
     }
 }
 

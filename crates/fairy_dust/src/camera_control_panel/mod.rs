@@ -1,5 +1,11 @@
-//! Capability: screen-space `bevy_diegetic` camera control panels for
-//! `bevy_lagrange::OrbitCam` examples.
+//! Capability: a singleton screen-space `bevy_diegetic` camera control panel
+//! that follows the currently-routed `bevy_lagrange::OrbitCam`.
+//!
+//! Single-camera examples and multi-camera examples both produce exactly one
+//! panel at the bottom-right; its contents swap to reflect whichever camera
+//! the cursor is currently routing input to (per `ResolvedOrbitCamInputRoute`).
+//! Cameras may optionally carry a `Name` component — when present, it drives
+//! the `CAMERA: <name>` title.
 
 mod config;
 mod constants;
@@ -9,11 +15,11 @@ mod snapshot;
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
+use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Fit;
-use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamInteractionEnded;
 use bevy_lagrange::OrbitCamInteractionSourcesChanged;
@@ -21,6 +27,7 @@ use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::ResolvedOrbitCamInputRoute;
 pub use config::CameraGuidance;
 pub use config::CameraGuidanceRow;
 pub use config::SourceVisibility;
@@ -34,20 +41,22 @@ use snapshot::resolve_guidance_snapshot;
 
 use crate::ensure_plugin;
 
+/// Singleton marker for the camera control panel. `bound_camera` records
+/// which `OrbitCam` the panel is currently showing — updated each frame from
+/// `ResolvedOrbitCamInputRoute`.
 #[derive(Component)]
 struct CameraGuidancePanel {
-    camera: Entity,
+    bound_camera: Option<Entity>,
 }
 
 pub(crate) fn install(app: &mut App) {
     ensure_panel_plugins(app);
+    app.add_systems(Startup, spawn_panel);
     app.add_systems(
         PostUpdate,
-        (refresh_changed_guidance_snapshot, refresh_guidance_display),
+        (rebind_panel_on_route_change, repaint_panel_display),
     );
-    app.add_observer(attach_default_guidance_on_orbit_cam_add)
-        .add_observer(spawn_guidance_panel_on_add)
-        .add_observer(refresh_on_interaction_started)
+    app.add_observer(refresh_on_interaction_started)
         .add_observer(refresh_on_interaction_ended)
         .add_observer(refresh_on_sources_changed);
 }
@@ -57,38 +66,13 @@ fn ensure_panel_plugins(app: &mut App) {
     ensure_plugin(app, MeshPickingPlugin);
 }
 
-fn attach_default_guidance_on_orbit_cam_add(
-    trigger: On<Add, OrbitCam>,
-    mut commands: Commands,
-    cameras: Query<(), (With<OrbitCam>, Without<CameraGuidance>)>,
-) {
-    let camera = trigger.entity;
-    if cameras.get(camera).is_ok() {
-        commands.entity(camera).insert(CameraGuidance::auto());
-    }
-}
-
-fn spawn_guidance_panel_on_add(
-    trigger: On<Add, CameraGuidance>,
-    mut commands: Commands,
-    cameras: Query<(
-        &CameraGuidance,
-        Option<&OrbitCamInteractionState>,
-        Option<&OrbitCamPreset>,
-        Option<&OrbitCamBindings>,
-        Option<&OrbitCamManual>,
-    )>,
-) {
-    let camera = trigger.entity;
-    let Ok((guidance, state, preset, bindings, manual)) = cameras.get(camera) else {
-        return;
-    };
-    let snapshot = resolve_guidance_snapshot(guidance, preset, bindings, manual);
-    let display = CameraGuidanceDisplay::from_interaction_state(state.copied().unwrap_or_default());
+fn spawn_panel(mut commands: Commands) {
+    let snapshot = default_snapshot();
+    let display = CameraGuidanceDisplay::default();
     let unlit = unlit_panel_material();
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
-        .anchor(guidance.anchor)
+        .anchor(Anchor::BottomRight)
         .material(unlit.clone())
         .text_material(unlit)
         .with_tree(build_guidance_tree(&snapshot, display))
@@ -97,7 +81,7 @@ fn spawn_guidance_panel_on_add(
     match panel {
         Ok(panel) => {
             commands.spawn((
-                CameraGuidancePanel { camera },
+                CameraGuidancePanel { bound_camera: None },
                 snapshot,
                 CameraGuidanceDisplayState::from_display(display),
                 panel,
@@ -110,17 +94,26 @@ fn spawn_guidance_panel_on_add(
     }
 }
 
-fn refresh_changed_guidance_snapshot(
+/// Placeholder snapshot rendered until the first route resolution completes.
+fn default_snapshot() -> CameraGuidanceSnapshot {
+    resolve_guidance_snapshot(None, None, Some(&OrbitCamPreset::BlenderLike), None, None)
+}
+
+/// Rebuilds the panel snapshot when the routed camera changes, or when the
+/// currently-bound camera's input-mode components change.
+fn rebind_panel_on_route_change(
     mut commands: Commands,
-    cameras: Query<
-        (
-            Entity,
-            &CameraGuidance,
-            Option<&OrbitCamInteractionState>,
-            Option<&OrbitCamPreset>,
-            Option<&OrbitCamBindings>,
-            Option<&OrbitCamManual>,
-        ),
+    route: Res<ResolvedOrbitCamInputRoute>,
+    cameras: Query<(
+        Option<&Name>,
+        Option<&CameraGuidance>,
+        Option<&OrbitCamInteractionState>,
+        Option<&OrbitCamPreset>,
+        Option<&OrbitCamBindings>,
+        Option<&OrbitCamManual>,
+    )>,
+    changed_cameras: Query<
+        Entity,
         Or<(
             Changed<CameraGuidance>,
             Changed<OrbitCamPreset>,
@@ -128,97 +121,92 @@ fn refresh_changed_guidance_snapshot(
             Changed<OrbitCamManual>,
         )>,
     >,
-    mut panels: Query<(
+    panel: Single<(
         Entity,
-        &CameraGuidancePanel,
+        &mut CameraGuidancePanel,
         &mut CameraGuidanceDisplayState,
     )>,
 ) {
-    for (camera, guidance, state, preset, bindings, manual) in &cameras {
-        let snapshot = resolve_guidance_snapshot(guidance, preset, bindings, manual);
-        let display =
-            CameraGuidanceDisplay::from_interaction_state(state.copied().unwrap_or_default());
-        refresh_camera_guidance_snapshot(camera, snapshot, display, &mut commands, &mut panels);
+    let routed = route.routed_camera();
+    let (panel_entity, mut panel_marker, mut display_state) = panel.into_inner();
+
+    let route_changed = panel_marker.bound_camera != routed;
+    let data_changed = routed.is_some_and(|cam| changed_cameras.get(cam).is_ok());
+    if !route_changed && !data_changed {
+        return;
     }
+
+    panel_marker.bound_camera = routed;
+
+    let Some(cam) = routed else {
+        return;
+    };
+    let Ok((name, guidance, state, preset, bindings, manual)) = cameras.get(cam) else {
+        return;
+    };
+
+    let snapshot = resolve_guidance_snapshot(name, guidance, preset, bindings, manual);
+    let display = CameraGuidanceDisplay::from_interaction_state(state.copied().unwrap_or_default());
+    *display_state = CameraGuidanceDisplayState::from_display(display);
+    commands.entity(panel_entity).insert(snapshot.clone());
+    commands.set_tree(panel_entity, build_guidance_tree(&snapshot, display));
 }
 
 fn refresh_on_interaction_started(
     event: On<OrbitCamInteractionStarted>,
     time: Res<Time<Real>>,
-    mut panels: Query<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
-    update_camera_guidance_display(event.camera, &mut panels, |display| {
-        display.activate(event.kind, event.sources, time.elapsed_secs());
-    });
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    display.activate(event.kind, event.sources, time.elapsed_secs());
 }
 
 fn refresh_on_interaction_ended(
     event: On<OrbitCamInteractionEnded>,
     time: Res<Time<Real>>,
-    mut panels: Query<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
-    update_camera_guidance_display(event.camera, &mut panels, |display| {
-        display.hold(event.kind, event.sources, time.elapsed_secs());
-    });
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    display.hold(event.kind, event.sources, time.elapsed_secs());
 }
 
 fn refresh_on_sources_changed(
     event: On<OrbitCamInteractionSourcesChanged>,
     time: Res<Time<Real>>,
-    mut panels: Query<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
-    update_camera_guidance_display(event.camera, &mut panels, |display| {
-        display.activate(event.kind, event.current, time.elapsed_secs());
-    });
-}
-
-fn update_camera_guidance_display(
-    camera: Entity,
-    panels: &mut Query<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
-    update: impl Fn(&mut CameraGuidanceDisplayState),
-) {
-    panels
-        .iter_mut()
-        .filter(|(panel_camera, _)| panel_camera.camera == camera)
-        .for_each(|(_, mut display)| update(&mut display));
-}
-
-fn refresh_camera_guidance_snapshot(
-    camera: Entity,
-    snapshot: CameraGuidanceSnapshot,
-    display: CameraGuidanceDisplay,
-    commands: &mut Commands,
-    panels: &mut Query<(
-        Entity,
-        &CameraGuidancePanel,
-        &mut CameraGuidanceDisplayState,
-    )>,
-) {
-    for (panel, panel_camera, mut display_state) in panels.iter_mut() {
-        if panel_camera.camera == camera {
-            commands.entity(panel).insert(snapshot.clone());
-            *display_state = CameraGuidanceDisplayState::from_display(display);
-            commands.set_tree(panel, build_guidance_tree(&snapshot, display));
-        }
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
     }
+    display.activate(event.kind, event.current, time.elapsed_secs());
 }
 
-fn refresh_guidance_display(
+/// Expires held source labels and rebuilds the panel tree when display state
+/// changes between frames.
+fn repaint_panel_display(
     time: Res<Time<Real>>,
     mut commands: Commands,
-    mut panels: Query<(
+    panel: Single<(
         Entity,
         &CameraGuidanceSnapshot,
         &mut CameraGuidanceDisplayState,
     )>,
 ) {
-    for (panel, snapshot, mut display) in &mut panels {
-        display.expire_held_sources(time.elapsed_secs());
-        if display.render_state == RenderState::Idle {
-            continue;
-        }
-
-        commands.set_tree(panel, build_guidance_tree(snapshot, display.display()));
-        display.render_state = RenderState::Idle;
+    let (panel_entity, snapshot, mut display) = panel.into_inner();
+    display.expire_held_sources(time.elapsed_secs());
+    if display.render_state == RenderState::Idle {
+        return;
     }
+    commands.set_tree(
+        panel_entity,
+        build_guidance_tree(snapshot, display.display()),
+    );
+    display.render_state = RenderState::Idle;
 }

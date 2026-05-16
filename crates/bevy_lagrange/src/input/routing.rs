@@ -239,6 +239,7 @@ pub struct ResolvedOrbitCamInputRoute {
 impl ResolvedOrbitCamInputRoute {
     /// The `OrbitCam` entity currently receiving input, if any. Returns
     /// `None` when the cursor is not over any orbit-camera viewport.
+    #[must_use]
     pub const fn routed_camera(&self) -> Option<Entity> { self.routed_camera }
 
     pub(crate) fn metrics_for(&self, camera: Entity) -> Option<CameraInputSurfaceMetrics> {

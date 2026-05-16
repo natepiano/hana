@@ -37,6 +37,10 @@ pub struct TitleBar {
     active_controls: Vec<String>,
 }
 
+impl Default for TitleBar {
+    fn default() -> Self { Self::new() }
+}
+
 impl TitleBar {
     /// Creates a title bar with the visible example title.
     #[must_use]

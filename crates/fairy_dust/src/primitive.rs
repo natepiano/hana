@@ -3,6 +3,7 @@
 use std::f32::consts::FRAC_PI_2;
 use std::f32::consts::PI;
 use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
@@ -167,7 +168,7 @@ pub(crate) fn install(app: &mut App, config: PrimitiveConfig, inserts: Vec<Primi
               mut materials: ResMut<Assets<StandardMaterial>>| {
             let inserts = inserts_cell
                 .lock()
-                .expect("primitive install Startup runs once")
+                .unwrap_or_else(PoisonError::into_inner)
                 .take()
                 .unwrap_or_default();
             spawn_primitive(
