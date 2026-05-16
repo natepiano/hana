@@ -43,6 +43,7 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((TextRenderPlugin, PanelGeometryPlugin, PanelRttPlugin))
             .add_observer(transparency::on_stable_transparency_added)
-            .add_observer(transparency::on_stable_transparency_removed);
+            .add_observer(transparency::on_stable_transparency_removed)
+            .add_observer(transparency::on_screen_space_camera_added);
     }
 }
