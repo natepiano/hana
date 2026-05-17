@@ -2,20 +2,20 @@
 //!
 //! Wires the keybinding through `bevy_enhanced_input` using the `bevy_kana`
 //! macros (`action!`, `event!`, `bind_action_system!`). The bound system
-//! sets a process-wide flag and triggers `AppExit::Success`. After the Bevy
-//! event loop returns, [`crate::SprinkleBuilder::run`] spawns
-//! `cargo run --example <name>` from the workspace root, then exits. Cargo
-//! handles incremental rebuild and launches the fresh binary.
+//! spawns `cargo run --example <name>` from the workspace root, then exits
+//! the current process directly with `std::process::exit(0)`.
+//!
+//! Bypassing `AppExit` is deliberate: on macOS the winit run loop can fail
+//! to honor `AppExit::Success` cleanly, leaving the old window stuck. A
+//! direct exit always works and lets cargo handle the incremental rebuild
+//! and re-launch.
 //!
 //! The example name and workspace root are derived from `current_exe()`:
 //! cargo writes example binaries to `<workspace>/target/<profile>/examples/<name>`.
 
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering;
 
-use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
@@ -30,25 +30,7 @@ struct FairyDustRestartContext;
 action!(Restart);
 event!(RestartEvent);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RestartState {
-    Idle,
-    Requested,
-}
-
-impl RestartState {
-    const fn to_u8(self) -> u8 {
-        match self {
-            Self::Idle => 0,
-            Self::Requested => 1,
-        }
-    }
-}
-
-static RESTART_STATE: AtomicU8 = AtomicU8::new(RestartState::Idle.to_u8());
-
 pub(crate) fn install(app: &mut App) {
-    RESTART_STATE.store(RestartState::Idle.to_u8(), Ordering::SeqCst);
     ensure_plugin(app, EnhancedInputPlugin);
     app.add_input_context::<FairyDustRestartContext>();
     app.add_systems(Startup, spawn_restart_action);
@@ -67,18 +49,14 @@ fn spawn_restart_action(mut commands: Commands) {
     ));
 }
 
-fn request_restart(mut exit: MessageWriter<AppExit>) {
-    RESTART_STATE.store(RestartState::Requested.to_u8(), Ordering::SeqCst);
-    exit.write(AppExit::Success);
-}
-
-/// Spawn `cargo run --example <name>` if a `Ctrl+Shift+R` press requested it.
-pub(crate) fn perform_restart_if_requested() {
-    if RESTART_STATE.load(Ordering::SeqCst) != RestartState::Requested.to_u8() {
-        return;
-    }
+fn request_restart() {
+    info!("fairy_dust restart: Ctrl+Shift+R pressed, invoking cargo and exiting");
     do_restart();
 }
+
+/// No-op now that restart exits the process directly from the input handler.
+/// Retained so [`crate::SprinkleBuilder::run`] doesn't need a cfg branch.
+pub(crate) fn perform_restart_if_requested() {}
 
 #[cfg(any(unix, windows))]
 fn do_restart() {
@@ -98,12 +76,20 @@ fn do_restart() {
         );
         std::process::exit(1);
     };
+    info!(
+        "fairy_dust restart: spawning `cargo run --example {}` in {}",
+        example_name,
+        workspace_root.display(),
+    );
     match std::process::Command::new("cargo")
         .args(["run", "--example", &example_name])
         .current_dir(&workspace_root)
         .spawn()
     {
-        Ok(_) => std::process::exit(0),
+        Ok(child) => {
+            info!("fairy_dust restart: cargo spawned as pid {}", child.id());
+            std::process::exit(0);
+        },
         Err(err) => {
             eprintln!("fairy_dust: failed to spawn `cargo run`: {err}");
             std::process::exit(1);

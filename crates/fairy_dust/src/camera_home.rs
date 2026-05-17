@@ -9,8 +9,8 @@
 
 use std::time::Duration;
 
-use bevy::prelude::*;
 use bevy::camera::primitives::Aabb;
+use bevy::prelude::*;
 use bevy::window::WindowResized;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
