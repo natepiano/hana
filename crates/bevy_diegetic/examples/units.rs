@@ -73,7 +73,7 @@ const INDEX_FOOTER_SIZE: Pt = Pt(8.0);
 
 // ── Screen panel styling ─────────────────────────────────────────────
 /// Inner-background alpha applied to both the title bar and the camera
-/// control panel. Higher than fairy_dust's default (0.50) so the example's
+/// control panel. Higher than `fairy_dust`'s default (0.50) so the example's
 /// HUD reads as a more opaque surface against the 3D scene.
 const PANEL_BACKGROUND_ALPHA: f32 = 0.90;
 

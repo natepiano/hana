@@ -18,6 +18,7 @@ use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::brp_extras;
 use crate::camera_control_panel;
+use crate::camera_control_panel::CameraControlPanelBackground;
 use crate::camera_home::CameraHomeConfig;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
@@ -28,7 +29,6 @@ use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 use crate::transparency;
-use crate::camera_control_panel::CameraControlPanelBackground;
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
