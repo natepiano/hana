@@ -28,6 +28,7 @@ use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 use crate::transparency;
+use crate::camera_control_panel::CameraControlPanelBackground;
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
@@ -67,7 +68,7 @@ impl<S> SprinkleBuilder<S> {
     #[must_use]
     pub fn with_camera_control_panel_background_color(mut self, color: Color) -> Self {
         self.app
-            .insert_resource(camera_control_panel::CameraControlPanelBackground(color));
+            .insert_resource(CameraControlPanelBackground(color));
         self
     }
 
