@@ -56,7 +56,7 @@ fn request_restart() {
 
 /// No-op now that restart exits the process directly from the input handler.
 /// Retained so [`crate::SprinkleBuilder::run`] doesn't need a cfg branch.
-pub(crate) fn perform_restart_if_requested() {}
+pub(crate) const fn perform_restart_if_requested() {}
 
 #[cfg(any(unix, windows))]
 fn do_restart() {

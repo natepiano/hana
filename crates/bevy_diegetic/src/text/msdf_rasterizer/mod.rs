@@ -881,6 +881,35 @@ mod tests {
     }
 
     #[test]
+    fn dump_eb_garamond_v_at_256_mask() {
+        let face = ttf_parser::Face::parse(EB_GARAMOND, 0).unwrap();
+        let gid = face.glyph_index('V').unwrap().0;
+        let bitmap = rasterize_glyph(EB_GARAMOND, gid, 256, 4.0, 2).unwrap();
+
+        let scale = 4_u32;
+        let up_w = bitmap.width * scale;
+        let up_h = bitmap.height * scale;
+        let mut up = Vec::with_capacity((up_w * up_h) as usize * 3);
+        for y in 0..up_h {
+            for x in 0..up_w {
+                let sx = x / scale;
+                let sy = y / scale;
+                let idx = ((sy * bitmap.width + sx) * 3) as usize;
+                let mut chans = [bitmap.data[idx], bitmap.data[idx + 1], bitmap.data[idx + 2]];
+                chans.sort_unstable();
+                let v = if chans[1] >= 128 { 255 } else { 0 };
+                up.extend_from_slice(&[v, v, v]);
+            }
+        }
+        let up_path = std::env::temp_dir().join("bevy_diegetic_eb_garamond_V_at_256_mask_4x.png");
+        image::RgbImage::from_raw(up_w, up_h, up)
+            .unwrap()
+            .save(&up_path)
+            .unwrap();
+        eprintln!("4× up: {} ({}x{})", up_path.display(), up_w, up_h);
+    }
+
+    #[test]
     fn dump_single_glyph_png() {
         let idx = glyph_index('A');
         let bitmap = rasterize_glyph(FONT_DATA, idx, 64, 4.0, 2)

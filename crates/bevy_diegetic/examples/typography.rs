@@ -156,11 +156,10 @@ enum CycleState {
     #[default]
     Idle,
     Cycling {
-        started_at: Duration,
+        started_at:    Duration,
         overlay_ready: bool,
     },
 }
-
 
 /// Marker for the main display text that the overlay toggle targets.
 #[derive(Component)]
@@ -293,7 +292,7 @@ fn spawn_hud_panels(commands: &mut Commands, font_registry: &FontRegistry) {
         )
         .anchor(bevy_diegetic::Anchor::TopRight)
         .material(unlit.clone())
-        .text_material(unlit.clone())
+        .text_material(unlit)
         .with_tree(build_fonts_panel(font_registry, 0))
         .build();
     let Ok(fonts_panel) = fonts_panel else {
@@ -623,7 +622,7 @@ fn cycle_word(
         text.0 = word.to_string();
     }
     *cycle_state = CycleState::Cycling {
-        started_at: time.elapsed(),
+        started_at:    time.elapsed(),
         overlay_ready: false,
     };
 }
