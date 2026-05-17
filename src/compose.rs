@@ -191,12 +191,12 @@ impl FromWorld for ComposeOutputPipeline {
         }
 
         let pipelines = {
-            let cache = world.resource_mut::<PipelineCache>();
+            let pipeline_cache = world.resource_mut::<PipelineCache>();
             ComposePipelines {
-                sdr:      cache.queue_render_pipeline(descriptor),
-                hdr:      cache.queue_render_pipeline(hdr_descriptor),
-                msaa_sdr: cache.queue_render_pipeline(msaa_descriptor),
-                msaa_hdr: cache.queue_render_pipeline(msaa_hdr_descriptor),
+                sdr:      pipeline_cache.queue_render_pipeline(descriptor),
+                hdr:      pipeline_cache.queue_render_pipeline(hdr_descriptor),
+                msaa_sdr: pipeline_cache.queue_render_pipeline(msaa_descriptor),
+                msaa_hdr: pipeline_cache.queue_render_pipeline(msaa_hdr_descriptor),
             }
         };
         Self {

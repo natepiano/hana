@@ -167,12 +167,12 @@ impl SpecializedMeshPipeline for HullPipeline {
                 .position(|id| *id == MeshVertexAttributeId::from(ATTRIBUTE_OUTLINE_NORMAL))
             {
                 let mesh_layout = layout.0.layout();
-                let attr = &mesh_layout.attributes[index];
+                let vertex_attribute = &mesh_layout.attributes[index];
                 descriptor.vertex.buffers[0]
                     .attributes
                     .push(VertexAttribute {
                         format:          VertexFormat::Float32x3,
-                        offset:          attr.offset,
+                        offset:          vertex_attribute.offset,
                         shader_location: OUTLINE_NORMAL_SHADER_LOCATION,
                     });
             }

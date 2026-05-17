@@ -37,7 +37,10 @@ use bevy_render::sync_world::MainEntity;
 use nonmax::NonMaxU32;
 
 use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::GET_BATCH_DATA_GPU_MODE_ERROR;
 use super::constants::GET_BINNED_BATCH_DATA_GPU_MODE_ERROR;
+use super::constants::GET_BINNED_INDEX_CPU_MODE_ERROR;
+use super::constants::GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR;
 use super::constants::HULL_OUTLINES_SHADER_DEF;
 use super::constants::MASK_SHADER_HANDLE;
 use super::constants::MISSING_BATCH_SET_INDEX;
@@ -194,10 +197,7 @@ impl GetBatchData for MeshMaskPipeline {
         (_, main_entity): (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_batch_data` should never be called in GPU mesh uniform \
-                building mode"
-            );
+            error!("{GET_BATCH_DATA_GPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -231,10 +231,7 @@ impl GetFullBatchData for MeshMaskPipeline {
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
         // This should only be called during GPU building.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_index_and_compare_data` should never be called in CPU mesh uniform \
-                building mode"
-            );
+            error!("{GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR}");
             return None;
         };
 
@@ -277,10 +274,7 @@ impl GetFullBatchData for MeshMaskPipeline {
     ) -> Option<NonMaxU32> {
         // This should only be called during GPU building.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_binned_index` should never be called in CPU mesh uniform \
-                building mode"
-            );
+            error!("{GET_BINNED_INDEX_CPU_MODE_ERROR}");
             return None;
         };
 
