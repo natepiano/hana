@@ -13,6 +13,7 @@ use super::CameraHomeBuilder;
 use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
+use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::camera_home;
@@ -83,7 +84,9 @@ impl<S> CameraHomeBuilder<S> {
 
     /// Finalizes the current home registration and adds studio lighting.
     #[must_use]
-    pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
+    pub fn with_studio_lighting(self) -> StudioLightingBuilder<S> {
+        self.finish().with_studio_lighting()
+    }
 
     /// Finalizes the current home registration and adds an example description panel.
     #[must_use]

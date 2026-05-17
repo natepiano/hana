@@ -62,7 +62,11 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 - `.with_studio_lighting()` — key/fill/rim lights + clear color. Replaces
   manual `DirectionalLight`/`PointLight`/`GlobalAmbientLight` spawns.
 - `.with_ground_plane()` — default 8×8 translucent ground. Override `.size()`
-  or `.color()` per example, but do not hand-roll a plane.
+  or `.color()` per example, but do not hand-roll a plane. Do **not** wire a
+  click-on-ground observer to re-home the camera — `H Home` (auto-added by
+  `.with_camera_home(...)`) is the standard homing affordance. Click-to-home
+  on the ground tends to fire on stray clicks and interferes with picking
+  the actual demo entities.
 - `.with_camera_control_panel()` — bottom-right camera controls HUD.
 - `.with_title_bar(TitleBar::new()...)` — top-left chip bar listing the
   example's keyboard shortcuts. Title defaults to `"CONTROLS"`; override
@@ -172,6 +176,9 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
 - Manual `Camera3d`/`OrbitCam` spawn → delete, use `.with_orbit_cam(...)`.
 - Custom `home_camera` keyboard system + `PlayAnimation::new(... ToOrbit ...)` →
   delete, use `.with_camera_home(...)`.
+- Click-on-ground observer that triggers `ZoomToFit` / `AnimateToFit` back to
+  the scene bounds → delete. The `SceneBounds` resource and the ground
+  observer go with it. `H Home` is the standard homing affordance.
 - Manual top-left HUD built from `DiegeticPanel::screen()` → delete, use
   `.with_title_bar(TitleBar::new(...))`.
 - Inline `info!`-only observers for animation/zoom events → delete; use

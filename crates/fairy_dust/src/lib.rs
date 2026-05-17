@@ -55,11 +55,14 @@ pub use builder::CameraHomeBuilder;
 pub use builder::NoOrbitCam;
 pub use builder::PrimitiveBuilder;
 pub use builder::SprinkleBuilder;
+pub use builder::StudioLightingBuilder;
 pub use builder::TitleBarBuilder;
 pub use builder::WithOrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
 pub use camera_control_panel::SourceVisibility;
+pub use camera_home::CameraHomeEntity;
+pub use camera_home::SetCameraHomeFromEntity;
 pub use constants::DEFAULT_PANEL_BACKGROUND;
 pub use constants::LOG_FILTER;
 pub use primitive::Face;
@@ -76,14 +79,11 @@ pub use screen_panels::TitleBar;
 /// `add_plugins` call.
 ///
 /// The Ctrl+Shift+R hot-restart shortcut is wired up unconditionally — when
-/// pressed, the example process re-execs itself via a trampoline so source
-/// changes picked up by a parallel `cargo build` take effect immediately.
-/// If this process was spawned as the trampoline, this function never
-/// returns — it sleeps so the parent is fully reaped, then `exec`s the
-/// same binary without the trampoline marker.
+/// pressed, the example process exits and spawns `cargo run --example <name>`
+/// from the workspace root. Cargo handles the incremental rebuild, so any
+/// source changes since the last build are picked up automatically.
 #[must_use]
 pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
-    restart::handle_trampoline_if_active();
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(LogPlugin {
         filter: LOG_FILTER.to_string(),

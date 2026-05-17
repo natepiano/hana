@@ -24,15 +24,34 @@ use crate::constants::TARGET;
 #[derive(Component)]
 struct FairyDustStudioLight;
 
-pub(crate) fn install(app: &mut App) {
+/// Configuration consumed by the studio-lighting startup system. Defaults
+/// match the original hard-coded rig; builder methods on
+/// [`crate::builder::StudioLightingBuilder`] override individual fields.
+#[derive(Resource, Clone, Copy)]
+pub(crate) struct StudioLightingConfig {
+    pub(crate) key_light_pos: Vec3,
+    pub(crate) aim_at:        Vec3,
+}
+
+impl Default for StudioLightingConfig {
+    fn default() -> Self {
+        Self {
+            key_light_pos: KEY_LIGHT_POS,
+            aim_at:        TARGET,
+        }
+    }
+}
+
+pub(crate) fn install(app: &mut App, config: StudioLightingConfig) {
     app.insert_resource(ClearColor(CLEAR_COLOR))
         .insert_resource(DirectionalLightShadowMap {
             size: SHADOW_MAP_SIZE,
         })
+        .insert_resource(config)
         .add_systems(Startup, spawn_studio_lights);
 }
 
-fn spawn_studio_lights(mut commands: Commands) {
+fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>) {
     commands.spawn((
         FairyDustStudioLight,
         DirectionalLight {
@@ -49,7 +68,7 @@ fn spawn_studio_lights(mut commands: Commands) {
             ..default()
         }
         .build(),
-        Transform::from_translation(KEY_LIGHT_POS).looking_at(TARGET, Vec3::Y),
+        Transform::from_translation(config.key_light_pos).looking_at(config.aim_at, Vec3::Y),
     ));
 
     commands.spawn((
@@ -59,7 +78,7 @@ fn spawn_studio_lights(mut commands: Commands) {
             shadows_enabled: false,
             ..default()
         },
-        Transform::from_translation(FILL_LIGHT_POS).looking_at(TARGET, Vec3::Y),
+        Transform::from_translation(FILL_LIGHT_POS).looking_at(config.aim_at, Vec3::Y),
     ));
 
     commands.spawn((

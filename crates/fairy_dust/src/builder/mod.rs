@@ -10,6 +10,7 @@ use bevy::app::App;
 use bevy::ecs::system::EntityCommands;
 
 use crate::camera_home::CameraHomeConfig;
+use crate::lighting::StudioLightingConfig;
 use crate::primitive::PrimitiveConfig;
 
 /// Boxed deferred-insert closure applied to a primitive entity at spawn time.
@@ -18,6 +19,7 @@ pub(super) type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + S
 mod camera_home;
 mod primitive;
 mod sprinkle;
+mod studio_lighting;
 mod title_bar;
 
 /// Typestate marker: the builder has not yet spawned an `OrbitCam`.
@@ -58,6 +60,19 @@ pub struct PrimitiveBuilder<S> {
 pub struct CameraHomeBuilder<S> {
     pub(super) parent: SprinkleBuilder<S>,
     pub(super) config: CameraHomeConfig,
+}
+
+/// Builder returned by [`SprinkleBuilder::with_studio_lighting`] for tweaking
+/// the studio rig before it spawns.
+///
+/// Lighting tweak methods are only reachable through this type, so calling
+/// [`Self::aim_at`] or [`Self::key_light_pos`] is a compile error when no
+/// studio lighting has been installed. Calling a non-lighting builder method
+/// finalizes the configuration and returns to the normal [`SprinkleBuilder`]
+/// (or [`PrimitiveBuilder`]) chain.
+pub struct StudioLightingBuilder<S> {
+    pub(super) parent: SprinkleBuilder<S>,
+    pub(super) config: StudioLightingConfig,
 }
 
 /// Builder returned by [`SprinkleBuilder::with_title_bar`] for wiring chip

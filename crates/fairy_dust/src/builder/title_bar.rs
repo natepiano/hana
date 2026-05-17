@@ -11,6 +11,7 @@ use super::CameraHomeBuilder;
 use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
+use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::screen_panels::ControlActivation;
@@ -149,7 +150,9 @@ impl<S> TitleBarBuilder<S> {
 
     /// Finalizes the title bar and adds studio lighting.
     #[must_use]
-    pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
+    pub fn with_studio_lighting(self) -> StudioLightingBuilder<S> {
+        self.finish().with_studio_lighting()
+    }
 
     /// Finalizes the title bar and adds an example description panel.
     #[must_use]

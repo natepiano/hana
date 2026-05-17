@@ -13,12 +13,13 @@ use super::CameraHomeBuilder;
 use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
+use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::brp_extras;
 use crate::camera_control_panel;
 use crate::camera_home::CameraHomeConfig;
-use crate::lighting;
+use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
 use crate::primitive::PrimitiveConfig;
 use crate::restart;
@@ -71,10 +72,17 @@ impl<S> SprinkleBuilder<S> {
     }
 
     /// Add a reusable key/fill/rim lighting setup for simple example scenes.
+    ///
+    /// Returns a [`StudioLightingBuilder`] so the key light position and aim
+    /// target can be tweaked before the rig spawns. Methods on the returned
+    /// builder are only reachable through this call, so lighting tweaks are
+    /// a compile error without `with_studio_lighting`.
     #[must_use]
-    pub fn with_studio_lighting(mut self) -> Self {
-        lighting::install(&mut self.app);
-        self
+    pub fn with_studio_lighting(self) -> StudioLightingBuilder<S> {
+        StudioLightingBuilder {
+            parent: self,
+            config: StudioLightingConfig::default(),
+        }
     }
 
     /// Starts configuring a reusable ground plane for the example scene.

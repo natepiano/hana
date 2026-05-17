@@ -41,7 +41,6 @@ struct ArrowGeometry {
     origin_y:      f32,
     advance_end_x: f32,
     descent_world: f32,
-    dot_radius:    f32,
     spacing:       f32,
     z:             f32,
 }
@@ -292,7 +291,6 @@ fn spawn_origin_and_advancement(
             origin_y,
             advance_end_x,
             descent_world,
-            dot_radius,
             spacing,
             z,
         },
@@ -307,10 +305,10 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;
     let thickness = scaling::callout_line_thickness(ctx.overlay, ctx.font_size, ctx.scale);
 
-    // Dashed vertical bracket lines — from below the arrow to just
-    // above the origin/advance dots on the baseline.
-    let tick_above = geometry.dot_radius.mul_add(3.0, geometry.origin_y);
-    let tick_below = arrow_y - head;
+    // Dashed vertical bracket lines — from the arrow body up to the
+    // origin/advance dots on the baseline.
+    let tick_above = geometry.origin_y;
+    let tick_below = arrow_y;
     let dash_len = geometry.spacing * BRACKET_DASH_RATIO;
     let gap_len = geometry.spacing * BRACKET_GAP_RATIO;
     spawn_dashed_callout_line(

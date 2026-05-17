@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
+use bevy::camera::primitives::Aabb;
 use bevy::window::WindowResized;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
@@ -45,8 +46,11 @@ pub(crate) struct CameraHomeConfig {
     pub margin:    f32,
 }
 
+/// Resource holding the entity used as the invisible home cube. Exposed so
+/// downstream code can mutate the cube's [`Transform`] directly when the
+/// event-based [`SetCameraHomeFromEntity`] flow doesn't fit.
 #[derive(Resource)]
-struct CameraHomeEntity(Entity);
+pub struct CameraHomeEntity(pub Entity);
 
 /// Tracks whether the camera is still at the home pose. The window-resize
 /// refit only fires when this is `Yes`, so user-driven pan/zoom/orbit isn't
@@ -74,6 +78,44 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.add_observer(on_home_animation_end);
     app.add_observer(on_non_home_animation_begin);
     app.add_observer(on_user_interaction_started);
+    app.add_observer(on_set_camera_home_from_entity);
+}
+
+/// Fire to retarget the H-key home pose onto an arbitrary mesh entity.
+///
+/// The observer reads the source entity's [`GlobalTransform`] + [`Aabb`] and
+/// writes the resulting world-space center/extents into the invisible home
+/// cube. Subsequent `H` presses (and window-resize refits) frame the updated
+/// region. Does not animate the camera — trigger an [`AnimateToFit`]
+/// separately if you want to move there immediately.
+#[derive(Event)]
+pub struct SetCameraHomeFromEntity {
+    /// Mesh entity whose world-space AABB defines the new home pose.
+    pub source: Entity,
+}
+
+fn on_set_camera_home_from_entity(
+    trigger: On<SetCameraHomeFromEntity>,
+    home: Option<Res<CameraHomeEntity>>,
+    bounds: Query<(&GlobalTransform, &Aabb)>,
+    mut transforms: Query<&mut Transform>,
+) {
+    let Some(home) = home else {
+        return;
+    };
+    let Ok((global, aabb)) = bounds.get(trigger.source) else {
+        return;
+    };
+    let center = global.transform_point(Vec3::from(aabb.center));
+    let (scale, _, _) = global.to_scale_rotation_translation();
+    let world_extents = (Vec3::from(aabb.half_extents) * scale * 2.0).abs();
+    // Avoid a zero-thickness slab when the source is a 2D mesh — AnimateToFit
+    // needs non-zero extents on every axis to compute a fit radius.
+    let safe_extents = world_extents.max(Vec3::splat(0.001));
+    let Ok(mut t) = transforms.get_mut(home.0) else {
+        return;
+    };
+    *t = Transform::from_translation(center).with_scale(safe_extents);
 }
 
 fn spawn_home_marker(

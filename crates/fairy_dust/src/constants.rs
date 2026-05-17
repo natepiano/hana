@@ -93,7 +93,3 @@ pub(crate) const RADIUS: Px = Px(12.0);
 
 // theme typography
 pub(crate) const TITLE_SIZE: Pt = Pt(14.0);
-
-// trampoline
-pub(crate) const TRAMPOLINE_ENV: &str = "FAIRY_DUST_RESTART_TRAMPOLINE";
-pub(crate) const TRAMPOLINE_SLEEP: Duration = Duration::from_millis(500);

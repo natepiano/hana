@@ -1,15 +1,17 @@
-//! Capability: Ctrl+Shift+R re-launches the example binary.
+//! Capability: Ctrl+Shift+R rebuilds and re-launches the example via cargo.
 //!
 //! Wires the keybinding through `bevy_enhanced_input` using the `bevy_kana`
 //! macros (`action!`, `event!`, `bind_action_system!`). The bound system
 //! sets a process-wide flag and triggers `AppExit::Success`. After the Bevy
-//! event loop returns, [`crate::SprinkleBuilder::run`] spawns a *trampoline*
-//! copy of the same binary (marked via env var) and exits. The trampoline
-//! sleeps long enough for the parent to be fully reaped — releasing the BRP
-//! TCP socket, GPU device handle, Cocoa runloop, etc. — then `exec`s itself
-//! without the env var, becoming a clean new instance.
+//! event loop returns, [`crate::SprinkleBuilder::run`] spawns
+//! `cargo run --example <name>` from the workspace root, then exits. Cargo
+//! handles incremental rebuild and launches the fresh binary.
+//!
+//! The example name and workspace root are derived from `current_exe()`:
+//! cargo writes example binaries to `<workspace>/target/<profile>/examples/<name>`.
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 
@@ -20,8 +22,6 @@ use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
 
-use crate::constants::TRAMPOLINE_ENV;
-use crate::constants::TRAMPOLINE_SLEEP;
 use crate::ensure_plugin;
 
 #[derive(Component)]
@@ -72,8 +72,7 @@ fn request_restart(mut exit: MessageWriter<AppExit>) {
     exit.write(AppExit::Success);
 }
 
-/// Spawn a trampoline copy of the current binary if a `Ctrl+Shift+R` press
-/// requested it.
+/// Spawn `cargo run --example <name>` if a `Ctrl+Shift+R` press requested it.
 pub(crate) fn perform_restart_if_requested() {
     if RESTART_STATE.load(Ordering::SeqCst) != RestartState::Requested.to_u8() {
         return;
@@ -81,26 +80,7 @@ pub(crate) fn perform_restart_if_requested() {
     do_restart();
 }
 
-/// Called from [`crate::sprinkle_example`] before any Bevy state is built.
-/// If this process was spawned as a restart trampoline, sleep so the parent
-/// is fully reaped, then `exec` ourselves without the trampoline marker.
-pub(crate) fn handle_trampoline_if_active() {
-    if std::env::var(TRAMPOLINE_ENV).is_err() {
-        return;
-    }
-    std::thread::sleep(TRAMPOLINE_SLEEP);
-    let exe = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(err) => {
-            eprintln!("fairy_dust: current_exe failed: {err}");
-            std::process::exit(1);
-        },
-    };
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    trampoline_relaunch(&exe, &args);
-}
-
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn do_restart() {
     let exe = match std::env::current_exe() {
         Ok(path) => path,
@@ -109,71 +89,26 @@ fn do_restart() {
             std::process::exit(1);
         },
     };
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match std::process::Command::new(&exe)
-        .args(&args)
-        .env(TRAMPOLINE_ENV, "1")
+    let Some((example_name, workspace_root)) = derive_cargo_args(&exe) else {
+        eprintln!(
+            "fairy_dust: could not derive cargo example context from {}; \
+             restart requires the binary to live at \
+             <workspace>/target/<profile>/examples/<name>",
+            exe.display(),
+        );
+        std::process::exit(1);
+    };
+    match std::process::Command::new("cargo")
+        .args(["run", "--example", &example_name])
+        .current_dir(&workspace_root)
         .spawn()
     {
-        Ok(_) => {},
+        Ok(_) => std::process::exit(0),
         Err(err) => {
-            eprintln!("fairy_dust: failed to spawn trampoline: {err}");
+            eprintln!("fairy_dust: failed to spawn `cargo run`: {err}");
             std::process::exit(1);
         },
     }
-    std::process::exit(0);
-}
-
-#[cfg(unix)]
-fn trampoline_relaunch(exe: &Path, args: &[String]) -> ! {
-    match std::process::Command::new(exe)
-        .args(args)
-        .env_remove(TRAMPOLINE_ENV)
-        .spawn()
-    {
-        Ok(_) => {},
-        Err(err) => eprintln!("fairy_dust: trampoline relaunch failed: {err}"),
-    }
-    std::process::exit(0);
-}
-
-#[cfg(windows)]
-fn do_restart() {
-    spawn_trampoline();
-    std::process::exit(0);
-}
-
-#[cfg(windows)]
-fn spawn_trampoline() {
-    let exe = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(err) => {
-            eprintln!("fairy_dust: current_exe failed: {err}");
-            return;
-        },
-    };
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match std::process::Command::new(&exe)
-        .args(&args)
-        .env(TRAMPOLINE_ENV, "1")
-        .spawn()
-    {
-        Ok(_) => {},
-        Err(err) => eprintln!("fairy_dust: failed to spawn trampoline: {err}"),
-    }
-}
-
-#[cfg(windows)]
-fn trampoline_relaunch(exe: &Path, args: &[String]) -> ! {
-    match std::process::Command::new(exe)
-        .args(args)
-        .env_remove(TRAMPOLINE_ENV)
-        .spawn()
-    {
-        Ok(_) => {},
-        Err(err) => eprintln!("fairy_dust: trampoline relaunch failed: {err}"),
-    }
-    std::process::exit(0);
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -181,8 +116,21 @@ fn do_restart() {
     eprintln!("fairy_dust: restart not supported on this platform");
 }
 
-#[cfg(not(any(unix, windows)))]
-fn trampoline_relaunch(_: &Path, _: &[String]) -> ! {
-    eprintln!("fairy_dust: restart not supported on this platform");
-    std::process::exit(1);
+/// Recover the example name and workspace root from the running binary's path.
+///
+/// Expects the path layout cargo produces for examples:
+/// `<workspace>/target/<profile>/examples/<name>`.
+#[cfg(any(unix, windows))]
+fn derive_cargo_args(exe: &Path) -> Option<(String, PathBuf)> {
+    let name = exe.file_name()?.to_str()?.to_string();
+    let examples_dir = exe.parent()?;
+    if examples_dir.file_name()?.to_str()? != "examples" {
+        return None;
+    }
+    let profile_dir = examples_dir.parent()?;
+    let target_dir = profile_dir.parent()?;
+    if target_dir.file_name()?.to_str()? != "target" {
+        return None;
+    }
+    Some((name, target_dir.parent()?.to_path_buf()))
 }

@@ -11,6 +11,7 @@ use super::CameraHomeBuilder;
 use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
+use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::primitive;
@@ -23,7 +24,8 @@ impl<S> PrimitiveBuilder<S> {
     /// Sets the primitive size.
     ///
     /// For a ground plane this is the square edge length. For a cube this is
-    /// the cube edge length.
+    /// the cube edge length. Use [`Self::transform`] with a non-uniform
+    /// [`Vec3`] scale to make a ground plane rectangular.
     #[must_use]
     pub const fn size(mut self, size: f32) -> Self {
         self.config.set_size(size);
@@ -115,7 +117,9 @@ impl<S> PrimitiveBuilder<S> {
 
     /// Finalizes the current primitive and adds studio lighting.
     #[must_use]
-    pub fn with_studio_lighting(self) -> SprinkleBuilder<S> { self.finish().with_studio_lighting() }
+    pub fn with_studio_lighting(self) -> StudioLightingBuilder<S> {
+        self.finish().with_studio_lighting()
+    }
 
     /// Finalizes the current primitive and adds an example description panel.
     #[must_use]
