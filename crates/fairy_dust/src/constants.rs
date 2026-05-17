@@ -74,7 +74,12 @@ pub(crate) const BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 pub(crate) const INNER_BORDER_WIDTH: Px = Px(1.0);
 
 // theme colors
-pub(crate) const INNER_BG: Color = Color::srgba(0.02, 0.03, 0.07, 0.50);
+/// Default inner background color used by all fairy_dust screen panels
+/// (title bar, description panel, camera control panel). Exposed publicly
+/// so callers tweaking only the alpha can do:
+/// `panel.with_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(0.85))`.
+pub const DEFAULT_PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.50);
+pub(crate) const INNER_BG: Color = DEFAULT_PANEL_BACKGROUND;
 pub(crate) const TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
 
 // theme padding

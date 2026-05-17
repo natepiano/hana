@@ -58,6 +58,7 @@ fn unlit_panel_material() -> StandardMaterial {
 fn panel_frame(
     builder: &mut LayoutBuilder,
     width: Sizing,
+    background: Color,
     content: impl FnOnce(&mut LayoutBuilder),
 ) {
     builder.with(
@@ -74,10 +75,14 @@ fn panel_frame(
                     .height(Sizing::GROW)
                     .padding(Padding::all(INNER_PAD))
                     .corner_radius(CornerRadius::all(INNER_RADIUS))
-                    .background(INNER_BG)
+                    .background(background)
                     .border(Border::all(INNER_BORDER_WIDTH, BORDER_DIM)),
                 content,
             );
         },
     );
 }
+
+/// Default background color for screen panels — exposed so per-panel
+/// builders can substitute it when no override is provided.
+pub(crate) const fn default_inner_background() -> Color { INNER_BG }

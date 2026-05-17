@@ -58,6 +58,18 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Overrides the inner background color of the camera control panel.
+    /// Pair with [`with_camera_control_panel`](Self::with_camera_control_panel).
+    /// Use [`DEFAULT_PANEL_BACKGROUND`](crate::DEFAULT_PANEL_BACKGROUND) and
+    /// [`Color::with_alpha`] to tweak only the opacity:
+    /// `.with_camera_control_panel_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(0.85))`.
+    #[must_use]
+    pub fn with_camera_control_panel_background_color(mut self, color: Color) -> Self {
+        self.app
+            .insert_resource(camera_control_panel::CameraControlPanelBackground(color));
+        self
+    }
+
     /// Add a reusable key/fill/rim lighting setup for simple example scenes.
     #[must_use]
     pub fn with_studio_lighting(mut self) -> Self {

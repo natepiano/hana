@@ -37,7 +37,6 @@ use crate::constants::BORDER;
 use crate::constants::BORDER_ACCENT;
 use crate::constants::BORDER_DIM;
 use crate::constants::FRAME_PAD;
-use crate::constants::INNER_BG;
 use crate::constants::INNER_BORDER_WIDTH;
 use crate::constants::INNER_PAD;
 use crate::constants::INNER_RADIUS;
@@ -55,9 +54,10 @@ pub(super) fn unlit_panel_material() -> StandardMaterial {
 pub(super) fn build_guidance_tree(
     snapshot: &CameraGuidanceSnapshot,
     display: CameraGuidanceDisplay,
+    background: Color,
 ) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    build_guidance_layout(&mut builder, snapshot, display);
+    build_guidance_layout(&mut builder, snapshot, display, background);
     builder.build()
 }
 
@@ -65,6 +65,7 @@ fn build_guidance_layout(
     builder: &mut LayoutBuilder,
     snapshot: &CameraGuidanceSnapshot,
     display: CameraGuidanceDisplay,
+    background: Color,
 ) {
     let title = LayoutTextStyle::new(TITLE_SIZE)
         .with_color(TITLE_COLOR)
@@ -98,7 +99,7 @@ fn build_guidance_layout(
                     .padding(Padding::all(INNER_PAD))
                     .child_gap(GUIDANCE_CHILD_GAP)
                     .corner_radius(CornerRadius::all(INNER_RADIUS))
-                    .background(INNER_BG)
+                    .background(background)
                     .border(Border::all(INNER_BORDER_WIDTH, BORDER_DIM)),
                 |builder| {
                     builder.text(format!("CAMERA: {}", snapshot.camera_label), title.clone());

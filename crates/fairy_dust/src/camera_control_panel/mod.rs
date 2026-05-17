@@ -39,6 +39,7 @@ use layout::unlit_panel_material;
 use snapshot::CameraGuidanceSnapshot;
 use snapshot::resolve_guidance_snapshot;
 
+use crate::constants::INNER_BG;
 use crate::ensure_plugin;
 
 /// Singleton marker for the camera control panel. `bound_camera` records
@@ -49,8 +50,19 @@ struct CameraGuidancePanel {
     bound_camera: Option<Entity>,
 }
 
+/// Inner background color for the camera control panel. Defaults to the
+/// crate's `INNER_BG` constant; override via
+/// [`SprinkleBuilder::with_camera_control_panel_background_color`].
+#[derive(Resource, Clone, Copy, Debug)]
+pub(crate) struct CameraControlPanelBackground(pub Color);
+
+impl Default for CameraControlPanelBackground {
+    fn default() -> Self { Self(INNER_BG) }
+}
+
 pub(crate) fn install(app: &mut App) {
     ensure_panel_plugins(app);
+    app.init_resource::<CameraControlPanelBackground>();
     app.add_systems(Startup, spawn_panel);
     app.add_systems(
         PostUpdate,
@@ -66,7 +78,7 @@ fn ensure_panel_plugins(app: &mut App) {
     ensure_plugin(app, MeshPickingPlugin);
 }
 
-fn spawn_panel(mut commands: Commands) {
+fn spawn_panel(mut commands: Commands, background: Res<CameraControlPanelBackground>) {
     let snapshot = default_snapshot();
     let display = CameraGuidanceDisplay::default();
     let unlit = unlit_panel_material();
@@ -75,7 +87,7 @@ fn spawn_panel(mut commands: Commands) {
         .anchor(Anchor::BottomRight)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_guidance_tree(&snapshot, display))
+        .with_tree(build_guidance_tree(&snapshot, display, background.0))
         .build();
 
     match panel {
@@ -126,6 +138,7 @@ fn rebind_panel_on_route_change(
         &mut CameraGuidancePanel,
         &mut CameraGuidanceDisplayState,
     )>,
+    background: Res<CameraControlPanelBackground>,
 ) {
     let routed = route.routed_camera();
     let (panel_entity, mut panel_marker, mut display_state) = panel.into_inner();
@@ -149,7 +162,10 @@ fn rebind_panel_on_route_change(
     let display = CameraGuidanceDisplay::from_interaction_state(state.copied().unwrap_or_default());
     *display_state = CameraGuidanceDisplayState::from_display(display);
     commands.entity(panel_entity).insert(snapshot.clone());
-    commands.set_tree(panel_entity, build_guidance_tree(&snapshot, display));
+    commands.set_tree(
+        panel_entity,
+        build_guidance_tree(&snapshot, display, background.0),
+    );
 }
 
 fn refresh_on_interaction_started(
@@ -198,6 +214,7 @@ fn repaint_panel_display(
         &CameraGuidanceSnapshot,
         &mut CameraGuidanceDisplayState,
     )>,
+    background: Res<CameraControlPanelBackground>,
 ) {
     let (panel_entity, snapshot, mut display) = panel.into_inner();
     display.expire_held_sources(time.elapsed_secs());
@@ -206,7 +223,7 @@ fn repaint_panel_display(
     }
     commands.set_tree(
         panel_entity,
-        build_guidance_tree(snapshot, display.display()),
+        build_guidance_tree(snapshot, display.display(), background.0),
     );
     display.render_state = RenderState::Idle;
 }

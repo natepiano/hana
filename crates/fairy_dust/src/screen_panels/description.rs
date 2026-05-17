@@ -20,11 +20,12 @@ use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
 /// A static side panel that explains what an example demonstrates.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DescriptionPanel {
-    anchor: Anchor,
-    title:  String,
-    lines:  Vec<String>,
+    anchor:           Anchor,
+    title:            String,
+    lines:            Vec<String>,
+    background_color: Option<Color>,
 }
 
 impl DescriptionPanel {
@@ -32,9 +33,10 @@ impl DescriptionPanel {
     #[must_use]
     pub fn new(title: impl Into<String>) -> Self {
         Self {
-            anchor: Anchor::BottomLeft,
-            title:  title.into(),
-            lines:  Vec::new(),
+            anchor:           Anchor::BottomLeft,
+            title:            title.into(),
+            lines:            Vec::new(),
+            background_color: None,
         }
     }
 
@@ -42,6 +44,14 @@ impl DescriptionPanel {
     #[must_use]
     pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
+        self
+    }
+
+    /// Overrides the inner background color (including alpha) for this
+    /// description panel. Defaults to the crate's `INNER_BG` constant.
+    #[must_use]
+    pub const fn with_background_color(mut self, color: Color) -> Self {
+        self.background_color = Some(color);
         self
     }
 
@@ -87,18 +97,26 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
     let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
     let body = LayoutTextStyle::new(BODY_SIZE).with_color(BODY_COLOR);
 
-    panel_frame(builder, Sizing::fixed(DESCRIPTION_WIDTH), |builder| {
-        builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .direction(Direction::TopToBottom)
-                .child_gap(DESCRIPTION_CHILD_GAP),
-            |builder| {
-                builder.text(&panel.title, title);
-                for line in &panel.lines {
-                    builder.text(line, body.clone());
-                }
-            },
-        );
-    });
+    let background = panel
+        .background_color
+        .unwrap_or_else(super::default_inner_background);
+    panel_frame(
+        builder,
+        Sizing::fixed(DESCRIPTION_WIDTH),
+        background,
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(DESCRIPTION_CHILD_GAP),
+                |builder| {
+                    builder.text(&panel.title, title);
+                    for line in &panel.lines {
+                        builder.text(line, body.clone());
+                    }
+                },
+            );
+        },
+    );
 }

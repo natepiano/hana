@@ -29,12 +29,13 @@ use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
 /// A compact top-left title bar for example-level controls.
-#[derive(Component, Clone, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Debug, PartialEq)]
 pub struct TitleBar {
-    anchor:          Anchor,
-    title:           String,
-    controls:        Vec<String>,
-    active_controls: Vec<String>,
+    anchor:           Anchor,
+    title:            String,
+    controls:         Vec<String>,
+    active_controls:  Vec<String>,
+    background_color: Option<Color>,
 }
 
 impl Default for TitleBar {
@@ -46,10 +47,11 @@ impl TitleBar {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            anchor:          Anchor::TopLeft,
-            title:           TITLE_BAR_DEFAULT_TITLE.to_string(),
-            controls:        Vec::new(),
-            active_controls: Vec::new(),
+            anchor:           Anchor::TopLeft,
+            title:            TITLE_BAR_DEFAULT_TITLE.to_string(),
+            controls:         Vec::new(),
+            active_controls:  Vec::new(),
+            background_color: None,
         }
     }
 
@@ -65,6 +67,14 @@ impl TitleBar {
     #[must_use]
     pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
+        self
+    }
+
+    /// Overrides the inner background color (including alpha) for this
+    /// title bar. Defaults to the crate's `INNER_BG` constant.
+    #[must_use]
+    pub const fn with_background_color(mut self, color: Color) -> Self {
+        self.background_color = Some(color);
         self
     }
 
@@ -208,7 +218,10 @@ fn build_title_bar_layout(
     let inactive_control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
     let active_control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
 
-    panel_frame(builder, Sizing::FIT, |builder| {
+    let background = title_bar
+        .background_color
+        .unwrap_or_else(super::default_inner_background);
+    panel_frame(builder, Sizing::FIT, background, |builder| {
         builder.with(
             El::new()
                 .width(Sizing::GROW)

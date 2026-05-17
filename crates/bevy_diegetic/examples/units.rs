@@ -42,6 +42,7 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::ControlActivation;
+use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
@@ -69,6 +70,12 @@ const INDEX_SUBHEADING_SIZE: Pt = Pt(11.0);
 const INDEX_LABEL_SIZE: Pt = Pt(10.0);
 const INDEX_CODE_SIZE: Pt = Pt(10.0);
 const INDEX_FOOTER_SIZE: Pt = Pt(8.0);
+
+// ── Screen panel styling ─────────────────────────────────────────────
+/// Inner-background alpha applied to both the title bar and the camera
+/// control panel. Higher than fairy_dust's default (0.50) so the example's
+/// HUD reads as a more opaque surface against the 3D scene.
+const PANEL_BACKGROUND_ALPHA: f32 = 0.90;
 
 // ── Scene layout ─────────────────────────────────────────────────────
 const GAP: Mm = Mm(15.0);
@@ -263,6 +270,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
+                .with_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA))
                 .control("D Outlines")
                 .control("R Rulers")
                 .control("P Perspective")
@@ -291,6 +299,9 @@ fn main() {
             |event| event.source == AnimationSource::ZoomToFit,
         )
         .with_camera_control_panel()
+        .with_camera_control_panel_background_color(
+            DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA),
+        )
         .init_resource::<DebugOutlines>()
         .init_resource::<Rulers>()
         .init_resource::<CameraProjection>()

@@ -60,6 +60,7 @@ pub use builder::WithOrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
 pub use camera_control_panel::SourceVisibility;
+pub use constants::DEFAULT_PANEL_BACKGROUND;
 pub use constants::LOG_FILTER;
 pub use primitive::Face;
 pub use primitive::cube_face_text;
