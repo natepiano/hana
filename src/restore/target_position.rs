@@ -27,10 +27,10 @@ pub(crate) enum MonitorResolutionSource {
     FallbackToPrimary,
 }
 
-pub struct ResolvedMonitor<'a> {
-    pub monitor_info:              &'a MonitorInfo,
-    pub logical_position:          Option<(i32, i32)>,
-    pub monitor_resolution_source: MonitorResolutionSource,
+pub(crate) struct ResolvedMonitor<'a> {
+    pub(crate) monitor_info:              &'a MonitorInfo,
+    pub(crate) logical_position:          Option<(i32, i32)>,
+    pub(crate) monitor_resolution_source: MonitorResolutionSource,
 }
 
 /// Resolve the target monitor from saved state and return an adjusted saved position.
@@ -711,4 +711,14 @@ fn try_apply_restore(
 
     window.visible = true;
     RestoreStatus::Complete
+}
+
+/// Run condition: returns true if any entity has a `TargetPosition` component.
+pub(crate) fn has_restoring_windows(query: Query<(), With<TargetPosition>>) -> bool {
+    !query.is_empty()
+}
+
+/// Run condition: returns true if no entity has a `TargetPosition` component.
+pub(crate) fn no_restoring_windows(query: Query<(), With<TargetPosition>>) -> bool {
+    query.is_empty()
 }

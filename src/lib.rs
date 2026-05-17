@@ -40,7 +40,6 @@ mod macos_tabbing_fix;
 mod managed;
 mod monitor;
 mod monitors;
-mod observers;
 mod persistence;
 mod platform;
 mod restore;
@@ -60,6 +59,10 @@ pub use events::WindowRestored;
 pub use managed::ManagedWindow;
 pub use managed::ManagedWindowPersistence;
 use managed::ManagedWindowRegistry;
+use managed::on_managed_window_added;
+use managed::on_managed_window_load;
+use managed::on_managed_window_removed;
+use managed::on_persistence_changed;
 pub use monitors::CurrentMonitor;
 pub use monitors::MonitorInfo;
 use monitors::MonitorPlugin;
@@ -67,6 +70,9 @@ pub use monitors::Monitors;
 pub use persistence::WindowKey;
 pub use platform::Platform;
 use restore::RestorePlugin;
+#[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
+use restore::has_restoring_windows;
+use restore::no_restoring_windows;
 
 /// The main plugin. See module docs for usage.
 ///
@@ -132,6 +138,26 @@ impl Plugin for WindowManagerPlugin {
     }
 }
 
+/// Hide the primary window when created, before winit creates the OS window.
+///
+/// Uses an observer on `PrimaryWindow` component addition, so it works regardless
+/// of plugin order. The window will be shown after restore completes or immediately
+/// if no saved state.
+///
+/// Note: We observe `Add<PrimaryWindow>` rather than `Add<Window>` because when
+/// `Window` is added, `PrimaryWindow` may not exist yet. By observing `PrimaryWindow`,
+/// we know the `Window` component already exists on the entity.
+fn hide_window_on_creation(add: On<Add, PrimaryWindow>, mut windows: Query<&mut Window>) {
+    debug!(
+        "[hide_window_on_creation] Observer fired for entity {:?}",
+        add.entity
+    );
+    if let Ok(mut window) = windows.get_mut(add.entity) {
+        debug!("[hide_window_on_creation] Setting window.visible = false");
+        window.visible = false;
+    }
+}
+
 /// Plugin variant with a custom state file path.
 struct WindowManagerPluginCustomPath {
     path:                       PathBuf,
@@ -167,7 +193,7 @@ impl Plugin for WindowManagerPluginCustomPath {
                 window.visible = false;
             } else {
                 debug!("[build] Window doesn't exist yet, registering observer");
-                app.add_observer(observers::hide_window_on_creation);
+                app.add_observer(hide_window_on_creation);
             }
         } else {
             debug!("[build] Linux X11: skipping window hide for frame extent compensation");
@@ -196,16 +222,16 @@ impl Plugin for WindowManagerPluginCustomPath {
             })
             .insert_resource(managed_window_persistence)
             .init_resource::<ManagedWindowRegistry>()
-            .add_observer(observers::on_managed_window_added)
-            .add_observer(observers::on_managed_window_removed)
-            .add_observer(observers::on_managed_window_load);
+            .add_observer(on_managed_window_added)
+            .add_observer(on_managed_window_removed)
+            .add_observer(on_managed_window_load);
 
         // X11 frame extent compensation (W6 workaround, winit #4445).
         #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
         app.add_systems(
             Update,
             x11_position_fix::compensate_target_position
-                .run_if(observers::has_restoring_windows)
+                .run_if(has_restoring_windows)
                 .run_if(|p: Res<Platform>| p.is_x11()),
         );
 
@@ -215,11 +241,11 @@ impl Plugin for WindowManagerPluginCustomPath {
             (
                 monitor::update_current_monitor,
                 persistence::save_window_state
-                    .run_if(observers::no_restoring_windows)
+                    .run_if(no_restoring_windows)
                     .after(monitor::update_current_monitor),
-                observers::on_persistence_changed
+                on_persistence_changed
                     .run_if(resource_changed::<ManagedWindowPersistence>)
-                    .run_if(observers::no_restoring_windows)
+                    .run_if(no_restoring_windows)
                     .after(monitor::update_current_monitor),
             ),
         );
