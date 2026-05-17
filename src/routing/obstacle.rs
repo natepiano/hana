@@ -19,7 +19,7 @@ pub(super) enum Blockage {
 /// An axis-aligned bounding box used as a routing obstacle.
 #[derive(Clone, Copy, Debug, Reflect)]
 pub struct Obstacle {
-    pub(crate) half_extents: Vec3,
+    pub(super) half_extents: Vec3,
     position:                Vec3,
 }
 

@@ -175,21 +175,24 @@ pub(crate) const SECTION_INFO_CENTER_X_PERCENT: f32 = 50.0;
 pub(crate) const SECTION_INFO_LEFT_OFFSET: f32 = -200.0;
 pub(crate) const SECTION_INFO_TEXTS: [(usize, &str); 7] = [
     (
-        1,
+        CAP_STYLES_SECTION_INDEX,
         "Round (transparent) / Flat / None\nEnd caps are independent\nEsc - Pause lights",
     ),
-    (2, "Catenary    Linear    Orthogonal"),
-    (3, "Drag blue boxes"),
-    (4, "Drag sphere"),
     (
-        6,
+        SOLVER_COMPARISON_SECTION_INDEX,
+        "Catenary    Linear    Orthogonal",
+    ),
+    (ENTITY_ATTACHMENT_SECTION_INDEX, "Drag blue boxes"),
+    (SHARED_HUB_SECTION_INDEX, "Drag sphere"),
+    (
+        DETACH_DEMO_SECTION_INDEX,
         "Click green sphere - cable freezes\n\
          Click red sphere - cable disappears\n\
          R - Reset",
     ),
-    (7, "Look, it's a tube!"),
+    (INSIDE_VIEW_SECTION_INDEX, "Look, it's a tube!"),
     (
-        8,
+        CONNECTOR_SECTION_INDEX,
         "Front: Fixed (no roll)\nMiddle: AsSpawned (plug keeps its spawn orientation)\nBack: Rotating (follows twist)\nDrag the plugs to compare",
     ),
 ];

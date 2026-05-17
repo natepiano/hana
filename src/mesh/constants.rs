@@ -25,3 +25,7 @@ pub(super) const DEFAULT_TUBE_RADIUS: f32 = 0.06;
 pub(super) const DEFAULT_TUBE_SIDES: u32 = 32;
 /// Minimum polygon sides needed to form a closed tube cross-section.
 pub(super) const MIN_TUBE_SIDES: u32 = 3;
+
+// uv mapping
+/// UV coordinate sampled at cap pole/center vertices.
+pub(super) const CAP_UV_CENTER: [f32; 2] = [0.5, 0.5];

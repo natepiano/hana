@@ -12,6 +12,7 @@ use super::buffers::WindingOrder;
 use super::config::CableMeshConfig;
 use super::config::Capping;
 use super::config::Faces;
+use super::constants::CAP_UV_CENTER;
 use super::constants::MIN_CAP_RINGS;
 
 /// Which side of a cap to generate.
@@ -141,7 +142,7 @@ fn add_hemisphere_cap(
             buffers.positions.push(buffers.positions[original_index]);
             let normal = buffers.normals[original_index];
             buffers.normals.push([-normal[0], -normal[1], -normal[2]]);
-            buffers.uvs.push([0.5, 0.5]);
+            buffers.uvs.push(CAP_UV_CENTER);
         }
         base
     } else {
@@ -165,7 +166,7 @@ fn add_hemisphere_cap(
 
             buffers.positions.push(vertex_position.to_array());
             buffers.normals.push(vertex_normal.to_array());
-            buffers.uvs.push([0.5, 0.5]);
+            buffers.uvs.push(CAP_UV_CENTER);
         }
 
         for j in 0..context.sides {
@@ -189,7 +190,7 @@ fn add_hemisphere_cap(
     buffers
         .normals
         .push((normal_sign * context.direction).to_array());
-    buffers.uvs.push([0.5, 0.5]);
+    buffers.uvs.push(CAP_UV_CENTER);
 
     for j in 0..context.sides {
         let next = (j + 1) % context.sides;
@@ -221,7 +222,7 @@ fn add_flat_cap(context: &CapContext, cap_side: CapSide, buffers: &mut MeshBuffe
     let center_index = buffers.positions.len().to_u32();
     buffers.positions.push(context.center.to_array());
     buffers.normals.push(cap_normal);
-    buffers.uvs.push([0.5, 0.5]);
+    buffers.uvs.push(CAP_UV_CENTER);
 
     for j in 0..context.sides {
         let next = (j + 1) % context.sides;
