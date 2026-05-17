@@ -97,10 +97,10 @@ pub(super) const THIN_LINE_WIDTH: f32 = 1.0;
 
 // z-layer offsets
 /// Z offset for callout elements (bounding boxes, origin dots, advancement arrows).
-pub(super) const CALLOUT_Z_OFFSET: f32 = 0.002;
+pub(super) const CALLOUT_Z_OFFSET: f32 = 0.0;
 
 /// Z offset for metric callout arrows rendered above the metric lines.
-pub(super) const METRIC_ARROW_Z_OFFSET: f32 = 0.0015;
+pub(super) const METRIC_ARROW_Z_OFFSET: f32 = 0.0;
 
 /// Z offset for metric lines and vertical dimension arrows.
-pub(super) const METRIC_LINE_Z_OFFSET: f32 = 0.001;
+pub(super) const METRIC_LINE_Z_OFFSET: f32 = 0.0;

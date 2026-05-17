@@ -58,7 +58,7 @@ pub(super) const GLYPH_WORKER_THREAD_NAME: &str = "Diegetic Glyph Raster";
 ///
 /// MSDF is resolution-independent, so all glyphs are generated at this
 /// single size. The shader handles scaling.
-pub(super) const DEFAULT_CANONICAL_SIZE: u32 = 64;
+pub(super) const DEFAULT_CANONICAL_SIZE: u32 = 128;
 /// Default padding around each glyph in pixels.
 pub(super) const DEFAULT_GLYPH_PADDING: u32 = 2;
 /// Default SDF range in pixels.

@@ -112,6 +112,7 @@ const NOTO_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/NotoSans-Regular.ttf";
 
 const DISPLAY_WORDS: &[(&str, &str)] = &[
     ("Typography", "accented cap above ascent"),
+    ("V", "EB Garamond Test"),
     ("Ångström", "ring accent, umlaut"),
     ("fjord", "f-j ligature candidate, j descender"),
     ("Qüixy", "Q descender, umlaut, y descender"),

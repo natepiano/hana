@@ -325,6 +325,18 @@ impl MsdfAtlas {
     #[must_use]
     pub const fn sdf_range() -> f64 { DEFAULT_SDF_RANGE }
 
+    /// Per-side padding baked into every rasterized glyph bitmap, in texels.
+    /// Sum of `DEFAULT_GLYPH_PADDING` and `DEFAULT_SDF_RANGE` — the same
+    /// `total_pad` used by `rasterize_glyph` to size the bitmap.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "padding is at most a handful of texels; f32 is exact"
+    )]
+    pub const fn glyph_padding_texels() -> f32 {
+        DEFAULT_GLYPH_PADDING as f32 + DEFAULT_SDF_RANGE as f32
+    }
+
     /// Returns the GPU image handle for a specific atlas page.
     ///
     /// Returns `None` if the page doesn't exist or hasn't been uploaded yet.

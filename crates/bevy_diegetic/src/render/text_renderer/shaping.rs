@@ -255,7 +255,8 @@ fn shape_text_to_quads(
         ));
     }
 
-    glyph_quad::clip_overlapping_quads(&mut quads);
+    let padding_world = MsdfAtlas::glyph_padding_texels() * em_scale * scale.x;
+    glyph_quad::clip_overlapping_quads(&mut quads, padding_world);
 
     if let Some(clip_rect) = clip_rect {
         let clip_local =

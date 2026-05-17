@@ -158,7 +158,8 @@ pub(super) fn shape_world_text(
         &mut stats,
     );
 
-    glyph_quad::clip_overlapping_quads(&mut quads);
+    let padding_world = MsdfAtlas::glyph_padding_texels() * em_scale * world_scale;
+    glyph_quad::clip_overlapping_quads(&mut quads, padding_world);
 
     stats.atlas_ms =
         atlas_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;

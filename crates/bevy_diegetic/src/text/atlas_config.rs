@@ -8,6 +8,7 @@ use bevy_kana::ToUsize;
 
 use super::constants::AVERAGE_GLYPH_COVERAGE;
 use super::constants::DEFAULT_AUTO_GLYPH_WORKER_THREADS;
+use super::constants::DEFAULT_CANONICAL_SIZE;
 use super::constants::DEFAULT_GLYPH_PADDING;
 use super::constants::DEFAULT_GLYPHS_PER_PAGE;
 use super::constants::MAX_CUSTOM_RASTER_SIZE;
@@ -39,7 +40,7 @@ pub enum RasterQuality {
     Low,
     /// 32px — sharp at normal viewing distances.
     Medium,
-    /// 64px — sharp even at extreme zoom (default).
+    /// `DEFAULT_CANONICAL_SIZE` px — sharp even at extreme zoom (default).
     #[default]
     High,
     /// 128px — maximum fidelity, significant memory cost.
@@ -56,7 +57,7 @@ impl RasterQuality {
         match self {
             Self::Low => 16,
             Self::Medium => 32,
-            Self::High => 64,
+            Self::High => DEFAULT_CANONICAL_SIZE,
             Self::Extreme => 128,
             Self::Custom(size) => {
                 if size < MIN_CUSTOM_RASTER_SIZE {
@@ -281,7 +282,7 @@ mod tests {
     fn raster_quality_pixel_sizes() {
         assert_eq!(RasterQuality::Low.pixel_size(), 16);
         assert_eq!(RasterQuality::Medium.pixel_size(), 32);
-        assert_eq!(RasterQuality::High.pixel_size(), 64);
+        assert_eq!(RasterQuality::High.pixel_size(), DEFAULT_CANONICAL_SIZE);
         assert_eq!(RasterQuality::Extreme.pixel_size(), 128);
     }
 
@@ -325,9 +326,9 @@ mod tests {
     fn default_config_values() {
         let config = AtlasConfig::default();
         assert_eq!(config.quality, RasterQuality::High);
-        assert_eq!(config.glyphs_per_page, 100);
+        assert_eq!(config.glyphs_per_page, DEFAULT_GLYPHS_PER_PAGE);
         assert_eq!(config.glyph_worker_threads, GlyphWorkerThreads::Auto);
-        assert_eq!(config.canonical_size(), 64);
+        assert_eq!(config.canonical_size(), DEFAULT_CANONICAL_SIZE);
     }
 
     #[test]

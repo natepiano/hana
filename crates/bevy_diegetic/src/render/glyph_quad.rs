@@ -57,11 +57,17 @@ pub(super) struct GlyphQuadData {
 /// to the earlier glyph, the right half to the later glyph — and adjusts
 /// UV coordinates proportionally. O(n) linear pass over sorted quads.
 ///
+/// `padding_world` is the per-side padding (SDF range + glyph padding)
+/// converted to world units for this text run. The trim is capped at
+/// `padding_world` per side so that overlap exceeding `2 * padding_world`
+/// — which can only come from real ink overlap (e.g. tight kerning pairs
+/// like AV) — is left alone instead of being chopped through the glyph ink.
+///
 /// Only clips pairs on the **same line** (matching Y position within
 /// tolerance). Cross-line pairs are skipped to prevent the last glyph of
 /// one line from destroying the first glyph of the next line.
-pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
-    if quads.len() < 2 {
+pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)], padding_world: f32) {
+    if quads.len() < 2 || padding_world <= 0.0 {
         return;
     }
 
@@ -81,7 +87,7 @@ pub(super) fn clip_overlapping_quads(quads: &mut [(u32, GlyphQuadData)]) {
         }
 
         let overlap = right_edge_i - left_edge_next;
-        let half_overlap = overlap * 0.5;
+        let half_overlap = (overlap * 0.5).min(padding_world);
 
         // Trim the right side of quad i.
         let old_width_i = quads[i].1.size[0];
@@ -333,7 +339,7 @@ mod tests {
             (0, make_quad(0.5, 1.0, 0.6)),
         ];
 
-        clip_overlapping_quads(&mut quads);
+        clip_overlapping_quads(&mut quads, f32::INFINITY);
 
         let first_width = quads[0].1.size[0];
         let second_width = quads[1].1.size[0];
@@ -359,7 +365,7 @@ mod tests {
         let width_before_second = quads[1].1.size[0];
         let x_before_second = quads[1].1.position[0];
 
-        clip_overlapping_quads(&mut quads);
+        clip_overlapping_quads(&mut quads, f32::INFINITY);
 
         assert!(
             (quads[0].1.size[0] - width_before_first).abs() < f32::EPSILON,
@@ -384,7 +390,7 @@ mod tests {
             (0, make_quad(0.4, 0.0, 0.5)),
         ];
 
-        clip_overlapping_quads(&mut quads);
+        clip_overlapping_quads(&mut quads, f32::INFINITY);
 
         assert!(quads[0].1.size[0] < 0.6, "A should be trimmed");
         assert!(quads[1].1.size[0] < 0.6, "B should be trimmed");
@@ -397,13 +403,39 @@ mod tests {
     }
 
     #[test]
+    fn clip_trim_capped_at_padding() {
+        // Kerning-style deep overlap: ink genuinely overlaps by more than
+        // the padding ring. Trim must stop at `padding` per side and leave
+        // the rest of the overlap untouched.
+        let padding = 0.06;
+        let overlap = 0.40;
+        let mut quads = vec![
+            (0_u32, make_quad(0.0, 1.0, 1.0)),
+            (0, make_quad(1.0 - overlap, 1.0, 1.0)),
+        ];
+
+        clip_overlapping_quads(&mut quads, padding);
+
+        let trimmed_left = 1.0 - quads[0].1.size[0];
+        let trimmed_right = quads[1].1.position[0] - (1.0 - overlap);
+        assert!(
+            (trimmed_left - padding).abs() < 1e-5,
+            "left side should trim exactly `padding`, trimmed {trimmed_left}"
+        );
+        assert!(
+            (trimmed_right - padding).abs() < 1e-5,
+            "right side should trim exactly `padding`, trimmed {trimmed_right}"
+        );
+    }
+
+    #[test]
     fn clip_cross_line_prevents_negative_width() {
         let mut quads = vec![
             (0_u32, make_quad(10.0, 2.0, 0.5)),
             (0, make_quad(0.0, 0.5, 0.5)),
         ];
 
-        clip_overlapping_quads(&mut quads);
+        clip_overlapping_quads(&mut quads, f32::INFINITY);
 
         assert!(
             quads[0].1.size[0] > 0.0,
