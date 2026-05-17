@@ -46,6 +46,10 @@ use nonmax::NonMaxU32;
 
 use super::constants::ATTRIBUTE_OUTLINE_NORMAL;
 use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::GET_BATCH_DATA_GPU_MODE_ERROR;
+use super::constants::GET_BINNED_BATCH_DATA_GPU_MODE_ERROR;
+use super::constants::GET_BINNED_INDEX_CPU_MODE_ERROR;
+use super::constants::GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR;
 use super::constants::HAS_OUTLINE_NORMALS_SHADER_DEF;
 use super::constants::HULL_DEPTH_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::HULL_OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL;
@@ -226,7 +230,7 @@ impl GetBatchData for HullPipeline {
         (_, main_entity): (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!("`get_batch_data` should never be called in GPU mesh uniform building mode");
+            error!("{GET_BATCH_DATA_GPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -259,9 +263,7 @@ impl GetFullBatchData for HullPipeline {
         main_entity: MainEntity,
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_index_and_compare_data` should never be called in CPU mesh uniform building mode"
-            );
+            error!("{GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -276,9 +278,7 @@ impl GetFullBatchData for HullPipeline {
         main_entity: MainEntity,
     ) -> Option<Self::BufferData> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!(
-                "`get_binned_batch_data` should never be called in GPU mesh uniform building mode"
-            );
+            error!("{GET_BINNED_BATCH_DATA_GPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -303,7 +303,7 @@ impl GetFullBatchData for HullPipeline {
         main_entity: MainEntity,
     ) -> Option<NonMaxU32> {
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
-            error!("`get_binned_index` should never be called in CPU mesh uniform building mode");
+            error!("{GET_BINNED_INDEX_CPU_MODE_ERROR}");
             return None;
         };
         mesh_instances

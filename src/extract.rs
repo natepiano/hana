@@ -75,8 +75,8 @@ impl ExtractedOutlineUniforms {
         self.max_jump_flood_width = 0.0;
 
         for outline in self.by_main_entity.values() {
-            self.methods = self.methods.with_outline_method(outline.outline_method);
-            if outline.outline_method == OutlineMethod::JumpFlood {
+            self.methods = self.methods.with_outline_method(outline.method);
+            if outline.method == OutlineMethod::JumpFlood {
                 self.max_jump_flood_width = self.max_jump_flood_width.max(outline.width);
             }
         }
@@ -123,19 +123,19 @@ impl ActiveOutlineMethods {
 #[derive(Debug, Reflect, Clone, PartialEq)]
 pub(crate) struct ExtractedOutline {
     /// Color multiplier for HDR glow via bloom.
-    pub(crate) intensity:      f32,
-    /// Outline width in pixels or world units depending on `outline_method`.
-    pub(crate) width:          f32,
+    pub(crate) intensity: f32,
+    /// Outline width in pixels or world units depending on `method`.
+    pub(crate) width:     f32,
     /// Draw priority for ordering (reserved for future use).
-    pub(crate) priority:       f32,
+    pub(crate) priority:  f32,
     /// Shader overlap factor derived from `OverlapMode`.
-    pub(crate) overlap:        f32,
+    pub(crate) overlap:   f32,
     /// Unique owner ID used for per-mesh and grouped overlap resolution.
-    pub(crate) owner_id:       f32,
+    pub(crate) owner_id:  f32,
     /// Linear RGBA outline color as a `Vec4`.
-    pub(crate) color:          Vec4,
+    pub(crate) color:     Vec4,
     /// Which outline algorithm this entity uses.
-    pub(crate) outline_method: OutlineMethod,
+    pub(crate) method:    OutlineMethod,
 }
 
 impl ExtractedOutline {
@@ -146,13 +146,13 @@ impl ExtractedOutline {
             _ => entity,
         };
         Self {
-            intensity:      outline.intensity,
-            width:          outline.width,
-            priority:       0.0,
-            overlap:        outline.overlap_mode.as_shader_factor(),
-            owner_id:       owner_entity.index().index().to_f32() + OWNER_ID_OFFSET,
-            color:          linear_color.to_vec4(),
-            outline_method: outline.method,
+            intensity: outline.intensity,
+            width:     outline.width,
+            priority:  0.0,
+            overlap:   outline.overlap_mode.as_shader_factor(),
+            owner_id:  owner_entity.index().index().to_f32() + OWNER_ID_OFFSET,
+            color:     linear_color.to_vec4(),
+            method:    outline.method,
         }
     }
 }

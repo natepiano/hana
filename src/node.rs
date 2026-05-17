@@ -32,6 +32,7 @@ use super::constants::COMPOSE_OUTPUT_BIND_GROUP_LABEL;
 use super::constants::FULLSCREEN_TRIANGLE_VERTEX_COUNT;
 use super::constants::HULL_OUTLINE_PASS_LABEL;
 use super::constants::JUMP_FLOOD_NO_SEED_CLEAR_COLOR;
+use super::constants::NO_GLOBAL_DEPTH_TEXTURE_WARNING;
 use super::constants::OUTLINE_DEPTH_FAR_PLANE_CLEAR;
 use super::constants::OUTLINE_FLOOD_INIT_PASS_LABEL;
 use super::constants::POST_PROCESS_PASS_LABEL;
@@ -109,7 +110,7 @@ impl ViewNode for OutlineNode {
         };
         let mut flood_textures = flood_textures.clone();
         let Some(global_depth) = prepass_textures.depth.as_ref() else {
-            warn!("No global depth texture found");
+            warn!("{NO_GLOBAL_DEPTH_TEXTURE_WARNING}");
             return Ok(());
         };
 

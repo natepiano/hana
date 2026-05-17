@@ -43,7 +43,16 @@ pub(super) const FAILED_TO_SPECIALIZE_HULL_MESH_PIPELINE_WARNING: &str =
     "Failed to specialize hull mesh pipeline";
 pub(super) const FAILED_TO_SPECIALIZE_MESH_PIPELINE_WARNING: &str =
     "Failed to specialize mesh pipeline";
+pub(super) const GET_BATCH_DATA_GPU_MODE_ERROR: &str =
+    "`get_batch_data` should never be called in GPU mesh uniform building mode";
+pub(super) const GET_BINNED_BATCH_DATA_GPU_MODE_ERROR: &str =
+    "`get_binned_batch_data` should never be called in GPU mesh uniform building mode";
+pub(super) const GET_BINNED_INDEX_CPU_MODE_ERROR: &str =
+    "`get_binned_index` should never be called in CPU mesh uniform building mode";
+pub(super) const GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR: &str =
+    "`get_index_and_compare_data` should never be called in CPU mesh uniform building mode";
 pub(super) const LIMINAL_TRACING_TARGET: &str = "bevy_liminal";
+pub(super) const NO_GLOBAL_DEPTH_TEXTURE_WARNING: &str = "No global depth texture found";
 pub(super) const NO_MESH_FOUND_WARNING: &str = "No mesh found for entity";
 pub(super) const NO_MESH_INSTANCE_FOUND_WARNING: &str = "No mesh instance found for entity";
 

@@ -26,7 +26,7 @@ impl OutlineUniform {
 
 impl From<&ExtractedOutline> for OutlineUniform {
     fn from(outline: &ExtractedOutline) -> Self {
-        let shell_mode = outline.outline_method.as_shell_mode_factor();
+        let shell_mode = outline.method.as_shell_mode_factor();
         Self {
             intensity:  outline.intensity,
             width:      outline.width,
