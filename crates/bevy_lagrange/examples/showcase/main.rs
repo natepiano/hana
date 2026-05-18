@@ -45,6 +45,7 @@ use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
@@ -157,13 +158,17 @@ fn setup(
 ) {
     let ground = scene::spawn_scene_objects(&mut commands, &mut meshes, &mut materials);
 
-    // Camera using the default SimpleMouse input preset.
+    // Camera using the BlenderLike input preset (middle-mouse orbit, shift+MMB pan,
+    // numpad-driven view changes).
     let camera = commands
-        .spawn(OrbitCam {
-            yaw: Some(CAMERA_START_YAW),
-            pitch: Some(CAMERA_START_PITCH),
-            ..default()
-        })
+        .spawn((
+            OrbitCam {
+                yaw: Some(CAMERA_START_YAW),
+                pitch: Some(CAMERA_START_PITCH),
+                ..default()
+            },
+            OrbitCamPreset::BlenderLike,
+        ))
         .id();
 
     ui::spawn_ui(&mut commands, camera);

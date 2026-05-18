@@ -25,6 +25,24 @@ struct CameraInput {
     scroll_pixel: f32,
 }
 
+/// Whether an `apply_*_input` step changed the camera's target state.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MotionStatus {
+    Changed,
+    Unchanged,
+}
+
+impl MotionStatus {
+    const fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unchanged, Self::Unchanged) => Self::Unchanged,
+            _ => Self::Changed,
+        }
+    }
+
+    const fn is_changed(self) -> bool { matches!(self, Self::Changed) }
+}
+
 /// Initializes `OrbitCam` from the camera's current transform, applying all limits.
 fn initialize_orbit_cam(
     orbit_cam: &mut OrbitCam,
@@ -106,13 +124,14 @@ fn merged_surface_metrics(
     metrics
 }
 
-/// Applies orbit input to target yaw/pitch. Returns `true` if the camera moved.
+/// Applies orbit input to target yaw/pitch. Returns `MotionStatus::Changed`
+/// if the camera moved.
 fn apply_orbit_input(
     orbit: Vec2,
     orbit_cam: &mut OrbitCam,
     drag_state: OrbitDragState,
     window_size: Option<Vec2>,
-) -> bool {
+) -> MotionStatus {
     if orbit.length_squared() > 0.0 {
         // Use window size for rotation otherwise the sensitivity is far too high for small
         // viewports
@@ -127,20 +146,21 @@ fn apply_orbit_input(
             let delta_y = orbit.y / window_size.y * PI;
             orbit_cam.target_yaw -= delta_x;
             orbit_cam.target_pitch += delta_y;
-            return true;
+            return MotionStatus::Changed;
         }
     }
-    false
+    MotionStatus::Unchanged
 }
 
-/// Applies pan input to target focus. Returns `true` if the camera moved.
+/// Applies pan input to target focus. Returns `MotionStatus::Changed` if
+/// the camera moved.
 fn apply_pan_input(
     mut pan: Vec2,
     orbit_cam: &mut OrbitCam,
     viewport_size: Option<Vec2>,
     transform: &Transform,
     projection: &Projection,
-) -> bool {
+) -> MotionStatus {
     if pan.length_squared() > 0.0 {
         // Make panning distance independent of resolution and FOV
         if let Some(viewport_size) = viewport_size {
@@ -169,19 +189,24 @@ fn apply_pan_input(
             let up = transform.rotation * orbit_cam.axis[1] * pan.y;
             let translation = (right + up) * multiplier;
             orbit_cam.target_focus += translation;
-            return true;
+            return MotionStatus::Changed;
         }
     }
-    false
+    MotionStatus::Unchanged
 }
 
-/// Applies scroll/zoom input to target radius. Returns `true` if the camera moved.
+/// Applies scroll/zoom input to target radius. Returns `MotionStatus::Changed`
+/// if the camera moved.
 //
 // Multiplicative (exponential) zoom: one out-tick is the exact inverse of one
 // in-tick at any radius. Additive `radius *= (1 ± k)` would feel symmetric
 // for a single tick but compounds asymmetrically — zoom-out lags zoom-in
 // once you're close.
-fn apply_scroll_input(scroll_line: f32, scroll_pixel: f32, orbit_cam: &mut OrbitCam) -> bool {
+fn apply_scroll_input(
+    scroll_line: f32,
+    scroll_pixel: f32,
+    orbit_cam: &mut OrbitCam,
+) -> MotionStatus {
     if (scroll_line + scroll_pixel).abs() > 0.0 {
         let line_factor = (-scroll_line * SCROLL_ZOOM_FACTOR).exp();
         let pixel_factor = (-scroll_pixel * SCROLL_ZOOM_FACTOR).exp();
@@ -193,9 +218,9 @@ fn apply_scroll_input(scroll_line: f32, scroll_pixel: f32, orbit_cam: &mut Orbit
             .radius
             .map(|value| orbit_cam.clamp_zoom(value * pixel_factor));
 
-        return true;
+        return MotionStatus::Changed;
     }
-    false
+    MotionStatus::Unchanged
 }
 
 /// Interpolates current values toward targets and updates the camera transform.
@@ -296,20 +321,24 @@ pub(crate) fn orbit_cam(
             drag_state.orbit_drag = orbit_drag;
         }
 
-        let mut has_moved = apply_orbit_input(
+        let motion = apply_orbit_input(
             input.orbit,
             &mut orbit_cam,
             *drag_state,
             metrics.input_surface_size,
-        );
-        has_moved |= apply_pan_input(
+        )
+        .merge(apply_pan_input(
             input.pan,
             &mut orbit_cam,
             metrics.camera_view_size,
             &transform,
             &projection,
-        );
-        has_moved |= apply_scroll_input(input.scroll_line, input.scroll_pixel, &mut orbit_cam);
+        ))
+        .merge(apply_scroll_input(
+            input.scroll_line,
+            input.scroll_pixel,
+            &mut orbit_cam,
+        ));
 
         // Apply constraints
         orbit_cam.target_yaw = orbit_cam.clamp_yaw(orbit_cam.target_yaw);
@@ -340,7 +369,7 @@ pub(crate) fn orbit_cam(
             clippy::float_cmp,
             reason = "lerp_and_snap produces bitwise-identical values on convergence"
         )]
-        let needs_update = has_moved
+        let needs_update = motion.is_changed()
             || update_request == OrbitCamUpdateRequest::ForceUpdate
             || orbit_cam.target_yaw != yaw
             || orbit_cam.target_pitch != pitch

@@ -92,9 +92,9 @@ const INSET: Px = Px(FRAME_PAD.0 + BORDER.0);
 pub(crate) const INNER_RADIUS: Px = Px(RADIUS.0 - INSET.0);
 pub(crate) const RADIUS: Px = Px(12.0);
 
-/// Canonical HUD title size. Used by fairy_dust panels and re-exported
+/// Canonical HUD title size. Used by `fairy_dust` panels and re-exported
 /// for ad-hoc panels that want to match the built-in look.
 pub const TITLE_SIZE: Pt = Pt(14.0);
-/// Canonical HUD body / label size. Used by fairy_dust panels and re-exported
+/// Canonical HUD body / label size. Used by `fairy_dust` panels and re-exported
 /// for ad-hoc panels that want to match the built-in look.
 pub const LABEL_SIZE: Pt = Pt(11.0);

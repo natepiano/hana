@@ -471,8 +471,7 @@ fn build_quality_labels_column(b: &mut LayoutBuilder, row_height: Sizing, select
                     |b| {
                         b.text(
                             quality_label(*quality),
-                            LayoutTextStyle::new(Pt(12.0))
-                                .with_color(row_color(is_selected)),
+                            LayoutTextStyle::new(Pt(12.0)).with_color(row_color(is_selected)),
                         );
                     },
                 );

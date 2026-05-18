@@ -14,16 +14,22 @@
 //!
 //! ## Groups
 //!
-//! - `warmup_burst` — full ASCII warm-up across font × px-size × mode.
-//!   The headline number a user feels when swapping `RasterQuality`.
-//! - `thread_scaling` — same workload at 1 / 2 / 4 / 6 / 8 / 12 worker
-//!   threads. Reveals the empirical ceiling for adding more threads.
-//! - `single_glyph` — one glyph at one worker, isolated per-glyph wall
-//!   time independent of dispatch and load-balancing.
-//! - `face_parse` — `ttf-parser` [`Face::parse`] cost. Per-glyph today,
-//!   bounds the win from caching it.
-//! - `image_alloc` — [`Rgb32FImage::new`] cost at the bbox sizes the
-//!   MSDF generator produces. Bounds the win from buffer reuse.
+//! - `warmup_burst` — full ASCII warm-up across font × px-size × mode. The headline number a user
+//!   feels when swapping `RasterQuality`.
+//! - `thread_scaling` — same workload at 1 / 2 / 4 / 6 / 8 / 12 worker threads. Reveals the
+//!   empirical ceiling for adding more threads.
+//! - `single_glyph` — one glyph at one worker, isolated per-glyph wall time independent of dispatch
+//!   and load-balancing.
+//! - `face_parse` — `ttf-parser` [`Face::parse`] cost. Per-glyph today, bounds the win from caching
+//!   it.
+//! - `image_alloc` — [`Rgb32FImage::new`] cost at the bbox sizes the MSDF generator produces.
+//!   Bounds the win from buffer reuse.
+
+#![allow(
+    clippy::panic,
+    clippy::expect_used,
+    reason = "benchmark setup panics on missing test fixtures"
+)]
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -42,8 +48,7 @@ use image::Rgb32FImage;
 use ttf_parser::Face;
 
 const ATLAS_PAGE_SIZE: u32 = 1024;
-const ASCII_PRINTABLE: &str =
-    "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+const ASCII_PRINTABLE: &str = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
 const JETBRAINS_MONO_DATA: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
 const EB_GARAMOND_DATA: &[u8] = include_bytes!("../assets/fonts/EBGaramond-Regular.ttf");
@@ -245,8 +250,7 @@ fn bench_single_glyph(c: &mut Criterion) {
     let mut group = c.benchmark_group("single_glyph");
     group.sample_size(30);
     for case in SINGLE_GLYPH_CASES {
-        let face =
-            Face::parse(case.font_data, 0).unwrap_or_else(|e| panic!("parse font: {e}"));
+        let face = Face::parse(case.font_data, 0).unwrap_or_else(|e| panic!("parse font: {e}"));
         let glyph_index = face
             .glyph_index(case.character)
             .unwrap_or_else(|| panic!("no glyph for '{}'", case.character))
