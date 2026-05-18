@@ -25,7 +25,7 @@ use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
-use super::bitmap_dims::compute_bitmap_size;
+use super::bitmap_dims;
 pub(super) use super::constants::DEFAULT_CANONICAL_SIZE;
 pub(super) use super::constants::DEFAULT_GLYPH_PADDING;
 pub(super) use super::constants::DEFAULT_SDF_RANGE;
@@ -166,7 +166,7 @@ fn rasterize_msdf_bitmap(
 
     let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?;
 
-    let dims = compute_bitmap_size(&face, glyph_id, px_size, sdf_range, padding)?;
+    let dims = bitmap_dims::compute_bitmap_size(&face, glyph_id, px_size, sdf_range, padding)?;
     let image_width = dims.width;
     let image_height = dims.height;
 

@@ -1,5 +1,9 @@
 //! MSDF atlas configuration.
 
+use core::error::Error;
+use core::fmt::Display;
+use core::fmt::Formatter;
+
 use bevy::prelude::*;
 use bevy::tasks;
 use bevy_kana::ToF32;
@@ -113,15 +117,15 @@ pub enum AtlasConfigError {
     GpuMsdfUnsupported,
 }
 
-impl core::fmt::Display for AtlasConfigError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Display for AtlasConfigError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::GpuMsdfUnsupported => f.write_str("MSDF on GPU is not yet implemented (Phase 2)"),
         }
     }
 }
 
-impl core::error::Error for AtlasConfigError {}
+impl Error for AtlasConfigError {}
 
 /// Controls how many worker threads are used for async glyph rasterization.
 ///

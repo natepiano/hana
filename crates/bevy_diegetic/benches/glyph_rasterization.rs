@@ -28,7 +28,9 @@
 #![allow(
     clippy::panic,
     clippy::expect_used,
-    reason = "benchmark setup panics on missing test fixtures"
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "benchmark setup panics on missing test fixtures; bitmap-size math mirrors the production path's bounded f64→u32 cast"
 )]
 
 use std::hint::black_box;

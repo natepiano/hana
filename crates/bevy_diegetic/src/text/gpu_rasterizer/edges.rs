@@ -18,7 +18,7 @@ use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
-use super::super::bitmap_dims::compute_bitmap_size;
+use crate::text::bitmap_dims;
 
 /// Discriminant bits in `EdgeSegment::kind` for the segment order.
 ///
@@ -26,13 +26,13 @@ use super::super::bitmap_dims::compute_bitmap_size;
 /// reserved for the MSDF channel mask (Phase 2).
 /// Linear segment discriminant — matches `EDGE_KIND_LINEAR` in
 /// `shaders/sdf_gen.wgsl`. Bits 0–1 of `EdgeSegment::kind`.
-pub(crate) const EDGE_KIND_LINEAR: u32 = 0;
+pub(super) const EDGE_KIND_LINEAR: u32 = 0;
 /// Quadratic bezier discriminant. Phase 1 SDF kernel handles all three
-/// orders; the constants are public so future MSDF code can validate
+/// orders; the constants stay together so future MSDF code can validate
 /// against the same numeric mapping.
-pub(crate) const EDGE_KIND_QUADRATIC: u32 = 1;
+pub(super) const EDGE_KIND_QUADRATIC: u32 = 1;
 /// Cubic bezier discriminant.
-pub(crate) const EDGE_KIND_CUBIC: u32 = 2;
+pub(super) const EDGE_KIND_CUBIC: u32 = 2;
 
 /// Per-edge record sent to the GPU storage buffer.
 ///
@@ -42,14 +42,14 @@ pub(crate) const EDGE_KIND_CUBIC: u32 = 2;
 /// reserve room for the Phase-2 MSDF channel mask.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
-pub(crate) struct EdgeSegment {
+pub(super) struct EdgeSegment {
     pub points: [f32; 8],
     pub kind:   u32,
 }
 
 /// Output of [`build_edge_buffer`].
 #[derive(Clone, Debug)]
-pub(crate) struct GpuGlyphRequestBody {
+pub(super) struct GpuGlyphRequestBody {
     /// All edges from every contour of the glyph, concatenated.
     pub edges:       Vec<EdgeSegment>,
     /// Bitmap dimensions in texels (the GPU shader writes
@@ -67,10 +67,10 @@ pub(crate) struct GpuGlyphRequestBody {
 ///
 /// Used by the parity test and by the spawned worker task in
 /// `enqueue_gpu_glyph`. Cost is dominated by `load_shape_from_face`
-/// (~hundreds of µs); the helper is `pub(crate)` so it can be spawned
+/// (~hundreds of µs); the helper is `pub(super)` so it can be spawned
 /// inside a worker `async move`.
 #[must_use]
-pub(crate) fn build_edge_buffer(
+pub(super) fn build_edge_buffer(
     font_data: &[u8],
     glyph_index: u16,
     canonical_size: u32,
@@ -81,7 +81,8 @@ pub(crate) fn build_edge_buffer(
     let glyph_id = GlyphId(glyph_index);
     let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?; // allow-banned: upstream fdsm API name
 
-    let dims = compute_bitmap_size(&face, glyph_id, canonical_size, sdf_range, padding)?;
+    let dims =
+        bitmap_dims::compute_bitmap_size(&face, glyph_id, canonical_size, sdf_range, padding)?;
     let image_width = dims.width;
     let image_height = dims.height;
 
@@ -129,7 +130,7 @@ pub(crate) fn build_edge_buffer(
 /// page region synchronously before spawning the expensive
 /// `build_edge_buffer` work on a worker thread.
 #[must_use]
-pub(crate) fn glyph_bitmap_size(
+pub(super) fn glyph_bitmap_size(
     font_data: &[u8],
     glyph_index: u16,
     canonical_size: u32,
@@ -137,7 +138,7 @@ pub(crate) fn glyph_bitmap_size(
     padding: u32,
 ) -> Option<UVec2> {
     let face = Face::parse(font_data, 0).ok()?;
-    let dims = compute_bitmap_size(
+    let dims = bitmap_dims::compute_bitmap_size(
         &face,
         GlyphId(glyph_index),
         canonical_size,

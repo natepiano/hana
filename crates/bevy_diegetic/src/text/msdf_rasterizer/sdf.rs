@@ -12,10 +12,10 @@ use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
-use super::super::bitmap_dims::compute_bitmap_size;
 use super::DistanceField;
 use super::RasterizedBitmap;
 use super::Rasterizer;
+use crate::text::bitmap_dims;
 
 /// Raw single-channel SDF bitmap output from rasterization.
 #[derive(Clone, Debug)]
@@ -63,8 +63,13 @@ impl Rasterizer for SdfRasterizer {
 
         let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?;
 
-        let dims =
-            compute_bitmap_size(&face, glyph_id, self.px_size, self.sdf_range, self.padding)?;
+        let dims = bitmap_dims::compute_bitmap_size(
+            &face,
+            glyph_id,
+            self.px_size,
+            self.sdf_range,
+            self.padding,
+        )?;
         let image_width = dims.width;
         let image_height = dims.height;
 

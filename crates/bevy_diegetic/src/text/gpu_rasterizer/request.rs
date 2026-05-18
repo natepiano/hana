@@ -3,7 +3,8 @@
 
 use std::sync::Mutex;
 use std::sync::PoisonError;
-use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 
 use bevy::math::UVec2;
 use bevy::math::Vec2;
@@ -11,14 +12,14 @@ use bevy::prelude::Event;
 use bevy::prelude::Resource;
 use bevy::render::extract_resource::ExtractResource;
 
-use super::super::atlas::GlyphKey;
-use super::super::msdf_rasterizer::DistanceField;
 use super::edges::GpuGlyphRequestBody;
+use crate::text::atlas::GlyphKey;
+use crate::text::msdf_rasterizer::DistanceField;
 
 /// Single queued glyph request, built on the main world and consumed
 /// by the render-world dispatch system.
 #[derive(Clone, Debug)]
-pub(crate) struct GpuGlyphRequest {
+pub(super) struct GpuGlyphRequest {
     /// Lookup key the completion event echoes back so the observer can
     /// finalize metrics.
     pub key:            GlyphKey,
@@ -43,17 +44,17 @@ pub(crate) struct GpuGlyphRequest {
 /// post-extract.
 #[derive(Resource, Default, Clone, ExtractResource)]
 pub struct GpuGlyphRequestQueue {
-    pub(crate) pending: Vec<GpuGlyphRequest>,
+    pub(super) pending: Vec<GpuGlyphRequest>,
 }
 
 impl GpuGlyphRequestQueue {
     /// Returns the number of pending requests.
     #[must_use]
-    pub fn len(&self) -> usize { self.pending.len() }
+    pub const fn len(&self) -> usize { self.pending.len() }
 
     /// Returns whether the queue is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool { self.pending.is_empty() }
+    pub const fn is_empty(&self) -> bool { self.pending.is_empty() }
 }
 
 /// Message sent from a spawned edge-build task back to the main world.
@@ -63,7 +64,7 @@ impl GpuGlyphRequestQueue {
 /// the atlas can record the sentinel `GlyphMetrics::INVISIBLE` and
 /// stop the key from re-queueing.
 #[derive(Clone, Debug)]
-pub(crate) enum BuiltRequest {
+pub(super) enum BuiltRequest {
     Built(Box<GpuGlyphRequest>),
     Invisible(GlyphKey),
 }
@@ -75,19 +76,19 @@ pub(crate) enum BuiltRequest {
 /// main-world `drain_request_channel` system each frame.
 #[derive(Resource, Clone)]
 pub struct GpuGlyphRequestSender {
-    pub(crate) sender: mpsc::Sender<BuiltRequest>,
+    pub(super) sender: Sender<BuiltRequest>,
 }
 
 /// Receive half of the worker→main request channel.
 #[derive(Resource)]
-pub(crate) struct GpuGlyphRequestReceiver {
-    pub(crate) receiver: Mutex<mpsc::Receiver<BuiltRequest>>,
+pub(super) struct GpuGlyphRequestReceiver {
+    pub(super) receiver: Mutex<Receiver<BuiltRequest>>,
 }
 
 impl GpuGlyphRequestReceiver {
     /// Drains every message that finished since the last poll, returning
     /// them in arrival order.
-    pub(crate) fn drain(&self) -> Vec<BuiltRequest> {
+    pub(super) fn drain(&self) -> Vec<BuiltRequest> {
         let rx = self.receiver.lock().unwrap_or_else(PoisonError::into_inner);
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {

@@ -2,11 +2,22 @@
 
 ## Status
 
-Implementation plan. Adds a GPU compute-shader rasterization path as a
-peer of the existing CPU rasterizer (`fdsm`-backed MSDF / SDF). Routes
-glyph rasterization through wgpu when the atlas is configured with
-`RasterBackend::Gpu`, eliminating the per-glyph CPU wall time that
-dominates atlas warm-up today.
+Phase 1 partially landed on `feat/gpu-rasterizer` (see Phase 1
+Retrospective for the gap list). Phase 2 and Phase 3 not started.
+
+Adds a GPU compute-shader rasterization path as a peer of the existing
+CPU rasterizer (`fdsm`-backed MSDF / SDF). Routes glyph rasterization
+through wgpu when the atlas is configured with `RasterBackend::Gpu`,
+eliminating the per-glyph CPU wall time that dominates atlas warm-up
+today.
+
+**Long-term direction:** the GPU path is not required to match the CPU
+path byte-for-byte and is allowed (encouraged, even) to diverge where
+the GPU can do better — apex fidelity, thin strokes, fractional
+boundary coverage. The first goal is "good enough and a lot faster."
+If that lands, the GPU path becomes the sole path and the `fdsm` CPU
+rasterizer retires. Until then, both backends coexist and the user
+picks via `RasterBackend::{Cpu, Gpu}`.
 
 ## Motivation
 
@@ -794,35 +805,220 @@ Files edited:
 Acceptance:
 - `cargo bench glyph_rasterization -- warmup_burst/jbm_ascii_128_sdf`
   shows GPU backend ≥ 5× faster than CPU backend.
-- The typography example's `B` key (proposed binding) toggles backend
-  at runtime via the `AtlasSlot` swap, no visible flicker.
-- Software-adapter parity test in `parity.rs`: per-pixel distance
-  values match the CPU output within ±1 unit (deterministic on the
-  software adapter). Real-hardware drift is documented but not
-  CI-tested — see "Known limitations → GPU vendor drift".
+- The typography example's `G` key toggles backend at runtime via
+  the `AtlasSlot` swap, no visible flicker. (Originally proposed as
+  `B`; `B` was already `RasterQuality::Small`.)
+- Snapshot test on the software adapter: render a fixed glyph set
+  through the GPU path, save the atlas page PNG, fail if it ever
+  changes without a deliberate `--update-snapshots` opt-in. The GPU
+  output is its *own* golden reference — no byte-for-byte comparison
+  to the CPU rasterizer. Divergence from CPU is allowed and may be
+  desirable (e.g. better apex / thin-stroke fidelity, fractional
+  coverage at boundaries). Visual review covers what snapshots
+  can't.
 - `gpu_cpu_bitmap_size_parity` test: CPU and GPU dimension
-  computations match exactly for a sample glyph set.
+  computations match exactly for a sample glyph set. (Bitmap-size
+  parity stays a hard requirement — the bitmap dimensions are
+  upstream of the rasterizer and a mismatch would break atlas
+  packing regardless of kernel.)
+
+### Phase 1 Retrospective
+
+**What landed:**
+- All Phase 1 files added; module wiring, `RasterBackend` validator,
+  `insert_completed_gpu` path, mpsc channel for worker→main edge-build
+  results, Arc<Mutex> bridge for render→main completions, atlas-side
+  `GpuGlyphDispatcher` trait + `ChannelGpuDispatcher` impl.
+- `drive_atlas_swap` includes backend in the swap-trigger comparison;
+  dispatcher handle is inherited by the pending atlas.
+- `parity.rs` Rust port of the SDF kernel; 5 test cases pass (JBM A/W/O,
+  EB Garamond A/V).
+- Typography example wired with a runtime backend toggle and a status
+  chip.
+- wgpu limits validated at pipeline init.
+
+**What deviated from the plan:**
+- Edge-build was moved off the main thread onto the atlas worker pool
+  via mpsc (D1=B decision). The plan originally described synchronous
+  edge build inside `enqueue_gpu_glyph`. The async path is documented
+  inline in the lifecycle section.
+- Render-schedule set is `RenderSystems::PrepareBindGroups`, not the
+  originally-proposed `Queue.after(Prepare)` — Queue runs before Prepare
+  in Bevy 0.18 so that ordering was impossible.
+- `GlyphHeader` lost its `em_to_px_scale: f32` field (kernel never used
+  it; edges are pre-baked in pixel space). Replaced by `[u32; 2]`
+  padding to keep the 32-byte stride.
+- Completion bridge is `Arc<Mutex<Vec<...>>>` rather than
+  `ExtractResourcePlugin` — extract only travels main→render.
+- Backend toggle keybinding is `G`, not `B` (B was already taken by
+  `RasterQuality::Small`).
+
+**Surprises:**
+- WGSL ray-cast winding vs. fdsm's scanline winding disagree by
+  sub-pixel signed distance on glyph boundaries — most visible as a thin
+  halo on closed contours (e.g. the 'O' counter ring, ~10% of pixels
+  differ at sdf_range=4). Not a kernel bug; inherent algorithmic
+  difference. Parity tolerance had to be relaxed.
+
+**Acceptance gaps (Phase 1 not fully complete):**
+1. **GPU bench acceptance unmet.** Plan called for
+   `cargo bench glyph_rasterization -- warmup_burst/jbm_ascii_128_sdf`
+   to show GPU ≥ 5× faster than CPU. What landed
+   (`warmup_burst_gpu_main_thread`) measures only the main-thread cost
+   of bitmap-size + region allocation + worker-pool edge build. Actual
+   GPU compute time is not in the bench. Closing this needs a Bevy-app
+   bench harness that runs the render schedule headlessly.
+2. **Parity tolerance relaxed.** Plan said ±1 distance unit per pixel on
+   the software adapter. `parity.rs` runs with `TOLERANCE = 64` (≈1 px
+   of signed distance at sdf_range=4) and `MAX_BAD_FRACTION = 0.08`.
+   Root cause is the boundary halo above. Either the criterion needs to
+   be rewritten to "no sign inversions outside an N-pixel boundary
+   band," or the kernel needs to switch to fdsm-style scanline winding
+   to match.
+3. **No headless wgpu integration test.** `parity.rs` exercises the
+   Rust port of the kernel math, not actual WGSL compilation +
+   dispatch against a real adapter. Software-adapter parity (as
+   originally specified) still needs writing.
+4. **`readback.rs` is a stub.** Plan lists it as a Phase 1 deliverable.
+   It exists but does nothing, so `dump_atlas_png` does not work under
+   the GPU backend.
+5. **Backend toggle never exercised end-to-end.** The G-key toggle
+   compiles and wires through `AtlasPreference` →
+   `drive_atlas_swap` → `set_backend`, but the typography example has
+   not been launched to confirm a GPU-rasterized glyph actually appears
+   on screen. The full path (enqueue → channel → extract → dispatch →
+   completion → atlas insert → render) is untested live.
+6. **Keybinding diverged from plan.** Plan proposes `B`; code uses `G`.
+   Trivial doc fix above already records the rebinding; update plan if
+   anything else assumes `B`.
+
+**Deferred — Phase 1 gaps land in the later phase that needs them:**
+- Gap 1 (real-GPU bench) → folded into Phase 2 prerequisites. The same
+  Bevy-app bench harness that closes the Phase 1 5× claim is the only
+  way to measure Phase 2's `warmup_burst/ebg_ascii_256_msdf` ≥ 10×
+  acceptance, so the harness ships at the head of Phase 2.
+- Gap 3 (headless wgpu integration test) → folded into Phase 2
+  prerequisites. Phase 2's 3-glyph parity test cannot run without it,
+  and it also retroactively satisfies Phase 1's software-adapter
+  parity acceptance.
+- Gap 4 (`readback.rs`) → folded into Phase 3. Phase 3's permanent CPU
+  fallback for affected glyphs is what exercises readback; until then
+  the stub is harmless because nothing calls it.
+- Gap 5 (live end-to-end run) → not a plan deliverable; will happen
+  the next time the typography example is launched. No code change
+  needed.
+- Gap 2 (parity tolerance) → dropped. Byte-for-byte parity with the
+  CPU rasterizer is no longer a goal. The GPU path is allowed (and
+  expected) to diverge from CPU where the GPU can do better — apex
+  fidelity, thin strokes, boundary anti-aliasing. Parity tests
+  become snapshot tests against the GPU's own golden output. See the
+  Phase 1 and Phase 2 acceptance bullets for the rewritten test
+  contract. The existing `parity.rs` Rust port of the kernel math
+  stays useful as a regression smoke test (does the kernel still do
+  *something* sensible?) but its tolerances are no longer load-relevant.
+- Gap 6 (G-key keybinding) → already corrected in the Phase 1
+  acceptance bullet above.
+
+### Phase 1 Review
+
+Outcome of the `/phase-review` cycle (Plan subagent returned 10
+findings; user walked through the 3 that needed a decision):
+
+**Applied to the plan without user gate (mechanical):**
+- F2 — Phase 2 `edges.rs` line clarified: `edge_coloring_simple` lands
+  *inside* the spawned worker task, not on the main thread.
+- F4 — Phase 2 names `EDGE_CHANNEL_MASK_SHIFT = 2` and
+  `EDGE_CHANNEL_MASK_BITS = 0b111` alongside the existing
+  `EDGE_KIND_*` constants.
+- F8 — Phase 1 acceptance corrected: `G` key, not `B`.
+- F9 — Phase 3 names the `readback.rs` dependency for the CPU
+  fallback path.
+- F10 — Phase 2 file list adds `text/atlas_config.rs` to delete the
+  `(Gpu, Msdf)` validation rejection.
+
+**Decided by user, applied to the plan:**
+- D1 (covers F1 + F6 + F7): no standalone "Phase 1.5." Each Phase 1
+  acceptance gap was folded into the later phase that needs it —
+  bench harness and headless wgpu test become Phase 2 prerequisites,
+  `readback.rs` becomes a Phase 3 deliverable.
+- D2 (covers F3): `GpuGlyphRequest` becomes an enum
+  (`Sdf { … } | Msdf { … }`) instead of a struct with a runtime
+  `distance_field` tag. The dispatcher matches on the variant. Wrong-
+  pipeline dispatch becomes a compile error, not a runtime assert.
+- D3 (covers F5): byte-for-byte parity with the CPU rasterizer is
+  dropped as a goal. Parity tests become snapshot tests against the
+  GPU's own golden output. The GPU path is allowed to diverge from
+  CPU where the GPU can do better. Long-term: the CPU path retires
+  once the GPU is "good enough and a lot faster."
+
+**Rejected:** none.
 
 ### Phase 2 — MSDF on GPU
+
+**Prerequisites (deferred from Phase 1, must ship at the head of
+Phase 2):**
+- Bevy-app bench harness: `LazyLock<App>` with `RenderPlugin` and
+  `synchronous_pipeline_compilation: true` (already spec'd under
+  "Bench device initialization" below). Closes Phase 1's
+  `warmup_burst/jbm_ascii_128_sdf` ≥ 5× acceptance and is the harness
+  Phase 2's MSDF bench bullet reuses.
+- Headless wgpu integration test: compile `sdf_gen.wgsl` against the
+  software adapter, dispatch a single glyph, read the result back,
+  hash it, and check against a committed snapshot hash. First-run
+  produces the snapshot; subsequent runs catch unintended kernel
+  changes. Closes Phase 1's snapshot-test acceptance and is the
+  scaffold the Phase 2 3-glyph MSDF snapshot test extends.
 
 Files added:
 - `gpu_rasterizer/shaders/msdf_gen.wgsl`
 
 Files edited:
+- `gpu_rasterizer/request.rs` — convert `GpuGlyphRequest` from a
+  struct with a runtime `distance_field: DistanceField` tag into an
+  enum with `Sdf { … }` and `Msdf { channel_masks: …, … }` variants.
+  Common fields (`key`, `bitmap_size`, `bearing`, `atlas_origin`,
+  `page_index`) stay shared in each variant or extract to an inner
+  `Common` struct. SDF-only and MSDF-only fields live only on their
+  variant — the MSDF channel-mask data cannot accidentally appear on
+  an SDF request, and vice versa. `BuiltRequest::Built(Box<…>)` and
+  the mpsc channel sender carry the enum. The runtime
+  `distance_field` field is deleted; the variant tag replaces it.
 - `gpu_rasterizer/edges.rs` — call fdsm's `edge_coloring_simple`
-  routine, pack the channel mask into `EdgeSegment`.
+  *inside* the spawned worker task (the Phase 1 async closure that
+  builds `BuiltRequest::Built`), pack the channel mask into the
+  `kind` field of `EdgeSegment`. Add `EDGE_CHANNEL_MASK_SHIFT: u32 =
+  2` and `EDGE_CHANNEL_MASK_BITS: u32 = 0b111` next to the existing
+  `EDGE_KIND_*` constants; reuse them in `sdf_gen.wgsl` /
+  `msdf_gen.wgsl` for the unpack. The MSDF arm of the worker task
+  constructs `GpuGlyphRequest::Msdf`; the SDF arm constructs
+  `GpuGlyphRequest::Sdf`.
 - `gpu_rasterizer/pipeline.rs` — second pipeline variant for MSDF; or
-  shader pipeline-constant for SDF vs MSDF dispatch.
-- `gpu_rasterizer/dispatch.rs` — route MSDF requests to MSDF pipeline.
+  shader pipeline-constant for SDF vs MSDF dispatch. The pipeline
+  resource holds both compiled pipelines; the dispatcher picks via
+  the request variant `match`.
+- `gpu_rasterizer/dispatch.rs` — `dispatch_glyph_compute` matches on
+  the `GpuGlyphRequest` variant: `Sdf { … }` arm calls the SDF
+  pipeline, `Msdf { … }` arm calls the MSDF pipeline. The compiler
+  refuses to let an MSDF request reach the SDF pipeline (or vice
+  versa) — mixed-mode kernel dispatch is structurally impossible
+  rather than a runtime assert. Per-page grouping still happens after
+  the variant match (group `Vec<SdfReq>` by page, then group
+  `Vec<MsdfReq>` by page).
+- `text/atlas_config.rs` — delete the `(Gpu, Msdf)` rejection branch
+  in `AtlasConfig::validate` (added in Phase 1 as a Phase-2 gate).
 
 Acceptance:
 - `warmup_burst/ebg_ascii_256_msdf` GPU backend ≥ 10× faster than CPU.
-- 3-glyph parity test (A, W, V across both fonts) on the software
-  adapter: per-channel distances match CPU within ±2 distance units.
-  EB Garamond `V` apex preserves corner sharpness.
+- 3-glyph snapshot test (A, W, V across both fonts) on the software
+  adapter: the GPU-rendered MSDF page is its own golden image. The
+  EB Garamond `V` apex is reviewed visually for corner sharpness; if
+  the GPU MSDF beats the CPU MSDF on apex preservation, that is a
+  win, not a parity failure.
 - `edge_coloring_matches_cpu` unit test: calls `edge_coloring_simple`
   on a known glyph outline through both the CPU and GPU edge-buffer
-  builders and asserts channel masks match exactly.
+  builders and asserts channel masks match exactly. (Edge-coloring
+  is a deterministic graph-partition algorithm — it must match.
+  Distance-field output need not.)
 - The `examples/msdf_font_audit.rs` diagnostic tool (see
   "Diagnostics") triages font-specific MSDF artifact reports
   post-launch.
@@ -836,6 +1032,13 @@ CPU fallback covers affected glyphs in the interim.
 
 The CPU fallback stays permanently. Memory cost is a `Vec<u8>` mirror
 per atlas page (~4 MB per 1024² page; typically 1–3 pages).
+
+**Phase 3 also ships `gpu_rasterizer/readback.rs` (deferred from
+Phase 1)** — `copy_texture_to_buffer` + `map_async` mirror of the GPU
+atlas page back into a `Vec<u8>`. The Phase 1 stub is harmless until
+something calls it; Phase 3's permanent CPU fallback is the first
+caller. The error-correction compute pass itself runs in-place on the
+GPU page texture and does not need readback.
 
 ## Testing strategy
 

@@ -36,17 +36,17 @@ use bevy::render::RenderStartup;
 use bevy::render::RenderSystems;
 use bevy::render::extract_resource::ExtractResourcePlugin;
 
-pub(crate) mod dispatch;
-pub(crate) mod edges;
-pub(crate) mod extract;
+mod dispatch;
+mod edges;
+mod extract;
 #[cfg(test)]
 mod parity;
-pub(crate) mod pipeline;
-pub(crate) mod readback;
-pub(crate) mod request;
+mod pipeline;
+mod readback;
+mod request;
 
 pub use self::dispatch::GpuGlyphBudget;
-pub use self::dispatch::RenderAtlasPages;
+use self::dispatch::RenderAtlasPages;
 pub use self::request::GpuGlyphCompleted;
 pub use self::request::GpuGlyphRequestQueue;
 pub use self::request::GpuGlyphRequestSender;
@@ -88,7 +88,7 @@ pub enum GpuEnqueueResult {
 /// is actually rasterized.
 pub fn enqueue_gpu_glyph(
     slot: &mut AtlasSlot,
-    sender: &request::GpuGlyphRequestSender,
+    sender: &GpuGlyphRequestSender,
     key: GlyphKey,
     font_data: &[u8],
     canonical_size: u32,
@@ -134,7 +134,7 @@ pub fn enqueue_gpu_glyph(
             sdf_range,
             padding,
         ) {
-            Some(body) => request::BuiltRequest::Built(Box::new(request::GpuGlyphRequest {
+            Some(body) => BuiltRequest::Built(Box::new(GpuGlyphRequest {
                 key,
                 body,
                 sdf_range: sdf_range_f32,
@@ -142,7 +142,7 @@ pub fn enqueue_gpu_glyph(
                 atlas_origin: region.atlas_origin,
                 page_index: region.page_index,
             })),
-            None => request::BuiltRequest::Invisible(key),
+            None => BuiltRequest::Invisible(key),
         };
         let _ = tx.send(msg);
     })
@@ -150,6 +150,18 @@ pub fn enqueue_gpu_glyph(
 
     GpuEnqueueResult::Queued
 }
+
+use bevy::app::PostStartup;
+use bevy::asset::AssetServer;
+use bevy::ecs::system::Commands;
+use bevy::ecs::system::Res;
+use bevy::render::render_resource::PipelineCache;
+use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::TextureFormatFeatureFlags;
+use bevy::render::renderer::RenderAdapter;
+use bevy::render::renderer::RenderDevice;
+use request::BuiltRequest;
+use request::GpuGlyphRequest;
 
 use self::dispatch::GpuGlyphCompletionBuffer;
 use self::dispatch::dispatch_glyph_compute;
@@ -159,6 +171,7 @@ use self::extract::drain_request_channel;
 use self::extract::sync_render_atlas_pages;
 use self::pipeline::GpuRasterizerPipeline;
 use self::request::GpuGlyphRequestReceiver;
+use super::atlas::GpuAtlasRegion;
 
 /// Adds the GPU glyph rasterizer.
 ///
@@ -191,7 +204,7 @@ impl Plugin for GpuRasterizerPlugin {
             ))
             // PostStartup so the TextPlugin's atlas has already been
             // inserted and its image_handle is populated.
-            .add_systems(bevy::app::PostStartup, install_dispatcher_on_atlas)
+            .add_systems(PostStartup, install_dispatcher_on_atlas)
             .add_systems(PreUpdate, drain_request_channel)
             .add_systems(Update, sync_render_atlas_pages)
             .add_systems(
@@ -224,11 +237,11 @@ impl Plugin for GpuRasterizerPlugin {
 /// [`super::atlas_config::RasterBackend::Cpu`] semantics until a
 /// device with sufficient limits is reachable.
 fn init_pipeline_render_world(
-    mut commands: bevy::ecs::system::Commands,
-    render_device: bevy::ecs::system::Res<bevy::render::renderer::RenderDevice>,
-    render_adapter: bevy::ecs::system::Res<bevy::render::renderer::RenderAdapter>,
-    pipeline_cache: bevy::ecs::system::Res<bevy::render::render_resource::PipelineCache>,
-    asset_server: bevy::ecs::system::Res<bevy::asset::AssetServer>,
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    render_adapter: Res<RenderAdapter>,
+    pipeline_cache: Res<PipelineCache>,
+    asset_server: Res<AssetServer>,
 ) {
     if !device_supports_gpu_rasterization(&render_device, &render_adapter) {
         return;
@@ -240,16 +253,14 @@ fn init_pipeline_render_world(
 /// Returns whether the active wgpu device meets the GPU rasterizer's
 /// minimum requirements. Logs the failing check on rejection.
 fn device_supports_gpu_rasterization(
-    render_device: &bevy::render::renderer::RenderDevice,
-    render_adapter: &bevy::render::renderer::RenderAdapter,
+    render_device: &RenderDevice,
+    render_adapter: &RenderAdapter,
 ) -> bool {
-    use bevy::render::render_resource::TextureFormat;
-    use bevy::render::render_resource::TextureFormatFeatureFlags;
-
-    let limits = render_device.limits();
     // Worst-case edge buffer: 2000 edges × 36 bytes ≈ 72 KB. Picked
     // 256 KB as a generous floor that survives shrunk mobile limits.
     const EDGE_BUFFER_FLOOR_BYTES: u32 = 256 * 1024;
+
+    let limits = render_device.limits();
     if limits.max_storage_buffer_binding_size < EDGE_BUFFER_FLOOR_BYTES {
         warn!(
             "gpu_rasterizer: max_storage_buffer_binding_size={} < {} required; GPU \
@@ -298,7 +309,7 @@ fn device_supports_gpu_rasterization(
 fn finalize_gpu_completion(trigger: On<GpuGlyphCompleted>, mut slot: ResMut<AtlasSlot>) {
     let event = trigger.event();
     let atlas = slot.active_mut();
-    let region = super::atlas::GpuAtlasRegion {
+    let region = GpuAtlasRegion {
         page_index:   event.page_index,
         atlas_origin: event.atlas_origin,
         bitmap_size:  event.bitmap_size,
@@ -310,9 +321,9 @@ fn finalize_gpu_completion(trigger: On<GpuGlyphCompleted>, mut slot: ResMut<Atla
 /// Dispatcher implementation installed on every atlas at startup and
 /// after each swap. Wraps the worker→main channel sender so the atlas
 /// can branch into the GPU path inside `lookup_or_queue` without
-/// importing any gpu_rasterizer types.
-pub(crate) struct ChannelGpuDispatcher {
-    pub(crate) sender: self::request::GpuGlyphRequestSender,
+/// importing any `gpu_rasterizer` types.
+struct ChannelGpuDispatcher {
+    sender: self::request::GpuGlyphRequestSender,
 }
 
 impl GpuGlyphDispatcher for ChannelGpuDispatcher {
@@ -363,7 +374,7 @@ impl GpuGlyphDispatcher for ChannelGpuDispatcher {
                 sdf_range,
                 padding,
             ) {
-                Some(body) => request::BuiltRequest::Built(Box::new(request::GpuGlyphRequest {
+                Some(body) => BuiltRequest::Built(Box::new(GpuGlyphRequest {
                     key,
                     body,
                     sdf_range: sdf_range_f32,
@@ -371,7 +382,7 @@ impl GpuGlyphDispatcher for ChannelGpuDispatcher {
                     atlas_origin: region.atlas_origin,
                     page_index: region.page_index,
                 })),
-                None => request::BuiltRequest::Invisible(key),
+                None => BuiltRequest::Invisible(key),
             };
             let _ = tx.send(msg);
         })
@@ -383,8 +394,8 @@ impl GpuGlyphDispatcher for ChannelGpuDispatcher {
 /// Installs a [`ChannelGpuDispatcher`] on the active atlas at startup
 /// so `atlas.get_or_insert` routes through the GPU path when the
 /// atlas is configured for [`super::atlas_config::RasterBackend::Gpu`].
-pub(crate) fn install_dispatcher_on_atlas(
-    sender: bevy::ecs::system::Res<self::request::GpuGlyphRequestSender>,
+fn install_dispatcher_on_atlas(
+    sender: Res<self::request::GpuGlyphRequestSender>,
     mut slot: ResMut<AtlasSlot>,
 ) {
     let dispatcher = std::sync::Arc::new(ChannelGpuDispatcher {

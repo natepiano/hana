@@ -19,7 +19,7 @@ mod constants;
 mod font;
 mod font_loader;
 mod font_registry;
-pub(crate) mod gpu_rasterizer;
+mod gpu_rasterizer;
 mod measurer;
 mod msdf_rasterizer;
 

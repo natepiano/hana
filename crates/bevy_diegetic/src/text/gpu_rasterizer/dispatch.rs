@@ -15,6 +15,8 @@ use bevy::ecs::system::Res;
 use bevy::ecs::system::ResMut;
 use bevy::image::Image;
 use bevy::log::warn;
+use bevy::math::UVec2;
+use bevy::math::Vec2;
 use bevy::prelude::Resource;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_asset::RenderAssets;
@@ -23,12 +25,16 @@ use bevy::render::render_resource::Buffer;
 use bevy::render::render_resource::BufferInitDescriptor;
 use bevy::render::render_resource::BufferUsages;
 use bevy::render::render_resource::CachedPipelineState;
+use bevy::render::render_resource::CommandEncoder;
 use bevy::render::render_resource::CommandEncoderDescriptor;
 use bevy::render::render_resource::ComputePassDescriptor;
+use bevy::render::render_resource::ComputePipeline;
 use bevy::render::render_resource::PipelineCache;
 use bevy::render::renderer::RenderDevice;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::texture::GpuImage;
+use bevy_kana::ToU32;
+use bevy_kana::ToUsize;
 use bytemuck::cast_slice;
 
 use super::pipeline::GlyphHeader;
@@ -37,6 +43,7 @@ use super::pipeline::RasterParams;
 use super::pipeline::WORKGROUP_SIZE;
 use super::request::GpuGlyphRequest;
 use super::request::GpuGlyphRequestQueue;
+use crate::text::atlas::GlyphKey;
 
 /// Default per-frame dispatch cap. The user can raise this via
 /// `Res<GpuGlyphBudget>` for batch warm-up or loading screens.
@@ -71,10 +78,10 @@ pub struct RenderAtlasPages {
 /// the main world for the [`super::request::GpuGlyphCompleted`] event.
 #[derive(Clone, Copy, Debug)]
 pub struct GpuGlyphCompletedRecord {
-    pub key:          super::super::atlas::GlyphKey,
-    pub bitmap_size:  bevy::math::UVec2,
-    pub bearing:      bevy::math::Vec2,
-    pub atlas_origin: bevy::math::UVec2,
+    pub key:          GlyphKey,
+    pub bitmap_size:  UVec2,
+    pub bearing:      Vec2,
+    pub atlas_origin: UVec2,
     pub page_index:   u32,
 }
 
@@ -88,7 +95,7 @@ pub struct GpuGlyphCompletedRecord {
 /// main-world drain system can read them in the same frame.
 #[derive(Resource, Clone, ExtractResource)]
 pub struct GpuGlyphCompletionBuffer {
-    pub(crate) inner: Arc<Mutex<Vec<GpuGlyphCompletedRecord>>>,
+    inner: Arc<Mutex<Vec<GpuGlyphCompletedRecord>>>,
 }
 
 impl Default for GpuGlyphCompletionBuffer {
@@ -101,16 +108,27 @@ impl Default for GpuGlyphCompletionBuffer {
 
 impl GpuGlyphCompletionBuffer {
     /// Appends a single completion record to the shared buffer.
-    pub(crate) fn push(&self, record: GpuGlyphCompletedRecord) {
+    fn push(&self, record: GpuGlyphCompletedRecord) {
         let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         guard.push(record);
     }
 
     /// Drains every queued completion record.
-    pub(crate) fn drain(&self) -> Vec<GpuGlyphCompletedRecord> {
+    pub(super) fn drain(&self) -> Vec<GpuGlyphCompletedRecord> {
         let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         std::mem::take(&mut *guard)
     }
+}
+
+/// Shared context for per-page dispatch work.
+struct PageDispatchContext<'a> {
+    render_device:    &'a RenderDevice,
+    pipeline_cache:   &'a PipelineCache,
+    pipeline:         &'a GpuRasterizerPipeline,
+    compute_pipeline: &'a ComputePipeline,
+    atlas_pages:      &'a RenderAtlasPages,
+    gpu_images:       &'a RenderAssets<GpuImage>,
+    completions:      &'a GpuGlyphCompletionBuffer,
 }
 
 /// Render-schedule system: drains the extracted request queue and
@@ -143,8 +161,6 @@ pub(super) fn dispatch_glyph_compute(
     }
 
     let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.sdf_pipeline) else {
-        // Pipeline still building; defer until next frame. Requests
-        // stay in the queue so nothing is lost.
         if matches!(
             pipeline_cache.get_compute_pipeline_state(pipeline.sdf_pipeline),
             CachedPipelineState::Err(_)
@@ -156,118 +172,176 @@ pub(super) fn dispatch_glyph_compute(
 
     let take = (budget.per_frame as usize).min(queue.pending.len());
     let dispatched: Vec<GpuGlyphRequest> = queue.pending.drain(..take).collect();
-
-    // Partition by page; one compute pass per page so each pass binds
-    // exactly one storage texture as the write target.
-    let mut by_page: HashMap<u32, Vec<GpuGlyphRequest>> = HashMap::new();
-    for req in dispatched {
-        by_page.entry(req.page_index).or_default().push(req);
-    }
+    let by_page = partition_by_page(dispatched);
 
     let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor {
         label: Some("gpu_rasterizer_encoder"),
     });
 
+    let context = PageDispatchContext {
+        render_device: &render_device,
+        pipeline_cache: &pipeline_cache,
+        pipeline: &pipeline,
+        compute_pipeline,
+        atlas_pages: &atlas_pages,
+        gpu_images: &gpu_images,
+        completions: &completions,
+    };
+
     for (page_index, requests) in &by_page {
-        let Some(handle) = atlas_pages.pages.get(*page_index as usize) else {
-            warn!(
-                "gpu_rasterizer: page {page_index} not in RenderAtlasPages; skipping {} glyph(s)",
-                requests.len()
-            );
-            continue;
-        };
-        let Some(gpu_image) = gpu_images.get(handle) else {
-            // Image not yet uploaded — re-queue for next frame.
-            queue.pending.extend(requests.iter().cloned());
-            continue;
-        };
-
-        // Build concatenated edge buffer and header buffer.
-        let mut edges_combined = Vec::new();
-        let mut headers = Vec::<GlyphHeader>::with_capacity(requests.len());
-        for req in requests {
-            let edge_offset = edges_combined.len() as u32;
-            edges_combined.extend_from_slice(&req.body.edges);
-            headers.push(GlyphHeader {
-                edge_offset,
-                edge_count: req.body.edges.len() as u32,
-                atlas_origin: [req.atlas_origin.x, req.atlas_origin.y],
-                bitmap_size: [req.body.bitmap_size.x, req.body.bitmap_size.y],
-                _padding: [0, 0],
-            });
-        }
-        if edges_combined.is_empty() || headers.is_empty() {
-            continue;
-        }
-
-        let edges_buf = create_storage_buffer(&render_device, "gpu_raster_edges", &edges_combined);
-        let headers_buf = create_storage_buffer(&render_device, "gpu_raster_headers", &headers);
-
-        // Take params from the first request — the dispatch pass
-        // serves one page at a time, and all requests on a page share
-        // the atlas-config-derived sdf_range / distance_field.
-        let first = &requests[0];
-        let params = RasterParams {
-            sdf_range:      first.sdf_range,
-            padding_texels: 0,
-            distance_field: u32::from(first.distance_field),
-            glyph_count:    headers.len() as u32,
-        };
-        let params_buf = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label:    Some("gpu_raster_params"),
-            contents: bytemuck::bytes_of(&params),
-            usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
-
-        let layout = pipeline_cache.get_bind_group_layout(&pipeline.layout);
-        let bind_group = render_device.create_bind_group(
-            Some("gpu_rasterizer_bind_group"),
-            &layout,
-            &BindGroupEntries::sequential((
-                edges_buf.as_entire_binding(),
-                headers_buf.as_entire_binding(),
-                &gpu_image.texture_view,
-                params_buf.as_entire_binding(),
-            )),
-        );
-
-        // Compute the max workgroup grid across all glyphs in this
-        // pass; over-dispatch is bounded by the per-glyph bounds check
-        // inside the shader.
-        let mut max_groups_x = 0_u32;
-        let mut max_groups_y = 0_u32;
-        for req in requests {
-            let gx = req.body.bitmap_size.x.div_ceil(WORKGROUP_SIZE);
-            let gy = req.body.bitmap_size.y.div_ceil(WORKGROUP_SIZE);
-            max_groups_x = max_groups_x.max(gx);
-            max_groups_y = max_groups_y.max(gy);
-        }
-        if max_groups_x == 0 || max_groups_y == 0 {
-            continue;
-        }
-
-        {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label:            Some("gpu_rasterizer_pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(compute_pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(max_groups_x, max_groups_y, headers.len() as u32);
-        }
-
-        for req in requests {
-            completions.push(GpuGlyphCompletedRecord {
-                key:          req.key,
-                bitmap_size:  req.body.bitmap_size,
-                bearing:      bevy::math::Vec2::new(req.body.bearing_x, req.body.bearing_y),
-                atlas_origin: req.atlas_origin,
-                page_index:   req.page_index,
-            });
-        }
+        encode_page(&context, &mut encoder, *page_index, requests, &mut queue);
     }
 
     render_queue.submit(std::iter::once(encoder.finish()));
+}
+
+/// Groups dispatched requests by atlas page index. One compute pass
+/// per page binds exactly one storage texture as the write target.
+fn partition_by_page(dispatched: Vec<GpuGlyphRequest>) -> HashMap<u32, Vec<GpuGlyphRequest>> {
+    let mut by_page: HashMap<u32, Vec<GpuGlyphRequest>> = HashMap::new();
+    for req in dispatched {
+        by_page.entry(req.page_index).or_default().push(req);
+    }
+    by_page
+}
+
+/// Encodes the compute pass for a single atlas page. Re-queues
+/// requests if the page's image is not yet uploaded.
+fn encode_page(
+    context: &PageDispatchContext<'_>,
+    encoder: &mut CommandEncoder,
+    page_index: u32,
+    requests: &[GpuGlyphRequest],
+    queue: &mut GpuGlyphRequestQueue,
+) {
+    let Some(handle) = context.atlas_pages.pages.get(page_index.to_usize()) else {
+        warn!(
+            "gpu_rasterizer: page {page_index} not in RenderAtlasPages; skipping {} glyph(s)",
+            requests.len()
+        );
+        return;
+    };
+    let Some(gpu_image) = context.gpu_images.get(handle) else {
+        queue.pending.extend(requests.iter().cloned());
+        return;
+    };
+
+    let Some(buffers) = build_page_buffers(context.render_device, requests) else {
+        return;
+    };
+
+    let layout = context
+        .pipeline_cache
+        .get_bind_group_layout(&context.pipeline.layout);
+    let bind_group = context.render_device.create_bind_group(
+        Some("gpu_rasterizer_bind_group"),
+        &layout,
+        &BindGroupEntries::sequential((
+            buffers.edges_buf.as_entire_binding(),
+            buffers.headers_buf.as_entire_binding(),
+            &gpu_image.texture_view,
+            buffers.params_buf.as_entire_binding(),
+        )),
+    );
+
+    let (max_groups_x, max_groups_y) = max_workgroup_grid(requests);
+    if max_groups_x == 0 || max_groups_y == 0 {
+        return;
+    }
+
+    {
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label:            Some("gpu_rasterizer_pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(context.compute_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(max_groups_x, max_groups_y, buffers.header_count);
+    }
+
+    for req in requests {
+        context.completions.push(GpuGlyphCompletedRecord {
+            key:          req.key,
+            bitmap_size:  req.body.bitmap_size,
+            bearing:      Vec2::new(req.body.bearing_x, req.body.bearing_y),
+            atlas_origin: req.atlas_origin,
+            page_index:   req.page_index,
+        });
+    }
+}
+
+/// Storage buffers prepared for one compute pass.
+struct PageBuffers {
+    edges_buf:    Buffer,
+    headers_buf:  Buffer,
+    params_buf:   Buffer,
+    header_count: u32,
+}
+
+/// Concatenates edge data and builds header / params buffers for a
+/// single page's requests. Returns `None` if there is nothing to
+/// dispatch (empty edges or no headers).
+fn build_page_buffers(
+    render_device: &RenderDevice,
+    requests: &[GpuGlyphRequest],
+) -> Option<PageBuffers> {
+    let mut edges_combined = Vec::new();
+    let mut headers = Vec::<GlyphHeader>::with_capacity(requests.len());
+    for req in requests {
+        let edge_offset = edges_combined.len().to_u32();
+        edges_combined.extend_from_slice(&req.body.edges);
+        headers.push(GlyphHeader {
+            edge_offset,
+            edge_count: req.body.edges.len().to_u32(),
+            atlas_origin: [req.atlas_origin.x, req.atlas_origin.y],
+            bitmap_size: [req.body.bitmap_size.x, req.body.bitmap_size.y],
+            _padding: [0, 0],
+        });
+    }
+    if edges_combined.is_empty() || headers.is_empty() {
+        return None;
+    }
+
+    let edges_buf = create_storage_buffer(render_device, "gpu_raster_edges", &edges_combined);
+    let headers_buf = create_storage_buffer(render_device, "gpu_raster_headers", &headers);
+
+    // All requests on a page share the atlas-config-derived
+    // sdf_range / distance_field, so take params from the first.
+    let first = &requests[0];
+    let header_count = headers.len().to_u32();
+    let params = RasterParams {
+        sdf_range:      first.sdf_range,
+        padding_texels: 0,
+        distance_field: u32::from(first.distance_field),
+        glyph_count:    header_count,
+    };
+    let params_buf = render_device.create_buffer_with_data(&BufferInitDescriptor {
+        label:    Some("gpu_raster_params"),
+        contents: bytemuck::bytes_of(&params),
+        usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+    });
+
+    Some(PageBuffers {
+        edges_buf,
+        headers_buf,
+        params_buf,
+        header_count,
+    })
+}
+
+/// Computes the max workgroup grid across all glyphs in a pass.
+/// Over-dispatch is bounded by the per-glyph bounds check in the
+/// shader.
+fn max_workgroup_grid(requests: &[GpuGlyphRequest]) -> (u32, u32) {
+    let mut max_groups_x = 0_u32;
+    let mut max_groups_y = 0_u32;
+    for req in requests {
+        let gx = req.body.bitmap_size.x.div_ceil(WORKGROUP_SIZE);
+        let gy = req.body.bitmap_size.y.div_ceil(WORKGROUP_SIZE);
+        max_groups_x = max_groups_x.max(gx);
+        max_groups_y = max_groups_y.max(gy);
+    }
+    (max_groups_x, max_groups_y)
 }
 
 fn create_storage_buffer<T: bytemuck::Pod>(

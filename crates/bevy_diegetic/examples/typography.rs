@@ -236,7 +236,8 @@ fn main() {
                 .control("T Overlay")
                 .control("←/→ Cycle Word")
                 .control("M MSDF")
-                .control("S SDF"),
+                .control("S SDF")
+                .control("G GPU"),
         )
         .wire_chip_to_state::<OverlayState, _>("T Overlay", |state| match state {
             OverlayState::On => ControlActivation::Active,

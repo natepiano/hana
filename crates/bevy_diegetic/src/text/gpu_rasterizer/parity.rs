@@ -15,19 +15,23 @@
 #![allow(
     clippy::panic,
     clippy::unwrap_used,
-    reason = "tests use panic/unwrap for clearer failure messages"
+    clippy::suboptimal_flops,
+    reason = "tests use panic/unwrap for clearer failure messages; arithmetic is a verbatim mirror of WGSL kernel — mul_add would diverge from the GPU code under test"
 )]
 
 use bevy_kana::ToF32;
 use bevy_kana::ToU8;
 use bevy_kana::ToUsize;
 
+use super::edges;
 use super::edges::EDGE_KIND_CUBIC;
 use super::edges::EDGE_KIND_LINEAR;
 use super::edges::EDGE_KIND_QUADRATIC;
 use super::edges::EdgeSegment;
-use super::edges::build_edge_buffer;
 use crate::text::msdf_rasterizer::DistanceField;
+use crate::text::msdf_rasterizer::RasterizedBitmap;
+use crate::text::msdf_rasterizer::Rasterizer;
+use crate::text::msdf_rasterizer::SdfRasterizer;
 
 const JETBRAINS_MONO: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 const EB_GARAMOND: &[u8] = include_bytes!("../../../assets/fonts/EBGaramond-Regular.ttf");
@@ -40,7 +44,7 @@ const PADDING: u32 = 2;
 /// kernel) use a per-pixel ray cast. The two algorithms produce
 /// identical signed-distance values in the interior of solid regions
 /// but disagree at boundary pixels by up to ~1 px of signed distance
-/// (~64 units for the default SDF_RANGE = 4), forming a thin halo
+/// (~64 units for the default `SDF_RANGE` = 4), forming a thin halo
 /// along the outline. The tolerance below ignores those boundary
 /// pixels; the cap on `MAX_BAD_FRACTION` ensures the halo stays
 /// thin.
@@ -260,9 +264,6 @@ fn rust_port_bitmap(edges: &[EdgeSegment], width: u32, height: u32, sdf_range: f
 }
 
 fn cpu_sdf_bitmap(font_data: &[u8], ch: char) -> (Vec<u8>, u32, u32) {
-    use crate::text::msdf_rasterizer::RasterizedBitmap;
-    use crate::text::msdf_rasterizer::Rasterizer;
-    use crate::text::msdf_rasterizer::SdfRasterizer;
     let r = SdfRasterizer::new(CANONICAL_SIZE, SDF_RANGE, PADDING);
     let bitmap = r
         .rasterize(font_data, glyph_index(font_data, ch))
@@ -300,7 +301,7 @@ fn compare_bitmaps(
             bad += 1;
         }
     }
-    let bad_fraction = bad.to_f32() as f64 / total.to_f32() as f64;
+    let bad_fraction = f64::from(bad.to_f32()) / f64::from(total.to_f32());
     // Dump a diff PNG so failures are debuggable: red where GPU port
     // > CPU, blue where GPU port < CPU, gray otherwise.
     if bad_fraction > 0.0 {
@@ -331,7 +332,8 @@ fn compare_bitmaps(
 
 fn run_parity_case(font_data: &[u8], ch: char, font_label: &str) {
     let idx = glyph_index(font_data, ch);
-    let Some(body) = build_edge_buffer(font_data, idx, CANONICAL_SIZE, SDF_RANGE, PADDING) else {
+    let Some(body) = edges::build_edge_buffer(font_data, idx, CANONICAL_SIZE, SDF_RANGE, PADDING)
+    else {
         panic!("build_edge_buffer returned None for '{ch}'");
     };
     let (cpu, cpu_w, cpu_h) = cpu_sdf_bitmap(font_data, ch);

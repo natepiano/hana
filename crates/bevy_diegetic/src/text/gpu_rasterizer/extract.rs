@@ -8,14 +8,15 @@
 use bevy::ecs::system::Commands;
 use bevy::ecs::system::Res;
 use bevy::ecs::system::ResMut;
+use bevy_kana::ToU32;
 
-use super::super::atlas_slot::AtlasSlot;
 use super::dispatch::GpuGlyphCompletionBuffer;
 use super::dispatch::RenderAtlasPages;
 use super::request::BuiltRequest;
 use super::request::GpuGlyphCompleted;
 use super::request::GpuGlyphRequestQueue;
 use super::request::GpuGlyphRequestReceiver;
+use crate::text::atlas_slot::AtlasSlot;
 
 /// Main-world post-extract cleanup: clears the request queue so the
 /// next frame's main-world enqueues start from empty.
@@ -73,7 +74,7 @@ pub(super) fn sync_render_atlas_pages(slot: Res<AtlasSlot>, mut pages: ResMut<Re
     let atlas = slot.active();
     pages.pages.clear();
     for i in 0..atlas.page_count() {
-        if let Some(handle) = atlas.image_handle(i as u32) {
+        if let Some(handle) = atlas.image_handle(i.to_u32()) {
             pages.pages.push(handle.clone());
         }
     }
