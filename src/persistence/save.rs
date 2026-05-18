@@ -126,13 +126,15 @@ pub(crate) fn save_active_window_state(
 
         let (monitor_index, monitor_scale) = existing_monitor.map_or_else(
             || {
-                let p = monitors.first();
-                (p.index, p.scale)
+                let monitor_info = monitors.first();
+                (monitor_info.index, monitor_info.scale)
             },
-            |m| (m.index, m.scale),
+            |current_monitor| (current_monitor.index, current_monitor.scale),
         );
-        let saved_window_mode: SavedWindowMode =
-            existing_monitor.map_or_else(|| (&window.mode).into(), |m| (&m.effective_mode).into());
+        let saved_window_mode: SavedWindowMode = existing_monitor.map_or_else(
+            || (&window.mode).into(),
+            |current_monitor| (&current_monitor.effective_mode).into(),
+        );
         let logical_position = physical_position.map(|p| {
             let logical_x = (f64::from(p.x) / monitor_scale).round().to_i32();
             let logical_y = (f64::from(p.y) / monitor_scale).round().to_i32();
@@ -281,13 +283,15 @@ pub(crate) fn save_window_state(
         // `update_current_monitor`)
         let (monitor_index, monitor_scale) = existing_monitor.map_or_else(
             || {
-                let p = monitors.first();
-                (p.index, p.scale)
+                let monitor_info = monitors.first();
+                (monitor_info.index, monitor_info.scale)
             },
-            |m| (m.index, m.scale),
+            |current_monitor| (current_monitor.index, current_monitor.scale),
         );
-        let saved_window_mode: SavedWindowMode =
-            existing_monitor.map_or_else(|| (&window.mode).into(), |m| (&m.effective_mode).into());
+        let saved_window_mode: SavedWindowMode = existing_monitor.map_or_else(
+            || (&window.mode).into(),
+            |current_monitor| (&current_monitor.effective_mode).into(),
+        );
 
         let entry = cached.0.entry(window_entity).or_default();
 

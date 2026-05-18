@@ -12,6 +12,7 @@ use crate::Platform;
 use crate::WindowKey;
 use crate::config::RestoreWindowConfig;
 use crate::constants::DEFAULT_SCALE_FACTOR;
+use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
 use crate::persistence;
@@ -182,8 +183,8 @@ pub(crate) fn load_target_position(
         MonitorResolutionSource::FallbackToPrimary
     ) {
         warn!(
-            "[load_target_position] Target monitor {} not found, falling back to monitor 0",
-            state.monitor
+            "[load_target_position] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
+            state.monitor,
         );
     }
 

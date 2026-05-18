@@ -13,6 +13,7 @@ use super::config::RestoreWindowConfig;
 use super::constants::DEFAULT_SCALE_FACTOR;
 use super::constants::FIRST_DUPLICATE_SUFFIX;
 use super::constants::MANAGED_WINDOW_NAME_SEPARATOR;
+use super::constants::PRIMARY_MONITOR_INDEX;
 use super::constants::PRIMARY_WINDOW_KEY;
 use super::monitors::CurrentMonitor;
 use super::monitors::Monitors;
@@ -351,8 +352,8 @@ fn restore_managed_window(
         restore::MonitorResolutionSource::FallbackToPrimary
     ) {
         warn!(
-            "[restore_managed_window] Target monitor {} not found, falling back to monitor 0",
-            saved_state.monitor
+            "[restore_managed_window] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
+            saved_state.monitor,
         );
     }
 
