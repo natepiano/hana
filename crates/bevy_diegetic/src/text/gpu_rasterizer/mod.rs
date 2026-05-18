@@ -205,12 +205,19 @@ impl Plugin for GpuRasterizerPlugin {
             // PostStartup so the TextPlugin's atlas has already been
             // inserted and its image_handle is populated.
             .add_systems(PostStartup, install_dispatcher_on_atlas)
-            .add_systems(PreUpdate, drain_request_channel)
-            .add_systems(Update, sync_render_atlas_pages)
+            // Clear main-world queue at start of PreUpdate (after
+            // Extract has run on the previous frame's contents), then
+            // drain the channel into the freshly-empty queue. Order is
+            // critical: if clear runs after drain (or in PostUpdate
+            // before Extract), the queue is wiped before the render
+            // world's Extract schedule can clone it, and
+            // dispatch_glyph_compute sees nothing.
             .add_systems(
-                PostUpdate,
-                (drain_gpu_completions, clear_main_request_queue),
+                PreUpdate,
+                (clear_main_request_queue, drain_request_channel).chain(),
             )
+            .add_systems(Update, sync_render_atlas_pages)
+            .add_systems(PostUpdate, drain_gpu_completions)
             .add_observer(finalize_gpu_completion);
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -367,22 +374,23 @@ impl GpuGlyphDispatcher for ChannelGpuDispatcher {
         )]
         let sdf_range_f32 = sdf_range as f32;
         pool.spawn(async move {
-            let msg = match edges::build_edge_buffer(
+            let msg = if let Some(body) = edges::build_edge_buffer(
                 &font_data,
                 key.glyph_index,
                 canonical_size,
                 sdf_range,
                 padding,
             ) {
-                Some(body) => BuiltRequest::Built(Box::new(GpuGlyphRequest {
+                BuiltRequest::Built(Box::new(GpuGlyphRequest {
                     key,
                     body,
                     sdf_range: sdf_range_f32,
                     distance_field,
                     atlas_origin: region.atlas_origin,
                     page_index: region.page_index,
-                })),
-                None => BuiltRequest::Invisible(key),
+                }))
+            } else {
+                BuiltRequest::Invisible(key)
             };
             let _ = tx.send(msg);
         })

@@ -36,8 +36,7 @@ pub(super) fn drain_request_channel(
     mut queue: ResMut<GpuGlyphRequestQueue>,
     mut slot: ResMut<AtlasSlot>,
 ) {
-    let messages = receiver.drain();
-    for msg in messages {
+    for msg in receiver.drain() {
         match msg {
             BuiltRequest::Built(req) => queue.pending.push(*req),
             BuiltRequest::Invisible(key) => {
@@ -55,8 +54,7 @@ pub(super) fn drain_request_channel(
 /// The atlas-side observer registered in `mod.rs::build` finalizes
 /// each event into a `insert_completed_gpu` call.
 pub(super) fn drain_gpu_completions(buffer: Res<GpuGlyphCompletionBuffer>, mut commands: Commands) {
-    let records = buffer.drain();
-    for record in records {
+    for record in buffer.drain() {
         commands.trigger(GpuGlyphCompleted {
             key:          record.key,
             bitmap_size:  record.bitmap_size,

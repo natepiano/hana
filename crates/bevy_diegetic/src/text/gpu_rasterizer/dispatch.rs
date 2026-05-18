@@ -161,11 +161,10 @@ pub(super) fn dispatch_glyph_compute(
     }
 
     let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.sdf_pipeline) else {
-        if matches!(
-            pipeline_cache.get_compute_pipeline_state(pipeline.sdf_pipeline),
-            CachedPipelineState::Err(_)
-        ) {
-            warn!("gpu_rasterizer: SDF pipeline failed to build; will retry next frame");
+        if let CachedPipelineState::Err(err) =
+            pipeline_cache.get_compute_pipeline_state(pipeline.sdf_pipeline)
+        {
+            warn!("gpu_rasterizer: SDF pipeline failed to build: {err:?}");
         }
         return;
     };

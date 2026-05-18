@@ -17,7 +17,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::Direction;
 use bevy_diegetic::DistanceField;
 use bevy_diegetic::El;
@@ -29,8 +28,6 @@ use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
-use bevy_diegetic::PanelTextChild;
-use bevy_diegetic::PendingGlyphs;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::RasterBackend;
@@ -280,7 +277,6 @@ fn main() {
                 toggle_backend,
                 pick_raster_quality,
                 refresh_quality_panel,
-                log_steady_state_perf,
             ),
         )
         .add_observer(on_world_text_added)
@@ -800,55 +796,6 @@ fn pick_raster_quality(
             return;
         }
     }
-}
-
-/// Logs steady-state per-frame work counts once per second so we can
-/// see which subsystem is actually burning CPU. Watch:
-///
-/// - text-shaping wall time / mesh-build wall time — if non-zero in steady state, some text entity
-///   is being re-processed every frame.
-/// - `pending_panel`/`pending_world` — entities stuck with `PendingGlyphs`; each forces the
-///   text-shaping pass to re-run on it every frame.
-/// - `atlas.poll_ms` — async glyph polling, should be near-zero when no rasterization is in flight.
-/// - `atlas.in_flight_glyphs` — should be 0 in steady state.
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Bevy system parameters are taken by value"
-)]
-fn log_steady_state_perf(
-    perf: Res<DiegeticPerfStats>,
-    time: Res<Time>,
-    pending_panel: Query<(), (With<PanelTextChild>, With<PendingGlyphs>)>,
-    pending_world: Query<(), (With<bevy_diegetic::WorldText>, With<PendingGlyphs>)>,
-    mut last_log: Local<f32>,
-) {
-    let now = time.elapsed_secs();
-    if now - *last_log < 1.0 {
-        return;
-    }
-    *last_log = now;
-    let pending_panel = pending_panel.iter().count();
-    let pending_world = pending_world.iter().count();
-    let pt = &perf.panel_text;
-    let atlas = &perf.atlas;
-    let shaping_ms = pt.shape_ms; // allow-banned: DiegeticPerfStats field name
-    let panels_processed = pt.shaped_panels; // allow-banned: DiegeticPerfStats field name
-    info!(
-        target: "typography_perf",
-        "shaping_ms={:.2} parley_ms={:.2} atlas_lookup_ms={:.2} mesh_build_ms={:.2} \
-         panels_processed={} pending_panel={} pending_world={} atlas_poll_ms={:.2} \
-         atlas_sync_ms={:.2} in_flight={}",
-        shaping_ms,
-        pt.parley_ms,
-        pt.atlas_lookup_ms,
-        pt.mesh_build_ms,
-        panels_processed,
-        pending_panel,
-        pending_world,
-        atlas.poll_ms,
-        atlas.sync_ms,
-        atlas.in_flight_glyphs,
-    );
 }
 
 /// Rebuilds the quality panel tree when the preference changes so the
