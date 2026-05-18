@@ -11,7 +11,6 @@
 use std::fmt::Debug;
 
 use bevy_kana::ToU8;
-use bevy_kana::ToU32;
 use fdsm::bezier::scanline::FillRule;
 use fdsm::correct_error;
 use fdsm::correct_error::ErrorCorrectionConfig;
@@ -26,6 +25,7 @@ use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
+use super::bitmap_dims::compute_bitmap_size;
 pub(super) use super::constants::DEFAULT_CANONICAL_SIZE;
 pub(super) use super::constants::DEFAULT_GLYPH_PADDING;
 pub(super) use super::constants::DEFAULT_SDF_RANGE;
@@ -166,20 +166,15 @@ fn rasterize_msdf_bitmap(
 
     let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?;
 
+    let dims = compute_bitmap_size(&face, glyph_id, px_size, sdf_range, padding)?;
+    let image_width = dims.width;
+    let image_height = dims.height;
+
     let bbox = face.glyph_bounding_box(glyph_id)?;
     let units_per_em = f64::from(face.units_per_em());
     let scale = f64::from(px_size) / units_per_em;
-
-    let total_pad = f64::from(padding) + sdf_range;
     let glyph_width = f64::from(bbox.x_max - bbox.x_min) * scale;
     let glyph_height = f64::from(bbox.y_max - bbox.y_min) * scale;
-
-    let image_width = total_pad.mul_add(2.0, glyph_width).ceil().to_u32();
-    let image_height = total_pad.mul_add(2.0, glyph_height).ceil().to_u32();
-
-    if image_width == 0 || image_height == 0 {
-        return None;
-    }
 
     let actual_pad_x = (f64::from(image_width) - glyph_width) / 2.0;
     let actual_pad_y = (f64::from(image_height) - glyph_height) / 2.0;

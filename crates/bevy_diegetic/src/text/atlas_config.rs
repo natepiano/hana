@@ -12,6 +12,7 @@ use super::constants::DEFAULT_AUTO_GLYPH_WORKER_THREADS;
 use super::constants::DEFAULT_CANONICAL_SIZE;
 use super::constants::DEFAULT_GLYPH_PADDING;
 use super::constants::DEFAULT_GLYPHS_PER_PAGE;
+use super::constants::DEFAULT_SDF_RANGE;
 use super::constants::MAX_CUSTOM_RASTER_SIZE;
 use super::constants::MAX_GLYPHS_PER_PAGE;
 use super::constants::MIN_CUSTOM_RASTER_SIZE;
@@ -79,6 +80,48 @@ impl RasterQuality {
         }
     }
 }
+
+/// Which device produces the glyph distance-field bytes.
+///
+/// Orthogonal to [`DistanceField`], which describes what each texel
+/// encodes. `RasterBackend` describes who computes it.
+///
+/// - [`RasterBackend::Cpu`] — `fdsm` on a worker pool (default).
+/// - [`RasterBackend::Gpu`] — wgpu compute shader writing directly into the atlas page storage
+///   texture.
+///
+/// The GPU backend is opt-in per atlas. Unsupported `(backend,
+/// distance_field)` combinations are rejected by
+/// [`AtlasConfig::validate`]. Device-feature loss (WebGL2, mobile
+/// without compute) is handled at plugin-init time: an atlas configured
+/// `Gpu` on an unsupported device falls back to `Cpu` with a warning.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum RasterBackend {
+    /// Synchronous `fdsm` rasterization on worker threads (default).
+    #[default]
+    Cpu,
+    /// Async wgpu compute rasterization, dispatched in the render
+    /// schedule. SDF only in Phase 1; MSDF lands in Phase 2.
+    Gpu,
+}
+
+/// Reasons an [`AtlasConfig`] is rejected by [`AtlasConfig::validate`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtlasConfigError {
+    /// `(Gpu, Msdf)` is not implemented until Phase 2 of the GPU
+    /// rasterizer rollout.
+    GpuMsdfUnsupported,
+}
+
+impl core::fmt::Display for AtlasConfigError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::GpuMsdfUnsupported => f.write_str("MSDF on GPU is not yet implemented (Phase 2)"),
+        }
+    }
+}
+
+impl core::error::Error for AtlasConfigError {}
 
 /// Controls how many worker threads are used for async glyph rasterization.
 ///
@@ -161,6 +204,12 @@ pub struct AtlasConfig {
     /// [`DistanceField::Sdf`] for smoother curves at the cost of corner
     /// fidelity.
     pub distance_field: DistanceField,
+
+    /// Device that produces the distance-field bytes. Defaults to
+    /// [`RasterBackend::Cpu`]. GPU support is Phase-1 SDF-only; the
+    /// `(Gpu, Msdf)` pair is rejected by [`AtlasConfig::validate`]
+    /// until Phase 2 lands.
+    pub backend: RasterBackend,
 }
 
 impl AtlasConfig {
@@ -172,6 +221,7 @@ impl AtlasConfig {
             glyphs_per_page:      DEFAULT_GLYPHS_PER_PAGE,
             glyph_worker_threads: GlyphWorkerThreads::Auto,
             distance_field:       DistanceField::Msdf,
+            backend:              RasterBackend::Cpu,
         }
     }
 
@@ -201,6 +251,41 @@ impl AtlasConfig {
     pub const fn with_distance_field(mut self, mode: DistanceField) -> Self {
         self.distance_field = mode;
         self
+    }
+
+    /// Sets which device produces the glyph distance-field bytes.
+    #[must_use]
+    pub const fn with_backend(mut self, backend: RasterBackend) -> Self {
+        self.backend = backend;
+        self
+    }
+
+    /// Default per-glyph SDF range in pixels (mirrors
+    /// [`super::constants::DEFAULT_SDF_RANGE`]). Exposed so the GPU
+    /// dispatcher can read it from the resource without a separate
+    /// constants import.
+    #[must_use]
+    pub const fn sdf_range(&self) -> f64 { DEFAULT_SDF_RANGE }
+
+    /// Default per-glyph padding in texels.
+    #[must_use]
+    pub const fn glyph_padding(&self) -> u32 { DEFAULT_GLYPH_PADDING }
+
+    /// Validates the `(backend, distance_field)` pair.
+    ///
+    /// Returns `Err(AtlasConfigError::GpuMsdfUnsupported)` for
+    /// `(Gpu, Msdf)` until Phase 2 of the GPU rasterizer rollout lands.
+    /// All other combinations are accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for any unsupported `(backend, distance_field)`
+    /// combination.
+    pub const fn validate(&self) -> Result<(), AtlasConfigError> {
+        match (self.backend, self.distance_field) {
+            (RasterBackend::Gpu, DistanceField::Msdf) => Err(AtlasConfigError::GpuMsdfUnsupported),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -393,6 +478,7 @@ mod tests {
                     glyphs_per_page: glyphs,
                     glyph_worker_threads: GlyphWorkerThreads::Auto,
                     distance_field: DistanceField::Msdf,
+                    backend: RasterBackend::Cpu,
                 };
                 let size = config.page_size();
                 assert_eq!(

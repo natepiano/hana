@@ -14,16 +14,16 @@
 //!
 //! ## Groups
 //!
-//! - `warmup_burst` — full ASCII warm-up across font × px-size × mode.
-//!   The headline number a user feels when swapping `RasterQuality`.
-//! - `thread_scaling` — same workload at 1 / 2 / 4 / 6 / 8 / 12 worker
-//!   threads. Reveals the empirical ceiling for adding more threads.
-//! - `single_glyph` — one glyph at one worker, isolated per-glyph wall
-//!   time independent of dispatch and load-balancing.
-//! - `face_parse` — `ttf-parser` [`Face::parse`] cost. Per-glyph today,
-//!   bounds the win from caching it.
-//! - `image_alloc` — [`Rgb32FImage::new`] cost at the bbox sizes the
-//!   MSDF generator produces. Bounds the win from buffer reuse.
+//! - `warmup_burst` — full ASCII warm-up across font × px-size × mode. The headline number a user
+//!   feels when swapping `RasterQuality`.
+//! - `thread_scaling` — same workload at 1 / 2 / 4 / 6 / 8 / 12 worker threads. Reveals the
+//!   empirical ceiling for adding more threads.
+//! - `single_glyph` — one glyph at one worker, isolated per-glyph wall time independent of dispatch
+//!   and load-balancing.
+//! - `face_parse` — `ttf-parser` [`Face::parse`] cost. Per-glyph today, bounds the win from caching
+//!   it.
+//! - `image_alloc` — [`Rgb32FImage::new`] cost at the bbox sizes the MSDF generator produces.
+//!   Bounds the win from buffer reuse.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -42,8 +42,7 @@ use image::Rgb32FImage;
 use ttf_parser::Face;
 
 const ATLAS_PAGE_SIZE: u32 = 1024;
-const ASCII_PRINTABLE: &str =
-    "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+const ASCII_PRINTABLE: &str = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
 
 const JETBRAINS_MONO_DATA: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
 const EB_GARAMOND_DATA: &[u8] = include_bytes!("../assets/fonts/EBGaramond-Regular.ttf");
@@ -245,8 +244,7 @@ fn bench_single_glyph(c: &mut Criterion) {
     let mut group = c.benchmark_group("single_glyph");
     group.sample_size(30);
     for case in SINGLE_GLYPH_CASES {
-        let face =
-            Face::parse(case.font_data, 0).unwrap_or_else(|e| panic!("parse font: {e}"));
+        let face = Face::parse(case.font_data, 0).unwrap_or_else(|e| panic!("parse font: {e}"));
         let glyph_index = face
             .glyph_index(case.character)
             .unwrap_or_else(|| panic!("no glyph for '{}'", case.character))
@@ -304,6 +302,130 @@ fn bench_image_alloc(c: &mut Criterion) {
     group.finish();
 }
 
+/// CPU-side cost of the GPU rasterization path: bitmap-size
+/// computation, page-region allocation, edge-buffer build on the
+/// worker pool. **Does not include actual GPU compute time**, which
+/// requires a live wgpu device and render-schedule loop — Phase 1.5
+/// follow-up. The number this group reports is the main-thread cost
+/// the user actually feels when GPU mode is dispatching glyphs, which
+/// is the relevant comparison for "does GPU avoid the rasterization
+/// hitch?". A small number here vs the CPU path means the GPU path
+/// frees the main thread, even if total GPU latency is higher.
+fn bench_gpu_main_thread(c: &mut Criterion) {
+    use std::sync::mpsc;
+
+    use bevy::math::UVec2;
+    use bevy_diegetic::GpuAtlasRegion;
+
+    // The atlas's allocator only needs page size + canonical size for
+    // GPU-mode operation; backend is set so any future internal
+    // branching follows the right path.
+    let pool = shared_pool(WARMUP_THREADS);
+    let mut group = c.benchmark_group("warmup_burst_gpu_main_thread");
+    group.sample_size(20);
+    for case in WARMUP_CASES {
+        if !matches!(case.distance_field, DistanceField::Sdf) {
+            continue; // Phase 1 GPU is SDF-only
+        }
+        group.throughput(Throughput::Elements(count_glyphs(
+            case.font_data,
+            ASCII_PRINTABLE,
+        )));
+        group.bench_function(case.name, |b| {
+            b.iter_with_setup(
+                || {
+                    GlyphAtlas::with_config(
+                        ATLAS_PAGE_SIZE,
+                        case.canonical_size,
+                        WARMUP_THREADS,
+                        case.distance_field,
+                        Some(Arc::clone(&pool)),
+                    )
+                },
+                |mut atlas| {
+                    let face = Face::parse(case.font_data, 0).expect("parse font");
+                    let (tx, rx) = mpsc::channel::<GpuAtlasRegion>();
+                    let mut queued = 0_usize;
+                    for ch in ASCII_PRINTABLE.chars() {
+                        let Some(gid) = face.glyph_index(ch) else {
+                            continue;
+                        };
+                        // Synchronous bitmap-size + allocate (the
+                        // path enqueue_gpu_glyph takes before
+                        // spawning the worker task).
+                        let Some(bitmap_size) =
+                            bench_glyph_bitmap_size(case.font_data, gid.0, case.canonical_size)
+                        else {
+                            continue;
+                        };
+                        let Some(region) = atlas.allocate_gpu_region(bitmap_size) else {
+                            continue;
+                        };
+                        let tx = tx.clone();
+                        let font_data = case.font_data.to_vec();
+                        let canonical_size = case.canonical_size;
+                        atlas
+                            .worker_pool()
+                            .spawn(async move {
+                                let _ = bench_build_edge_buffer(&font_data, gid.0, canonical_size);
+                                let _ = tx.send(region);
+                            })
+                            .detach();
+                        queued += 1;
+                    }
+                    drop(tx);
+                    let mut completed = 0_usize;
+                    while completed < queued {
+                        match rx.recv() {
+                            Ok(_) => completed += 1,
+                            Err(_) => break,
+                        }
+                    }
+                    black_box(atlas.glyph_count());
+                    let _: UVec2 = UVec2::ZERO; // type used in setup, silence unused
+                },
+            );
+        });
+    }
+    group.finish();
+}
+
+/// Mirror of `gpu_rasterizer::edges::glyph_bitmap_size`. The bench can
+/// not depend on private crate items, so this is a verbatim copy of
+/// the math (kept in sync via the shared `compute_bitmap_size` formula
+/// used by both CPU rasterizers).
+fn bench_glyph_bitmap_size(
+    font_data: &[u8],
+    glyph_index: u16,
+    canonical_size: u32,
+) -> Option<bevy::math::UVec2> {
+    let face = Face::parse(font_data, 0).ok()?;
+    let bbox = face.glyph_bounding_box(ttf_parser::GlyphId(glyph_index))?;
+    let units_per_em = f64::from(face.units_per_em());
+    let scale = f64::from(canonical_size) / units_per_em;
+    let total_pad = 2.0_f64 + 4.0_f64;
+    let glyph_width = f64::from(bbox.x_max - bbox.x_min) * scale;
+    let glyph_height = f64::from(bbox.y_max - bbox.y_min) * scale;
+    let width = total_pad.mul_add(2.0, glyph_width).ceil() as u32;
+    let height = total_pad.mul_add(2.0, glyph_height).ceil() as u32;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some(bevy::math::UVec2::new(width, height))
+}
+
+/// Mirror of `gpu_rasterizer::edges::build_edge_buffer` without the
+/// segment packing — the bench measures the cost of loading the
+/// outline and walking contours, which is what the spawned worker
+/// task in `enqueue_gpu_glyph` actually does.
+fn bench_build_edge_buffer(font_data: &[u8], glyph_index: u16, _canonical_size: u32) -> bool {
+    let Ok(face) = Face::parse(font_data, 0) else {
+        return false;
+    };
+    let glyph_id = ttf_parser::GlyphId(glyph_index);
+    fdsm_ttf_parser::load_shape_from_face(&face, glyph_id).is_some() // allow-banned: upstream fdsm API name
+}
+
 criterion_group!(
     benches,
     bench_warmup_burst,
@@ -311,5 +433,6 @@ criterion_group!(
     bench_single_glyph,
     bench_face_parse,
     bench_image_alloc,
+    bench_gpu_main_thread,
 );
 criterion_main!(benches);

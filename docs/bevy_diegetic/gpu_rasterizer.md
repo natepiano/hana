@@ -210,10 +210,14 @@ implemented as a single `Plugin::build` (Bevy 0.18 does not use a
 - Calls `app.sub_app_mut(RenderApp)` to register the render-world
   resources (`RenderGlyphQueue`, `GpuGlyphCompletionBuffer`) and adds
   `dispatch_glyph_compute` into the `Render` schedule, in
-  `RenderSystems::Queue`, ordered `.after(RenderSystems::Prepare)`. The Bevy
-  0.18 render-schedule sets are `ExtractCommands`, `PrepareAssets`,
-  `Prepare`, `Queue`, `PhaseSort`, `Render`, `Cleanup` — `QueueMeshes`
-  is not a valid set name.
+  `RenderSystems::PrepareBindGroups`. The system needs `RenderAssets<GpuImage>`
+  populated (which happens in `PrepareAssets`) and the `PipelineCache` to have
+  resolved the bind-group layout (which happens during `Prepare`). The Bevy
+  0.18 render-schedule ordering is `ExtractCommands → PrepareAssets →
+  PrepareMeshes → CreateViews → Specialize → PrepareViews → Queue →
+  QueueMeshes → QueueSweep → PhaseSort → Prepare → … → PrepareBindGroups →
+  Render → Cleanup → PostCleanup` — note that `Queue` runs *before*
+  `Prepare`, so the dispatch system cannot live in `Queue.after(Prepare)`.
 - Validates wgpu device limits (see "wgpu limits validation"). On
   failure, logs a warning, skips dispatch-system insertion, and any
   GPU-backed atlas constructed later falls back to CPU.
@@ -279,8 +283,12 @@ f32 at dispatch-encoding time.
 | 4  | `edge_count` | u32 |
 | 8  | `atlas_origin` | vec2&lt;u32&gt; (where in the page to write) |
 | 16 | `bitmap_size` | vec2&lt;u32&gt; (width, height in texels) |
-| 24 | `em_to_px_scale` | f32 |
-| 28 | `_padding` | u32 |
+| 24 | `_padding` | [u32; 2] (keeps array stride a multiple of 16) |
+
+Edges are pre-baked into pixel space by `build_edge_buffer` (see
+`edges.rs`), so the kernel does not need an em→px scale. The 8 trailing
+bytes of pad keep storage-buffer array alignment intact and reserve
+room for Phase 2 fields without an ABI break.
 
 `EdgeSegment`: 8 floats covering up to four control points (cubic
 beziers: P0, P1, P2, P3), plus a `kind` u32. Total 36 bytes per edge.
@@ -445,14 +453,17 @@ points into the concatenated buffer. The total edge-buffer size per
 pass is bounded by `wgpu limits validation` (see below).
 
 **Render-to-main completion bridge.** Render-world `EventWriter<T>`
-events do not auto-extract back to the main world in Bevy 0.18. The
-crate's existing pattern (`AtlasSwapStarted` / `FontRegistered` at
+events do not auto-extract back to the main world in Bevy 0.18, and
+`ExtractResourcePlugin<T>` only copies main→render. The completion
+bridge uses an `Arc<Mutex<Vec<GpuGlyphCompletedRecord>>>` wrapped in a
+`GpuGlyphCompletionBuffer` resource: both worlds hold a clone of the
+same `Arc`, so the render-world dispatcher's `push(record)` and the
+main-world drain system's `drain()` operate on the same inner `Vec`.
+The crate's existing pattern (`AtlasSwapStarted` / `FontRegistered` at
 `crates/bevy_diegetic/src/text/mod.rs:186, 273`) is
 `commands.trigger(...)` from a main-world system, observed via
-`app.add_observer`. The dispatch system writes completion records into
-a `GpuGlyphCompletionBuffer` resource (a `Vec<GpuGlyphCompletedRecord>`
-cleared each frame by the extract-back system before render begins);
-the extract-back system on the main world drains the buffer and calls
+`app.add_observer`. The main-world `drain_gpu_completions` system
+reads the shared buffer and calls
 `commands.trigger(GpuGlyphCompleted { ... })` for each record.
 
 `RenderAtlasPages` resource (render-world):
@@ -470,12 +481,17 @@ handles to look up the wgpu texture in `RenderAssets<Image>` and bind
 it as a storage write target.
 
 **Workgroup sizing.** 8×8 = 64 threads per workgroup. The dispatch is
-`(ceil(bitmap_size.x / 8), ceil(bitmap_size.y / 8), 1)` per glyph
-(example: 128×128 → 16×16 = 256 workgroups). Each thread writes one
-output pixel **after** bounds-checking
-`global_invocation_id.xy < bitmap_size`, because not all glyph
-dimensions are multiples of 8 (padding produces 130×130 etc.). The
-bounds check is the standard WGSL idiom for over-dispatched grids.
+**one grid for the whole page**: `(max_x, max_y, glyph_count)` where
+`max_x = max(ceil(bitmap.x / 8))` and `max_y = max(ceil(bitmap.y / 8))`
+across all glyphs in the page. The shader reads `glyphs[workgroup_id.z]`
+to find its glyph header, then bounds-checks
+`global_invocation_id.xy < header.bitmap_size` before writing — over-
+dispatch is bounded by that per-glyph check. This trades a small
+amount of wasted threads on the largest dimension for a single compute
+pass per page instead of N. Each thread writes one output pixel; not
+all glyph dimensions are multiples of 8 (padding produces 130×130
+etc.) so the bounds check is also the standard WGSL idiom for
+over-dispatched grids.
 
 **Queue backpressure.** `RenderGlyphQueue.pending` is unbounded. If
 the user enqueues faster than the budget drains (e.g., streaming a CJK
@@ -601,21 +617,23 @@ mis-classify and patches them. Implemented in Phase 3.
 
 ```
 main world
-  atlas.get_or_insert(key, font_data)
+  enqueue_gpu_glyph(slot, queue, key, font_data, ...)
     │
-    ├── if backend == Cpu: existing path (spawn fdsm task)
+    ├── if backend == Cpu: caller routes through atlas.get_or_insert instead
     │
     └── if backend == Gpu:
-          1. allocate page region (existing shelf allocator)
-          2. mark key as in_flight
-          3. spawn build_edge_buffer on worker pool
-             └── on completion: push GpuGlyphRequest into queue
+          1. build_edge_buffer (synchronous in Phase 1; worker-pool
+             integration planned for Phase 1.5 — see "Worker pool
+             relevance")
+          2. allocate page region (existing shelf allocator)
+          3. mark key as in_flight
+          4. push GpuGlyphRequest into queue
 
 extract schedule (every frame)
   copy GpuGlyphRequestQueue from main → RenderGlyphQueue in render world
   clear main-world queue
 
-render schedule (RenderSystems::Queue, after RenderSystems::Prepare)
+render schedule (RenderSystems::PrepareBindGroups)
   dispatch_glyph_compute system:
     1. drain up to `budget` requests from RenderGlyphQueue
     2. partition by target atlas page (one compute pass per page)
@@ -625,8 +643,9 @@ render schedule (RenderSystems::Queue, after RenderSystems::Prepare)
     6. append completion records into GpuGlyphCompletionBuffer
 
 extract back (render → main)
-  collect GpuGlyphCompletedRender from render world
-  emit GpuGlyphCompleted events in main world
+  shared Arc<Mutex<Vec<...>>> inside GpuGlyphCompletionBuffer: render-side
+  dispatcher pushed records during PrepareBindGroups; main-side
+  drain_gpu_completions reads them and fires GpuGlyphCompleted events
 
 main world (next frame)
   observer on GpuGlyphCompleted:
@@ -663,11 +682,13 @@ most backends — `Rgba8Unorm` satisfies this. Distance values are
 written and read linearly; the text fragment shader treats texel
 channels as distance scalars, not colors, so there is no gamma issue.
 
-`Image` usage flags: add `TextureUsages::STORAGE_BINDING` to atlas
-page images at creation. Verify that Bevy's `Image` asset upload path
-respects this flag — if it does not, the GPU implementation needs a
-custom upload path that constructs the wgpu texture directly. A spike
-during Phase 1 setup confirms this before pipeline work begins.
+`Image` usage flags: `GlyphAtlas::upload_to_gpu` and `sync_to_gpu` set
+`texture_descriptor.usage |= STORAGE_BINDING | COPY_DST |
+TEXTURE_BINDING` on every page image before insertion into
+`Assets<Image>`. Without `STORAGE_BINDING`, wgpu's validation layer
+rejects the compute-pass bind group at runtime. `COPY_DST` keeps the
+existing dirty-page upload path working; `TEXTURE_BINDING` lets the
+text fragment shader sample the page.
 
 ### Page allocation timing
 

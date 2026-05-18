@@ -177,6 +177,7 @@ pub use render::WorldTextReady;
 pub use render::default_panel_material;
 use screen_space::ScreenSpacePlugin;
 pub use text::AtlasConfig;
+pub use text::AtlasConfigError;
 pub use text::AtlasPreference;
 pub use text::AtlasSlot;
 pub use text::AtlasSwapCompleted;
@@ -198,8 +199,17 @@ pub use text::GlyphMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
 pub use text::GlyphWorkerThreads;
+pub use text::GpuAtlasRegion;
+pub use text::GpuEnqueueResult;
+pub use text::GpuGlyphBudget;
+pub use text::GpuGlyphCompleted;
+pub use text::GpuGlyphRequestQueue;
+pub use text::GpuGlyphRequestSender;
+pub use text::GpuRasterizerPlugin;
+pub use text::RasterBackend;
 pub use text::RasterQuality;
 use text::TextPlugin;
+pub use text::enqueue_gpu_glyph;
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///
@@ -236,6 +246,7 @@ impl Plugin for DiegeticUiPlugin {
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((
             TextPlugin,
+            GpuRasterizerPlugin,
             PanelPlugin,
             ScreenSpacePlugin,
             RenderPlugin,

@@ -14,10 +14,12 @@
 mod atlas;
 mod atlas_config;
 mod atlas_slot;
+mod bitmap_dims;
 mod constants;
 mod font;
 mod font_loader;
 mod font_registry;
+pub(crate) mod gpu_rasterizer;
 mod measurer;
 mod msdf_rasterizer;
 
@@ -25,8 +27,11 @@ pub use atlas::GlyphAtlas;
 pub use atlas::GlyphKey;
 pub use atlas::GlyphLookup;
 pub use atlas::GlyphMetrics;
+pub use atlas::GpuAtlasRegion;
 pub use atlas_config::AtlasConfig;
+pub use atlas_config::AtlasConfigError;
 pub use atlas_config::GlyphWorkerThreads;
+pub use atlas_config::RasterBackend;
 pub use atlas_config::RasterQuality;
 pub use atlas_slot::AtlasPreference;
 pub use atlas_slot::AtlasSlot;
@@ -47,6 +52,13 @@ pub use font_registry::FontLoadFailed;
 pub use font_registry::FontRegistered;
 pub use font_registry::FontRegistry;
 pub use font_registry::FontSource;
+pub use gpu_rasterizer::GpuEnqueueResult;
+pub use gpu_rasterizer::GpuGlyphBudget;
+pub use gpu_rasterizer::GpuGlyphCompleted;
+pub use gpu_rasterizer::GpuGlyphRequestQueue;
+pub use gpu_rasterizer::GpuGlyphRequestSender;
+pub use gpu_rasterizer::GpuRasterizerPlugin;
+pub use gpu_rasterizer::enqueue_gpu_glyph;
 pub use measurer::DiegeticTextMeasurer;
 pub use measurer::create_parley_measurer;
 pub use msdf_rasterizer::DistanceField;
@@ -84,21 +96,30 @@ impl Plugin for TextPlugin {
             if app.world().contains_resource::<AtlasConfig>() {
                 config.log_and_clamp();
             }
+            // Reject unsupported (backend, distance_field) combinations
+            // up front so the GPU dispatcher never queues a glyph it
+            // cannot rasterize.
+            if let Err(err) = config.validate() {
+                warn!("AtlasConfig: {err}; downgrading backend to Cpu",);
+            }
             let page_size = config.page_size();
             let canonical_size = config.canonical_size();
             let glyph_worker_threads = config.clamped_glyph_worker_threads();
-            app.insert_resource(AtlasSlot::Single(GlyphAtlas::with_config(
+            let mut atlas = GlyphAtlas::with_config(
                 page_size,
                 canonical_size,
                 glyph_worker_threads,
                 config.distance_field,
                 None,
-            )));
+            );
+            atlas.set_backend(config.backend);
+            app.insert_resource(AtlasSlot::Single(atlas));
         }
         if !app.world().contains_resource::<AtlasPreference>() {
             app.insert_resource(AtlasPreference {
                 distance_field: config.distance_field,
                 quality:        config.quality,
+                backend:        config.backend,
             });
         }
 
@@ -157,9 +178,13 @@ fn drive_atlas_swap(
 ) {
     let active_mode = slot.distance_field();
     let active_canonical = slot.active().canonical_size();
+    let active_backend = slot.active().backend();
     let target_mode = preference.distance_field;
     let target_canonical = preference.quality.pixel_size();
-    let active_matches_target = target_mode == active_mode && target_canonical == active_canonical;
+    let target_backend = preference.backend;
+    let active_matches_target = target_mode == active_mode
+        && target_canonical == active_canonical
+        && target_backend == active_backend;
 
     match (&mut *slot, active_matches_target) {
         // Steady state, matching preferences: nothing to do.
@@ -173,14 +198,23 @@ fn drive_atlas_swap(
                 AtlasSlot::Single(a) => a,
                 AtlasSlot::Swapping { active, .. } => active,
             };
-            let target_cfg = target_config(config.as_deref(), target_mode, preference.quality);
-            let pending = GlyphAtlas::with_config(
+            let target_cfg = target_config(
+                config.as_deref(),
+                target_mode,
+                preference.quality,
+                target_backend,
+            );
+            let mut pending = GlyphAtlas::with_config(
                 target_cfg.page_size(),
                 target_cfg.canonical_size(),
                 target_cfg.clamped_glyph_worker_threads(),
                 target_cfg.distance_field,
                 Some(active.worker_pool()),
             );
+            pending.set_backend(target_cfg.backend);
+            if let Some(dispatcher) = active.gpu_dispatcher_handle() {
+                pending.set_gpu_dispatcher(dispatcher);
+            }
             *slot = AtlasSlot::Swapping { active, pending };
             *frames_in_swap = 0;
             commands.trigger(AtlasSwapStarted);
@@ -200,7 +234,8 @@ fn drive_atlas_swap(
         // Mid-swap, preference still differs from active.
         (AtlasSlot::Swapping { pending, .. }, false) => {
             let pending_matches_target = pending.distance_field() == target_mode
-                && pending.canonical_size() == target_canonical;
+                && pending.canonical_size() == target_canonical
+                && pending.backend() == target_backend;
             if pending_matches_target {
                 // Wait at least two frames after swap start: one for
                 // the `AtlasSwapStarted` observer to mark visible text
@@ -221,14 +256,23 @@ fn drive_atlas_swap(
                 let active = match taken {
                     AtlasSlot::Single(a) | AtlasSlot::Swapping { active: a, .. } => a,
                 };
-                let target_cfg = target_config(config.as_deref(), target_mode, preference.quality);
-                let pending = GlyphAtlas::with_config(
+                let target_cfg = target_config(
+                    config.as_deref(),
+                    target_mode,
+                    preference.quality,
+                    target_backend,
+                );
+                let mut pending = GlyphAtlas::with_config(
                     target_cfg.page_size(),
                     target_cfg.canonical_size(),
                     target_cfg.clamped_glyph_worker_threads(),
                     target_cfg.distance_field,
                     Some(active.worker_pool()),
                 );
+                pending.set_backend(target_cfg.backend);
+                if let Some(dispatcher) = active.gpu_dispatcher_handle() {
+                    pending.set_gpu_dispatcher(dispatcher);
+                }
                 *slot = AtlasSlot::Swapping { active, pending };
                 *frames_in_swap = 0;
                 commands.trigger(AtlasSwapStarted);
@@ -237,12 +281,13 @@ fn drive_atlas_swap(
     }
 }
 
-/// Builds an `AtlasConfig` that overlays the requested mode and
-/// quality onto the user's existing config (or defaults if none).
+/// Builds an `AtlasConfig` that overlays the requested mode, quality,
+/// and backend onto the user's existing config (or defaults if none).
 fn target_config(
     config: Option<&AtlasConfig>,
     mode: DistanceField,
     quality: RasterQuality,
+    backend: RasterBackend,
 ) -> AtlasConfig {
     let base = config.copied().unwrap_or_default();
     AtlasConfig {
@@ -250,6 +295,7 @@ fn target_config(
         glyphs_per_page: base.glyphs_per_page,
         glyph_worker_threads: base.glyph_worker_threads,
         distance_field: mode,
+        backend,
     }
 }
 

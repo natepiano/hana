@@ -34,6 +34,7 @@ bevy = { workspace = true, features = [
 ] }
 bevy_kana = { workspace = true }
 bitflags = { workspace = true }
+bytemuck = { workspace = true }
 etagere = { workspace = true }
 fdsm = { workspace = true }
 fdsm-ttf-parser = { workspace = true }

@@ -17,6 +17,7 @@ use bevy::prelude::Resource;
 
 use super::atlas::AsyncGlyphPollStats;
 use super::atlas::GlyphAtlas;
+use super::atlas_config::RasterBackend;
 use super::atlas_config::RasterQuality;
 use super::msdf_rasterizer::DistanceField;
 
@@ -192,6 +193,8 @@ pub struct AtlasPreference {
     pub distance_field: DistanceField,
     /// Canonical rasterization size in pixels.
     pub quality:        RasterQuality,
+    /// Which device produces glyph distance-field bytes.
+    pub backend:        RasterBackend,
 }
 
 /// Fired when the driver transitions the slot into the `Swapping`

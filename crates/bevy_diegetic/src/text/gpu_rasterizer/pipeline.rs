@@ -1,0 +1,114 @@
+//! wgpu compute pipeline + bind-group layout for GPU glyph rasterization.
+
+use std::borrow::Cow;
+
+use bevy::asset::AssetServer;
+use bevy::asset::Handle;
+use bevy::prelude::Resource;
+use bevy::render::render_resource::BindGroupLayoutDescriptor;
+use bevy::render::render_resource::BindGroupLayoutEntries;
+use bevy::render::render_resource::CachedComputePipelineId;
+use bevy::render::render_resource::ComputePipelineDescriptor;
+use bevy::render::render_resource::PipelineCache;
+use bevy::render::render_resource::ShaderStages;
+use bevy::render::render_resource::StorageTextureAccess;
+use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::binding_types::storage_buffer_read_only_sized;
+use bevy::render::render_resource::binding_types::texture_storage_2d;
+use bevy::render::render_resource::binding_types::uniform_buffer_sized;
+use bevy::shader::Shader;
+
+/// Asset path for the embedded SDF generation kernel.
+///
+/// Loaded via [`bevy::asset::embedded_asset!`] in the plugin so the
+/// WGSL ships in the crate binary.
+pub(super) const SDF_SHADER_ASSET_PATH: &str =
+    "embedded://bevy_diegetic/text/gpu_rasterizer/shaders/sdf_gen.wgsl";
+
+/// Workgroup edge length — 8 × 8 = 64 threads per workgroup.
+pub(super) const WORKGROUP_SIZE: u32 = 8;
+
+/// std140 uniform layout. Matches `RasterParams` in `sdf_gen.wgsl`.
+///
+/// All four fields are 4-byte aligned; the total is 16 bytes which is
+/// already a multiple of 16 so no trailing pad is needed.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub(super) struct RasterParams {
+    pub sdf_range:      f32,
+    pub padding_texels: u32,
+    pub distance_field: u32,
+    pub glyph_count:    u32,
+}
+
+/// std140 per-glyph header. Matches `GlyphHeader` in `sdf_gen.wgsl`.
+///
+/// 24 bytes of data + 8 bytes of trailing pad → 32 bytes per record so
+/// the storage-buffer array stride stays a multiple of 16. The
+/// previous `em_to_px_scale` field was removed: edges are pre-baked
+/// into pixel space by [`super::edges::build_edge_buffer`], so the
+/// kernel never needs the scale.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub(super) struct GlyphHeader {
+    pub edge_offset:  u32,
+    pub edge_count:   u32,
+    pub atlas_origin: [u32; 2],
+    pub bitmap_size:  [u32; 2],
+    pub _padding:     [u32; 2],
+}
+
+/// Render-world resource holding the compute pipeline + bind layout.
+#[derive(Resource)]
+pub(super) struct GpuRasterizerPipeline {
+    pub layout:       BindGroupLayoutDescriptor,
+    pub sdf_pipeline: CachedComputePipelineId,
+    #[allow(
+        dead_code,
+        reason = "kept for shader hot-reload diagnostics and Phase 2 MSDF pipeline init"
+    )]
+    pub shader:       Handle<Shader>,
+}
+
+impl GpuRasterizerPipeline {
+    /// Constructs the layout + queues the pipeline build through the
+    /// `PipelineCache`. The pipeline becomes usable once `PipelineCache`
+    /// reports `CachedPipelineState::Ok` for `sdf_pipeline`.
+    #[must_use]
+    pub fn create(pipeline_cache: &PipelineCache, asset_server: &AssetServer) -> Self {
+        let layout = BindGroupLayoutDescriptor::new(
+            "gpu_rasterizer_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    // 0: edges storage buffer (read-only)
+                    storage_buffer_read_only_sized(false, None),
+                    // 1: glyph headers storage buffer (read-only)
+                    storage_buffer_read_only_sized(false, None),
+                    // 2: output storage texture (write-only)
+                    texture_storage_2d(TextureFormat::Rgba8Unorm, StorageTextureAccess::WriteOnly),
+                    // 3: raster params uniform
+                    uniform_buffer_sized(false, None),
+                ),
+            ),
+        );
+
+        let shader: Handle<Shader> = asset_server.load(SDF_SHADER_ASSET_PATH);
+
+        let sdf_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                            Some("gpu_rasterizer_sdf_pipeline".into()),
+            layout:                           vec![layout.clone()],
+            push_constant_ranges:             Vec::new(),
+            shader:                           shader.clone(),
+            shader_defs:                      Vec::new(),
+            entry_point:                      Some(Cow::Borrowed("sdf_main")),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        Self {
+            layout,
+            sdf_pipeline,
+            shader,
+        }
+    }
+}

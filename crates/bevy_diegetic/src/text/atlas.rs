@@ -13,12 +13,14 @@ use std::sync::mpsc::Sender;
 use std::time::Instant;
 
 use bevy::image::Image;
+use bevy::math::UVec2;
 use bevy::prelude::Assets;
 use bevy::prelude::Handle;
 use bevy::prelude::Resource;
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::TextureUsages;
 use bevy::tasks::TaskPool;
 use bevy::tasks::TaskPoolBuilder;
 use bevy_kana::ToF32;
@@ -28,6 +30,7 @@ use bevy_kana::ToUsize;
 use etagere::AtlasAllocator;
 use etagere::size2;
 
+use super::atlas_config::RasterBackend;
 use super::constants::ATLAS_GUTTER;
 use super::constants::BYTES_PER_PIXEL;
 use super::constants::DEFAULT_ATLAS_SIZE;
@@ -83,7 +86,7 @@ impl GlyphMetrics {
     /// Sentinel for glyphs with no visual representation (e.g. space).
     /// Zero-sized so no quad is generated, but present in the cache so
     /// the glyph isn't re-queued for async rasterization.
-    const INVISIBLE: Self = Self {
+    pub(crate) const INVISIBLE: Self = Self {
         uv_rect:      [0.0; 4],
         bearing_x:    0.0,
         bearing_y:    0.0,
@@ -91,6 +94,21 @@ impl GlyphMetrics {
         pixel_height: 0,
         page_index:   0,
     };
+}
+
+/// Page region reserved for a GPU-dispatched glyph rasterization.
+///
+/// Returned by [`GlyphAtlas::allocate_gpu_region`] so the dispatcher
+/// knows where in the page texture to write and the completion observer
+/// knows how to build [`GlyphMetrics`].
+#[derive(Clone, Copy, Debug)]
+pub struct GpuAtlasRegion {
+    /// Atlas page index the bitmap will be written into.
+    pub page_index:   u32,
+    /// Top-left texel of the bitmap interior on the page.
+    pub atlas_origin: UVec2,
+    /// Bitmap dimensions in texels (excludes the gutter ring).
+    pub bitmap_size:  UVec2,
 }
 
 /// Completed async rasterization result.
@@ -216,6 +234,41 @@ pub struct GlyphAtlas {
     /// Rasterizer chosen at construction. Cloned into each async task
     /// so workers hold a clone independent of the atlas lock.
     rasterizer:        Arc<dyn Rasterizer>,
+    /// Which device rasterizes glyphs. CPU uses `rasterizer` above;
+    /// GPU uses the dispatcher set via [`Self::set_gpu_dispatcher`].
+    /// Defaults to [`RasterBackend::Cpu`].
+    backend:           RasterBackend,
+    /// Callback used to route a single glyph through the GPU path.
+    /// Installed by `GpuRasterizerPlugin::build` once per atlas. When
+    /// `None` (CPU-only atlas or pre-init), `get_or_insert` falls
+    /// back to the CPU path even if `backend == Gpu`.
+    gpu_dispatcher:    Option<Arc<dyn GpuGlyphDispatcher>>,
+}
+
+/// Plug-point the atlas uses to route a glyph through the GPU
+/// rasterizer without depending on the `gpu_rasterizer` module
+/// directly. `GpuRasterizerPlugin` installs an implementation that
+/// allocates the page region, marks the glyph in-flight, and spawns
+/// the edge-build task.
+pub trait GpuGlyphDispatcher: Send + Sync + 'static {
+    /// Enqueues `key` for GPU rasterization. The implementation
+    /// owns all GPU-specific state (sender channel, worker pool) and
+    /// must be safe to call from any thread.
+    ///
+    /// Returns `true` if the request was accepted (queued or already
+    /// handled); `false` only if the dispatcher could not enqueue
+    /// (oversized glyph, unsupported state) so the caller can fall
+    /// back to CPU.
+    fn dispatch(
+        &self,
+        atlas: &mut GlyphAtlas,
+        key: GlyphKey,
+        font_data: &[u8],
+        canonical_size: u32,
+        sdf_range: f64,
+        padding: u32,
+        distance_field: DistanceField,
+    ) -> bool;
 }
 
 impl GlyphAtlas {
@@ -270,6 +323,32 @@ impl GlyphAtlas {
         )
     }
 
+    /// Sets the backend the atlas dispatches to in `get_or_insert`.
+    pub const fn set_backend(&mut self, backend: RasterBackend) { self.backend = backend; }
+
+    /// Returns the backend the atlas dispatches to in `get_or_insert`.
+    #[must_use]
+    pub const fn backend(&self) -> RasterBackend { self.backend }
+
+    /// Installs a GPU dispatcher so [`Self::get_or_insert`] can route
+    /// glyphs through the compute-shader path when
+    /// [`Self::backend()`] is [`RasterBackend::Gpu`].
+    pub fn set_gpu_dispatcher(&mut self, dispatcher: Arc<dyn GpuGlyphDispatcher>) {
+        self.gpu_dispatcher = Some(dispatcher);
+    }
+
+    /// Returns whether the atlas has a GPU dispatcher installed.
+    #[must_use]
+    pub fn has_gpu_dispatcher(&self) -> bool { self.gpu_dispatcher.is_some() }
+
+    /// Returns a clone of the installed GPU dispatcher handle, if any.
+    /// Used by the atlas-swap path so the pending atlas inherits the
+    /// active atlas's dispatcher.
+    #[must_use]
+    pub fn gpu_dispatcher_handle(&self) -> Option<Arc<dyn GpuGlyphDispatcher>> {
+        self.gpu_dispatcher.clone()
+    }
+
     fn new_with_dimensions(
         width: u32,
         height: u32,
@@ -312,6 +391,8 @@ impl GlyphAtlas {
             peak_active_jobs: Arc::new(AtomicUsize::new(0)),
             glyph_worker_pool,
             rasterizer,
+            backend: RasterBackend::Cpu,
+            gpu_dispatcher: None,
         }
     }
 
@@ -433,7 +514,7 @@ impl GlyphAtlas {
             if page.image_handle.is_some() {
                 continue;
             }
-            let image = Image::new(
+            let mut image = Image::new(
                 Extent3d {
                     width:                 self.width,
                     height:                self.height,
@@ -444,6 +525,15 @@ impl GlyphAtlas {
                 TextureFormat::Rgba8Unorm,
                 bevy::asset::RenderAssetUsages::default(),
             );
+            // Atlas pages must allow STORAGE_BINDING so the GPU
+            // rasterizer's compute shader can write distance-field
+            // texels directly into them. Pages also stay COPY_DST so
+            // the existing dirty-page sync_to_gpu path keeps working,
+            // and TEXTURE_BINDING so the text fragment shader can
+            // sample them.
+            image.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::TEXTURE_BINDING;
             page.image_handle = Some(images.add(image));
             page.state = AtlasPageState::Clean;
         }
@@ -466,7 +556,7 @@ impl GlyphAtlas {
                 }
             } else {
                 // New page created at runtime — allocate GPU Image.
-                let image = Image::new(
+                let mut image = Image::new(
                     Extent3d {
                         width:                 self.width,
                         height:                self.height,
@@ -477,6 +567,9 @@ impl GlyphAtlas {
                     TextureFormat::Rgba8Unorm,
                     bevy::asset::RenderAssetUsages::default(),
                 );
+                image.texture_descriptor.usage |= TextureUsages::STORAGE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::TEXTURE_BINDING;
                 page.image_handle = Some(images.add(image));
             }
             page.state = AtlasPageState::Clean;
@@ -506,6 +599,29 @@ impl GlyphAtlas {
         // Already queued — don't spawn a duplicate task.
         if self.in_flight.contains(&key) {
             return GlyphLookup::Pending;
+        }
+
+        // GPU branch: route through the installed dispatcher when the
+        // atlas is configured for GPU rasterization. A `false` return
+        // means the dispatcher could not enqueue (oversized glyph,
+        // missing pipeline); fall through to the CPU path in that
+        // case so the glyph still renders.
+        if matches!(self.backend, RasterBackend::Gpu)
+            && let Some(disp) = self.gpu_dispatcher.clone()
+        {
+            let canonical = self.canonical_size;
+            let mode = self.rasterizer.mode();
+            if disp.dispatch(
+                self,
+                key,
+                font_data,
+                canonical,
+                DEFAULT_SDF_RANGE,
+                DEFAULT_GLYPH_PADDING,
+                mode,
+            ) {
+                return GlyphLookup::Queued;
+            }
         }
 
         // Queue async rasterization.
@@ -623,6 +739,108 @@ impl GlyphAtlas {
         }
         stats.worker_threads = workers.len();
         stats
+    }
+
+    /// Marks a glyph as in-flight without spawning CPU rasterization.
+    ///
+    /// Used by the GPU dispatch path: after [`Self::allocate_gpu_region`]
+    /// reserves a page slot, the caller marks the key in-flight so
+    /// subsequent lookups during the GPU dispatch report `Pending`
+    /// instead of re-queueing.
+    pub fn mark_in_flight(&mut self, key: GlyphKey) { self.in_flight.insert(key); }
+
+    /// Reserves a page region for a GPU-dispatched glyph.
+    ///
+    /// Allocates `bitmap_size + 2 * ATLAS_GUTTER` on a page (creating a
+    /// new page if every existing one is full), returns the interior
+    /// origin where the GPU shader should write. Returns `None` only if
+    /// the requested bitmap is larger than a single page.
+    pub fn allocate_gpu_region(&mut self, bitmap_size: UVec2) -> Option<GpuAtlasRegion> {
+        let width = bitmap_size.x;
+        let height = bitmap_size.y;
+        let g = ATLAS_GUTTER;
+        let padded_width = width + 2 * g;
+        let padded_height = height + 2 * g;
+        let alloc_size = size2(padded_width.to_i32(), padded_height.to_i32());
+
+        let mut found = None;
+        for (i, page) in self.pages.iter_mut().enumerate() {
+            if let Some(alloc) = page.allocator.allocate(alloc_size) {
+                found = Some((i, alloc));
+                break;
+            }
+        }
+        let (page_index, alloc) = if let Some(hit) = found {
+            hit
+        } else {
+            let mut new_page = AtlasPage::new(self.width, self.height);
+            let alloc = new_page.allocator.allocate(alloc_size)?;
+            self.pages.push(new_page);
+            (self.pages.len() - 1, alloc)
+        };
+
+        let rect = alloc.rectangle;
+        let alloc_x = rect.min.x.to_u32();
+        let alloc_y = rect.min.y.to_u32();
+        let x0 = alloc_x + g;
+        let y0 = alloc_y + g;
+        // Mark page dirty so any GPU-side state machine that watches
+        // page state recognizes the region is now in use, even though
+        // CPU pixels were not written here.
+        self.pages[page_index].state = AtlasPageState::Dirty;
+
+        Some(GpuAtlasRegion {
+            page_index: page_index.to_u32(),
+            atlas_origin: UVec2::new(x0, y0),
+            bitmap_size,
+        })
+    }
+
+    /// Builds [`GlyphMetrics`] from the GPU dispatch's pre-computed
+    /// region and the edge builder's reported bearings.
+    #[must_use]
+    pub fn metrics_for_gpu_region(
+        &self,
+        region: GpuAtlasRegion,
+        bearing_x: f32,
+        bearing_y: f32,
+    ) -> GlyphMetrics {
+        let atlas_width = self.width.to_f32();
+        let atlas_height = self.height.to_f32();
+        let x0 = region.atlas_origin.x;
+        let y0 = region.atlas_origin.y;
+        let w = region.bitmap_size.x;
+        let h = region.bitmap_size.y;
+        let u_min = x0.to_f32() / atlas_width;
+        let v_min = y0.to_f32() / atlas_height;
+        let u_max = (x0 + w).to_f32() / atlas_width;
+        let v_max = (y0 + h).to_f32() / atlas_height;
+        GlyphMetrics {
+            uv_rect: [u_min, v_min, u_max, v_max],
+            bearing_x,
+            bearing_y,
+            pixel_width: w,
+            pixel_height: h,
+            page_index: region.page_index,
+        }
+    }
+
+    /// Registers a GPU-dispatched glyph as ready.
+    ///
+    /// Sibling to the CPU-side `insert_bitmap` path: removes `key`
+    /// from the in-flight set and records the pre-computed metrics so
+    /// future lookups hit the cache. The GPU compute pass has already
+    /// written the texels into the page texture; nothing CPU-side
+    /// needs to move.
+    pub fn insert_completed_gpu(&mut self, key: GlyphKey, metrics: GlyphMetrics) {
+        self.in_flight.remove(&key);
+        self.glyphs.insert(key, metrics);
+    }
+
+    /// Marks an in-flight GPU glyph as invisible (no outline / oversized).
+    pub fn insert_completed_gpu_invisible(&mut self, key: GlyphKey) {
+        self.in_flight.remove(&key);
+        self.glyphs.insert(key, GlyphMetrics::INVISIBLE);
     }
 
     /// Synchronously rasterizes and inserts a glyph. Used in tests and
@@ -837,6 +1055,8 @@ impl Default for GlyphAtlas {
             peak_active_jobs: Arc::new(AtomicUsize::new(0)),
             glyph_worker_pool,
             rasterizer,
+            backend: RasterBackend::Cpu,
+            gpu_dispatcher: None,
         }
     }
 }

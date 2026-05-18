@@ -33,6 +33,7 @@ use bevy_diegetic::PanelTextChild;
 use bevy_diegetic::PendingGlyphs;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
+use bevy_diegetic::RasterBackend;
 use bevy_diegetic::RasterQuality;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
@@ -253,6 +254,10 @@ fn main() {
             DistanceField::Sdf => ControlActivation::Active,
             DistanceField::Msdf => ControlActivation::Inactive,
         })
+        .wire_chip_to_state::<AtlasPreference, _>("G GPU", |pref| match pref.backend {
+            RasterBackend::Gpu => ControlActivation::Active,
+            RasterBackend::Cpu => ControlActivation::Inactive,
+        })
         .with_camera_control_panel()
         .insert_resource(WordCycle {
             index: 0,
@@ -271,6 +276,7 @@ fn main() {
                 cycle_word,
                 tick_cycle_state,
                 toggle_distance_field,
+                toggle_backend,
                 pick_raster_quality,
                 refresh_quality_panel,
                 log_steady_state_perf,
@@ -471,8 +477,7 @@ fn build_quality_labels_column(b: &mut LayoutBuilder, row_height: Sizing, select
                     |b| {
                         b.text(
                             quality_label(*quality),
-                            LayoutTextStyle::new(Pt(12.0))
-                                .with_color(row_color(is_selected)),
+                            LayoutTextStyle::new(Pt(12.0)).with_color(row_color(is_selected)),
                         );
                     },
                 );
@@ -763,6 +768,21 @@ fn toggle_distance_field(
         && preference.distance_field != DistanceField::Sdf
     {
         preference.distance_field = DistanceField::Sdf;
+    }
+}
+
+/// `G` flips the rasterizer backend between CPU (`fdsm`) and GPU
+/// (wgpu compute shader). Mutates [`AtlasPreference::backend`]; the
+/// driver picks up the mismatch on the next `PostUpdate` and starts
+/// the parallel-atlas swap into an atlas built with the new backend.
+/// Visual difference signals WGSL kernel bugs — when the GPU path is
+/// correct, rendered glyphs should be byte-identical to CPU.
+fn toggle_backend(keyboard: Res<ButtonInput<KeyCode>>, mut preference: ResMut<AtlasPreference>) {
+    if keyboard.just_pressed(KeyCode::KeyG) {
+        preference.backend = match preference.backend {
+            RasterBackend::Cpu => RasterBackend::Gpu,
+            RasterBackend::Gpu => RasterBackend::Cpu,
+        };
     }
 }
 
