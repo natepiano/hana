@@ -36,11 +36,14 @@ use super::constants::GLYPH_WORKER_THREAD_NAME;
 use super::font::Font;
 use super::font_registry::FontId;
 use super::font_registry::FontRegistry;
-use super::msdf_rasterizer;
 use super::msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
 use super::msdf_rasterizer::DEFAULT_GLYPH_PADDING;
 use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
-use super::msdf_rasterizer::MsdfBitmap;
+use super::msdf_rasterizer::DistanceField;
+use super::msdf_rasterizer::MsdfRasterizer;
+use super::msdf_rasterizer::RasterizedBitmap;
+use super::msdf_rasterizer::Rasterizer;
+use super::msdf_rasterizer::SdfRasterizer;
 use crate::constants::MILLISECONDS_PER_SECOND;
 
 /// Key for looking up a cached glyph in the atlas.
@@ -53,6 +56,13 @@ pub struct GlyphKey {
 }
 
 /// Metrics for a single glyph stored in the atlas.
+///
+/// **Mode-agnostic**: UV rect, bearings, and pixel dimensions are
+/// identical regardless of which rasterizer (MSDF vs. SDF) produced the
+/// underlying bitmap. The atlas insert path computes the same allocation
+/// extent and bearing offsets for both modes; only the per-pixel byte
+/// payload differs. This means downstream code that builds glyph quads
+/// from `GlyphMetrics` does not need to branch on the atlas's mode.
 #[derive(Clone, Copy, Debug)]
 pub struct GlyphMetrics {
     /// UV rectangle in the atlas texture: `[u_min, v_min, u_max, v_max]`.
@@ -87,7 +97,7 @@ impl GlyphMetrics {
 struct RasterizedGlyph {
     key:               GlyphKey,
     /// `None` for glyphs with no visual representation (e.g. space).
-    bitmap:            Option<MsdfBitmap>,
+    bitmap:            Option<RasterizedBitmap>,
     /// End-to-end raster time on the worker.
     elapsed_ms:        f32,
     /// Worker thread id that completed the raster.
@@ -159,19 +169,25 @@ impl AtlasPage {
     }
 }
 
-/// MSDF glyph atlas with automatic page overflow.
+/// Glyph atlas with automatic page overflow.
 ///
-/// Stores RGBA textures containing MSDF glyph bitmaps and a lookup table
-/// mapping [`GlyphKey`] to [`GlyphMetrics`]. Glyphs are packed into pages
-/// using `etagere`'s shelf-packing algorithm. When a page fills, a new
-/// page is allocated automatically.
+/// Stores RGBA textures containing rasterized glyph bitmaps and a
+/// lookup table mapping [`GlyphKey`] to [`GlyphMetrics`]. Glyphs are
+/// packed into pages using `etagere`'s shelf-packing algorithm. When a
+/// page fills, a new page is allocated automatically.
+///
+/// The atlas owns an `Arc<dyn Rasterizer>` chosen at construction time
+/// from the requested [`DistanceField`] — either MSDF (three channels,
+/// sharp corners) or SDF (one channel, smooth curves). Both modes
+/// write into the same RGBA atlas texture; the shader branches on a
+/// per-material uniform.
 ///
 /// Glyph rasterization is asynchronous — cache misses spawn tasks on
-/// [`AsyncComputeTaskPool`] and return `None`. Call
+/// the atlas's worker pool and return `None`. Call
 /// [`poll_async_glyphs`](Self::poll_async_glyphs) each frame to insert
 /// completed results.
 #[derive(Resource)]
-pub struct MsdfAtlas {
+pub struct GlyphAtlas {
     /// Atlas pages, each with its own pixel buffer and allocator.
     pages:             Vec<AtlasPage>,
     /// Cached glyph metrics, keyed by `GlyphKey`.
@@ -180,7 +196,7 @@ pub struct MsdfAtlas {
     width:             u32,
     /// Page height in pixels.
     height:            u32,
-    /// Canonical pixel size for MSDF rasterization.
+    /// Canonical pixel size for glyph rasterization.
     canonical_size:    u32,
     /// Glyph keys currently being rasterized asynchronously.
     in_flight:         HashSet<GlyphKey>,
@@ -192,12 +208,19 @@ pub struct MsdfAtlas {
     active_jobs:       Arc<AtomicUsize>,
     /// Peak concurrently executing raster jobs observed so far.
     peak_active_jobs:  Arc<AtomicUsize>,
-    /// Dedicated worker pool for async glyph rasterization.
+    /// Worker pool for async glyph rasterization. Shared across atlas
+    /// instances during a mode swap so the pending atlas reuses the
+    /// active atlas's threads instead of doubling the live thread
+    /// count.
     glyph_worker_pool: Arc<TaskPool>,
+    /// Rasterizer chosen at construction. Cloned into each async task
+    /// so workers hold a clone independent of the atlas lock.
+    rasterizer:        Arc<dyn Rasterizer>,
 }
 
-impl MsdfAtlas {
-    /// Creates a new atlas with the default page size and canonical size.
+impl GlyphAtlas {
+    /// Creates a new atlas with the default page size, canonical size,
+    /// and MSDF rasterizer.
     #[must_use]
     pub fn new() -> Self {
         Self::new_with_dimensions(
@@ -205,10 +228,13 @@ impl MsdfAtlas {
             DEFAULT_ATLAS_SIZE,
             DEFAULT_CANONICAL_SIZE,
             DEFAULT_GLYPH_WORKER_THREADS,
+            DistanceField::Msdf,
+            None,
         )
     }
 
-    /// Creates a new atlas with a specific page size (uses default canonical size).
+    /// Creates a new atlas with a specific page size (default canonical
+    /// size and MSDF rasterizer).
     #[must_use]
     pub fn with_size(width: u32, height: u32) -> Self {
         Self::new_with_dimensions(
@@ -216,13 +242,32 @@ impl MsdfAtlas {
             height,
             DEFAULT_CANONICAL_SIZE,
             DEFAULT_GLYPH_WORKER_THREADS,
+            DistanceField::Msdf,
+            None,
         )
     }
 
-    /// Creates a new atlas with a specific page size and canonical rasterization size.
+    /// Creates a new atlas configured from `AtlasConfig`-derived values.
+    ///
+    /// `shared_worker_pool`: when `Some`, the new atlas reuses the given
+    /// pool instead of allocating its own. Used by the mode-swap path
+    /// so the pending atlas does not double the live thread count.
     #[must_use]
-    pub fn with_config(page_size: u32, canonical_size: u32, glyph_worker_threads: usize) -> Self {
-        Self::new_with_dimensions(page_size, page_size, canonical_size, glyph_worker_threads)
+    pub fn with_config(
+        page_size: u32,
+        canonical_size: u32,
+        glyph_worker_threads: usize,
+        distance_field: DistanceField,
+        shared_worker_pool: Option<Arc<TaskPool>>,
+    ) -> Self {
+        Self::new_with_dimensions(
+            page_size,
+            page_size,
+            canonical_size,
+            glyph_worker_threads,
+            distance_field,
+            shared_worker_pool,
+        )
     }
 
     fn new_with_dimensions(
@@ -230,8 +275,30 @@ impl MsdfAtlas {
         height: u32,
         canonical_size: u32,
         glyph_worker_threads: usize,
+        distance_field: DistanceField,
+        shared_worker_pool: Option<Arc<TaskPool>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
+        let rasterizer: Arc<dyn Rasterizer> = match distance_field {
+            DistanceField::Msdf => Arc::new(MsdfRasterizer::new(
+                canonical_size,
+                DEFAULT_SDF_RANGE,
+                DEFAULT_GLYPH_PADDING,
+            )),
+            DistanceField::Sdf => Arc::new(SdfRasterizer::new(
+                canonical_size,
+                DEFAULT_SDF_RANGE,
+                DEFAULT_GLYPH_PADDING,
+            )),
+        };
+        let glyph_worker_pool = shared_worker_pool.unwrap_or_else(|| {
+            Arc::new(
+                TaskPoolBuilder::new()
+                    .num_threads(glyph_worker_threads)
+                    .thread_name(GLYPH_WORKER_THREAD_NAME.to_string())
+                    .build(),
+            )
+        });
         Self {
             pages: vec![AtlasPage::new(width, height)],
             glyphs: HashMap::new(),
@@ -243,13 +310,27 @@ impl MsdfAtlas {
             tx,
             active_jobs: Arc::new(AtomicUsize::new(0)),
             peak_active_jobs: Arc::new(AtomicUsize::new(0)),
-            glyph_worker_pool: Arc::new(
-                TaskPoolBuilder::new()
-                    .num_threads(glyph_worker_threads)
-                    .thread_name(GLYPH_WORKER_THREAD_NAME.to_string())
-                    .build(),
-            ),
+            glyph_worker_pool,
+            rasterizer,
         }
+    }
+
+    /// Distance-field variant this atlas was built with.
+    #[must_use]
+    pub fn distance_field(&self) -> DistanceField { self.rasterizer.mode() }
+
+    /// Whether a glyph is already rasterized into the cache.
+    #[must_use]
+    pub fn is_ready(&self, key: GlyphKey) -> bool { self.glyphs.contains_key(&key) }
+
+    /// Returns a clone of the shared worker pool. Used by the mode-swap
+    /// path so the pending atlas reuses the active atlas's threads.
+    #[must_use]
+    pub fn worker_pool(&self) -> Arc<TaskPool> { Arc::clone(&self.glyph_worker_pool) }
+
+    /// Iterates over keys currently being rasterized asynchronously.
+    pub fn in_flight_keys(&self) -> impl Iterator<Item = GlyphKey> + '_ {
+        self.in_flight.iter().copied()
     }
 
     /// Returns the page width in pixels.
@@ -434,19 +515,13 @@ impl MsdfAtlas {
         let peak_active_jobs = Arc::clone(&self.peak_active_jobs);
         let glyph_index = key.glyph_index;
         let font_data = font_data.to_vec();
-        let canonical = self.canonical_size;
+        let rasterizer = Arc::clone(&self.rasterizer);
         self.glyph_worker_pool
             .spawn(async move {
                 let active_now = active_jobs.fetch_add(1, Ordering::Relaxed) + 1;
                 peak_active_jobs.fetch_max(active_now, Ordering::Relaxed);
                 let start = Instant::now();
-                let bitmap = msdf_rasterizer::rasterize_glyph(
-                    &font_data,
-                    glyph_index,
-                    canonical,
-                    DEFAULT_SDF_RANGE,
-                    DEFAULT_GLYPH_PADDING,
-                );
+                let bitmap = rasterizer.rasterize(&font_data, glyph_index);
                 let elapsed_ms = start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
                 let worker = format!("{:?}", std::thread::current().id());
                 let _ = tx.send(RasterizedGlyph {
@@ -476,7 +551,7 @@ impl MsdfAtlas {
     ///
     /// ```ignore
     /// app.add_observer(|trigger: On<FontRegistered>,
-    ///                    mut atlas: ResMut<MsdfAtlas>,
+    ///                    mut atlas: ResMut<GlyphAtlas>,
     ///                    font_registry: Res<FontRegistry>| {
     ///     atlas.preload("ABCDEF...", trigger.id, &font_registry);
     /// });
@@ -557,13 +632,7 @@ impl MsdfAtlas {
         if let Some(metrics) = self.glyphs.get(&key) {
             return Some(*metrics);
         }
-        let bitmap = msdf_rasterizer::rasterize_glyph(
-            font_data,
-            key.glyph_index,
-            self.canonical_size,
-            DEFAULT_SDF_RANGE,
-            DEFAULT_GLYPH_PADDING,
-        )?;
+        let bitmap = self.rasterizer.rasterize(font_data, key.glyph_index)?;
         self.insert_bitmap(key, &bitmap)
     }
 
@@ -572,12 +641,20 @@ impl MsdfAtlas {
     ///
     /// Allocates `bitmap + 2 * ATLAS_GUTTER` per page, copies the bitmap
     /// into the interior, replicates border texels into the gutter, and
-    /// computes UV coordinates inset by half a texel so linear filtering
-    /// samples texel centers rather than edges.
-    fn insert_bitmap(&mut self, key: GlyphKey, bitmap: &MsdfBitmap) -> Option<GlyphMetrics> {
+    /// computes UV coordinates. The atlas gutter (replicated border
+    /// texels) handles edge sampling — no half-texel inset needed.
+    ///
+    /// Per-pixel layout depends on the [`RasterizedBitmap`] variant:
+    /// MSDF writes 3 bytes (R, G, B) and A=255; SDF writes 1 byte into
+    /// R, with G=B=0 and A=255 (the shader reads only R in SDF mode).
+    fn insert_bitmap(&mut self, key: GlyphKey, bitmap: &RasterizedBitmap) -> Option<GlyphMetrics> {
+        let (width, height, bearing_x, bearing_y) = match bitmap {
+            RasterizedBitmap::Msdf(b) => (b.width, b.height, b.bearing_x, b.bearing_y),
+            RasterizedBitmap::Sdf(b) => (b.width, b.height, b.bearing_x, b.bearing_y),
+        };
         let g = ATLAS_GUTTER;
-        let padded_width = bitmap.width + 2 * g;
-        let padded_height = bitmap.height + 2 * g;
+        let padded_width = width + 2 * g;
+        let padded_height = height + 2 * g;
         let alloc_size = size2(padded_width.to_i32(), padded_height.to_i32());
 
         // Try each existing page.
@@ -608,50 +685,57 @@ impl MsdfAtlas {
         let x0 = alloc_x + g;
         let y0 = alloc_y + g;
 
-        // Copy RGB bitmap data into RGBA page pixels (interior).
-        for row in 0..bitmap.height {
-            for col in 0..bitmap.width {
-                let src_idx = ((row * bitmap.width + col) * 3).to_usize();
-                let dst_x = x0 + col;
-                let dst_y = y0 + row;
-                let dst_idx = ((dst_y * self.width + dst_x) * BYTES_PER_PIXEL).to_usize();
-
-                page.pixels[dst_idx] = bitmap.data[src_idx];
-                page.pixels[dst_idx + 1] = bitmap.data[src_idx + 1];
-                page.pixels[dst_idx + 2] = bitmap.data[src_idx + 2];
-                page.pixels[dst_idx + 3] = 255;
-            }
+        // Copy bitmap data into RGBA page pixels (interior). Each
+        // variant decides how its per-pixel bytes map onto the RGBA
+        // texel.
+        match bitmap {
+            RasterizedBitmap::Msdf(b) => {
+                for row in 0..b.height {
+                    for col in 0..b.width {
+                        let src_idx = ((row * b.width + col) * 3).to_usize();
+                        let dst_x = x0 + col;
+                        let dst_y = y0 + row;
+                        let dst_idx = ((dst_y * self.width + dst_x) * BYTES_PER_PIXEL).to_usize();
+                        page.pixels[dst_idx] = b.data[src_idx];
+                        page.pixels[dst_idx + 1] = b.data[src_idx + 1];
+                        page.pixels[dst_idx + 2] = b.data[src_idx + 2];
+                        page.pixels[dst_idx + 3] = 255;
+                    }
+                }
+            },
+            RasterizedBitmap::Sdf(b) => {
+                for row in 0..b.height {
+                    for col in 0..b.width {
+                        let src_idx = (row * b.width + col).to_usize();
+                        let dst_x = x0 + col;
+                        let dst_y = y0 + row;
+                        let dst_idx = ((dst_y * self.width + dst_x) * BYTES_PER_PIXEL).to_usize();
+                        page.pixels[dst_idx] = b.data[src_idx];
+                        page.pixels[dst_idx + 1] = 0;
+                        page.pixels[dst_idx + 2] = 0;
+                        page.pixels[dst_idx + 3] = 255;
+                    }
+                }
+            },
         }
 
         // Replicate border texels into the gutter so linear filtering
         // at the edge samples continuous distance field values.
-        Self::replicate_gutter(
-            &mut page.pixels,
-            self.width,
-            x0,
-            y0,
-            bitmap.width,
-            bitmap.height,
-            g,
-        );
+        Self::replicate_gutter(&mut page.pixels, self.width, x0, y0, width, height, g);
 
-        // UV coordinates map the full bitmap extent. The atlas gutter
-        // (replicated border texels) handles edge sampling — no half-texel
-        // inset needed. Insetting would stretch the MSDF across the quad
-        // and push the visible contour beyond the font metrics.
         let atlas_width = self.width.to_f32();
         let atlas_height = self.height.to_f32();
         let u_min = x0.to_f32() / atlas_width;
         let v_min = y0.to_f32() / atlas_height;
-        let u_max = (x0 + bitmap.width).to_f32() / atlas_width;
-        let v_max = (y0 + bitmap.height).to_f32() / atlas_height;
+        let u_max = (x0 + width).to_f32() / atlas_width;
+        let v_max = (y0 + height).to_f32() / atlas_height;
 
         let metrics = GlyphMetrics {
             uv_rect:      [u_min, v_min, u_max, v_max],
-            bearing_x:    bitmap.bearing_x.to_f32(),
-            bearing_y:    bitmap.bearing_y.to_f32(),
-            pixel_width:  bitmap.width,
-            pixel_height: bitmap.height,
+            bearing_x:    bearing_x.to_f32(),
+            bearing_y:    bearing_y.to_f32(),
+            pixel_width:  width,
+            pixel_height: height,
             page_index:   page_index.to_u32(),
         };
 
@@ -720,6 +804,123 @@ impl MsdfAtlas {
     }
 }
 
-impl Default for MsdfAtlas {
-    fn default() -> Self { Self::new() }
+impl Default for GlyphAtlas {
+    /// Returns an empty placeholder atlas — no pages, no glyphs, no
+    /// cached rasterizations. Used internally only as the transient
+    /// value left behind by `std::mem::take` during a mode swap; the
+    /// `AtlasSlot::complete_swap` step overwrites it with `pending`
+    /// immediately afterward. No public API surface ever observes this
+    /// state.
+    fn default() -> Self {
+        let (tx, rx) = mpsc::channel();
+        let rasterizer: Arc<dyn Rasterizer> = Arc::new(MsdfRasterizer::new(
+            DEFAULT_CANONICAL_SIZE,
+            DEFAULT_SDF_RANGE,
+            DEFAULT_GLYPH_PADDING,
+        ));
+        let glyph_worker_pool = Arc::new(
+            TaskPoolBuilder::new()
+                .num_threads(1)
+                .thread_name(GLYPH_WORKER_THREAD_NAME.to_string())
+                .build(),
+        );
+        Self {
+            pages: Vec::new(),
+            glyphs: HashMap::new(),
+            width: 0,
+            height: 0,
+            canonical_size: DEFAULT_CANONICAL_SIZE,
+            in_flight: HashSet::new(),
+            rx: Mutex::new(rx),
+            tx,
+            active_jobs: Arc::new(AtomicUsize::new(0)),
+            peak_active_jobs: Arc::new(AtomicUsize::new(0)),
+            glyph_worker_pool,
+            rasterizer,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::panic,
+        clippy::unwrap_used,
+        reason = "tests use panic/unwrap for clearer failure messages"
+    )]
+
+    use super::*;
+
+    const FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+
+    fn glyph_index(ch: char) -> u16 {
+        let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap_or_else(|e| panic!("parse: {e}"));
+        face.glyph_index(ch)
+            .unwrap_or_else(|| panic!("no glyph for '{ch}'"))
+            .0
+    }
+
+    #[test]
+    fn glyph_metrics_match_across_msdf_and_sdf() {
+        let mut msdf_atlas = GlyphAtlas::with_config(
+            DEFAULT_ATLAS_SIZE,
+            DEFAULT_CANONICAL_SIZE,
+            DEFAULT_GLYPH_WORKER_THREADS,
+            DistanceField::Msdf,
+            None,
+        );
+        let mut sdf_atlas = GlyphAtlas::with_config(
+            DEFAULT_ATLAS_SIZE,
+            DEFAULT_CANONICAL_SIZE,
+            DEFAULT_GLYPH_WORKER_THREADS,
+            DistanceField::Sdf,
+            None,
+        );
+        for ch in ['A', 'g', 'W', 'O'] {
+            let key = GlyphKey {
+                font_id:     0,
+                glyph_index: glyph_index(ch),
+            };
+            let m = msdf_atlas
+                .get_or_insert_sync(key, FONT_DATA)
+                .unwrap_or_else(|| panic!("msdf insert '{ch}'"));
+            let s = sdf_atlas
+                .get_or_insert_sync(key, FONT_DATA)
+                .unwrap_or_else(|| panic!("sdf insert '{ch}'"));
+            assert_eq!(
+                (m.pixel_width, m.pixel_height),
+                (s.pixel_width, s.pixel_height),
+                "pixel dims differ for '{ch}'",
+            );
+            assert_eq!(
+                m.bearing_x.to_bits(),
+                s.bearing_x.to_bits(),
+                "bearing_x differs for '{ch}'"
+            );
+            assert_eq!(
+                m.bearing_y.to_bits(),
+                s.bearing_y.to_bits(),
+                "bearing_y differs for '{ch}'"
+            );
+            assert_eq!(
+                m.uv_rect.map(f32::to_bits),
+                s.uv_rect.map(f32::to_bits),
+                "uv_rect differs for '{ch}'"
+            );
+        }
+        assert_eq!(msdf_atlas.distance_field(), DistanceField::Msdf);
+        assert_eq!(sdf_atlas.distance_field(), DistanceField::Sdf);
+    }
+
+    #[test]
+    fn is_ready_reflects_cache_state() {
+        let mut atlas = GlyphAtlas::new();
+        let key = GlyphKey {
+            font_id:     0,
+            glyph_index: glyph_index('A'),
+        };
+        assert!(!atlas.is_ready(key), "uninserted glyph not ready");
+        atlas.get_or_insert_sync(key, FONT_DATA);
+        assert!(atlas.is_ready(key), "inserted glyph ready");
+    }
 }

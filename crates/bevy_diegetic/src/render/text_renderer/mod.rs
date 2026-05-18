@@ -15,24 +15,29 @@ use self::reconcile::poll_atlas_glyphs;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
-use super::msdf_material::MsdfTextMaterial;
+use super::glyph_material::GlyphMaterial;
 use super::panel_rtt;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
+use super::world_text::PanelTextChild;
+use super::world_text::PendingGlyphs;
+use super::world_text::WorldText;
 use crate::cascade::CascadeEntityPlugin;
 use crate::cascade::CascadePanelChildPlugin;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
+use crate::text::AtlasSwapCompleted;
+use crate::text::AtlasSwapStarted;
 
 /// Plugin that adds MSDF text rendering for diegetic panels.
 ///
-/// Registers the [`MsdfTextMaterial`], adds the text extraction system,
+/// Registers the [`GlyphMaterial`], adds the text extraction system,
 /// and sets up rendering.
 pub(super) struct TextRenderPlugin;
 
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<MsdfTextMaterial>::default());
+        app.add_plugins(MaterialPlugin::<GlyphMaterial>::default());
         app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldFontUnit>::default());
@@ -60,5 +65,47 @@ impl Plugin for TextRenderPlugin {
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );
+        app.add_observer(mark_text_pending_on_swap_started);
+        app.add_observer(mark_text_pending_on_swap_completed);
+    }
+}
+
+/// Observer: when the atlas driver starts a parallel-swap, mark every
+/// visible text entity with [`PendingGlyphs`]. The next
+/// `shape_panel_text_children` / `render_world_text` pass then queues
+/// the entity's visible glyphs onto pending via `rasterize_target_mut`,
+/// scoping the swap workload to "currently on screen" instead of "every
+/// glyph the atlas has ever cached".
+fn mark_text_pending_on_swap_started(
+    _trigger: On<AtlasSwapStarted>,
+    panel_children: Query<Entity, With<PanelTextChild>>,
+    world_texts: Query<Entity, With<WorldText>>,
+    mut commands: Commands,
+) {
+    for entity in &panel_children {
+        commands.entity(entity).insert_if_new(PendingGlyphs);
+    }
+    for entity in &world_texts {
+        commands.entity(entity).insert_if_new(PendingGlyphs);
+    }
+}
+
+/// Observer: when the swap finalizes, mark every visible text entity
+/// with [`PendingGlyphs`] again so the text-shaping pass re-runs
+/// against the new active atlas. That pass emits fresh quad data,
+/// which lets the batcher rebuild materials with the new image
+/// handle and (for world text) re-spawns meshes referencing the new
+/// atlas.
+fn mark_text_pending_on_swap_completed(
+    _trigger: On<AtlasSwapCompleted>,
+    panel_children: Query<Entity, With<PanelTextChild>>,
+    world_texts: Query<Entity, With<WorldText>>,
+    mut commands: Commands,
+) {
+    for entity in &panel_children {
+        commands.entity(entity).insert_if_new(PendingGlyphs);
+    }
+    for entity in &world_texts {
+        commands.entity(entity).insert_if_new(PendingGlyphs);
     }
 }

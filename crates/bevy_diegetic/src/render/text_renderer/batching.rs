@@ -19,15 +19,16 @@ use crate::panel::DiegeticPerfStats;
 use crate::panel::HueOffset;
 use crate::panel::RenderMode;
 use crate::render::constants;
+use crate::render::glyph_material;
+use crate::render::glyph_material::GlyphMaterial;
+use crate::render::glyph_material::GlyphMaterialInput;
+use crate::render::glyph_material::GlyphShadowProxyMaterialInput;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
-use crate::render::msdf_material;
-use crate::render::msdf_material::MsdfShadowProxyMaterialInput;
-use crate::render::msdf_material::MsdfTextMaterial;
-use crate::render::msdf_material::MsdfTextMaterialInput;
 use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelTextChild;
-use crate::text::MsdfAtlas;
+use crate::text::AtlasSlot;
+use crate::text::GlyphAtlas;
 
 /// Marker component for text mesh entities spawned by the renderer.
 #[derive(Component)]
@@ -66,7 +67,7 @@ struct SharedMsdfMaterialKey {
 /// Cached default material handles shared across panels without a [`HueOffset`].
 #[derive(Resource, Default)]
 pub(super) struct SharedMsdfMaterials {
-    handles: HashMap<SharedMsdfMaterialKey, Handle<MsdfTextMaterial>>,
+    handles: HashMap<SharedMsdfMaterialKey, Handle<GlyphMaterial>>,
 }
 
 impl SharedMsdfMaterials {
@@ -172,9 +173,9 @@ pub(super) fn build_panel_batched_meshes(
     panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
-    atlas: Res<MsdfAtlas>,
+    atlas_slot: Res<AtlasSlot>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<MsdfTextMaterial>>,
+    mut materials: ResMut<Assets<GlyphMaterial>>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     rtt_registry: Res<PanelRttRegistry>,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -244,7 +245,7 @@ pub(super) fn build_panel_batched_meshes(
         let mut spawn_context = BatchSpawnContext {
             panel_entity,
             hue,
-            atlas: &atlas,
+            atlas: atlas_slot.active(),
             meshes: &mut meshes,
             materials: &mut materials,
             shared_mats: &mut shared_mats,
@@ -313,9 +314,9 @@ fn collect_panel_batches(
 struct BatchSpawnContext<'a, 'w, 's> {
     panel_entity:    Entity,
     hue:             f32,
-    atlas:           &'a MsdfAtlas,
+    atlas:           &'a GlyphAtlas,
     meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<MsdfTextMaterial>,
+    materials:       &'a mut Assets<GlyphMaterial>,
     shared_mats:     &'a mut SharedMsdfMaterials,
     content_layer:   RenderLayers,
     scene_layer:     RenderLayers,
@@ -399,8 +400,8 @@ fn spawn_batch_meshes(
 
 struct VisibleMaterialContext<'a> {
     hue:             f32,
-    atlas:           &'a MsdfAtlas,
-    materials:       &'a mut Assets<MsdfTextMaterial>,
+    atlas:           &'a GlyphAtlas,
+    materials:       &'a mut Assets<GlyphMaterial>,
     shared_mats:     &'a mut SharedMsdfMaterials,
     batch_base:      StandardMaterial,
     text_oit_offset: f32,
@@ -411,7 +412,7 @@ fn resolve_visible_material(
     alpha_mode: AlphaMode,
     page_image: &Handle<Image>,
     context: &mut VisibleMaterialContext<'_>,
-) -> Handle<MsdfTextMaterial> {
+) -> Handle<GlyphMaterial> {
     let clip_rect = clip_rect_from_bits(key.clip_rect);
     if context.hue.abs() < f32::EPSILON && key.render_mode == GlyphRenderMode::Text {
         context
@@ -426,13 +427,14 @@ fn resolve_visible_material(
             .or_insert_with(|| {
                 context
                     .materials
-                    .add(msdf_material::msdf_text_material(MsdfTextMaterialInput {
+                    .add(glyph_material::glyph_material(GlyphMaterialInput {
                         base: context.batch_base.clone(),
-                        sdf_range: MsdfAtlas::sdf_range().to_f32(),
+                        sdf_range: GlyphAtlas::sdf_range().to_f32(),
                         atlas_dimensions: UVec2::new(context.atlas.width(), context.atlas.height()),
                         atlas_texture: page_image.clone(),
                         hue_offset: 0.0,
                         render_mode: glyph_render_mode_uniform(GlyphRenderMode::Text),
+                        distance_field: context.atlas.distance_field(),
                         clip_rect,
                         oit_depth_offset: context.text_oit_offset,
                         alpha_mode,
@@ -442,13 +444,14 @@ fn resolve_visible_material(
     } else {
         context
             .materials
-            .add(msdf_material::msdf_text_material(MsdfTextMaterialInput {
+            .add(glyph_material::glyph_material(GlyphMaterialInput {
                 base: context.batch_base.clone(),
-                sdf_range: MsdfAtlas::sdf_range().to_f32(),
+                sdf_range: GlyphAtlas::sdf_range().to_f32(),
                 atlas_dimensions: UVec2::new(context.atlas.width(), context.atlas.height()),
                 atlas_texture: page_image.clone(),
                 hue_offset: context.hue,
                 render_mode: glyph_render_mode_uniform(key.render_mode),
+                distance_field: context.atlas.distance_field(),
                 clip_rect,
                 oit_depth_offset: context.text_oit_offset,
                 alpha_mode,
@@ -459,7 +462,7 @@ fn resolve_visible_material(
 fn spawn_visible_mesh(
     panel_entity: Entity,
     mesh_handle: Handle<Mesh>,
-    material_handle: Handle<MsdfTextMaterial>,
+    material_handle: Handle<GlyphMaterial>,
     shadow_mode: TextMeshShadow,
     content_layer: &RenderLayers,
     commands: &mut Commands,
@@ -491,12 +494,12 @@ fn spawn_visible_mesh(
 struct ShadowProxyContext<'a, 'w, 's> {
     panel_entity:    Entity,
     hue:             f32,
-    atlas:           &'a MsdfAtlas,
+    atlas:           &'a GlyphAtlas,
     text_base:       StandardMaterial,
     text_depth_bias: f32,
     text_oit_offset: f32,
     scene_layer:     RenderLayers,
-    materials:       &'a mut Assets<MsdfTextMaterial>,
+    materials:       &'a mut Assets<GlyphMaterial>,
     commands:        &'a mut Commands<'w, 's>,
 }
 
@@ -519,14 +522,15 @@ fn spawn_shadow_proxy(
     proxy_base.depth_bias = context.text_depth_bias - constants::LAYER_DEPTH_BIAS;
     let proxy_material = context
         .materials
-        .add(msdf_material::msdf_shadow_proxy_material(
-            MsdfShadowProxyMaterialInput {
+        .add(glyph_material::glyph_shadow_proxy_material(
+            GlyphShadowProxyMaterialInput {
                 base: proxy_base,
-                sdf_range: MsdfAtlas::sdf_range().to_f32(),
+                sdf_range: GlyphAtlas::sdf_range().to_f32(),
                 atlas_dimensions: UVec2::new(context.atlas.width(), context.atlas.height()),
                 atlas_texture: page_image,
                 hue_offset: context.hue,
                 render_mode: shadow_render_mode,
+                distance_field: context.atlas.distance_field(),
                 clip_rect,
                 oit_depth_offset: context.text_oit_offset,
             },
@@ -544,9 +548,9 @@ fn spawn_shadow_proxy(
 /// Syncs [`HueOffset`] to text materials on child meshes.
 pub(super) fn sync_panel_hue_offset(
     panels: Query<(Entity, &HueOffset), Changed<HueOffset>>,
-    mut children: Query<(&ChildOf, &mut MeshMaterial3d<MsdfTextMaterial>)>,
+    mut children: Query<(&ChildOf, &mut MeshMaterial3d<GlyphMaterial>)>,
     shared_mats: Res<SharedMsdfMaterials>,
-    mut materials: ResMut<Assets<MsdfTextMaterial>>,
+    mut materials: ResMut<Assets<GlyphMaterial>>,
 ) {
     for (panel_entity, hue_offset) in &panels {
         for (child_of, mut material_handle) in &mut children {
@@ -577,39 +581,41 @@ mod tests {
     use bevy::prelude::*;
 
     use super::*;
-    use crate::render::msdf_material;
-    use crate::render::msdf_material::MsdfTextMaterialInput;
+    use crate::DistanceField;
+    use crate::render::glyph_material;
+    use crate::render::glyph_material::GlyphMaterialInput;
 
     #[test]
     fn material_sharing_by_hue_offset() {
-        let mut materials = Assets::<MsdfTextMaterial>::default();
+        let mut materials = Assets::<GlyphMaterial>::default();
         let mut images = Assets::<Image>::default();
         let atlas_image = images.add(Image::default());
         let base = StandardMaterial::default();
-        let shared_handle =
-            materials.add(msdf_material::msdf_text_material(MsdfTextMaterialInput {
-                base:             base.clone(),
-                sdf_range:        4.0,
-                atlas_dimensions: UVec2::new(256, 256),
-                atlas_texture:    atlas_image.clone(),
-                hue_offset:       0.0,
-                render_mode:      0,
-                clip_rect:        constants::UNCLIPPED_TEXT_CLIP_RECT,
-                oit_depth_offset: 0.0,
-                alpha_mode:       AlphaMode::AlphaToCoverage,
-            }));
+        let shared_handle = materials.add(glyph_material::glyph_material(GlyphMaterialInput {
+            base:             base.clone(),
+            sdf_range:        4.0,
+            atlas_dimensions: UVec2::new(256, 256),
+            atlas_texture:    atlas_image.clone(),
+            hue_offset:       0.0,
+            render_mode:      0,
+            distance_field:   DistanceField::Msdf,
+            clip_rect:        constants::UNCLIPPED_TEXT_CLIP_RECT,
+            oit_depth_offset: 0.0,
+            alpha_mode:       AlphaMode::AlphaToCoverage,
+        }));
 
-        let mut decide = |hue: f32| -> Handle<MsdfTextMaterial> {
+        let mut decide = |hue: f32| -> Handle<GlyphMaterial> {
             if hue.abs() < f32::EPSILON {
                 shared_handle.clone()
             } else {
-                materials.add(msdf_material::msdf_text_material(MsdfTextMaterialInput {
+                materials.add(glyph_material::glyph_material(GlyphMaterialInput {
                     base:             base.clone(),
                     sdf_range:        4.0,
                     atlas_dimensions: UVec2::new(256, 256),
                     atlas_texture:    atlas_image.clone(),
                     hue_offset:       hue,
                     render_mode:      0,
+                    distance_field:   DistanceField::Msdf,
                     clip_rect:        constants::UNCLIPPED_TEXT_CLIP_RECT,
                     oit_depth_offset: 0.0,
                     alpha_mode:       AlphaMode::AlphaToCoverage,

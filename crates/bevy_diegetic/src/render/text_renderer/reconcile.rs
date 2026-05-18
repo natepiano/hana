@@ -18,13 +18,14 @@ use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::WorldText;
-use crate::text::MsdfAtlas;
+use crate::text::AtlasSlot;
 
-/// Polls completed async glyph rasterizations, inserts them into the
-/// atlas, and syncs to GPU. Entities with `PendingGlyphs` will be
-/// re-checked by `shape_panel_text_children` and `render_world_text`.
+/// Polls completed async glyph rasterizations on every contained
+/// atlas (active and pending during a swap), inserts them, and syncs
+/// to GPU. Entities with `PendingGlyphs` will be re-checked by
+/// `shape_panel_text_children` and `render_world_text`.
 pub(super) fn poll_atlas_glyphs(
-    mut atlas: ResMut<MsdfAtlas>,
+    mut atlas: ResMut<AtlasSlot>,
     mut images: ResMut<Assets<Image>>,
     mut shared_mats: ResMut<SharedMsdfMaterials>,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -32,7 +33,7 @@ pub(super) fn poll_atlas_glyphs(
     let poll_start = Instant::now();
     let poll_stats = atlas.poll_async_glyphs_stats();
     let poll_ms = poll_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    let dirty_pages = atlas.dirty_page_count();
+    let dirty_pages = atlas.active().dirty_page_count();
     let mut sync_ms = 0.0;
 
     if poll_stats.inserted > 0 || poll_stats.invisible > 0 {
@@ -42,6 +43,7 @@ pub(super) fn poll_atlas_glyphs(
         shared_mats.clear();
     }
 
+    let active = atlas.active();
     perf.atlas.poll_ms = poll_ms;
     perf.atlas.sync_ms = sync_ms;
     perf.atlas.completed_glyphs = poll_stats.completed;
@@ -49,14 +51,14 @@ pub(super) fn poll_atlas_glyphs(
     perf.atlas.invisible_glyphs = poll_stats.invisible;
     perf.atlas.pages_added = poll_stats.pages_added;
     perf.atlas.dirty_pages = dirty_pages;
-    perf.atlas.in_flight_glyphs = atlas.in_flight_count();
-    perf.atlas.active_jobs = atlas.active_job_count();
-    perf.atlas.peak_active_jobs = atlas.peak_active_job_count();
+    perf.atlas.in_flight_glyphs = active.in_flight_count();
+    perf.atlas.active_jobs = active.active_job_count();
+    perf.atlas.peak_active_jobs = active.peak_active_job_count();
     perf.atlas.worker_threads = poll_stats.worker_threads;
     perf.atlas.avg_raster_ms = poll_stats.avg_raster_ms;
     perf.atlas.max_raster_ms = poll_stats.max_raster_ms;
     perf.atlas.batch_max_active_jobs = poll_stats.max_active_jobs;
-    perf.atlas.total_glyphs = atlas.glyph_count();
+    perf.atlas.total_glyphs = active.glyph_count();
 
     if poll_stats.completed > 0 || sync_ms > 0.0 {
         bevy::log::debug!(
@@ -66,14 +68,14 @@ pub(super) fn poll_atlas_glyphs(
             poll_stats.invisible,
             poll_stats.pages_added,
             dirty_pages,
-            atlas.in_flight_count(),
-            atlas.active_job_count(),
-            atlas.peak_active_job_count(),
+            active.in_flight_count(),
+            active.active_job_count(),
+            active.peak_active_job_count(),
             poll_stats.worker_threads,
             poll_stats.avg_raster_ms,
             poll_stats.max_raster_ms,
             poll_stats.max_active_jobs,
-            atlas.glyph_count(),
+            active.glyph_count(),
         );
     }
 }

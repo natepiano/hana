@@ -9,7 +9,7 @@
 //! # `GlyphLoadingPolicy::WhenReady` (default)
 //!
 //! Text stays invisible until **every** glyph has been rasterized, then
-//! appears all at once. Combined with [`MsdfAtlas::preload`], you can
+//! appears all at once. Combined with [`GlyphAtlas::preload`], you can
 //! warm the atlas for a known character set in a [`FontRegistered`]
 //! observer so the text is ready before it's ever spawned. This is the
 //! recommended approach for UI text, labels, and anything where partial
@@ -40,9 +40,9 @@ use bevy_diegetic::Font;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
 use bevy_diegetic::FontSource;
+use bevy_diegetic::GlyphAtlas;
 use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::MsdfAtlas;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::LagrangePlugin;
@@ -154,7 +154,7 @@ fn setup(
 /// Loaded font → no preload + `Progressive`.
 fn on_font_registered(
     trigger: On<FontRegistered>,
-    mut atlas: ResMut<MsdfAtlas>,
+    mut atlas: ResMut<GlyphAtlas>,
     font_registry: Res<FontRegistry>,
     mut commands: Commands,
 ) {

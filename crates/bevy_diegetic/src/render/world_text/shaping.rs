@@ -16,9 +16,9 @@ use crate::render::text_shaping::TextShapingContext;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
+use crate::text::GlyphAtlas;
 use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
-use crate::text::MsdfAtlas;
 
 /// Result of shaping and building glyph quads for a [`WorldText`](super::WorldText) entity.
 pub(super) struct ShapedWorldText {
@@ -70,7 +70,7 @@ pub(super) fn shape_world_text(
     text: &str,
     style: &WorldTextStyle,
     font_registry: &FontRegistry,
-    atlas: &mut MsdfAtlas,
+    atlas: &mut GlyphAtlas,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
     scale: f32,
@@ -158,7 +158,7 @@ pub(super) fn shape_world_text(
         &mut stats,
     );
 
-    let padding_world = MsdfAtlas::glyph_padding_texels() * em_scale * world_scale;
+    let padding_world = GlyphAtlas::glyph_padding_texels() * em_scale * world_scale;
     glyph_quad::clip_overlapping_quads(&mut quads, padding_world);
 
     stats.atlas_ms =
@@ -182,7 +182,7 @@ pub(super) fn shape_world_text(
 fn build_glyph_quads(
     glyphs: &[ShapedGlyph],
     style: &WorldTextStyle,
-    atlas: &mut MsdfAtlas,
+    atlas: &mut GlyphAtlas,
     font_data: &[u8],
     boosted_size: f32,
     em_scale: f32,
@@ -266,7 +266,7 @@ fn build_glyph_quads(
 fn ensure_all_glyphs_ready(
     glyphs: &[ShapedGlyph],
     style: &WorldTextStyle,
-    atlas: &mut MsdfAtlas,
+    atlas: &mut GlyphAtlas,
     font_data: &[u8],
     stats: &mut TextBuildStats,
 ) -> bool {
@@ -297,7 +297,7 @@ fn measure_anchor_offset(
     glyphs: &[ShapedGlyph],
     style: &WorldTextStyle,
     font_registry: &FontRegistry,
-    atlas: &mut MsdfAtlas,
+    atlas: &mut GlyphAtlas,
     font_data: &[u8],
     em_scale: f32,
 ) -> (f32, f32) {

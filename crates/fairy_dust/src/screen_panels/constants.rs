@@ -1,17 +1,14 @@
 //! Constants for the `screen_panels` module.
 
 use bevy::prelude::Color;
-use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 
 // body
 pub(super) const BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-pub(super) const BODY_SIZE: Pt = Pt(11.0);
 
 // control
 pub(super) const CONTROL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 pub(super) const CONTROL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-pub(super) const CONTROL_SIZE: Pt = Pt(12.0);
 
 // description
 pub(super) const DESCRIPTION_CHILD_GAP: Px = Px(6.0);

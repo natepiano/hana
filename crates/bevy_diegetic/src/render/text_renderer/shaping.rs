@@ -30,12 +30,13 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
+use crate::text::AtlasSlot;
 use crate::text::Font;
 use crate::text::FontId;
 use crate::text::FontRegistry;
+use crate::text::GlyphAtlas;
 use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
-use crate::text::MsdfAtlas;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
 pub(super) fn shape_panel_text_children(
@@ -55,8 +56,9 @@ pub(super) fn shape_panel_text_children(
     pending_texts: Query<Entity, (With<PanelTextChild>, With<WorldText>, With<PendingGlyphs>)>,
     texts: Query<(&WorldText, &WorldTextStyle, &PanelTextChild, &ChildOf)>,
     panel_alpha: Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
+    existing_child_alpha: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
-    mut atlas: ResMut<MsdfAtlas>,
+    mut atlas_slot: ResMut<AtlasSlot>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
@@ -110,7 +112,7 @@ pub(super) fn shape_panel_text_children(
         };
         let mut services = TextQuadServices {
             font_registry: &font_registry,
-            atlas:         &mut atlas,
+            atlas:         atlas_slot.rasterize_target_mut(),
             shaping_cx:    &shaping_cx,
             cache:         &mut cache,
         };
@@ -119,7 +121,17 @@ pub(super) fn shape_panel_text_children(
         aggregate.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
 
-        match GlyphReadiness::from(&stats) {
+        // During a parallel-atlas swap, the text-shaping pass above
+        // has queued visible glyphs onto pending. Force `Pending` so
+        // we keep `PendingGlyphs` and don't replace `PanelTextQuads`
+        // (which would let the batcher build materials whose UVs
+        // came from pending but whose image still points to active).
+        let readiness = if atlas_slot.is_swapping() {
+            GlyphReadiness::Pending
+        } else {
+            GlyphReadiness::from(&stats)
+        };
+        match readiness {
             GlyphReadiness::Ready => {
                 let panel_text_quads = PanelTextQuads {
                     quads,
@@ -133,9 +145,13 @@ pub(super) fn shape_panel_text_children(
                 );
                 let resolved =
                     PanelTextAlpha::entity_value(&panel_text_quads).unwrap_or(panel_fallback);
-                commands
-                    .entity(entity)
-                    .insert((panel_text_quads, Resolved(resolved)));
+                let alpha_unchanged = existing_child_alpha
+                    .get(entity)
+                    .is_ok_and(|current| current.0 == resolved);
+                commands.entity(entity).insert(panel_text_quads);
+                if !alpha_unchanged {
+                    commands.entity(entity).insert(Resolved(resolved));
+                }
                 commands.entity(entity).remove::<PendingGlyphs>();
                 commands.entity(entity).insert(AwaitingReady);
             },
@@ -158,7 +174,7 @@ pub(super) fn shape_panel_text_children(
 /// Shared text-shaping resources threaded through quad construction.
 struct TextQuadServices<'a> {
     font_registry: &'a FontRegistry,
-    atlas:         &'a mut MsdfAtlas,
+    atlas:         &'a mut GlyphAtlas,
     shaping_cx:    &'a TextShapingContext,
     cache:         &'a mut ShapedTextCache,
 }
@@ -255,7 +271,7 @@ fn shape_text_to_quads(
         ));
     }
 
-    let padding_world = MsdfAtlas::glyph_padding_texels() * em_scale * scale.x;
+    let padding_world = GlyphAtlas::glyph_padding_texels() * em_scale * scale.x;
     glyph_quad::clip_overlapping_quads(&mut quads, padding_world);
 
     if let Some(clip_rect) = clip_rect {
@@ -276,7 +292,7 @@ fn all_glyphs_ready_when_required(
     config: &LayoutTextStyle,
     shaped_glyphs: &[ShapedGlyph],
     font_data: &[u8],
-    atlas: &mut MsdfAtlas,
+    atlas: &mut GlyphAtlas,
     stats: &mut TextBuildStats,
 ) -> bool {
     if config.loading_policy() != GlyphLoadingPolicy::WhenReady {

@@ -867,7 +867,7 @@ pub struct TextDimensions {
 // ── Shader discriminant assertions ──────────────────────────────────────────
 //
 // These compile-time assertions ensure that `GlyphRenderMode` discriminants
-// stay in sync with the constants in `assets/shaders/msdf_text.wgsl`.
+// stay in sync with the constants in `assets/shaders/glyph_text.wgsl`.
 // If you add or reorder variants, update the shader constants to match
 // and adjust these assertions.
 

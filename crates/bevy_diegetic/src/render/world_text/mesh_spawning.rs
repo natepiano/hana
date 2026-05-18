@@ -12,13 +12,13 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
 use crate::layout::WorldTextStyle;
 use crate::render::constants;
+use crate::render::glyph_material;
+use crate::render::glyph_material::GlyphMaterial;
+use crate::render::glyph_material::GlyphMaterialInput;
+use crate::render::glyph_material::GlyphShadowProxyMaterialInput;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
-use crate::render::msdf_material;
-use crate::render::msdf_material::MsdfShadowProxyMaterialInput;
-use crate::render::msdf_material::MsdfTextMaterial;
-use crate::render::msdf_material::MsdfTextMaterialInput;
-use crate::text::MsdfAtlas;
+use crate::text::GlyphAtlas;
 
 /// Marker for mesh entities spawned by the world text renderer.
 #[derive(Component)]
@@ -59,7 +59,7 @@ const fn apply_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness)
 
 pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
     pub(super) meshes:    &'a mut Assets<Mesh>,
-    pub(super) materials: &'a mut Assets<MsdfTextMaterial>,
+    pub(super) materials: &'a mut Assets<GlyphMaterial>,
     pub(super) commands:  &'a mut Commands<'w, 's>,
 }
 
@@ -70,7 +70,7 @@ pub(super) fn spawn_world_text_meshes(
     page_quads: &HashMap<u32, Vec<GlyphQuadData>>,
     entity: Entity,
     style: &WorldTextStyle,
-    atlas: &MsdfAtlas,
+    atlas: &GlyphAtlas,
     alpha_mode: AlphaMode,
     assets: &mut MeshSpawnAssets<'_, '_, '_>,
 ) -> f32 {
@@ -103,13 +103,14 @@ pub(super) fn spawn_world_text_meshes(
                 ..Default::default()
             };
             apply_sidedness(&mut visible_base, style.sidedness());
-            let mat = msdf_material::msdf_text_material(MsdfTextMaterialInput {
+            let mat = glyph_material::glyph_material(GlyphMaterialInput {
                 base: visible_base,
-                sdf_range: MsdfAtlas::sdf_range().to_f32(),
+                sdf_range: GlyphAtlas::sdf_range().to_f32(),
                 atlas_dimensions: UVec2::new(atlas.width(), atlas.height()),
                 atlas_texture: page_image.clone(),
                 hue_offset: 0.0,
                 render_mode: u32::from(style.render_mode()),
+                distance_field: atlas.distance_field(),
                 clip_rect: constants::UNCLIPPED_TEXT_CLIP_RECT,
                 oit_depth_offset: constants::OIT_DEPTH_STEP,
                 alpha_mode,
@@ -150,14 +151,15 @@ pub(super) fn spawn_world_text_meshes(
             apply_sidedness(&mut proxy_base, style.sidedness());
             let proxy_material = assets
                 .materials
-                .add(msdf_material::msdf_shadow_proxy_material(
-                    MsdfShadowProxyMaterialInput {
+                .add(glyph_material::glyph_shadow_proxy_material(
+                    GlyphShadowProxyMaterialInput {
                         base:             proxy_base,
-                        sdf_range:        MsdfAtlas::sdf_range().to_f32(),
+                        sdf_range:        GlyphAtlas::sdf_range().to_f32(),
                         atlas_dimensions: UVec2::new(atlas.width(), atlas.height()),
                         atlas_texture:    page_image,
                         hue_offset:       0.0,
                         render_mode:      shadow_render_mode,
+                        distance_field:   atlas.distance_field(),
                         clip_rect:        constants::UNCLIPPED_TEXT_CLIP_RECT,
                         oit_depth_offset: 0.0,
                     },

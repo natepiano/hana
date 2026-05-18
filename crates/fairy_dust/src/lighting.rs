@@ -62,6 +62,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
             ..default()
         },
         CascadeShadowConfigBuilder {
+            num_cascades: 2,
             minimum_distance: CASCADE_MIN_DISTANCE,
             maximum_distance: CASCADE_MAX_DISTANCE,
             first_cascade_far_bound: CASCADE_FIRST_FAR_BOUND,

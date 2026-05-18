@@ -48,9 +48,15 @@ pub(super) fn compute_panel_layouts(
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
     defaults: Res<CascadeDefaults>,
+    mut trace_init: Local<bool>,
+    mut trace_remaining: Local<u32>,
 ) {
     let start = Instant::now();
     let mut panel_count = 0_usize;
+    if !*trace_init {
+        *trace_init = true;
+        *trace_remaining = 30;
+    }
 
     let cache_ref = Arc::new(Mutex::new(cache.clone()));
     let parley_fn = Arc::clone(&measurer.measure_fn);
@@ -71,8 +77,18 @@ pub(super) fn compute_panel_layouts(
     });
 
     for (entity, panel_ref, mut tree_change, mut scaled_tree_cache) in &mut panels {
-        if !panel_ref.is_changed() && tree_change.pending().is_none() {
+        let panel_changed = panel_ref.is_changed();
+        let pending_some = tree_change.pending().is_some();
+        if !panel_changed && !pending_some {
             continue;
+        }
+        if *trace_remaining > 0 {
+            *trace_remaining -= 1;
+            bevy::log::info!(
+                target: "compute_panel_layouts_trace",
+                "entity={entity:?} panel_changed={panel_changed} pending={pending_some} budget_left={}",
+                *trace_remaining,
+            );
         }
         let Ok(mut computed) = computed_panels.get_mut(entity) else {
             continue;

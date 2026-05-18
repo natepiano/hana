@@ -1,4 +1,14 @@
-//! Single-glyph MSDF rasterization via `fdsm` + `ttf-parser`.
+//! Glyph rasterization via `fdsm` + `ttf-parser`.
+//!
+//! Hosts the [`Rasterizer`] trait and its two concrete implementations:
+//! - [`MsdfRasterizer`] — current multi-channel SDF behavior.
+//! - [`SdfRasterizer`] — new single-channel SDF, smoother on curves.
+//!
+//! Each rasterizer returns a [`RasterizedBitmap`] tagged by channel
+//! layout so downstream code can copy bytes into the atlas page texture
+//! with the right per-pixel stride.
+
+use std::fmt::Debug;
 
 use bevy_kana::ToU8;
 use bevy_kana::ToU32;
@@ -7,7 +17,6 @@ use fdsm::correct_error;
 use fdsm::correct_error::ErrorCorrectionConfig;
 use fdsm::generate;
 use fdsm::render;
-use fdsm::shape::Shape;
 use fdsm::transform::Transform;
 use image::Rgb;
 use image::Rgb32FImage;
@@ -22,6 +31,66 @@ pub(super) use super::constants::DEFAULT_GLYPH_PADDING;
 pub(super) use super::constants::DEFAULT_SDF_RANGE;
 use super::constants::EDGE_COLORING_ANGLE;
 use super::constants::EDGE_COLORING_SEED;
+
+mod sdf;
+
+use fdsm::shape::Shape;
+pub(crate) use sdf::SdfBitmap;
+pub(crate) use sdf::SdfRasterizer; // allow-banned: upstream fdsm API name
+
+/// Which signed-distance-field variant a rasterizer produces.
+///
+/// Carried in `AtlasConfig` and the per-material uniform so a single
+/// shader can switch sampling strategy without rebuilding pipelines.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bevy::prelude::Reflect)]
+pub enum DistanceField {
+    /// Three-channel MSDF — sharp at corners, can show pointy artifacts
+    /// where channels disagree on curves.
+    #[default]
+    Msdf,
+    /// Single-channel SDF — smooth on curves, rounds off sharp corners.
+    Sdf,
+    // Mtsdf,  ← reserved; lands when MTSDF rasterizer ships.
+}
+
+impl From<DistanceField> for u32 {
+    fn from(mode: DistanceField) -> Self {
+        match mode {
+            DistanceField::Msdf => 0,
+            DistanceField::Sdf => 1,
+        }
+    }
+}
+
+/// Rasterized glyph bitmap tagged by channel layout.
+///
+/// Each variant carries the per-pixel byte count its rasterizer
+/// produces — MSDF = 3 channels, SDF = 1 channel. The atlas insert path
+/// matches on the variant to know how to copy bytes into the RGBA page
+/// texture.
+#[derive(Clone, Debug)]
+pub(crate) enum RasterizedBitmap {
+    /// Three channels (R, G, B) carrying independent signed pseudo-distances.
+    Msdf(MsdfBitmap),
+    /// One channel carrying a single signed distance.
+    Sdf(SdfBitmap),
+    // Mtsdf(MtsdfBitmap)  ← future, 4 channels.
+}
+
+/// Glyph rasterization strategy.
+///
+/// Each implementation owns its rasterization constants (`px_size`,
+/// `sdf_range`, `padding`) so the trait method needs only per-glyph
+/// inputs. This eliminates a class of parameter-mismatch bugs across
+/// the active/pending atlas pair during a mode swap.
+pub(crate) trait Rasterizer: Send + Sync + 'static + Debug {
+    /// Rasterizes a single glyph. Returns `None` if the glyph has no
+    /// outline (e.g., space character) or is otherwise unrenderable.
+    fn rasterize(&self, font_data: &[u8], glyph_index: u16) -> Option<RasterizedBitmap>;
+
+    /// Which distance-field variant this rasterizer produces.
+    fn mode(&self) -> DistanceField;
+}
 
 /// Raw MSDF bitmap output from rasterization.
 #[derive(Clone, Debug)]
@@ -38,33 +107,69 @@ pub(super) struct MsdfBitmap {
     pub bearing_y: f64,
 }
 
+/// Multi-channel signed-distance-field rasterizer.
+///
+/// Produces three independent signed-distance channels per pixel. A
+/// shader takes the median to preserve sharp corners that single-channel
+/// SDF cannot represent.
+#[derive(Debug)]
+pub(crate) struct MsdfRasterizer {
+    px_size:   u32,
+    sdf_range: f64,
+    padding:   u32,
+}
+
+impl MsdfRasterizer {
+    #[must_use]
+    pub const fn new(px_size: u32, sdf_range: f64, padding: u32) -> Self {
+        Self {
+            px_size,
+            sdf_range,
+            padding,
+        }
+    }
+}
+
+impl Rasterizer for MsdfRasterizer {
+    fn rasterize(&self, font_data: &[u8], glyph_index: u16) -> Option<RasterizedBitmap> {
+        rasterize_msdf_bitmap(
+            font_data,
+            glyph_index,
+            self.px_size,
+            self.sdf_range,
+            self.padding,
+        )
+        .map(RasterizedBitmap::Msdf)
+    }
+
+    fn mode(&self) -> DistanceField { DistanceField::Msdf }
+}
+
 /// Rasterizes a single glyph to a 3-channel MSDF bitmap.
 ///
-/// Uses `fdsm` with `ttf-parser` glyph outlines. Returns raw pixel data
-/// (3 bytes per pixel: R, G, B distance channels) and the glyph's bearing
-/// offsets in em units.
-///
-/// Returns `None` if the glyph has no outline (e.g., space character).
+/// Body of the MSDF rasterization step. Returns raw pixel data (3
+/// bytes per pixel: R, G, B distance channels) and the glyph's bearing
+/// offsets in em units. Returns `None` if the glyph has no outline
+/// (e.g., space character).
 #[must_use]
-pub(super) fn rasterize_glyph(
+fn rasterize_msdf_bitmap(
     font_data: &[u8],
     glyph_index: u16,
     px_size: u32,
     sdf_range: f64,
     padding: u32,
 ) -> Option<MsdfBitmap> {
+    // allow-banned: upstream fdsm API name
+
     let face = Face::parse(font_data, 0).ok()?;
     let glyph_id = GlyphId(glyph_index);
 
-    // Load glyph outline from font.
     let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id)?;
 
-    // Get glyph bounding box in font units.
     let bbox = face.glyph_bounding_box(glyph_id)?;
     let units_per_em = f64::from(face.units_per_em());
     let scale = f64::from(px_size) / units_per_em;
 
-    // Compute bitmap dimensions with padding.
     let total_pad = f64::from(padding) + sdf_range;
     let glyph_width = f64::from(bbox.x_max - bbox.x_min) * scale;
     let glyph_height = f64::from(bbox.y_max - bbox.y_min) * scale;
@@ -76,20 +181,12 @@ pub(super) fn rasterize_glyph(
         return None;
     }
 
-    // The ceil() may add fractional pixels. Compute the actual padding
-    // used on each side so the glyph outline is centered in the bitmap.
-    // This ensures the bearing accounts for the ceiled bitmap size.
     let actual_pad_x = (f64::from(image_width) - glyph_width) / 2.0;
     let actual_pad_y = (f64::from(image_height) - glyph_height) / 2.0;
 
-    // Color edges for multi-channel generation.
     let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
-    let colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED);
+    let colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name
 
-    // Build transform: font units → pixel coordinates.
-    // Origin in font space is at (bbox.x_min, bbox.y_min).
-    // In image space, we offset by actual_pad (centered).
-    // Y axis is flipped (font: Y-up, image: Y-down).
     let tx = actual_pad_x - f64::from(bbox.x_min) * scale;
     let ty = actual_pad_y + f64::from(bbox.y_max) * scale;
 
@@ -101,10 +198,6 @@ pub(super) fn rasterize_glyph(
     colored.transform(&transform);
     let prepared = colored.prepare();
 
-    // Generate MSDF into a float image, apply error correction, then
-    // convert to u8. Error correction fixes artifacts at sharp corners
-    // where false edges in the multi-channel distance field produce
-    // visible spikes.
     let mut image_f32 = Rgb32FImage::new(image_width, image_height);
     generate::generate_msdf(&prepared, sdf_range, &mut image_f32);
     render::correct_sign_msdf(&mut image_f32, &prepared, FillRule::Nonzero);
@@ -119,7 +212,6 @@ pub(super) fn rasterize_glyph(
         );
     }
 
-    // Convert f32 [0.0, 1.0] to u8 [0, 255].
     let image = RgbImage::from_fn(image_width, image_height, |x, y| {
         let p = image_f32.get_pixel(x, y);
         Rgb([
@@ -129,9 +221,6 @@ pub(super) fn rasterize_glyph(
         ])
     });
 
-    // Bearing offsets in em units (fraction of units_per_em).
-    // Use `actual_pad` (which accounts for ceil() rounding) so the
-    // glyph outline is centered in the bitmap and positioned correctly.
     let bearing_x = f64::from(bbox.x_min) / units_per_em - actual_pad_x / f64::from(px_size);
     let bearing_y = f64::from(bbox.y_max) / units_per_em + actual_pad_y / f64::from(px_size);
 
@@ -142,6 +231,25 @@ pub(super) fn rasterize_glyph(
         bearing_x,
         bearing_y,
     })
+}
+
+/// Test-only convenience wrapper around `MsdfRasterizer` that returns
+/// the historical `Option<MsdfBitmap>` directly, so the parity tests
+/// and module-level tests don't have to match on `RasterizedBitmap`.
+#[cfg(test)]
+#[must_use]
+fn rasterize_glyph(
+    font_data: &[u8],
+    glyph_index: u16,
+    px_size: u32,
+    sdf_range: f64,
+    padding: u32,
+) -> Option<MsdfBitmap> {
+    let r = MsdfRasterizer::new(px_size, sdf_range, padding);
+    match r.rasterize(font_data, glyph_index)? {
+        RasterizedBitmap::Msdf(b) => Some(b),
+        RasterizedBitmap::Sdf(_) => None,
+    }
 }
 
 #[cfg(test)]
@@ -174,8 +282,8 @@ mod tests {
     use super::*;
     use crate::layout::FontSlant;
     use crate::layout::TextMeasure;
+    use crate::text::atlas::GlyphAtlas;
     use crate::text::atlas::GlyphKey;
-    use crate::text::atlas::MsdfAtlas;
     use crate::text::measurer;
 
     const FONT_DATA: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
@@ -267,7 +375,7 @@ mod tests {
 
     #[test]
     fn atlas_insert_single_glyph() {
-        let mut atlas = MsdfAtlas::new();
+        let mut atlas = GlyphAtlas::new();
         let key = GlyphKey {
             font_id:     0,
             glyph_index: glyph_index('A'),
@@ -280,7 +388,7 @@ mod tests {
 
     #[test]
     fn atlas_deduplicates_same_glyph() {
-        let mut atlas = MsdfAtlas::new();
+        let mut atlas = GlyphAtlas::new();
         let key = GlyphKey {
             font_id:     0,
             glyph_index: glyph_index('A'),
@@ -298,7 +406,7 @@ mod tests {
 
     #[test]
     fn atlas_packs_many_glyphs_without_overlap() {
-        let mut atlas = MsdfAtlas::new();
+        let mut atlas = GlyphAtlas::new();
         let chars: Vec<char> = ('A'..='Z').chain('a'..='z').chain('0'..='9').collect();
 
         for ch in &chars {
@@ -358,7 +466,7 @@ mod tests {
 
     #[test]
     fn atlas_on_demand_ascii() {
-        let mut atlas = MsdfAtlas::new();
+        let mut atlas = GlyphAtlas::new();
         let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
 
         for c in (33_u8..=126).map(char::from) {
@@ -395,7 +503,7 @@ mod tests {
             bm.width, bm.height, bm.bearing_x, bm.bearing_y
         );
 
-        let mut atlas = MsdfAtlas::new();
+        let mut atlas = GlyphAtlas::new();
         let key = GlyphKey {
             font_id:     0,
             glyph_index: idx,
@@ -669,7 +777,7 @@ mod tests {
 
     #[test]
     fn dump_atlas_png() {
-        let mut atlas = MsdfAtlas::new();
+        let mut atlas = GlyphAtlas::new();
         let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
 
         for c in (33_u8..=126).map(char::from) {
@@ -710,7 +818,7 @@ mod tests {
     #[test]
     fn atlas_overflows_to_second_page() {
         // Small atlas that can't fit all ASCII glyphs on one page.
-        let mut atlas = MsdfAtlas::with_size(128, 128);
+        let mut atlas = GlyphAtlas::with_size(128, 128);
         let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
 
         for c in (33_u8..=126).map(char::from) {
@@ -763,7 +871,7 @@ mod tests {
 
     #[test]
     fn atlas_iter_glyphs_reports_page_distribution() {
-        let mut atlas = MsdfAtlas::with_size(128, 128);
+        let mut atlas = GlyphAtlas::with_size(128, 128);
         let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
 
         for c in (33_u8..=126).map(char::from) {
@@ -804,7 +912,7 @@ mod tests {
 
     #[test]
     fn atlas_single_page_no_overflow() {
-        let mut atlas = MsdfAtlas::new(); // Default 1024x1024
+        let mut atlas = GlyphAtlas::new(); // Default 1024x1024
         let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
 
         // Insert just A-Z — should easily fit on one page.
@@ -842,7 +950,7 @@ mod tests {
 
     #[test]
     fn atlas_multi_page_no_uv_overlap_within_page() {
-        let mut atlas = MsdfAtlas::with_size(128, 128);
+        let mut atlas = GlyphAtlas::with_size(128, 128);
         let face = ttf_parser::Face::parse(FONT_DATA, 0).unwrap();
 
         let mut keys = Vec::new();

@@ -11,11 +11,11 @@ use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Sizing;
 
 use super::constants::BODY_COLOR;
-use super::constants::BODY_SIZE;
 use super::constants::DESCRIPTION_CHILD_GAP;
 use super::constants::DESCRIPTION_WIDTH;
 use super::panel_frame;
 use super::unlit_panel_material;
+use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
@@ -95,7 +95,7 @@ pub(super) fn spawn_description_panel(commands: &mut Commands, panel: &Descripti
 
 fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPanel) {
     let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let body = LayoutTextStyle::new(BODY_SIZE).with_color(BODY_COLOR);
+    let body = LayoutTextStyle::new(LABEL_SIZE).with_color(BODY_COLOR);
 
     let background = panel
         .background_color

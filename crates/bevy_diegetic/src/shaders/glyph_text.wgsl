@@ -1,8 +1,10 @@
-// MSDF Text Fragment Shader — MaterialExtension for StandardMaterial
+// Glyph Text Fragment Shader — MaterialExtension for StandardMaterial
 //
-// Renders glyphs from an MSDF atlas texture. Uses the median-of-three
-// technique for clean edges at any scale, with adaptive anti-aliasing
-// based on screen pixel range.
+// Renders glyphs from a signed-distance-field atlas texture. The
+// `distance_field` uniform selects sampling strategy:
+//   0 = MSDF — median of R, G, B for sharp corners.
+//   1 = SDF  — single channel (R) for smoother curves.
+// Both branches feed the same adaptive anti-aliasing path.
 //
 // Supports three render modes:
 //   0 = Text       — normal MSDF alpha (smooth text edges)
@@ -46,20 +48,22 @@ const RENDER_MODE_TEXT: u32       = 1u;
 const RENDER_MODE_PUNCH_OUT: u32  = 2u;
 const RENDER_MODE_SOLID_QUAD: u32 = 3u;
 
-struct MsdfTextUniform {
+struct GlyphMaterialUniform {
     sdf_range: f32,
     atlas_width: f32,
     atlas_height: f32,
     hue_offset: f32,
     render_mode: u32,
     is_shadow_proxy: u32,
+    // 0 = MSDF (median of R, G, B); 1 = SDF (R only).
+    distance_field: u32,
     clip_rect: vec4<f32>,
     oit_depth_offset: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> msdf: MsdfTextUniform;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var msdf_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var msdf_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: GlyphMaterialUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var atlas_texture: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(102) var atlas_sampler: sampler;
 
 /// Rotates a color's hue by the given angle in radians.
 fn rotate_hue(color: vec3<f32>, angle: f32) -> vec3<f32> {
@@ -75,8 +79,8 @@ fn median(r: f32, g: f32, b: f32) -> f32 {
 
 fn screen_px_range(uv: vec2<f32>) -> f32 {
     let unit_range = vec2<f32>(
-        msdf.sdf_range / msdf.atlas_width,
-        msdf.sdf_range / msdf.atlas_height,
+        uniforms.sdf_range / uniforms.atlas_width,
+        uniforms.sdf_range / uniforms.atlas_height,
     );
     let screen_tex_size = vec2<f32>(1.0) / fwidth(uv);
     return max(
@@ -85,23 +89,29 @@ fn screen_px_range(uv: vec2<f32>) -> f32 {
     );
 }
 
-/// Computes the final alpha based on the render mode.
+/// Computes the final alpha based on the render mode and distance-field
+/// variant. MSDF takes median of RGB; SDF reads only R.
 fn compute_alpha(uv: vec2<f32>) -> f32 {
-    if msdf.render_mode == RENDER_MODE_SOLID_QUAD {
+    if uniforms.render_mode == RENDER_MODE_SOLID_QUAD {
         return 1.0;
     }
 
-    let msdf_sample = textureSample(msdf_texture, msdf_sampler, uv);
-    let sd = median(msdf_sample.r, msdf_sample.g, msdf_sample.b) - 0.5;
+    let atlas_sample = textureSample(atlas_texture, atlas_sampler, uv);
+    let distance = select(
+        atlas_sample.r,
+        median(atlas_sample.r, atlas_sample.g, atlas_sample.b),
+        uniforms.distance_field == 0u,
+    );
+    let sd = distance - 0.5;
     let screen_px_dist = screen_px_range(uv) * sd;
-    let msdf_alpha = clamp(screen_px_dist + 0.5, 0.0, 1.0);
+    let glyph_alpha = clamp(screen_px_dist + 0.5, 0.0, 1.0);
 
-    if msdf.render_mode == RENDER_MODE_PUNCH_OUT {
-        return 1.0 - msdf_alpha;
+    if uniforms.render_mode == RENDER_MODE_PUNCH_OUT {
+        return 1.0 - glyph_alpha;
     }
 
     // RENDER_MODE_TEXT (default).
-    return msdf_alpha;
+    return glyph_alpha;
 }
 
 // ── Prepass entry point (shadow maps, depth prepass) ──────────────────
@@ -118,15 +128,15 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) {
     // Clip to parent scissor rect (panel-local Y-up coordinates).
-    if in.uv_b.x < msdf.clip_rect.x || in.uv_b.x > msdf.clip_rect.z ||
-       in.uv_b.y < msdf.clip_rect.y || in.uv_b.y > msdf.clip_rect.w {
+    if in.uv_b.x < uniforms.clip_rect.x || in.uv_b.x > uniforms.clip_rect.z ||
+       in.uv_b.y < uniforms.clip_rect.y || in.uv_b.y > uniforms.clip_rect.w {
         discard;
     }
 
     // Only shadow proxies need MSDF decode in the prepass. Non-proxy
     // meshes pass through without texture sampling — the full quad
     // writes depth, producing a rectangular shadow (SolidQuad behavior).
-    if msdf.is_shadow_proxy == 1u {
+    if uniforms.is_shadow_proxy == 1u {
         let final_alpha = compute_alpha(in.uv);
         if final_alpha < 0.5 {
             discard;
@@ -143,13 +153,13 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
     // Clip to parent scissor rect (panel-local Y-up coordinates).
-    if in.uv_b.x < msdf.clip_rect.x || in.uv_b.x > msdf.clip_rect.z ||
-       in.uv_b.y < msdf.clip_rect.y || in.uv_b.y > msdf.clip_rect.w {
+    if in.uv_b.x < uniforms.clip_rect.x || in.uv_b.x > uniforms.clip_rect.z ||
+       in.uv_b.y < uniforms.clip_rect.y || in.uv_b.y > uniforms.clip_rect.w {
         discard;
     }
 
     // Shadow proxy: invisible in the main pass.
-    if msdf.is_shadow_proxy == 1u {
+    if uniforms.is_shadow_proxy == 1u {
         discard;
     }
 
@@ -164,8 +174,8 @@ fn fragment(
 
     // Apply hue rotation to vertex color if needed.
 #ifdef VERTEX_COLORS
-    if in.color.a > 0.0 && msdf.hue_offset != 0.0 {
-        let rotated = rotate_hue(pbr_input.material.base_color.rgb, msdf.hue_offset);
+    if in.color.a > 0.0 && uniforms.hue_offset != 0.0 {
+        let rotated = rotate_hue(pbr_input.material.base_color.rgb, uniforms.hue_offset);
         pbr_input.material.base_color = vec4<f32>(rotated, pbr_input.material.base_color.a);
     }
 #endif
@@ -194,7 +204,7 @@ fn fragment(
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
         var oit_pos = in.position;
-        oit_pos.z += msdf.oit_depth_offset;
+        oit_pos.z += uniforms.oit_depth_offset;
         oit_draw(oit_pos, out.color);
         discard;
     }

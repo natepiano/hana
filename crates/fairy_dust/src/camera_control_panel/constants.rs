@@ -1,7 +1,6 @@
 //! Constants for the `camera_control_panel` module.
 
 use bevy::prelude::Color;
-use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 
 // colors
@@ -21,7 +20,3 @@ pub(super) const TABLE_COLUMN_GAP: f32 = 8.0;
 pub(super) const TABLE_DIVIDER_WIDTH: Px = Px(1.0);
 pub(super) const TABLE_GROUP_GAP: f32 = 7.0;
 pub(super) const TABLE_ROW_GAP: f32 = 3.0;
-
-// typography
-pub(super) const HEADER_SIZE: Pt = Pt(12.0);
-pub(super) const LABEL_SIZE: Pt = Pt(11.0);

@@ -15,7 +15,6 @@ use bevy_diegetic::Sizing;
 
 use super::constants::CONTROL_ACTIVE_COLOR;
 use super::constants::CONTROL_INACTIVE_COLOR;
-use super::constants::CONTROL_SIZE;
 use super::constants::DIVIDER_COLOR;
 use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
@@ -25,6 +24,7 @@ use super::panel_frame;
 use super::unlit_panel_material;
 use crate::camera_home::CameraHomeConfig;
 use crate::constants::HOME_CONTROL;
+use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
@@ -215,8 +215,8 @@ fn build_title_bar_layout(
     state: &TitleBarControlState,
 ) {
     let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let inactive_control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
-    let active_control = LayoutTextStyle::new(CONTROL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
+    let inactive_control = LayoutTextStyle::new(LABEL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
+    let active_control = LayoutTextStyle::new(LABEL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
 
     let background = title_bar
         .background_color

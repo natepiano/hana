@@ -27,10 +27,10 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::GlyphAtlas;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
-use bevy_diegetic::MsdfAtlas;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::RasterQuality;
@@ -290,7 +290,7 @@ fn main() {
 // ── Setup ──────────────────────────────────────────────────────────
 
 fn setup(
-    atlas: Res<MsdfAtlas>,
+    atlas: Res<GlyphAtlas>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -637,7 +637,7 @@ fn build_glyph_grid(b: &mut LayoutBuilder, chars: &[char], glyph_style: &LayoutT
 /// stabilizes, chunks `AccumulatedCharacters` into display pages of
 /// `CHARS_PER_CELL` and transitions to Ready.
 fn commit_atlas_pages(
-    atlas: Res<MsdfAtlas>,
+    atlas: Res<GlyphAtlas>,
     all_chars: Res<AccumulatedCharacters>,
     mut phase: ResMut<AtlasPhase>,
     mut committed: ResMut<CommittedPages>,
@@ -710,7 +710,7 @@ fn commit_atlas_pages(
 /// Rebuilds the grid panel from committed snapshots (Ready) or shows
 /// a loading cell with all chars (Loading) to trigger rasterization.
 fn display_committed_pages(
-    atlas: Res<MsdfAtlas>,
+    atlas: Res<GlyphAtlas>,
     phase: Res<AtlasPhase>,
     committed: Res<CommittedPages>,
     revealed: Res<PagesRevealed>,
@@ -834,7 +834,7 @@ fn display_committed_pages(
 // ── Input ──────────────────────────────────────────────────────────
 
 fn handle_input(
-    atlas: Res<MsdfAtlas>,
+    atlas: Res<GlyphAtlas>,
     keys: Res<ButtonInput<KeyCode>>,
     committed: Res<CommittedPages>,
     mut revealed: ResMut<PagesRevealed>,

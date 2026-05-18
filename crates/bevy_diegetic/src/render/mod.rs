@@ -2,8 +2,8 @@
 
 mod clip;
 mod constants;
+mod glyph_material;
 mod glyph_quad;
-mod msdf_material;
 mod panel_geometry;
 mod panel_rtt;
 mod sdf_material;

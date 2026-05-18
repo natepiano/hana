@@ -36,7 +36,7 @@
 //! App::new()
 //!     .insert_resource(
 //!         AtlasConfig::new()
-//!             .with_quality(RasterQuality::Low)
+//!             .with_quality(RasterQuality::Tiny)
 //!             .with_glyphs_per_page(50),
 //!     )
 //!     .insert_resource(CascadeDefaults {
@@ -177,7 +177,12 @@ pub use render::WorldTextReady;
 pub use render::default_panel_material;
 use screen_space::ScreenSpacePlugin;
 pub use text::AtlasConfig;
+pub use text::AtlasPreference;
+pub use text::AtlasSlot;
+pub use text::AtlasSwapCompleted;
+pub use text::AtlasSwapStarted;
 pub use text::DiegeticTextMeasurer;
+pub use text::DistanceField;
 pub use text::Font;
 pub use text::FontId;
 pub use text::FontLoadFailed;
@@ -185,6 +190,7 @@ pub use text::FontMetrics;
 pub use text::FontRegistered;
 pub use text::FontRegistry;
 pub use text::FontSource;
+pub use text::GlyphAtlas;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphBounds;
 pub use text::GlyphKey;
@@ -192,7 +198,6 @@ pub use text::GlyphMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
 pub use text::GlyphWorkerThreads;
-pub use text::MsdfAtlas;
 pub use text::RasterQuality;
 use text::TextPlugin;
 
@@ -215,7 +220,7 @@ use text::TextPlugin;
 /// App::new()
 ///     .insert_resource(
 ///         AtlasConfig::new()
-///             .with_quality(RasterQuality::Low)
+///             .with_quality(RasterQuality::Tiny)
 ///             .with_glyphs_per_page(50)
 ///             .with_glyph_worker_threads(GlyphWorkerThreads::Fixed(4)),
 ///     )
@@ -226,7 +231,7 @@ pub struct DiegeticUiPlugin;
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/sdf_panel.wgsl");
-        embedded_asset!(app, "shaders/msdf_text.wgsl");
+        embedded_asset!(app, "shaders/glyph_text.wgsl");
 
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((

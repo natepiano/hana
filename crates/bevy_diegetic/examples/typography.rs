@@ -12,11 +12,14 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
+use bevy_diegetic::AtlasPreference;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::Direction;
+use bevy_diegetic::DistanceField;
 use bevy_diegetic::El;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontId;
@@ -26,8 +29,11 @@ use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelTextChild;
+use bevy_diegetic::PendingGlyphs;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
+use bevy_diegetic::RasterQuality;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TypographyOverlay;
@@ -77,7 +83,6 @@ const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
 const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
 
 const CAM_HELP_WIDTH: Px = Px(280.0);
-const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
 const CAM_HELP_RADIUS: Px = Px(15.0);
 const CAM_HELP_FRAME_PAD: Px = Px(2.0);
 const CAM_HELP_BORDER: Px = Px(2.0);
@@ -91,8 +96,22 @@ const FONTS_PANEL_HEIGHT: Px = Px(208.0);
 const FONTS_PANEL_GAP: Px = Px(10.0);
 const FONTS_PANEL_ROW_HEIGHT: Px = Px(24.0);
 const FONTS_PANEL_KEY_WIDTH: Px = Px(18.0);
-const FONTS_KEY_SIZE: Pt = Pt(12.0);
-const FONTS_SAMPLE_SIZE: Pt = Pt(15.0);
+
+const QUALITY_PANEL_WIDTH: Px = CAM_HELP_WIDTH;
+const QUALITY_PANEL_HEIGHT: Px = Px(190.0);
+
+/// Quality key bindings: (letter label, `RasterQuality`, `KeyCode`).
+///
+/// Maps A/B/C/D/E to the five named pixel sizes the
+/// [`RasterQuality`] enum exposes. Custom is not bound — apps that
+/// want a specific size set `RasterQualityPreference` directly.
+const QUALITY_KEYS: &[(&str, RasterQuality, KeyCode)] = &[
+    ("A", RasterQuality::Tiny, KeyCode::KeyA),
+    ("B", RasterQuality::Small, KeyCode::KeyB),
+    ("C", RasterQuality::Medium, KeyCode::KeyC),
+    ("D", RasterQuality::Large, KeyCode::KeyD),
+    ("E", RasterQuality::Huge, KeyCode::KeyE),
+];
 
 /// Font key bindings: (digit key label, font family name, `KeyCode`).
 /// `JetBrains` Mono is always available; the rest are loaded at runtime.
@@ -140,6 +159,9 @@ const DISPLAY_WORDS: &[(&str, &str)] = &[
 
 #[derive(Component)]
 struct FontsPanel;
+
+#[derive(Component)]
+struct QualityPanel;
 
 #[derive(Component)]
 struct CommentText;
@@ -211,7 +233,9 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .control("T Overlay")
-                .control("←/→ Cycle Word"),
+                .control("←/→ Cycle Word")
+                .control("M MSDF")
+                .control("S SDF"),
         )
         .wire_chip_to_state::<OverlayState, _>("T Overlay", |state| match state {
             OverlayState::On => ControlActivation::Active,
@@ -220,6 +244,14 @@ fn main() {
         .wire_chip_to_state::<CycleState, _>("←/→ Cycle Word", |state| match state {
             CycleState::Cycling { .. } => ControlActivation::Active,
             CycleState::Idle => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<AtlasPreference, _>("M MSDF", |pref| match pref.distance_field {
+            DistanceField::Msdf => ControlActivation::Active,
+            DistanceField::Sdf => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<AtlasPreference, _>("S SDF", |pref| match pref.distance_field {
+            DistanceField::Sdf => ControlActivation::Active,
+            DistanceField::Msdf => ControlActivation::Inactive,
         })
         .with_camera_control_panel()
         .insert_resource(WordCycle {
@@ -233,7 +265,16 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (toggle_overlay, switch_font, cycle_word, tick_cycle_state),
+            (
+                toggle_overlay,
+                switch_font,
+                cycle_word,
+                tick_cycle_state,
+                toggle_distance_field,
+                pick_raster_quality,
+                refresh_quality_panel,
+                log_steady_state_perf,
+            ),
         )
         .add_observer(on_world_text_added)
         .add_observer(on_font_registered)
@@ -292,7 +333,7 @@ fn spawn_hud_panels(commands: &mut Commands, font_registry: &FontRegistry) {
         )
         .anchor(bevy_diegetic::Anchor::TopRight)
         .material(unlit.clone())
-        .text_material(unlit)
+        .text_material(unlit.clone())
         .with_tree(build_fonts_panel(font_registry, 0))
         .build();
     let Ok(fonts_panel) = fonts_panel else {
@@ -301,6 +342,154 @@ fn spawn_hud_panels(commands: &mut Commands, font_registry: &FontRegistry) {
     };
 
     commands.spawn((FontsPanel, fonts_panel, Transform::default()));
+
+    let quality_panel = DiegeticPanel::screen()
+        .size(
+            Sizing::fixed(QUALITY_PANEL_WIDTH),
+            Sizing::fixed(QUALITY_PANEL_HEIGHT),
+        )
+        .anchor(bevy_diegetic::Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_quality_panel(RasterQuality::default()))
+        .build();
+    let Ok(quality_panel) = quality_panel else {
+        error!("failed to build quality HUD dimensions");
+        return;
+    };
+    commands.spawn((QualityPanel, quality_panel, Transform::default()));
+}
+
+fn build_quality_panel(selected: RasterQuality) -> bevy_diegetic::LayoutTree {
+    let row_height = Sizing::fixed(FONTS_PANEL_ROW_HEIGHT);
+    let mut builder = LayoutBuilder::new(QUALITY_PANEL_WIDTH, QUALITY_PANEL_HEIGHT);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .child_align_x(AlignX::Left)
+            .child_align_y(AlignY::Bottom),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .padding(Padding::all(CAM_HELP_FRAME_PAD))
+                    .corner_radius(CornerRadius::new(
+                        CAM_HELP_RADIUS,
+                        CAM_HELP_RADIUS,
+                        CAM_HELP_RADIUS,
+                        CAM_HELP_RADIUS,
+                    ))
+                    .background(HUD_FRAME_BACKGROUND)
+                    .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
+                |b| {
+                    b.with(
+                        El::new()
+                            .width(Sizing::FIT)
+                            .height(Sizing::FIT)
+                            .padding(Padding::all(Px(10.0)))
+                            .direction(Direction::TopToBottom)
+                            .child_gap(Px(6.0))
+                            .corner_radius(CornerRadius::new(
+                                CAM_HELP_INNER_RADIUS,
+                                CAM_HELP_INNER_RADIUS,
+                                CAM_HELP_INNER_RADIUS,
+                                CAM_HELP_INNER_RADIUS,
+                            ))
+                            .background(HUD_BACKGROUND)
+                            .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
+                        |b| {
+                            b.text(
+                                "QUALITY",
+                                LayoutTextStyle::new(fairy_dust::TITLE_SIZE)
+                                    .with_color(HUD_TITLE_COLOR),
+                            );
+                            b.with(
+                                El::new()
+                                    .width(Sizing::FIT)
+                                    .height(Sizing::FIT)
+                                    .direction(Direction::LeftToRight)
+                                    .child_gap(FONTS_PANEL_GAP),
+                                |b| {
+                                    build_quality_keys_column(b, row_height);
+                                    build_quality_labels_column(b, row_height, selected);
+                                },
+                            );
+                        },
+                    );
+                },
+            );
+        },
+    );
+    builder.build()
+}
+
+fn build_quality_keys_column(b: &mut LayoutBuilder, row_height: Sizing) {
+    b.with(
+        El::new()
+            .width(Sizing::fixed(FONTS_PANEL_KEY_WIDTH))
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_align_x(AlignX::Center),
+        |b| {
+            for (label, _, _) in QUALITY_KEYS {
+                b.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(row_height)
+                        .child_align_x(AlignX::Center)
+                        .child_align_y(AlignY::Center),
+                    |b| {
+                        b.text(
+                            *label,
+                            LayoutTextStyle::new(Pt(12.0)).with_color(HUD_TITLE_COLOR),
+                        );
+                    },
+                );
+            }
+        },
+    );
+}
+
+fn build_quality_labels_column(b: &mut LayoutBuilder, row_height: Sizing, selected: RasterQuality) {
+    b.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_align_x(AlignX::Left),
+        |b| {
+            for (_, quality, _) in QUALITY_KEYS {
+                let is_selected = *quality == selected;
+                b.with(
+                    El::new()
+                        .width(Sizing::FIT)
+                        .height(row_height)
+                        .child_align_x(AlignX::Left)
+                        .child_align_y(AlignY::Center),
+                    |b| {
+                        b.text(
+                            quality_label(*quality),
+                            LayoutTextStyle::new(Pt(12.0))
+                                .with_color(row_color(is_selected)),
+                        );
+                    },
+                );
+            }
+        },
+    );
+}
+
+const fn quality_label(quality: RasterQuality) -> &'static str {
+    match quality {
+        RasterQuality::Tiny => "16px  Tiny",
+        RasterQuality::Small => "32px  Small",
+        RasterQuality::Medium => "64px  Medium",
+        RasterQuality::Large => "128px Large",
+        RasterQuality::Huge => "256px Huge",
+        RasterQuality::Custom(_) => "Custom",
+    }
 }
 
 fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
@@ -394,7 +583,7 @@ fn build_font_key_cells(selected_font: usize) -> Vec<ColumnCell<'static>> {
         .map(|(idx, (label, _, _))| {
             ColumnCell::Text(
                 label,
-                LayoutTextStyle::new(FONTS_KEY_SIZE).with_color(row_color(idx == selected_font)),
+                LayoutTextStyle::new(Pt(12.0)).with_color(row_color(idx == selected_font)),
             )
         })
         .collect()
@@ -414,7 +603,7 @@ fn build_font_name_cells(
                 .0;
             ColumnCell::Text(
                 name,
-                LayoutTextStyle::new(FONTS_SAMPLE_SIZE)
+                LayoutTextStyle::new(Pt(12.0))
                     .with_font(font_id)
                     .with_color(row_color(idx == selected_font)),
             )
@@ -469,7 +658,7 @@ fn build_fonts_panel(
                         |b| {
                             b.text(
                                 "FONTS",
-                                LayoutTextStyle::new(CAM_HELP_TITLE_SIZE)
+                                LayoutTextStyle::new(fairy_dust::TITLE_SIZE)
                                     .with_color(HUD_TITLE_COLOR),
                             );
                             b.with(
@@ -557,6 +746,102 @@ fn on_font_registered(
     for entity in &panels {
         info!("Rebuilding fonts panel");
         commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
+    }
+}
+
+/// `M` selects MSDF rasterization; `S` selects SDF. Mutates
+/// [`AtlasPreference::distance_field`]; the driver picks up the
+/// mismatch on the next `PostUpdate` and starts the parallel-atlas
+/// swap.
+fn toggle_distance_field(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut preference: ResMut<AtlasPreference>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyM) && preference.distance_field != DistanceField::Msdf {
+        preference.distance_field = DistanceField::Msdf;
+    } else if keyboard.just_pressed(KeyCode::KeyS)
+        && preference.distance_field != DistanceField::Sdf
+    {
+        preference.distance_field = DistanceField::Sdf;
+    }
+}
+
+/// `A`/`B`/`C`/`D`/`E` pick a canonical rasterization size. Mutates
+/// [`AtlasPreference::quality`]; the driver runs the same parallel-
+/// atlas swap as MSDF↔SDF when the size differs from the active atlas.
+fn pick_raster_quality(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut preference: ResMut<AtlasPreference>,
+) {
+    for (_, quality, key) in QUALITY_KEYS {
+        if keyboard.just_pressed(*key) && preference.quality != *quality {
+            preference.quality = *quality;
+            return;
+        }
+    }
+}
+
+/// Logs steady-state per-frame work counts once per second so we can
+/// see which subsystem is actually burning CPU. Watch:
+///
+/// - text-shaping wall time / mesh-build wall time — if non-zero in steady state, some text entity
+///   is being re-processed every frame.
+/// - `pending_panel`/`pending_world` — entities stuck with `PendingGlyphs`; each forces the
+///   text-shaping pass to re-run on it every frame.
+/// - `atlas.poll_ms` — async glyph polling, should be near-zero when no rasterization is in flight.
+/// - `atlas.in_flight_glyphs` — should be 0 in steady state.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Bevy system parameters are taken by value"
+)]
+fn log_steady_state_perf(
+    perf: Res<DiegeticPerfStats>,
+    time: Res<Time>,
+    pending_panel: Query<(), (With<PanelTextChild>, With<PendingGlyphs>)>,
+    pending_world: Query<(), (With<bevy_diegetic::WorldText>, With<PendingGlyphs>)>,
+    mut last_log: Local<f32>,
+) {
+    let now = time.elapsed_secs();
+    if now - *last_log < 1.0 {
+        return;
+    }
+    *last_log = now;
+    let pending_panel = pending_panel.iter().count();
+    let pending_world = pending_world.iter().count();
+    let pt = &perf.panel_text;
+    let atlas = &perf.atlas;
+    let shaping_ms = pt.shape_ms; // allow-banned: DiegeticPerfStats field name
+    let panels_processed = pt.shaped_panels; // allow-banned: DiegeticPerfStats field name
+    info!(
+        target: "typography_perf",
+        "shaping_ms={:.2} parley_ms={:.2} atlas_lookup_ms={:.2} mesh_build_ms={:.2} \
+         panels_processed={} pending_panel={} pending_world={} atlas_poll_ms={:.2} \
+         atlas_sync_ms={:.2} in_flight={}",
+        shaping_ms,
+        pt.parley_ms,
+        pt.atlas_lookup_ms,
+        pt.mesh_build_ms,
+        panels_processed,
+        pending_panel,
+        pending_world,
+        atlas.poll_ms,
+        atlas.sync_ms,
+        atlas.in_flight_glyphs,
+    );
+}
+
+/// Rebuilds the quality panel tree when the preference changes so the
+/// selected row highlights match.
+fn refresh_quality_panel(
+    preference: Res<AtlasPreference>,
+    panels: Query<Entity, With<QualityPanel>>,
+    mut commands: Commands,
+) {
+    if !preference.is_changed() {
+        return;
+    }
+    for entity in &panels {
+        commands.set_tree(entity, build_quality_panel(preference.quality));
     }
 }
 

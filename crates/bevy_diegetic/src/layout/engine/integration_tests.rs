@@ -41,6 +41,8 @@ use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
 use crate::layout::TextWrap;
+use crate::layout::element::Element;
+use crate::layout::element::ElementContent;
 
 const VIEWPORT: f32 = 200.0;
 
@@ -1756,8 +1758,6 @@ fn grow_body_compression_20_rows() {
 #[test]
 #[ignore = "manual perf benchmark — run with --ignored"]
 fn perf_element_sizes() {
-    use crate::layout::element::Element;
-    use crate::layout::element::ElementContent;
     println!("Element: {} bytes", std::mem::size_of::<Element>());
     println!(
         "ElementContent: {} bytes",

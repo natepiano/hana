@@ -8,6 +8,7 @@ use bevy_kana::ToUsize;
 
 use super::constants::AVERAGE_GLYPH_COVERAGE;
 use super::constants::DEFAULT_AUTO_GLYPH_WORKER_THREADS;
+#[cfg(test)]
 use super::constants::DEFAULT_CANONICAL_SIZE;
 use super::constants::DEFAULT_GLYPH_PADDING;
 use super::constants::DEFAULT_GLYPHS_PER_PAGE;
@@ -17,34 +18,40 @@ use super::constants::MIN_CUSTOM_RASTER_SIZE;
 use super::constants::MIN_GLYPHS_PER_PAGE;
 use super::constants::SDF_RANGE;
 use super::constants::SHELF_PACKING_EFFICIENCY;
+use super::msdf_rasterizer::DistanceField;
 
-/// Controls the pixel resolution of MSDF glyph rasterization.
+/// Controls the pixel resolution of glyph rasterization (the canonical
+/// size at which each glyph is rendered into the atlas).
 ///
-/// Higher quality means sharper text at extreme zoom levels but uses more
-/// memory per glyph. MSDF is resolution-independent — the shader handles
-/// scaling — so this controls the *baseline fidelity* from which the
-/// distance field is generated.
+/// Higher quality means sharper text at extreme zoom levels but uses
+/// more memory per glyph and slower rasterization. Distance-field
+/// rendering is resolution-independent — the shader handles scaling —
+/// so this controls the *baseline fidelity* from which the distance
+/// field is generated.
 ///
 /// # Variants
 ///
-/// | Variant    | Pixels | Use case                                     |
-/// |------------|--------|----------------------------------------------|
-/// | `Low`      | 16     | Retro/pixel-art aesthetic, minimal memory    |
-/// | `Medium`   | 32     | Sharp at normal viewing distances             |
-/// | `High`     | 64     | Sharp at extreme zoom (recommended default)  |
-/// | `Extreme`  | 128    | Maximum fidelity, 16x memory vs `Medium`     |
-/// | `Custom`   | 8–256  | Clamped to safe range, warns if out of bounds|
+/// | Variant   | Pixels | Use case                                       |
+/// |-----------|--------|------------------------------------------------|
+/// | `Tiny`    | 16     | Retro/pixel-art aesthetic, minimal memory      |
+/// | `Small`   | 32     | Sharp at normal viewing distances              |
+/// | `Medium`  | 64     | Good fidelity for most apps                    |
+/// | `Large`   | 128    | Recommended default — sharp at extreme zoom    |
+/// | `Huge`    | 256    | Maximum fidelity, 16× memory vs `Small`        |
+/// | `Custom`  | 8–256  | Clamped to safe range, warns if out of bounds  |
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum RasterQuality {
     /// 16px — deliberately chunky, retro aesthetic, minimal memory.
-    Low,
+    Tiny,
     /// 32px — sharp at normal viewing distances.
+    Small,
+    /// 64px — good fidelity for most apps.
     Medium,
-    /// `DEFAULT_CANONICAL_SIZE` px — sharp even at extreme zoom (default).
+    /// 128px — sharp at extreme zoom (default).
     #[default]
-    High,
-    /// 128px — maximum fidelity, significant memory cost.
-    Extreme,
+    Large,
+    /// 256px — maximum fidelity, significant memory cost.
+    Huge,
     /// Custom pixel size, clamped to 8–256. Values outside this range
     /// are clamped and a warning is logged.
     Custom(u32),
@@ -55,10 +62,11 @@ impl RasterQuality {
     #[must_use]
     pub const fn pixel_size(self) -> u32 {
         match self {
-            Self::Low => 16,
-            Self::Medium => 32,
-            Self::High => DEFAULT_CANONICAL_SIZE,
-            Self::Extreme => 128,
+            Self::Tiny => 16,
+            Self::Small => 32,
+            Self::Medium => 64,
+            Self::Large => 128,
+            Self::Huge => 256,
             Self::Custom(size) => {
                 if size < MIN_CUSTOM_RASTER_SIZE {
                     MIN_CUSTOM_RASTER_SIZE
@@ -109,7 +117,7 @@ impl GlyphWorkerThreads {
 /// App::new()
 ///     .insert_resource(
 ///         AtlasConfig::new()
-///             .with_quality(RasterQuality::Low)
+///             .with_quality(RasterQuality::Tiny)
 ///             .with_glyphs_per_page(50),
 ///     )
 ///     .add_plugins(DiegeticUiPlugin);
@@ -124,7 +132,7 @@ impl GlyphWorkerThreads {
 ///
 /// # Defaults
 ///
-/// - **Quality**: [`RasterQuality::High`] (64px) — sharp at extreme zoom
+/// - **Quality**: [`RasterQuality::Large`] (128px) — sharp at extreme zoom
 /// - **Glyphs per page**: 100 — fits most Latin text comfortably
 /// - **Glyph worker threads**: [`GlyphWorkerThreads::Auto`] — currently up to 6 worker threads,
 ///   clamped to the machine's available parallelism
@@ -147,6 +155,12 @@ pub struct AtlasConfig {
     /// Async worker policy for MSDF glyph rasterization. Applies to both
     /// panel text and [`WorldText`](crate::WorldText).
     pub glyph_worker_threads: GlyphWorkerThreads,
+
+    /// Distance-field variant used for glyph rasterization. Defaults to
+    /// [`DistanceField::Msdf`] (multi-channel — sharp at corners). Use
+    /// [`DistanceField::Sdf`] for smoother curves at the cost of corner
+    /// fidelity.
+    pub distance_field: DistanceField,
 }
 
 impl AtlasConfig {
@@ -154,9 +168,10 @@ impl AtlasConfig {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            quality:              RasterQuality::High,
+            quality:              RasterQuality::Large,
             glyphs_per_page:      DEFAULT_GLYPHS_PER_PAGE,
             glyph_worker_threads: GlyphWorkerThreads::Auto,
+            distance_field:       DistanceField::Msdf,
         }
     }
 
@@ -178,6 +193,13 @@ impl AtlasConfig {
     #[must_use]
     pub const fn with_glyph_worker_threads(mut self, workers: GlyphWorkerThreads) -> Self {
         self.glyph_worker_threads = workers;
+        self
+    }
+
+    /// Sets which distance-field variant the atlas rasterizes glyphs with.
+    #[must_use]
+    pub const fn with_distance_field(mut self, mode: DistanceField) -> Self {
+        self.distance_field = mode;
         self
     }
 }
@@ -280,10 +302,11 @@ mod tests {
 
     #[test]
     fn raster_quality_pixel_sizes() {
-        assert_eq!(RasterQuality::Low.pixel_size(), 16);
-        assert_eq!(RasterQuality::Medium.pixel_size(), 32);
-        assert_eq!(RasterQuality::High.pixel_size(), DEFAULT_CANONICAL_SIZE);
-        assert_eq!(RasterQuality::Extreme.pixel_size(), 128);
+        assert_eq!(RasterQuality::Tiny.pixel_size(), 16);
+        assert_eq!(RasterQuality::Small.pixel_size(), 32);
+        assert_eq!(RasterQuality::Medium.pixel_size(), 64);
+        assert_eq!(RasterQuality::Large.pixel_size(), DEFAULT_CANONICAL_SIZE);
+        assert_eq!(RasterQuality::Huge.pixel_size(), 256);
     }
 
     #[test]
@@ -325,10 +348,17 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = AtlasConfig::default();
-        assert_eq!(config.quality, RasterQuality::High);
+        assert_eq!(config.quality, RasterQuality::Large);
         assert_eq!(config.glyphs_per_page, DEFAULT_GLYPHS_PER_PAGE);
         assert_eq!(config.glyph_worker_threads, GlyphWorkerThreads::Auto);
         assert_eq!(config.canonical_size(), DEFAULT_CANONICAL_SIZE);
+        assert_eq!(config.distance_field, DistanceField::Msdf);
+    }
+
+    #[test]
+    fn with_distance_field_overrides_default() {
+        let config = AtlasConfig::new().with_distance_field(DistanceField::Sdf);
+        assert_eq!(config.distance_field, DistanceField::Sdf);
     }
 
     #[test]
@@ -351,16 +381,18 @@ mod tests {
     #[test]
     fn page_size_is_aligned_to_4() {
         for quality in [
-            RasterQuality::Low,
+            RasterQuality::Tiny,
+            RasterQuality::Small,
             RasterQuality::Medium,
-            RasterQuality::High,
-            RasterQuality::Extreme,
+            RasterQuality::Large,
+            RasterQuality::Huge,
         ] {
             for glyphs in [10, 50, 100, 500, 1000] {
                 let config = AtlasConfig {
                     quality,
                     glyphs_per_page: glyphs,
                     glyph_worker_threads: GlyphWorkerThreads::Auto,
+                    distance_field: DistanceField::Msdf,
                 };
                 let size = config.page_size();
                 assert_eq!(

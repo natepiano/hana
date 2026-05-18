@@ -21,9 +21,7 @@ use super::constants::ACTION_COLUMN_MIN_WIDTH;
 use super::constants::ACTIVE_COLOR;
 use super::constants::GUIDANCE_CHILD_GAP;
 use super::constants::HEADER_COLOR;
-use super::constants::HEADER_SIZE;
 use super::constants::LABEL_COLOR;
-use super::constants::LABEL_SIZE;
 use super::constants::SOURCE_COLOR;
 use super::constants::TABLE_ACTION_ARROW;
 use super::constants::TABLE_COLUMN_GAP;
@@ -40,6 +38,7 @@ use crate::constants::FRAME_PAD;
 use crate::constants::INNER_BORDER_WIDTH;
 use crate::constants::INNER_PAD;
 use crate::constants::INNER_RADIUS;
+use crate::constants::LABEL_SIZE;
 use crate::constants::RADIUS;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
@@ -70,7 +69,7 @@ fn build_guidance_layout(
     let title = LayoutTextStyle::new(TITLE_SIZE)
         .with_color(TITLE_COLOR)
         .no_wrap();
-    let header = LayoutTextStyle::new(HEADER_SIZE)
+    let header = LayoutTextStyle::new(LABEL_SIZE)
         .with_color(HEADER_COLOR)
         .no_wrap();
     let label = LayoutTextStyle::new(LABEL_SIZE)

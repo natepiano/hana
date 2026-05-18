@@ -16,6 +16,7 @@ workspace = true
 [features]
 bench_support      = []
 default            = ["typography_overlay"]
+trace_chrome       = ["bevy/trace_chrome"]
 typography_overlay = []
 
 [dependencies]
