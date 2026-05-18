@@ -157,11 +157,16 @@ pub(super) fn spawn_title_bar_with_home_chip(
     title_bar: &TitleBar,
     home: Option<&CameraHomeConfig>,
 ) {
-    let mut bar = title_bar.clone();
-    if home.is_some() && !bar.controls.iter().any(|control| control == HOME_CONTROL) {
-        bar.controls.insert(0, HOME_CONTROL.to_string());
+    let mut title_bar = title_bar.clone();
+    if home.is_some()
+        && !title_bar
+            .controls
+            .iter()
+            .any(|control| control == HOME_CONTROL)
+    {
+        title_bar.controls.insert(0, HOME_CONTROL.to_string());
     }
-    spawn_title_bar(commands, &bar);
+    spawn_title_bar(commands, &title_bar);
 }
 
 fn spawn_title_bar(commands: &mut Commands, title_bar: &TitleBar) {

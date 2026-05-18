@@ -32,12 +32,12 @@ pub(crate) fn install_with_bundle<B>(
     let configure = Mutex::new(Some(configure));
     let bundle = Mutex::new(Some(bundle));
     app.add_systems(Startup, move |mut commands: Commands| {
-        let mut cam = OrbitCam::default();
+        let mut orbit_cam = OrbitCam::default();
         let configure_fn = configure.lock().ok().and_then(|mut g| g.take());
         if let Some(f) = configure_fn {
-            f(&mut cam);
+            f(&mut orbit_cam);
         }
-        let mut camera = commands.spawn((cam, FairyDustOrbitCam));
+        let mut camera = commands.spawn((orbit_cam, FairyDustOrbitCam));
         if let Some(bundle) = bundle.lock().ok().and_then(|mut g| g.take()) {
             camera.insert(bundle);
         }

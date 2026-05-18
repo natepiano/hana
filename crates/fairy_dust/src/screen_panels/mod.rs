@@ -37,13 +37,13 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
     });
 }
 
-pub(crate) fn install_title_bar(app: &mut App, bar: TitleBar) {
+pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(PostUpdate, title_bar::refresh_changed_title_bar);
     app.add_systems(
         Startup,
         move |mut commands: Commands, home: Option<Res<CameraHomeConfig>>| {
-            title_bar::spawn_title_bar_with_home_chip(&mut commands, &bar, home.as_deref());
+            title_bar::spawn_title_bar_with_home_chip(&mut commands, &title_bar, home.as_deref());
         },
     );
 }
@@ -85,4 +85,4 @@ fn panel_frame(
 
 /// Default background color for screen panels — exposed so per-panel
 /// builders can substitute it when no override is provided.
-pub(crate) const fn default_inner_background() -> Color { INNER_BG }
+pub(super) const fn default_inner_background() -> Color { INNER_BG }
