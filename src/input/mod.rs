@@ -5,9 +5,9 @@
 //! that handles platform-specific modifier keys (`Cmd` vs `Ctrl`) and
 //! automatic `BlockBy` application.
 
-mod action_macro;
-mod bind_action_system_macro;
-mod event_macro;
+mod action;
+mod bind_action_system;
+mod event;
 mod keybindings;
 
 pub use keybindings::Keybindings;
