@@ -25,6 +25,12 @@
 //! - `image_alloc` — [`Rgb32FImage::new`] cost at the bbox sizes the MSDF generator produces.
 //!   Bounds the win from buffer reuse.
 
+#![allow(
+    clippy::panic,
+    clippy::expect_used,
+    reason = "benchmark setup panics on missing test fixtures"
+)]
+
 use std::hint::black_box;
 use std::sync::Arc;
 use std::thread;

@@ -139,11 +139,11 @@ pub(super) const UI_SCREEN_PADDING_PIXELS: f32 = 12.0;
 
 // window label
 pub(super) const PRIMARY_WINDOW_FOCUSED_LABEL: &str = "Window 1";
-pub(super) const PRIMARY_WINDOW_TITLE: &str = "extras - window 1";
+pub(super) const PRIMARY_WINDOW_TITLE: &str = "showcase - window 1";
 pub(super) const SECOND_WINDOW_FOCUSED_LABEL: &str = "Window 2";
 pub(super) const SECOND_WINDOW_LOG_CLOSED: &str = "Window 2: closed";
 pub(super) const SECOND_WINDOW_LOG_OPENED: &str = "Window 2: opened";
 pub(super) const SECOND_WINDOW_MANAGED_NAME: &str = "window_2";
-pub(super) const SECOND_WINDOW_TITLE: &str = "extras - window 2";
+pub(super) const SECOND_WINDOW_TITLE: &str = "showcase - window 2";
 pub(super) const SECOND_WINDOW_UI_LABEL: &str = "Window 2";
 pub(super) const WINDOW_LABEL_DURATION_SECS: f32 = 2.0;
