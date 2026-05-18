@@ -47,13 +47,7 @@ impl CacheUpdate {
 }
 
 impl<T> From<Option<T>> for CacheUpdate {
-    fn from(opt: Option<T>) -> Self {
-        if opt.is_some() {
-            Self::Changed
-        } else {
-            Self::Unchanged
-        }
-    }
+    fn from(opt: Option<T>) -> Self { opt.map_or(Self::Unchanged, |_| Self::Changed) }
 }
 
 impl ExtractedOutlineUniforms {

@@ -29,8 +29,10 @@ use super::compose::ComposeVariant;
 use super::compose::SampleMode;
 use super::constants::COMPOSE_BIND_GROUP_SLOT;
 use super::constants::COMPOSE_OUTPUT_BIND_GROUP_LABEL;
+use super::constants::FLOOD_INIT_RENDER_ERROR;
 use super::constants::FULLSCREEN_TRIANGLE_VERTEX_COUNT;
 use super::constants::HULL_OUTLINE_PASS_LABEL;
+use super::constants::HULL_OUTLINE_RENDER_ERROR;
 use super::constants::JUMP_FLOOD_NO_SEED_CLEAR_COLOR;
 use super::constants::NO_GLOBAL_DEPTH_TEXTURE_WARNING;
 use super::constants::OUTLINE_DEPTH_FAR_PLANE_CLEAR;
@@ -247,7 +249,7 @@ fn run_mask_init_pass(
     if let Some(outline_phase) = outline_phase
         && let Err(err) = outline_phase.render(&mut init_pass, world, view_entity)
     {
-        error!("Error encountered while rendering the outline flood init phase {err:?}");
+        error!("{FLOOD_INIT_RENDER_ERROR} {err:?}");
     }
 }
 
@@ -289,7 +291,7 @@ fn run_hull_pass(render_context: &mut RenderContext<'_>, hull_pass_context: Hull
     }
 
     if let Err(err) = phase.render(&mut hull_pass, world, view_entity) {
-        error!("Error encountered while rendering hull outline phase {err:?}");
+        error!("{HULL_OUTLINE_RENDER_ERROR} {err:?}");
     }
 }
 
