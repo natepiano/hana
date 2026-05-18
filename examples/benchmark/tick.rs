@@ -3,6 +3,12 @@ use std::process::exit;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+use crate::benchmark_state::BenchmarkMode;
+use crate::benchmark_state::BenchmarkPhase;
+use crate::benchmark_state::BenchmarkState;
+use crate::benchmark_state::OutlinePresence;
+use crate::benchmark_state::next_outline_method;
+use crate::benchmark_state::outline_method_label;
 use crate::constants::AUTO_BENCHMARK_COMPLETE_MESSAGE;
 use crate::constants::AUTO_BENCHMARK_START_MESSAGE;
 use crate::constants::AUTO_EXIT_DELAY_SECS;
@@ -20,12 +26,6 @@ use crate::grid::BenchmarkEntity;
 use crate::results::compute_statistics;
 use crate::results::write_results;
 use crate::scenarios::spawn_scenario;
-use crate::state::BenchmarkMode;
-use crate::state::BenchmarkPhase;
-use crate::state::BenchmarkState;
-use crate::state::OutlinePresence;
-use crate::state::next_outline_method;
-use crate::state::outline_method_label;
 use crate::viewport::compute_viewport_info;
 
 #[derive(SystemParam)]
@@ -201,7 +201,7 @@ fn handle_analyze_phase(state: &mut BenchmarkState) {
     state.outline_presence = OutlinePresence::Disabled;
     if state.mode == BenchmarkMode::Auto {
         write_results(&state.results);
-        if state.exit_behavior == crate::state::ExitBehavior::OnComplete {
+        if state.exit_behavior == crate::benchmark_state::ExitBehavior::OnComplete {
             info!("Auto benchmark complete, exiting in {AUTO_EXIT_DELAY_SECS}s");
             state.phase = BenchmarkPhase::ExitDelay;
         } else {

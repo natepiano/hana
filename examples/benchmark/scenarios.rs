@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy_liminal::OutlineMethod;
 
+use crate::benchmark_state::OutlinePresence;
 use crate::grid::GridSpawnSpec;
 use crate::grid::spawn_grid;
-use crate::state::OutlinePresence;
 use crate::viewport::ViewportInfo;
 
 #[derive(Clone, Copy)]

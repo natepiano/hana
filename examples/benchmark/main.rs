@@ -1,14 +1,15 @@
 //! Performance benchmark spawning many outlined meshes with FPS tracking.
 
+mod benchmark_state;
 mod constants;
 mod grid;
 mod hud;
 mod results;
 mod scenarios;
-mod state;
 mod tick;
 mod viewport;
 
+use benchmark_state::BenchmarkState;
 use bevy::color::palettes::css::DARK_SEA_GREEN;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::input::keyboard::KeyboardInput;
@@ -41,7 +42,6 @@ use constants::LIGHT_RANGE;
 use hud::HudText;
 use hud::HudUpdateTimer;
 use hud::update_hud;
-use state::BenchmarkState;
 use tick::benchmark_tick;
 use tick::handle_input;
 

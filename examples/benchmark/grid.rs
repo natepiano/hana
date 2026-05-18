@@ -8,6 +8,7 @@ use bevy_liminal::OverlapMode;
 use rand::RngExt;
 use rand::rng;
 
+use crate::benchmark_state::OutlinePresence;
 use crate::constants::DEFAULT_OUTLINE_INTENSITY;
 use crate::constants::DEPTH_SPACING_MULTIPLIER;
 use crate::constants::GRID_3D_COLUMNS;
@@ -15,7 +16,6 @@ use crate::constants::GRID_3D_ROWS;
 use crate::constants::GRID_CENTER_DIVISOR;
 use crate::constants::GRID_CENTER_OFFSET;
 use crate::constants::GRID_TO_3D_THRESHOLD;
-use crate::state::OutlinePresence;
 use crate::viewport::ViewportInfo;
 
 #[derive(Component)]

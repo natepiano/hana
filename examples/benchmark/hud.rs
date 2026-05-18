@@ -6,6 +6,10 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_kana::ToF64;
 
+use crate::benchmark_state::BenchmarkMode;
+use crate::benchmark_state::BenchmarkPhase;
+use crate::benchmark_state::BenchmarkState;
+use crate::benchmark_state::outline_method_label;
 use crate::constants::AUTO_EXIT_DELAY_SECS;
 use crate::constants::AUTO_STARTUP_DELAY_SECS;
 use crate::constants::BENCHMARK_LABEL;
@@ -24,10 +28,6 @@ use crate::constants::RESULT_LABEL_PADDING;
 use crate::constants::SCENARIOS;
 use crate::constants::WARMUP_FRAMES;
 use crate::scenarios::ScenarioDefinition;
-use crate::state::BenchmarkMode;
-use crate::state::BenchmarkPhase;
-use crate::state::BenchmarkState;
-use crate::state::outline_method_label;
 
 #[derive(Component)]
 pub(super) struct HudText;
