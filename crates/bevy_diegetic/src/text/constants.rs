@@ -8,7 +8,7 @@ pub(super) const AVERAGE_GLYPH_COVERAGE: f32 = 0.75;
 /// machines. Intentionally distinct from `DEFAULT_GLYPH_WORKER_THREADS`
 /// (the unconditional override default); same value today, but they answer
 /// different questions and may diverge.
-pub(super) const DEFAULT_AUTO_GLYPH_WORKER_THREADS: usize = 6;
+pub(super) const DEFAULT_AUTO_GLYPH_WORKER_THREADS: usize = 8;
 /// Default glyphs per atlas page.
 pub(super) const DEFAULT_GLYPHS_PER_PAGE: u16 = 100;
 /// Maximum canonical rasterization size in pixels.
@@ -41,7 +41,7 @@ pub(super) const DEFAULT_ATLAS_SIZE: u32 = 1024;
 /// provided. Intentionally distinct from `DEFAULT_AUTO_GLYPH_WORKER_THREADS`
 /// (the cap used by `Auto` worker selection); same value today, but they
 /// answer different questions and may diverge.
-pub(super) const DEFAULT_GLYPH_WORKER_THREADS: usize = 6;
+pub(super) const DEFAULT_GLYPH_WORKER_THREADS: usize = 8;
 
 // font defaults
 /// Default font family name.

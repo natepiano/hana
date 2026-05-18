@@ -77,6 +77,10 @@ harness           = false
 name              = "layout_engine_raw"
 required-features = ["bench_support"]
 
+[[bench]]
+harness = false
+name    = "glyph_rasterization"
+
 [[example]]
 name              = "typography"
 required-features = ["typography_overlay"]
