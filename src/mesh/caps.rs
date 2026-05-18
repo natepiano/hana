@@ -14,6 +14,7 @@ use super::config::Capping;
 use super::config::Faces;
 use super::constants::CAP_UV_CENTER;
 use super::constants::MIN_CAP_RINGS;
+use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
 /// Which side of a cap to generate.
 #[derive(Clone, Copy, Debug)]
@@ -44,7 +45,7 @@ pub(super) fn add_end_caps(
     point_count: usize,
     buffers: &mut MeshBuffers,
 ) {
-    if point_count < 2 {
+    if point_count < MIN_CABLE_SAMPLE_POINTS.to_usize() {
         return;
     }
 

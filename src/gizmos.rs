@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_kana::ToUsize;
 
 use crate::cable::CableSystems;
 use crate::cable::ComputedCableGeometry;
@@ -10,6 +11,7 @@ use crate::constants::TANGENT_SAMPLING_INTERVAL;
 use crate::constants::TANGENT_VECTOR_SCALE;
 use crate::constants::WAYPOINT_DOT_COLOR;
 use crate::constants::WAYPOINT_DOT_SIZE;
+use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
 /// Gizmo group for cable debug wireframes.
 ///
@@ -57,7 +59,7 @@ fn render_cable_gizmos(
         };
 
         for segment in &cable_geometry.segments {
-            if segment.points.len() < 2 {
+            if segment.points.len() < MIN_CABLE_SAMPLE_POINTS.to_usize() {
                 continue;
             }
 

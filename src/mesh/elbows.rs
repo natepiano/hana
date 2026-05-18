@@ -3,6 +3,7 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
+use bevy_kana::ToUsize;
 
 use super::config::CableMeshConfig;
 use super::constants::DEFAULT_ELBOW_ARM_FRACTION;
@@ -10,6 +11,7 @@ use super::constants::MAX_ARM_RATIO;
 use super::constants::MIN_ELBOW_RINGS;
 use super::path;
 use crate::routing::CableGeometry;
+use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
 /// Resolve elbow arm lengths from per-elbow overrides or the global multiplier.
 fn resolve_elbow_arms(
@@ -132,7 +134,7 @@ pub(super) fn insert_knee_rings(
     config: &CableMeshConfig,
 ) -> (Vec<Vec3>, Vec<Vec3>, Vec<f32>) {
     let point_count = points.len();
-    if point_count < 2 {
+    if point_count < MIN_CABLE_SAMPLE_POINTS.to_usize() {
         let tangents = path::recompute_tangents(&points);
         return (points, tangents, arc_lengths);
     }

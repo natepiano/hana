@@ -24,7 +24,7 @@ pub use handle::CableMeshChild;
 pub use handle::CableMeshHandle;
 pub use tube::generate_tube_mesh;
 
-pub(crate) struct MeshPlugin;
+pub(super) struct MeshPlugin;
 
 impl Plugin for MeshPlugin {
     fn build(&self, app: &mut App) { app.add_observer(handle::on_geometry_computed); }

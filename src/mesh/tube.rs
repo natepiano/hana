@@ -19,6 +19,7 @@ use super::elbows;
 use super::frames;
 use super::path;
 use crate::routing::CableGeometry;
+use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 use crate::routing::MIN_SEGMENT_LENGTH;
 
 /// Immutable path data for tube mesh generation.
@@ -161,7 +162,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
     let mut all_tangents = flat.tangents;
     let mut all_arc_lengths = flat.arc_lengths;
 
-    if all_points.len() < 2 {
+    if all_points.len() < MIN_CABLE_SAMPLE_POINTS.to_usize() {
         return Mesh::new(PrimitiveTopology::TriangleList, default());
     }
 
@@ -175,7 +176,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
         );
     }
 
-    if all_points.len() < 2 {
+    if all_points.len() < MIN_CABLE_SAMPLE_POINTS.to_usize() {
         return Mesh::new(PrimitiveTopology::TriangleList, default());
     }
 

@@ -5,7 +5,7 @@ use bevy::math::Vec3;
 // catenary solver
 pub(super) const MAX_NEWTON_ITERATIONS: u32 = 50;
 /// Minimum sample points required to represent a cable segment.
-pub(super) const MIN_CABLE_SAMPLE_POINTS: u32 = 2;
+pub(crate) const MIN_CABLE_SAMPLE_POINTS: u32 = 2;
 pub(super) const MIN_CATENARY_PARAM: f32 = 1e-4;
 pub const MIN_SEGMENT_LENGTH: f32 = 0.001;
 /// Initial Newton guess multiplier for near-taut cables where the standard

@@ -5,8 +5,10 @@ use std::iter;
 
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
+use bevy_kana::ToUsize;
 
 use super::constants::DEFAULT_RESOLUTION_SENTINEL;
+use super::constants::MIN_CABLE_SAMPLE_POINTS;
 use super::obstacle::Obstacle;
 
 enum TangentSample {
@@ -143,7 +145,7 @@ impl CableSegment {
     pub fn straight_line(start: impl Into<Vec3>, end: impl Into<Vec3>, n: usize) -> Self {
         let start: Vec3 = start.into();
         let end: Vec3 = end.into();
-        let n = n.max(2);
+        let n = n.max(MIN_CABLE_SAMPLE_POINTS.to_usize());
         let points: Vec<Vec3> = (0..n)
             .map(|i| {
                 let t = i.to_f32() / (n - 1).to_f32();

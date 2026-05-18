@@ -1,6 +1,8 @@
 use bevy::prelude::*;
+use bevy_kana::ToUsize;
 
 use crate::routing::CableGeometry;
+use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
 /// Result of flattening all geometry segments into a single continuous polyline.
 pub(super) struct FlattenedGeometry {
@@ -17,7 +19,7 @@ pub(super) fn flatten_geometry(geometry: &CableGeometry) -> FlattenedGeometry {
     let mut arc_offset = 0.0_f32;
 
     for segment in &geometry.segments {
-        if segment.points.len() < 2 {
+        if segment.points.len() < MIN_CABLE_SAMPLE_POINTS.to_usize() {
             arc_offset += segment.length;
             continue;
         }
@@ -49,7 +51,7 @@ pub(super) fn trim_path(
 ) {
     let total = *arc_lengths.last().unwrap_or(&0.0);
 
-    if trim_start > 0.0 && points.len() >= 2 {
+    if trim_start > 0.0 && points.len() >= MIN_CABLE_SAMPLE_POINTS.to_usize() {
         let cut = arc_lengths
             .iter()
             .position(|&arc_length| arc_length >= trim_start)
@@ -71,7 +73,7 @@ pub(super) fn trim_path(
         }
     }
 
-    if trim_end > 0.0 && points.len() >= 2 {
+    if trim_end > 0.0 && points.len() >= MIN_CABLE_SAMPLE_POINTS.to_usize() {
         let end_boundary = total - trim_end;
         let mut cut = points.len();
         for i in (0..points.len()).rev() {

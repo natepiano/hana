@@ -21,7 +21,7 @@ use crate::mesh::CableMeshConfig;
 use crate::routing::Obstacle;
 use crate::routing::Solver;
 
-pub(crate) struct CablePlugin;
+pub(super) struct CablePlugin;
 
 impl Plugin for CablePlugin {
     fn build(&self, app: &mut App) {

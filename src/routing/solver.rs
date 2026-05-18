@@ -11,6 +11,7 @@ use bevy::math::Vec3;
 use bevy_kana::ToUsize;
 
 use super::constants::DEFAULT_RESOLUTION;
+use super::constants::MIN_CABLE_SAMPLE_POINTS;
 use super::geometry::CableGeometry;
 use super::geometry::CableSegment;
 use super::geometry::RouteRequest;
@@ -62,7 +63,11 @@ pub struct LinearSolver;
 
 impl CurveSolver for LinearSolver {
     fn solve_segment(&self, start: Vec3, end: Vec3, resolution: u32) -> CableSegment {
-        CableSegment::straight_line(start, end, resolution.max(2).to_usize())
+        CableSegment::straight_line(
+            start,
+            end,
+            resolution.max(MIN_CABLE_SAMPLE_POINTS).to_usize(),
+        )
     }
 }
 

@@ -7,12 +7,14 @@ use std::collections::HashMap;
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
+use bevy_kana::ToUsize;
 
 use super::constants::ASTAR_SEGMENT_SAMPLE_STEPS;
 use super::constants::COLLINEARITY_THRESHOLD;
 use super::constants::DEFAULT_ASTAR_MAX_CELLS;
 use super::constants::DEFAULT_GRID_SIZE;
 use super::constants::DEFAULT_OBSTACLE_MARGIN;
+use super::constants::MIN_CABLE_SAMPLE_POINTS;
 use super::obstacle;
 use super::obstacle::Blockage;
 use super::obstacle::Obstacle;
@@ -275,7 +277,7 @@ impl AStarPlanner {
 
 /// Remove collinear waypoints from a path.
 fn simplify_path(waypoints: &mut Vec<Vec3>) {
-    if waypoints.len() <= 2 {
+    if waypoints.len() <= MIN_CABLE_SAMPLE_POINTS.to_usize() {
         return;
     }
 
