@@ -35,7 +35,7 @@ pub struct WindowRestored {
     /// The window entity this event targets.
     pub entity:            Entity,
     /// Identifier for this window (primary or managed name).
-    pub window_id:         WindowKey,
+    pub window_key:        WindowKey,
     /// Target position in physical pixels (None on Wayland).
     pub physical_position: Option<IVec2>,
     /// Target position in logical pixels (pre-scale, from the saved state).
@@ -94,7 +94,7 @@ pub struct WindowRestoreMismatch {
     /// The window entity this event targets.
     pub entity:                     Entity,
     /// Identifier for this window (primary or managed name).
-    pub window_id:                  WindowKey,
+    pub window_key:                 WindowKey,
     /// Target physical position from `TargetPosition` (None on Wayland).
     pub expected_physical_position: Option<IVec2>,
     /// Actual physical position from `Window.position` (None on Wayland).

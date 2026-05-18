@@ -127,8 +127,8 @@ pub(crate) fn on_window_restored(
 ) {
     let event = trigger.event();
     info!(
-        "[on_window_restored] Restore complete: window_id={} entity={:?} physical_position={:?} logical_position={:?} physical_size={} logical_size={} mode={:?} monitor={}",
-        event.window_id,
+        "[on_window_restored] Restore complete: window_key={} entity={:?} physical_position={:?} logical_position={:?} physical_size={} logical_size={} mode={:?} monitor={}",
+        event.window_key,
         event.entity,
         event.physical_position,
         event.logical_position,
@@ -168,9 +168,9 @@ pub(crate) fn on_window_restore_mismatch(
 ) {
     let event = trigger.event();
     warn!(
-        "[on_window_restore_mismatch] window_id={} entity={:?} \
+        "[on_window_restore_mismatch] window_key={} entity={:?} \
          monitor: {} vs {}, size: {} vs {}, mode: {:?} vs {:?}",
-        event.window_id,
+        event.window_key,
         event.entity,
         event.expected_monitor,
         event.actual_monitor,

@@ -384,7 +384,7 @@ fn emit_settle_success(
         .entity(entity)
         .trigger(|entity| WindowRestored {
             entity,
-            window_id: window_key,
+            window_key,
             physical_position: target.physical_position,
             logical_position: target.logical_position,
             logical_size: target.logical_size,
@@ -434,7 +434,7 @@ fn emit_settle_mismatch(
         .entity(entity)
         .trigger(|entity| WindowRestoreMismatch {
             entity,
-            window_id: window_key,
+            window_key,
             expected_physical_position: target.physical_position,
             actual_physical_position: actual.snapshot.physical_position,
             expected_logical_position: target.logical_position,

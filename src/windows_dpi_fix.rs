@@ -115,7 +115,7 @@ unsafe extern "system" fn subclass_proc(
 
 /// Guard resource that removes the window subclass on drop.
 #[derive(Resource)]
-pub(crate) struct DpiFixGuard {
+struct DpiFixGuard {
     hwnd: SendSyncHwnd,
 }
 
