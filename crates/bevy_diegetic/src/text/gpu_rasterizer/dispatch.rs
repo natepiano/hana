@@ -75,13 +75,14 @@ impl Default for GpuGlyphBudget {
 
 /// Shared context for dispatch work.
 struct PageDispatchContext<'a> {
-    render_device:                 &'a RenderDevice,
-    pipeline_cache:                &'a PipelineCache,
-    pipeline:                      &'a GpuRasterizerPipeline,
-    sdf_compute_pipeline:          &'a ComputePipeline,
-    msdf_compute_pipeline:         Option<&'a ComputePipeline>,
-    msdf_correct_compute_pipeline: Option<&'a ComputePipeline>,
-    gpu_images:                    &'a RenderAssets<GpuImage>,
+    render_device:                  &'a RenderDevice,
+    pipeline_cache:                 &'a PipelineCache,
+    pipeline:                       &'a GpuRasterizerPipeline,
+    sdf_compute_pipeline:           &'a ComputePipeline,
+    msdf_compute_pipeline:          Option<&'a ComputePipeline>,
+    msdf_correct_compute_pipeline:  Option<&'a ComputePipeline>,
+    mtsdf_correct_compute_pipeline: Option<&'a ComputePipeline>,
+    gpu_images:                     &'a RenderAssets<GpuImage>,
 }
 
 /// Render-schedule system: drains the extracted jobs and dispatches
@@ -137,6 +138,14 @@ pub(super) fn dispatch_glyph_compute(
     {
         warn!("gpu_rasterizer: MSDF correction pipeline failed to build: {err:?}");
     }
+    let mtsdf_correct_compute_pipeline =
+        pipeline_cache.get_compute_pipeline(pipeline.mtsdf_correct_pipeline);
+    if mtsdf_correct_compute_pipeline.is_none()
+        && let CachedPipelineState::Err(err) =
+            pipeline_cache.get_compute_pipeline_state(pipeline.mtsdf_correct_pipeline)
+    {
+        warn!("gpu_rasterizer: MTSDF correction pipeline failed to build: {err:?}");
+    }
 
     let take = (budget.per_frame as usize).min(queue.pending.len());
     let dispatched: Vec<GpuRenderJob> = queue.pending.drain(..take).collect();
@@ -156,6 +165,7 @@ pub(super) fn dispatch_glyph_compute(
         sdf_compute_pipeline,
         msdf_compute_pipeline,
         msdf_correct_compute_pipeline,
+        mtsdf_correct_compute_pipeline,
         gpu_images: &gpu_images,
     };
 
@@ -211,7 +221,14 @@ fn encode_image(
         .pipeline_cache
         .get_bind_group_layout(&context.pipeline.correction_layout);
     let msdf_pipelines_ready = msdf_pipelines_ready(context);
-    let scratch = create_msdf_scratch(context, gpu_image, jobs, msdf_pipelines_ready);
+    let mtsdf_pipelines_ready = mtsdf_pipelines_ready(context);
+    let scratch = create_msdf_scratch(
+        context,
+        gpu_image,
+        jobs,
+        msdf_pipelines_ready,
+        mtsdf_pipelines_ready,
+    );
     let dispatches = collect_glyph_dispatches(
         context,
         &layout,
@@ -220,14 +237,25 @@ fn encode_image(
         scratch.as_ref(),
         jobs,
         msdf_pipelines_ready,
+        mtsdf_pipelines_ready,
     );
 
     encode_glyph_dispatches(context, encoder, &dispatches);
-    record_completed_jobs(queue, jobs, dispatches.msdf_skipped, msdf_pipelines_ready);
+    record_completed_jobs(
+        queue,
+        jobs,
+        dispatches.msdf_skipped,
+        msdf_pipelines_ready,
+        mtsdf_pipelines_ready,
+    );
 }
 
 const fn msdf_pipelines_ready(context: &PageDispatchContext<'_>) -> bool {
     context.msdf_compute_pipeline.is_some() && context.msdf_correct_compute_pipeline.is_some()
+}
+
+const fn mtsdf_pipelines_ready(context: &PageDispatchContext<'_>) -> bool {
+    context.msdf_compute_pipeline.is_some() && context.mtsdf_correct_compute_pipeline.is_some()
 }
 
 fn create_msdf_scratch(
@@ -235,12 +263,17 @@ fn create_msdf_scratch(
     gpu_image: &GpuImage,
     jobs: &[GpuRenderJob],
     msdf_pipelines_ready: bool,
+    mtsdf_pipelines_ready: bool,
 ) -> Option<ScratchTexture> {
-    if msdf_pipelines_ready
+    let needs_msdf = msdf_pipelines_ready
         && jobs
             .iter()
-            .any(|j| matches!(j.request, GpuGlyphRequest::Msdf(_)))
-    {
+            .any(|j| matches!(j.request, GpuGlyphRequest::Msdf(_)));
+    let needs_mtsdf = mtsdf_pipelines_ready
+        && jobs
+            .iter()
+            .any(|j| matches!(j.request, GpuGlyphRequest::Mtsdf(_)));
+    if needs_msdf || needs_mtsdf {
         Some(create_scratch_texture(context.render_device, gpu_image))
     } else {
         None
@@ -255,6 +288,7 @@ fn collect_glyph_dispatches(
     scratch: Option<&ScratchTexture>,
     jobs: &[GpuRenderJob],
     msdf_pipelines_ready: bool,
+    mtsdf_pipelines_ready: bool,
 ) -> GlyphDispatches {
     let mut dispatches = GlyphDispatches::default();
     for job in jobs {
@@ -267,15 +301,26 @@ fn collect_glyph_dispatches(
                 let dispatch = build_per_glyph_dispatch(context, layout, gpu_image, request);
                 dispatches.sdf_per_glyph.push(dispatch);
             },
-            GpuGlyphRequest::Msdf(_) => {
+            GpuGlyphRequest::Msdf(_) | GpuGlyphRequest::Mtsdf(_) => {
+                let is_mtsdf = matches!(request, GpuGlyphRequest::Mtsdf(_));
+                let ready = if is_mtsdf {
+                    mtsdf_pipelines_ready
+                } else {
+                    msdf_pipelines_ready
+                };
                 let Some(scratch_view) = scratch.map(|s| &s.view) else {
                     dispatches.msdf_skipped.push(job.clone());
                     continue;
                 };
-                if !msdf_pipelines_ready {
+                if !ready {
                     dispatches.msdf_skipped.push(job.clone());
                     continue;
                 }
+                let kind = if is_mtsdf {
+                    MsdfCorrectKind::Mtsdf
+                } else {
+                    MsdfCorrectKind::Standard
+                };
                 let dispatch = build_msdf_glyph_dispatch(
                     context,
                     layout,
@@ -283,6 +328,7 @@ fn collect_glyph_dispatches(
                     gpu_image,
                     scratch_view,
                     request,
+                    kind,
                 );
                 dispatches.msdf_per_glyph.push(dispatch);
             },
@@ -315,18 +361,23 @@ fn encode_glyph_dispatches(
             pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
         }
     }
-    if let (Some(msdf_pipeline), Some(correct_pipeline)) = (
-        context.msdf_compute_pipeline,
-        context.msdf_correct_compute_pipeline,
-    ) {
-        for dispatch in &dispatches.msdf_per_glyph {
-            pass.set_pipeline(msdf_pipeline);
-            pass.set_bind_group(0, &dispatch.gen_bind_group, &[]);
-            pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
-            pass.set_pipeline(correct_pipeline);
-            pass.set_bind_group(0, &dispatch.correct_bind_group, &[]);
-            pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
-        }
+    let Some(msdf_pipeline) = context.msdf_compute_pipeline else {
+        return;
+    };
+    for dispatch in &dispatches.msdf_per_glyph {
+        let correct_pipeline = match dispatch.kind {
+            MsdfCorrectKind::Standard => context.msdf_correct_compute_pipeline,
+            MsdfCorrectKind::Mtsdf => context.mtsdf_correct_compute_pipeline,
+        };
+        let Some(correct_pipeline) = correct_pipeline else {
+            continue;
+        };
+        pass.set_pipeline(msdf_pipeline);
+        pass.set_bind_group(0, &dispatch.gen_bind_group, &[]);
+        pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
+        pass.set_pipeline(correct_pipeline);
+        pass.set_bind_group(0, &dispatch.correct_bind_group, &[]);
+        pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
     }
 }
 
@@ -335,11 +386,15 @@ fn record_completed_jobs(
     jobs: &[GpuRenderJob],
     msdf_skipped: Vec<GpuRenderJob>,
     msdf_pipelines_ready: bool,
+    mtsdf_pipelines_ready: bool,
 ) {
     queue.pending.extend(msdf_skipped);
     for job in jobs {
         let request = &job.request;
         if matches!(request, GpuGlyphRequest::Msdf(_)) && !msdf_pipelines_ready {
+            continue;
+        }
+        if matches!(request, GpuGlyphRequest::Mtsdf(_)) && !mtsdf_pipelines_ready {
             continue;
         }
         let common = request.common();
@@ -388,10 +443,23 @@ struct MsdfPerGlyphDispatch {
     correct_bind_group: BindGroup,
     groups_x:           u32,
     groups_y:           u32,
+    /// Which correction kernel to bind at encode time. The generation
+    /// kernel is identical for MSDF and MTSDF; only the correction pass
+    /// differs (MTSDF writes a signed-true-distance alpha).
+    kind:               MsdfCorrectKind,
     _edges_buf:         Buffer,
     _headers_buf:       Buffer,
     _params_buf:        Buffer,
     _corners_buf:       Buffer,
+}
+
+/// Selects which correction pipeline a dispatch should bind.
+#[derive(Clone, Copy, Debug)]
+enum MsdfCorrectKind {
+    /// Plain MSDF correction — alpha hardcoded to `1.0`.
+    Standard,
+    /// MTSDF correction — alpha carries encoded signed true distance.
+    Mtsdf,
 }
 
 /// Per-page scratch texture used as the intermediate for MSDF
@@ -493,6 +561,7 @@ fn build_msdf_glyph_dispatch(
     gpu_image: &GpuImage,
     scratch_view: &TextureView,
     request: &GpuGlyphRequest,
+    kind: MsdfCorrectKind,
 ) -> MsdfPerGlyphDispatch {
     let common = request.common();
     let edges_buf = create_storage_buffer(
@@ -561,6 +630,7 @@ fn build_msdf_glyph_dispatch(
         correct_bind_group,
         groups_x,
         groups_y,
+        kind,
         _edges_buf: edges_buf,
         _headers_buf: headers_buf,
         _params_buf: params_buf,

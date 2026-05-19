@@ -727,5 +727,18 @@ fn msdf_correct_main(
         out_rgb = vec3<f32>(cm, cm, cm);
     }
 
-    textureStore(output, atlas_xy, vec4<f32>(out_rgb, 1.0));
+    // Alpha channel: MSDF mode hardcodes 1.0 (channel ignored by the
+    // text fragment shader). MTSDF mode encodes the signed true
+    // distance the same way RGB channels are encoded — `clamp(d /
+    // range + 0.5, 0, 1)` — so the fragment shader can clamp the RGB
+    // median to ±tolerance around the alpha value. This is what stops
+    // per-channel MSDF comb from escaping in narrow features (CJK,
+    // ornate Latin). The signed form is needed so the fragment shader
+    // knows which side of the edge each texel is on.
+#ifdef MTSDF
+    let out_alpha = clamp(true_dist / params.sdf_range + 0.5, 0.0, 1.0);
+#else
+    let out_alpha = 1.0;
+#endif
+    textureStore(output, atlas_xy, vec4<f32>(out_rgb, out_alpha));
 }

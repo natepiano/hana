@@ -4,9 +4,10 @@
 //! Uses Bevy's [`ExtendedMaterial`] to layer glyph rendering on top of
 //! the full PBR pipeline. The shader branches on the
 //! [`DistanceField`](crate::DistanceField) uniform to pick MSDF (median
-//! of RGB) vs. SDF (single R channel) decode. PBR lighting, shadows,
-//! double-sided normals, and other `StandardMaterial` properties stay
-//! intact.
+//! of RGB), SDF (single R channel), or MTSDF (median of RGB clamped to
+//! ±tolerance around an alpha-stored true SDF) decode. PBR lighting,
+//! shadows, double-sided normals, and other `StandardMaterial`
+//! properties stay intact.
 
 use bevy::asset::Asset;
 use bevy::image::Image;

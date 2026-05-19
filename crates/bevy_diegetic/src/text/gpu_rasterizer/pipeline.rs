@@ -19,6 +19,7 @@ use bevy::render::render_resource::binding_types::texture_2d;
 use bevy::render::render_resource::binding_types::texture_storage_2d;
 use bevy::render::render_resource::binding_types::uniform_buffer_sized;
 use bevy::shader::Shader;
+use bevy::shader::ShaderDefVal;
 
 /// Asset path for the embedded SDF generation kernel.
 ///
@@ -72,17 +73,22 @@ pub(super) struct GlyphHeader {
 /// Render-world resource holding the compute pipelines + bind layouts.
 #[derive(Resource)]
 pub(super) struct GpuRasterizerPipeline {
-    pub layout:                BindGroupLayoutDescriptor,
-    pub correction_layout:     BindGroupLayoutDescriptor,
-    pub sdf_pipeline:          CachedComputePipelineId,
-    pub msdf_pipeline:         CachedComputePipelineId,
-    pub msdf_correct_pipeline: CachedComputePipelineId,
+    pub layout:                 BindGroupLayoutDescriptor,
+    pub correction_layout:      BindGroupLayoutDescriptor,
+    pub sdf_pipeline:           CachedComputePipelineId,
+    pub msdf_pipeline:          CachedComputePipelineId,
+    pub msdf_correct_pipeline:  CachedComputePipelineId,
+    /// MTSDF correction. Reuses the MSDF correction kernel built with
+    /// the `MTSDF=1` shader_def — the only delta is that the alpha
+    /// channel carries an encoded signed true distance rather than the
+    /// MSDF path's hardcoded `1.0`.
+    pub mtsdf_correct_pipeline: CachedComputePipelineId,
     #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
-    pub sdf_shader:            Handle<Shader>,
+    pub sdf_shader:             Handle<Shader>,
     #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
-    pub msdf_shader:           Handle<Shader>,
+    pub msdf_shader:            Handle<Shader>,
     #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
-    pub msdf_correct_shader:   Handle<Shader>,
+    pub msdf_correct_shader:    Handle<Shader>,
 }
 
 impl GpuRasterizerPipeline {
@@ -163,6 +169,18 @@ impl GpuRasterizerPipeline {
                 entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
                 zero_initialize_workgroup_memory: false,
             });
+        let mtsdf_correct_pipeline =
+            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+                label:                            Some(
+                    "gpu_rasterizer_mtsdf_correct_pipeline".into(),
+                ),
+                layout:                           vec![correction_layout.clone()],
+                push_constant_ranges:             Vec::new(),
+                shader:                           msdf_correct_shader.clone(),
+                shader_defs:                      vec![ShaderDefVal::Bool("MTSDF".into(), true)],
+                entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
+                zero_initialize_workgroup_memory: false,
+            });
 
         Self {
             layout,
@@ -170,6 +188,7 @@ impl GpuRasterizerPipeline {
             sdf_pipeline,
             msdf_pipeline,
             msdf_correct_pipeline,
+            mtsdf_correct_pipeline,
             sdf_shader,
             msdf_shader,
             msdf_correct_shader,

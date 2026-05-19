@@ -2,9 +2,15 @@
 //
 // Renders glyphs from a signed-distance-field atlas texture. The
 // `distance_field` uniform selects sampling strategy:
-//   0 = MSDF — median of R, G, B for sharp corners.
-//   1 = SDF  — single channel (R) for smoother curves.
-// Both branches feed the same adaptive anti-aliasing path.
+//   0 = MSDF  — median of R, G, B for sharp corners.
+//   1 = SDF   — single channel (R) for smoother curves.
+//   2 = MTSDF — RGB is MSDF, alpha is signed true SDF. Takes
+//               max(median, alpha): comb holes fill (alpha wins),
+//               sharp corner wedges keep their extension past the
+//               rounded true-SDF edge (median wins), and sub-texel
+//               inward notches soften into faint AA traces instead
+//               of comb-amplified dark lines at low atlas sizes.
+// All branches feed the same adaptive anti-aliasing path.
 //
 // Supports three render modes:
 //   0 = Text       — normal MSDF alpha (smooth text edges)
@@ -90,18 +96,33 @@ fn screen_px_range(uv: vec2<f32>) -> f32 {
 }
 
 /// Computes the final alpha based on the render mode and distance-field
-/// variant. MSDF takes median of RGB; SDF reads only R.
+/// variant. MSDF takes median of RGB; SDF reads only R; MTSDF takes the
+/// median of RGB clamped to ±tolerance around the alpha (true SDF).
 fn compute_alpha(uv: vec2<f32>) -> f32 {
     if uniforms.render_mode == RENDER_MODE_SOLID_QUAD {
         return 1.0;
     }
 
     let atlas_sample = textureSample(atlas_texture, atlas_sampler, uv);
-    let distance = select(
-        atlas_sample.r,
-        median(atlas_sample.r, atlas_sample.g, atlas_sample.b),
-        uniforms.distance_field == 0u,
-    );
+    var distance: f32;
+    if uniforms.distance_field == 1u {
+        distance = atlas_sample.r;
+    } else if uniforms.distance_field == 2u {
+        // MTSDF: max(median, alpha). Pushes the result toward
+        // whichever channel reports "more inside" — which gives the
+        // right answer in every regime: comb holes fill (alpha wins),
+        // sharp corners stay sharp (median wins past the rounded
+        // true-SDF edge), sub-texel inward notches at low atlas
+        // resolution soften into faint AA traces (alpha is less
+        // negative than the comb-amplified median) instead of hard
+        // dark lines while still resolving cleanly when the atlas
+        // size makes the feature multi-texel.
+        let msdf_median = median(atlas_sample.r, atlas_sample.g, atlas_sample.b);
+        let alpha_sdf = atlas_sample.a;
+        distance = max(msdf_median, alpha_sdf);
+    } else {
+        distance = median(atlas_sample.r, atlas_sample.g, atlas_sample.b);
+    }
     let sd = distance - 0.5;
     let screen_px_dist = screen_px_range(uv) * sd;
     let glyph_alpha = clamp(screen_px_dist + 0.5, 0.0, 1.0);

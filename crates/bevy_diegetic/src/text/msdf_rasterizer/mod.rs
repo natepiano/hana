@@ -50,7 +50,11 @@ pub enum DistanceField {
     Msdf,
     /// Single-channel SDF — smooth on curves, rounds off sharp corners.
     Sdf,
-    // Mtsdf,  ← reserved; lands when MTSDF rasterizer ships.
+    /// Four-channel MTSDF — RGB carries MSDF, alpha carries signed true
+    /// SDF. The fragment shader clamps the RGB median to ±tolerance
+    /// around the alpha channel, which prevents per-channel comb
+    /// artifacts on narrow features (CJK, ornate Latin). GPU-only.
+    Mtsdf,
 }
 
 impl From<DistanceField> for u32 {
@@ -58,6 +62,7 @@ impl From<DistanceField> for u32 {
         match mode {
             DistanceField::Msdf => 0,
             DistanceField::Sdf => 1,
+            DistanceField::Mtsdf => 2,
         }
     }
 }
@@ -87,9 +92,6 @@ pub(crate) trait Rasterizer: Send + Sync + 'static + Debug {
     /// Rasterizes a single glyph. Returns `None` if the glyph has no
     /// outline (e.g., space character) or is otherwise unrenderable.
     fn rasterize(&self, font_data: &[u8], glyph_index: u16) -> Option<RasterizedBitmap>;
-
-    /// Which distance-field variant this rasterizer produces.
-    fn mode(&self) -> DistanceField;
 }
 
 /// Raw MSDF bitmap output from rasterization.
@@ -147,8 +149,6 @@ impl Rasterizer for MsdfRasterizer {
         )
         .map(RasterizedBitmap::Msdf)
     }
-
-    fn mode(&self) -> DistanceField { DistanceField::Msdf }
 }
 
 /// Rasterizes a single glyph to a 3-channel MSDF bitmap.

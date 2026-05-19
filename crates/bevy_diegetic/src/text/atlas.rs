@@ -254,6 +254,12 @@ pub struct GlyphAtlas {
     /// Rasterizer chosen at construction. Cloned into each async task
     /// so workers hold a clone independent of the atlas lock.
     rasterizer:        Arc<dyn Rasterizer>,
+    /// Distance-field variant this atlas was built for. Tracked
+    /// independently from `rasterizer.mode()` because MTSDF falls back
+    /// to an MSDF rasterizer on the CPU path (the alpha SDF is
+    /// computed inside the GPU correction kernel), so the rasterizer's
+    /// reported mode wouldn't match the atlas's actual encoding.
+    distance_field:    DistanceField,
     /// Which device rasterizes glyphs. CPU uses `rasterizer` above;
     /// GPU uses the dispatcher set via [`Self::set_gpu_dispatcher`].
     /// Defaults to [`RasterBackend::Cpu`].
@@ -401,7 +407,11 @@ impl GlyphAtlas {
     ) -> Self {
         let (tx, rx) = mpsc::channel();
         let rasterizer: Arc<dyn Rasterizer> = match distance_field {
-            DistanceField::Msdf => Arc::new(MsdfRasterizer::new(
+            // MTSDF has no CPU implementation by design — the alpha
+            // channel is computed in the GPU correction kernel from the
+            // already-resident `true_signed_distance` data. CPU backend
+            // falls back to plain MSDF (alpha is unused on CPU).
+            DistanceField::Msdf | DistanceField::Mtsdf => Arc::new(MsdfRasterizer::new(
                 canonical_size,
                 DEFAULT_SDF_RANGE,
                 DEFAULT_GLYPH_PADDING,
@@ -433,6 +443,7 @@ impl GlyphAtlas {
             peak_active_jobs: Arc::new(AtomicUsize::new(0)),
             glyph_worker_pool,
             rasterizer,
+            distance_field,
             backend: RasterBackend::Cpu,
             gpu_dispatcher: None,
             gpu_pipe: None,
@@ -441,7 +452,7 @@ impl GlyphAtlas {
 
     /// Distance-field variant this atlas was built with.
     #[must_use]
-    pub fn distance_field(&self) -> DistanceField { self.rasterizer.mode() }
+    pub const fn distance_field(&self) -> DistanceField { self.distance_field }
 
     /// Whether a glyph is already rasterized into the cache.
     #[must_use]
@@ -653,7 +664,11 @@ impl GlyphAtlas {
             && let Some(disp) = self.gpu_dispatcher.clone()
         {
             let canonical = self.canonical_size;
-            let mode = self.rasterizer.mode();
+            // Pass the atlas's distance_field, not `rasterizer.mode()`.
+            // MTSDF reuses the MSDF rasterizer on CPU fallback paths,
+            // so the rasterizer reports `Msdf` even when this atlas is
+            // configured for `Mtsdf` — the GPU path needs the truth.
+            let mode = self.distance_field;
             if disp.dispatch(
                 self,
                 key,
@@ -1197,6 +1212,7 @@ impl Default for GlyphAtlas {
             peak_active_jobs: Arc::new(AtomicUsize::new(0)),
             glyph_worker_pool,
             rasterizer,
+            distance_field: DistanceField::Msdf,
             backend: RasterBackend::Cpu,
             gpu_dispatcher: None,
             gpu_pipe: None,

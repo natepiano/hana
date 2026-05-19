@@ -282,6 +282,158 @@ starts.
    and the G key toggle stay through Phases 2 / 2.1 / 2.5 / 3 so
    the CPU/GPU comparison stays available throughout.
 
+### Active investigation — MTSDF as the path to CJK-robust rendering (2026-05-19)
+
+**Status: planning.** EB Garamond G at 64/128/256 px still shows
+artifacts at the bowl-to-link junction under (`Msdf`, `Gpu`):
+- 64 px: small wrong-sign notches above and below the junction
+- 128 px: comb pattern at the top neck (alternating wrong-sign texels)
+- 256 px: smaller version of the same comb
+
+The artifacts persist across **three** different edge-coloring
+algorithms (`edge_coloring_simple`, ink-trap port, by-distance port —
+see `crates/bevy_diegetic/src/text/gpu_rasterizer/coloring.rs` git
+history). That rules out coloring as the cause. **Coloring is not
+the bottleneck.** The active port in `coloring.rs` is
+`edge_coloring_by_distance`.
+
+#### Why the existing truth-override doesn't catch this
+
+`msdf_correct.wgsl:711-728` already runs an unconditional sign-
+override every frame: when `median_inside != truth_inside`, flip
+all three channels (`1 - c`). This catches pure sign-disagreement
+cases but does **not** catch the comb at the EB Garamond G neck.
+
+Cause: the comb is **per-channel disagreement with correct
+median**, not sign disagreement. Example inside the neck:
+- Texel A: `(0.55, 0.45, 0.6)` → median 0.55, inside ✓
+- Texel B: `(0.6, 0.45, 0.45)` → median 0.45, outside → flips to
+  `(0.4, 0.55, 0.55)`, median 0.55
+- Texel C: `(0.45, 0.6, 0.55)` → median 0.55, inside ✓
+
+After the flip every texel's median is correctly inside. But the
+per-channel structure varies wildly between neighbors. The
+fragment shader does **bilinear-then-median**, so at sub-texel
+positions the bilinear of (R,G,B) crosses 0.5 unpredictably → comb.
+
+EDGE_PRIORITY's protection bands cover every pixel inside a narrow
+2–3 texel neck, so pass-1 artifact detection never fires there and
+the per-channel noise is never flattened.
+
+#### Decision: MTSDF as the architectural fix
+
+User goal is **CJK rendering**, which has narrow features at every
+scale. Per-glyph tuning won't scale to 20K+ Han characters. MTSDF
+solves the class of problem:
+
+- R/G/B continue to carry the MSDF channels (sharp corners)
+- **A carries the signed true SDF** (not unsigned — the signed
+  version is strictly more useful, see below)
+- Fragment shader clamps `median(rgb)` to `±tolerance` around the
+  alpha-SDF; the per-channel comb cannot escape because the alpha
+  channel is one value per texel, so bilinear sampling stays
+  uniform in solid regions
+
+The alpha channel ALSO serves the text-effects pipeline (outline,
+glow, drop shadow) described in the existing Phase 3 plan below.
+Both consumers want the same data.
+
+**Signed vs unsigned alpha:** the existing Phase 3 plan stored
+unsigned distance. Update: store **signed** distance. Effects
+threshold the magnitude (work either way), but the median-clamp
+correction needs the sign to know which side of the edge each
+texel is on. Encoding: `clamp(true_dist * inv_range + 0.5, 0, 1)`
+— same encoding as the RGB channels.
+
+The GPU correction kernel already computes `true_signed_distance`
+per texel for the sign-override. Storing it in alpha instead of
+`1.0` is one line.
+
+#### Sequencing — MTSDF as a peer first, then promote
+
+The user's explicit preference:
+1. Add MTSDF as a **third** runtime option alongside `Sdf` / `Msdf`
+   (don't replace anything yet)
+2. Verify on EB Garamond G at 64 / 128 / 256 px
+3. Verify on a dense Han glyph (鬱 U+9B31, 龘 U+9F98, or 麤 U+9EA4)
+4. If both render cleanly, promote MTSDF to default and retire the
+   pure-MSDF path
+
+**GPU-only.** No CPU MTSDF implementation. Reasons:
+- fdsm doesn't expose MTSDF (only `edge_coloring_simple` + MSDF/SDF
+  rasterizers). Porting msdfgen's MTSDF generation to Rust is real
+  work for zero runtime benefit since GPU rasterization is now the
+  default.
+- The GPU correction kernel already computes `true_signed_distance`,
+  so GPU MTSDF is nearly free incrementally.
+- Parity tests stay valid: RGB output is identical between MSDF and
+  MTSDF (same gen kernel, same correction logic), so existing
+  `msdf_parity::*` tests continue to assert RGB. A new test can
+  compare the alpha output against the CPU SDF rasterizer for spot
+  validation of the new channel.
+
+#### Implementation steps
+
+1. **Plumb the variant.** Add `DistanceField::Mtsdf`. Treats like
+   MSDF in `edges.rs`, `request.rs`, `pipeline.rs`, `dispatch.rs`
+   for everything except the alpha write and the fragment shader
+   path.
+2. **Generator.** `msdf_correct.wgsl`: add a `mode` field to
+   `RasterParams` (or gate via `shader_defs` `MTSDF=1` per the
+   existing Phase 3 plan); when MTSDF, write
+   `clamp(true_dist * inv_range + 0.5, 0, 1)` to alpha; otherwise
+   write `1.0`. One line of WGSL behind an `#ifdef MTSDF`.
+3. **Fragment shader.** Add an MTSDF-aware path that reads `.a`,
+   computes `median(.rgb)`, and clamps to `clamp(median, alpha -
+   tolerance, alpha + tolerance)`. `tolerance` is a compile-time
+   constant (~`0.5 / sdf_range_in_texels`). Existing MSDF and SDF
+   shader paths are untouched.
+4. **Pipeline cache.** Third cached pipeline in
+   `GpuRasterizerPipeline` (per the existing Phase 3 plan via
+   `shader_defs`).
+5. **`typography.rs`.** Third selectable distance-field option.
+6. **Tests.** Extend `msdf_parity` to assert RGB matches CPU MSDF
+   when MTSDF mode is selected. Add a new test comparing the alpha
+   output against CPU SDF for spot validation.
+
+The smallest first step that proves the concept: steps 1–3 with a
+temporary fragment-shader hardcode that always reads alpha for
+MTSDF textures. Eyeball EB Garamond G + a CJK glyph at 64/128/256.
+If artifacts vanish, polish 4–6.
+
+#### Files for the next session to read
+
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/shaders/msdf_correct.wgsl`
+  — final-pass sign-correction lives at lines 711–728; alpha write
+  is line 730 (`textureStore(output, atlas_xy, vec4<f32>(out_rgb,
+  1.0));`)
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/shaders/msdf_gen.wgsl`
+  — MSDF generation kernel
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/pipeline.rs`
+  — `GpuRasterizerPipeline` and shader_defs plumbing
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/edges.rs`
+  — `build_edge_buffer` switches on `DistanceField`
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/request.rs`
+  — `GpuGlyphRequest::{Sdf, Msdf}` variant enum
+- `crates/bevy_diegetic/src/text/msdf_rasterizer.rs`
+  — defines `DistanceField` enum (the user-facing variant)
+- `examples/typography/src/main.rs` — find the existing
+  SDF/MSDF selector to add the MTSDF option
+- Text fragment shader — need to locate; grep for `median` in
+  `.wgsl` files outside `gpu_rasterizer/shaders/`
+- `docs/bevy_diegetic/sdf_text.md` — describes the SDF/MSDF/MTSDF
+  encodings (reference, not modified by this work)
+
+#### Out of scope for this investigation
+
+- Text effects pipeline (outline / glow / drop shadow) — Phase 3
+  plan below covers this. MTSDF generation is the prerequisite;
+  effects build on top.
+- Retiring pure-MSDF / pure-SDF paths — Phase 4 below. Wait until
+  MTSDF is verified across the supported font set + CJK before
+  pulling those paths.
+- CPU MTSDF generation — never planned; GPU-only by decision above.
+
 ## Motivation
 
 The benchmark `crates/bevy_diegetic/benches/glyph_rasterization.rs`
@@ -846,11 +998,15 @@ components, shader uniforms, fragment-shader extension).
 
 Generator side:
 - R/G/B carry the MSDF channels as before.
-- A carries the true unsigned distance (min across **all** edges,
-  ignoring channel masks). The per-edge loop in `msdf_gen.wgsl`
-  already computes `ed.dist_sq` for every edge; adding an
-  unconditional `min()` into `best_sq_a` is one extra line per
-  edge plus one extra `clamp` and a `vec4` `textureStore`.
+- A carries the **signed** true distance (`true_signed_distance`
+  encoded as `clamp(true_dist * inv_range + 0.5, 0, 1)`). Earlier
+  drafts of this plan stored unsigned; updated 2026-05-19 because
+  the artifact-clamp use case (see the active investigation above)
+  needs the sign to know which side of the edge each texel is on,
+  and effects can threshold the magnitude regardless. Cheaper to
+  produce too — `msdf_correct.wgsl` already computes
+  `true_signed_distance` per texel for sign correction, so storing
+  it in alpha instead of `1.0` is one line.
 - Storage is already RGBA8.
 - **One shader source, two pipelines via `shader_defs`.** Add
   `#ifdef MTSDF` at the alpha-write site in `msdf_gen.wgsl`. The

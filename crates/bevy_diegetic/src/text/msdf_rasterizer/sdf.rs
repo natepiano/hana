@@ -12,7 +12,6 @@ use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
-use super::DistanceField;
 use super::RasterizedBitmap;
 use super::Rasterizer;
 use crate::text::bitmap_dims;
@@ -126,8 +125,6 @@ impl Rasterizer for SdfRasterizer {
             pad_y_em: vertical_padding_em,
         }))
     }
-
-    fn mode(&self) -> DistanceField { DistanceField::Sdf }
 }
 
 #[cfg(test)]
@@ -175,12 +172,6 @@ mod tests {
             },
             RasterizedBitmap::Msdf(_) => panic!("SdfRasterizer returned Msdf variant"),
         }
-    }
-
-    #[test]
-    fn sdf_mode_matches_variant() {
-        let r = SdfRasterizer::new(32, 4.0, 2);
-        assert_eq!(r.mode(), DistanceField::Sdf);
     }
 
     #[test]

@@ -44,6 +44,10 @@ pub(super) enum GpuGlyphRequest {
     Sdf(GpuGlyphRequestCommon),
     /// Three-channel MSDF request with channel-coloured edges.
     Msdf(GpuGlyphRequestCommon),
+    /// Four-channel MTSDF request. Generation reuses the MSDF kernel;
+    /// the correction pass writes a signed-true-distance alpha so the
+    /// fragment shader can clamp the RGB median to ±tolerance around it.
+    Mtsdf(GpuGlyphRequestCommon),
 }
 
 impl GpuGlyphRequest {
@@ -51,7 +55,7 @@ impl GpuGlyphRequest {
     #[must_use]
     pub(super) const fn common(&self) -> &GpuGlyphRequestCommon {
         match self {
-            Self::Sdf(c) | Self::Msdf(c) => c,
+            Self::Sdf(c) | Self::Msdf(c) | Self::Mtsdf(c) => c,
         }
     }
 
@@ -61,6 +65,7 @@ impl GpuGlyphRequest {
         match self {
             Self::Sdf(_) => DistanceField::Sdf,
             Self::Msdf(_) => DistanceField::Msdf,
+            Self::Mtsdf(_) => DistanceField::Mtsdf,
         }
     }
 }

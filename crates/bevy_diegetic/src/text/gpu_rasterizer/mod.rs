@@ -297,6 +297,7 @@ fn enqueue_on_atlas(
             let request = match distance_field {
                 DistanceField::Sdf => GpuGlyphRequest::Sdf(common),
                 DistanceField::Msdf => GpuGlyphRequest::Msdf(common),
+                DistanceField::Mtsdf => GpuGlyphRequest::Mtsdf(common),
             };
             BuiltGpuRequest::built(Box::new(request), completions)
         } else {

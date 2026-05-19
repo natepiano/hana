@@ -1315,3 +1315,67 @@ fn msdf_parity_ebg_v() { write_parity_outputs(EB_GARAMOND, 'V', "EB Garamond"); 
 
 #[test]
 fn msdf_parity_ebg_h() { write_parity_outputs(EB_GARAMOND, 'h', "EB Garamond"); }
+
+/// MTSDF reuses the MSDF generation path one-for-one — the channel
+/// coloring, the corner list, every per-edge payload. The only delta
+/// is the GPU correction kernel's alpha write, which has no CPU
+/// counterpart. This test catches future drift between the two arms
+/// of the `match` in `edges::build_edge_buffer` and the parity that
+/// the fragment shader's MTSDF clamp depends on.
+fn assert_edge_buffer_matches_msdf(font_data: &[u8], ch: char, font_label: &str) {
+    let idx = glyph_index(font_data, ch);
+    let msdf = edges::build_edge_buffer(
+        font_data,
+        idx,
+        CANONICAL_SIZE,
+        SDF_RANGE,
+        PADDING,
+        DistanceField::Msdf,
+    )
+    .unwrap_or_else(|| panic!("MSDF edge buffer None for {font_label} '{ch}'"));
+    let mtsdf = edges::build_edge_buffer(
+        font_data,
+        idx,
+        CANONICAL_SIZE,
+        SDF_RANGE,
+        PADDING,
+        DistanceField::Mtsdf,
+    )
+    .unwrap_or_else(|| panic!("MTSDF edge buffer None for {font_label} '{ch}'"));
+
+    assert_eq!(
+        msdf.bitmap_size, mtsdf.bitmap_size,
+        "{font_label} '{ch}': bitmap dims diverge between MSDF and MTSDF"
+    );
+    assert_eq!(
+        msdf.edges.len(),
+        mtsdf.edges.len(),
+        "{font_label} '{ch}': edge count diverges"
+    );
+    assert_eq!(
+        msdf.corners.len(),
+        mtsdf.corners.len(),
+        "{font_label} '{ch}': corner count diverges"
+    );
+    for (i, (a, b)) in msdf.edges.iter().zip(&mtsdf.edges).enumerate() {
+        assert_eq!(
+            a.kind, b.kind,
+            "{font_label} '{ch}': edge[{i}] kind diverges ({} vs {})",
+            a.kind, b.kind
+        );
+        assert_eq!(
+            a.points, b.points,
+            "{font_label} '{ch}': edge[{i}] points diverge"
+        );
+    }
+}
+
+#[test]
+fn mtsdf_edge_buffer_matches_msdf_jbm_h() {
+    assert_edge_buffer_matches_msdf(JETBRAINS_MONO, 'h', "JetBrains Mono");
+}
+
+#[test]
+fn mtsdf_edge_buffer_matches_msdf_ebg_g() {
+    assert_edge_buffer_matches_msdf(EB_GARAMOND, 'g', "EB Garamond");
+}

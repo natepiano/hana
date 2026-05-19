@@ -47,9 +47,9 @@ pub enum RasterQuality {
     /// 16px — deliberately chunky, retro aesthetic, minimal memory.
     Tiny,
     /// 32px — sharp at normal viewing distances (default).
-    #[default]
     Small,
     /// 64px — good fidelity for most apps.
+    #[default]
     Medium,
     /// 128px — sharp at extreme zoom.
     Large,

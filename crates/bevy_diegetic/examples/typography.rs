@@ -237,6 +237,7 @@ fn main() {
                 .control("←/→ Cycle Word")
                 .control("M MSDF")
                 .control("S SDF")
+                .control("X MTSDF")
                 .control("G GPU"),
         )
         .wire_chip_to_state::<OverlayState, _>("T Overlay", |state| match state {
@@ -249,17 +250,27 @@ fn main() {
         })
         .wire_chip_to_state::<AtlasSlot, _>("M MSDF", |slot| match slot.active().distance_field() {
             DistanceField::Msdf => ControlActivation::Active,
-            DistanceField::Sdf => ControlActivation::Inactive,
+            DistanceField::Sdf | DistanceField::Mtsdf => ControlActivation::Inactive,
         })
         .wire_chip_to_state::<AtlasSlot, _>("S SDF", |slot| match slot.active().distance_field() {
             DistanceField::Sdf => ControlActivation::Active,
-            DistanceField::Msdf => ControlActivation::Inactive,
+            DistanceField::Msdf | DistanceField::Mtsdf => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<AtlasSlot, _>("X MTSDF", |slot| {
+            match slot.active().distance_field() {
+                DistanceField::Mtsdf => ControlActivation::Active,
+                DistanceField::Msdf | DistanceField::Sdf => ControlActivation::Inactive,
+            }
         })
         .wire_chip_to_state::<AtlasSlot, _>("G GPU", |slot| match slot.active().backend() {
             RasterBackend::Gpu => ControlActivation::Active,
             RasterBackend::Cpu => ControlActivation::Inactive,
         })
         .with_camera_control_panel()
+        .insert_resource(AtlasPreference {
+            quality: RasterQuality::Medium,
+            ..default()
+        })
         .insert_resource(WordCycle {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
@@ -744,8 +755,8 @@ fn on_font_registered(
     }
 }
 
-/// `M` selects MSDF rasterization; `S` selects SDF. Mutates
-/// [`AtlasPreference::distance_field`]; the driver picks up the
+/// `M` selects MSDF rasterization; `S` selects SDF; `X` selects MTSDF.
+/// Mutates [`AtlasPreference::distance_field`]; the driver picks up the
 /// mismatch on the next `PostUpdate` and starts the parallel-atlas
 /// swap.
 fn toggle_distance_field(
@@ -758,6 +769,10 @@ fn toggle_distance_field(
         && preference.distance_field != DistanceField::Sdf
     {
         preference.distance_field = DistanceField::Sdf;
+    } else if keyboard.just_pressed(KeyCode::KeyX)
+        && preference.distance_field != DistanceField::Mtsdf
+    {
+        preference.distance_field = DistanceField::Mtsdf;
     }
 }
 
