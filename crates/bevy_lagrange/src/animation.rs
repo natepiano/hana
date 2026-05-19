@@ -224,7 +224,7 @@ impl MoveState {
 pub struct CameraMoveList {
     /// The queue of camera movements to process.
     pub camera_moves: VecDeque<CameraMove>,
-    state:            MoveState,
+    move_state:       MoveState,
 }
 
 impl CameraMoveList {
@@ -233,14 +233,14 @@ impl CameraMoveList {
     pub const fn new(camera_moves: VecDeque<CameraMove>) -> Self {
         Self {
             camera_moves,
-            state: MoveState::Ready,
+            move_state: MoveState::Ready,
         }
     }
 
     /// Calculates total remaining time in milliseconds for all queued `camera_moves`.
     pub fn remaining_time_ms(&self) -> f32 {
         // Get remaining time for current move
-        let current_remaining = match &self.state {
+        let current_remaining = match &self.move_state {
             MoveState::InProgress { elapsed_millis, .. } => {
                 self.camera_moves.front().map_or(0.0, |current_move| {
                     (current_move.duration_ms() - elapsed_millis).max(0.0)
@@ -413,7 +413,7 @@ fn handle_ready_state(
         pan_orbit.target_pitch,
         pan_orbit.target_radius,
     );
-    queue.state = MoveState::InProgress {
+    queue.move_state = MoveState::InProgress {
         elapsed_millis: 0.0,
         start:          current_orbit.clone(),
         last_written:   current_orbit,
@@ -441,7 +441,7 @@ fn handle_in_progress(
         elapsed_millis,
         start,
         last_written,
-    } = &mut queue.state
+    } = &mut queue.move_state
     else {
         return;
     };
@@ -504,7 +504,7 @@ fn handle_in_progress(
             camera_move: current_move.clone(),
         });
         queue.camera_moves.pop_front();
-        queue.state = MoveState::Ready;
+        queue.move_state = MoveState::Ready;
     }
 }
 
@@ -543,7 +543,7 @@ pub(crate) fn process_camera_move_list(
             continue;
         };
 
-        if input.has_input() || queue.state.externally_modified(&pan_orbit) {
+        if input.has_input() || queue.move_state.externally_modified(&pan_orbit) {
             let outcome = handle_camera_input_interrupt(
                 &mut commands,
                 entity,
@@ -569,7 +569,7 @@ pub(crate) fn process_camera_move_list(
             }
         }
 
-        match &queue.state {
+        match &queue.move_state {
             MoveState::Ready => {
                 handle_ready_state(
                     &mut commands,
