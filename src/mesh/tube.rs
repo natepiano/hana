@@ -33,7 +33,7 @@ struct TubePathData<'a> {
 /// Generate cross-section rings along the path and connect them with triangles.
 fn generate_tube_rings(
     tube_path_data: &TubePathData,
-    config: &CableMeshConfig,
+    cable_mesh_config: &CableMeshConfig,
     sides: u32,
     total_length: f32,
     out: &mut TubeMeshBuffers,
@@ -50,8 +50,8 @@ fn generate_tube_rings(
         for j in 0..sides {
             let angle = (j.to_f32() / sides.to_f32()) * TAU;
             let (sin_angle, cos_angle) = angle.sin_cos();
-            let offset = *frame_normal * cos_angle * config.tube.radius
-                + *binormal * sin_angle * config.tube.radius;
+            let offset = *frame_normal * cos_angle * cable_mesh_config.tube.radius
+                + *binormal * sin_angle * cable_mesh_config.tube.radius;
             let vertex_position = *point + offset;
             let vertex_normal = offset.normalize_or_zero();
 
@@ -71,7 +71,7 @@ fn generate_tube_rings(
                 let upcoming = next_base + j;
                 let upcoming_next = next_base + next;
 
-                match config.tube.faces {
+                match cable_mesh_config.tube.faces {
                     Faces::Outside => buffers::push_quad(
                         out.buffers.indices,
                         current,
@@ -153,8 +153,8 @@ fn apply_inside_normals(
 
 /// All segments are flattened into a single continuous polyline.
 #[must_use]
-pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) -> Mesh {
-    let sides = config.tube.sides.max(MIN_TUBE_SIDES);
+pub fn generate_tube_mesh(geometry: &CableGeometry, cable_mesh_config: &CableMeshConfig) -> Mesh {
+    let sides = cable_mesh_config.tube.sides.max(MIN_TUBE_SIDES);
     let total_length = geometry.total_length.max(MIN_SEGMENT_LENGTH);
 
     let flat = path::flatten_geometry(geometry);
@@ -166,13 +166,13 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
         return Mesh::new(PrimitiveTopology::TriangleList, default());
     }
 
-    if config.trim.start > 0.0 || config.trim.end > 0.0 {
+    if cable_mesh_config.trim.start > 0.0 || cable_mesh_config.trim.end > 0.0 {
         path::trim_path(
             &mut all_points,
             &mut all_tangents,
             &mut all_arc_lengths,
-            config.trim.start,
-            config.trim.end,
+            cable_mesh_config.trim.start,
+            cable_mesh_config.trim.end,
         );
     }
 
@@ -181,9 +181,9 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
     }
 
     let (all_points, all_tangents, all_arc_lengths) =
-        elbows::insert_knee_rings(all_points, all_arc_lengths, config);
+        elbows::insert_knee_rings(all_points, all_arc_lengths, cable_mesh_config);
     let point_count = all_points.len();
-    let frames = frames::compute_rmf(&all_points, &all_tangents);
+    let frames = frames::compute_rotation_minimizing_frames(&all_points, &all_tangents);
 
     let mut positions = Vec::with_capacity(point_count * sides.to_usize());
     let mut normals = Vec::with_capacity(point_count * sides.to_usize());
@@ -199,7 +199,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
     };
     generate_tube_rings(
         &tube_path_data,
-        config,
+        cable_mesh_config,
         sides,
         total_length,
         &mut TubeMeshBuffers {
@@ -214,7 +214,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
     );
 
     apply_inside_normals(
-        &config.tube.faces,
+        &cable_mesh_config.tube.faces,
         &mut positions,
         &mut normals,
         &mut uvs,
@@ -232,7 +232,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, config: &CableMeshConfig) ->
         &all_points,
         &all_tangents,
         &frames,
-        config,
+        cable_mesh_config,
         sides,
         point_count,
         &mut buffers,

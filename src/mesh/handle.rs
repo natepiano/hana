@@ -43,7 +43,8 @@ pub(super) fn on_geometry_computed(
         return;
     };
     let cable_entity = trigger.event_target();
-    let Ok((computed, config, children, mesh_handle, _)) = cables.get(cable_entity) else {
+    let Ok((computed, cable_mesh_config, children, mesh_handle, _)) = cables.get(cable_entity)
+    else {
         return;
     };
 
@@ -52,8 +53,8 @@ pub(super) fn on_geometry_computed(
     };
 
     // Read endpoint cap styles from children
-    let mut cap_start = config.caps.start.clone();
-    let mut cap_end = config.caps.end.clone();
+    let mut cap_start = cable_mesh_config.caps.start.clone();
+    let mut cap_end = cable_mesh_config.caps.end.clone();
     for child in children.iter() {
         if let Ok(endpoint) = endpoints.get(child) {
             match endpoint.end {
@@ -64,11 +65,11 @@ pub(super) fn on_geometry_computed(
     }
 
     // Build the config with endpoint cap styles applied
-    let mut mesh_config = config.clone();
-    mesh_config.caps.start = cap_start;
-    mesh_config.caps.end = cap_end;
+    let mut updated_cable_mesh_config = cable_mesh_config.clone();
+    updated_cable_mesh_config.caps.start = cap_start;
+    updated_cable_mesh_config.caps.end = cap_end;
 
-    let new_mesh = tube::generate_tube_mesh(cable_geometry, &mesh_config);
+    let new_mesh = tube::generate_tube_mesh(cable_geometry, &updated_cable_mesh_config);
 
     if let Some(handle) = mesh_handle {
         // Update existing mesh asset in place
@@ -79,7 +80,7 @@ pub(super) fn on_geometry_computed(
         // First time: create asset, spawn mesh child
         let handle = meshes.add(new_mesh);
         let mut child_commands = commands.spawn((Mesh3d(handle.clone()), ChildOf(cable_entity)));
-        if let Some(ref mat) = config.material {
+        if let Some(ref mat) = cable_mesh_config.material {
             child_commands.insert(MeshMaterial3d(mat.clone()));
         }
         let child = child_commands.id();

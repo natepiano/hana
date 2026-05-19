@@ -240,18 +240,22 @@ pub(crate) fn sync_cable_settings(
         With<Cable>,
     >,
 ) {
-    for (entity, config, computed, multiplier) in &cables {
-        let mut new_config = config.clone();
+    for (entity, cable_mesh_config, computed, multiplier) in &cables {
+        let mut updated_cable_mesh_config = cable_mesh_config.clone();
         let mult = multiplier.map_or(1.0, |m| m.0);
-        new_config.tube.radius = cable_settings.tube.radius * mult;
-        new_config.tube.sides = cable_settings.tube.sides;
-        new_config.elbow.bend_radius_multiplier = cable_settings.elbow.bend_radius_multiplier;
-        new_config.elbow.min_radius_multiplier = cable_settings.elbow.min_radius_multiplier;
-        new_config.elbow.rings_per_right_angle = cable_settings.elbow.rings_per_right_angle;
-        new_config.elbow.angle_threshold_deg = cable_settings.elbow.angle_threshold_deg;
-        new_config.elbow.arm_multiplier = cable_settings.elbow.arm_multiplier;
+        updated_cable_mesh_config.tube.radius = cable_settings.tube.radius * mult;
+        updated_cable_mesh_config.tube.sides = cable_settings.tube.sides;
+        updated_cable_mesh_config.elbow.bend_radius_multiplier =
+            cable_settings.elbow.bend_radius_multiplier;
+        updated_cable_mesh_config.elbow.min_radius_multiplier =
+            cable_settings.elbow.min_radius_multiplier;
+        updated_cable_mesh_config.elbow.rings_per_right_angle =
+            cable_settings.elbow.rings_per_right_angle;
+        updated_cable_mesh_config.elbow.angle_threshold_deg =
+            cable_settings.elbow.angle_threshold_deg;
+        updated_cable_mesh_config.elbow.arm_multiplier = cable_settings.elbow.arm_multiplier;
         commands
             .entity(entity)
-            .insert((new_config, computed.clone()));
+            .insert((updated_cable_mesh_config, computed.clone()));
     }
 }

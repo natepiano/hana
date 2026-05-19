@@ -15,13 +15,13 @@ use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
 /// Resolve elbow arm lengths from per-elbow overrides or the global multiplier.
 fn resolve_elbow_arms(
-    config: &CableMeshConfig,
+    cable_mesh_config: &CableMeshConfig,
     elbow_idx: usize,
     fillet_start: Vec3,
     fillet_end: Vec3,
     max_arm: f32,
 ) -> (f32, f32) {
-    config
+    cable_mesh_config
         .elbow
         .arm_overrides
         .as_ref()
@@ -30,7 +30,7 @@ fn resolve_elbow_arms(
             || {
                 let arm = (fillet_start.distance(fillet_end)
                     * DEFAULT_ELBOW_ARM_FRACTION
-                    * config.elbow.arm_multiplier)
+                    * cable_mesh_config.elbow.arm_multiplier)
                     .min(max_arm);
                 (arm, arm)
             },
@@ -74,12 +74,16 @@ struct ElbowParams {
 }
 
 impl From<&CableMeshConfig> for ElbowParams {
-    fn from(config: &CableMeshConfig) -> Self {
-        let tube_radius = config.tube.radius;
+    fn from(cable_mesh_config: &CableMeshConfig) -> Self {
+        let tube_radius = cable_mesh_config.tube.radius;
         Self {
-            angle_threshold_cos: config.elbow.angle_threshold_deg.to_radians().cos(),
-            bend_radius:         tube_radius * config.elbow.bend_radius_multiplier,
-            min_bend_radius:     tube_radius * config.elbow.min_radius_multiplier,
+            angle_threshold_cos: cable_mesh_config
+                .elbow
+                .angle_threshold_deg
+                .to_radians()
+                .cos(),
+            bend_radius:         tube_radius * cable_mesh_config.elbow.bend_radius_multiplier,
+            min_bend_radius:     tube_radius * cable_mesh_config.elbow.min_radius_multiplier,
         }
     }
 }
@@ -89,7 +93,7 @@ fn compute_elbow_at_corner(
     incoming_direction: Vec3,
     outgoing_direction: Vec3,
     corner: Vec3,
-    config: &CableMeshConfig,
+    cable_mesh_config: &CableMeshConfig,
     elbow_idx: usize,
     elbow_params: &ElbowParams,
 ) -> Option<ElbowMetadata> {
@@ -109,8 +113,13 @@ fn compute_elbow_at_corner(
     let fillet_start = corner - incoming_direction * fillet_reach;
     let fillet_end = corner + outgoing_direction * fillet_reach;
     let max_arm = fillet_reach * MAX_ARM_RATIO;
-    let (control1_arm, control2_arm) =
-        resolve_elbow_arms(config, elbow_idx, fillet_start, fillet_end, max_arm);
+    let (control1_arm, control2_arm) = resolve_elbow_arms(
+        cable_mesh_config,
+        elbow_idx,
+        fillet_start,
+        fillet_end,
+        max_arm,
+    );
     let first_control_point = fillet_start + incoming_direction * control1_arm;
     let second_control_point = fillet_end - outgoing_direction * control2_arm;
 
@@ -131,7 +140,7 @@ fn compute_elbow_at_corner(
 pub(super) fn insert_knee_rings(
     points: Vec<Vec3>,
     arc_lengths: Vec<f32>,
-    config: &CableMeshConfig,
+    cable_mesh_config: &CableMeshConfig,
 ) -> (Vec<Vec3>, Vec<Vec3>, Vec<f32>) {
     let point_count = points.len();
     if point_count < MIN_CABLE_SAMPLE_POINTS.to_usize() {
@@ -139,8 +148,8 @@ pub(super) fn insert_knee_rings(
         return (points, tangents, arc_lengths);
     }
 
-    let elbow_params = ElbowParams::from(config);
-    let rings_per_right_angle = config.elbow.rings_per_right_angle;
+    let elbow_params = ElbowParams::from(cable_mesh_config);
+    let rings_per_right_angle = cable_mesh_config.elbow.rings_per_right_angle;
     let mut output_points = Vec::with_capacity(point_count * 2);
     let mut output_arc_lengths = Vec::with_capacity(point_count * 2);
 
@@ -163,7 +172,7 @@ pub(super) fn insert_knee_rings(
             incoming_direction,
             outgoing_direction,
             points[i],
-            config,
+            cable_mesh_config,
             elbow_idx,
             &elbow_params,
         ) else {
@@ -243,7 +252,7 @@ pub(super) fn insert_knee_rings(
 #[must_use]
 pub fn compute_elbow_metadata(
     geometry: &CableGeometry,
-    config: &CableMeshConfig,
+    cable_mesh_config: &CableMeshConfig,
 ) -> Vec<ElbowMetadata> {
     let flat = path::flatten_geometry(geometry);
     let mut points = flat.points;
@@ -253,18 +262,18 @@ pub fn compute_elbow_metadata(
         return Vec::new();
     }
 
-    if config.trim.start > 0.0 || config.trim.end > 0.0 {
+    if cable_mesh_config.trim.start > 0.0 || cable_mesh_config.trim.end > 0.0 {
         let mut tangents = path::recompute_tangents(&points);
         path::trim_path(
             &mut points,
             &mut tangents,
             &mut arc_lengths,
-            config.trim.start,
-            config.trim.end,
+            cable_mesh_config.trim.start,
+            cable_mesh_config.trim.end,
         );
     }
 
-    let elbow_params = ElbowParams::from(config);
+    let elbow_params = ElbowParams::from(cable_mesh_config);
     let mut elbows = Vec::new();
     let mut elbow_idx = 0_usize;
 
@@ -276,7 +285,7 @@ pub fn compute_elbow_metadata(
             incoming_direction,
             outgoing_direction,
             points[i],
-            config,
+            cable_mesh_config,
             elbow_idx,
             &elbow_params,
         ) {

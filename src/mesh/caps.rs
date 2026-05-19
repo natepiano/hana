@@ -40,7 +40,7 @@ pub(super) fn add_end_caps(
     all_points: &[Vec3],
     all_tangents: &[Vec3],
     frames: &[(Vec3, Vec3)],
-    config: &CableMeshConfig,
+    cable_mesh_config: &CableMeshConfig,
     sides: u32,
     point_count: usize,
     buffers: &mut MeshBuffers,
@@ -49,7 +49,7 @@ pub(super) fn add_end_caps(
         return;
     }
 
-    let render_inside = matches!(config.tube.faces, Faces::Inside);
+    let render_inside = matches!(cable_mesh_config.tube.faces, Faces::Inside);
     let start_winding_order = if render_inside {
         WindingOrder::Standard
     } else {
@@ -59,13 +59,13 @@ pub(super) fn add_end_caps(
         center: &all_points[0],
         direction: -all_tangents[0],
         frame: frames[0],
-        radius: config.tube.radius,
+        radius: cable_mesh_config.tube.radius,
         sides,
         ring_base: 0,
-        faces: &config.tube.faces,
+        faces: &cable_mesh_config.tube.faces,
         winding_order: start_winding_order,
     };
-    add_single_cap(&config.caps.start, &start_context, buffers);
+    add_single_cap(&cable_mesh_config.caps.start, &start_context, buffers);
 
     let last = point_count - 1;
     let end_winding_order = if render_inside {
@@ -77,13 +77,13 @@ pub(super) fn add_end_caps(
         center: &all_points[last],
         direction: all_tangents[last],
         frame: frames[last],
-        radius: config.tube.radius,
+        radius: cable_mesh_config.tube.radius,
         sides,
         ring_base: (last * sides.to_usize()).to_u32(),
-        faces: &config.tube.faces,
+        faces: &cable_mesh_config.tube.faces,
         winding_order: end_winding_order,
     };
-    add_single_cap(&config.caps.end, &end_context, buffers);
+    add_single_cap(&cable_mesh_config.caps.end, &end_context, buffers);
 }
 
 /// Dispatch a single cap (start or end) based on style.
