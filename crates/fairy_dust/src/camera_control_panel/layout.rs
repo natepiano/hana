@@ -16,7 +16,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamInteractionKind;
 
-use super::config::SourceVisibility;
 use super::constants::ACTION_COLUMN_MIN_WIDTH;
 use super::constants::ACTIVE_COLOR;
 use super::constants::GUIDANCE_CHILD_GAP;
@@ -29,6 +28,7 @@ use super::constants::TABLE_DIVIDER_WIDTH;
 use super::constants::TABLE_GROUP_GAP;
 use super::constants::TABLE_ROW_GAP;
 use super::display::CameraGuidanceDisplay;
+use super::guidance::SourceVisibility;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
 use crate::constants::BORDER;

@@ -7,9 +7,9 @@
 //! Cameras may optionally carry a `Name` component — when present, it drives
 //! the `CAMERA: <name>` title.
 
-mod config;
 mod constants;
 mod display;
+mod guidance;
 mod layout;
 mod snapshot;
 
@@ -28,12 +28,12 @@ use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
-pub use config::CameraGuidance;
-pub use config::CameraGuidanceRow;
-pub use config::SourceVisibility;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
+pub use guidance::CameraGuidance;
+pub use guidance::CameraGuidanceRow;
+pub use guidance::SourceVisibility;
 use layout::build_guidance_tree;
 use layout::unlit_panel_material;
 use snapshot::CameraGuidanceSnapshot;
