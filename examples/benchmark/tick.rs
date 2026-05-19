@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use crate::benchmark_state::BenchmarkMode;
 use crate::benchmark_state::BenchmarkPhase;
 use crate::benchmark_state::BenchmarkState;
+use crate::benchmark_state::ExitBehavior;
 use crate::benchmark_state::OutlinePresence;
 use crate::benchmark_state::next_outline_method;
 use crate::benchmark_state::outline_method_label;
@@ -201,7 +202,7 @@ fn handle_analyze_phase(state: &mut BenchmarkState) {
     state.outline_presence = OutlinePresence::Disabled;
     if state.mode == BenchmarkMode::Auto {
         write_results(&state.results);
-        if state.exit_behavior == crate::benchmark_state::ExitBehavior::OnComplete {
+        if state.exit_behavior == ExitBehavior::OnComplete {
             info!("Auto benchmark complete, exiting in {AUTO_EXIT_DELAY_SECS}s");
             state.phase = BenchmarkPhase::ExitDelay;
         } else {

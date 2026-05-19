@@ -30,16 +30,16 @@ use super::hull_pipeline::DynamicRange;
 /// Whether the view uses multi-sample anti-aliasing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SampleMode {
-    SingleSample,
-    MultiSample,
+    Single,
+    Multi,
 }
 
 impl From<Msaa> for SampleMode {
     fn from(msaa: Msaa) -> Self {
         if msaa.samples() > MSAA_DISABLED_SAMPLE_COUNT {
-            Self::MultiSample
+            Self::Multi
         } else {
-            Self::SingleSample
+            Self::Single
         }
     }
 }
@@ -56,10 +56,10 @@ pub(crate) enum ComposeVariant {
 impl ComposeVariant {
     pub(crate) const fn new(sample_mode: SampleMode, dynamic_range: DynamicRange) -> Self {
         match (sample_mode, dynamic_range) {
-            (SampleMode::SingleSample, DynamicRange::Sdr) => Self::Sdr,
-            (SampleMode::SingleSample, DynamicRange::Hdr) => Self::Hdr,
-            (SampleMode::MultiSample, DynamicRange::Sdr) => Self::MsaaSdr,
-            (SampleMode::MultiSample, DynamicRange::Hdr) => Self::MsaaHdr,
+            (SampleMode::Single, DynamicRange::Sdr) => Self::Sdr,
+            (SampleMode::Single, DynamicRange::Hdr) => Self::Hdr,
+            (SampleMode::Multi, DynamicRange::Sdr) => Self::MsaaSdr,
+            (SampleMode::Multi, DynamicRange::Hdr) => Self::MsaaHdr,
         }
     }
 
