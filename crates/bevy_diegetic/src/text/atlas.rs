@@ -39,6 +39,10 @@ use super::constants::GLYPH_WORKER_THREAD_NAME;
 use super::font::Font;
 use super::font_registry::FontId;
 use super::font_registry::FontRegistry;
+use super::gpu_rasterizer::AtlasGpuPipe;
+use super::gpu_rasterizer::BuiltGpuRequest;
+use super::gpu_rasterizer::GpuCompletionSink;
+use super::gpu_rasterizer::GpuRenderJob;
 use super::msdf_rasterizer::DEFAULT_CANONICAL_SIZE;
 use super::msdf_rasterizer::DEFAULT_GLYPH_PADDING;
 use super::msdf_rasterizer::DEFAULT_SDF_RANGE;
@@ -243,6 +247,8 @@ pub struct GlyphAtlas {
     /// `None` (CPU-only atlas or pre-init), `get_or_insert` falls
     /// back to the CPU path even if `backend == Gpu`.
     gpu_dispatcher:    Option<Arc<dyn GpuGlyphDispatcher>>,
+    /// Per-atlas worker, dispatch, and completion pipe for GPU glyphs.
+    gpu_pipe:          Option<AtlasGpuPipe>,
 }
 
 /// Plug-point the atlas uses to route a glyph through the GPU
@@ -334,6 +340,7 @@ impl GlyphAtlas {
     /// glyphs through the compute-shader path when
     /// [`Self::backend()`] is [`RasterBackend::Gpu`].
     pub fn set_gpu_dispatcher(&mut self, dispatcher: Arc<dyn GpuGlyphDispatcher>) {
+        self.ensure_gpu_pipe();
         self.gpu_dispatcher = Some(dispatcher);
     }
 
@@ -347,6 +354,29 @@ impl GlyphAtlas {
     #[must_use]
     pub fn gpu_dispatcher_handle(&self) -> Option<Arc<dyn GpuGlyphDispatcher>> {
         self.gpu_dispatcher.clone()
+    }
+
+    fn ensure_gpu_pipe(&mut self) {
+        self.gpu_pipe.get_or_insert_with(AtlasGpuPipe::new);
+    }
+
+    /// Returns worker and completion endpoints for this atlas's GPU pipe.
+    pub(crate) fn gpu_pipe_handles(
+        &mut self,
+    ) -> (mpsc::Sender<BuiltGpuRequest>, GpuCompletionSink) {
+        self.ensure_gpu_pipe();
+        let pipe = self
+            .gpu_pipe
+            .as_ref()
+            .expect("gpu pipe must exist after ensure_gpu_pipe");
+        (pipe.built_tx.clone(), pipe.completions.clone())
+    }
+
+    /// Moves pending render jobs into `out` for extraction.
+    pub(crate) fn drain_gpu_render_jobs(&mut self, out: &mut Vec<GpuRenderJob>) {
+        if let Some(pipe) = self.gpu_pipe.as_mut() {
+            out.append(&mut pipe.pending_dispatch);
+        }
     }
 
     fn new_with_dimensions(
@@ -393,6 +423,7 @@ impl GlyphAtlas {
             rasterizer,
             backend: RasterBackend::Cpu,
             gpu_dispatcher: None,
+            gpu_pipe: None,
         }
     }
 
@@ -466,7 +497,7 @@ impl GlyphAtlas {
     /// Iterates over all glyphs currently stored in the atlas.
     ///
     /// This exposes the atlas's canonical glyph keys and metrics, which is
-    /// necessary for tooling that needs to inspect shaped glyph storage without
+    /// necessary for tooling that needs to inspect glyph storage without
     /// reconstructing keys from source characters.
     pub fn iter_glyphs(&self) -> impl Iterator<Item = (&GlyphKey, &GlyphMetrics)> {
         self.glyphs.iter()
@@ -738,6 +769,70 @@ impl GlyphAtlas {
             stats.avg_raster_ms = total_raster_ms / stats.completed.to_f32();
         }
         stats.worker_threads = workers.len();
+        let gpu_stats = self.poll_gpu();
+        stats.completed += gpu_stats.completed;
+        stats.inserted += gpu_stats.inserted;
+        stats.invisible += gpu_stats.invisible;
+        stats
+    }
+
+    fn poll_gpu(&mut self) -> AsyncGlyphPollStats {
+        let Some(pipe) = self.gpu_pipe.as_ref() else {
+            return AsyncGlyphPollStats::default();
+        };
+        let built = pipe.drain_built();
+        let mut stats = AsyncGlyphPollStats::default();
+        for msg in built {
+            match msg {
+                BuiltGpuRequest::Built {
+                    request,
+                    completions,
+                } => {
+                    let page_index = request.page_index.to_usize();
+                    let image_handle = self.pages[page_index]
+                        .image_handle
+                        .clone()
+                        .expect("GPU atlas page must be uploaded before dispatch");
+                    let job = GpuRenderJob {
+                        request: *request,
+                        image_handle,
+                        completions,
+                    };
+                    self.gpu_pipe
+                        .as_mut()
+                        .expect("GPU pipe must exist while draining built requests")
+                        .pending_dispatch
+                        .push(job);
+                },
+                BuiltGpuRequest::Invisible { key } => {
+                    stats.completed += 1;
+                    if !self.glyphs.contains_key(&key) {
+                        stats.invisible += 1;
+                    }
+                    self.insert_completed_gpu_invisible(key);
+                },
+            }
+        }
+
+        let completions = self
+            .gpu_pipe
+            .as_ref()
+            .map(|pipe| pipe.completions.drain())
+            .unwrap_or_default();
+        for record in completions {
+            stats.completed += 1;
+            let was_cached = self.glyphs.contains_key(&record.key);
+            let region = GpuAtlasRegion {
+                page_index:   record.page_index,
+                atlas_origin: record.atlas_origin,
+                bitmap_size:  record.bitmap_size,
+            };
+            let metrics = self.metrics_for_gpu_region(region, record.bearing.x, record.bearing.y);
+            self.insert_completed_gpu(record.key, metrics);
+            if !was_cached {
+                stats.inserted += 1;
+            }
+        }
         stats
     }
 
@@ -784,10 +879,14 @@ impl GlyphAtlas {
         let alloc_y = rect.min.y.to_u32();
         let x0 = alloc_x + g;
         let y0 = alloc_y + g;
-        // Mark page dirty so any GPU-side state machine that watches
-        // page state recognizes the region is now in use, even though
-        // CPU pixels were not written here.
-        self.pages[page_index].state = AtlasPageState::Dirty;
+        // Only mark Dirty when the page is brand new (no image_handle
+        // yet) so sync_to_gpu allocates the underlying Image. For pages
+        // that already have a handle, sync_to_gpu would blit the empty
+        // CPU mirror over the GPU storage texture and wipe previously
+        // dispatched GPU texels.
+        if self.pages[page_index].image_handle.is_none() {
+            self.pages[page_index].state = AtlasPageState::Dirty;
+        }
 
         Some(GpuAtlasRegion {
             page_index: page_index.to_u32(),
@@ -1057,6 +1156,7 @@ impl Default for GlyphAtlas {
             rasterizer,
             backend: RasterBackend::Cpu,
             gpu_dispatcher: None,
+            gpu_pipe: None,
         }
     }
 }

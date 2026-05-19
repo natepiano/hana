@@ -48,12 +48,12 @@ use super::msdf_rasterizer::DistanceField;
 pub enum RasterQuality {
     /// 16px — deliberately chunky, retro aesthetic, minimal memory.
     Tiny,
-    /// 32px — sharp at normal viewing distances.
+    /// 32px — sharp at normal viewing distances (default).
+    #[default]
     Small,
     /// 64px — good fidelity for most apps.
     Medium,
-    /// 128px — sharp at extreme zoom (default).
-    #[default]
+    /// 128px — sharp at extreme zoom.
     Large,
     /// 256px — maximum fidelity, significant memory cost.
     Huge,
@@ -179,7 +179,7 @@ impl GlyphWorkerThreads {
 ///
 /// # Defaults
 ///
-/// - **Quality**: [`RasterQuality::Large`] (128px) — sharp at extreme zoom
+/// - **Quality**: [`RasterQuality::Small`] (32px) — sharp at normal viewing distances
 /// - **Glyphs per page**: 100 — fits most Latin text comfortably
 /// - **Glyph worker threads**: [`GlyphWorkerThreads::Auto`] — currently up to 6 worker threads,
 ///   clamped to the machine's available parallelism
@@ -204,9 +204,9 @@ pub struct AtlasConfig {
     pub glyph_worker_threads: GlyphWorkerThreads,
 
     /// Distance-field variant used for glyph rasterization. Defaults to
-    /// [`DistanceField::Msdf`] (multi-channel — sharp at corners). Use
-    /// [`DistanceField::Sdf`] for smoother curves at the cost of corner
-    /// fidelity.
+    /// [`DistanceField::Sdf`] (single-channel — smooth on curves). Use
+    /// [`DistanceField::Msdf`] for sharper corners at the cost of curve
+    /// smoothness.
     pub distance_field: DistanceField,
 
     /// Device that produces the distance-field bytes. Defaults to
@@ -221,10 +221,10 @@ impl AtlasConfig {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            quality:              RasterQuality::Large,
+            quality:              RasterQuality::Small,
             glyphs_per_page:      DEFAULT_GLYPHS_PER_PAGE,
             glyph_worker_threads: GlyphWorkerThreads::Auto,
-            distance_field:       DistanceField::Msdf,
+            distance_field:       DistanceField::Sdf,
             backend:              RasterBackend::Cpu,
         }
     }
@@ -437,11 +437,11 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = AtlasConfig::default();
-        assert_eq!(config.quality, RasterQuality::Large);
+        assert_eq!(config.quality, RasterQuality::Small);
         assert_eq!(config.glyphs_per_page, DEFAULT_GLYPHS_PER_PAGE);
         assert_eq!(config.glyph_worker_threads, GlyphWorkerThreads::Auto);
-        assert_eq!(config.canonical_size(), DEFAULT_CANONICAL_SIZE);
-        assert_eq!(config.distance_field, DistanceField::Msdf);
+        assert_eq!(config.canonical_size(), 32);
+        assert_eq!(config.distance_field, DistanceField::Sdf);
     }
 
     #[test]

@@ -31,12 +31,20 @@ pub(super) fn poll_atlas_glyphs(
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     let poll_start = Instant::now();
+    let dirty_before_poll = atlas.total_dirty_page_count();
+    if dirty_before_poll > 0 {
+        atlas.sync_to_gpu(&mut images);
+        shared_mats.clear();
+    }
     let poll_stats = atlas.poll_async_glyphs_stats();
     let poll_ms = poll_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     let dirty_pages = atlas.active().dirty_page_count();
     let mut sync_ms = 0.0;
 
-    if poll_stats.inserted > 0 || poll_stats.invisible > 0 {
+    if poll_stats.inserted > 0
+        || poll_stats.invisible > 0
+        || atlas.total_dirty_page_count() > 0
+    {
         let sync_start = Instant::now();
         atlas.sync_to_gpu(&mut images);
         sync_ms = sync_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;

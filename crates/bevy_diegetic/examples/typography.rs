@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::AtlasPreference;
+use bevy_diegetic::AtlasSlot;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
@@ -244,15 +245,15 @@ fn main() {
             CycleState::Cycling { .. } => ControlActivation::Active,
             CycleState::Idle => ControlActivation::Inactive,
         })
-        .wire_chip_to_state::<AtlasPreference, _>("M MSDF", |pref| match pref.distance_field {
+        .wire_chip_to_state::<AtlasSlot, _>("M MSDF", |slot| match slot.active().distance_field() {
             DistanceField::Msdf => ControlActivation::Active,
             DistanceField::Sdf => ControlActivation::Inactive,
         })
-        .wire_chip_to_state::<AtlasPreference, _>("S SDF", |pref| match pref.distance_field {
+        .wire_chip_to_state::<AtlasSlot, _>("S SDF", |slot| match slot.active().distance_field() {
             DistanceField::Sdf => ControlActivation::Active,
             DistanceField::Msdf => ControlActivation::Inactive,
         })
-        .wire_chip_to_state::<AtlasPreference, _>("G GPU", |pref| match pref.backend {
+        .wire_chip_to_state::<AtlasSlot, _>("G GPU", |slot| match slot.active().backend() {
             RasterBackend::Gpu => ControlActivation::Active,
             RasterBackend::Cpu => ControlActivation::Inactive,
         })
@@ -780,6 +781,7 @@ fn toggle_backend(keyboard: Res<ButtonInput<KeyCode>>, mut preference: ResMut<At
             RasterBackend::Cpu => RasterBackend::Gpu,
             RasterBackend::Gpu => RasterBackend::Cpu,
         };
+        info!("backend toggled → {:?}", preference.backend);
     }
 }
 

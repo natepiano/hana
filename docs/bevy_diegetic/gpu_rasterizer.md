@@ -2,8 +2,33 @@
 
 ## Status
 
-Phase 1 partially landed on `feat/gpu-rasterizer` (see Phase 1
-Retrospective for the gap list). Phase 2 and Phase 3 not started.
+Phase 1 close-out in progress on `feat/gpu-rasterizer`. End-to-end
+GPU pipeline works: typography example launches; pressing G triggers
+the parallel-atlas swap to GPU (completes in ~400ms); pressing G
+again swaps back to CPU cleanly. Initial render under GPU is visually
+correct (no spillover, no wrong-character substitution). The
+swap-back regression that produced "To2oer42To" — caused by stale
+completions and a shared global page-handle resource — is fixed by a
+type-system rewrite that gives each `GlyphAtlas` its own GPU pipe
+(channels, completion sink, and pending dispatch queue); ownership
+now enforces "completions can only land on the atlas that issued
+them." See **Phase 1 — Architecture rewrite (per-atlas async
+plumbing)** below.
+
+**O4 fixed (2026-05-18):** Incremental glyph adds under GPU mode now
+land correctly. Root cause was `allocate_gpu_region` marking the page
+`Dirty` unconditionally, which made `sync_to_gpu` blit the empty CPU
+`page.pixels` mirror over the storage texture on the next frame —
+wiping every previously dispatched GPU glyph on that page. Fix: only
+mark `Dirty` when the page has no `image_handle` yet (genuinely new
+page). Verified by cycling words in the typography example (Ångström,
+fjord, etc. all render in full, and the CONTROLS / FONTS / QUALITY /
+CAMERA panels stay intact across cycles).
+
+Remaining before Phase 1 closes: **O5** (GPU render quality lower
+than CPU) and the **(Msdf, Gpu) validator** inconsistency.
+
+Phase 2 and Phase 3 not started.
 
 Adds a GPU compute-shader rasterization path as a peer of the existing
 CPU rasterizer (`fdsm`-backed MSDF / SDF). Routes glyph rasterization
@@ -882,12 +907,14 @@ Acceptance:
 4. **`readback.rs` is a stub.** Plan lists it as a Phase 1 deliverable.
    It exists but does nothing, so `dump_atlas_png` does not work under
    the GPU backend.
-5. **Backend toggle never exercised end-to-end.** The G-key toggle
-   compiles and wires through `AtlasPreference` →
-   `drive_atlas_swap` → `set_backend`, but the typography example has
-   not been launched to confirm a GPU-rasterized glyph actually appears
-   on screen. The full path (enqueue → channel → extract → dispatch →
-   completion → atlas insert → render) is untested live.
+5. **Backend toggle never exercised end-to-end.** ~~The G-key toggle
+   compiles and wires through `AtlasPreference` → `drive_atlas_swap`
+   → `set_backend`, but the typography example has not been launched
+   to confirm a GPU-rasterized glyph actually appears on screen.~~
+   **Closed:** Launched the typography example, hit S then G; the
+   GPU path successfully rasterizes and renders. Atlas swap completes;
+   the renderer reads the GPU-written texture. Two real bugs surfaced
+   from doing so (see Phase 1 — Open Issues below).
 6. **Keybinding diverged from plan.** Plan proposes `B`; code uses `G`.
    Trivial doc fix above already records the rebinding; update plan if
    anything else assumes `B`.
@@ -952,6 +979,318 @@ findings; user walked through the 3 that needed a decision):
   once the GPU is "good enough and a lot faster."
 
 **Rejected:** none.
+
+### Phase 1 — Architecture rewrite (per-atlas async plumbing)
+
+The original Phase 1 design routed GPU requests/completions through
+**shared world resources** (one `GpuGlyphRequestSender`, one
+`GpuGlyphCompletionBuffer`, one `RenderAtlasPages` resource). That
+design cannot survive a parallel-atlas swap: when the old atlas
+drops, in-flight worker tasks still send into the shared channels,
+their completions arrive after `complete_swap()`, and the
+`finalize_gpu_completion` observer applies them to the new active
+atlas with the old atlas's coordinates — silent corruption.
+
+A first patch added a monotonic `AtlasGeneration(u64)` tag to every
+request and completion, dropping mismatches at the observer. That
+patch fixed GPU→CPU swap-back but **broke CPU→GPU**: requests issued
+against `pending` arrived back at an observer that consulted
+`slot.active_mut()` (which is the *old* active during a swap), so
+generations never matched, completions were dropped, and `pending`
+never finished warming. Swap hung forever.
+
+The fix (designed via Codex consultation, implemented end-to-end):
+**each `GlyphAtlas` owns its own GPU pipe.** Ownership replaces id
+checks; Rust drop semantics enforce the invariant.
+
+- Added `AtlasGpuPipe { built_tx, built_rx, completions:
+  GpuCompletionSink, pending_dispatch: Vec<GpuRenderJob> }` to
+  `GlyphAtlas` (lazy-initialised when a `GpuGlyphDispatcher` is
+  installed).
+- Workers spawned by an atlas clone *that atlas's* `built_tx`. When
+  the atlas drops, sends become silent `SendError`.
+- Render jobs carry the exact `Handle<Image>` of the target page
+  plus a clone of *that atlas's* `GpuCompletionSink`. The render-
+  world dispatcher writes completions directly into the job's sink.
+  No global "current pages" resource.
+- Completion **application** moved into `GlyphAtlas::poll_gpu`,
+  called from `AtlasSlot::poll_async_glyphs`, which already polls
+  both `active` and `pending` during swap. `pending` drains itself.
+- Deleted: `AtlasGeneration`, `GpuGlyphRequestSender`,
+  `GpuGlyphRequestReceiver`, `GpuGlyphCompletionBuffer`,
+  `RenderAtlasPages`, `GpuGlyphCompleted` event,
+  `finalize_gpu_completion` observer, the
+  `clear_main_request_queue` / `drain_request_channel` /
+  `drain_gpu_completions` / `sync_render_atlas_pages` systems.
+- Added: `GpuRenderJobExtract` (main→render ExtractResource that
+  Codex's `collect_gpu_render_jobs` system fills each frame by
+  draining every atlas's `pending_dispatch`), `GpuRenderJobQueue`
+  (render-world persistent queue).
+- `reconcile.rs::poll_atlas_glyphs` now `sync_to_gpu`s dirty pages
+  **before** `poll_async_glyphs_stats` so when an atlas builds a
+  `GpuRenderJob`, the page's `image_handle` is `Some`.
+
+Verified live (typography example, S→G→G round trip):
+- CPU→GPU swap completes in ~400ms.
+- GPU→CPU swap completes in ~2s.
+- No swap-back corruption.
+- Initial GPU render of "Typography" is correct.
+
+### Phase 1 — Open Issues
+
+**O1, O2, O3 — closed.**
+- O1 (compute kernel over-dispatch) — fixed by per-glyph dispatch in
+  `dispatch.rs::encode_image`.
+- O2 (heavy default config) — applied: defaults are
+  `RasterQuality::Small` + `DistanceField::Sdf`.
+- O3 (G chip highlight) — fixed by rewiring the M/S/G chips to
+  observe `AtlasSlot.active()` instead of `AtlasPreference`. The
+  chip now lights only after the swap completes (the truth-source
+  semantic the user wanted). Plus a backend-toggle `info!` log
+  line gives a deterministic textual signal.
+
+**O4. Incremental glyph adds under GPU produce only ~1 character
+(closed 2026-05-18).**
+
+- *Root cause:* `GlyphAtlas::allocate_gpu_region` unconditionally
+  marked the page `AtlasPageState::Dirty`. On the next frame,
+  `reconcile.rs::poll_atlas_glyphs` saw `total_dirty_page_count >
+  0` and called `sync_to_gpu`, which executes
+  `image.data = page.pixels.clone()` for any page that already has
+  an `image_handle`. In GPU mode `page.pixels` is the empty CPU
+  mirror — the GPU compute pass writes directly to the storage
+  texture, not to `page.pixels` — so the blit wiped every
+  previously dispatched GPU glyph on that page. The only glyphs
+  visible after a cycle were the ones the compute pass wrote that
+  same frame, which was usually just the one new glyph the cycled
+  word added (because most other glyphs were already cached and
+  didn't dispatch again).
+- *Fix:* `allocate_gpu_region` now marks `Dirty` only when the page
+  has no `image_handle` yet (genuinely new page that needs
+  `sync_to_gpu` to allocate its `Image`). Pages that already have a
+  handle keep their state alone, so subsequent syncs don't overwrite
+  the GPU-rasterized texels. One-block change in
+  `crates/bevy_diegetic/src/text/atlas.rs` around line 880.
+- *Why warm-up worked but incremental didn't:* during the swap
+  warm-up, every allocation happens in one synchronous burst on
+  `shape_panel_text_children`'s first frame after the swap. The
+  first `sync_to_gpu` on the next frame blits empty pixels over an
+  empty texture (no-op), then the compute pass writes glyphs into
+  the now-allocated texture. No later allocation re-marks the page
+  Dirty in that same window, so no later sync wipes anything.
+  Incremental adds are a different story: a stable page already has
+  GPU texels, then a fresh allocation Dirties it, and the next sync
+  wipes the existing texels before the new dispatch even runs.
+- *Verified:* typography example, GPU mode, cycle through Ångström,
+  fjord, "EB Garamond Test", and the small description labels —
+  every word renders in full, and the surrounding panels (CONTROLS,
+  FONTS, QUALITY, CAMERA, anatomy diagram labels) stay intact
+  across cycles.
+
+**O5. GPU glyph render quality is visibly worse than CPU
+(noted but lower priority).**
+
+- *Symptom:* "GPU versions look bad right now" — initial render is
+  structurally correct (no garbage, correct character identity) but
+  visibly lower fidelity than the CPU rasterizer's MSDF/SDF output.
+  Edges look softer, possibly with banding or quantisation
+  artifacts.
+- *Probable causes:* the SDF kernel's per-pixel distance estimate
+  (`distance_quadratic`/`distance_cubic` using a 5-seed Newton
+  refinement with `NEWTON_ITER = 4`) is less accurate than fdsm's
+  swept-region search; the winding subdivision (8 segments for
+  quadratic, 12 for cubic) is coarse; and the `sdf_range` is
+  passed through whole but the kernel's normalisation may not
+  match fdsm's exactly.
+- *When to address:* after O4 lands. The user is on board with GPU
+  diverging from CPU as long as it's "good enough and a lot
+  faster" — define "good enough" by snapshot comparison once the
+  Phase 2 bench/snapshot harness exists.
+
+**Phase 1 close-out checklist** (revised):
+
+- [x] Per-atlas async plumbing rewrite (replaces O1/O3 architecture
+      issues at the root).
+- [x] O1 — kernel per-glyph dispatch.
+- [x] O2 — defaults are Small + Sdf.
+- [x] O3 — chips wired to `AtlasSlot.active()`.
+- [x] Both swap directions verified clean.
+- [x] **O4** — incremental glyph adds under GPU land correctly
+      (page-Dirty fix in `allocate_gpu_region`).
+- [ ] **O5** — improve render quality (or commit to "good enough"
+      with a snapshot baseline).
+- [ ] Confirm `(Msdf, Gpu)` combo handled gracefully. Validator
+      currently warns but doesn't downgrade; runtime toggle to
+      `(Msdf, Gpu)` routes through the SDF kernel and writes a
+      grayscale SDF into the MSDF atlas, which the MSDF shader
+      reads as a degraded SDF render. Either: (a) validator
+      downgrades at startup AND runtime toggle clamps, OR (b) the
+      G chip disables when M is active.
+
+### Phase 1 — Resumption Context (post-compact handoff)
+
+For a fresh-context Claude picking up after compaction. Skim before
+resuming.
+
+**Branch:** `feat/gpu-rasterizer`. Uncommitted changes only — nothing
+has been committed for this work yet. The user is handling unrelated
+`docs/*` deletions in a separate session — leave doc files alone
+except `docs/bevy_diegetic/gpu_rasterizer.md` (this doc).
+
+**O4 status (2026-05-18): closed.** The page-Dirty fix in
+`allocate_gpu_region` resolved incremental glyph adds. See O4 entry
+under "Phase 1 — Open Issues" for the root cause writeup. Do NOT
+revert that conditional — it is the entire fix.
+
+**Last big change (don't redesign — extend it):** the per-atlas
+async plumbing rewrite is in place. Each `GlyphAtlas` owns its own
+`AtlasGpuPipe` (mpsc channels + a cloneable `GpuCompletionSink` +
+`pending_dispatch: Vec<GpuRenderJob>`). Workers send via the
+atlas's own `built_tx`. Render jobs carry `Handle<Image>` and a
+clone of the atlas's completion sink. `GlyphAtlas::poll_gpu`
+(called from `poll_async_glyphs_stats`) drains the atlas's own
+pipe; `AtlasSlot::poll_async_glyphs` polls both `active` and
+`pending`, so the pending atlas self-drains during swap. Generation
+tag is deleted. Observer is deleted. `RenderAtlasPages` is deleted.
+
+**Live state after rewrite:** Typography example launches; press G
+to swap to GPU (~400ms to complete); initial "Typography" renders
+correctly; press G again to swap back to CPU cleanly. **No swap-back
+corruption.** Both directions of the swap work.
+
+**What works (do not re-debug):**
+- Atlas swap state machine (both directions, both backends).
+- Per-atlas channels: worker → built_tx → atlas's own poll
+  → GpuRenderJob with `Handle<Image>` + sink clone.
+- Render-world dispatcher reads the job's `image_handle` directly
+  (no global page-handle resource).
+- Completions land in the atlas's own sink and are applied by
+  the atlas's `poll_gpu`.
+- Pipeline cache compiles `sdf_gen.wgsl`.
+- GPU writes land in the atlas texture and the renderer reads them
+  (verified by initial "Typography" rendering correctly).
+- Per-glyph workgroup dispatch (no over-dispatch corruption).
+- Chip wiring (M/S/G) reflects `AtlasSlot.active()`, lights only
+  after the swap completes.
+- Backend toggle log line: `backend toggled → {Cpu|Gpu}` fires on
+  every G keypress.
+- **Incremental glyph adds under GPU mode (O4)**: cycle ←/→,
+  panel updates, camera updates all render in full without
+  wiping previously-cached glyphs. Verified with Ångström,
+  fjord, EB Garamond Test and all anatomy diagram labels.
+
+**What doesn't work yet (in priority order):**
+- **O5 — GPU render quality is visibly worse than CPU.** Initial
+  render is structurally correct (no garbage, correct character
+  identity) but visibly lower fidelity than CPU MSDF/SDF output.
+  Edges look softer, possibly banded. Probable causes documented
+  in the O5 entry under "Phase 1 — Open Issues".
+- `(Msdf, Gpu)` validator-vs-toggle inconsistency — still warns,
+  doesn't downgrade.
+
+**File map for the GPU rasterizer** (current state on
+`feat/gpu-rasterizer`):
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/mod.rs` — plugin
+  wiring, stateless `ChannelGpuDispatcher`, `enqueue_gpu_glyph`
+  public entry, `enqueue_on_atlas` (internal). NO observer.
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/pipeline.rs` —
+  `GpuRasterizerPipeline` resource + SDF pipeline only. Unchanged.
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/dispatch.rs` —
+  `dispatch_glyph_compute` (render-world system),
+  `partition_by_image` (groups jobs by `Handle<Image>`),
+  `encode_image` (per-glyph dispatch). Re-queues jobs into the
+  render-side `GpuRenderJobQueue.pending` when
+  `gpu_images.get(handle)` returns `None`.
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/edges.rs` —
+  outline → edge-buffer conversion; `glyph_bitmap_size` helper.
+  `GpuGlyphRequestBody` and `EdgeSegment` are `pub(crate)`.
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/extract.rs` —
+  ONE system left: `collect_gpu_render_jobs` (drains each atlas's
+  `pending_dispatch` into `GpuRenderJobExtract`).
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/request.rs` —
+  `AtlasGpuPipe`, `BuiltGpuRequest::{Built, Invisible}`,
+  `GpuRenderJob` (carries `image_handle` + `completions` sink),
+  `GpuCompletionSink`, `GpuRenderJobExtract` (main→render),
+  `GpuRenderJobQueue` (render-world). `GpuGlyphRequest` is still a
+  struct with a runtime `distance_field` tag (Phase 2 plans to
+  refactor into an enum per D2).
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/parity.rs` — Rust
+  port of WGSL kernel for smoke testing.
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/readback.rs` — STUB
+  (Phase 3 deliverable).
+- `crates/bevy_diegetic/src/text/gpu_rasterizer/shaders/sdf_gen.wgsl`
+  — the kernel. Per-glyph dispatch already in place.
+
+**Files outside the rasterizer touched in Phase 1:**
+- `crates/bevy_diegetic/src/text/atlas.rs` — `RasterBackend` field,
+  `GpuGlyphDispatcher` trait, `set_backend` / `set_gpu_dispatcher`,
+  `gpu_dispatcher_handle`, `lookup_or_queue` GPU branch, NEW
+  `gpu_pipe: Option<AtlasGpuPipe>` field with `ensure_gpu_pipe`,
+  `gpu_pipe_handles`, `drain_gpu_render_jobs`, `poll_gpu`.
+- `crates/bevy_diegetic/src/text/atlas_config.rs` — `backend` field,
+  defaults are `RasterQuality::Small` + `DistanceField::Sdf`,
+  `validate()` rejects `(Gpu, Msdf)` (warning only).
+- `crates/bevy_diegetic/src/text/atlas_slot.rs` — `AtlasPreference`
+  gained `backend: RasterBackend`; new helpers
+  `total_dirty_page_count` and `drain_gpu_render_jobs` (drains both
+  halves during swap).
+- `crates/bevy_diegetic/src/text/mod.rs` — `drive_atlas_swap`
+  includes backend in trigger comparison; pending inherits
+  dispatcher handle from active.
+- `crates/bevy_diegetic/src/text/msdf_rasterizer/mod.rs` —
+  `DistanceField::Sdf` is now the `#[default]`.
+- `crates/bevy_diegetic/src/render/text_renderer/reconcile.rs` —
+  `poll_atlas_glyphs` syncs dirty pages BEFORE polling so
+  `GpuRenderJob` builds find the page's `image_handle` populated.
+- `crates/bevy_diegetic/examples/typography.rs` — `G` key toggle
+  with `info!` log; M/S/G chips wired to `AtlasSlot.active()` not
+  `AtlasPreference`; `log_steady_state_perf` was gutted to a no-op
+  during prior debugging.
+- `crates/bevy_diegetic/src/lib.rs` and
+  `crates/bevy_diegetic/src/text/mod.rs` — removed exports for
+  deleted shared types (`GpuGlyphCompleted`,
+  `GpuGlyphRequestQueue`, `GpuGlyphRequestSender`).
+
+**How to smoke-test the full pipeline (post-O4):**
+1. `cargo build -p bevy_diegetic --example typography`
+2. Launch (BRP MCP `brp_launch typography`). Initial render shows
+   "Typography" cleanly under CPU.
+3. Press G. ~400ms later the swap completes; "Typography" still
+   renders cleanly under GPU.
+4. Press → (ArrowRight) several times to cycle through specimen
+   words. Each cycled word (Ångström, fjord, etc.) should render
+   in full, and the surrounding panels (CONTROLS, FONTS, QUALITY,
+   CAMERA, anatomy diagram labels) should stay intact.
+5. Press G again. Swap back to CPU; cycling still works.
+
+**O5 next steps (when starting work):**
+- The SDF kernel in `crates/bevy_diegetic/src/text/gpu_rasterizer/
+  shaders/sdf_gen.wgsl` uses a per-pixel distance estimate with a
+  5-seed Newton refinement (`NEWTON_ITER = 4`) and subdivides
+  quadratic curves into 8 segments / cubic into 12 for winding.
+  Likely sources of quality loss: (a) seed count + iteration count
+  too low for thin strokes, (b) `sdf_range` normalisation may not
+  match fdsm's, (c) coarse winding subdivision missing thin
+  segments at apexes.
+- Before touching the kernel, run the typography example side by
+  side with CPU and GPU on the same specimen and screenshot the
+  difference — having concrete before/after images helps judge
+  whether kernel tweaks moved fidelity in the right direction.
+- The parity test at `gpu_rasterizer/parity.rs` is the existing
+  comparison harness; extending it with snapshot diffs is the
+  natural next move.
+
+**Don't:**
+- Re-add the generation tag. It was rejected for cause.
+- Re-introduce a shared global page handle resource.
+- Add a `finalize_gpu_completion` observer that reaches into
+  `slot.active_mut()`. That was the original bug.
+- Revert the `image_handle.is_none()` guard around the
+  `state = Dirty` assignment in `allocate_gpu_region`. That guard
+  IS the O4 fix; removing it brings back the texture-wipe bug.
+- Treat the chip not lighting as a wiring bug — `wire_chip_to_state`
+  works; the source of truth was wrong before (preference vs slot
+  state).
 
 ### Phase 2 — MSDF on GPU
 

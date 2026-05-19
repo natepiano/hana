@@ -19,6 +19,7 @@ use super::atlas::AsyncGlyphPollStats;
 use super::atlas::GlyphAtlas;
 use super::atlas_config::RasterBackend;
 use super::atlas_config::RasterQuality;
+use super::gpu_rasterizer::GpuRenderJob;
 use super::msdf_rasterizer::DistanceField;
 
 /// World-level resource. Owns the currently-active atlas and, during a
@@ -112,6 +113,28 @@ impl AtlasSlot {
     #[must_use]
     pub const fn page_count(&self) -> usize { self.active().page_count() }
 
+    /// Number of dirty pages across every contained atlas.
+    #[must_use]
+    pub fn total_dirty_page_count(&self) -> usize {
+        match self {
+            Self::Single(a) => a.dirty_page_count(),
+            Self::Swapping { active, pending } => {
+                active.dirty_page_count() + pending.dirty_page_count()
+            },
+        }
+    }
+
+    /// Moves all per-atlas GPU jobs into `out` for render extraction.
+    pub(crate) fn drain_gpu_render_jobs(&mut self, out: &mut Vec<GpuRenderJob>) {
+        match self {
+            Self::Single(a) => a.drain_gpu_render_jobs(out),
+            Self::Swapping { active, pending } => {
+                active.drain_gpu_render_jobs(out);
+                pending.drain_gpu_render_jobs(out);
+            },
+        }
+    }
+
     /// Polls completed async glyph rasterizations on every contained
     /// atlas. During a swap, both `active` and `pending` drain so
     /// late-arriving results aren't dropped silently. Returns `true`
@@ -180,7 +203,7 @@ impl Default for AtlasSlot {
 /// canonical_size)` tuple triggers a parallel-atlas swap.
 ///
 /// Both fields default to the underlying type's `Default`:
-/// [`DistanceField::Msdf`] and [`RasterQuality::Large`] (128 px).
+/// [`DistanceField::Sdf`] and [`RasterQuality::Small`] (32 px).
 /// The plugin seeds this resource from [`AtlasConfig`] at startup,
 /// so apps that set up an `AtlasConfig` get their config values as
 /// the initial preference.

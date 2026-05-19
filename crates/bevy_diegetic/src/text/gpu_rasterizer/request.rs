@@ -1,14 +1,14 @@
-//! Main-world request queue and render-to-main completion event for
-//! GPU glyph rasterization.
+//! Per-atlas request and completion plumbing for GPU glyph rasterization.
 
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc;
 
+use bevy::image::Image;
 use bevy::math::UVec2;
 use bevy::math::Vec2;
-use bevy::prelude::Event;
+use bevy::prelude::Handle;
 use bevy::prelude::Resource;
 use bevy::render::extract_resource::ExtractResource;
 
@@ -16,18 +16,16 @@ use super::edges::GpuGlyphRequestBody;
 use crate::text::atlas::GlyphKey;
 use crate::text::msdf_rasterizer::DistanceField;
 
-/// Single queued glyph request, built on the main world and consumed
-/// by the render-world dispatch system.
+/// Single built glyph request consumed by the render-world dispatch system.
 #[derive(Clone, Debug)]
-pub(super) struct GpuGlyphRequest {
-    /// Lookup key the completion event echoes back so the observer can
-    /// finalize metrics.
+pub(crate) struct GpuGlyphRequest {
+    /// Lookup key the completion record echoes back.
     pub key:            GlyphKey,
     /// Edges, bitmap dims, and bearings produced by [`super::edges::build_edge_buffer`].
     pub body:           GpuGlyphRequestBody,
     /// SDF distance range in pixels.
     pub sdf_range:      f32,
-    /// SDF vs MSDF (Phase 1 only routes SDF; MSDF lands in Phase 2).
+    /// SDF vs MSDF.
     pub distance_field: DistanceField,
     /// Top-left texel of the bitmap interior on the target page.
     pub atlas_origin:   UVec2,
@@ -35,61 +33,82 @@ pub(super) struct GpuGlyphRequest {
     pub page_index:     u32,
 }
 
-/// Main-world resource — append-only queue of glyph requests.
-///
-/// Extracted into the render world each frame via
-/// [`bevy::render::extract_resource::ExtractResourcePlugin`]; the
-/// render-world dispatcher drains the cloned copy and submits compute
-/// passes. A separate main-world system clears the original queue
-/// post-extract.
-#[derive(Resource, Default, Clone, ExtractResource)]
-pub struct GpuGlyphRequestQueue {
-    pub(super) pending: Vec<GpuGlyphRequest>,
-}
-
-impl GpuGlyphRequestQueue {
-    /// Returns the number of pending requests.
-    #[must_use]
-    pub const fn len(&self) -> usize { self.pending.len() }
-
-    /// Returns whether the queue is empty.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool { self.pending.is_empty() }
-}
-
-/// Message sent from a spawned edge-build task back to the main world.
-///
-/// `Built` carries the finished request that should be queued for
-/// GPU dispatch; `Invisible` reports that the glyph had no outline so
-/// the atlas can record the sentinel `GlyphMetrics::INVISIBLE` and
-/// stop the key from re-queueing.
+/// Message sent from a spawned edge-build task back to its atlas.
 #[derive(Clone, Debug)]
-pub(super) enum BuiltRequest {
-    Built(Box<GpuGlyphRequest>),
-    Invisible(GlyphKey),
+pub(crate) enum BuiltGpuRequest {
+    /// Visible glyph work ready for render-world dispatch.
+    Built {
+        request:     Box<GpuGlyphRequest>,
+        completions: GpuCompletionSink,
+    },
+    /// The glyph has no outline, so the atlas should cache an invisible entry.
+    Invisible {
+        key: GlyphKey,
+    },
 }
 
-/// Send half of the worker→main request channel.
-///
-/// Cloned into each spawned edge-build task by `enqueue_gpu_glyph`.
-/// The matching [`GpuGlyphRequestReceiver`] is drained by the
-/// main-world `drain_request_channel` system each frame.
-#[derive(Resource, Clone)]
-pub struct GpuGlyphRequestSender {
-    pub(super) sender: Sender<BuiltRequest>,
+/// Completion record emitted by the render-world dispatcher.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GpuGlyphCompletedRecord {
+    pub key:          GlyphKey,
+    pub bitmap_size:  UVec2,
+    pub bearing:      Vec2,
+    pub atlas_origin: UVec2,
+    pub page_index:   u32,
 }
 
-/// Receive half of the worker→main request channel.
-#[derive(Resource)]
-pub(super) struct GpuGlyphRequestReceiver {
-    pub(super) receiver: Mutex<Receiver<BuiltRequest>>,
+/// Cloneable render-to-main completion sink owned by one atlas.
+#[derive(Clone, Debug)]
+pub(crate) struct GpuCompletionSink {
+    inner: Arc<Mutex<Vec<GpuGlyphCompletedRecord>>>,
 }
 
-impl GpuGlyphRequestReceiver {
-    /// Drains every message that finished since the last poll, returning
-    /// them in arrival order.
-    pub(super) fn drain(&self) -> Vec<BuiltRequest> {
-        let rx = self.receiver.lock().unwrap_or_else(PoisonError::into_inner);
+impl GpuCompletionSink {
+    /// Appends a single completion record.
+    pub fn push(&self, record: GpuGlyphCompletedRecord) {
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.push(record);
+    }
+
+    /// Drains every queued completion record.
+    #[must_use]
+    pub fn drain(&self) -> Vec<GpuGlyphCompletedRecord> {
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        std::mem::take(&mut *guard)
+    }
+}
+
+/// Main-owned GPU pipe attached to a single atlas.
+pub(crate) struct AtlasGpuPipe {
+    /// Worker-to-main edge-build results.
+    pub built_tx:         mpsc::Sender<BuiltGpuRequest>,
+    /// Main-side receiver drained by atlas polling.
+    pub built_rx:         Mutex<mpsc::Receiver<BuiltGpuRequest>>,
+    /// Render-to-main completion sink.
+    pub completions:      GpuCompletionSink,
+    /// Jobs waiting for the extract pass.
+    pub pending_dispatch: Vec<GpuRenderJob>,
+}
+
+impl AtlasGpuPipe {
+    /// Creates an empty per-atlas GPU pipe.
+    #[must_use]
+    pub fn new() -> Self {
+        let (built_tx, built_rx) = mpsc::channel();
+        Self {
+            built_tx,
+            built_rx: Mutex::new(built_rx),
+            completions: GpuCompletionSink {
+                inner: Arc::new(Mutex::new(Vec::new())),
+            },
+            pending_dispatch: Vec::new(),
+        }
+    }
+
+    /// Drains built worker results into a temporary vector.
+    #[must_use]
+    pub fn drain_built(&self) -> Vec<BuiltGpuRequest> {
+        let rx = self.built_rx.lock().unwrap_or_else(PoisonError::into_inner);
         let mut out = Vec::new();
         while let Ok(msg) = rx.try_recv() {
             out.push(msg);
@@ -98,23 +117,25 @@ impl GpuGlyphRequestReceiver {
     }
 }
 
-/// Event fired on the main world when a GPU compute pass finishes a
-/// glyph. Observed by the atlas-side finalizer, which calls
-/// [`super::super::atlas::GlyphAtlas::insert_completed_gpu`].
-///
-/// Carries the pre-allocated region details so the observer can
-/// reconstruct the [`super::super::atlas::GlyphMetrics`] without
-/// reading any render-world state.
-#[derive(Event, Clone, Copy, Debug)]
-pub struct GpuGlyphCompleted {
-    /// Lookup key the dispatch was for.
-    pub key:          GlyphKey,
-    /// Bitmap dimensions in texels.
-    pub bitmap_size:  UVec2,
-    /// Em-units bearing reported by the edge builder.
-    pub bearing:      Vec2,
-    /// Top-left interior texel on the page.
-    pub atlas_origin: UVec2,
-    /// Atlas page index that was written.
-    pub page_index:   u32,
+/// Render-world job for one glyph.
+#[derive(Clone, Debug)]
+pub(crate) struct GpuRenderJob {
+    /// Built edge data and atlas target coordinates.
+    pub request:      GpuGlyphRequest,
+    /// Exact image the compute shader writes to.
+    pub image_handle: Handle<Image>,
+    /// Per-atlas completion sink.
+    pub completions:  GpuCompletionSink,
+}
+
+/// Main-to-render extract payload for GPU jobs.
+#[derive(Resource, Default, Clone, ExtractResource)]
+pub(crate) struct GpuRenderJobExtract {
+    pub pending: Vec<GpuRenderJob>,
+}
+
+/// Persistent render-world queue.
+#[derive(Resource, Default)]
+pub(crate) struct GpuRenderJobQueue {
+    pub pending: Vec<GpuRenderJob>,
 }

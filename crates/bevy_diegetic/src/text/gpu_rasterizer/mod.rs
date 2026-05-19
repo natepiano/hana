@@ -1,33 +1,20 @@
-//! GPU compute-shader glyph rasterizer (Phase 1: SDF).
+//! GPU compute-shader glyph rasterizer.
 //!
 //! Sibling to the CPU `fdsm` path in [`super::msdf_rasterizer`]. Opt
 //! in per atlas by setting [`super::atlas_config::RasterBackend::Gpu`]
 //! on the [`super::atlas_config::AtlasConfig`].
-//!
-//! ## Wiring
-//!
-//! - Main world: a worker task per glyph builds the edge buffer (via [`edges::build_edge_buffer`])
-//!   and pushes a [`request::GpuGlyphRequest`] into [`request::GpuGlyphRequestQueue`].
-//! - Extract: the queue and the atlas page handles flow into the render world via
-//!   [`bevy::render::extract_resource::ExtractResourcePlugin`].
-//! - Render schedule, [`bevy::render::RenderSystems::PrepareBindGroups`]:
-//!   [`dispatch::dispatch_glyph_compute`] drains the queue, groups by page, encodes one compute
-//!   pass per page, writes records into [`dispatch::GpuGlyphCompletionBuffer`].
-//! - Extract back: the completion buffer flows to the main world.
-//!   [`extract::drain_gpu_completions`] turns each record into a [`request::GpuGlyphCompleted`]
-//!   event; an atlas-side observer calls `insert_completed_gpu`.
 
-use std::sync::Mutex;
-use std::sync::mpsc;
+use std::sync::Arc;
 
 use bevy::app::App;
 use bevy::app::Plugin;
+use bevy::app::PostStartup;
 use bevy::app::PostUpdate;
-use bevy::app::PreUpdate;
-use bevy::app::Update;
+use bevy::asset::AssetServer;
 use bevy::asset::embedded_asset;
-use bevy::ecs::observer::On;
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::ecs::system::Commands;
+use bevy::ecs::system::Res;
 use bevy::ecs::system::ResMut;
 use bevy::log::warn;
 use bevy::render::Render;
@@ -35,6 +22,12 @@ use bevy::render::RenderApp;
 use bevy::render::RenderStartup;
 use bevy::render::RenderSystems;
 use bevy::render::extract_resource::ExtractResourcePlugin;
+use bevy::render::render_resource::PipelineCache;
+use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::TextureFormatFeatureFlags;
+use bevy::render::renderer::RenderAdapter;
+use bevy::render::renderer::RenderDevice;
+use bevy_kana::ToF32;
 
 mod dispatch;
 mod edges;
@@ -46,10 +39,16 @@ mod readback;
 mod request;
 
 pub use self::dispatch::GpuGlyphBudget;
-use self::dispatch::RenderAtlasPages;
-pub use self::request::GpuGlyphCompleted;
-pub use self::request::GpuGlyphRequestQueue;
-pub use self::request::GpuGlyphRequestSender;
+pub(crate) use self::request::AtlasGpuPipe;
+pub(crate) use self::request::BuiltGpuRequest;
+pub(crate) use self::request::GpuCompletionSink;
+pub(crate) use self::request::GpuGlyphRequest;
+pub(crate) use self::request::GpuRenderJob;
+use self::dispatch::dispatch_glyph_compute;
+use self::extract::collect_gpu_render_jobs;
+use self::pipeline::GpuRasterizerPipeline;
+use self::request::GpuRenderJobExtract;
+use self::request::GpuRenderJobQueue;
 use super::atlas::GlyphAtlas;
 use super::atlas::GlyphKey;
 use super::atlas::GpuGlyphDispatcher;
@@ -65,8 +64,8 @@ pub enum GpuEnqueueResult {
     /// Glyph already cached, already in-flight, or has no outline
     /// (e.g., space). Caller does not need to re-enqueue.
     AlreadyHandled,
-    /// Allocation failed — the glyph is larger than a single atlas
-    /// page. Caller should fall back to CPU rasterization or log.
+    /// Allocation failed because the glyph is larger than a single
+    /// atlas page.
     AllocationFailed,
     /// `font_data` could not be parsed or the glyph has no outline.
     NoOutline,
@@ -74,21 +73,12 @@ pub enum GpuEnqueueResult {
 
 /// Enqueues a glyph for GPU rasterization.
 ///
-/// Public entry point used by text-shaping integrations (and by
-/// tests / benchmarks). The cheap parts — bitmap-size computation and
-/// page-region allocation — happen synchronously so the atlas's
-/// shelf allocator stays single-threaded; the expensive part
-/// (`build_edge_buffer`, ~hundreds of µs per glyph) is offloaded to
-/// the atlas's existing worker pool. The completed request lands in
-/// the queue on the frame after the worker finishes, via
-/// [`drain_request_channel`].
-///
-/// Returns immediately. Use [`super::super::atlas::GlyphAtlas::is_ready`]
-/// or watch for [`GpuGlyphCompleted`] events to know when the glyph
-/// is actually rasterized.
+/// Public entry point used by integrations and tests. Bitmap-size
+/// computation and page-region allocation happen synchronously so the
+/// atlas allocator stays single-threaded; edge-buffer construction is
+/// offloaded to the atlas worker pool.
 pub fn enqueue_gpu_glyph(
     slot: &mut AtlasSlot,
-    sender: &GpuGlyphRequestSender,
     key: GlyphKey,
     font_data: &[u8],
     canonical_size: u32,
@@ -96,82 +86,16 @@ pub fn enqueue_gpu_glyph(
     padding: u32,
     distance_field: DistanceField,
 ) -> GpuEnqueueResult {
-    let atlas = slot.rasterize_target_mut();
-    if atlas.is_ready(key) {
-        return GpuEnqueueResult::AlreadyHandled;
-    }
-    if atlas.in_flight_keys().any(|k| k == key) {
-        return GpuEnqueueResult::AlreadyHandled;
-    }
-    let Some(bitmap_size) = edges::glyph_bitmap_size(
+    enqueue_on_atlas(
+        slot.rasterize_target_mut(),
+        key,
         font_data,
-        key.glyph_index,
         canonical_size,
         sdf_range,
         padding,
-    ) else {
-        atlas.insert_completed_gpu_invisible(key);
-        return GpuEnqueueResult::NoOutline;
-    };
-    let Some(region) = atlas.allocate_gpu_region(bitmap_size) else {
-        return GpuEnqueueResult::AllocationFailed;
-    };
-    atlas.mark_in_flight(key);
-
-    let pool = atlas.worker_pool();
-    let tx = sender.sender.clone();
-    let font_data = font_data.to_vec();
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "sdf_range is small (~4.0); f64→f32 is exact"
-    )]
-    let sdf_range_f32 = sdf_range as f32;
-    pool.spawn(async move {
-        let msg = match edges::build_edge_buffer(
-            &font_data,
-            key.glyph_index,
-            canonical_size,
-            sdf_range,
-            padding,
-        ) {
-            Some(body) => BuiltRequest::Built(Box::new(GpuGlyphRequest {
-                key,
-                body,
-                sdf_range: sdf_range_f32,
-                distance_field,
-                atlas_origin: region.atlas_origin,
-                page_index: region.page_index,
-            })),
-            None => BuiltRequest::Invisible(key),
-        };
-        let _ = tx.send(msg);
-    })
-    .detach();
-
-    GpuEnqueueResult::Queued
+        distance_field,
+    )
 }
-
-use bevy::app::PostStartup;
-use bevy::asset::AssetServer;
-use bevy::ecs::system::Commands;
-use bevy::ecs::system::Res;
-use bevy::render::render_resource::PipelineCache;
-use bevy::render::render_resource::TextureFormat;
-use bevy::render::render_resource::TextureFormatFeatureFlags;
-use bevy::render::renderer::RenderAdapter;
-use bevy::render::renderer::RenderDevice;
-use request::BuiltRequest;
-use request::GpuGlyphRequest;
-
-use self::dispatch::GpuGlyphCompletionBuffer;
-use self::dispatch::dispatch_glyph_compute;
-use self::extract::clear_main_request_queue;
-use self::extract::drain_gpu_completions;
-use self::extract::drain_request_channel;
-use self::extract::sync_render_atlas_pages;
-use self::pipeline::GpuRasterizerPipeline;
-use self::request::GpuGlyphRequestReceiver;
-use super::atlas::GpuAtlasRegion;
 
 /// Adds the GPU glyph rasterizer.
 ///
@@ -184,47 +108,21 @@ impl Plugin for GpuRasterizerPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/sdf_gen.wgsl");
 
-        let (tx, rx) = mpsc::channel();
-        app.insert_resource(self::request::GpuGlyphRequestSender { sender: tx })
-            .insert_resource(GpuGlyphRequestReceiver {
-                receiver: Mutex::new(rx),
-            })
-            .init_resource::<GpuGlyphRequestQueue>()
-            .init_resource::<GpuGlyphBudget>()
-            .init_resource::<RenderAtlasPages>()
-            .init_resource::<GpuGlyphCompletionBuffer>()
+        app.init_resource::<GpuGlyphBudget>()
+            .init_resource::<GpuRenderJobExtract>()
             .add_plugins((
-                ExtractResourcePlugin::<GpuGlyphRequestQueue>::default(),
                 ExtractResourcePlugin::<GpuGlyphBudget>::default(),
-                ExtractResourcePlugin::<RenderAtlasPages>::default(),
-                // Cloning the buffer here shares the Arc<Mutex<...>>
-                // between main and render worlds — render pushes,
-                // main drains.
-                ExtractResourcePlugin::<GpuGlyphCompletionBuffer>::default(),
+                ExtractResourcePlugin::<GpuRenderJobExtract>::default(),
             ))
-            // PostStartup so the TextPlugin's atlas has already been
-            // inserted and its image_handle is populated.
             .add_systems(PostStartup, install_dispatcher_on_atlas)
-            // Clear main-world queue at start of PreUpdate (after
-            // Extract has run on the previous frame's contents), then
-            // drain the channel into the freshly-empty queue. Order is
-            // critical: if clear runs after drain (or in PostUpdate
-            // before Extract), the queue is wiped before the render
-            // world's Extract schedule can clone it, and
-            // dispatch_glyph_compute sees nothing.
-            .add_systems(
-                PreUpdate,
-                (clear_main_request_queue, drain_request_channel).chain(),
-            )
-            .add_systems(Update, sync_render_atlas_pages)
-            .add_systems(PostUpdate, drain_gpu_completions)
-            .add_observer(finalize_gpu_completion);
+            .add_systems(PostUpdate, collect_gpu_render_jobs);
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             warn!("gpu_rasterizer: RenderApp unavailable; GPU backend will be inactive");
             return;
         };
         render_app
+            .init_resource::<GpuRenderJobQueue>()
             .add_systems(RenderStartup, init_pipeline_render_world)
             .add_systems(
                 Render,
@@ -235,14 +133,6 @@ impl Plugin for GpuRasterizerPlugin {
 
 /// Render-startup system that validates wgpu device limits and, on
 /// success, builds the SDF compute pipeline.
-///
-/// On failure (insufficient storage-buffer size, missing
-/// `STORAGE_READ_WRITE` for `Rgba8Unorm`, undersized compute
-/// workgroups), logs a warning and skips pipeline insertion. The
-/// dispatch system gracefully no-ops when [`GpuRasterizerPipeline`] is
-/// absent — atlases configured for GPU rasterization will stay in
-/// [`super::atlas_config::RasterBackend::Cpu`] semantics until a
-/// device with sufficient limits is reachable.
 fn init_pipeline_render_world(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -263,8 +153,6 @@ fn device_supports_gpu_rasterization(
     render_device: &RenderDevice,
     render_adapter: &RenderAdapter,
 ) -> bool {
-    // Worst-case edge buffer: 2000 edges × 36 bytes ≈ 72 KB. Picked
-    // 256 KB as a generous floor that survives shrunk mobile limits.
     const EDGE_BUFFER_FLOOR_BYTES: u32 = 256 * 1024;
 
     let limits = render_device.limits();
@@ -276,7 +164,6 @@ fn device_supports_gpu_rasterization(
         );
         return false;
     }
-    // Edges + headers + (texture binding does not count) + uniform = 3 storage entries.
     if limits.max_storage_buffers_per_shader_stage < 2 {
         warn!(
             "gpu_rasterizer: max_storage_buffers_per_shader_stage={} < 2 required; GPU \
@@ -304,34 +191,13 @@ fn device_supports_gpu_rasterization(
         );
         return false;
     }
-    // Write-only access for Rgba8Unorm is core wgpu, but documented
-    // here so future MSDF (RGBA read-after-write) can add a stronger
-    // check.
     let _ = TextureFormatFeatureFlags::STORAGE_READ_WRITE;
     true
 }
 
-/// Main-world observer: routes each [`GpuGlyphCompleted`] event to
-/// the active atlas's `insert_completed_gpu`.
-fn finalize_gpu_completion(trigger: On<GpuGlyphCompleted>, mut slot: ResMut<AtlasSlot>) {
-    let event = trigger.event();
-    let atlas = slot.active_mut();
-    let region = GpuAtlasRegion {
-        page_index:   event.page_index,
-        atlas_origin: event.atlas_origin,
-        bitmap_size:  event.bitmap_size,
-    };
-    let metrics = atlas.metrics_for_gpu_region(region, event.bearing.x, event.bearing.y);
-    atlas.insert_completed_gpu(event.key, metrics);
-}
-
 /// Dispatcher implementation installed on every atlas at startup and
-/// after each swap. Wraps the worker→main channel sender so the atlas
-/// can branch into the GPU path inside `lookup_or_queue` without
-/// importing any `gpu_rasterizer` types.
-struct ChannelGpuDispatcher {
-    sender: self::request::GpuGlyphRequestSender,
-}
+/// inherited by pending atlases during swaps.
+struct ChannelGpuDispatcher;
 
 impl GpuGlyphDispatcher for ChannelGpuDispatcher {
     fn dispatch(
@@ -344,70 +210,85 @@ impl GpuGlyphDispatcher for ChannelGpuDispatcher {
         padding: u32,
         distance_field: DistanceField,
     ) -> bool {
-        if atlas.is_ready(key) {
-            return true;
-        }
-        if atlas.in_flight_keys().any(|k| k == key) {
-            return true;
-        }
-        let Some(bitmap_size) = edges::glyph_bitmap_size(
-            font_data,
+        !matches!(
+            enqueue_on_atlas(
+                atlas,
+                key,
+                font_data,
+                canonical_size,
+                sdf_range,
+                padding,
+                distance_field,
+            ),
+            GpuEnqueueResult::AllocationFailed
+        )
+    }
+}
+
+fn enqueue_on_atlas(
+    atlas: &mut GlyphAtlas,
+    key: GlyphKey,
+    font_data: &[u8],
+    canonical_size: u32,
+    sdf_range: f64,
+    padding: u32,
+    distance_field: DistanceField,
+) -> GpuEnqueueResult {
+    if atlas.is_ready(key) || atlas.in_flight_keys().any(|k| k == key) {
+        return GpuEnqueueResult::AlreadyHandled;
+    }
+    let Some(bitmap_size) = edges::glyph_bitmap_size(
+        font_data,
+        key.glyph_index,
+        canonical_size,
+        sdf_range,
+        padding,
+    ) else {
+        atlas.insert_completed_gpu_invisible(key);
+        return GpuEnqueueResult::NoOutline;
+    };
+    let Some(region) = atlas.allocate_gpu_region(bitmap_size) else {
+        return GpuEnqueueResult::AllocationFailed;
+    };
+    atlas.mark_in_flight(key);
+
+    let pool = atlas.worker_pool();
+    let (built_tx, completions) = atlas.gpu_pipe_handles();
+    let font_data = font_data.to_vec();
+    let sdf_range_f32 = sdf_range.to_f32();
+    pool.spawn(async move {
+        let msg = if let Some(body) = edges::build_edge_buffer(
+            &font_data,
             key.glyph_index,
             canonical_size,
             sdf_range,
             padding,
-        ) else {
-            atlas.insert_completed_gpu_invisible(key);
-            return true;
-        };
-        let Some(region) = atlas.allocate_gpu_region(bitmap_size) else {
-            return false;
-        };
-        atlas.mark_in_flight(key);
-
-        let pool = atlas.worker_pool();
-        let tx = self.sender.sender.clone();
-        let font_data = font_data.to_vec();
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "sdf_range is small (~4.0); f64→f32 is exact"
-        )]
-        let sdf_range_f32 = sdf_range as f32;
-        pool.spawn(async move {
-            let msg = if let Some(body) = edges::build_edge_buffer(
-                &font_data,
-                key.glyph_index,
-                canonical_size,
-                sdf_range,
-                padding,
-            ) {
-                BuiltRequest::Built(Box::new(GpuGlyphRequest {
+        ) {
+            BuiltGpuRequest::Built {
+                request: Box::new(GpuGlyphRequest {
                     key,
                     body,
                     sdf_range: sdf_range_f32,
                     distance_field,
                     atlas_origin: region.atlas_origin,
                     page_index: region.page_index,
-                }))
-            } else {
-                BuiltRequest::Invisible(key)
-            };
-            let _ = tx.send(msg);
-        })
-        .detach();
-        true
-    }
+                }),
+                completions,
+            }
+        } else {
+            BuiltGpuRequest::Invisible { key }
+        };
+        let _ = built_tx.send(msg);
+    })
+    .detach();
+
+    GpuEnqueueResult::Queued
 }
 
 /// Installs a [`ChannelGpuDispatcher`] on the active atlas at startup
 /// so `atlas.get_or_insert` routes through the GPU path when the
 /// atlas is configured for [`super::atlas_config::RasterBackend::Gpu`].
-fn install_dispatcher_on_atlas(
-    sender: Res<self::request::GpuGlyphRequestSender>,
-    mut slot: ResMut<AtlasSlot>,
-) {
-    let dispatcher = std::sync::Arc::new(ChannelGpuDispatcher {
-        sender: sender.clone(),
-    });
-    slot.active_mut().set_gpu_dispatcher(dispatcher);
+fn install_dispatcher_on_atlas(mut slot: ResMut<AtlasSlot>) {
+    slot.active_mut()
+        .set_gpu_dispatcher(Arc::new(ChannelGpuDispatcher));
 }
