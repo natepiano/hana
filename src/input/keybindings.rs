@@ -34,6 +34,29 @@ impl PlatformShortcutMode {
     }
 }
 
+struct ModifierBlockers {
+    all_modifiers:       Vec<Entity>,
+    non_shift_modifiers: Vec<Entity>,
+}
+
+impl ModifierBlockers {
+    fn new(shift_entity: Entity, primary_entity: Entity, alt_entity: Entity) -> Self {
+        Self {
+            all_modifiers:       vec![shift_entity, primary_entity, alt_entity],
+            non_shift_modifiers: vec![primary_entity, alt_entity],
+        }
+    }
+
+    fn add_non_shift_modifier(&mut self, entity: Entity) {
+        self.all_modifiers.push(entity);
+        self.non_shift_modifiers.push(entity);
+    }
+
+    fn all_modifiers(&self) -> Vec<Entity> { self.all_modifiers.clone() }
+
+    fn non_shift_modifiers(&self) -> Vec<Entity> { self.non_shift_modifiers.clone() }
+}
+
 /// Modifier-aware keybinding builder with platform-specific `Cmd`/`Ctrl` handling.
 ///
 /// Spawns modifier actions and provides methods to bind keys with automatic
@@ -69,10 +92,9 @@ impl PlatformShortcutMode {
 /// }
 /// ```
 pub struct Keybindings<C: Component> {
-    all_modifiers:       Vec<Entity>,
-    non_shift_modifiers: Vec<Entity>,
-    action_settings:     ActionSettings,
-    phantom_data:        PhantomData<C>,
+    modifier_blockers: ModifierBlockers,
+    action_settings:   ActionSettings,
+    phantom_data:      PhantomData<C>,
 }
 
 impl<C: Component> Keybindings<C> {
@@ -119,8 +141,7 @@ impl<C: Component> Keybindings<C> {
             ))
             .id();
 
-        let mut all_modifiers = vec![shift_entity, primary_entity, alt_entity];
-        let mut non_shift_modifiers = vec![primary_entity, alt_entity];
+        let mut modifier_blockers = ModifierBlockers::new(shift_entity, primary_entity, alt_entity);
 
         match PlatformShortcutMode::current() {
             PlatformShortcutMode::Command => {
@@ -132,15 +153,13 @@ impl<C: Component> Keybindings<C> {
                         bindings![KeyCode::ControlLeft, KeyCode::ControlRight],
                     ))
                     .id();
-                all_modifiers.push(control_entity);
-                non_shift_modifiers.push(control_entity);
+                modifier_blockers.add_non_shift_modifier(control_entity);
             },
             PlatformShortcutMode::Control => {},
         }
 
         Self {
-            all_modifiers,
-            non_shift_modifiers,
+            modifier_blockers,
             action_settings,
             phantom_data: PhantomData,
         }
@@ -151,7 +170,7 @@ impl<C: Component> Keybindings<C> {
         spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.all_modifiers.clone()),
+            BlockBy::new(self.modifier_blockers.all_modifiers()),
             bindings![key],
         ));
     }
@@ -161,7 +180,7 @@ impl<C: Component> Keybindings<C> {
         spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.non_shift_modifiers.clone()),
+            BlockBy::new(self.modifier_blockers.non_shift_modifiers()),
             bindings![key.with_mod_keys(ModKeys::SHIFT)],
         ));
     }
@@ -175,7 +194,7 @@ impl<C: Component> Keybindings<C> {
         spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.all_modifiers.clone()),
+            BlockBy::new(self.modifier_blockers.all_modifiers()),
             bindings,
         ));
     }
