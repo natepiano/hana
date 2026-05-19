@@ -30,7 +30,8 @@ jobs:
 
       # Gates the `bench` job. Keep automatic triggers focused on benchmark
       # files and performance-sensitive bevy_diegetic subsystems. Broader
-      # changes can opt in with `[bench]` in the push commit message.
+      # changes, including CI-only edits, can opt in with `[bench]` in the
+      # push commit message or by manually dispatching the workflow.
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -46,7 +47,6 @@ jobs:
               - 'crates/bevy_diegetic/src/constants.rs'
               - 'crates/bevy_diegetic/src/lib.rs'
               - 'crates/bevy_diegetic/Cargo.toml'
-              - '.github/workflows/ci.yml'
 
   format:
     name: Format Check
