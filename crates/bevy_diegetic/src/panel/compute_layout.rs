@@ -84,7 +84,7 @@ pub(super) fn compute_panel_layouts(
         }
         if *trace_remaining > 0 {
             *trace_remaining -= 1;
-            bevy::log::info!(
+            bevy::log::debug!(
                 target: "compute_panel_layouts_trace",
                 "entity={entity:?} panel_changed={panel_changed} pending={pending_some} budget_left={}",
                 *trace_remaining,

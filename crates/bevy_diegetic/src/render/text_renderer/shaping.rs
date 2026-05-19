@@ -255,8 +255,9 @@ fn shape_text_to_quads(
         let glyph_y = bounds.y + shaped_glyph.baseline + shaped_glyph.y;
         let quad_width = metrics.pixel_width.to_f32() * em_scale;
         let quad_height = metrics.pixel_height.to_f32() * em_scale;
-        let quad_layout_x = metrics.bearing_x.mul_add(config.size(), glyph_x);
-        let quad_layout_y = (-metrics.bearing_y).mul_add(config.size(), glyph_y);
+        let quad_layout_x = (metrics.bearing_x - metrics.pad_x_em).mul_add(config.size(), glyph_x);
+        let quad_layout_y =
+            (-(metrics.bearing_y + metrics.pad_y_em)).mul_add(config.size(), glyph_y);
         let local_x = quad_layout_x.mul_add(scale.x, -anchor.x);
         let local_y = (-quad_layout_y).mul_add(scale.y, anchor.y);
 

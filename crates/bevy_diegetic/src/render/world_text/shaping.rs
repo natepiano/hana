@@ -220,9 +220,9 @@ fn build_glyph_quads(
         let quad_width = metrics.pixel_width.to_f32() * em_scale;
         let quad_height = metrics.pixel_height.to_f32() * em_scale;
 
-        let quad_x = metrics.bearing_x.mul_add(boosted_size, shaped_glyph.x) - anchor_x;
-        let quad_y = -(metrics
-            .bearing_y
+        let quad_x =
+            (metrics.bearing_x - metrics.pad_x_em).mul_add(boosted_size, shaped_glyph.x) - anchor_x;
+        let quad_y = -((metrics.bearing_y + metrics.pad_y_em)
             .mul_add(-boosted_size, shaped_glyph.baseline + shaped_glyph.y)
             - anchor_y);
 
@@ -308,11 +308,18 @@ fn measure_anchor_offset(
             glyph_index: shaped_glyph.id,
         };
         if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {
-            let right = (metrics.pixel_width.to_f32()).mul_add(
+            // Anchor measurement uses ink extent (atlas-invariant), not
+            // quad extent. Derivation: quad spans bitmap = ink + 2·pad
+            // and its left edge sits at (bearing - pad). The quad's
+            // right edge is therefore (bearing + ink + pad), one pad
+            // beyond the ink. Subtract that single pad to land on the
+            // ink's right edge — atlas-invariant.
+            let quad_right = metrics.pixel_width.to_f32().mul_add(
                 em_scale,
-                metrics.bearing_x.mul_add(style.size(), shaped_glyph.x),
+                (metrics.bearing_x - metrics.pad_x_em).mul_add(style.size(), shaped_glyph.x),
             );
-            max_x = max_x.max(right);
+            let ink_right = metrics.pad_x_em.mul_add(-style.size(), quad_right);
+            max_x = max_x.max(ink_right);
         }
     }
     let mut baselines: Vec<f32> = glyphs.iter().map(|glyph| glyph.baseline).collect();

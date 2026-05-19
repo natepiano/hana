@@ -102,10 +102,16 @@ pub(super) struct MsdfBitmap {
     pub width:     u32,
     /// Height in pixels.
     pub height:    u32,
-    /// Horizontal bearing offset in em units (glyph origin to bitmap left).
+    /// Font-defined horizontal bearing in em units (atlas-invariant —
+    /// `bbox.x_min / units_per_em`).
     pub bearing_x: f64,
-    /// Vertical bearing offset in em units (glyph origin to bitmap top).
+    /// Font-defined vertical bearing in em units (atlas-invariant —
+    /// `bbox.y_max / units_per_em`).
     pub bearing_y: f64,
+    /// Atlas-specific horizontal bitmap inset in em units.
+    pub pad_x_em:  f64,
+    /// Atlas-specific vertical bitmap inset in em units.
+    pub pad_y_em:  f64,
 }
 
 /// Multi-channel signed-distance-field rasterizer.
@@ -217,8 +223,10 @@ fn rasterize_msdf_bitmap(
         ])
     });
 
-    let bearing_x = f64::from(bbox.x_min) / units_per_em - actual_pad_x / f64::from(px_size);
-    let bearing_y = f64::from(bbox.y_max) / units_per_em + actual_pad_y / f64::from(px_size);
+    let bearing_x = f64::from(bbox.x_min) / units_per_em;
+    let bearing_y = f64::from(bbox.y_max) / units_per_em;
+    let horizontal_padding_em = actual_pad_x / f64::from(px_size);
+    let vertical_padding_em = actual_pad_y / f64::from(px_size);
 
     Some(MsdfBitmap {
         data: image.into_raw(),
@@ -226,6 +234,8 @@ fn rasterize_msdf_bitmap(
         height: image_height,
         bearing_x,
         bearing_y,
+        pad_x_em: horizontal_padding_em,
+        pad_y_em: vertical_padding_em,
     })
 }
 

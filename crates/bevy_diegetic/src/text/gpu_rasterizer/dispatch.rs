@@ -241,6 +241,7 @@ fn encode_image(
             key:          req.key,
             bitmap_size:  req.body.bitmap_size,
             bearing:      Vec2::new(req.body.bearing_x, req.body.bearing_y),
+            pad_em:       Vec2::new(req.body.pad_x_em, req.body.pad_y_em),
             atlas_origin: req.atlas_origin,
             page_index:   req.page_index,
         });

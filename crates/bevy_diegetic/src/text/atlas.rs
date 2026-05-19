@@ -75,10 +75,23 @@ pub struct GlyphKey {
 pub struct GlyphMetrics {
     /// UV rectangle in the atlas texture: `[u_min, v_min, u_max, v_max]`.
     pub uv_rect:      [f32; 4],
-    /// Horizontal bearing offset in em units (glyph origin to bitmap left).
+    /// Font-defined horizontal bearing (em units, ink origin to ink
+    /// left). Atlas-invariant — equal across atlases of different
+    /// canonical sizes for the same font/glyph. Quad-builders combine
+    /// this with `pad_x_em` to position the padded quad.
     pub bearing_x:    f32,
-    /// Vertical bearing offset in em units (glyph origin to bitmap top).
+    /// Font-defined vertical bearing (em units, baseline to ink top).
+    /// Atlas-invariant.
     pub bearing_y:    f32,
+    /// Atlas-specific outward padding on the X axis (em units). The
+    /// bitmap extends `pad_x_em` em-units to the left of the ink and
+    /// `pad_x_em` to the right. Differs per canonical size because the
+    /// bitmap dimensions are integer-rounded; quad-builders subtract
+    /// it at the corner so the ink lands at the same em-coordinate
+    /// regardless of which atlas served the glyph.
+    pub pad_x_em:     f32,
+    /// Atlas-specific outward padding on the Y axis (em units).
+    pub pad_y_em:     f32,
     /// Glyph bitmap width in pixels.
     pub pixel_width:  u32,
     /// Glyph bitmap height in pixels.
@@ -95,6 +108,8 @@ impl GlyphMetrics {
         uv_rect:      [0.0; 4],
         bearing_x:    0.0,
         bearing_y:    0.0,
+        pad_x_em:     0.0,
+        pad_y_em:     0.0,
         pixel_width:  0,
         pixel_height: 0,
         page_index:   0,
@@ -833,7 +848,13 @@ impl GlyphAtlas {
                 atlas_origin: record.atlas_origin,
                 bitmap_size:  record.bitmap_size,
             };
-            let metrics = self.metrics_for_gpu_region(region, record.bearing.x, record.bearing.y);
+            let metrics = self.metrics_for_gpu_region(
+                region,
+                record.bearing.x,
+                record.bearing.y,
+                record.pad_em.x,
+                record.pad_em.y,
+            );
             self.insert_completed_gpu(record.key, metrics);
             if !was_cached {
                 stats.inserted += 1;
@@ -902,13 +923,15 @@ impl GlyphAtlas {
     }
 
     /// Builds [`GlyphMetrics`] from the GPU dispatch's pre-computed
-    /// region and the edge builder's reported bearings.
+    /// region and the edge builder's reported bearings and padding.
     #[must_use]
     pub fn metrics_for_gpu_region(
         &self,
         region: GpuAtlasRegion,
         bearing_x: f32,
         bearing_y: f32,
+        horizontal_padding_em: f32,
+        vertical_padding_em: f32,
     ) -> GlyphMetrics {
         let atlas_width = self.width.to_f32();
         let atlas_height = self.height.to_f32();
@@ -924,6 +947,8 @@ impl GlyphAtlas {
             uv_rect: [u_min, v_min, u_max, v_max],
             bearing_x,
             bearing_y,
+            pad_x_em: horizontal_padding_em,
+            pad_y_em: vertical_padding_em,
             pixel_width: w,
             pixel_height: h,
             page_index: region.page_index,
@@ -971,10 +996,25 @@ impl GlyphAtlas {
     /// MSDF writes 3 bytes (R, G, B) and A=255; SDF writes 1 byte into
     /// R, with G=B=0 and A=255 (the shader reads only R in SDF mode).
     fn insert_bitmap(&mut self, key: GlyphKey, bitmap: &RasterizedBitmap) -> Option<GlyphMetrics> {
-        let (width, height, bearing_x, bearing_y) = match bitmap {
-            RasterizedBitmap::Msdf(b) => (b.width, b.height, b.bearing_x, b.bearing_y),
-            RasterizedBitmap::Sdf(b) => (b.width, b.height, b.bearing_x, b.bearing_y),
-        };
+        let (width, height, bearing_x, bearing_y, horizontal_padding_em, vertical_padding_em) =
+            match bitmap {
+                RasterizedBitmap::Msdf(b) => (
+                    b.width,
+                    b.height,
+                    b.bearing_x,
+                    b.bearing_y,
+                    b.pad_x_em,
+                    b.pad_y_em,
+                ),
+                RasterizedBitmap::Sdf(b) => (
+                    b.width,
+                    b.height,
+                    b.bearing_x,
+                    b.bearing_y,
+                    b.pad_x_em,
+                    b.pad_y_em,
+                ),
+            };
         let g = ATLAS_GUTTER;
         let padded_width = width + 2 * g;
         let padded_height = height + 2 * g;
@@ -1057,6 +1097,8 @@ impl GlyphAtlas {
             uv_rect:      [u_min, v_min, u_max, v_max],
             bearing_x:    bearing_x.to_f32(),
             bearing_y:    bearing_y.to_f32(),
+            pad_x_em:     horizontal_padding_em.to_f32(),
+            pad_y_em:     vertical_padding_em.to_f32(),
             pixel_width:  width,
             pixel_height: height,
             page_index:   page_index.to_u32(),

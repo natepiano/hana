@@ -53,6 +53,10 @@ pub struct GpuGlyphCompletedRecord {
     pub key:          GlyphKey,
     pub bitmap_size:  UVec2,
     pub bearing:      Vec2,
+    /// Atlas-specific bitmap inset in em units, used by quad-builders
+    /// to position the padded quad without contaminating the
+    /// font-defined bearing.
+    pub pad_em:       Vec2,
     pub atlas_origin: UVec2,
     pub page_index:   u32,
 }

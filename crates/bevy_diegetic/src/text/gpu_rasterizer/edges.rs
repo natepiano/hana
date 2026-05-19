@@ -55,10 +55,19 @@ pub struct GpuGlyphRequestBody {
     /// Bitmap dimensions in texels (the GPU shader writes
     /// `bitmap_size.x * bitmap_size.y` pixels).
     pub bitmap_size: UVec2,
-    /// Horizontal bearing in em units (matches CPU rasterizer output).
+    /// Font-defined horizontal bearing in em units (atlas-invariant —
+    /// equals `bbox.x_min / units_per_em`).
     pub bearing_x:   f32,
-    /// Vertical bearing in em units (matches CPU rasterizer output).
+    /// Font-defined vertical bearing in em units (atlas-invariant —
+    /// equals `bbox.y_max / units_per_em`).
     pub bearing_y:   f32,
+    /// Atlas-specific horizontal bitmap inset in em units. Quad
+    /// builders subtract this from `bearing_x` to position the padded
+    /// quad while keeping the ink at the same em-coordinate across
+    /// canonical sizes.
+    pub pad_x_em:    f32,
+    /// Atlas-specific vertical bitmap inset in em units.
+    pub pad_y_em:    f32,
 }
 
 /// Synchronous variant: builds the edge buffer + bitmap dims + bearings
@@ -112,16 +121,18 @@ pub(super) fn build_edge_buffer(
         }
     }
 
-    let bearing_x =
-        (f64::from(bbox.x_min) / units_per_em - actual_pad_x / f64::from(canonical_size)).to_f32();
-    let bearing_y =
-        (f64::from(bbox.y_max) / units_per_em + actual_pad_y / f64::from(canonical_size)).to_f32();
+    let bearing_x = (f64::from(bbox.x_min) / units_per_em).to_f32();
+    let bearing_y = (f64::from(bbox.y_max) / units_per_em).to_f32();
+    let horizontal_padding_em = (actual_pad_x / f64::from(canonical_size)).to_f32();
+    let vertical_padding_em = (actual_pad_y / f64::from(canonical_size)).to_f32();
 
     Some(GpuGlyphRequestBody {
         edges,
         bitmap_size: UVec2::new(image_width, image_height),
         bearing_x,
         bearing_y,
+        pad_x_em: horizontal_padding_em,
+        pad_y_em: vertical_padding_em,
     })
 }
 
