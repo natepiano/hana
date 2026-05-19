@@ -58,11 +58,28 @@ pub struct EdgeSegment {
     pub kind:   u32,
 }
 
+/// Per-corner record consumed by the MSDF error-correction pass.
+///
+/// Stores the pixel-space position of a contour corner — a corner
+/// being the start vertex of a segment where the bitwise AND of the
+/// previous and current segment's channel mask is not bright (i.e.
+/// has fewer than two bits set). The correction kernel protects the
+/// four texels straddling each corner from being flattened to the
+/// median.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct CornerPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
 /// Output of [`build_edge_buffer`].
 #[derive(Clone, Debug)]
 pub struct GpuGlyphRequestBody {
     /// All edges from every contour of the glyph, concatenated.
     pub edges:       Vec<EdgeSegment>,
+    /// Contour corner points in pixel space; empty on SDF requests.
+    pub corners:     Vec<CornerPoint>,
     /// Bitmap dimensions in texels (the GPU shader writes
     /// `bitmap_size.x * bitmap_size.y` pixels).
     pub bitmap_size: UVec2,
@@ -127,7 +144,7 @@ pub(super) fn build_edge_buffer(
         scale, 0.0, tx, 0.0, -scale, ty, 0.0, 0.0, 1.0,
     ));
 
-    let edges = match distance_field {
+    let (edges, corners) = match distance_field {
         DistanceField::Sdf => {
             let mut outline = outline;
             outline.transform(&affine);
@@ -137,19 +154,21 @@ pub(super) fn build_edge_buffer(
                     out.push(segment_to_edge(segment, 0));
                 }
             }
-            out
+            (out, Vec::new())
         },
         DistanceField::Msdf => {
             let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
             let mut colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name
             colored.transform(&affine);
-            let mut out = Vec::new();
+            let mut edge_out = Vec::new();
+            let mut corner_out = Vec::new();
             for contour in &colored.contours {
+                collect_contour_corners(&contour.segments, &mut corner_out);
                 for colored_segment in &contour.segments {
-                    out.push(colored_segment_to_edge(colored_segment));
+                    edge_out.push(colored_segment_to_edge(colored_segment));
                 }
             }
-            out
+            (edge_out, corner_out)
         },
     };
 
@@ -160,12 +179,40 @@ pub(super) fn build_edge_buffer(
 
     Some(GpuGlyphRequestBody {
         edges,
+        corners,
         bitmap_size: UVec2::new(image_width, image_height),
         bearing_x,
         bearing_y,
         pad_x_em: horizontal_padding_em,
         pad_y_em: vertical_padding_em,
     })
+}
+
+/// Detects contour corners by the same rule fdsm's
+/// `protect_corners` uses: a corner is the start of a segment whose
+/// channel-mask AND with the previous segment's mask is not bright
+/// (i.e. has fewer than two bits set). `segments` is one contour,
+/// already transformed to pixel space.
+fn collect_contour_corners(segments: &[ColoredSegment], out: &mut Vec<CornerPoint>) {
+    let len = segments.len();
+    if len == 0 {
+        return;
+    }
+    for i in 0..len {
+        let curr = &segments[i];
+        let prev_idx = if i == 0 { len - 1 } else { i - 1 };
+        let prev = &segments[prev_idx];
+        let common = curr.color.value() & prev.color.value();
+        // Color::is_bright: `(c & (c - 1)) != 0` — true iff ≥ 2 bits set.
+        let is_bright = common != 0 && (common & common.wrapping_sub(1)) != 0;
+        if !is_bright {
+            let start = curr.segment.start();
+            out.push(CornerPoint {
+                x: start.x.to_f32(),
+                y: start.y.to_f32(),
+            });
+        }
+    }
 }
 
 /// Computes only the bitmap dimensions for a glyph, without building
@@ -219,6 +266,8 @@ mod tests {
         reason = "tests use panic/unwrap for clearer failure messages"
     )]
 
+    use ttf_parser::GlyphId;
+
     use super::*;
     use crate::text::constants::DEFAULT_GLYPH_PADDING;
     use crate::text::constants::DEFAULT_SDF_RANGE;
@@ -239,7 +288,7 @@ mod tests {
     /// `EdgeSegment::kind` bits 2–4 match exactly for the same glyph.
     fn channel_masks_from_cpu(font_data: &[u8], ch: char) -> Vec<u32> {
         let face = ttf_parser::Face::parse(font_data, 0).unwrap();
-        let glyph_id = ttf_parser::GlyphId(glyph_index(font_data, ch));
+        let glyph_id = GlyphId(glyph_index(font_data, ch));
         let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id).unwrap(); // allow-banned: upstream fdsm API name
         let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
         let colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name

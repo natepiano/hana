@@ -15,6 +15,60 @@ separate fields, so on-screen text position is invariant under
 canonical-size changes — a prerequisite for the per-element atlas
 binding plan in Phase 2.5.
 
+### Active investigation — GPU MSDF visual parity (2026-05-19)
+
+`(Msdf, Gpu)` is now the default backend
+(`AtlasConfig::new`/`DistanceField::Msdf`/`RasterBackend::Gpu` all
+marked `#[default]`). Two artifacts under investigation against the
+CPU MSDF reference:
+
+**1. Ghost sliver (FIXED).** Thin bright sliver above the 'h'
+ascender (and similar artifacts above other glyphs) in the bitmap
+padding region. Three layered fixes:
+- `msdf_gen.wgsl`: orthogonality tiebreaker in the per-channel pick
+  (mirror of fdsm's `Ord for DistanceAndOrthogonality` which orders
+  by `abs(distance_squared)` then by higher orthogonality). Without
+  it, iteration order picks edges whose endpoint-tangent pseudo-
+  distance collapses to ~0 along the extended tangent line above
+  the corner.
+- `msdf_correct.wgsl::true_signed_distance`: returns `unsigned * sign(winding)`
+  (actual nearest-edge distance), not pseudo-distance. Pseudo
+  collapses to small magnitude for far-away points along extended
+  endpoint tangent rays, producing near-0.5 encoded values.
+- `msdf_correct.wgsl` truth-override: fires on (a) strict sign
+  disagreement OR (b) `cm` ambiguous within `±1.5/255` of 0.5 AND
+  `|true_dist| > sdf_range/2` (saturation region). (b) catches the
+  8-bit quantization case where median lands at 127 (0.498) — strict
+  `cm > 0.5` misses it.
+- Removed the blanket sign-flip from `msdf_gen` (it preserved tiny
+  pseudo magnitudes near 0.5). Truth-override is the new sign
+  correction stage, matching fdsm's separate `correct_sign_msdf`
+  pass.
+
+**2. Rounded corners (OPEN).** GPU MSDF corners at H crossbar are
+visibly rounded; CPU MSDF same corners are crisp 90°. Diagnostic
+ruled out:
+- Truth-override is NOT the cause — corners stay rounded with the
+  override disabled entirely.
+- Error-correction artifact flattening is NOT the cause — corners
+  stay rounded with that branch disabled.
+- Orthogonality tiebreaker is NOT the cause — corners stay rounded
+  with strict-`<` only.
+
+That leaves the rounding originating in raw `msdf_gen.wgsl` output
+(per-channel pseudo-distances at corners). The WGSL math mirrors
+fdsm's `signed_pseudo_distance` line-for-line; further debugging
+needs side-by-side bitmap diff.
+
+**Next step (drafted, not yet built):** standalone `examples/msdf_diff`
+bin that runs CPU MSDF via fdsm directly and a Rust port of
+`msdf_gen.wgsl`+`msdf_correct.wgsl` (same pattern as
+`gpu_rasterizer/parity.rs` which already ports `sdf_gen.wgsl`), saves
+both atlases as PNG plus a per-pixel diff PNG. Avoids needing a wgpu
+device. Goal: localize where GPU per-channel values diverge from
+fdsm's at corner texels, to take the user out of the screenshot
+loop.
+
 Active work queue. **"Continue to the next phase" = work the
 next unfinished item in this list, top-to-bottom.** Phase 2
 stays at #1 until its acceptance work is done, then Phase 2.1

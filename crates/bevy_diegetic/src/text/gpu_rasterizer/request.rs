@@ -20,7 +20,7 @@ use crate::text::msdf_rasterizer::DistanceField;
 
 /// Fields common to every GPU glyph request variant.
 #[derive(Clone, Debug)]
-pub(crate) struct GpuGlyphRequestCommon {
+pub(super) struct GpuGlyphRequestCommon {
     /// Lookup key the completion record echoes back.
     pub key:          GlyphKey,
     /// Edges, bitmap dims, and bearings produced by [`super::edges::build_edge_buffer`].
@@ -39,7 +39,7 @@ pub(crate) struct GpuGlyphRequestCommon {
 /// data carries everything needed for either kernel; on the MSDF
 /// variant the `EdgeSegment::kind` bits 2–4 hold the channel mask.
 #[derive(Clone, Debug)]
-pub(crate) enum GpuGlyphRequest {
+pub(super) enum GpuGlyphRequest {
     /// Single-channel SDF request.
     Sdf(GpuGlyphRequestCommon),
     /// Three-channel MSDF request with channel-coloured edges.
@@ -49,7 +49,7 @@ pub(crate) enum GpuGlyphRequest {
 impl GpuGlyphRequest {
     /// Returns a reference to the common fields shared by every variant.
     #[must_use]
-    pub const fn common(&self) -> &GpuGlyphRequestCommon {
+    pub(super) const fn common(&self) -> &GpuGlyphRequestCommon {
         match self {
             Self::Sdf(c) | Self::Msdf(c) => c,
         }
@@ -67,7 +67,12 @@ impl GpuGlyphRequest {
 
 /// Message sent from a spawned edge-build task back to its atlas.
 #[derive(Clone, Debug)]
-pub(crate) enum BuiltGpuRequest {
+pub(crate) struct BuiltGpuRequest {
+    kind: BuiltGpuRequestKind,
+}
+
+#[derive(Clone, Debug)]
+enum BuiltGpuRequestKind {
     /// Visible glyph work ready for render-world dispatch.
     Built {
         request:     Box<GpuGlyphRequest>,
@@ -75,6 +80,59 @@ pub(crate) enum BuiltGpuRequest {
     },
     /// The glyph has no outline, so the atlas should cache an invisible entry.
     Invisible { key: GlyphKey },
+}
+
+impl BuiltGpuRequest {
+    #[must_use]
+    pub(super) const fn built(
+        request: Box<GpuGlyphRequest>,
+        completions: GpuCompletionSink,
+    ) -> Self {
+        Self {
+            kind: BuiltGpuRequestKind::Built {
+                request,
+                completions,
+            },
+        }
+    }
+
+    #[must_use]
+    pub(super) const fn invisible(key: GlyphKey) -> Self {
+        Self {
+            kind: BuiltGpuRequestKind::Invisible { key },
+        }
+    }
+
+    #[must_use]
+    pub fn page_index(&self) -> Option<u32> {
+        match &self.kind {
+            BuiltGpuRequestKind::Built { request, .. } => Some(request.common().page_index),
+            BuiltGpuRequestKind::Invisible { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn invisible_key(&self) -> Option<GlyphKey> {
+        match &self.kind {
+            BuiltGpuRequestKind::Built { .. } => None,
+            BuiltGpuRequestKind::Invisible { key } => Some(*key),
+        }
+    }
+
+    #[must_use]
+    pub fn into_render_job(self, image_handle: Handle<Image>) -> Option<GpuRenderJob> {
+        match self.kind {
+            BuiltGpuRequestKind::Built {
+                request,
+                completions,
+            } => Some(GpuRenderJob {
+                request: *request,
+                image_handle,
+                completions,
+            }),
+            BuiltGpuRequestKind::Invisible { .. } => None,
+        }
+    }
 }
 
 /// Completion record emitted by the render-world dispatcher.
@@ -155,11 +213,11 @@ impl AtlasGpuPipe {
 #[derive(Clone, Debug)]
 pub(crate) struct GpuRenderJob {
     /// Built edge data and atlas target coordinates.
-    pub request:      GpuGlyphRequest,
+    pub(super) request:      GpuGlyphRequest,
     /// Exact image the compute shader writes to.
-    pub image_handle: Handle<Image>,
+    pub(super) image_handle: Handle<Image>,
     /// Per-atlas completion sink.
-    pub completions:  GpuCompletionSink,
+    pub(super) completions:  GpuCompletionSink,
 }
 
 /// Main-to-render extract payload for GPU jobs.

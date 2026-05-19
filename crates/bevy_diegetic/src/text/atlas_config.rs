@@ -88,21 +88,21 @@ impl RasterQuality {
 /// Orthogonal to [`DistanceField`], which describes what each texel
 /// encodes. `RasterBackend` describes who computes it.
 ///
-/// - [`RasterBackend::Cpu`] — `fdsm` on a worker pool (default).
+/// - [`RasterBackend::Cpu`] — `fdsm` on a worker pool.
 /// - [`RasterBackend::Gpu`] — wgpu compute shader writing directly into the atlas page storage
-///   texture. Supports both SDF and MSDF.
+///   texture (default). Supports both SDF and MSDF.
 ///
 /// The GPU backend requires compute-shader storage textures. Devices
 /// without that support log a warning at plugin init and text will
 /// not render — there is no fallback path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum RasterBackend {
-    /// Synchronous `fdsm` rasterization on worker threads (default).
-    #[default]
+    /// Synchronous `fdsm` rasterization on worker threads.
     Cpu,
     /// Async wgpu compute rasterization, dispatched in the render
-    /// schedule. Handles both SDF and MSDF; pipeline picked per
-    /// request variant.
+    /// schedule (default). Handles both SDF and MSDF; pipeline picked
+    /// per request variant.
+    #[default]
     Gpu,
 }
 
@@ -208,8 +208,8 @@ impl AtlasConfig {
             quality:              RasterQuality::Small,
             glyphs_per_page:      DEFAULT_GLYPHS_PER_PAGE,
             glyph_worker_threads: GlyphWorkerThreads::Auto,
-            distance_field:       DistanceField::Sdf,
-            backend:              RasterBackend::Cpu,
+            distance_field:       DistanceField::Msdf,
+            backend:              RasterBackend::Gpu,
         }
     }
 
@@ -421,7 +421,8 @@ mod tests {
         assert_eq!(config.glyphs_per_page, DEFAULT_GLYPHS_PER_PAGE);
         assert_eq!(config.glyph_worker_threads, GlyphWorkerThreads::Auto);
         assert_eq!(config.canonical_size(), 32);
-        assert_eq!(config.distance_field, DistanceField::Sdf);
+        assert_eq!(config.distance_field, DistanceField::Msdf);
+        assert_eq!(config.backend, RasterBackend::Gpu);
     }
 
     #[test]

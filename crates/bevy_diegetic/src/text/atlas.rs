@@ -800,37 +800,32 @@ impl GlyphAtlas {
         let mut new_jobs: Vec<GpuRenderJob> = Vec::with_capacity(built.len());
         let mut invisible_keys: Vec<GlyphKey> = Vec::new();
         for msg in built {
-            match msg {
-                BuiltGpuRequest::Built {
-                    request,
-                    completions,
-                } => {
-                    let page_index = request.common().page_index.to_usize();
-                    let Some(image_handle) = self
-                        .pages
-                        .get(page_index)
-                        .and_then(|page| page.image_handle.clone())
-                    else {
-                        warn!(
-                            "gpu_rasterizer: page {page_index} has no image handle yet; dropping \
-                             built request"
-                        );
-                        continue;
-                    };
-                    new_jobs.push(GpuRenderJob {
-                        request: *request,
-                        image_handle,
-                        completions,
-                    });
-                },
-                BuiltGpuRequest::Invisible { key } => {
-                    stats.completed += 1;
-                    if !self.glyphs.contains_key(&key) {
-                        stats.invisible += 1;
-                    }
-                    invisible_keys.push(key);
-                },
+            if let Some(key) = msg.invisible_key() {
+                stats.completed += 1;
+                if !self.glyphs.contains_key(&key) {
+                    stats.invisible += 1;
+                }
+                invisible_keys.push(key);
+                continue;
             }
+            let Some(page_index) = msg.page_index().map(ToUsize::to_usize) else {
+                continue;
+            };
+            let Some(image_handle) = self
+                .pages
+                .get(page_index)
+                .and_then(|page| page.image_handle.clone())
+            else {
+                warn!(
+                    "gpu_rasterizer: page {page_index} has no image handle yet; dropping built \
+                     request"
+                );
+                continue;
+            };
+            let Some(job) = msg.into_render_job(image_handle) else {
+                continue;
+            };
+            new_jobs.push(job);
         }
 
         for key in invisible_keys {

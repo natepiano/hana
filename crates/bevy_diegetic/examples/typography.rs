@@ -42,7 +42,6 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::ControlActivation;
 use fairy_dust::SetCameraHomeFromEntity;
 use fairy_dust::TitleBar;
@@ -280,7 +279,6 @@ fn main() {
                 refresh_quality_panel,
             ),
         )
-        .add_observer(on_world_text_added)
         .add_observer(on_font_registered)
         .add_observer(on_typography_overlay_ready)
         .run();
@@ -507,10 +505,6 @@ fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
     }
 }
 
-fn on_world_text_added(added: On<Add, WorldText>, mut commands: Commands) {
-    commands.entity(added.entity).observe(on_text_clicked);
-}
-
 fn on_typography_overlay_ready(
     trigger: On<TypographyOverlayReady>,
     cameras: Query<Entity, With<OrbitCam>>,
@@ -556,19 +550,6 @@ fn tick_cycle_state(time: Res<Time>, mut cycle_state: ResMut<CycleState>) {
     {
         *cycle_state = CycleState::Idle;
     }
-}
-
-fn on_text_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
-    if click.button != PointerButton::Primary {
-        return;
-    }
-    click.propagate(false);
-    let camera = click.hit.camera;
-    commands.trigger(
-        ZoomToFit::new(camera, click.entity)
-            .margin(ZOOM_TO_FIT_MARGIN)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-    );
 }
 
 const fn row_color(active: bool) -> Color {

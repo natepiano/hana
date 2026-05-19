@@ -45,11 +45,10 @@ pub(crate) use sdf::SdfRasterizer; // allow-banned: upstream fdsm API name
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bevy::prelude::Reflect)]
 pub enum DistanceField {
     /// Three-channel MSDF — sharp at corners, can show pointy artifacts
-    /// where channels disagree on curves.
-    Msdf,
-    /// Single-channel SDF — smooth on curves, rounds off sharp corners
-    /// (default).
+    /// where channels disagree on curves (default).
     #[default]
+    Msdf,
+    /// Single-channel SDF — smooth on curves, rounds off sharp corners.
     Sdf,
     // Mtsdf,  ← reserved; lands when MTSDF rasterizer ships.
 }

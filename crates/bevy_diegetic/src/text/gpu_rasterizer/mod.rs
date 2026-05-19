@@ -11,7 +11,10 @@ use bevy::app::Plugin;
 use bevy::app::PostStartup;
 use bevy::app::PostUpdate;
 use bevy::asset::AssetServer;
+use bevy::asset::Handle;
 use bevy::asset::embedded_asset;
+use bevy::asset::load_internal_asset;
+use bevy::asset::uuid_handle;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::Commands;
 use bevy::ecs::system::Res;
@@ -27,6 +30,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::render::render_resource::TextureFormatFeatureFlags;
 use bevy::render::renderer::RenderAdapter;
 use bevy::render::renderer::RenderDevice;
+use bevy::shader::Shader;
 use bevy_kana::ToF32;
 
 mod dispatch;
@@ -45,7 +49,7 @@ use self::pipeline::GpuRasterizerPipeline;
 pub(crate) use self::request::AtlasGpuPipe;
 pub(crate) use self::request::BuiltGpuRequest;
 pub(crate) use self::request::GpuCompletionSink;
-pub(crate) use self::request::GpuGlyphRequest;
+use self::request::GpuGlyphRequest;
 use self::request::GpuGlyphRequestCommon;
 pub(crate) use self::request::GpuRenderJob;
 use self::request::GpuRenderJobExtract;
@@ -105,10 +109,23 @@ pub fn enqueue_gpu_glyph(
 /// so the dispatch system runs as a no-op each frame.
 pub struct GpuRasterizerPlugin;
 
+/// Internal-asset handle for the shared MSDF/SDF math module imported
+/// by the generation and correction kernels via
+/// `#import bevy_diegetic::gpu_rasterizer::msdf_common`.
+const MSDF_COMMON_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("e0b9bbb7-49c1-4eaa-9c0e-09a78dbb1b9c");
+
 impl Plugin for GpuRasterizerPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            MSDF_COMMON_SHADER_HANDLE,
+            "shaders/msdf_common.wgsl",
+            Shader::from_wgsl
+        );
         embedded_asset!(app, "shaders/sdf_gen.wgsl");
         embedded_asset!(app, "shaders/msdf_gen.wgsl");
+        embedded_asset!(app, "shaders/msdf_correct.wgsl");
 
         app.init_resource::<GpuGlyphBudget>()
             .init_resource::<GpuRenderJobExtract>()
@@ -278,12 +295,9 @@ fn enqueue_on_atlas(
                 DistanceField::Sdf => GpuGlyphRequest::Sdf(common),
                 DistanceField::Msdf => GpuGlyphRequest::Msdf(common),
             };
-            BuiltGpuRequest::Built {
-                request: Box::new(request),
-                completions,
-            }
+            BuiltGpuRequest::built(Box::new(request), completions)
         } else {
-            BuiltGpuRequest::Invisible { key }
+            BuiltGpuRequest::invisible(key)
         };
         let _ = built_tx.send(msg);
     })

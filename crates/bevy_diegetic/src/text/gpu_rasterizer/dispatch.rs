@@ -17,6 +17,7 @@ use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::BindGroup;
 use bevy::render::render_resource::BindGroupEntries;
+use bevy::render::render_resource::BindGroupLayout;
 use bevy::render::render_resource::Buffer;
 use bevy::render::render_resource::BufferInitDescriptor;
 use bevy::render::render_resource::BufferUsages;
@@ -25,13 +26,22 @@ use bevy::render::render_resource::CommandEncoder;
 use bevy::render::render_resource::CommandEncoderDescriptor;
 use bevy::render::render_resource::ComputePassDescriptor;
 use bevy::render::render_resource::ComputePipeline;
+use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::PipelineCache;
+use bevy::render::render_resource::Texture;
+use bevy::render::render_resource::TextureDescriptor;
+use bevy::render::render_resource::TextureDimension;
+use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::TextureUsages;
+use bevy::render::render_resource::TextureView;
+use bevy::render::render_resource::TextureViewDescriptor;
 use bevy::render::renderer::RenderDevice;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::texture::GpuImage;
 use bevy_kana::ToU32;
 use bytemuck::cast_slice;
 
+use super::edges::CornerPoint;
 use super::pipeline::GlyphHeader;
 use super::pipeline::GpuRasterizerPipeline;
 use super::pipeline::RasterParams;
@@ -65,12 +75,13 @@ impl Default for GpuGlyphBudget {
 
 /// Shared context for dispatch work.
 struct PageDispatchContext<'a> {
-    render_device:         &'a RenderDevice,
-    pipeline_cache:        &'a PipelineCache,
-    pipeline:              &'a GpuRasterizerPipeline,
-    sdf_compute_pipeline:  &'a ComputePipeline,
-    msdf_compute_pipeline: Option<&'a ComputePipeline>,
-    gpu_images:            &'a RenderAssets<GpuImage>,
+    render_device:                 &'a RenderDevice,
+    pipeline_cache:                &'a PipelineCache,
+    pipeline:                      &'a GpuRasterizerPipeline,
+    sdf_compute_pipeline:          &'a ComputePipeline,
+    msdf_compute_pipeline:         Option<&'a ComputePipeline>,
+    msdf_correct_compute_pipeline: Option<&'a ComputePipeline>,
+    gpu_images:                    &'a RenderAssets<GpuImage>,
 }
 
 /// Render-schedule system: drains the extracted jobs and dispatches
@@ -118,6 +129,14 @@ pub(super) fn dispatch_glyph_compute(
     {
         warn!("gpu_rasterizer: MSDF pipeline failed to build: {err:?}");
     }
+    let msdf_correct_compute_pipeline =
+        pipeline_cache.get_compute_pipeline(pipeline.msdf_correct_pipeline);
+    if msdf_correct_compute_pipeline.is_none()
+        && let CachedPipelineState::Err(err) =
+            pipeline_cache.get_compute_pipeline_state(pipeline.msdf_correct_pipeline)
+    {
+        warn!("gpu_rasterizer: MSDF correction pipeline failed to build: {err:?}");
+    }
 
     let take = (budget.per_frame as usize).min(queue.pending.len());
     let dispatched: Vec<GpuRenderJob> = queue.pending.drain(..take).collect();
@@ -136,6 +155,7 @@ pub(super) fn dispatch_glyph_compute(
         pipeline: &pipeline,
         sdf_compute_pipeline,
         msdf_compute_pipeline,
+        msdf_correct_compute_pipeline,
         gpu_images: &gpu_images,
     };
 
@@ -161,11 +181,17 @@ fn partition_by_image(dispatched: Vec<GpuRenderJob>) -> HashMap<Handle<Image>, V
 
 /// Encodes the compute pass for a single atlas image.
 ///
-/// One `dispatch_workgroups` call per glyph, sized exactly to that
-/// glyph's bitmap. The kernel sees `glyph_count == 1` and reads
-/// `headers[0]`, so no extra workgroup can address a neighbor glyph's
-/// atlas region. SDF and MSDF dispatches share a single compute pass
-/// per image; the pipeline binding swaps between the two groups.
+/// One `dispatch_workgroups` call per glyph for the SDF and MSDF
+/// generation kernels, sized exactly to that glyph's bitmap. The
+/// kernel sees `glyph_count == 1` and reads `headers[0]`, so no extra
+/// workgroup can address a neighbor glyph's atlas region.
+///
+/// MSDF requests use a two-pass ping-pong: the MSDF generation kernel
+/// writes into a per-page scratch texture; the MSDF correction kernel
+/// then reads the scratch and writes the final corrected texels to the
+/// atlas page. Both kernels run in the same `ComputePass`, so wgpu
+/// inserts the read-after-write barriers automatically when bind
+/// groups are swapped.
 fn encode_image(
     context: &PageDispatchContext<'_>,
     encoder: &mut CommandEncoder,
@@ -181,58 +207,139 @@ fn encode_image(
     let layout = context
         .pipeline_cache
         .get_bind_group_layout(&context.pipeline.layout);
+    let correction_layout = context
+        .pipeline_cache
+        .get_bind_group_layout(&context.pipeline.correction_layout);
+    let msdf_pipelines_ready = msdf_pipelines_ready(context);
+    let scratch = create_msdf_scratch(context, gpu_image, jobs, msdf_pipelines_ready);
+    let dispatches = collect_glyph_dispatches(
+        context,
+        &layout,
+        &correction_layout,
+        gpu_image,
+        scratch.as_ref(),
+        jobs,
+        msdf_pipelines_ready,
+    );
 
-    let mut sdf_per_glyph: Vec<PerGlyphDispatch> = Vec::new();
-    let mut msdf_per_glyph: Vec<PerGlyphDispatch> = Vec::new();
-    let mut msdf_skipped: Vec<GpuRenderJob> = Vec::new();
+    encode_glyph_dispatches(context, encoder, &dispatches);
+    record_completed_jobs(queue, jobs, dispatches.msdf_skipped, msdf_pipelines_ready);
+}
+
+const fn msdf_pipelines_ready(context: &PageDispatchContext<'_>) -> bool {
+    context.msdf_compute_pipeline.is_some() && context.msdf_correct_compute_pipeline.is_some()
+}
+
+fn create_msdf_scratch(
+    context: &PageDispatchContext<'_>,
+    gpu_image: &GpuImage,
+    jobs: &[GpuRenderJob],
+    msdf_pipelines_ready: bool,
+) -> Option<ScratchTexture> {
+    if msdf_pipelines_ready
+        && jobs
+            .iter()
+            .any(|j| matches!(j.request, GpuGlyphRequest::Msdf(_)))
+    {
+        Some(create_scratch_texture(context.render_device, gpu_image))
+    } else {
+        None
+    }
+}
+
+fn collect_glyph_dispatches(
+    context: &PageDispatchContext<'_>,
+    layout: &BindGroupLayout,
+    correction_layout: &BindGroupLayout,
+    gpu_image: &GpuImage,
+    scratch: Option<&ScratchTexture>,
+    jobs: &[GpuRenderJob],
+    msdf_pipelines_ready: bool,
+) -> GlyphDispatches {
+    let mut dispatches = GlyphDispatches::default();
     for job in jobs {
         let request = &job.request;
-        let common = request.common();
-        if common.body.edges.is_empty()
-            || common.body.bitmap_size.x == 0
-            || common.body.bitmap_size.y == 0
-        {
+        if has_empty_dispatch(request) {
             continue;
         }
-        if matches!(request, GpuGlyphRequest::Msdf(_)) && context.msdf_compute_pipeline.is_none() {
-            msdf_skipped.push(job.clone());
-            continue;
-        }
-        let dispatch = build_per_glyph_dispatch(context, &layout, gpu_image, request);
         match request {
-            GpuGlyphRequest::Sdf(_) => sdf_per_glyph.push(dispatch),
-            GpuGlyphRequest::Msdf(_) => msdf_per_glyph.push(dispatch),
+            GpuGlyphRequest::Sdf(_) => {
+                let dispatch = build_per_glyph_dispatch(context, layout, gpu_image, request);
+                dispatches.sdf_per_glyph.push(dispatch);
+            },
+            GpuGlyphRequest::Msdf(_) => {
+                let Some(scratch_view) = scratch.map(|s| &s.view) else {
+                    dispatches.msdf_skipped.push(job.clone());
+                    continue;
+                };
+                if !msdf_pipelines_ready {
+                    dispatches.msdf_skipped.push(job.clone());
+                    continue;
+                }
+                let dispatch = build_msdf_glyph_dispatch(
+                    context,
+                    layout,
+                    correction_layout,
+                    gpu_image,
+                    scratch_view,
+                    request,
+                );
+                dispatches.msdf_per_glyph.push(dispatch);
+            },
         }
     }
+    dispatches
+}
 
-    if !sdf_per_glyph.is_empty() || !msdf_per_glyph.is_empty() {
-        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-            label:            Some("gpu_rasterizer_pass"),
-            timestamp_writes: None,
-        });
-        if !sdf_per_glyph.is_empty() {
-            pass.set_pipeline(context.sdf_compute_pipeline);
-            for dispatch in &sdf_per_glyph {
-                pass.set_bind_group(0, &dispatch.bind_group, &[]);
-                pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
-            }
+const fn has_empty_dispatch(request: &GpuGlyphRequest) -> bool {
+    let common = request.common();
+    common.body.edges.is_empty() || common.body.bitmap_size.x == 0 || common.body.bitmap_size.y == 0
+}
+
+fn encode_glyph_dispatches(
+    context: &PageDispatchContext<'_>,
+    encoder: &mut CommandEncoder,
+    dispatches: &GlyphDispatches,
+) {
+    if dispatches.is_empty() {
+        return;
+    }
+    let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+        label:            Some("gpu_rasterizer_pass"),
+        timestamp_writes: None,
+    });
+    if !dispatches.sdf_per_glyph.is_empty() {
+        pass.set_pipeline(context.sdf_compute_pipeline);
+        for dispatch in &dispatches.sdf_per_glyph {
+            pass.set_bind_group(0, &dispatch.bind_group, &[]);
+            pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
         }
-        if let Some(msdf_pipeline) = context.msdf_compute_pipeline
-            && !msdf_per_glyph.is_empty()
-        {
+    }
+    if let (Some(msdf_pipeline), Some(correct_pipeline)) = (
+        context.msdf_compute_pipeline,
+        context.msdf_correct_compute_pipeline,
+    ) {
+        for dispatch in &dispatches.msdf_per_glyph {
             pass.set_pipeline(msdf_pipeline);
-            for dispatch in &msdf_per_glyph {
-                pass.set_bind_group(0, &dispatch.bind_group, &[]);
-                pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
-            }
+            pass.set_bind_group(0, &dispatch.gen_bind_group, &[]);
+            pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
+            pass.set_pipeline(correct_pipeline);
+            pass.set_bind_group(0, &dispatch.correct_bind_group, &[]);
+            pass.dispatch_workgroups(dispatch.groups_x, dispatch.groups_y, 1);
         }
     }
+}
 
+fn record_completed_jobs(
+    queue: &mut GpuRenderJobQueue,
+    jobs: &[GpuRenderJob],
+    msdf_skipped: Vec<GpuRenderJob>,
+    msdf_pipelines_ready: bool,
+) {
     queue.pending.extend(msdf_skipped);
-
     for job in jobs {
         let request = &job.request;
-        if matches!(request, GpuGlyphRequest::Msdf(_)) && context.msdf_compute_pipeline.is_none() {
+        if matches!(request, GpuGlyphRequest::Msdf(_)) && !msdf_pipelines_ready {
             continue;
         }
         let common = request.common();
@@ -260,9 +367,72 @@ struct PerGlyphDispatch {
     _params_buf:  Buffer,
 }
 
+#[derive(Default)]
+struct GlyphDispatches {
+    sdf_per_glyph:  Vec<PerGlyphDispatch>,
+    msdf_per_glyph: Vec<MsdfPerGlyphDispatch>,
+    msdf_skipped:   Vec<GpuRenderJob>,
+}
+
+impl GlyphDispatches {
+    const fn is_empty(&self) -> bool {
+        self.sdf_per_glyph.is_empty() && self.msdf_per_glyph.is_empty()
+    }
+}
+
+/// MSDF per-glyph dispatch state — two bind groups (generation pass
+/// writes to scratch, correction pass reads scratch + writes page) and
+/// all GPU resources they reference.
+struct MsdfPerGlyphDispatch {
+    gen_bind_group:     BindGroup,
+    correct_bind_group: BindGroup,
+    groups_x:           u32,
+    groups_y:           u32,
+    _edges_buf:         Buffer,
+    _headers_buf:       Buffer,
+    _params_buf:        Buffer,
+    _corners_buf:       Buffer,
+}
+
+/// Per-page scratch texture used as the intermediate for MSDF
+/// generation before the correction pass reads it back. Created once
+/// per `encode_image` call; dropped at the end of the function so the
+/// memory is released as soon as the command buffer references it via
+/// the bind group resources held by the encoder.
+struct ScratchTexture {
+    _texture: Texture,
+    view:     TextureView,
+}
+
+fn create_scratch_texture(device: &RenderDevice, gpu_image: &GpuImage) -> ScratchTexture {
+    let extent = Extent3d {
+        width:                 gpu_image.size.width,
+        height:                gpu_image.size.height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&TextureDescriptor {
+        label:           Some("gpu_rasterizer_msdf_scratch"),
+        size:            extent,
+        mip_level_count: 1,
+        sample_count:    1,
+        dimension:       TextureDimension::D2,
+        format:          TextureFormat::Rgba8Unorm,
+        usage:           TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+        view_formats:    &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor {
+        label: Some("gpu_rasterizer_msdf_scratch_view"),
+        ..Default::default()
+    });
+    ScratchTexture {
+        _texture: texture,
+        view,
+    }
+}
+
 fn build_per_glyph_dispatch(
     context: &PageDispatchContext<'_>,
-    layout: &bevy::render::render_resource::BindGroupLayout,
+    layout: &BindGroupLayout,
     gpu_image: &GpuImage,
     request: &GpuGlyphRequest,
 ) -> PerGlyphDispatch {
@@ -273,11 +443,12 @@ fn build_per_glyph_dispatch(
         &common.body.edges,
     );
     let header = GlyphHeader {
-        edge_offset:  0,
-        edge_count:   common.body.edges.len().to_u32(),
-        atlas_origin: [common.atlas_origin.x, common.atlas_origin.y],
-        bitmap_size:  [common.body.bitmap_size.x, common.body.bitmap_size.y],
-        _padding:     [0, 0],
+        edge_offset:   0,
+        edge_count:    common.body.edges.len().to_u32(),
+        atlas_origin:  [common.atlas_origin.x, common.atlas_origin.y],
+        bitmap_size:   [common.body.bitmap_size.x, common.body.bitmap_size.y],
+        corner_offset: 0,
+        corner_count:  common.body.corners.len().to_u32(),
     };
     let headers_buf = create_storage_buffer(context.render_device, "gpu_raster_headers", &[header]);
     let params = RasterParams {
@@ -312,6 +483,88 @@ fn build_per_glyph_dispatch(
         _edges_buf: edges_buf,
         _headers_buf: headers_buf,
         _params_buf: params_buf,
+    }
+}
+
+fn build_msdf_glyph_dispatch(
+    context: &PageDispatchContext<'_>,
+    layout: &BindGroupLayout,
+    correction_layout: &BindGroupLayout,
+    gpu_image: &GpuImage,
+    scratch_view: &TextureView,
+    request: &GpuGlyphRequest,
+) -> MsdfPerGlyphDispatch {
+    let common = request.common();
+    let edges_buf = create_storage_buffer(
+        context.render_device,
+        "gpu_raster_edges",
+        &common.body.edges,
+    );
+    // Corner buffer must be non-empty so wgpu can bind it as a storage
+    // buffer; for glyphs with zero corners we ship a single zeroed
+    // sentinel and the kernel ignores it via `corner_count == 0`.
+    let corners_data: Vec<CornerPoint> = if common.body.corners.is_empty() {
+        vec![CornerPoint::default()]
+    } else {
+        common.body.corners.clone()
+    };
+    let corners_buf =
+        create_storage_buffer(context.render_device, "gpu_raster_corners", &corners_data);
+    let header = GlyphHeader {
+        edge_offset:   0,
+        edge_count:    common.body.edges.len().to_u32(),
+        atlas_origin:  [common.atlas_origin.x, common.atlas_origin.y],
+        bitmap_size:   [common.body.bitmap_size.x, common.body.bitmap_size.y],
+        corner_offset: 0,
+        corner_count:  common.body.corners.len().to_u32(),
+    };
+    let headers_buf = create_storage_buffer(context.render_device, "gpu_raster_headers", &[header]);
+    let params = RasterParams {
+        sdf_range:      common.sdf_range,
+        padding_texels: 0,
+        distance_field: u32::from(request.distance_field()),
+        glyph_count:    1,
+    };
+    let params_buf = context
+        .render_device
+        .create_buffer_with_data(&BufferInitDescriptor {
+            label:    Some("gpu_raster_params"),
+            contents: bytemuck::bytes_of(&params),
+            usage:    BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+    let gen_bind_group = context.render_device.create_bind_group(
+        Some("gpu_rasterizer_msdf_gen_bind_group"),
+        layout,
+        &BindGroupEntries::sequential((
+            edges_buf.as_entire_binding(),
+            headers_buf.as_entire_binding(),
+            scratch_view,
+            params_buf.as_entire_binding(),
+        )),
+    );
+    let correct_bind_group = context.render_device.create_bind_group(
+        Some("gpu_rasterizer_msdf_correct_bind_group"),
+        correction_layout,
+        &BindGroupEntries::sequential((
+            edges_buf.as_entire_binding(),
+            headers_buf.as_entire_binding(),
+            scratch_view,
+            &gpu_image.texture_view,
+            params_buf.as_entire_binding(),
+            corners_buf.as_entire_binding(),
+        )),
+    );
+    let groups_x = common.body.bitmap_size.x.div_ceil(WORKGROUP_SIZE);
+    let groups_y = common.body.bitmap_size.y.div_ceil(WORKGROUP_SIZE);
+    MsdfPerGlyphDispatch {
+        gen_bind_group,
+        correct_bind_group,
+        groups_x,
+        groups_y,
+        _edges_buf: edges_buf,
+        _headers_buf: headers_buf,
+        _params_buf: params_buf,
+        _corners_buf: corners_buf,
     }
 }
 

@@ -13,7 +13,9 @@ use bevy::render::render_resource::PipelineCache;
 use bevy::render::render_resource::ShaderStages;
 use bevy::render::render_resource::StorageTextureAccess;
 use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::TextureSampleType;
 use bevy::render::render_resource::binding_types::storage_buffer_read_only_sized;
+use bevy::render::render_resource::binding_types::texture_2d;
 use bevy::render::render_resource::binding_types::texture_storage_2d;
 use bevy::render::render_resource::binding_types::uniform_buffer_sized;
 use bevy::shader::Shader;
@@ -28,6 +30,10 @@ pub(super) const SDF_SHADER_ASSET_PATH: &str =
 /// Asset path for the embedded MSDF generation kernel.
 pub(super) const MSDF_SHADER_ASSET_PATH: &str =
     "embedded://bevy_diegetic/text/gpu_rasterizer/shaders/msdf_gen.wgsl";
+
+/// Asset path for the embedded MSDF error-correction kernel.
+pub(super) const MSDF_CORRECT_SHADER_ASSET_PATH: &str =
+    "embedded://bevy_diegetic/text/gpu_rasterizer/shaders/msdf_correct.wgsl";
 
 /// Workgroup edge length — 8 × 8 = 64 threads per workgroup.
 pub(super) const WORKGROUP_SIZE: u32 = 8;
@@ -45,39 +51,45 @@ pub(super) struct RasterParams {
     pub glyph_count:    u32,
 }
 
-/// std140 per-glyph header. Matches `GlyphHeader` in `sdf_gen.wgsl`.
+/// std140 per-glyph header. Matches `GlyphHeader` in `sdf_gen.wgsl`,
+/// `msdf_gen.wgsl`, and `msdf_correct.wgsl`.
 ///
-/// 24 bytes of data + 8 bytes of trailing pad → 32 bytes per record so
-/// the storage-buffer array stride stays a multiple of 16. The
-/// previous `em_to_px_scale` field was removed: edges are pre-baked
-/// into pixel space by [`super::edges::build_edge_buffer`], so the
-/// kernel never needs the scale.
+/// 32 bytes per record so the storage-buffer array stride stays a
+/// multiple of 16. The generator kernels ignore the corner fields; the
+/// MSDF correction kernel uses them to walk the per-glyph slice of the
+/// global corners buffer.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct GlyphHeader {
-    pub edge_offset:  u32,
-    pub edge_count:   u32,
-    pub atlas_origin: [u32; 2],
-    pub bitmap_size:  [u32; 2],
-    pub _padding:     [u32; 2],
+    pub edge_offset:   u32,
+    pub edge_count:    u32,
+    pub atlas_origin:  [u32; 2],
+    pub bitmap_size:   [u32; 2],
+    pub corner_offset: u32,
+    pub corner_count:  u32,
 }
 
-/// Render-world resource holding the compute pipelines + bind layout.
+/// Render-world resource holding the compute pipelines + bind layouts.
 #[derive(Resource)]
 pub(super) struct GpuRasterizerPipeline {
-    pub layout:        BindGroupLayoutDescriptor,
-    pub sdf_pipeline:  CachedComputePipelineId,
-    pub msdf_pipeline: CachedComputePipelineId,
+    pub layout:                BindGroupLayoutDescriptor,
+    pub correction_layout:     BindGroupLayoutDescriptor,
+    pub sdf_pipeline:          CachedComputePipelineId,
+    pub msdf_pipeline:         CachedComputePipelineId,
+    pub msdf_correct_pipeline: CachedComputePipelineId,
     #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
-    pub sdf_shader:    Handle<Shader>,
+    pub sdf_shader:            Handle<Shader>,
     #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
-    pub msdf_shader:   Handle<Shader>,
+    pub msdf_shader:           Handle<Shader>,
+    #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
+    pub msdf_correct_shader:   Handle<Shader>,
 }
 
 impl GpuRasterizerPipeline {
-    /// Constructs the layout + queues the SDF and MSDF compute pipeline
-    /// builds through the `PipelineCache`. Each pipeline becomes usable
-    /// once `PipelineCache` reports `CachedPipelineState::Ok` for it.
+    /// Constructs both bind-group layouts + queues the SDF, MSDF, and
+    /// MSDF-correction compute pipelines through the `PipelineCache`.
+    /// Each pipeline becomes usable once `PipelineCache` reports
+    /// `CachedPipelineState::Ok` for it.
     #[must_use]
     pub fn create(pipeline_cache: &PipelineCache, asset_server: &AssetServer) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
@@ -97,8 +109,29 @@ impl GpuRasterizerPipeline {
             ),
         );
 
+        let correction_layout = BindGroupLayoutDescriptor::new(
+            "gpu_rasterizer_correction_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    // 0: edges storage buffer (read-only)
+                    storage_buffer_read_only_sized(false, None),
+                    // 1: glyph headers storage buffer (read-only)
+                    storage_buffer_read_only_sized(false, None),
+                    // 2: scratch MSDF input — sampled (textureLoad, no sampler).
+                    texture_2d(TextureSampleType::Float { filterable: false }),
+                    // 3: page output storage texture (write-only)
+                    texture_storage_2d(TextureFormat::Rgba8Unorm, StorageTextureAccess::WriteOnly),
+                    // 4: raster params uniform
+                    uniform_buffer_sized(false, None),
+                    // 5: corner points storage buffer (read-only)
+                    storage_buffer_read_only_sized(false, None),
+                ),
+            ),
+        );
         let sdf_shader: Handle<Shader> = asset_server.load(SDF_SHADER_ASSET_PATH);
         let msdf_shader: Handle<Shader> = asset_server.load(MSDF_SHADER_ASSET_PATH);
+        let msdf_correct_shader: Handle<Shader> = asset_server.load(MSDF_CORRECT_SHADER_ASSET_PATH);
 
         let sdf_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label:                            Some("gpu_rasterizer_sdf_pipeline".into()),
@@ -118,13 +151,28 @@ impl GpuRasterizerPipeline {
             entry_point:                      Some(Cow::Borrowed("msdf_main")),
             zero_initialize_workgroup_memory: false,
         });
+        let msdf_correct_pipeline =
+            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+                label:                            Some(
+                    "gpu_rasterizer_msdf_correct_pipeline".into(),
+                ),
+                layout:                           vec![correction_layout.clone()],
+                push_constant_ranges:             Vec::new(),
+                shader:                           msdf_correct_shader.clone(),
+                shader_defs:                      Vec::new(),
+                entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
+                zero_initialize_workgroup_memory: false,
+            });
 
         Self {
             layout,
+            correction_layout,
             sdf_pipeline,
             msdf_pipeline,
+            msdf_correct_pipeline,
             sdf_shader,
             msdf_shader,
+            msdf_correct_shader,
         }
     }
 }
