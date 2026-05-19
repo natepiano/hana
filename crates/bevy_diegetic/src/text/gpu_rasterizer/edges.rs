@@ -13,13 +13,13 @@ use bytemuck::Zeroable;
 use fdsm::bezier::Order;
 use fdsm::bezier::Segment as FdsmSegment;
 use fdsm::shape::ColoredSegment; // allow-banned: upstream fdsm API name
-use fdsm::shape::Shape; // allow-banned: upstream fdsm API name
 use fdsm::transform::Transform;
 use nalgebra::Affine2;
 use nalgebra::Matrix3;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
+use super::coloring;
 use crate::text::bitmap_dims;
 use crate::text::constants::EDGE_COLORING_ANGLE;
 use crate::text::constants::EDGE_COLORING_SEED;
@@ -102,9 +102,10 @@ pub struct GpuGlyphRequestBody {
 /// for a single glyph. Returns `None` if the glyph has no outline
 /// (space) or the computed bitmap is zero-sized.
 ///
-/// On the MSDF path, edges are first colored via fdsm's
-/// `edge_coloring_simple`; the resulting per-segment channel mask is
-/// packed into bits 2–4 of each `EdgeSegment::kind`.
+/// On the MSDF path, edges are first colored via the ink-trap algorithm
+/// in [`super::coloring`] (a port of msdfgen's `edgeColoringInkTrap`); the
+/// resulting per-segment channel mask is packed into bits 2–4 of each
+/// `EdgeSegment::kind`.
 ///
 /// Used by the parity test and by the spawned worker task in
 /// `enqueue_gpu_glyph`. The helper is `pub(super)` so it can be spawned
@@ -158,7 +159,8 @@ pub(super) fn build_edge_buffer(
         },
         DistanceField::Msdf => {
             let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
-            let mut colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name
+            let mut colored =
+                coloring::edge_coloring_ink_trap(outline, sin_alpha, EDGE_COLORING_SEED);
             colored.transform(&affine);
             let mut edge_out = Vec::new();
             let mut corner_out = Vec::new();
@@ -283,7 +285,7 @@ mod tests {
             .0
     }
 
-    /// Walks the same fdsm coloring path the GPU edge builder uses and
+    /// Walks the same ink-trap coloring path the GPU edge builder uses and
     /// collects channel masks per segment, then asserts the GPU path's
     /// `EdgeSegment::kind` bits 2–4 match exactly for the same glyph.
     fn channel_masks_from_cpu(font_data: &[u8], ch: char) -> Vec<u32> {
@@ -291,7 +293,7 @@ mod tests {
         let glyph_id = GlyphId(glyph_index(font_data, ch));
         let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id).unwrap(); // allow-banned: upstream fdsm API name
         let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
-        let colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name
+        let colored = coloring::edge_coloring_ink_trap(outline, sin_alpha, EDGE_COLORING_SEED);
         let mut masks = Vec::new();
         for contour in &colored.contours {
             for seg in &contour.segments {

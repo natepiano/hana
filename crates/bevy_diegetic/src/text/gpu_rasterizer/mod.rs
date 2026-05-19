@@ -33,6 +33,7 @@ use bevy::render::renderer::RenderDevice;
 use bevy::shader::Shader;
 use bevy_kana::ToF32;
 
+mod coloring;
 mod dispatch;
 mod edges;
 mod extract;
