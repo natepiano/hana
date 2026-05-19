@@ -130,10 +130,8 @@ pub fn render_world_text(
         #[cfg(feature = "typography_overlay")]
         if readiness == GlyphReadiness::Ready {
             commands.entity(entity).insert(ComputedWorldText {
-                anchor_x:      shaped.anchor_x,
-                anchor_y:      shaped.anchor_y,
-                glyph_rects:   shaped.glyph_rects,
-                first_advance: shaped.first_advance,
+                anchor_y: shaped.anchor_y,
+                glyphs:   shaped.glyphs,
             });
         }
 

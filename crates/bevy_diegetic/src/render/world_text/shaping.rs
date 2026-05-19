@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 use ttf_parser::GlyphId;
 
+#[cfg(feature = "typography_overlay")]
+use super::ComputedGlyphMetrics;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
@@ -23,42 +25,32 @@ use crate::text::GlyphLookup;
 /// Result of shaping and building glyph quads for a [`WorldText`](super::WorldText) entity.
 pub(super) struct ShapedWorldText {
     /// Per-glyph quads keyed by atlas page index.
-    pub(super) quads:         Vec<(u32, GlyphQuadData)>,
-    /// `Anchor` offset X in layout units.
-    pub(super) anchor_x:      f32,
+    pub(super) quads:    Vec<(u32, GlyphQuadData)>,
     /// `Anchor` offset Y in layout units.
-    pub(super) anchor_y:      f32,
+    pub(super) anchor_y: f32,
     /// Per-glyph ink bounding boxes `[x, y, width, height]` in world units.
     #[cfg(feature = "typography_overlay")]
-    pub(super) glyph_rects:   Vec<[f32; 4]>,
-    /// Advance width of the first glyph in world units.
-    #[cfg(feature = "typography_overlay")]
-    pub(super) first_advance: f32,
+    pub(super) glyphs:   Vec<ComputedGlyphMetrics>,
     /// Timing and queue diagnostics from the build.
-    pub(super) stats:         TextBuildStats,
+    pub(super) stats:    TextBuildStats,
 }
 
 impl ShapedWorldText {
     const fn empty(stats: TextBuildStats) -> Self {
         Self {
             quads: Vec::new(),
-            anchor_x: 0.0,
             anchor_y: 0.0,
             #[cfg(feature = "typography_overlay")]
-            glyph_rects: Vec::new(),
-            #[cfg(feature = "typography_overlay")]
-            first_advance: 0.0,
+            glyphs: Vec::new(),
             stats,
         }
     }
 }
 
 struct BuiltGlyphQuads {
-    quads:         Vec<(u32, GlyphQuadData)>,
+    quads:  Vec<(u32, GlyphQuadData)>,
     #[cfg(feature = "typography_overlay")]
-    rects:         Vec<[f32; 4]>,
-    #[cfg(feature = "typography_overlay")]
-    first_advance: f32,
+    glyphs: Vec<ComputedGlyphMetrics>,
 }
 
 /// Shapes text and produces glyph quads in entity-local coordinates.
@@ -133,17 +125,13 @@ pub(super) fn shape_world_text(
         em_scale,
     );
 
-    // Constant across all glyphs — hoist above the loop so they remain
-    // in scope for the `first_advance` calculation below.
     let boosted_size = config.size();
     let world_scale = scale * points_to_world; // points → world meters
 
     let BuiltGlyphQuads {
         mut quads,
         #[cfg(feature = "typography_overlay")]
-            rects: glyph_rects,
-        #[cfg(feature = "typography_overlay")]
-        first_advance,
+        glyphs,
     } = build_glyph_quads(
         &shaped.glyphs,
         style,
@@ -169,12 +157,9 @@ pub(super) fn shape_world_text(
     // units for downstream consumers (typography overlay).
     ShapedWorldText {
         quads,
-        anchor_x: anchor_x * points_to_world,
         anchor_y: anchor_y * points_to_world,
         #[cfg(feature = "typography_overlay")]
-        glyph_rects,
-        #[cfg(feature = "typography_overlay")]
-        first_advance,
+        glyphs,
         stats,
     }
 }
@@ -194,7 +179,7 @@ fn build_glyph_quads(
 ) -> BuiltGlyphQuads {
     let mut quads = Vec::with_capacity(glyphs.len());
     #[cfg(feature = "typography_overlay")]
-    let mut glyph_rects = Vec::with_capacity(glyphs.len());
+    let mut computed_glyphs = Vec::with_capacity(glyphs.len());
 
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
@@ -246,18 +231,20 @@ fn build_glyph_quads(
             Vec2::new(anchor_x, anchor_y),
             world_scale,
         ) {
-            glyph_rects.push(rect);
+            let origin_x = (shaped_glyph.x - anchor_x) * world_scale;
+            computed_glyphs.push(ComputedGlyphMetrics {
+                rect,
+                origin_x: origin_x.min(rect[0]),
+                origin_y: -(shaped_glyph.baseline + shaped_glyph.y - anchor_y) * world_scale,
+                advance_x: shaped_glyph.advance * world_scale,
+            });
         }
     }
 
     BuiltGlyphQuads {
         quads,
         #[cfg(feature = "typography_overlay")]
-        rects: glyph_rects,
-        #[cfg(feature = "typography_overlay")]
-        first_advance: glyphs.first().map_or(0.0, |shaped_glyph| {
-            glyph_advance(font_data, shaped_glyph.id, boosted_size, world_scale)
-        }),
+        glyphs: computed_glyphs,
     }
 }
 
@@ -367,19 +354,4 @@ fn ink_rect(
         ink_width * scale,
         ink_height * scale,
     ])
-}
-
-/// Returns a single glyph's horizontal advance in world units.
-#[cfg(feature = "typography_overlay")]
-fn glyph_advance(font_data: &[u8], glyph_id: u16, font_size: f32, scale: f32) -> f32 {
-    ttf_parser::Face::parse(font_data, 0)
-        .ok()
-        .and_then(|face| {
-            let glyph_id = GlyphId(glyph_id);
-            face.glyph_hor_advance(glyph_id).map(|advance| {
-                let upm = f32::from(face.units_per_em());
-                f32::from(advance) * font_size / upm * scale
-            })
-        })
-        .unwrap_or(0.0)
 }

@@ -51,10 +51,12 @@ pub(super) fn spawn_font_metric_gizmos(
     text_services: &mut TextServices<'_>,
     assets: &mut OverlayAssets<'_>,
 ) -> Entity {
+    let first_glyph = computed.glyphs.first();
+    let last_glyph = computed.glyphs.last();
     let extents = GlyphExtents {
-        first_left:    computed.glyph_rects.first().map_or(0.0, |r| r[0]),
-        last_right:    computed.glyph_rects.last().map_or(0.0, |r| r[0] + r[2]),
-        arrow_spacing: scaling::arrow_spacing(computed.first_advance),
+        first_left:    first_glyph.map_or(0.0, |glyph| glyph.rect[0]),
+        last_right:    last_glyph.map_or(0.0, |glyph| glyph.rect[0] + glyph.rect[2]),
+        arrow_spacing: first_glyph.map_or(0.0, |glyph| scaling::arrow_spacing(glyph.advance_x)),
     };
 
     let (_, _, metric_lines) = build_metric_gizmos(

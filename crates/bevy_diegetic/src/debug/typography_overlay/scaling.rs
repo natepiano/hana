@@ -13,14 +13,9 @@ pub(super) fn layout_to_world_y(layout_y: f32, anchor_y: f32, scale: f32) -> f32
     -(layout_y - anchor_y) * scale
 }
 
-/// Convert layout X to world X, with anchor offset.
-pub(super) fn layout_to_world_x(layout_x: f32, anchor_x: f32, scale: f32) -> f32 {
-    (layout_x - anchor_x) * scale
-}
-
 /// Computes the uniform spacing between arrow columns from the first
 /// glyph's advance width.
-pub(super) const fn arrow_spacing(first_advance: f32) -> f32 { first_advance * ARROW_SPACING_RATIO }
+pub(super) const fn arrow_spacing(advance: f32) -> f32 { advance * ARROW_SPACING_RATIO }
 
 /// Scale factor for converting font-size-relative ratios to world units.
 pub(super) fn font_scale(font_size: f32, scale: f32) -> f32 { font_size * scale }

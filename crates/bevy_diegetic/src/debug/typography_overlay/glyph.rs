@@ -66,12 +66,12 @@ pub(super) fn spawn_glyph_metric_gizmos(
     spawn_glyph_box_panels(ctx, computed, BBOX_COLOR);
 
     // "Bounding Box" callout from the first glyph's bbox.
-    if !computed.glyph_rects.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
+    if !computed.glyphs.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
         spawn_bounding_box_callout(ctx, font_context, computed, BBOX_COLOR);
     }
 
     // Origin dots + Advancement arrow below the first glyph.
-    if !computed.glyph_rects.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
+    if !computed.glyphs.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
         spawn_origin_and_advancement(ctx, font_context, computed, assets);
     }
 }
@@ -89,8 +89,8 @@ fn spawn_glyph_box_panels(
 
     let border_width = scaling::bbox_border_width(ctx.overlay, ctx.font_size, ctx.scale);
 
-    for glyph_rect in &computed.glyph_rects {
-        let [x, y, width, height] = *glyph_rect;
+    for glyph in &computed.glyphs {
+        let [x, y, width, height] = glyph.rect;
         if width <= 0.0 || height <= 0.0 {
             continue;
         }
@@ -134,13 +134,10 @@ fn spawn_bounding_box_callout(
     let callout_thickness = scaling::font_scale(ctx.font_size, ctx.scale) * BBOX_MIN_WORLD_RATIO;
     let z = CALLOUT_Z_OFFSET;
 
-    let Some(last) = computed.glyph_rects.last() else {
+    let Some(last) = computed.glyphs.last() else {
         return;
     };
-    let last_x = last[0];
-    let last_y = last[1];
-    let last_width = last[2];
-    let last_height = last[3];
+    let [last_x, last_y, last_width, last_height] = last.rect;
 
     // Shelf starts at right edge of last bbox, at vertical midpoint.
     let shelf_right_x = last_x + last_width;
@@ -149,7 +146,10 @@ fn spawn_bounding_box_callout(
     // Shelf extends rightward, then riser goes up. Label sits to the
     // left of the riser (CenterRight anchor) so it's always clear of
     // adjacent glyphs even when bounding boxes overlap.
-    let shelf_len = scaling::arrow_spacing(computed.first_advance) / 2.0;
+    let shelf_len = computed
+        .glyphs
+        .first()
+        .map_or(0.0, |glyph| scaling::arrow_spacing(glyph.advance_x) / 2.0);
     let shelf_end_x = shelf_right_x + shelf_len;
 
     // Vertical line goes up to halfway between Cap Height and Ascent.
@@ -210,19 +210,18 @@ fn spawn_origin_and_advancement(
     let z = CALLOUT_Z_OFFSET;
     let dot_radius = scaling::dot_radius(ctx.font_size, ctx.scale);
 
-    let first = &computed.glyph_rects[0];
-    let first_mid_x = first[0] + first[2] / 2.0;
+    let first = &computed.glyphs[0];
+    let first_mid_x = first.rect[0] + first.rect[2] / 2.0;
 
     let line_metrics = font_context.line;
-    let baseline_world = scaling::layout_to_world_y(line_metrics.baseline, ctx.anchor_y, ctx.scale);
     let descent_world = scaling::layout_to_world_y(
         line_metrics.baseline + line_metrics.descent,
         ctx.anchor_y,
         ctx.scale,
     );
 
-    let origin_x = scaling::layout_to_world_x(0.0, ctx.anchor_x, ctx.scale);
-    let origin_y = baseline_world;
+    let origin_x = first.origin_x;
+    let origin_y = first.origin_y;
 
     // Origin dot — small filled circle at (origin, baseline).
     spawn_overlay_dot(
@@ -235,7 +234,7 @@ fn spawn_origin_and_advancement(
 
     // Origin label — centered between the bottom of the first
     // glyph's bbox and the Descent line.
-    let first_bbox_bottom = first[1] - first[3];
+    let first_bbox_bottom = first.rect[1] - first.rect[3];
     let origin_label_y = f32::midpoint(first_bbox_bottom, descent_world);
 
     // Callout line from just above the label toward the origin
@@ -273,7 +272,7 @@ fn spawn_origin_and_advancement(
     ));
 
     // Advancement end dot — filled circle at (origin + advance, baseline).
-    let advance_end_x = origin_x + computed.first_advance;
+    let advance_end_x = origin_x + first.advance_x;
     spawn_overlay_dot(
         ctx,
         assets,
@@ -283,7 +282,7 @@ fn spawn_origin_and_advancement(
     );
 
     // Advancement arrow — horizontal double-headed arrow below descent.
-    let spacing = scaling::arrow_spacing(computed.first_advance);
+    let spacing = scaling::arrow_spacing(first.advance_x);
     spawn_advancement_arrow(
         ctx,
         &ArrowGeometry {

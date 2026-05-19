@@ -27,16 +27,29 @@ use crate::layout::WorldTextStyle;
 #[cfg(feature = "typography_overlay")]
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
-    /// `Anchor` offset X in layout units (matches the renderer's anchor).
-    pub anchor_x:      f32,
     /// `Anchor` offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y:      f32,
-    /// Per-glyph ink bounding boxes `[x, y, width, height]` in world
-    /// units. Derived from the font's glyph bbox, positioned using the
-    /// same coordinate system as the renderer.
-    pub glyph_rects:   Vec<[f32; 4]>,
-    /// Advance width of the first glyph in world units.
-    pub first_advance: f32,
+    pub anchor_y: f32,
+    /// Per-visible-glyph metrics aligned with the rendered text.
+    pub glyphs:   Vec<ComputedGlyphMetrics>,
+}
+
+/// Overlay-only metrics for one visible glyph in a shaped [`WorldText`] run.
+#[cfg(feature = "typography_overlay")]
+#[derive(Clone, Debug)]
+pub struct ComputedGlyphMetrics {
+    /// Ink bounding box `[x, y, width, height]` in world units.
+    pub rect:      [f32; 4],
+    /// Glyph origin X for overlay callouts, in world units.
+    ///
+    /// Usually this is the shaped glyph origin. When a substituted glyph draws
+    /// before that origin, as `JetBrains` Mono coding alternates do, this shifts
+    /// left to the visible overhang so the origin/advance callout tracks the
+    /// displayed glyph cell.
+    pub origin_x:  f32,
+    /// Glyph baseline origin Y in world units.
+    pub origin_y:  f32,
+    /// Shaped horizontal advance in world units.
+    pub advance_x: f32,
 }
 
 /// Standalone MSDF text rendered in world space.

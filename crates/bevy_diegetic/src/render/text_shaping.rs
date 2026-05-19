@@ -172,6 +172,7 @@ pub(super) fn shape_text_cached(
                         x:        run.offset() + advance_x + glyph.x,
                         y:        glyph.y,
                         baseline: run.baseline(),
+                        advance:  glyph.advance,
                     });
                     advance_x += glyph.advance;
                 }

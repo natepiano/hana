@@ -30,7 +30,6 @@ pub(super) struct OverlayContext<'w, 's, 'a> {
     pub(super) commands:  &'a mut Commands<'w, 's>,
     pub(super) entity:    Entity,
     pub(super) overlay:   &'a TypographyOverlay,
-    pub(super) anchor_x:  f32,
     pub(super) anchor_y:  f32,
     pub(super) font_size: f32,
     pub(super) scale:     f32,
@@ -144,11 +143,6 @@ pub fn build_typography_overlay(
                 .meters_per_unit()
         });
         let scale = unit_scale * points_to_world;
-        let anchor_x = if scale > 0.0 {
-            computed.anchor_x / scale
-        } else {
-            0.0
-        };
         let anchor_y = if scale > 0.0 {
             computed.anchor_y / scale
         } else {
@@ -167,7 +161,6 @@ pub fn build_typography_overlay(
             commands: &mut commands,
             entity: container_entity,
             overlay,
-            anchor_x,
             anchor_y,
             font_size,
             scale,
