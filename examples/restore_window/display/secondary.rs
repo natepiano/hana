@@ -1,0 +1,115 @@
+use bevy::prelude::*;
+use bevy::window::Monitor;
+use bevy_window_manager::CurrentMonitor;
+use bevy_window_manager::ManagedWindow;
+use bevy_window_manager::Monitors;
+
+use super::super::constants::DEFAULT_COLOR;
+use super::super::constants::FONT_SIZE;
+use super::super::constants::SECONDARY_WINDOW_NAME_LABEL;
+use super::super::constants::UNKNOWN_MANAGED_WINDOW_NAME;
+use super::super::constants::VIDEO_MODES_HEADER;
+use super::super::events::MismatchStates;
+use super::super::events::RestoredStates;
+use super::super::input;
+use super::super::state::SecondaryDisplay;
+use super::super::state::SelectedVideoModes;
+use super::comparison::add_span;
+use super::comparison::build_comparison_spans;
+
+// --- Secondary Window Displays ---
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Bevy system — each param is a distinct system resource"
+)]
+pub(crate) fn update_secondary_displays(
+    mut displays: Query<(Entity, &SecondaryDisplay)>,
+    windows: Query<(&Window, Option<&CurrentMonitor>)>,
+    managed_query: Query<&ManagedWindow>,
+    monitors: Res<Monitors>,
+    bevy_monitors: Query<(Entity, &Monitor)>,
+    mut selected: ResMut<SelectedVideoModes>,
+    restored_states: Res<RestoredStates>,
+    mismatch_states: Res<MismatchStates>,
+    mut commands: Commands,
+) {
+    for (display_entity, display) in &mut displays {
+        let Ok((window, current_monitor)) = windows.get(display.0) else {
+            continue;
+        };
+        let monitor_info = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
+            monitor_info:   *monitors.first(),
+            effective_mode: window.mode,
+        });
+
+        let name = managed_query
+            .get(display.0)
+            .map_or(UNKNOWN_MANAGED_WINDOW_NAME, |managed_window| {
+                &managed_window.name
+            });
+        let restored_state = restored_states.by_entity.get(&display.0);
+        let mismatch_state = mismatch_states.by_entity.get(&display.0);
+
+        let (video_modes, refresh_rate) =
+            input::get_video_modes_for_monitor(&bevy_monitors, &monitor_info);
+        let refresh_display = input::format_refresh_rate(window, refresh_rate);
+        let active_mode_idx = input::find_active_video_mode_index(window, &video_modes);
+        input::sync_selected_to_active(window, &monitor_info, active_mode_idx, &mut selected);
+        let selected_idx = selected.get(monitor_info.index);
+        let video_modes_display =
+            input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
+
+        let font = TextFont {
+            font_size: FONT_SIZE,
+            ..default()
+        };
+
+        commands.entity(display_entity).despawn_children();
+        commands
+            .entity(display_entity)
+            .with_children(|child_spawner| {
+                // Window name + monitor header
+                let monitor_row = input::format_monitor_row(&monitor_info, &refresh_display);
+                add_span(
+                    child_spawner,
+                    &font,
+                    &format!("{SECONDARY_WINDOW_NAME_LABEL} {name}\n{monitor_row}\n\n"),
+                    DEFAULT_COLOR,
+                );
+
+                // Comparison table
+                build_comparison_spans(
+                    child_spawner,
+                    restored_state,
+                    mismatch_state,
+                    window,
+                    &monitor_info,
+                    &font,
+                );
+
+                // Video modes
+                add_span(
+                    child_spawner,
+                    &font,
+                    &format!("{VIDEO_MODES_HEADER}{video_modes_display}\n"),
+                    DEFAULT_COLOR,
+                );
+
+                // Controls
+                add_span(
+                    child_spawner,
+                    &font,
+                    "\nControls:\n\
+                 [Enter] Exclusive Fullscreen\n\
+                 [B] Borderless Fullscreen\n\
+                 [W] Windowed\n\
+                 [Space] Spawn managed window\n\
+                 [P] Toggle persistence\n\
+                 [Ctrl+Shift+Backspace] Clear state and quit\n\
+                 [Q] Quit\n",
+                    DEFAULT_COLOR,
+                );
+            });
+    }
+}

@@ -1,0 +1,145 @@
+use bevy::prelude::*;
+use bevy::window::Monitor;
+use bevy::window::PrimaryWindow;
+use bevy::window::WindowPosition;
+use bevy_kana::ToU32;
+use bevy_window_manager::CurrentMonitor;
+use bevy_window_manager::ManagedWindow;
+use bevy_window_manager::ManagedWindowPersistence;
+use bevy_window_manager::Monitors;
+
+use super::super::constants::AUTOMATIC_TEXT;
+use super::super::constants::DEFAULT_COLOR;
+use super::super::constants::FONT_SIZE;
+use super::super::constants::MANAGED_WINDOWS_HEADER;
+use super::super::constants::MONITOR_LABEL;
+use super::super::constants::NO_MANAGED_WINDOWS_TEXT;
+use super::super::constants::SCALE_LABEL;
+use super::super::constants::VIDEO_MODES_HEADER;
+use super::super::events::MismatchStates;
+use super::super::events::RestoredStates;
+use super::super::input;
+use super::super::state::PrimaryDisplay;
+use super::super::state::SelectedVideoModes;
+use super::comparison::add_span;
+use super::comparison::build_comparison_spans;
+
+// --- Primary Window Display ---
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Bevy system — each param is a distinct system resource"
+)]
+pub(crate) fn update_primary_display(
+    primary_display: Single<Entity, With<PrimaryDisplay>>,
+    window_query: Single<(Entity, &Window, &CurrentMonitor), With<PrimaryWindow>>,
+    monitors: Res<Monitors>,
+    bevy_monitors: Query<(Entity, &Monitor)>,
+    mut selected: ResMut<SelectedVideoModes>,
+    persistence: Res<ManagedWindowPersistence>,
+    managed_query: Query<(&Window, &ManagedWindow, Option<&CurrentMonitor>)>,
+    restored_states: Res<RestoredStates>,
+    mismatch_states: Res<MismatchStates>,
+    mut commands: Commands,
+) {
+    let display_entity = *primary_display;
+    let (window_entity, window, monitor) = *window_query;
+
+    let restored_state = restored_states.by_entity.get(&window_entity);
+    let mismatch_state = mismatch_states.by_entity.get(&window_entity);
+
+    let (video_modes, refresh_rate) = input::get_video_modes_for_monitor(&bevy_monitors, monitor);
+    let refresh_display = input::format_refresh_rate(window, refresh_rate);
+    let active_mode_idx = input::find_active_video_mode_index(window, &video_modes);
+    input::sync_selected_to_active(window, monitor, active_mode_idx, &mut selected);
+    let selected_idx = selected.get(monitor.index);
+    let video_modes_display =
+        input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
+
+    let font = TextFont {
+        font_size: FONT_SIZE,
+        ..default()
+    };
+
+    commands.entity(display_entity).despawn_children();
+    commands
+        .entity(display_entity)
+        .with_children(|child_spawner| {
+            // Monitor header
+            let monitor_row = input::format_monitor_row(monitor, &refresh_display);
+            add_span(
+                child_spawner,
+                &font,
+                &format!("{monitor_row}\n\n"),
+                DEFAULT_COLOR,
+            );
+
+            // Comparison table
+            build_comparison_spans(
+                child_spawner,
+                restored_state,
+                mismatch_state,
+                window,
+                monitor,
+                &font,
+            );
+
+            // Video modes
+            add_span(
+                child_spawner,
+                &font,
+                &format!("{VIDEO_MODES_HEADER}{video_modes_display}\n"),
+                DEFAULT_COLOR,
+            );
+
+            // Controls
+            add_span(
+                child_spawner,
+                &font,
+                &format!(
+                    "\nControls:\n\
+                 [Enter] Exclusive Fullscreen\n\
+                 [B] Borderless Fullscreen\n\
+                 [W] Windowed\n\
+                 [Space] Spawn managed window\n\
+                 [P] Toggle persistence ({persistence:?})\n\
+                 [Ctrl+Shift+Backspace] Clear state and quit\n\
+                 [Q] Quit\n"
+                ),
+                DEFAULT_COLOR,
+            );
+
+            // Managed windows list
+            let mut managed_lines = Vec::new();
+            for (managed_window, managed, current_monitor) in &managed_query {
+                let monitor = current_monitor.map_or_else(
+                    || *monitors.first(),
+                    |current_monitor| current_monitor.monitor_info,
+                );
+                let position = match managed_window.position {
+                    WindowPosition::At(managed_position) => {
+                        format!("({}, {})", managed_position.x, managed_position.y)
+                    },
+                    _ => AUTOMATIC_TEXT.to_string(),
+                };
+                managed_lines.push(format!(
+                    "  {}: position={position} physical={}x{} logical={}x{} {SCALE_LABEL} {} {MONITOR_LABEL} {}\n",
+                    managed.name,
+                    managed_window.physical_width(),
+                    managed_window.physical_height(),
+                    managed_window.resolution.width().to_u32(),
+                    managed_window.resolution.height().to_u32(),
+                    managed_window.resolution.scale_factor(),
+                    monitor.index,
+                ));
+            }
+            add_span(child_spawner, &font, MANAGED_WINDOWS_HEADER, DEFAULT_COLOR);
+            if managed_lines.is_empty() {
+                add_span(child_spawner, &font, NO_MANAGED_WINDOWS_TEXT, DEFAULT_COLOR);
+            } else {
+                for line in &managed_lines {
+                    add_span(child_spawner, &font, line, DEFAULT_COLOR);
+                }
+            }
+        });
+}

@@ -310,12 +310,12 @@ pub(crate) fn save_window_state(
 
         // Log monitor transitions with detailed info
         if monitor_changed {
-            let prev_scale = entry
+            let previous_scale = entry
                 .monitor
                 .and_then(|i| monitors.by_index(i))
                 .map(|m| m.scale);
             debug!(
-                "[save_window_state] [{window_key}] MONITOR CHANGE: {:?} (scale={prev_scale:?}) -> {monitor_index} (scale={monitor_scale})",
+                "[save_window_state] [{window_key}] MONITOR CHANGE: {:?} (scale={previous_scale:?}) -> {monitor_index} (scale={monitor_scale})",
                 entry.monitor,
             );
         }

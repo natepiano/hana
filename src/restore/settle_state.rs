@@ -24,7 +24,7 @@ use crate::monitors::CurrentMonitor;
 
 /// Tracks the two-timer settling state after restore completes.
 #[derive(Debug, Clone, Reflect)]
-pub(super) struct SettleState {
+pub(crate) struct SettleState {
     /// Hard deadline timer — fires mismatch if stability is never reached.
     total_timeout:   Timer,
     /// Resets whenever any compared value changes between frames.
