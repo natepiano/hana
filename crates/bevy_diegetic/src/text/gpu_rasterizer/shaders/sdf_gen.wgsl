@@ -11,6 +11,8 @@ const EDGE_KIND_QUADRATIC: u32 = 1u;
 const EDGE_KIND_CUBIC: u32 = 2u;
 
 const NEWTON_ITER: u32 = 4u;
+const SQRT_3_OVER_2: f32 = 0.8660254;
+const DEGENERATE_EPS: f32 = 1e-20;
 
 struct EdgeSegment {
     p0x: f32, p0y: f32,
@@ -70,6 +72,46 @@ fn bezier_cubic_deriv(t: f32, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: v
          + 3.0 * t * t * (p3 - p2);
 }
 
+fn bezier_cubic_deriv2(t: f32, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> vec2<f32> {
+    let one_minus = 1.0 - t;
+    return 6.0 * one_minus * (p2 - 2.0 * p1 + p0)
+         + 6.0 * t * (p3 - 2.0 * p2 + p1);
+}
+
+// Real cube root that handles negative inputs.
+fn cbrt_signed(x: f32) -> f32 {
+    if (x < 0.0) { return -pow(-x, 1.0 / 3.0); }
+    return pow(x, 1.0 / 3.0);
+}
+
+// Solves x³ + a x² + b x + c = 0. Writes real roots into `roots` and
+// returns the count of real roots (1 or 3). Unused slots are left
+// untouched; callers must use the returned count.
+fn solve_cubic_normed(a: f32, b: f32, c: f32, roots: ptr<function, array<f32, 3>>) -> u32 {
+    let a2 = a * a;
+    let q = (1.0 / 9.0) * (a2 - 3.0 * b);
+    let r = (1.0 / 54.0) * (a * (2.0 * a2 - 9.0 * b) + 27.0 * c);
+    let r2 = r * r;
+    let q3 = q * q * q;
+    let a_third = a * (1.0 / 3.0);
+    if (r2 < q3) {
+        let t_norm = clamp(r / sqrt(q3), -1.0, 1.0);
+        let theta = acos(t_norm);
+        let q_pre = -2.0 * sqrt(q);
+        let cos_t3 = cos(theta / 3.0);
+        let sin_t3 = sin(theta / 3.0);
+        (*roots)[0] = q_pre * cos_t3 - a_third;
+        (*roots)[1] = q_pre * (-0.5 * cos_t3 - SQRT_3_OVER_2 * sin_t3) - a_third;
+        (*roots)[2] = q_pre * (-0.5 * cos_t3 + SQRT_3_OVER_2 * sin_t3) - a_third;
+        return 3u;
+    }
+    let sgn = select(-1.0, 1.0, r < 0.0);
+    let u = sgn * cbrt_signed(abs(r) + sqrt(r2 - q3));
+    let v = select(q / u, 0.0, u == 0.0);
+    (*roots)[0] = (u + v) - a_third;
+    return 1u;
+}
+
 // Distance from a point to a line segment p0..p1.
 fn distance_linear(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>) -> f32 {
     let d = p1 - p0;
@@ -78,42 +120,70 @@ fn distance_linear(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>) -> f32 {
     return length(pt - (p0 + t * d));
 }
 
-// Distance from a point to a quadratic bezier, found by Newton-refining
-// the closest parameter starting from several seeds.
+// Exact distance from a point to a quadratic bezier via the analytic
+// closest-parameter solution. The condition d/dt |B(t)-pt|² = 0
+// expands to a cubic polynomial in t whose real roots in [0,1] are
+// the candidate closest parameters; endpoint distances cover the
+// rest.
 fn distance_quadratic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
-    var best = distance_linear(pt, p0, p2);
-    var ts = array<f32, 5>(0.0, 0.25, 0.5, 0.75, 1.0);
-    for (var s = 0u; s < 5u; s = s + 1u) {
-        var t = ts[s];
-        for (var it = 0u; it < NEWTON_ITER; it = it + 1u) {
-            let bt = bezier_quadratic(t, p0, p1, p2);
-            let dbt = bezier_quadratic_deriv(t, p0, p1, p2);
-            let dot_d = dot(dbt, dbt);
-            if (dot_d < 1e-20) { break; }
-            let delta = dot(bt - pt, dbt) / dot_d;
-            t = clamp(t - delta, 0.0, 1.0);
-        }
-        let dist = length(pt - bezier_quadratic(t, p0, p1, p2));
-        if (dist < best) { best = dist; }
+    let pv = pt - p0;
+    let pv1 = p1 - p0;
+    let pv2 = p2 - 2.0 * p1 + p0;
+    let a_norm_sq = dot(pv2, pv2);
+
+    let dp0 = pv;
+    let dp2 = p2 - pt;
+    var best_sq = min(dot(dp0, dp0), dot(dp2, dp2));
+
+    if (a_norm_sq < DEGENERATE_EPS) {
+        // Control point on the chord: behaves as a straight segment.
+        let lin = distance_linear(pt, p0, p2);
+        return min(sqrt(best_sq), lin);
     }
-    return best;
+
+    let ainv = 1.0 / a_norm_sq;
+    var roots: array<f32, 3>;
+    let n = solve_cubic_normed(
+        3.0 * dot(pv1, pv2) * ainv,
+        (2.0 * dot(pv1, pv1) - dot(pv2, pv)) * ainv,
+        -dot(pv1, pv) * ainv,
+        &roots,
+    );
+    for (var i = 0u; i < n; i = i + 1u) {
+        let t = roots[i];
+        if (t >= 0.0 && t <= 1.0) {
+            let q = p0 + pv1 * (2.0 * t) + pv2 * (t * t);
+            let diff = q - pt;
+            let dsq = dot(diff, diff);
+            if (dsq < best_sq) { best_sq = dsq; }
+        }
+    }
+    return sqrt(best_sq);
 }
 
+// Distance from a point to a cubic bezier. The objective
+// f(t) = (B(t) - pt) · B'(t) has up to 5 real roots, with no
+// closed-form solver inside a shader, so we Newton-refine multiple
+// seeds. The Newton step uses the proper second-derivative-corrected
+// form (matching fdsm / msdfgen) and the running minimum is tracked
+// across every iteration, not just at the converged endpoint.
 fn distance_cubic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> f32 {
     var best = distance_linear(pt, p0, p3);
-    var ts = array<f32, 5>(0.0, 0.25, 0.5, 0.75, 1.0);
-    for (var s = 0u; s < 5u; s = s + 1u) {
+    var ts = array<f32, 9>(0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0);
+    for (var s = 0u; s < 9u; s = s + 1u) {
         var t = ts[s];
         for (var it = 0u; it < NEWTON_ITER; it = it + 1u) {
             let bt = bezier_cubic(t, p0, p1, p2, p3);
-            let dbt = bezier_cubic_deriv(t, p0, p1, p2, p3);
-            let dot_d = dot(dbt, dbt);
-            if (dot_d < 1e-20) { break; }
-            let delta = dot(bt - pt, dbt) / dot_d;
-            t = clamp(t - delta, 0.0, 1.0);
+            let d1 = bezier_cubic_deriv(t, p0, p1, p2, p3);
+            let d2 = bezier_cubic_deriv2(t, p0, p1, p2, p3);
+            let qe = bt - pt;
+            let denom = dot(d1, d1) + dot(qe, d2);
+            if (abs(denom) < DEGENERATE_EPS) { break; }
+            t = t - dot(qe, d1) / denom;
+            if (t <= 0.0 || t >= 1.0) { break; }
+            let dist = length(pt - bezier_cubic(t, p0, p1, p2, p3));
+            if (dist < best) { best = dist; }
         }
-        let dist = length(pt - bezier_cubic(t, p0, p1, p2, p3));
-        if (dist < best) { best = dist; }
     }
     return best;
 }

@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 
 use bevy::image::Image;
 use bevy::math::UVec2;
@@ -42,14 +44,12 @@ pub(crate) enum BuiltGpuRequest {
         completions: GpuCompletionSink,
     },
     /// The glyph has no outline, so the atlas should cache an invisible entry.
-    Invisible {
-        key: GlyphKey,
-    },
+    Invisible { key: GlyphKey },
 }
 
 /// Completion record emitted by the render-world dispatcher.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct GpuGlyphCompletedRecord {
+pub struct GpuGlyphCompletedRecord {
     pub key:          GlyphKey,
     pub bitmap_size:  UVec2,
     pub bearing:      Vec2,
@@ -81,9 +81,9 @@ impl GpuCompletionSink {
 /// Main-owned GPU pipe attached to a single atlas.
 pub(crate) struct AtlasGpuPipe {
     /// Worker-to-main edge-build results.
-    pub built_tx:         mpsc::Sender<BuiltGpuRequest>,
+    pub built_tx:         Sender<BuiltGpuRequest>,
     /// Main-side receiver drained by atlas polling.
-    pub built_rx:         Mutex<mpsc::Receiver<BuiltGpuRequest>>,
+    pub built_rx:         Mutex<Receiver<BuiltGpuRequest>>,
     /// Render-to-main completion sink.
     pub completions:      GpuCompletionSink,
     /// Jobs waiting for the extract pass.
@@ -130,12 +130,12 @@ pub(crate) struct GpuRenderJob {
 
 /// Main-to-render extract payload for GPU jobs.
 #[derive(Resource, Default, Clone, ExtractResource)]
-pub(crate) struct GpuRenderJobExtract {
+pub(super) struct GpuRenderJobExtract {
     pub pending: Vec<GpuRenderJob>,
 }
 
 /// Persistent render-world queue.
 #[derive(Resource, Default)]
-pub(crate) struct GpuRenderJobQueue {
+pub(super) struct GpuRenderJobQueue {
     pub pending: Vec<GpuRenderJob>,
 }

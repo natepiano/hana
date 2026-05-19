@@ -13,6 +13,7 @@ use std::sync::mpsc::Sender;
 use std::time::Instant;
 
 use bevy::image::Image;
+use bevy::log::warn;
 use bevy::math::UVec2;
 use bevy::prelude::Assets;
 use bevy::prelude::Handle;
@@ -356,19 +357,15 @@ impl GlyphAtlas {
         self.gpu_dispatcher.clone()
     }
 
-    fn ensure_gpu_pipe(&mut self) {
-        self.gpu_pipe.get_or_insert_with(AtlasGpuPipe::new);
+    fn ensure_gpu_pipe(&mut self) -> &mut AtlasGpuPipe {
+        self.gpu_pipe.get_or_insert_with(AtlasGpuPipe::new)
     }
 
     /// Returns worker and completion endpoints for this atlas's GPU pipe.
     pub(crate) fn gpu_pipe_handles(
         &mut self,
     ) -> (mpsc::Sender<BuiltGpuRequest>, GpuCompletionSink) {
-        self.ensure_gpu_pipe();
-        let pipe = self
-            .gpu_pipe
-            .as_ref()
-            .expect("gpu pipe must exist after ensure_gpu_pipe");
+        let pipe = self.ensure_gpu_pipe();
         (pipe.built_tx.clone(), pipe.completions.clone())
     }
 
@@ -777,11 +774,16 @@ impl GlyphAtlas {
     }
 
     fn poll_gpu(&mut self) -> AsyncGlyphPollStats {
-        let Some(pipe) = self.gpu_pipe.as_ref() else {
-            return AsyncGlyphPollStats::default();
-        };
-        let built = pipe.drain_built();
         let mut stats = AsyncGlyphPollStats::default();
+        let (built, completion_records) = {
+            let Some(pipe) = self.gpu_pipe.as_ref() else {
+                return stats;
+            };
+            (pipe.drain_built(), pipe.completions.drain())
+        };
+
+        let mut new_jobs: Vec<GpuRenderJob> = Vec::with_capacity(built.len());
+        let mut invisible_keys: Vec<GlyphKey> = Vec::new();
         for msg in built {
             match msg {
                 BuiltGpuRequest::Built {
@@ -789,37 +791,41 @@ impl GlyphAtlas {
                     completions,
                 } => {
                     let page_index = request.page_index.to_usize();
-                    let image_handle = self.pages[page_index]
-                        .image_handle
-                        .clone()
-                        .expect("GPU atlas page must be uploaded before dispatch");
-                    let job = GpuRenderJob {
+                    let Some(image_handle) = self
+                        .pages
+                        .get(page_index)
+                        .and_then(|page| page.image_handle.clone())
+                    else {
+                        warn!(
+                            "gpu_rasterizer: page {page_index} has no image handle yet; dropping \
+                             built request"
+                        );
+                        continue;
+                    };
+                    new_jobs.push(GpuRenderJob {
                         request: *request,
                         image_handle,
                         completions,
-                    };
-                    self.gpu_pipe
-                        .as_mut()
-                        .expect("GPU pipe must exist while draining built requests")
-                        .pending_dispatch
-                        .push(job);
+                    });
                 },
                 BuiltGpuRequest::Invisible { key } => {
                     stats.completed += 1;
                     if !self.glyphs.contains_key(&key) {
                         stats.invisible += 1;
                     }
-                    self.insert_completed_gpu_invisible(key);
+                    invisible_keys.push(key);
                 },
             }
         }
 
-        let completions = self
-            .gpu_pipe
-            .as_ref()
-            .map(|pipe| pipe.completions.drain())
-            .unwrap_or_default();
-        for record in completions {
+        for key in invisible_keys {
+            self.insert_completed_gpu_invisible(key);
+        }
+        if !new_jobs.is_empty() {
+            self.ensure_gpu_pipe().pending_dispatch.extend(new_jobs);
+        }
+
+        for record in completion_records {
             stats.completed += 1;
             let was_cached = self.glyphs.contains_key(&record.key);
             let region = GpuAtlasRegion {

@@ -137,9 +137,7 @@ pub(super) fn dispatch_glyph_compute(
 
 /// Groups dispatched jobs by target image. One compute pass per image
 /// binds exactly one storage texture as the write target.
-fn partition_by_image(
-    dispatched: Vec<GpuRenderJob>,
-) -> HashMap<Handle<Image>, Vec<GpuRenderJob>> {
+fn partition_by_image(dispatched: Vec<GpuRenderJob>) -> HashMap<Handle<Image>, Vec<GpuRenderJob>> {
     let mut by_image: HashMap<Handle<Image>, Vec<GpuRenderJob>> = HashMap::new();
     for job in dispatched {
         by_image
@@ -176,10 +174,7 @@ fn encode_image(
     let mut per_glyph: Vec<PerGlyphDispatch> = Vec::with_capacity(jobs.len());
     for job in jobs {
         let req = &job.request;
-        if req.body.edges.is_empty()
-            || req.body.bitmap_size.x == 0
-            || req.body.bitmap_size.y == 0
-        {
+        if req.body.edges.is_empty() || req.body.bitmap_size.x == 0 || req.body.bitmap_size.y == 0 {
             continue;
         }
         let edges_buf =

@@ -102,16 +102,54 @@ fn bezier_cubic(t: f32, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> Vec2 {
         .add(p3.mul(t2 * t))
 }
 
-fn bezier_quadratic_deriv(t: f32, p0: Vec2, p1: Vec2, p2: Vec2) -> Vec2 {
-    p1.sub(p0).mul(2.0 * (1.0 - t)).add(p2.sub(p1).mul(2.0 * t))
-}
-
 fn bezier_cubic_deriv(t: f32, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> Vec2 {
     let one_minus = 1.0 - t;
     p1.sub(p0)
         .mul(3.0 * one_minus * one_minus)
         .add(p2.sub(p1).mul(6.0 * one_minus * t))
         .add(p3.sub(p2).mul(3.0 * t * t))
+}
+
+fn bezier_cubic_deriv2(t: f32, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> Vec2 {
+    let one_minus = 1.0 - t;
+    let term0 = p2.sub(p1.mul(2.0)).add(p0);
+    let term1 = p3.sub(p2.mul(2.0)).add(p1);
+    term0.mul(6.0 * one_minus).add(term1.mul(6.0 * t))
+}
+
+const SQRT_3_OVER_2: f32 = 0.866_025_4;
+
+fn cbrt_signed(x: f32) -> f32 { if x < 0.0 { -(-x).cbrt() } else { x.cbrt() } }
+
+/// Solves x³ + a x² + b x + c = 0. Returns `(roots, count)`.
+#[allow(
+    clippy::many_single_char_names,
+    reason = "matches standard cubic-solver notation; renaming hurts readability of the math"
+)]
+fn solve_cubic_normed(a: f32, b: f32, c: f32) -> ([f32; 3], u32) {
+    let a2 = a * a;
+    let q = (1.0 / 9.0) * (a2 - 3.0 * b);
+    let r = (1.0 / 54.0) * (a * (2.0 * a2 - 9.0 * b) + 27.0 * c);
+    let r2 = r * r;
+    let q3 = q * q * q;
+    let a_third = a * (1.0 / 3.0);
+    if r2 < q3 {
+        let t_norm = (r / q3.sqrt()).clamp(-1.0, 1.0);
+        let theta = t_norm.acos();
+        let q_pre = -2.0 * q.sqrt();
+        let cos_t3 = (theta / 3.0).cos();
+        let sin_t3 = (theta / 3.0).sin();
+        let roots = [
+            q_pre * cos_t3 - a_third,
+            q_pre * (-0.5 * cos_t3 - SQRT_3_OVER_2 * sin_t3) - a_third,
+            q_pre * (-0.5 * cos_t3 + SQRT_3_OVER_2 * sin_t3) - a_third,
+        ];
+        return (roots, 3);
+    }
+    let sgn = if r < 0.0 { 1.0 } else { -1.0 };
+    let u = sgn * cbrt_signed(r.abs() + (r2 - q3).sqrt());
+    let v = if u == 0.0 { 0.0 } else { q / u };
+    ([(u + v) - a_third, 0.0, 0.0], 1)
 }
 
 fn distance_linear(pt: Vec2, p0: Vec2, p1: Vec2) -> f32 {
@@ -121,58 +159,67 @@ fn distance_linear(pt: Vec2, p0: Vec2, p1: Vec2) -> f32 {
     pt.sub(p0.add(d.mul(t))).length()
 }
 
-fn newton_refine(seeds: &[f32], iter: u32, eval: impl Fn(f32) -> (Vec2, Vec2), pt: Vec2) -> f32 {
-    let mut best = f32::INFINITY;
-    for &seed in seeds {
-        let mut t = seed;
-        for _ in 0..iter {
-            let (bt, dbt) = eval(t);
-            let dot_d = dbt.dot(dbt);
-            if dot_d < 1e-20 {
-                break;
-            }
-            let delta = bt.sub(pt).dot(dbt) / dot_d;
-            t = (t - delta).clamp(0.0, 1.0);
-        }
-        let (bt, _) = eval(t);
-        let dist = pt.sub(bt).length();
-        if dist < best {
-            best = dist;
-        }
-    }
-    best
-}
+const DEGENERATE_EPS: f32 = 1e-20;
+const NEWTON_ITER: u32 = 4;
+const CUBIC_SEEDS: &[f32] = &[0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0];
 
 fn distance_quadratic(pt: Vec2, p0: Vec2, p1: Vec2, p2: Vec2) -> f32 {
-    let base = distance_linear(pt, p0, p2);
-    let refined = newton_refine(
-        &[0.0, 0.25, 0.5, 0.75, 1.0],
-        4,
-        |t| {
-            (
-                bezier_quadratic(t, p0, p1, p2),
-                bezier_quadratic_deriv(t, p0, p1, p2),
-            )
-        },
-        pt,
+    let pv = pt.sub(p0);
+    let pv1 = p1.sub(p0);
+    let pv2 = p2.sub(p1.mul(2.0)).add(p0);
+    let a_norm_sq = pv2.dot(pv2);
+
+    let dp0 = pv;
+    let dp2 = p2.sub(pt);
+    let mut best_sq = dp0.dot(dp0).min(dp2.dot(dp2));
+
+    if a_norm_sq < DEGENERATE_EPS {
+        return best_sq.sqrt().min(distance_linear(pt, p0, p2));
+    }
+
+    let ainv = a_norm_sq.recip();
+    let (roots, n) = solve_cubic_normed(
+        3.0 * pv1.dot(pv2) * ainv,
+        (2.0 * pv1.dot(pv1) - pv2.dot(pv)) * ainv,
+        -pv1.dot(pv) * ainv,
     );
-    base.min(refined)
+    for &t in roots.iter().take(n as usize) {
+        if (0.0..=1.0).contains(&t) {
+            let q = p0.add(pv1.mul(2.0 * t)).add(pv2.mul(t * t));
+            let diff = q.sub(pt);
+            let dsq = diff.dot(diff);
+            if dsq < best_sq {
+                best_sq = dsq;
+            }
+        }
+    }
+    best_sq.sqrt()
 }
 
 fn distance_cubic(pt: Vec2, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> f32 {
-    let base = distance_linear(pt, p0, p3);
-    let refined = newton_refine(
-        &[0.0, 0.25, 0.5, 0.75, 1.0],
-        4,
-        |t| {
-            (
-                bezier_cubic(t, p0, p1, p2, p3),
-                bezier_cubic_deriv(t, p0, p1, p2, p3),
-            )
-        },
-        pt,
-    );
-    base.min(refined)
+    let mut best = distance_linear(pt, p0, p3);
+    for &seed in CUBIC_SEEDS {
+        let mut t = seed;
+        for _ in 0..NEWTON_ITER {
+            let bt = bezier_cubic(t, p0, p1, p2, p3);
+            let d1 = bezier_cubic_deriv(t, p0, p1, p2, p3);
+            let d2 = bezier_cubic_deriv2(t, p0, p1, p2, p3);
+            let qe = bt.sub(pt);
+            let denom = d1.dot(d1) + qe.dot(d2);
+            if denom.abs() < DEGENERATE_EPS {
+                break;
+            }
+            t -= qe.dot(d1) / denom;
+            if t <= 0.0 || t >= 1.0 {
+                break;
+            }
+            let dist = pt.sub(bezier_cubic(t, p0, p1, p2, p3)).length();
+            if dist < best {
+                best = dist;
+            }
+        }
+    }
+    best
 }
 
 fn winding_linear(pt: Vec2, p0: Vec2, p1: Vec2) -> i32 {

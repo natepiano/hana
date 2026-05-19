@@ -41,10 +41,7 @@ pub(super) fn poll_atlas_glyphs(
     let dirty_pages = atlas.active().dirty_page_count();
     let mut sync_ms = 0.0;
 
-    if poll_stats.inserted > 0
-        || poll_stats.invisible > 0
-        || atlas.total_dirty_page_count() > 0
-    {
+    if poll_stats.inserted > 0 || poll_stats.invisible > 0 || atlas.total_dirty_page_count() > 0 {
         let sync_start = Instant::now();
         atlas.sync_to_gpu(&mut images);
         sync_ms = sync_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;

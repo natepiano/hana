@@ -42,14 +42,14 @@ pub(super) const EDGE_KIND_CUBIC: u32 = 2;
 /// reserve room for the Phase-2 MSDF channel mask.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
-pub(crate) struct EdgeSegment {
+pub struct EdgeSegment {
     pub points: [f32; 8],
     pub kind:   u32,
 }
 
 /// Output of [`build_edge_buffer`].
 #[derive(Clone, Debug)]
-pub(crate) struct GpuGlyphRequestBody {
+pub struct GpuGlyphRequestBody {
     /// All edges from every contour of the glyph, concatenated.
     pub edges:       Vec<EdgeSegment>,
     /// Bitmap dimensions in texels (the GPU shader writes

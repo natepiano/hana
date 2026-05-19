@@ -39,14 +39,14 @@ mod readback;
 mod request;
 
 pub use self::dispatch::GpuGlyphBudget;
+use self::dispatch::dispatch_glyph_compute;
+use self::extract::collect_gpu_render_jobs;
+use self::pipeline::GpuRasterizerPipeline;
 pub(crate) use self::request::AtlasGpuPipe;
 pub(crate) use self::request::BuiltGpuRequest;
 pub(crate) use self::request::GpuCompletionSink;
 pub(crate) use self::request::GpuGlyphRequest;
 pub(crate) use self::request::GpuRenderJob;
-use self::dispatch::dispatch_glyph_compute;
-use self::extract::collect_gpu_render_jobs;
-use self::pipeline::GpuRasterizerPipeline;
 use self::request::GpuRenderJobExtract;
 use self::request::GpuRenderJobQueue;
 use super::atlas::GlyphAtlas;
