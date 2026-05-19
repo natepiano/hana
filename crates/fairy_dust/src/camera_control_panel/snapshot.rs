@@ -10,10 +10,10 @@ use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::describe_orbit_cam_controls;
 
-use super::config::CameraGuidance;
-use super::config::CameraGuidanceContent;
-use super::config::CameraGuidanceRow;
-use super::config::SourceVisibility;
+use super::guidance::CameraGuidance;
+use super::guidance::CameraGuidanceContent;
+use super::guidance::CameraGuidanceRow;
+use super::guidance::SourceVisibility;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(super) struct CameraGuidanceSnapshot {

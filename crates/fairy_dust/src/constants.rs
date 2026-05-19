@@ -14,6 +14,13 @@ pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
 pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
 pub(crate) const HOME_KEY: KeyCode = KeyCode::KeyH;
 
+// cargo restart
+pub(crate) const CARGO_BIN: &str = "cargo";
+pub(crate) const CARGO_EXAMPLE_FLAG: &str = "--example";
+pub(crate) const CARGO_EXAMPLES_DIR: &str = "examples";
+pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
+pub(crate) const CARGO_TARGET_DIR: &str = "target";
+
 // cascade shadow
 pub(crate) const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
 pub(crate) const CASCADE_MAX_DISTANCE: f32 = 18.0;

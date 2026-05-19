@@ -28,19 +28,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Gates the `bench` job. Only crates with benches need to be listed here;
-      # currently only bevy_diegetic has them. Workspace Cargo.toml/Cargo.lock
-      # are included so dependency bumps still exercise benches, and ci.yml
-      # itself is included so changes to the bench job are validated.
+      # Gates the `bench` job. Keep automatic triggers focused on benchmark
+      # files and performance-sensitive bevy_diegetic subsystems. Broader
+      # changes, including CI-only edits, can opt in with `[bench]` in the
+      # push commit message or by manually dispatching the workflow.
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             bench:
-              - 'crates/bevy_diegetic/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-              - '.github/workflows/ci.yml'
+              - 'crates/bevy_diegetic/benches/**'
+              - 'crates/bevy_diegetic/assets/fonts/**'
+              - 'crates/bevy_diegetic/src/cascade/**'
+              - 'crates/bevy_diegetic/src/layout/**'
+              - 'crates/bevy_diegetic/src/panel/**'
+              - 'crates/bevy_diegetic/src/render/**'
+              - 'crates/bevy_diegetic/src/text/**'
+              - 'crates/bevy_diegetic/src/constants.rs'
+              - 'crates/bevy_diegetic/src/lib.rs'
+              - 'crates/bevy_diegetic/Cargo.toml'
 
   format:
     name: Format Check
@@ -167,7 +173,10 @@ jobs:
   bench:
     name: Benchmark
     needs: changes
-    if: needs.changes.outputs.bench == 'true'
+    if: >-
+      needs.changes.outputs.bench == 'true' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[bench]'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

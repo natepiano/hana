@@ -22,6 +22,11 @@ use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
 
+use crate::constants::CARGO_BIN;
+use crate::constants::CARGO_EXAMPLE_FLAG;
+use crate::constants::CARGO_EXAMPLES_DIR;
+use crate::constants::CARGO_RUN_SUBCOMMAND;
+use crate::constants::CARGO_TARGET_DIR;
 use crate::ensure_plugin;
 
 #[derive(Component)]
@@ -81,8 +86,8 @@ fn do_restart() {
         example_name,
         workspace_root.display(),
     );
-    match std::process::Command::new("cargo")
-        .args(["run", "--example", &example_name])
+    match std::process::Command::new(CARGO_BIN)
+        .args([CARGO_RUN_SUBCOMMAND, CARGO_EXAMPLE_FLAG, &example_name])
         .current_dir(&workspace_root)
         .spawn()
     {
@@ -110,12 +115,12 @@ fn do_restart() {
 fn derive_cargo_args(exe: &Path) -> Option<(String, PathBuf)> {
     let name = exe.file_name()?.to_str()?.to_string();
     let examples_dir = exe.parent()?;
-    if examples_dir.file_name()?.to_str()? != "examples" {
+    if examples_dir.file_name()?.to_str()? != CARGO_EXAMPLES_DIR {
         return None;
     }
     let profile_dir = examples_dir.parent()?;
     let target_dir = profile_dir.parent()?;
-    if target_dir.file_name()?.to_str()? != "target" {
+    if target_dir.file_name()?.to_str()? != CARGO_TARGET_DIR {
         return None;
     }
     Some((name, target_dir.parent()?.to_path_buf()))

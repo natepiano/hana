@@ -73,6 +73,17 @@ impl From<bool> for EguiBlockState {
     fn from(blocked: bool) -> Self { if blocked { Self::Blocked } else { Self::Open } }
 }
 
+struct CameraSnapshotInputs<'a> {
+    entity:           Entity,
+    camera:           &'a Camera,
+    target:           &'a RenderTarget,
+    manual:           Option<&'a OrbitCamManual>,
+    disabled:         Option<&'a CameraInputDisabled>,
+    move_list:        Option<&'a CameraMoveList>,
+    interrupt:        Option<&'a CameraInputInterruptBehavior>,
+    explicit_metrics: Option<&'a CameraInputSurfaceMetrics>,
+}
+
 pub(super) fn collect_window_snapshots(
     world: &mut World,
 ) -> HashMap<Option<Entity>, WindowSnapshot> {
@@ -131,14 +142,16 @@ fn collect_camera_snapshots_impl(
         .map(
             |(entity, camera, target, manual, disabled, move_list, interrupt, explicit_metrics)| {
                 camera_snapshot(
-                    entity,
-                    camera,
-                    target,
-                    manual,
-                    disabled,
-                    move_list,
-                    interrupt,
-                    explicit_metrics,
+                    CameraSnapshotInputs {
+                        entity,
+                        camera,
+                        target,
+                        manual,
+                        disabled,
+                        move_list,
+                        interrupt,
+                        explicit_metrics,
+                    },
                     EguiBlockState::Open,
                     windows,
                 )
@@ -182,14 +195,16 @@ fn collect_camera_snapshots_impl(
                 block_on_egui,
             )| {
                 camera_snapshot(
-                    entity,
-                    camera,
-                    target,
-                    manual,
-                    disabled,
-                    move_list,
-                    interrupt,
-                    explicit_metrics,
+                    CameraSnapshotInputs {
+                        entity,
+                        camera,
+                        target,
+                        manual,
+                        disabled,
+                        move_list,
+                        interrupt,
+                        explicit_metrics,
+                    },
                     EguiBlockState::from(egui_blocks_all && block_on_egui.is_some()),
                     windows,
                 )
@@ -199,17 +214,20 @@ fn collect_camera_snapshots_impl(
 }
 
 fn camera_snapshot(
-    entity: Entity,
-    camera: &Camera,
-    target: &RenderTarget,
-    manual: Option<&OrbitCamManual>,
-    disabled: Option<&CameraInputDisabled>,
-    move_list: Option<&CameraMoveList>,
-    interrupt: Option<&CameraInputInterruptBehavior>,
-    explicit_metrics: Option<&CameraInputSurfaceMetrics>,
+    camera_snapshot_inputs: CameraSnapshotInputs<'_>,
     egui_block_state: EguiBlockState,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> CameraRoutingSnapshot {
+    let CameraSnapshotInputs {
+        entity,
+        camera,
+        target,
+        manual,
+        disabled,
+        move_list,
+        interrupt,
+        explicit_metrics,
+    } = camera_snapshot_inputs;
     let window = window_snapshot(target, windows);
     let metrics = camera_input_surface_metrics(camera, window, explicit_metrics.copied());
     let cursor_hit = window
