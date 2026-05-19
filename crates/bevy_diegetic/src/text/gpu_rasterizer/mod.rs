@@ -37,6 +37,8 @@ mod dispatch;
 mod edges;
 mod extract;
 #[cfg(test)]
+mod msdf_parity;
+#[cfg(test)]
 mod parity;
 mod pipeline;
 mod readback;

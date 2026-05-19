@@ -708,36 +708,21 @@ fn msdf_correct_main(
             cm, c, nr, nt, nrt, vec2<f32>(1.0, 1.0), atlas_xy, local_pt, header)) { error = true; }
     }
 
-    // Truth-override safety net. Fires in two cases:
-    //   (1) strict sign disagreement — median clearly inside but
-    //       winding-rule says outside (or vice versa); fdsm's
-    //       `correct_sign_msdf` equivalent.
-    //   (2) ambiguous median (cm ≈ 0.5) AND truth is clearly far from
-    //       the boundary. This catches the ghost-sliver case above a
-    //       corner where the per-channel encoding lands at (0.5, 0,
-    //       0.5) — median 0.5 within 8-bit quantization noise — and
-    //       fdsm's analogous neighbor-propagation pass would have
-    //       fixed it. The truth-far-from-boundary clause keeps
-    //       legitimate anti-aliased edge texels (where truth ≈ 0)
-    //       untouched.
+    // Sign correction — mirror of fdsm's `correct_sign_msdf`. When the
+    // median's side disagrees with the non-zero winding rule, flip all
+    // three channels (`1 - c`). Flipping preserves per-channel
+    // disagreement, which is what keeps corners sharp; flattening to
+    // `(truth, truth, truth)` would destroy the MSDF structure and
+    // round corners.
     let local_pt_center = vec2<f32>(f32(gid.x) + 0.5, f32(gid.y) + 0.5);
     let true_dist = true_signed_distance(local_pt_center, header);
-    let half_eps = 1.5 / 255.0;
-    let strictly_inside = cm > 0.5 + half_eps;
-    let strictly_outside = cm < 0.5 - half_eps;
+    let median_inside = cm > 0.5;
     let truth_inside = true_dist > 0.0;
-    let truth_outside = true_dist < 0.0;
-    let truth_far = abs(true_dist) > params.sdf_range * 0.5;
-    let ambiguous = !strictly_inside && !strictly_outside;
-    let truth_override =
-        (strictly_inside && truth_outside)
-        || (strictly_outside && truth_inside)
-        || (ambiguous && truth_far);
+    let sign_disagree = median_inside != truth_inside;
 
     var out_rgb = c;
-    if (truth_override) {
-        let truth_psd = clamp(true_dist / params.sdf_range + 0.5, 0.0, 1.0);
-        out_rgb = vec3<f32>(truth_psd, truth_psd, truth_psd);
+    if (sign_disagree) {
+        out_rgb = vec3<f32>(1.0) - c;
     } else if (error) {
         out_rgb = vec3<f32>(cm, cm, cm);
     }

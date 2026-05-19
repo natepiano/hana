@@ -69,6 +69,174 @@ device. Goal: localize where GPU per-channel values diverge from
 fdsm's at corner texels, to take the user out of the screenshot
 loop.
 
+### Root cause identified — f32 corner-endpoint tiebreaker (2026-05-19)
+
+**Status: diagnosed, fix not yet applied.** The PNG-parity test
+infrastructure described above landed as `gpu_rasterizer/msdf_parity.rs`
+(5 tests: JBM h/A/O, EBG V/h; outputs cpu / gpu_port / diff /
+channels PNGs to `std::env::temp_dir()` plus per-bad-texel
+diagnostics). Run with:
+
+```
+cargo nextest run -p bevy_diegetic --no-fail-fast msdf_parity --no-capture
+```
+
+#### What the parity test showed
+
+- EBG h/V, JBM O: **pixel-perfect parity** between CPU and Rust port
+  of `msdf_gen` + `correct_sign`.
+- JBM 'A': 3 bad texels at `(17, 2..=4)` — the apex.
+- JBM 'h': 9 bad texels at `(4..=5, 0..=4)` — the padding above the
+  top-left of the ascender (the sliver location).
+
+Every bad texel has the same signature: CPU = `(0, N, 0)`, port =
+`(0, N, N)` — only the B channel differs. CPU-without-`correct_error_msdf`
+produces the same `(0, N, 0)`, so the divergence is **not** error
+correction — it's the raw `generate_msdf` + `correct_sign_msdf` output.
+
+#### The actual bug
+
+At JBM 'h' texel `(4.5, 0.5)`, two linear edges share the corner
+endpoint `(6.12, 6.14)`:
+
+- Edge 0 (mask `.GB`, CYAN): `(6.12, 52.86) → (6.12, 6.14)`, vertical,
+  ends at the corner. `param = +1.12` → `t_c` clamps to 1.0 → foot
+  computed as `p0 + (p1−p0)·1.0`.
+- Edge 1 (mask `R.B`, MAGENTA): `(6.12, 6.14) → (11.88, 6.14)`,
+  horizontal, starts at the corner. `param = -0.28` → `t_c` clamps
+  to 0.0 → foot used directly as `p0`.
+
+Per-edge dump (f32):
+
+```
+edge[0] dist_sq = 34.4469680786 orth = 0.277 signed_pseudo = +1.624
+edge[1] dist_sq = 34.4469757080 orth = 0.961 signed_pseudo = +5.640
+```
+
+The two `dist_sq` values differ by **~7.6e-6** because Edge 0
+recomputes the foot via `p0 + d·t_c` (catastrophic cancellation in
+the recombination) while Edge 1 uses `p0` directly. The values
+should be bit-exact equal but aren't.
+
+The picker's tiebreaker is
+
+```rust
+let take = ed.dist_sq < best_sq[c]
+    || (ed.dist_sq == best_sq[c] && orth > best_orth[c]);
+```
+
+Edge 1's `dist_sq` is strictly *greater* than Edge 0's by f32 noise,
+so `<` is false AND `==` is false — the orth tiebreaker never fires.
+Edge 0 wins B with signed `+1.624` instead of Edge 1's `+5.640`. After
+`correct_sign_msdf` flips, B lands at `23` instead of the correct
+`0`. That residual blue signal is exactly the ghost sliver / rounded
+corner the user has been seeing.
+
+fdsm in f64 doesn't hit this: its corner-distance ulp is ~4e-15 rather
+than ~4e-6, so the two segment distances either land bit-exact equal
+(orth tiebreaker fires correctly → picks higher-orth Edge 1) or differ
+by an amount that still resolves to the correct edge. The `(b)`
+truth-override branch we added earlier (catches `cm ≈ 0.5` quantization)
+doesn't fire here because the f32 picker produces `cm = 87/255 = 0.34`,
+which the strict-outside test correctly classifies as outside — there
+is no median ambiguity to override.
+
+#### The fix
+
+In `distance_linear` / `distance_quadratic` / `distance_cubic` (both
+the Rust port at `msdf_parity.rs` and the WGSL kernels in
+`shaders/msdf_common.wgsl`), when `t_c` clamps to exactly `0.0` or
+`1.0`, set `foot` to the stored endpoint (`p0` or the segment's
+terminal control point) directly instead of recomputing
+`p0 + d·t_c`. Segments that share a corner store the corner via the
+same f32 conversion path, so both segments' foot — and therefore
+`dist_sq` — are bit-exact equal. The orthogonality tiebreaker then
+fires as fdsm intends and picks the correct edge.
+
+This is a localized numerical fix, not an algorithm change. Same
+diagnosis applies to JBM 'A' apex (3 bad texels) and any other
+corner-sliver artifact. After the fix, expect the JBM h/A diff
+counts to drop to zero and the visible rounded-corner / sliver
+artifacts in `examples/typography` to clear.
+
+### Rounded corners — FIXED via `msdf_correct.wgsl` sign-correction rewrite (2026-05-19)
+
+**Status: closed.** GPU MSDF corners are now sharp at all atlas
+sizes; live comparison via the `G` key toggle shows the GPU output
+matching — and at 64 px canonical, slightly *exceeding* — the CPU
+reference. The f32 corner-endpoint fix was necessary but not
+sufficient; the remaining bug was in `msdf_correct.wgsl`'s sign-
+correction stage.
+
+#### Root cause
+
+The `truth_override` block in `msdf_correct.wgsl` did two things that
+each independently rounded corners:
+
+1. **Sign disagreement flattened to single-channel SDF.** When the
+   median sign disagreed with the non-zero winding rule, the texel
+   was replaced with `(truth_psd, truth_psd, truth_psd)` — all three
+   channels equal. That destroys the per-channel disagreement MSDF
+   needs to encode sharp corners. fdsm's analogous
+   `correct_sign_msdf` does `1 - c` (per-channel flip) which
+   preserves the disagreement.
+
+2. **Extra `(ambiguous && truth_far)` clause** (added as a band-aid
+   for the ghost-sliver bug). It fired on any texel where the median
+   was near 0.5 AND the truth distance was `> sdf_range / 2`. At
+   corner-interior texels several pixels into a corner, the median
+   naturally lands near 0.5 (because the encoding requires R/G/B
+   disagreement to express the corner) and truth is "far" (the
+   texel is several pixels from any segment). That made every
+   such texel get flattened to single-channel SDF — the visible
+   rounded blob in the GPU screenshot.
+
+#### Fix
+
+`shaders/msdf_correct.wgsl`: replaced the `truth_override` block
+with a direct mirror of `correct_sign_msdf`:
+
+```wgsl
+let median_inside = cm > 0.5;
+let truth_inside  = true_dist > 0.0;
+let sign_disagree = median_inside != truth_inside;
+if (sign_disagree) {
+    out_rgb = vec3<f32>(1.0) - c;  // flip, not flatten
+} else if (error) {
+    out_rgb = vec3<f32>(cm, cm, cm);
+}
+```
+
+The `(ambiguous && truth_far)` clause is gone entirely; the f32
+corner-endpoint fix at the gen stage already removes the ghost-
+sliver case it was working around.
+
+#### Why GPU now exceeds CPU at small atlas sizes
+
+At 64 px canonical the GPU rendering is visibly sharper than CPU,
+where pre-fix it was visibly rounder. Two compounding effects:
+
+- The pre-fix `(ambiguous && truth_far)` clause hit a much larger
+  fraction of texels at small atlas sizes (higher texel-to-em
+  ratio → more texels outside the SDF ramp → more truth_far fires;
+  denser per-channel disagreement → more ambiguous medians). At
+  128/256 px the damage was masked because the firing region
+  shrank. With the clause removed, MSDF's full sub-texel boundary
+  precision is preserved at low res.
+
+- CPU pipeline runs fdsm's `correct_error_msdf` on `Rgb32FImage`
+  (f64-derived f32) and flags more artifact texels than our shader
+  does. Our shader runs the same EdgePriority tests on
+  `rgba8unorm` scratch + f32 distance math; the 8-bit quantization
+  between gen and correct rounds away the marginal signal that
+  fdsm's tests fire on, so fewer texels get flattened. At low res
+  the preserved per-channel disagreement is what reads as corner
+  crispness.
+
+To confirm the second point, count how many texels our `error = true`
+branch fires on vs fdsm's `correct_error_msdf` at 64 px and 128 px;
+if our count is lower, hypothesis confirmed.
+
 Active work queue. **"Continue to the next phase" = work the
 next unfinished item in this list, top-to-bottom.** Phase 2
 stays at #1 until its acceptance work is done, then Phase 2.1

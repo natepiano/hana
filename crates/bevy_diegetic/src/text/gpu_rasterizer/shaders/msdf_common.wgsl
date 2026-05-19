@@ -123,7 +123,17 @@ fn distance_linear(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>) -> EdgeDist {
     let len_sq = max(dot(d, d), DEGENERATE_EPS);
     let t_raw = dot(pt - p0, d) / len_sq;
     let t_c = clamp(t_raw, 0.0, 1.0);
-    let foot = p0 + t_c * d;
+    // When t_c clamps to an endpoint, use the stored endpoint directly so
+    // sibling segments sharing a corner produce bit-exact equal foot/dist_sq
+    // — `p0 + (p1 - p0) * 1.0` is not guaranteed equal to `p1` in f32.
+    var foot: vec2<f32>;
+    if (t_c <= 0.0) {
+        foot = p0;
+    } else if (t_c >= 1.0) {
+        foot = p1;
+    } else {
+        foot = p0 + t_c * d;
+    }
     let diff = pt - foot;
     var out: EdgeDist;
     out.dist_sq = dot(diff, diff);
@@ -170,10 +180,23 @@ fn distance_quadratic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>
         }
     }
     let t_c = clamp(best_t, 0.0, 1.0);
-    let foot = bezier_quadratic(t_c, p0, p1, p2);
+    var foot: vec2<f32>;
+    var dist_sq: f32;
+    if (t_c <= 0.0) {
+        foot = p0;
+        let diff = pt - p0;
+        dist_sq = dot(diff, diff);
+    } else if (t_c >= 1.0) {
+        foot = p2;
+        let diff = pt - p2;
+        dist_sq = dot(diff, diff);
+    } else {
+        foot = bezier_quadratic(t_c, p0, p1, p2);
+        dist_sq = best_sq;
+    }
     let tangent = bezier_quadratic_deriv(t_c, p0, p1, p2);
     var out: EdgeDist;
-    out.dist_sq = best_sq;
+    out.dist_sq = dist_sq;
     out.param = best_t;
     out.foot = foot;
     out.tangent = tangent;
@@ -214,10 +237,23 @@ fn distance_cubic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3
         }
     }
     let t_c = clamp(best_t, 0.0, 1.0);
-    let foot = bezier_cubic(t_c, p0, p1, p2, p3);
+    var foot: vec2<f32>;
+    var dist_sq: f32;
+    if (t_c <= 0.0) {
+        foot = p0;
+        let diff = pt - p0;
+        dist_sq = dot(diff, diff);
+    } else if (t_c >= 1.0) {
+        foot = p3;
+        let diff = pt - p3;
+        dist_sq = dot(diff, diff);
+    } else {
+        foot = bezier_cubic(t_c, p0, p1, p2, p3);
+        dist_sq = best_sq;
+    }
     let tangent = bezier_cubic_deriv(t_c, p0, p1, p2, p3);
     var out: EdgeDist;
-    out.dist_sq = best_sq;
+    out.dist_sq = dist_sq;
     out.param = best_t;
     out.foot = foot;
     out.tangent = tangent;
