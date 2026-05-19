@@ -18,21 +18,51 @@ use super::edges::GpuGlyphRequestBody;
 use crate::text::atlas::GlyphKey;
 use crate::text::msdf_rasterizer::DistanceField;
 
-/// Single built glyph request consumed by the render-world dispatch system.
+/// Fields common to every GPU glyph request variant.
 #[derive(Clone, Debug)]
-pub(crate) struct GpuGlyphRequest {
+pub(crate) struct GpuGlyphRequestCommon {
     /// Lookup key the completion record echoes back.
-    pub key:            GlyphKey,
+    pub key:          GlyphKey,
     /// Edges, bitmap dims, and bearings produced by [`super::edges::build_edge_buffer`].
-    pub body:           GpuGlyphRequestBody,
+    pub body:         GpuGlyphRequestBody,
     /// SDF distance range in pixels.
-    pub sdf_range:      f32,
-    /// SDF vs MSDF.
-    pub distance_field: DistanceField,
+    pub sdf_range:    f32,
     /// Top-left texel of the bitmap interior on the target page.
-    pub atlas_origin:   UVec2,
+    pub atlas_origin: UVec2,
     /// Atlas page index the bitmap will be written into.
-    pub page_index:     u32,
+    pub page_index:   u32,
+}
+
+/// Built glyph request consumed by the render-world dispatch system.
+///
+/// The variant tag picks the compute pipeline (SDF vs MSDF). Variant
+/// data carries everything needed for either kernel; on the MSDF
+/// variant the `EdgeSegment::kind` bits 2–4 hold the channel mask.
+#[derive(Clone, Debug)]
+pub(crate) enum GpuGlyphRequest {
+    /// Single-channel SDF request.
+    Sdf(GpuGlyphRequestCommon),
+    /// Three-channel MSDF request with channel-coloured edges.
+    Msdf(GpuGlyphRequestCommon),
+}
+
+impl GpuGlyphRequest {
+    /// Returns a reference to the common fields shared by every variant.
+    #[must_use]
+    pub const fn common(&self) -> &GpuGlyphRequestCommon {
+        match self {
+            Self::Sdf(c) | Self::Msdf(c) => c,
+        }
+    }
+
+    /// Returns the distance-field encoding this request targets.
+    #[must_use]
+    pub const fn distance_field(&self) -> DistanceField {
+        match self {
+            Self::Sdf(_) => DistanceField::Sdf,
+            Self::Msdf(_) => DistanceField::Msdf,
+        }
+    }
 }
 
 /// Message sent from a spawned edge-build task back to its atlas.

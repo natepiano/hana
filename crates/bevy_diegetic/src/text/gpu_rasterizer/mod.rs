@@ -46,6 +46,7 @@ pub(crate) use self::request::AtlasGpuPipe;
 pub(crate) use self::request::BuiltGpuRequest;
 pub(crate) use self::request::GpuCompletionSink;
 pub(crate) use self::request::GpuGlyphRequest;
+use self::request::GpuGlyphRequestCommon;
 pub(crate) use self::request::GpuRenderJob;
 use self::request::GpuRenderJobExtract;
 use self::request::GpuRenderJobQueue;
@@ -107,6 +108,7 @@ pub struct GpuRasterizerPlugin;
 impl Plugin for GpuRasterizerPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/sdf_gen.wgsl");
+        embedded_asset!(app, "shaders/msdf_gen.wgsl");
 
         app.init_resource::<GpuGlyphBudget>()
             .init_resource::<GpuRenderJobExtract>()
@@ -263,16 +265,21 @@ fn enqueue_on_atlas(
             canonical_size,
             sdf_range,
             padding,
+            distance_field,
         ) {
+            let common = GpuGlyphRequestCommon {
+                key,
+                body,
+                sdf_range: sdf_range_f32,
+                atlas_origin: region.atlas_origin,
+                page_index: region.page_index,
+            };
+            let request = match distance_field {
+                DistanceField::Sdf => GpuGlyphRequest::Sdf(common),
+                DistanceField::Msdf => GpuGlyphRequest::Msdf(common),
+            };
             BuiltGpuRequest::Built {
-                request: Box::new(GpuGlyphRequest {
-                    key,
-                    body,
-                    sdf_range: sdf_range_f32,
-                    distance_field,
-                    atlas_origin: region.atlas_origin,
-                    page_index: region.page_index,
-                }),
+                request: Box::new(request),
                 completions,
             }
         } else {

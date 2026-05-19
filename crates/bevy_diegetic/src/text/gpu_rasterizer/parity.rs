@@ -379,8 +379,14 @@ fn compare_bitmaps(
 
 fn run_parity_case(font_data: &[u8], ch: char, font_label: &str) {
     let idx = glyph_index(font_data, ch);
-    let Some(body) = edges::build_edge_buffer(font_data, idx, CANONICAL_SIZE, SDF_RANGE, PADDING)
-    else {
+    let Some(body) = edges::build_edge_buffer(
+        font_data,
+        idx,
+        CANONICAL_SIZE,
+        SDF_RANGE,
+        PADDING,
+        DistanceField::Sdf,
+    ) else {
         panic!("build_edge_buffer returned None for '{ch}'");
     };
     let (cpu, cpu_w, cpu_h) = cpu_sdf_bitmap(font_data, ch);
@@ -389,7 +395,6 @@ fn run_parity_case(font_data: &[u8], ch: char, font_label: &str) {
         (cpu_w, cpu_h),
         "{font_label} '{ch}': GPU vs CPU bitmap dimensions disagree"
     );
-    let _ = (DistanceField::Sdf,); // documentation: parity is SDF-only in Phase 1
     let gpu_port = rust_port_bitmap(
         &body.edges,
         body.bitmap_size.x,

@@ -25,6 +25,10 @@ use bevy::shader::Shader;
 pub(super) const SDF_SHADER_ASSET_PATH: &str =
     "embedded://bevy_diegetic/text/gpu_rasterizer/shaders/sdf_gen.wgsl";
 
+/// Asset path for the embedded MSDF generation kernel.
+pub(super) const MSDF_SHADER_ASSET_PATH: &str =
+    "embedded://bevy_diegetic/text/gpu_rasterizer/shaders/msdf_gen.wgsl";
+
 /// Workgroup edge length — 8 × 8 = 64 threads per workgroup.
 pub(super) const WORKGROUP_SIZE: u32 = 8;
 
@@ -58,22 +62,22 @@ pub(super) struct GlyphHeader {
     pub _padding:     [u32; 2],
 }
 
-/// Render-world resource holding the compute pipeline + bind layout.
+/// Render-world resource holding the compute pipelines + bind layout.
 #[derive(Resource)]
 pub(super) struct GpuRasterizerPipeline {
-    pub layout:       BindGroupLayoutDescriptor,
-    pub sdf_pipeline: CachedComputePipelineId,
-    #[allow(
-        dead_code,
-        reason = "kept for shader hot-reload diagnostics and Phase 2 MSDF pipeline init"
-    )]
-    pub shader:       Handle<Shader>,
+    pub layout:        BindGroupLayoutDescriptor,
+    pub sdf_pipeline:  CachedComputePipelineId,
+    pub msdf_pipeline: CachedComputePipelineId,
+    #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
+    pub sdf_shader:    Handle<Shader>,
+    #[allow(dead_code, reason = "kept for shader hot-reload diagnostics")]
+    pub msdf_shader:   Handle<Shader>,
 }
 
 impl GpuRasterizerPipeline {
-    /// Constructs the layout + queues the pipeline build through the
-    /// `PipelineCache`. The pipeline becomes usable once `PipelineCache`
-    /// reports `CachedPipelineState::Ok` for `sdf_pipeline`.
+    /// Constructs the layout + queues the SDF and MSDF compute pipeline
+    /// builds through the `PipelineCache`. Each pipeline becomes usable
+    /// once `PipelineCache` reports `CachedPipelineState::Ok` for it.
     #[must_use]
     pub fn create(pipeline_cache: &PipelineCache, asset_server: &AssetServer) -> Self {
         let layout = BindGroupLayoutDescriptor::new(
@@ -93,22 +97,34 @@ impl GpuRasterizerPipeline {
             ),
         );
 
-        let shader: Handle<Shader> = asset_server.load(SDF_SHADER_ASSET_PATH);
+        let sdf_shader: Handle<Shader> = asset_server.load(SDF_SHADER_ASSET_PATH);
+        let msdf_shader: Handle<Shader> = asset_server.load(MSDF_SHADER_ASSET_PATH);
 
         let sdf_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label:                            Some("gpu_rasterizer_sdf_pipeline".into()),
             layout:                           vec![layout.clone()],
             push_constant_ranges:             Vec::new(),
-            shader:                           shader.clone(),
+            shader:                           sdf_shader.clone(),
             shader_defs:                      Vec::new(),
             entry_point:                      Some(Cow::Borrowed("sdf_main")),
+            zero_initialize_workgroup_memory: false,
+        });
+        let msdf_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label:                            Some("gpu_rasterizer_msdf_pipeline".into()),
+            layout:                           vec![layout.clone()],
+            push_constant_ranges:             Vec::new(),
+            shader:                           msdf_shader.clone(),
+            shader_defs:                      Vec::new(),
+            entry_point:                      Some(Cow::Borrowed("msdf_main")),
             zero_initialize_workgroup_memory: false,
         });
 
         Self {
             layout,
             sdf_pipeline,
-            shader,
+            msdf_pipeline,
+            sdf_shader,
+            msdf_shader,
         }
     }
 }

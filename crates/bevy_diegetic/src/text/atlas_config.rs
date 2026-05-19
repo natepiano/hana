@@ -1,8 +1,6 @@
 //! MSDF atlas configuration.
 
-use core::error::Error;
-use core::fmt::Display;
-use core::fmt::Formatter;
+use core::convert::Infallible;
 
 use bevy::prelude::*;
 use bevy::tasks;
@@ -92,40 +90,28 @@ impl RasterQuality {
 ///
 /// - [`RasterBackend::Cpu`] — `fdsm` on a worker pool (default).
 /// - [`RasterBackend::Gpu`] — wgpu compute shader writing directly into the atlas page storage
-///   texture.
+///   texture. Supports both SDF and MSDF.
 ///
-/// The GPU backend is opt-in per atlas. Unsupported `(backend,
-/// distance_field)` combinations are rejected by
-/// [`AtlasConfig::validate`]. Device-feature loss (WebGL2, mobile
-/// without compute) is handled at plugin-init time: an atlas configured
-/// `Gpu` on an unsupported device falls back to `Cpu` with a warning.
+/// The GPU backend requires compute-shader storage textures. Devices
+/// without that support log a warning at plugin init and text will
+/// not render — there is no fallback path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum RasterBackend {
     /// Synchronous `fdsm` rasterization on worker threads (default).
     #[default]
     Cpu,
     /// Async wgpu compute rasterization, dispatched in the render
-    /// schedule. SDF only in Phase 1; MSDF lands in Phase 2.
+    /// schedule. Handles both SDF and MSDF; pipeline picked per
+    /// request variant.
     Gpu,
 }
 
 /// Reasons an [`AtlasConfig`] is rejected by [`AtlasConfig::validate`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AtlasConfigError {
-    /// `(Gpu, Msdf)` is not implemented until Phase 2 of the GPU
-    /// rasterizer rollout.
-    GpuMsdfUnsupported,
-}
-
-impl Display for AtlasConfigError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::GpuMsdfUnsupported => f.write_str("MSDF on GPU is not yet implemented (Phase 2)"),
-        }
-    }
-}
-
-impl Error for AtlasConfigError {}
+///
+/// Currently always `Ok`; aliased to `Infallible` so callers can keep
+/// the `if let Err(_)` form for forward-compatibility without code
+/// changes if a constraint is added later.
+pub type AtlasConfigError = Infallible;
 
 /// Controls how many worker threads are used for async glyph rasterization.
 ///
@@ -210,9 +196,7 @@ pub struct AtlasConfig {
     pub distance_field: DistanceField,
 
     /// Device that produces the distance-field bytes. Defaults to
-    /// [`RasterBackend::Cpu`]. GPU support is Phase-1 SDF-only; the
-    /// `(Gpu, Msdf)` pair is rejected by [`AtlasConfig::validate`]
-    /// until Phase 2 lands.
+    /// [`RasterBackend::Cpu`]. GPU backend handles SDF and MSDF.
     pub backend: RasterBackend,
 }
 
@@ -277,20 +261,16 @@ impl AtlasConfig {
 
     /// Validates the `(backend, distance_field)` pair.
     ///
-    /// Returns `Err(AtlasConfigError::GpuMsdfUnsupported)` for
-    /// `(Gpu, Msdf)` until Phase 2 of the GPU rasterizer rollout lands.
-    /// All other combinations are accepted.
+    /// Every supported pair currently returns `Ok`. Kept as a fallible
+    /// API so future constraints can be added without changing the
+    /// signature.
     ///
     /// # Errors
     ///
     /// Returns an error for any unsupported `(backend, distance_field)`
-    /// combination.
-    pub const fn validate(&self) -> Result<(), AtlasConfigError> {
-        match (self.backend, self.distance_field) {
-            (RasterBackend::Gpu, DistanceField::Msdf) => Err(AtlasConfigError::GpuMsdfUnsupported),
-            _ => Ok(()),
-        }
-    }
+    /// combination. Currently none.
+    #[must_use]
+    pub const fn validate(&self) -> Result<(), AtlasConfigError> { Ok(()) }
 }
 
 impl Default for AtlasConfig {

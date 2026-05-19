@@ -12,6 +12,8 @@ use bytemuck::Pod;
 use bytemuck::Zeroable;
 use fdsm::bezier::Order;
 use fdsm::bezier::Segment as FdsmSegment;
+use fdsm::shape::ColoredSegment; // allow-banned: upstream fdsm API name
+use fdsm::shape::Shape; // allow-banned: upstream fdsm API name
 use fdsm::transform::Transform;
 use nalgebra::Affine2;
 use nalgebra::Matrix3;
@@ -19,27 +21,36 @@ use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
 use crate::text::bitmap_dims;
+use crate::text::constants::EDGE_COLORING_ANGLE;
+use crate::text::constants::EDGE_COLORING_SEED;
+use crate::text::msdf_rasterizer::DistanceField;
 
 /// Discriminant bits in `EdgeSegment::kind` for the segment order.
 ///
-/// Bits 0–1 of `kind` encode the segment order, leaving the upper bits
-/// reserved for the MSDF channel mask (Phase 2).
+/// Bits 0–1 of `kind` encode the segment order. Bits 2–4 encode the
+/// MSDF channel mask (R / G / B = bits 0 / 1 / 2 of the mask).
 /// Linear segment discriminant — matches `EDGE_KIND_LINEAR` in
-/// `shaders/sdf_gen.wgsl`. Bits 0–1 of `EdgeSegment::kind`.
+/// `shaders/sdf_gen.wgsl` and `shaders/msdf_gen.wgsl`.
 pub(super) const EDGE_KIND_LINEAR: u32 = 0;
-/// Quadratic bezier discriminant. Phase 1 SDF kernel handles all three
-/// orders; the constants stay together so future MSDF code can validate
-/// against the same numeric mapping.
+/// Quadratic bezier discriminant. Shared across SDF and MSDF kernels;
+/// the constants stay together so the WGSL ports validate against the
+/// same numeric mapping.
 pub(super) const EDGE_KIND_QUADRATIC: u32 = 1;
 /// Cubic bezier discriminant.
 pub(super) const EDGE_KIND_CUBIC: u32 = 2;
+/// Shift to extract the MSDF channel mask from `EdgeSegment::kind`.
+/// Used by both `msdf_gen.wgsl` and the parity port.
+pub(super) const EDGE_CHANNEL_MASK_SHIFT: u32 = 2;
+/// Width of the channel-mask field (bits 2–4 = three channels).
+pub(super) const EDGE_CHANNEL_MASK_BITS: u32 = 0b111;
 
 /// Per-edge record sent to the GPU storage buffer.
 ///
 /// 9 × 4 = 36 bytes per record. Holds up to four control points (P0–P3,
 /// stored interleaved as `[x0, y0, x1, y1, x2, y2, x3, y3]`) plus a
 /// `kind` field. Bits 0–1 of `kind` are the segment order; bits 2–4
-/// reserve room for the Phase-2 MSDF channel mask.
+/// are the MSDF channel mask (set by `build_edge_buffer` on the MSDF
+/// path, left at 0 on the SDF path).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
 pub struct EdgeSegment {
@@ -74,9 +85,12 @@ pub struct GpuGlyphRequestBody {
 /// for a single glyph. Returns `None` if the glyph has no outline
 /// (space) or the computed bitmap is zero-sized.
 ///
+/// On the MSDF path, edges are first colored via fdsm's
+/// `edge_coloring_simple`; the resulting per-segment channel mask is
+/// packed into bits 2–4 of each `EdgeSegment::kind`.
+///
 /// Used by the parity test and by the spawned worker task in
-/// `enqueue_gpu_glyph`. Cost is dominated by `load_shape_from_face`
-/// (~hundreds of µs); the helper is `pub(super)` so it can be spawned
+/// `enqueue_gpu_glyph`. The helper is `pub(super)` so it can be spawned
 /// inside a worker `async move`.
 #[must_use]
 pub(super) fn build_edge_buffer(
@@ -85,6 +99,7 @@ pub(super) fn build_edge_buffer(
     canonical_size: u32,
     sdf_range: f64,
     padding: u32,
+    distance_field: DistanceField,
 ) -> Option<GpuGlyphRequestBody> {
     let face = Face::parse(font_data, 0).ok()?;
     let glyph_id = GlyphId(glyph_index);
@@ -111,15 +126,32 @@ pub(super) fn build_edge_buffer(
     let affine = Affine2::from_matrix_unchecked(Matrix3::new(
         scale, 0.0, tx, 0.0, -scale, ty, 0.0, 0.0, 1.0,
     ));
-    let mut outline = outline;
-    outline.transform(&affine);
 
-    let mut edges = Vec::new();
-    for contour in &outline.contours {
-        for segment in &contour.segments {
-            edges.push(segment_to_edge(segment));
-        }
-    }
+    let edges = match distance_field {
+        DistanceField::Sdf => {
+            let mut outline = outline;
+            outline.transform(&affine);
+            let mut out = Vec::new();
+            for contour in &outline.contours {
+                for segment in &contour.segments {
+                    out.push(segment_to_edge(segment, 0));
+                }
+            }
+            out
+        },
+        DistanceField::Msdf => {
+            let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
+            let mut colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name
+            colored.transform(&affine);
+            let mut out = Vec::new();
+            for contour in &colored.contours {
+                for colored_segment in &contour.segments {
+                    out.push(colored_segment_to_edge(colored_segment));
+                }
+            }
+            out
+        },
+    };
 
     let bearing_x = (f64::from(bbox.x_min) / units_per_em).to_f32();
     let bearing_y = (f64::from(bbox.y_max) / units_per_em).to_f32();
@@ -159,8 +191,8 @@ pub(super) fn glyph_bitmap_size(
     Some(UVec2::new(dims.width, dims.height))
 }
 
-fn segment_to_edge(segment: &FdsmSegment) -> EdgeSegment {
-    let (kind, point_count) = match segment.order() {
+fn segment_to_edge(segment: &FdsmSegment, channel_mask: u32) -> EdgeSegment {
+    let (order_bits, point_count) = match segment.order() {
         Order::Linear => (EDGE_KIND_LINEAR, 2_usize),
         Order::Quadratic => (EDGE_KIND_QUADRATIC, 3_usize),
         Order::Cubic => (EDGE_KIND_CUBIC, 4_usize),
@@ -171,5 +203,103 @@ fn segment_to_edge(segment: &FdsmSegment) -> EdgeSegment {
         points[i * 2] = p.x.to_f32();
         points[i * 2 + 1] = p.y.to_f32();
     }
+    let kind = order_bits | ((channel_mask & EDGE_CHANNEL_MASK_BITS) << EDGE_CHANNEL_MASK_SHIFT);
     EdgeSegment { points, kind }
+}
+
+fn colored_segment_to_edge(colored: &ColoredSegment) -> EdgeSegment {
+    segment_to_edge(&colored.segment, u32::from(colored.color.value()))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::panic,
+        clippy::unwrap_used,
+        reason = "tests use panic/unwrap for clearer failure messages"
+    )]
+
+    use super::*;
+    use crate::text::constants::DEFAULT_GLYPH_PADDING;
+    use crate::text::constants::DEFAULT_SDF_RANGE;
+
+    const FONT_DATA: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+    const EB_GARAMOND: &[u8] = include_bytes!("../../../assets/fonts/EBGaramond-Regular.ttf");
+    const CANONICAL_SIZE: u32 = 32;
+
+    fn glyph_index(font_data: &[u8], ch: char) -> u16 {
+        let face = ttf_parser::Face::parse(font_data, 0).unwrap_or_else(|e| panic!("parse: {e}"));
+        face.glyph_index(ch)
+            .unwrap_or_else(|| panic!("no glyph for '{ch}'"))
+            .0
+    }
+
+    /// Walks the same fdsm coloring path the GPU edge builder uses and
+    /// collects channel masks per segment, then asserts the GPU path's
+    /// `EdgeSegment::kind` bits 2–4 match exactly for the same glyph.
+    fn channel_masks_from_cpu(font_data: &[u8], ch: char) -> Vec<u32> {
+        let face = ttf_parser::Face::parse(font_data, 0).unwrap();
+        let glyph_id = ttf_parser::GlyphId(glyph_index(font_data, ch));
+        let outline = fdsm_ttf_parser::load_shape_from_face(&face, glyph_id).unwrap(); // allow-banned: upstream fdsm API name
+        let sin_alpha = EDGE_COLORING_ANGLE.to_radians().sin();
+        let colored = Shape::edge_coloring_simple(outline, sin_alpha, EDGE_COLORING_SEED); // allow-banned: upstream fdsm API name
+        let mut masks = Vec::new();
+        for contour in &colored.contours {
+            for seg in &contour.segments {
+                masks.push(u32::from(seg.color.value()));
+            }
+        }
+        masks
+    }
+
+    fn channel_masks_from_gpu(font_data: &[u8], ch: char) -> Vec<u32> {
+        let body = build_edge_buffer(
+            font_data,
+            glyph_index(font_data, ch),
+            CANONICAL_SIZE,
+            DEFAULT_SDF_RANGE,
+            DEFAULT_GLYPH_PADDING,
+            DistanceField::Msdf,
+        )
+        .unwrap();
+        body.edges
+            .iter()
+            .map(|e| (e.kind >> EDGE_CHANNEL_MASK_SHIFT) & EDGE_CHANNEL_MASK_BITS)
+            .collect()
+    }
+
+    #[test]
+    fn edge_coloring_matches_cpu() {
+        for (font, label, glyphs) in [
+            (FONT_DATA, "JetBrains Mono", ['A', 'O', 'W', 'g'].as_slice()),
+            (EB_GARAMOND, "EB Garamond", ['V', 'A', 'g'].as_slice()),
+        ] {
+            for &ch in glyphs {
+                let cpu = channel_masks_from_cpu(font, ch);
+                let gpu = channel_masks_from_gpu(font, ch);
+                assert_eq!(
+                    cpu, gpu,
+                    "{label} '{ch}': channel masks disagree between CPU coloring and GPU edge \
+                     buffer"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sdf_path_emits_zero_channel_mask() {
+        let body = build_edge_buffer(
+            FONT_DATA,
+            glyph_index(FONT_DATA, 'A'),
+            CANONICAL_SIZE,
+            DEFAULT_SDF_RANGE,
+            DEFAULT_GLYPH_PADDING,
+            DistanceField::Sdf,
+        )
+        .unwrap();
+        for edge in &body.edges {
+            let mask = (edge.kind >> EDGE_CHANNEL_MASK_SHIFT) & EDGE_CHANNEL_MASK_BITS;
+            assert_eq!(mask, 0, "SDF path should leave channel mask bits zero");
+        }
+    }
 }

@@ -805,7 +805,7 @@ impl GlyphAtlas {
                     request,
                     completions,
                 } => {
-                    let page_index = request.page_index.to_usize();
+                    let page_index = request.common().page_index.to_usize();
                     let Some(image_handle) = self
                         .pages
                         .get(page_index)
