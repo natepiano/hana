@@ -17,6 +17,7 @@ use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::camera_home;
+use crate::restart_camera;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 
@@ -170,6 +171,14 @@ impl CameraHomeBuilder<NoOrbitCam> {
 }
 
 impl CameraHomeBuilder<WithOrbitCam> {
+    /// Finalizes the current home registration and makes the restart camera
+    /// animation available through [`crate::RestoreWindowAnimation`].
+    #[must_use]
+    pub fn with_restore_camera_on_restart(mut self) -> SprinkleBuilder<WithOrbitCam> {
+        restart_camera::install(&mut self.parent.app);
+        self.finish()
+    }
+
     /// Finalizes the current home registration and adds stable transparency to the
     /// spawned `OrbitCam`.
     #[must_use]

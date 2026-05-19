@@ -24,6 +24,7 @@ use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
 use crate::primitive::PrimitiveConfig;
 use crate::restart;
+use crate::restart_camera;
 use crate::save_window_position;
 use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
@@ -238,6 +239,14 @@ impl SprinkleBuilder<NoOrbitCam> {
 // Camera-attached capabilities — only valid after an `OrbitCam` has been
 // configured.
 impl SprinkleBuilder<WithOrbitCam> {
+    /// Capture the current `OrbitCam` pose on hot restart and make the restore
+    /// animation available through [`crate::RestoreWindowAnimation`].
+    #[must_use]
+    pub fn with_restore_camera_on_restart(mut self) -> Self {
+        restart_camera::install(&mut self.app);
+        self
+    }
+
     /// Insert `bevy_diegetic::StableTransparency` on the spawned `OrbitCam`,
     /// which adds `OrderIndependentTransparencySettings`, sets the camera's
     /// depth texture to `TEXTURE_BINDING`, and forces `Msaa::Off` on the

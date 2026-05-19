@@ -43,6 +43,8 @@ use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::ControlActivation;
+use fairy_dust::RestartCameraRestore;
+use fairy_dust::RestoreWindowAnimation;
 use fairy_dust::SetCameraHomeFromEntity;
 use fairy_dust::TitleBar;
 
@@ -228,6 +230,7 @@ fn main() {
         .pitch(HOME_PITCH)
         .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .margin(ZOOM_TO_FIT_MARGIN)
+        .with_restore_camera_on_restart()
         .with_title_bar(
             TitleBar::new()
                 .control("T Overlay")
@@ -510,6 +513,7 @@ fn on_typography_overlay_ready(
     cameras: Query<Entity, With<OrbitCam>>,
     mut initialized: Local<bool>,
     mut cycle_state: ResMut<CycleState>,
+    restore: Option<Res<RestartCameraRestore>>,
     mut commands: Commands,
 ) {
     let target = trigger.event_target();
@@ -529,6 +533,13 @@ fn on_typography_overlay_ready(
         return;
     }
     *initialized = true;
+    if restore
+        .as_deref()
+        .is_some_and(RestartCameraRestore::has_restart_camera_pose)
+    {
+        commands.trigger(RestoreWindowAnimation);
+        return;
+    }
     for camera in &cameras {
         commands.trigger(
             AnimateToFit::new(camera, target)

@@ -21,6 +21,7 @@ use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
+use bevy_lagrange::OrbitCam;
 
 use crate::constants::CARGO_BIN;
 use crate::constants::CARGO_EXAMPLE_FLAG;
@@ -28,6 +29,9 @@ use crate::constants::CARGO_EXAMPLES_DIR;
 use crate::constants::CARGO_RUN_SUBCOMMAND;
 use crate::constants::CARGO_TARGET_DIR;
 use crate::ensure_plugin;
+use crate::orbit_cam::FairyDustOrbitCam;
+use crate::restart_camera;
+use crate::restart_camera::RestartCameraRestore;
 
 #[derive(Component)]
 struct FairyDustRestartContext;
@@ -54,9 +58,13 @@ fn spawn_restart_action(mut commands: Commands) {
     ));
 }
 
-fn request_restart() {
+fn request_restart(
+    cameras: Query<&OrbitCam, With<FairyDustOrbitCam>>,
+    restore_state: Option<Res<RestartCameraRestore>>,
+) {
     info!("fairy_dust restart: Ctrl+Shift+R pressed, invoking cargo and exiting");
-    do_restart();
+    let encoded_pose = restart_camera::encode_child_pose(&cameras, restore_state.as_deref());
+    do_restart(encoded_pose);
 }
 
 /// No-op now that restart exits the process directly from the input handler.
@@ -64,7 +72,7 @@ fn request_restart() {
 pub(crate) const fn perform_restart_if_requested() {}
 
 #[cfg(any(unix, windows))]
-fn do_restart() {
+fn do_restart(encoded_pose: Option<String>) {
     let exe = match std::env::current_exe() {
         Ok(path) => path,
         Err(err) => {
@@ -86,11 +94,12 @@ fn do_restart() {
         example_name,
         workspace_root.display(),
     );
-    match std::process::Command::new(CARGO_BIN)
+    let mut command = std::process::Command::new(CARGO_BIN);
+    command
         .args([CARGO_RUN_SUBCOMMAND, CARGO_EXAMPLE_FLAG, &example_name])
-        .current_dir(&workspace_root)
-        .spawn()
-    {
+        .current_dir(&workspace_root);
+    restart_camera::apply_child_env(&mut command, encoded_pose);
+    match command.spawn() {
         Ok(child) => {
             info!("fairy_dust restart: cargo spawned as pid {}", child.id());
             std::process::exit(0);
@@ -103,7 +112,7 @@ fn do_restart() {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn do_restart() {
+fn do_restart(_: Option<String>) {
     eprintln!("fairy_dust: restart not supported on this platform");
 }
 

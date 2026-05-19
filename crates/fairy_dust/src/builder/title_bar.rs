@@ -236,6 +236,13 @@ impl TitleBarBuilder<NoOrbitCam> {
 }
 
 impl TitleBarBuilder<WithOrbitCam> {
+    /// Finalizes the title bar and makes the restart camera animation available
+    /// through [`crate::RestoreWindowAnimation`].
+    #[must_use]
+    pub fn with_restore_camera_on_restart(self) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_restore_camera_on_restart()
+    }
+
     /// Finalizes the title bar and adds stable transparency to the spawned
     /// `OrbitCam`.
     #[must_use]
