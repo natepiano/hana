@@ -30,7 +30,6 @@ use super::compose::SampleMode;
 use super::constants::COMPOSE_BIND_GROUP_SLOT;
 use super::constants::COMPOSE_OUTPUT_BIND_GROUP_LABEL;
 use super::constants::FLOOD_INIT_RENDER_ERROR;
-use super::constants::FULLSCREEN_TRIANGLE_VERTEX_COUNT;
 use super::constants::HULL_OUTLINE_PASS_LABEL;
 use super::constants::HULL_OUTLINE_RENDER_ERROR;
 use super::constants::JUMP_FLOOD_NO_SEED_CLEAR_COLOR;
@@ -38,6 +37,7 @@ use super::constants::NO_GLOBAL_DEPTH_TEXTURE_WARNING;
 use super::constants::OUTLINE_DEPTH_FAR_PLANE_CLEAR;
 use super::constants::OUTLINE_FLOOD_INIT_PASS_LABEL;
 use super::constants::POST_PROCESS_PASS_LABEL;
+use super::constants::TRIANGLE_VERTEX_COUNT;
 use super::extract::ActiveOutlineModes;
 use super::flood;
 use super::flood::FloodSettings;
@@ -392,5 +392,5 @@ fn run_jump_flood_composite(
 
     render_pass.set_render_pipeline(pipeline);
     render_pass.set_bind_group(COMPOSE_BIND_GROUP_SLOT, &bind_group, &[]);
-    render_pass.draw(0..FULLSCREEN_TRIANGLE_VERTEX_COUNT, 0..1);
+    render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..1);
 }

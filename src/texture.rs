@@ -14,6 +14,8 @@ use bevy_render::texture::TextureCache;
 use super::camera::OutlineCamera;
 use super::constants::MSAA_DISABLED_SAMPLE_COUNT;
 use super::constants::OUTLINE_DEPTH_TEXTURE_LABEL;
+use super::constants::OUTLINE_TEXTURE_BASE_MIP_ONLY;
+use super::constants::OUTLINE_TEXTURE_SINGLE_LAYER;
 use super::extract::ActiveOutlineModes;
 
 #[derive(Clone, Component)]
@@ -75,13 +77,13 @@ pub(crate) fn prepare_flood_textures(
         let size = Extent3d {
             width:                 target_size.x,
             height:                target_size.y,
-            depth_or_array_layers: 1,
+            depth_or_array_layers: OUTLINE_TEXTURE_SINGLE_LAYER,
         };
 
         let texture_descriptor = TextureDescriptor {
             label: None,
             size,
-            mip_level_count: 1,
+            mip_level_count: OUTLINE_TEXTURE_BASE_MIP_ONLY,
             sample_count: MSAA_DISABLED_SAMPLE_COUNT,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba32Float,
@@ -93,7 +95,7 @@ pub(crate) fn prepare_flood_textures(
         let outline_depth = render_device.create_texture(&TextureDescriptor {
             label: Some(OUTLINE_DEPTH_TEXTURE_LABEL),
             size,
-            mip_level_count: 1,
+            mip_level_count: OUTLINE_TEXTURE_BASE_MIP_ONLY,
             sample_count: MSAA_DISABLED_SAMPLE_COUNT,
             dimension: TextureDimension::D2,
             format: CORE_3D_DEPTH_FORMAT,

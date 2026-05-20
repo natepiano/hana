@@ -4,10 +4,12 @@ use bevy::mesh::Indices;
 use bevy::mesh::PrimitiveTopology;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
+use bevy_kana::ToUsize;
 
 use super::Outline;
 use super::constants::ATTRIBUTE_OUTLINE_NORMAL;
 use super::constants::DEGENERATE_EDGE_THRESHOLD;
+use super::constants::TRIANGLE_VERTEX_COUNT;
 
 /// Computes angle-weighted smoothed outline normals and stores them as
 /// [`ATTRIBUTE_OUTLINE_NORMAL`] on the mesh.
@@ -33,7 +35,8 @@ pub fn generate_outline_normals(mesh: &mut Mesh) {
     };
 
     let index_count = mesh.indices().map_or(positions.len(), Indices::len);
-    if !index_count.is_multiple_of(3) {
+    let triangle_vertex_count = TRIANGLE_VERTEX_COUNT.to_usize();
+    if !index_count.is_multiple_of(triangle_vertex_count) {
         return;
     }
 
@@ -41,7 +44,7 @@ pub fn generate_outline_normals(mesh: &mut Mesh) {
     // Key by `f32::to_bits()` for exact position matching (no floating-point tolerance).
     let mut accumulated_normals: HashMap<[u32; 3], Vec3> = HashMap::new();
 
-    let triangle_count = index_count / 3;
+    let triangle_count = index_count / triangle_vertex_count;
     for tri in 0..triangle_count {
         let (i0, i1, i2) = triangle_indices(mesh, positions.len(), tri);
 
@@ -166,7 +169,7 @@ fn accumulate_weighted_normal(
 }
 
 fn triangle_indices(mesh: &Mesh, vertex_count: usize, tri: usize) -> (usize, usize, usize) {
-    let base = tri * 3;
+    let base = tri * TRIANGLE_VERTEX_COUNT.to_usize();
     if let Some(indices) = mesh.indices() {
         let mut iter = indices.iter().skip(base);
         let i0 = iter.next().unwrap_or(0);

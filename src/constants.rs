@@ -95,6 +95,15 @@ pub(super) const OUTLINE_NORMAL_SHADER_LOCATION: u32 = 8;
 /// "no owner" in the shader, so all valid owner IDs start at 1.0.
 pub(super) const OWNER_ID_OFFSET: f32 = 1.0;
 
+/// Outline render targets are 2D textures with a single (non-array) layer.
+pub(super) const OUTLINE_TEXTURE_SINGLE_LAYER: u32 = 1;
+
+/// Outline render targets use only the base mip level — no mipmap chain.
+pub(super) const OUTLINE_TEXTURE_BASE_MIP_ONLY: u32 = 1;
+
+/// Number of vertices in each triangle primitive (mesh indices, draw counts).
+pub(super) const TRIANGLE_VERTEX_COUNT: u32 = 3;
+
 // pipeline labels
 pub(super) const HULL_OUTLINE_PIPELINE_LABEL: &str = "hull_outline_pipeline";
 pub(super) const OUTLINE_COMPOSE_OUTPUT_MSAA_PIPELINE_LABEL: &str =
@@ -102,9 +111,6 @@ pub(super) const OUTLINE_COMPOSE_OUTPUT_MSAA_PIPELINE_LABEL: &str =
 pub(super) const OUTLINE_COMPOSE_OUTPUT_PIPELINE_LABEL: &str = "outline_compose_output_pipeline";
 pub(super) const OUTLINE_JUMP_FLOOD_PIPELINE_LABEL: &str = "outline_jump_flood_pipeline";
 pub(super) const OUTLINE_PIPELINE_LABEL: &str = "outline_pipeline";
-
-// render pass constants
-pub(super) const FULLSCREEN_TRIANGLE_VERTEX_COUNT: u32 = 3;
 
 // render pass labels
 pub(super) const HULL_OUTLINE_PASS_LABEL: &str = "hull_outline_pass";

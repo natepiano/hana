@@ -36,12 +36,12 @@ use bevy_render::render_resource::TextureView;
 use super::camera::OutlineCamera;
 use super::constants::FLOOD_SHADER_HANDLE;
 use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
-use super::constants::FULLSCREEN_TRIANGLE_VERTEX_COUNT;
 use super::constants::JUMP_FLOOD_BIND_GROUP_LABEL;
 use super::constants::JUMP_FLOOD_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::JUMP_FLOOD_BIND_GROUP_SLOT;
 use super::constants::OUTLINE_JUMP_FLOOD_PASS_LABEL;
 use super::constants::OUTLINE_JUMP_FLOOD_PIPELINE_LABEL;
+use super::constants::TRIANGLE_VERTEX_COUNT;
 use super::extract::ExtractedOutlineUniforms;
 
 #[derive(ShaderType)]
@@ -236,6 +236,6 @@ impl<'w> JumpFloodPass<'w> {
             &bind_group,
             &[self.pipeline.lookup_offsets[size.to_usize()]],
         );
-        render_pass.draw(0..FULLSCREEN_TRIANGLE_VERTEX_COUNT, 0..1);
+        render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..1);
     }
 }
