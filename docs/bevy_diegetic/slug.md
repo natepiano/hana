@@ -279,6 +279,9 @@ structures, alpha-mode choices, shadow passes, or cache shapes.
 one text entity with Slug and another with the distance-field renderer in
 the same scene while still falling back to the global preference when no
 override is set.
+Panel text supports the same override on `LayoutTextStyle`, so a panel
+can mix `b.text(..., LayoutTextStyle::new(...).with_renderer(...))`
+entries without forcing the whole app to one renderer.
 
 Slug must replace the glyph silhouette source, not the public text
 behavior contract. The current `WorldText` and panel text feature set is

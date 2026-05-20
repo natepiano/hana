@@ -14,6 +14,7 @@ use super::FontFeatureFlags;
 use super::FontFeatures;
 use super::Unit;
 use super::constants::DEFAULT_FONT_SIZE;
+use crate::render::TextRenderer;
 
 /// Controls how the layout engine breaks text across lines.
 ///
@@ -232,6 +233,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     shadow_mode:    GlyphShadowMode,
     sidedness:      GlyphSidedness,
     loading_policy: GlyphLoadingPolicy,
+    renderer:       Option<TextRenderer>,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from global config.
     /// Only meaningful for [`ForStandalone`] — ignored by layout text.
@@ -262,6 +264,7 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.shadow_mode == other.shadow_mode
             && self.sidedness == other.sidedness
             && self.loading_policy == other.loading_policy
+            && self.renderer == other.renderer
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.world_scale == other.world_scale
@@ -411,6 +414,24 @@ impl<C: Send + Sync + 'static> TextProps<C> {
         self
     }
 
+    /// Returns the renderer override, if any.
+    #[must_use]
+    pub const fn renderer(&self) -> Option<TextRenderer> { self.renderer }
+
+    /// Sets the renderer override for this text.
+    #[must_use]
+    pub const fn with_renderer(mut self, renderer: TextRenderer) -> Self {
+        self.renderer = Some(renderer);
+        self
+    }
+
+    /// Clears the renderer override so the global renderer preference applies.
+    #[must_use]
+    pub const fn with_default_renderer(mut self) -> Self {
+        self.renderer = None;
+        self
+    }
+
     /// Returns the per-style alpha-mode override, if any.
     ///
     /// `None` means "inherit" — resolution falls through to panel-level
@@ -481,6 +502,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             shadow_mode: _,
             sidedness: _,
             loading_policy: _,
+            renderer: _,
             // Standalone-only — not relevant for layout shaping cache.
             unit: _,
             world_scale: _,
@@ -525,6 +547,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             shadow_mode: _,
             sidedness: _,
             loading_policy: _,
+            renderer: _,
             alpha_mode: _,
             context: _,
         } = self;
@@ -592,6 +615,7 @@ impl TextProps<ForLayout> {
             shadow_mode:    GlyphShadowMode::Text,
             sidedness:      GlyphSidedness::DoubleSided,
             loading_policy: GlyphLoadingPolicy::WhenReady,
+            renderer:       None,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
@@ -656,6 +680,7 @@ impl TextProps<ForLayout> {
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
             loading_policy: self.loading_policy,
+            renderer:       self.renderer,
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    None,
@@ -698,6 +723,7 @@ impl TextProps<ForStandalone> {
             shadow_mode:    GlyphShadowMode::Text,
             sidedness:      GlyphSidedness::DoubleSided,
             loading_policy: GlyphLoadingPolicy::WhenReady,
+            renderer:       None,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
@@ -801,6 +827,7 @@ impl TextProps<ForStandalone> {
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
             loading_policy: self.loading_policy,
+            renderer:       self.renderer,
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    self.world_scale,

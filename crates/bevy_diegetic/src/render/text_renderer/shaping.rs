@@ -113,7 +113,10 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        if text_backend.backend() == TextRenderer::Slug {
+        let selected_renderer = config
+            .renderer()
+            .unwrap_or_else(|| text_backend.backend());
+        if selected_renderer == TextRenderer::Slug {
             let (panel_slug_run, stats) = build_panel_slug_text(
                 world_text.text(),
                 &config,

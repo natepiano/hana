@@ -35,4 +35,7 @@ impl TextRendererPreference {
     /// Selected text renderer backend.
     #[must_use]
     pub const fn backend(self) -> TextRenderer { self.backend }
+
+    /// Sets the selected text renderer backend.
+    pub const fn set_backend(&mut self, backend: TextRenderer) { self.backend = backend; }
 }
