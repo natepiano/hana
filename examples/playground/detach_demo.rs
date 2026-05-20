@@ -43,10 +43,10 @@ struct DetachDemoAssets<'a> {
 }
 
 struct DetachDemoRow {
-    z:             f32,
-    sphere_color:  Color,
-    solver:        CatenarySolver,
-    detach_policy: DetachPolicy,
+    z:               f32,
+    sphere_color:    Color,
+    catenary_solver: CatenarySolver,
+    detach_policy:   DetachPolicy,
 }
 
 pub(crate) fn spawn_detach_demo(
@@ -71,24 +71,24 @@ pub(crate) fn spawn_detach_demo(
 
     let rows = [
         DetachDemoRow {
-            z:             DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_FREEZE_INDEX],
-            sphere_color:  DESPAWN_GREEN,
-            solver:        CatenarySolver::new().with_slack(SLACK_NORMAL),
-            detach_policy: DetachPolicy::Remain,
+            z:               DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_FREEZE_INDEX],
+            sphere_color:    DESPAWN_GREEN,
+            catenary_solver: CatenarySolver::new().with_slack(SLACK_NORMAL),
+            detach_policy:   DetachPolicy::Remain,
         },
         DetachDemoRow {
-            z:             DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_SLACK_BUMP_INDEX],
-            sphere_color:  DETACH_BUMP_BLUE,
-            solver:        CatenarySolver::new()
+            z:               DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_SLACK_BUMP_INDEX],
+            sphere_color:    DETACH_BUMP_BLUE,
+            catenary_solver: CatenarySolver::new()
                 .with_slack(SLACK_NORMAL)
                 .with_detach_slack_bump(DETACH_DEMO_SLACK_BUMP),
-            detach_policy: DetachPolicy::Remain,
+            detach_policy:   DetachPolicy::Remain,
         },
         DetachDemoRow {
-            z:             DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_DESPAWN_INDEX],
-            sphere_color:  DESPAWN_RED,
-            solver:        CatenarySolver::new().with_slack(SLACK_NORMAL),
-            detach_policy: DetachPolicy::Despawn,
+            z:               DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_DESPAWN_INDEX],
+            sphere_color:    DESPAWN_RED,
+            catenary_solver: CatenarySolver::new().with_slack(SLACK_NORMAL),
+            detach_policy:   DetachPolicy::Despawn,
         },
     ];
 
@@ -139,7 +139,7 @@ fn spawn_detach_demo_row(
     commands
         .spawn((
             Cable {
-                solver:     Solver::Catenary(row.solver),
+                solver:     Solver::Catenary(row.catenary_solver),
                 obstacles:  vec![],
                 resolution: DEFAULT_CABLE_RESOLUTION,
             },

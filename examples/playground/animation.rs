@@ -86,8 +86,8 @@ pub(crate) fn animate_tube_light(
     let cycle = LIGHT_TRAVEL_CYCLE_SECONDS;
     let phase = elapsed % cycle;
 
-    let light_phase = LightTravelPhase::from(phase);
-    let t = light_phase.sample_position(phase);
+    let light_travel_phase = LightTravelPhase::from(phase);
+    let t = light_travel_phase.sample_position(phase);
 
     for (tube, mut transform) in &mut lights {
         transform.translation = tube.start.lerp(tube.end, t);
