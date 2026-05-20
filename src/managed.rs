@@ -134,7 +134,7 @@ pub(crate) fn on_managed_window_added(
         .is_some_and(|s| s.contains_key(&WindowKey::Managed(unique_name.clone())));
 
     if !already_saved && let Ok(window) = windows.get(entity) {
-        let monitor = match window.position {
+        let monitor_info = match window.position {
             WindowPosition::At(physical_position) => *monitors.monitor_for_window(
                 physical_position,
                 window.physical_width(),
@@ -144,10 +144,10 @@ pub(crate) fn on_managed_window_added(
         };
         let logical_position = match window.position {
             WindowPosition::At(physical_position) => {
-                let logical_x = (f64::from(physical_position.x) / monitor.scale)
+                let logical_x = (f64::from(physical_position.x) / monitor_info.scale)
                     .round()
                     .to_i32();
-                let logical_y = (f64::from(physical_position.y) / monitor.scale)
+                let logical_y = (f64::from(physical_position.y) / monitor_info.scale)
                     .round()
                     .to_i32();
                 Some((logical_x, logical_y))
@@ -158,8 +158,8 @@ pub(crate) fn on_managed_window_added(
             logical_position,
             logical_width: window.width().to_u32(),
             logical_height: window.height().to_u32(),
-            scale: monitor.scale,
-            monitor: monitor.index,
+            scale: monitor_info.scale,
+            monitor: monitor_info.index,
             saved_window_mode: SavedWindowMode::Windowed,
             app_name: String::new(),
         };
@@ -335,7 +335,7 @@ pub(crate) fn on_managed_window_load(
 /// preventing the physical size from being doubled on high-DPI displays.
 fn restore_managed_window(
     entity: Entity,
-    saved_state: &WindowState,
+    saved_window_state: &WindowState,
     monitors: &Monitors,
     winit_info: &WinitInfo,
     commands: &mut Commands,
@@ -343,8 +343,8 @@ fn restore_managed_window(
     platform: Platform,
 ) {
     let resolved_monitor = restore::resolve_target_monitor_and_position(
-        saved_state.monitor,
-        saved_state.logical_position,
+        saved_window_state.monitor,
+        saved_window_state.logical_position,
         monitors,
     );
     if matches!(
@@ -353,7 +353,7 @@ fn restore_managed_window(
     ) {
         warn!(
             "[restore_managed_window] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
-            saved_state.monitor,
+            saved_window_state.monitor,
         );
     }
 
@@ -362,8 +362,8 @@ fn restore_managed_window(
     // The window is created on the focused window's monitor (the primary window's monitor)
     // without explicit positioning. Its starting scale matches the primary monitor, not the
     // target monitor.
-    let target = restore::compute_target_position(
-        saved_state,
+    let target_position = restore::compute_target_position(
+        saved_window_state,
         resolved_monitor.monitor_info,
         resolved_monitor.logical_position,
         physical_decoration,
@@ -373,22 +373,22 @@ fn restore_managed_window(
 
     debug!(
         "[restore_managed_window] saved_position={:?} clamped_position={:?} target_scale={} logical={}x{} physical={}x{} monitor={} monitor_position=({},{}) monitor_size=({},{})",
-        saved_state.logical_position,
-        target.physical_position,
-        target.target_scale,
-        target.logical_size.x,
-        target.logical_size.y,
-        target.physical_size.x,
-        target.physical_size.y,
-        target.monitor_index,
+        saved_window_state.logical_position,
+        target_position.physical_position,
+        target_position.target_scale,
+        target_position.logical_size.x,
+        target_position.logical_size.y,
+        target_position.physical_size.x,
+        target_position.physical_size.y,
+        target_position.monitor_index,
         resolved_monitor.monitor_info.physical_position.x,
         resolved_monitor.monitor_info.physical_position.y,
         resolved_monitor.monitor_info.physical_size.x,
         resolved_monitor.monitor_info.physical_size.y,
     );
 
-    let is_fullscreen = saved_state.saved_window_mode.is_fullscreen();
-    commands.entity(entity).insert(target);
+    let is_fullscreen = saved_window_state.saved_window_mode.is_fullscreen();
+    commands.entity(entity).insert(target_position);
 
     // Insert `X11FrameCompensated` for platforms that don't need compensation.
     // For fullscreen modes, skip frame compensation — frame extents are irrelevant

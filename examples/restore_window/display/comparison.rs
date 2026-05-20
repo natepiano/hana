@@ -106,13 +106,13 @@ impl RestoredValues {
 /// Build comparison spans (restored vs current) for a window and add them as `TextSpan` children.
 pub(super) fn build_comparison_spans(
     child_spawner: &mut ChildSpawnerCommands,
-    restored_state: Option<&CachedRestoredState>,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_restored_state: Option<&CachedRestoredState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     window: &Window,
-    monitor: &CurrentMonitor,
+    current_monitor: &CurrentMonitor,
     font: &TextFont,
 ) {
-    let effective_mode = monitor.effective_mode;
+    let effective_mode = current_monitor.effective_mode;
     let scale = window.resolution.scale_factor();
 
     let current_values = CurrentValues {
@@ -135,15 +135,15 @@ pub(super) fn build_comparison_spans(
             window.resolution.height().to_u32()
         ),
         scale:             format!("{scale}"),
-        monitor:           format!("{}", monitor.index),
+        monitor:           format!("{}", current_monitor.index),
         mode:              format!("{effective_mode:?}"),
     };
 
-    if let Some(cached_restored_state) = restored_state {
+    if let Some(cached_restored_state) = cached_restored_state {
         build_restored_spans(
             child_spawner,
             cached_restored_state,
-            mismatch_state,
+            cached_mismatch_state,
             &current_values,
             font,
         );
@@ -163,7 +163,7 @@ pub(super) fn build_comparison_spans(
 fn build_restored_spans(
     child_spawner: &mut ChildSpawnerCommands,
     cached_restored_state: &CachedRestoredState,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     current_values: &CurrentValues,
     font: &TextFont,
 ) {
@@ -171,19 +171,19 @@ fn build_restored_spans(
     let column_width = restored_values
         .comparison_width()
         .max(MIN_COMPARISON_COLUMN_WIDTH);
-    let layout = if mismatch_state.is_some() {
+    let comparison_layout = if cached_mismatch_state.is_some() {
         ComparisonLayout::WithMismatchColumns
     } else {
         ComparisonLayout::CurrentOnly
     };
 
-    add_restored_header(child_spawner, font, layout, column_width);
+    add_restored_header(child_spawner, font, comparison_layout, column_width);
     add_position_rows(
         child_spawner,
         font,
         &restored_values,
         current_values,
-        mismatch_state,
+        cached_mismatch_state,
         column_width,
     );
     add_size_rows(
@@ -191,14 +191,14 @@ fn build_restored_spans(
         font,
         &restored_values,
         current_values,
-        mismatch_state,
+        cached_mismatch_state,
         column_width,
     );
     add_scale_row(
         child_spawner,
         font,
         current_values,
-        mismatch_state,
+        cached_mismatch_state,
         column_width,
     );
     add_monitor_row(
@@ -206,7 +206,7 @@ fn build_restored_spans(
         font,
         &restored_values,
         current_values,
-        mismatch_state,
+        cached_mismatch_state,
         column_width,
     );
     add_mode_row(
@@ -214,7 +214,7 @@ fn build_restored_spans(
         font,
         &restored_values,
         current_values,
-        mismatch_state,
+        cached_mismatch_state,
         column_width,
     );
 }
@@ -222,10 +222,10 @@ fn build_restored_spans(
 fn add_restored_header(
     child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
-    layout: ComparisonLayout,
+    comparison_layout: ComparisonLayout,
     column_width: usize,
 ) {
-    let header = if matches!(layout, ComparisonLayout::WithMismatchColumns) {
+    let header = if matches!(comparison_layout, ComparisonLayout::WithMismatchColumns) {
         format!(
             "{:LABEL_WIDTH$}{:<column_width$}{:<column_width$}{:<column_width$}{}\n",
             "",
@@ -248,7 +248,7 @@ fn add_position_rows(
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     column_width: usize,
 ) {
     add_row(
@@ -258,12 +258,15 @@ fn add_position_rows(
             label:    POSITION_PHYSICAL_LABEL,
             restored: restored_values.physical_position.clone(),
             current:  current_values.physical_position.clone(),
-            mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
-                expected: mismatch.physical_position.expected.map_or_else(
-                    || NONE_TEXT.to_string(),
-                    |position| format!("({}, {})", position.x, position.y),
-                ),
-                actual:   mismatch.physical_position.actual.map_or_else(
+            mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
+                expected: cached_mismatch_state
+                    .physical_position
+                    .expected
+                    .map_or_else(
+                        || NONE_TEXT.to_string(),
+                        |position| format!("({}, {})", position.x, position.y),
+                    ),
+                actual:   cached_mismatch_state.physical_position.actual.map_or_else(
                     || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
@@ -278,12 +281,12 @@ fn add_position_rows(
             label:    POSITION_LOGICAL_LABEL,
             restored: restored_values.logical_position.clone(),
             current:  current_values.logical_position.clone(),
-            mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
-                expected: mismatch.logical_position.expected.map_or_else(
+            mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
+                expected: cached_mismatch_state.logical_position.expected.map_or_else(
                     || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
-                actual:   mismatch.logical_position.actual.map_or_else(
+                actual:   cached_mismatch_state.logical_position.actual.map_or_else(
                     || NONE_TEXT.to_string(),
                     |position| format!("({}, {})", position.x, position.y),
                 ),
@@ -298,7 +301,7 @@ fn add_size_rows(
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     column_width: usize,
 ) {
     add_row(
@@ -308,14 +311,16 @@ fn add_size_rows(
             label:    SIZE_PHYSICAL_LABEL,
             restored: restored_values.physical_size.clone(),
             current:  current_values.physical_size.clone(),
-            mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
+            mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    mismatch.physical_size.expected.x, mismatch.physical_size.expected.y
+                    cached_mismatch_state.physical_size.expected.x,
+                    cached_mismatch_state.physical_size.expected.y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    mismatch.physical_size.actual.x, mismatch.physical_size.actual.y
+                    cached_mismatch_state.physical_size.actual.x,
+                    cached_mismatch_state.physical_size.actual.y
                 ),
             }),
         },
@@ -328,14 +333,16 @@ fn add_size_rows(
             label:    SIZE_LOGICAL_LABEL,
             restored: restored_values.logical_size.clone(),
             current:  current_values.logical_size.clone(),
-            mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
+            mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    mismatch.logical_size.expected.x, mismatch.logical_size.expected.y
+                    cached_mismatch_state.logical_size.expected.x,
+                    cached_mismatch_state.logical_size.expected.y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    mismatch.logical_size.actual.x, mismatch.logical_size.actual.y
+                    cached_mismatch_state.logical_size.actual.x,
+                    cached_mismatch_state.logical_size.actual.y
                 ),
             }),
         },
@@ -347,10 +354,10 @@ fn add_scale_row(
     child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
     current_values: &CurrentValues,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     column_width: usize,
 ) {
-    if mismatch_state.is_none() {
+    if cached_mismatch_state.is_none() {
         add_span(
             child_spawner,
             font,
@@ -363,16 +370,16 @@ fn add_scale_row(
         return;
     }
 
-    let row = ComparisonRow {
+    let comparison_row = ComparisonRow {
         label:    SCALE_LABEL,
         restored: String::new(),
         current:  current_values.scale.clone(),
-        mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
-            expected: mismatch.scale.expected.to_string(),
-            actual:   mismatch.scale.actual.to_string(),
+        mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
+            expected: cached_mismatch_state.scale.expected.to_string(),
+            actual:   cached_mismatch_state.scale.actual.to_string(),
         }),
     };
-    add_row(child_spawner, font, &row, column_width);
+    add_row(child_spawner, font, &comparison_row, column_width);
 }
 
 fn add_monitor_row(
@@ -380,7 +387,7 @@ fn add_monitor_row(
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     column_width: usize,
 ) {
     add_row(
@@ -390,9 +397,9 @@ fn add_monitor_row(
             label:    MONITOR_LABEL,
             restored: restored_values.monitor.clone(),
             current:  current_values.monitor.clone(),
-            mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
-                expected: mismatch.monitor.expected.to_string(),
-                actual:   mismatch.monitor.actual.to_string(),
+            mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
+                expected: cached_mismatch_state.monitor.expected.to_string(),
+                actual:   cached_mismatch_state.monitor.actual.to_string(),
             }),
         },
         column_width,
@@ -404,7 +411,7 @@ fn add_mode_row(
     font: &TextFont,
     restored_values: &RestoredValues,
     current_values: &CurrentValues,
-    mismatch_state: Option<&CachedMismatchState>,
+    cached_mismatch_state: Option<&CachedMismatchState>,
     column_width: usize,
 ) {
     add_row(
@@ -414,9 +421,9 @@ fn add_mode_row(
             label:    MODE_LABEL,
             restored: restored_values.mode.clone(),
             current:  current_values.mode.clone(),
-            mismatch: mismatch_state.map(|mismatch| ComparisonMismatch {
-                expected: format!("{:?}", mismatch.mode.expected),
-                actual:   format!("{:?}", mismatch.mode.actual),
+            mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
+                expected: format!("{:?}", cached_mismatch_state.mode.expected),
+                actual:   format!("{:?}", cached_mismatch_state.mode.actual),
             }),
         },
         column_width,
@@ -493,13 +500,19 @@ fn build_current_only_spans(
 fn add_row(
     child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
-    row: &ComparisonRow<'_>,
+    comparison_row: &ComparisonRow<'_>,
     column_width: usize,
 ) {
-    if let Some(mismatch) = row.mismatch.as_ref() {
-        add_extended_comparison_row(child_spawner, font, row, mismatch, column_width);
+    if let Some(comparison_mismatch) = comparison_row.mismatch.as_ref() {
+        add_extended_comparison_row(
+            child_spawner,
+            font,
+            comparison_row,
+            comparison_mismatch,
+            column_width,
+        );
     } else {
-        add_standard_comparison_row(child_spawner, font, row, column_width);
+        add_standard_comparison_row(child_spawner, font, comparison_row, column_width);
     }
 }
 
@@ -507,10 +520,10 @@ fn add_row(
 fn add_standard_comparison_row(
     child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
-    row: &ComparisonRow<'_>,
+    comparison_row: &ComparisonRow<'_>,
     column_width: usize,
 ) {
-    let color = if row.restored == row.current {
+    let color = if comparison_row.restored == comparison_row.current {
         DEFAULT_COLOR
     } else {
         MISMATCH_COLOR
@@ -522,13 +535,18 @@ fn add_standard_comparison_row(
         font,
         &format!(
             "{label:<LABEL_WIDTH$}{restored:<column_width$}",
-            label = row.label,
-            restored = row.restored
+            label = comparison_row.label,
+            restored = comparison_row.restored
         ),
         DEFAULT_COLOR,
     );
     // Current value (colored)
-    add_span(child_spawner, font, &format!("{}\n", row.current), color);
+    add_span(
+        child_spawner,
+        font,
+        &format!("{}\n", comparison_row.current),
+        color,
+    );
 }
 
 /// Add a 5-column comparison row: label + restored + current + expected + actual.
@@ -536,16 +554,16 @@ fn add_standard_comparison_row(
 fn add_extended_comparison_row(
     child_spawner: &mut ChildSpawnerCommands,
     font: &TextFont,
-    row: &ComparisonRow<'_>,
-    mismatch: &ComparisonMismatch,
+    comparison_row: &ComparisonRow<'_>,
+    comparison_mismatch: &ComparisonMismatch,
     column_width: usize,
 ) {
-    let current_color = if row.restored == row.current {
+    let current_color = if comparison_row.restored == comparison_row.current {
         DEFAULT_COLOR
     } else {
         MISMATCH_COLOR
     };
-    let mismatch_color = if mismatch.expected == mismatch.actual {
+    let mismatch_color = if comparison_mismatch.expected == comparison_mismatch.actual {
         DEFAULT_COLOR
     } else {
         MISMATCH_WARN_COLOR
@@ -557,8 +575,8 @@ fn add_extended_comparison_row(
         font,
         &format!(
             "{label:<LABEL_WIDTH$}{restored:<column_width$}",
-            label = row.label,
-            restored = row.restored
+            label = comparison_row.label,
+            restored = comparison_row.restored
         ),
         DEFAULT_COLOR,
     );
@@ -566,21 +584,24 @@ fn add_extended_comparison_row(
     add_span(
         child_spawner,
         font,
-        &format!("{current:<column_width$}", current = row.current),
+        &format!("{current:<column_width$}", current = comparison_row.current),
         current_color,
     );
     // Expected value (always white)
     add_span(
         child_spawner,
         font,
-        &format!("{expected:<column_width$}", expected = mismatch.expected),
+        &format!(
+            "{expected:<column_width$}",
+            expected = comparison_mismatch.expected
+        ),
         DEFAULT_COLOR,
     );
     // Actual value (warning color if mismatch)
     add_span(
         child_spawner,
         font,
-        &format!("{}\n", mismatch.actual),
+        &format!("{}\n", comparison_mismatch.actual),
         mismatch_color,
     );
 }

@@ -52,6 +52,14 @@ pub(crate) const PRIMARY_MONITOR_MARKER: &str = " Primary Monitor -";
 pub(crate) const REFRESH_RATE_LABEL: &str = "Refresh Rate:";
 pub(crate) const RESTORED_COLUMN_TITLE: &str = "Restored";
 pub(crate) const SCALE_LABEL: &str = "Scale:";
+pub(crate) const SECONDARY_WINDOW_CONTROLS: &str = "\nControls:\n\
+                 [Enter] Exclusive Fullscreen\n\
+                 [B] Borderless Fullscreen\n\
+                 [W] Windowed\n\
+                 [Space] Spawn managed window\n\
+                 [P] Toggle persistence\n\
+                 [Ctrl+Shift+Backspace] Clear state and quit\n\
+                 [Q] Quit\n";
 pub(crate) const SECONDARY_WINDOW_NAME_LABEL: &str = "Window:";
 pub(crate) const SELECTED_VIDEO_MODE_MARKER: &str = ">";
 pub(crate) const SIZE_LOGICAL_LABEL: &str = "Size (logical):";

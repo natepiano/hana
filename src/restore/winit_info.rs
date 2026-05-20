@@ -188,7 +188,7 @@ pub(crate) fn load_target_position(
         );
     }
 
-    let target = target_position::compute_target_position(
+    let target_position = target_position::compute_target_position(
         &state,
         resolved_monitor.monitor_info,
         resolved_monitor.logical_position,
@@ -199,10 +199,10 @@ pub(crate) fn load_target_position(
 
     debug!(
         "[load_target_position] Starting monitor={starting_monitor_index} scale={starting_scale}, Target monitor={} scale={}, monitor_scale_strategy={:?}, position={:?}",
-        target.monitor_index,
-        target.target_scale,
-        target.monitor_scale_strategy,
-        target.physical_position
+        target_position.monitor_index,
+        target_position.target_scale,
+        target_position.monitor_scale_strategy,
+        target_position.physical_position
     );
 
     #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
@@ -220,7 +220,7 @@ pub(crate) fn load_target_position(
 
     let entity = *window_entity;
     let is_fullscreen = state.saved_window_mode.is_fullscreen();
-    commands.entity(entity).insert(target);
+    commands.entity(entity).insert(target_position);
 
     if is_fullscreen || !platform.needs_frame_compensation() {
         commands.entity(entity).insert(X11FrameCompensated);
@@ -241,15 +241,15 @@ pub(crate) fn move_to_target_monitor(
         return;
     }
 
-    let Ok(target) = targets.single() else {
+    let Ok(target_position) = targets.single() else {
         return;
     };
 
-    if !target.saved_window_mode.is_fullscreen() {
+    if !target_position.saved_window_mode.is_fullscreen() {
         return;
     }
 
-    if let Some(position) = target.physical_position {
+    if let Some(position) = target_position.physical_position {
         debug!("[move_to_target_monitor] X11 fullscreen: setting position={position:?}");
         window.position = WindowPosition::At(position);
     }

@@ -6,6 +6,7 @@ use bevy_window_manager::Monitors;
 
 use super::super::constants::DEFAULT_COLOR;
 use super::super::constants::FONT_SIZE;
+use super::super::constants::SECONDARY_WINDOW_CONTROLS;
 use super::super::constants::SECONDARY_WINDOW_NAME_LABEL;
 use super::super::constants::UNKNOWN_MANAGED_WINDOW_NAME;
 use super::super::constants::VIDEO_MODES_HEADER;
@@ -35,28 +36,26 @@ pub(crate) fn update_secondary_displays(
     mut commands: Commands,
 ) {
     for (display_entity, display) in &mut displays {
-        let Ok((window, current_monitor)) = windows.get(display.0) else {
+        let Ok((window, maybe_current_monitor)) = windows.get(display.0) else {
             continue;
         };
-        let monitor_info = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-            monitor_info:   *monitors.first(),
-            effective_mode: window.mode,
-        });
+        let current_monitor =
+            input::resolve_current_monitor(maybe_current_monitor, window, &monitors);
 
         let name = managed_query
             .get(display.0)
             .map_or(UNKNOWN_MANAGED_WINDOW_NAME, |managed_window| {
                 &managed_window.name
             });
-        let restored_state = restored_states.by_entity.get(&display.0);
-        let mismatch_state = mismatch_states.by_entity.get(&display.0);
+        let cached_restored_state = restored_states.by_entity.get(&display.0);
+        let cached_mismatch_state = mismatch_states.by_entity.get(&display.0);
 
         let (video_modes, refresh_rate) =
-            input::get_video_modes_for_monitor(&bevy_monitors, &monitor_info);
+            input::get_video_modes_for_monitor(&bevy_monitors, &current_monitor);
         let refresh_display = input::format_refresh_rate(window, refresh_rate);
         let active_mode_idx = input::find_active_video_mode_index(window, &video_modes);
-        input::sync_selected_to_active(window, &monitor_info, active_mode_idx, &mut selected);
-        let selected_idx = selected.get(monitor_info.index);
+        input::sync_selected_to_active(window, &current_monitor, active_mode_idx, &mut selected);
+        let selected_idx = selected.get(current_monitor.index);
         let video_modes_display =
             input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 
@@ -70,7 +69,7 @@ pub(crate) fn update_secondary_displays(
             .entity(display_entity)
             .with_children(|child_spawner| {
                 // Window name + monitor header
-                let monitor_row = input::format_monitor_row(&monitor_info, &refresh_display);
+                let monitor_row = input::format_monitor_row(&current_monitor, &refresh_display);
                 add_span(
                     child_spawner,
                     &font,
@@ -81,10 +80,10 @@ pub(crate) fn update_secondary_displays(
                 // Comparison table
                 build_comparison_spans(
                     child_spawner,
-                    restored_state,
-                    mismatch_state,
+                    cached_restored_state,
+                    cached_mismatch_state,
                     window,
-                    &monitor_info,
+                    &current_monitor,
                     &font,
                 );
 
@@ -100,14 +99,7 @@ pub(crate) fn update_secondary_displays(
                 add_span(
                     child_spawner,
                     &font,
-                    "\nControls:\n\
-                 [Enter] Exclusive Fullscreen\n\
-                 [B] Borderless Fullscreen\n\
-                 [W] Windowed\n\
-                 [Space] Spawn managed window\n\
-                 [P] Toggle persistence\n\
-                 [Ctrl+Shift+Backspace] Clear state and quit\n\
-                 [Q] Quit\n",
+                    SECONDARY_WINDOW_CONTROLS,
                     DEFAULT_COLOR,
                 );
             });

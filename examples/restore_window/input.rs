@@ -86,6 +86,17 @@ pub(crate) fn get_state_file_path() -> Option<PathBuf> {
     config_dir().map(|config_dir| config_dir.join(executable_name).join(STATE_FILE))
 }
 
+pub(crate) fn resolve_current_monitor(
+    current_monitor: Option<&CurrentMonitor>,
+    window: &Window,
+    monitors: &Monitors,
+) -> CurrentMonitor {
+    current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
+        monitor_info:   *monitors.first(),
+        effective_mode: window.mode,
+    })
+}
+
 pub(crate) fn handle_window_mode_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut windows: Query<(Entity, &mut Window, Option<&CurrentMonitor>)>,
@@ -95,36 +106,35 @@ pub(crate) fn handle_window_mode_input(
     restored_states: Res<RestoredStates>,
     mut commands: Commands,
 ) {
-    let Some((entity, mut window, current_monitor)) =
+    let Some((entity, mut window, maybe_current_monitor)) =
         windows.iter_mut().find(|(_, window, _)| window.focused)
     else {
         return;
     };
 
-    let monitor = current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor_info:   *monitors.first(),
-        effective_mode: window.mode,
-    });
+    let current_monitor = resolve_current_monitor(maybe_current_monitor, &window, &monitors);
 
     let is_fullscreen = !matches!(window.mode, WindowMode::Windowed);
     let restore_complete = restored_states.by_entity.contains_key(&entity);
-    let mode_desynced = window.mode != monitor.effective_mode;
+    let mode_desynced = window.mode != current_monitor.effective_mode;
     if restore_complete && !is_fullscreen && mode_desynced {
-        window.mode = monitor.effective_mode;
+        window.mode = current_monitor.effective_mode;
     }
 
     let video_modes: Vec<VideoMode> = bevy_monitors
         .iter()
-        .find(|(_, bevy_monitor)| bevy_monitor.physical_position == monitor.physical_position)
+        .find(|(_, bevy_monitor)| {
+            bevy_monitor.physical_position == current_monitor.physical_position
+        })
         .map(|(_, bevy_monitor)| bevy_monitor.video_modes.clone())
         .unwrap_or_default();
 
-    let current_idx = selected.get(monitor.index);
+    let current_idx = selected.get(current_monitor.index);
     if keys.just_pressed(KeyCode::ArrowUp) && current_idx > 0 {
-        selected.set(monitor.index, current_idx - 1);
+        selected.set(current_monitor.index, current_idx - 1);
     }
     if keys.just_pressed(KeyCode::ArrowDown) && current_idx < video_modes.len().saturating_sub(1) {
-        selected.set(monitor.index, current_idx + 1);
+        selected.set(current_monitor.index, current_idx + 1);
     }
 
     if keys.just_pressed(KeyCode::Enter) {
@@ -140,11 +150,13 @@ pub(crate) fn handle_window_mode_input(
 
 pub(crate) fn get_video_modes_for_monitor<'a>(
     bevy_monitors: &'a Query<(Entity, &Monitor)>,
-    monitor: &CurrentMonitor,
+    current_monitor: &CurrentMonitor,
 ) -> (Vec<&'a VideoMode>, Option<u32>) {
     bevy_monitors
         .iter()
-        .find(|(_, bevy_monitor)| bevy_monitor.physical_position == monitor.physical_position)
+        .find(|(_, bevy_monitor)| {
+            bevy_monitor.physical_position == current_monitor.physical_position
+        })
         .map(|(_, bevy_monitor)| {
             (
                 bevy_monitor.video_modes.iter().collect(),
@@ -183,7 +195,7 @@ pub(crate) fn find_active_video_mode_index(
 
 pub(crate) fn sync_selected_to_active(
     window: &Window,
-    monitor: &CurrentMonitor,
+    current_monitor: &CurrentMonitor,
     active_mode_idx: Option<usize>,
     selected: &mut SelectedVideoModes,
 ) {
@@ -192,7 +204,7 @@ pub(crate) fn sync_selected_to_active(
         if selected.last_sync != Some(current_mode)
             && let Some(active_idx) = active_mode_idx
         {
-            selected.set(monitor.index, active_idx);
+            selected.set(current_monitor.index, active_idx);
             selected.last_sync = Some(current_mode);
         }
     } else {
@@ -212,16 +224,19 @@ pub(crate) fn platform_suffix() -> &'static str {
 #[cfg(not(target_os = "linux"))]
 pub(crate) const fn platform_suffix() -> &'static str { "" }
 
-pub(crate) fn format_monitor_row(monitor: &CurrentMonitor, refresh_display: &str) -> String {
-    let primary_marker = if monitor.index == PRIMARY_MONITOR_INDEX {
+pub(crate) fn format_monitor_row(
+    current_monitor: &CurrentMonitor,
+    refresh_display: &str,
+) -> String {
+    let primary_marker = if current_monitor.index == PRIMARY_MONITOR_INDEX {
         PRIMARY_MONITOR_MARKER
     } else {
         NON_PRIMARY_MONITOR_MARKER
     };
     format!(
         "{MONITOR_LABEL} {}{primary_marker} {SCALE_LABEL} {} - {REFRESH_RATE_LABEL} {refresh_display}{}",
-        monitor.index,
-        monitor.scale,
+        current_monitor.index,
+        current_monitor.scale,
         platform_suffix()
     )
 }

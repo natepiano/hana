@@ -97,7 +97,7 @@ impl TargetPosition {
 /// Compute a `TargetPosition` from saved state and a resolved target monitor.
 #[must_use]
 pub(crate) fn compute_target_position(
-    saved_state: &WindowState,
+    saved_window_state: &WindowState,
     target_info: &MonitorInfo,
     logical_fallback_position: Option<(i32, i32)>,
     physical_decoration: UVec2,
@@ -108,8 +108,8 @@ pub(crate) fn compute_target_position(
 
     // Convert logical → physical using the target monitor's scale factor.
     // This is the single conversion point for size values.
-    let physical_width = (f64::from(saved_state.logical_width) * target_scale).to_u32();
-    let physical_height = (f64::from(saved_state.logical_height) * target_scale).to_u32();
+    let physical_width = (f64::from(saved_window_state.logical_width) * target_scale).to_u32();
+    let physical_height = (f64::from(saved_window_state.logical_height) * target_scale).to_u32();
 
     let physical_outer_width = physical_width + physical_decoration.x;
     let physical_outer_height = physical_height + physical_decoration.y;
@@ -131,13 +131,16 @@ pub(crate) fn compute_target_position(
         physical_position,
         logical_position: logical_fallback_position.map(|(x, y)| IVec2::new(x, y)),
         physical_size: UVec2::new(physical_width, physical_height),
-        logical_size: UVec2::new(saved_state.logical_width, saved_state.logical_height),
+        logical_size: UVec2::new(
+            saved_window_state.logical_width,
+            saved_window_state.logical_height,
+        ),
         target_scale,
         starting_scale,
         monitor_scale_strategy: platform.scale_strategy(starting_scale, target_scale),
-        saved_window_mode: saved_state.saved_window_mode.clone(),
+        saved_window_mode: saved_window_state.saved_window_mode.clone(),
         monitor_index: target_info.index,
-        fullscreen_restore_state: saved_state
+        fullscreen_restore_state: saved_window_state
             .saved_window_mode
             .is_fullscreen()
             .then_some(platform.fullscreen_restore_state()),

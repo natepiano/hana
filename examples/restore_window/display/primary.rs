@@ -43,16 +43,17 @@ pub(crate) fn update_primary_display(
     mut commands: Commands,
 ) {
     let display_entity = *primary_display;
-    let (window_entity, window, monitor) = *window_query;
+    let (window_entity, window, current_monitor) = *window_query;
 
-    let restored_state = restored_states.by_entity.get(&window_entity);
-    let mismatch_state = mismatch_states.by_entity.get(&window_entity);
+    let cached_restored_state = restored_states.by_entity.get(&window_entity);
+    let cached_mismatch_state = mismatch_states.by_entity.get(&window_entity);
 
-    let (video_modes, refresh_rate) = input::get_video_modes_for_monitor(&bevy_monitors, monitor);
+    let (video_modes, refresh_rate) =
+        input::get_video_modes_for_monitor(&bevy_monitors, current_monitor);
     let refresh_display = input::format_refresh_rate(window, refresh_rate);
     let active_mode_idx = input::find_active_video_mode_index(window, &video_modes);
-    input::sync_selected_to_active(window, monitor, active_mode_idx, &mut selected);
-    let selected_idx = selected.get(monitor.index);
+    input::sync_selected_to_active(window, current_monitor, active_mode_idx, &mut selected);
+    let selected_idx = selected.get(current_monitor.index);
     let video_modes_display =
         input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 
@@ -66,7 +67,7 @@ pub(crate) fn update_primary_display(
         .entity(display_entity)
         .with_children(|child_spawner| {
             // Monitor header
-            let monitor_row = input::format_monitor_row(monitor, &refresh_display);
+            let monitor_row = input::format_monitor_row(current_monitor, &refresh_display);
             add_span(
                 child_spawner,
                 &font,
@@ -77,10 +78,10 @@ pub(crate) fn update_primary_display(
             // Comparison table
             build_comparison_spans(
                 child_spawner,
-                restored_state,
-                mismatch_state,
+                cached_restored_state,
+                cached_mismatch_state,
                 window,
-                monitor,
+                current_monitor,
                 &font,
             );
 
@@ -112,7 +113,7 @@ pub(crate) fn update_primary_display(
             // Managed windows list
             let mut managed_lines = Vec::new();
             for (managed_window, managed, current_monitor) in &managed_query {
-                let monitor = current_monitor.map_or_else(
+                let monitor_info = current_monitor.map_or_else(
                     || *monitors.first(),
                     |current_monitor| current_monitor.monitor_info,
                 );
@@ -130,7 +131,7 @@ pub(crate) fn update_primary_display(
                     managed_window.resolution.width().to_u32(),
                     managed_window.resolution.height().to_u32(),
                     managed_window.resolution.scale_factor(),
-                    monitor.index,
+                    monitor_info.index,
                 ));
             }
             add_span(child_spawner, &font, MANAGED_WINDOWS_HEADER, DEFAULT_COLOR);

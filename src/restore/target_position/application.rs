@@ -21,35 +21,37 @@ use crate::restore::settle_state::SettleState;
 use crate::restore::winit_info::X11FrameCompensated;
 
 /// Apply the initial window move to the target monitor.
-fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
-    if target.saved_window_mode.is_fullscreen() {
-        if let Some(physical_position) = target.physical_position {
+fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
+    if target_position.saved_window_mode.is_fullscreen() {
+        if let Some(physical_position) = target_position.physical_position {
             debug!(
                 "[apply_initial_move] Moving to target position {:?} for fullscreen mode {:?}",
-                physical_position, target.saved_window_mode
+                physical_position, target_position.saved_window_mode
             );
             window.position = WindowPosition::At(physical_position);
         } else {
             debug!(
                 "[apply_initial_move] No saved position, fullscreen mode {:?} targets monitor {} via WindowMode",
-                target.saved_window_mode, target.monitor_index
+                target_position.saved_window_mode, target_position.monitor_index
             );
         }
         return;
     }
 
-    let Some(physical_position) = target.physical_position else {
+    let Some(physical_position) = target_position.physical_position else {
         debug!(
             "[apply_initial_move] No saved position, centering on monitor {}",
-            target.monitor_index
+            target_position.monitor_index
         );
-        window.position = WindowPosition::Centered(MonitorSelection::Index(target.monitor_index));
+        window.position =
+            WindowPosition::Centered(MonitorSelection::Index(target_position.monitor_index));
         return;
     };
 
-    let (physical_move_position, physical_move_size) = match target.monitor_scale_strategy {
+    let (physical_move_position, physical_move_size) = match target_position.monitor_scale_strategy
+    {
         MonitorScaleStrategy::HigherToLower(_) => {
-            let ratio = target.ratio();
+            let ratio = target_position.ratio();
             let physical_compensated_x = (f64::from(physical_position.x) * ratio).to_i32();
             let physical_compensated_y = (f64::from(physical_position.y) * ratio).to_i32();
             debug!(
@@ -57,21 +59,21 @@ fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
             );
             (
                 IVec2::new(physical_compensated_x, physical_compensated_y),
-                target.physical_size,
+                target_position.physical_size,
             )
         },
         MonitorScaleStrategy::CompensateSizeOnly(_) => {
-            let compensated_size = target.compensated_size();
+            let compensated_size = target_position.compensated_size();
             debug!(
                 "[apply_initial_move] CompensateSizeOnly: position={:?} compensated_size={}x{} (ratio={})",
                 physical_position,
                 compensated_size.x,
                 compensated_size.y,
-                target.ratio()
+                target_position.ratio()
             );
             (physical_position, compensated_size)
         },
-        _ => (physical_position, target.physical_size),
+        _ => (physical_position, target_position.physical_size),
     };
 
     debug!(
@@ -97,37 +99,40 @@ fn apply_initial_move(target: &TargetPosition, window: &mut Window) {
 /// The two-phase scale-change dance is skipped because macOS does not fire
 /// `WindowScaleFactorChanged` for windows that are still hidden; waiting for it would
 /// deadlock. Settle starts immediately and verifies the resulting state.
-fn begin_cross_dpi_restore(target: &mut TargetPosition, window: &mut Window) {
-    if target.physical_position.is_none() {
+fn begin_cross_dpi_restore(target_position: &mut TargetPosition, window: &mut Window) {
+    if target_position.physical_position.is_none() {
         // Size at `starting_scale`: `set_physical_resolution` is interpreted at the
         // window's current scale factor, which is `starting_scale` until the move
         // completes. Storing logical = `starting_size / starting_scale = logical_size`
         // means the post-move physical size resolves to `logical_size * target_scale`,
         // matching `target.physical_size` for settle.
-        let physical_width = (f64::from(target.logical_size.x) * target.starting_scale).to_u32();
-        let physical_height = (f64::from(target.logical_size.y) * target.starting_scale).to_u32();
+        let physical_width =
+            (f64::from(target_position.logical_size.x) * target_position.starting_scale).to_u32();
+        let physical_height =
+            (f64::from(target_position.logical_size.y) * target_position.starting_scale).to_u32();
         debug!(
             "[begin_cross_dpi_restore] no saved position, centering on monitor {} at \
              starting_scale={} (physical {}x{} → logical {}x{} after move to target_scale={})",
-            target.monitor_index,
-            target.starting_scale,
+            target_position.monitor_index,
+            target_position.starting_scale,
             physical_width,
             physical_height,
-            target.logical_size.x,
-            target.logical_size.y,
-            target.target_scale
+            target_position.logical_size.x,
+            target_position.logical_size.y,
+            target_position.target_scale
         );
-        window.position = WindowPosition::Centered(MonitorSelection::Index(target.monitor_index));
+        window.position =
+            WindowPosition::Centered(MonitorSelection::Index(target_position.monitor_index));
         window
             .resolution
             .set_physical_resolution(physical_width, physical_height);
         window.visible = true;
-        target.settle_state = Some(SettleState::new());
+        target_position.settle_state = Some(SettleState::new());
         return;
     }
 
-    apply_initial_move(target, window);
-    target.monitor_scale_strategy = match target.monitor_scale_strategy {
+    apply_initial_move(target_position, window);
+    target_position.monitor_scale_strategy = match target_position.monitor_scale_strategy {
         MonitorScaleStrategy::HigherToLower(_) => {
             MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange)
         },
@@ -144,8 +149,8 @@ pub(crate) fn restore_windows(
 ) {
     let scale_changed = scale_changed_messages.read().last().is_some();
 
-    for (entity, mut target, mut window) in &mut windows {
-        if target.settle_state.is_some() {
+    for (entity, mut target_position, mut window) in &mut windows {
+        if target_position.settle_state.is_some() {
             continue;
         }
 
@@ -158,67 +163,70 @@ pub(crate) fn restore_windows(
 
         if platform.needs_managed_scale_fixup() {
             let actual_scale = f64::from(window.resolution.base_scale_factor());
-            if (actual_scale - target.starting_scale).abs() > SCALE_FACTOR_EPSILON {
-                let old_monitor_scale_strategy = target.monitor_scale_strategy;
-                target.starting_scale = actual_scale;
-                target.monitor_scale_strategy =
-                    platform.scale_strategy(actual_scale, target.target_scale);
+            if (actual_scale - target_position.starting_scale).abs() > SCALE_FACTOR_EPSILON {
+                let old_monitor_scale_strategy = target_position.monitor_scale_strategy;
+                target_position.starting_scale = actual_scale;
+                target_position.monitor_scale_strategy =
+                    platform.scale_strategy(actual_scale, target_position.target_scale);
                 debug!(
                     "[restore_windows] Corrected starting_scale for entity {entity:?}: \
                      monitor_scale_strategy: {old_monitor_scale_strategy:?} -> {:?} \
                      (actual_scale={actual_scale:.2})",
-                    target.monitor_scale_strategy
+                    target_position.monitor_scale_strategy
                 );
             }
         }
 
         if matches!(
-            target.monitor_scale_strategy,
+            target_position.monitor_scale_strategy,
             MonitorScaleStrategy::HigherToLower(WindowRestoreState::NeedInitialMove)
                 | MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::NeedInitialMove)
         ) {
-            begin_cross_dpi_restore(&mut target, &mut window);
+            begin_cross_dpi_restore(&mut target_position, &mut window);
             continue;
         }
 
-        match target.monitor_scale_strategy {
+        match target_position.monitor_scale_strategy {
             MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange)
                 if scale_changed =>
             {
                 debug!(
                     "[Restore] ScaleChanged received, transitioning to WindowRestoreState::ApplySize"
                 );
-                target.monitor_scale_strategy =
+                target_position.monitor_scale_strategy =
                     MonitorScaleStrategy::HigherToLower(WindowRestoreState::ApplySize);
             },
             MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange) => {
                 debug!(
                     "[Restore] CompensateSizeOnly: transitioning to ApplySize (scale_changed={scale_changed})"
                 );
-                target.monitor_scale_strategy =
+                target_position.monitor_scale_strategy =
                     MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize);
             },
             _ => {},
         }
 
-        if let Some(fullscreen_restore_state) = target.fullscreen_restore_state {
+        if let Some(fullscreen_restore_state) = target_position.fullscreen_restore_state {
             match fullscreen_restore_state {
                 FullscreenRestoreState::MoveToMonitor => {
-                    if let Some(position) = target.physical_position {
+                    if let Some(position) = target_position.physical_position {
                         debug!("[restore_windows] Fullscreen MoveToMonitor: position={position:?}");
                         window.position = WindowPosition::At(position);
                     }
-                    target.fullscreen_restore_state = Some(FullscreenRestoreState::WaitForMove);
+                    target_position.fullscreen_restore_state =
+                        Some(FullscreenRestoreState::WaitForMove);
                     continue;
                 },
                 FullscreenRestoreState::WaitForMove => {
                     debug!("[restore_windows] Fullscreen WaitForMove: waiting for compositor");
-                    target.fullscreen_restore_state = Some(FullscreenRestoreState::ApplyMode);
+                    target_position.fullscreen_restore_state =
+                        Some(FullscreenRestoreState::ApplyMode);
                     continue;
                 },
                 FullscreenRestoreState::WaitForSurface => {
                     debug!("[restore_windows] Fullscreen WaitForSurface: waiting for GPU surface");
-                    target.fullscreen_restore_state = Some(FullscreenRestoreState::ApplyMode);
+                    target_position.fullscreen_restore_state =
+                        Some(FullscreenRestoreState::ApplyMode);
                     continue;
                 },
                 FullscreenRestoreState::ApplyMode => {},
@@ -226,14 +234,14 @@ pub(crate) fn restore_windows(
         }
 
         if matches!(
-            try_apply_restore(&target, &mut window, *platform),
+            try_apply_restore(&target_position, &mut window, *platform),
             RestoreStatus::Complete
-        ) && target.settle_state.is_none()
+        ) && target_position.settle_state.is_none()
         {
             info!(
                 "[restore_windows] Restore applied, starting settle (200ms stability / 1s timeout)"
             );
-            target.settle_state = Some(SettleState::new());
+            target_position.settle_state = Some(SettleState::new());
         }
     }
 }
@@ -283,23 +291,31 @@ fn apply_window_geometry(
         .set_physical_resolution(physical_size.x, physical_size.y);
 }
 
-fn apply_fullscreen_restore(target: &TargetPosition, window: &mut Window, platform: Platform) {
-    let monitor_index = target.monitor_index;
+fn apply_fullscreen_restore(
+    target_position: &TargetPosition,
+    window: &mut Window,
+    platform: Platform,
+) {
+    let monitor_index = target_position.monitor_index;
 
     let window_mode = if platform.exclusive_fullscreen_fallback()
-        && matches!(target.saved_window_mode, SavedWindowMode::Fullscreen { .. })
-    {
+        && matches!(
+            target_position.saved_window_mode,
+            SavedWindowMode::Fullscreen { .. }
+        ) {
         warn!(
             "Exclusive fullscreen is not supported on Wayland, restoring as BorderlessFullscreen"
         );
         WindowMode::BorderlessFullscreen(MonitorSelection::Index(monitor_index))
     } else {
-        target.saved_window_mode.to_window_mode(monitor_index)
+        target_position
+            .saved_window_mode
+            .to_window_mode(monitor_index)
     };
 
     debug!(
         "[Restore] Applying fullscreen mode {:?} on monitor {} -> WindowMode::{:?}",
-        target.saved_window_mode, monitor_index, window_mode
+        target_position.saved_window_mode, monitor_index, window_mode
     );
     debug!(
         "[Restore] Current window state: position={:?} mode={:?}",
@@ -310,49 +326,52 @@ fn apply_fullscreen_restore(target: &TargetPosition, window: &mut Window, platfo
 }
 
 fn try_apply_restore(
-    target: &TargetPosition,
+    target_position: &TargetPosition,
     window: &mut Window,
     platform: Platform,
 ) -> RestoreStatus {
-    if target.saved_window_mode.is_fullscreen() {
+    if target_position.saved_window_mode.is_fullscreen() {
         debug!(
             "[try_apply_restore] fullscreen: mode={:?} target_monitor={} current_physical={}x{} current_mode={:?} current_position={:?}",
-            target.saved_window_mode,
-            target.monitor_index,
+            target_position.saved_window_mode,
+            target_position.monitor_index,
             window.physical_width(),
             window.physical_height(),
             window.mode,
             window.position,
         );
-        apply_fullscreen_restore(target, window, platform);
+        apply_fullscreen_restore(target_position, window, platform);
         window.visible = true;
         return RestoreStatus::Complete;
     }
 
     debug!(
         "[Restore] target_position={:?} target_scale={} monitor_scale_strategy={:?}",
-        target.physical_position, target.target_scale, target.monitor_scale_strategy
+        target_position.physical_position,
+        target_position.target_scale,
+        target_position.monitor_scale_strategy
     );
 
-    match target.monitor_scale_strategy {
+    match target_position.monitor_scale_strategy {
         MonitorScaleStrategy::ApplyUnchanged => {
             apply_window_geometry(
                 window,
-                target.physical_position,
-                target.physical_size,
+                target_position.physical_position,
+                target_position.physical_size,
                 RESTORE_STRATEGY_APPLY_UNCHANGED,
                 None,
-                target.monitor_index,
+                target_position.monitor_index,
             );
         },
         MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize) => {
             debug!(
                 "[try_apply_restore] size={}x{} ONLY (CompensateSizeOnly::ApplySize, position already set)",
-                target.physical_size.x, target.physical_size.y
+                target_position.physical_size.x, target_position.physical_size.y
             );
-            window
-                .resolution
-                .set_physical_resolution(target.physical_size.x, target.physical_size.y);
+            window.resolution.set_physical_resolution(
+                target_position.physical_size.x,
+                target_position.physical_size.y,
+            );
         },
         MonitorScaleStrategy::CompensateSizeOnly(
             WindowRestoreState::NeedInitialMove | WindowRestoreState::WaitingForScaleChange,
@@ -365,21 +384,22 @@ fn try_apply_restore(
         MonitorScaleStrategy::LowerToHigher => {
             apply_window_geometry(
                 window,
-                target.compensated_position(),
-                target.compensated_size(),
+                target_position.compensated_position(),
+                target_position.compensated_size(),
                 RESTORE_STRATEGY_LOWER_TO_HIGHER,
-                Some(target.ratio()),
-                target.monitor_index,
+                Some(target_position.ratio()),
+                target_position.monitor_index,
             );
         },
         MonitorScaleStrategy::HigherToLower(WindowRestoreState::ApplySize) => {
             debug!(
                 "[try_apply_restore] size={}x{} ONLY (HigherToLower::ApplySize, position already set)",
-                target.physical_size.x, target.physical_size.y
+                target_position.physical_size.x, target_position.physical_size.y
             );
-            window
-                .resolution
-                .set_physical_resolution(target.physical_size.x, target.physical_size.y);
+            window.resolution.set_physical_resolution(
+                target_position.physical_size.x,
+                target_position.physical_size.y,
+            );
         },
         MonitorScaleStrategy::HigherToLower(
             WindowRestoreState::NeedInitialMove | WindowRestoreState::WaitingForScaleChange,

@@ -94,15 +94,15 @@ fn build_actual_snapshot(
 /// frame vs client coords differ. The physical size can also differ when
 /// scales differ between backends (e.g. Wayland scale 1 vs `XWayland` scale 2).
 fn check_settle_matches(
-    target: &TargetPosition,
+    target_position: &TargetPosition,
     target_physical_position: Option<IVec2>,
     target_physical_size: UVec2,
     target_mode: WindowMode,
     target_monitor: usize,
-    actual: &SettleSnapshot,
+    settle_snapshot: &SettleSnapshot,
     platform: Platform,
 ) -> SettleComparison {
-    let is_fullscreen = target.saved_window_mode.is_fullscreen();
+    let is_fullscreen = target_position.saved_window_mode.is_fullscreen();
     // Skip position comparison when:
     // - fullscreen (window fills monitor; saved position is irrelevant)
     // - no saved position (window was anchored via `WindowPosition::Centered`; the resulting `At`
@@ -111,10 +111,11 @@ fn check_settle_matches(
     let skip_position = is_fullscreen
         || target_physical_position.is_none()
         || !platform.position_reliable_for_settle();
-    let position_matches = skip_position || target_physical_position == actual.physical_position;
-    let size_match = is_fullscreen || target_physical_size == actual.physical_size;
-    let mode_match = platform.modes_match(target_mode, actual.window_mode);
-    let monitor_match = target_monitor == actual.monitor;
+    let position_matches =
+        skip_position || target_physical_position == settle_snapshot.physical_position;
+    let size_match = is_fullscreen || target_physical_size == settle_snapshot.physical_size;
+    let mode_match = platform.modes_match(target_mode, settle_snapshot.window_mode);
+    let monitor_match = target_monitor == settle_snapshot.monitor;
     SettleComparison {
         position: position_matches.into(),
         size:     size_match.into(),
@@ -169,12 +170,12 @@ enum ChangeHandling {
 /// stability timer if so.
 fn detect_settle_change(
     settle: &mut SettleState,
-    snapshot: SettleSnapshot,
+    settle_snapshot: SettleSnapshot,
     window_key: &WindowKey,
     total_elapsed_ms: f32,
     timeout_state: TimeoutState,
 ) -> ChangeHandling {
-    let changed = settle.last_snapshot.as_ref() != Some(&snapshot);
+    let changed = settle.last_snapshot.as_ref() != Some(&settle_snapshot);
     if changed {
         if settle.last_snapshot.is_some() {
             debug!(
@@ -183,7 +184,7 @@ fn detect_settle_change(
             );
         }
         settle.stability_timer.reset();
-        settle.last_snapshot = Some(snapshot);
+        settle.last_snapshot = Some(settle_snapshot);
         match timeout_state {
             TimeoutState::TimedOut => ChangeHandling::Continue,
             TimeoutState::Active => ChangeHandling::Skip,
@@ -234,28 +235,28 @@ pub(crate) fn check_restore_settling(
     managed_query: Query<&ManagedWindow>,
     platform: Res<Platform>,
 ) {
-    for (entity, mut target, window, current_monitor) in &mut windows {
-        let target_mode = target
+    for (entity, mut target_position, window, current_monitor) in &mut windows {
+        let target_mode = target_position
             .saved_window_mode
-            .to_window_mode(target.monitor_index);
-        let target_physical_size = target.physical_size;
-        let target_logical_size = target.logical_size;
-        let target_monitor = target.monitor_index;
-        let expected_scale = target.target_scale;
+            .to_window_mode(target_position.monitor_index);
+        let target_physical_size = target_position.physical_size;
+        let target_logical_size = target_position.logical_size;
+        let target_monitor = target_position.monitor_index;
+        let expected_scale = target_position.target_scale;
 
         let target_physical_position = platform
             .position_available()
-            .then_some(target.physical_position)
+            .then_some(target_position.physical_position)
             .flatten();
         let target_logical_position = platform
             .position_available()
-            .then_some(target.logical_position)
+            .then_some(target_position.logical_position)
             .flatten();
         let window_key = resolve_window_key(entity, &primary_query, &managed_query);
         let (current_snapshot, actual_scale) =
             build_actual_snapshot(window, current_monitor, *platform);
 
-        let Some(settle) = target.settle_state.as_mut() else {
+        let Some(settle) = target_position.settle_state.as_mut() else {
             continue;
         };
         settle.total_timeout.tick(time.delta());
@@ -283,7 +284,7 @@ pub(crate) fn check_restore_settling(
         }
         let stable = settle.stability_timer.is_finished();
         let comparison = check_settle_matches(
-            &target,
+            &target_position,
             target_physical_position,
             target_physical_size,
             target_mode,
@@ -340,14 +341,18 @@ pub(crate) fn check_restore_settling(
 
 /// Bundled actual values for settle mismatch reporting.
 struct SettleActual {
-    snapshot:     SettleSnapshot,
-    scale:        f64,
-    logical_size: UVec2,
+    settle_snapshot: SettleSnapshot,
+    scale:           f64,
+    logical_size:    UVec2,
 }
 
-fn build_settle_actual(window: &Window, snapshot: SettleSnapshot, scale: f64) -> SettleActual {
+fn build_settle_actual(
+    window: &Window,
+    settle_snapshot: SettleSnapshot,
+    scale: f64,
+) -> SettleActual {
     SettleActual {
-        snapshot,
+        settle_snapshot,
         scale,
         logical_size: UVec2::new(
             window.resolution.width().to_u32(),
@@ -402,7 +407,7 @@ fn emit_settle_mismatch(
     entity: Entity,
     window_key: WindowKey,
     target: &SettleTarget,
-    actual: &SettleActual,
+    settle_actual: &SettleActual,
     total_elapsed_ms: f32,
 ) {
     warn!(
@@ -414,41 +419,48 @@ fn emit_settle_mismatch(
          monitor: {} vs {}, \
          scale: {} vs {}",
         target.physical_position,
-        actual.snapshot.physical_position,
+        settle_actual.settle_snapshot.physical_position,
         target.physical_size,
-        actual.snapshot.physical_size,
+        settle_actual.settle_snapshot.physical_size,
         target.window_mode,
-        actual.snapshot.window_mode,
+        settle_actual.settle_snapshot.window_mode,
         target.monitor,
-        actual.snapshot.monitor,
+        settle_actual.settle_snapshot.monitor,
         target.scale,
-        actual.scale,
+        settle_actual.scale,
     );
-    let actual_logical_position = actual.snapshot.physical_position.map(|position| {
-        IVec2::new(
-            (f64::from(position.x) / actual.scale).round().to_i32(),
-            (f64::from(position.y) / actual.scale).round().to_i32(),
-        )
-    });
+    let actual_logical_position = settle_actual
+        .settle_snapshot
+        .physical_position
+        .map(|position| {
+            IVec2::new(
+                (f64::from(position.x) / settle_actual.scale)
+                    .round()
+                    .to_i32(),
+                (f64::from(position.y) / settle_actual.scale)
+                    .round()
+                    .to_i32(),
+            )
+        });
     commands
         .entity(entity)
         .trigger(|entity| WindowRestoreMismatch {
             entity,
             window_key,
             expected_physical_position: target.physical_position,
-            actual_physical_position: actual.snapshot.physical_position,
+            actual_physical_position: settle_actual.settle_snapshot.physical_position,
             expected_logical_position: target.logical_position,
             actual_logical_position,
             expected_physical_size: target.physical_size,
-            actual_physical_size: actual.snapshot.physical_size,
+            actual_physical_size: settle_actual.settle_snapshot.physical_size,
             expected_logical_size: target.logical_size,
-            actual_logical_size: actual.logical_size,
+            actual_logical_size: settle_actual.logical_size,
             expected_mode: target.window_mode,
-            actual_mode: actual.snapshot.window_mode,
+            actual_mode: settle_actual.settle_snapshot.window_mode,
             expected_monitor: target.monitor,
-            actual_monitor: actual.snapshot.monitor,
+            actual_monitor: settle_actual.settle_snapshot.monitor,
             expected_scale: target.scale,
-            actual_scale: actual.scale,
+            actual_scale: settle_actual.scale,
         })
         .remove::<TargetPosition>()
         .remove::<X11FrameCompensated>();
