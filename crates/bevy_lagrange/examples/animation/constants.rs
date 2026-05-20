@@ -23,6 +23,10 @@ pub(super) const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
 
 // instructions
 pub(super) const INSTRUCTIONS_FONT_SIZE: f32 = 18.0;
+pub(super) const INSTRUCTIONS_TEXT: &str = "M - Toggle manual orbit animation\n\
+             Space - PlayAnimation (5-step sequence)\n\
+             A - AnimateToFit (yaw=45 pitch=30)\n\
+             R - Reset camera";
 
 // play animation
 #[derive(Clone, Copy)]

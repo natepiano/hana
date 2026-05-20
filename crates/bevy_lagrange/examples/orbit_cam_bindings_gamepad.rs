@@ -17,6 +17,11 @@ use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamHeldBinding;
 use bevy_lagrange::OrbitCamInputBinding;
 
+const ACTIVE_GAMEPAD_STATUS: &str = "Gamepad: active policy uses any connected controller";
+const DISCONNECTED_GAMEPAD_STATUS: &str = "Gamepad: none detected";
+const STATUS_TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 1.0);
+const STATUS_TEXT_INSET_PIXELS: f32 = 12.0;
+
 #[derive(Component)]
 struct GamepadStatus;
 
@@ -43,12 +48,12 @@ fn gamepad_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
 
 fn spawn_status(mut commands: Commands) {
     commands.spawn((
-        Text::new("Gamepad: none detected"),
-        TextColor(Color::srgb(0.9, 0.9, 1.0)),
+        Text::new(DISCONNECTED_GAMEPAD_STATUS),
+        TextColor(STATUS_TEXT_COLOR),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(12.0),
-            left: Val::Px(12.0),
+            top: Val::Px(STATUS_TEXT_INSET_PIXELS),
+            left: Val::Px(STATUS_TEXT_INSET_PIXELS),
             ..default()
         },
         GamepadStatus,
@@ -60,9 +65,9 @@ fn update_status(
     mut labels: Query<&mut Text, With<GamepadStatus>>,
 ) {
     let status = if gamepads.is_empty() {
-        "Gamepad: none detected"
+        DISCONNECTED_GAMEPAD_STATUS
     } else {
-        "Gamepad: active policy uses any connected controller"
+        ACTIVE_GAMEPAD_STATUS
     };
     for mut label in &mut labels {
         **label = status.into();

@@ -11,6 +11,10 @@ use fairy_dust::TitleBar;
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_SIZE: f32 = 1.0;
 const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + 0.2, 0.0);
+const DESCRIPTION_CAMERA_DRIVE_LINE: &str = "The `home_camera` system, reads the keypress and mutates `target_focus`, `target_yaw`, `target_pitch`, and `target_radius` directly on the `OrbitCam`.";
+const DESCRIPTION_CAMERA_LERP_LINE: &str = "`OrbitCam` then lerps to the home destination.";
+const DESCRIPTION_HEADING: &str = "PROGRAMMATIC ORBITCAM CONTROL";
+const DESCRIPTION_HOME_CONTROL_LINE: &str = "Press H to home the camera";
 
 const GROUND_SIZE: f32 = 8.0;
 
@@ -116,11 +120,11 @@ const fn configure_camera(camera: &mut OrbitCam) {
 }
 
 fn description_panel() -> DescriptionPanel {
-    DescriptionPanel::new("PROGRAMMATIC ORBITCAM CONTROL")
+    DescriptionPanel::new(DESCRIPTION_HEADING)
         .with_anchor(Anchor::BottomLeft)
-        .line("Press H to home the camera")
-        .line("The `home_camera` system, reads the keypress and mutates `target_focus`, `target_yaw`, `target_pitch`, and `target_radius` directly on the `OrbitCam`.")
-        .line("`OrbitCam` then lerps to the home destination.")
+        .line(DESCRIPTION_HOME_CONTROL_LINE)
+        .line(DESCRIPTION_CAMERA_DRIVE_LINE)
+        .line(DESCRIPTION_CAMERA_LERP_LINE)
 }
 
 fn home_camera(

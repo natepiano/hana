@@ -55,7 +55,7 @@ pub(crate) fn animate_camera(
         },
         CameraMove::ToOrbit {
             focus,
-            yaw: QUARTER_TURN_RADIANS.mul_add(2.0, yaw),
+            yaw: QUARTER_TURN_RADIANS.mul_add(SECOND_ORBIT_MOVE_QUARTER_TURNS, yaw),
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -63,7 +63,7 @@ pub(crate) fn animate_camera(
         },
         CameraMove::ToOrbit {
             focus,
-            yaw: QUARTER_TURN_RADIANS.mul_add(3.0, yaw),
+            yaw: QUARTER_TURN_RADIANS.mul_add(THIRD_ORBIT_MOVE_QUARTER_TURNS, yaw),
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -71,7 +71,7 @@ pub(crate) fn animate_camera(
         },
         CameraMove::ToOrbit {
             focus,
-            yaw: QUARTER_TURN_RADIANS.mul_add(4.0, yaw),
+            yaw: QUARTER_TURN_RADIANS.mul_add(FOURTH_ORBIT_MOVE_QUARTER_TURNS, yaw),
             pitch,
             radius,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
@@ -95,7 +95,7 @@ pub(crate) fn randomize_easing(
     }
     if keyboard.just_pressed(KeyCode::KeyE) {
         easing.0 = EaseFunction::CubicOut;
-        log.push("Easing: reset to CubicOut".into());
+        log.push(EVENT_LOG_EASING_RESET.into());
     }
 }
 
@@ -122,9 +122,22 @@ pub(crate) fn animate_fit_to_scene(
     );
 }
 
+#[derive(Default, PartialEq, Eq)]
+pub(crate) enum DeferRefit {
+    #[default]
+    Continue,
+    WaitOneFrame,
+}
+
+#[derive(PartialEq, Eq)]
+enum ProjectionLog {
+    Unwritten,
+    Written,
+}
+
 /// Toggles between perspective and orthographic projection, then re-fits the scene.
 ///
-/// The fit is deferred one frame via `pending_fit` because `OrbitCam` needs to
+/// The fit is deferred one frame via `defer_refit` because `OrbitCam` needs to
 /// process the projection change (syncing radius ↔ orthographic scale) before the
 /// fit calculation can produce correct results.
 pub(crate) fn toggle_projection(
@@ -135,11 +148,11 @@ pub(crate) fn toggle_projection(
     active_easing: Res<ActiveEasing>,
     mut camera_query: Query<(&mut Projection, &mut OrbitCam)>,
     mut log: ResMut<event_log::EventLog>,
-    mut pending_fit: Local<bool>,
+    mut defer_refit: Local<DeferRefit>,
 ) {
     // Deferred fit: projection was changed last frame, `OrbitCam` has now synced.
-    if *pending_fit {
-        *pending_fit = false;
+    if *defer_refit == DeferRefit::WaitOneFrame {
+        *defer_refit = DeferRefit::Continue;
         for camera in second_window::all_cameras(&scene, second.as_deref()) {
             commands.trigger(
                 AnimateToFit::new(camera, scene.scene_bounds)
@@ -156,7 +169,7 @@ pub(crate) fn toggle_projection(
     if !keyboard.just_pressed(KeyCode::KeyP) {
         return;
     }
-    let mut logged = false;
+    let mut projection_log = ProjectionLog::Unwritten;
     for camera in second_window::all_cameras(&scene, second.as_deref()) {
         let Ok((mut projection, mut orbit_camera)) = camera_query.get_mut(camera) else {
             continue;
@@ -170,24 +183,24 @@ pub(crate) fn toggle_projection(
                     far: ORTHOGRAPHIC_FAR_PLANE,
                     ..OrthographicProjection::default_3d()
                 });
-                if !logged {
-                    log.push("Projection: Orthographic".into());
-                    logged = true;
+                if projection_log == ProjectionLog::Unwritten {
+                    log.push(PROJECTION_LOG_ORTHOGRAPHIC.into());
+                    projection_log = ProjectionLog::Written;
                 }
             },
             Projection::Orthographic(_) => {
                 *projection = Projection::Perspective(PerspectiveProjection::default());
-                if !logged {
-                    log.push("Projection: Perspective".into());
-                    logged = true;
+                if projection_log == ProjectionLog::Unwritten {
+                    log.push(PROJECTION_LOG_PERSPECTIVE.into());
+                    projection_log = ProjectionLog::Written;
                 }
             },
             Projection::Custom(_) => {},
         }
         orbit_camera.force_update();
     }
-    if logged {
-        *pending_fit = true;
+    if projection_log == ProjectionLog::Written {
+        *defer_refit = DeferRefit::WaitOneFrame;
     }
 }
 

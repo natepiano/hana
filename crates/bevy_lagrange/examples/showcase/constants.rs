@@ -57,7 +57,9 @@ pub(super) const ALL_EASINGS: &[EaseFunction] = &[
 
 // event log
 pub(super) const EVENT_LOG_AUTO_SCROLL_STEP_MULTIPLIER: f32 = 4.0;
+pub(super) const EVENT_LOG_CAMERA_MOVE_END: &str = "CameraMoveEnd";
 pub(super) const EVENT_LOG_COLOR: Color = Color::srgba(0.0, 1.0, 0.0, 0.9);
+pub(super) const EVENT_LOG_EASING_RESET: &str = "Easing: reset to CubicOut";
 pub(super) const EVENT_LOG_ERROR_COLOR: Color = Color::srgba(1.0, 0.3, 0.3, 0.9);
 pub(super) const EVENT_LOG_FONT_SIZE: f32 = 14.0;
 pub(super) const EVENT_LOG_HINT_BOTTOM_PIXELS: f32 = 28.0;
@@ -65,6 +67,8 @@ pub(super) const EVENT_LOG_PANEL_BOTTOM_PIXELS: f32 = 72.0;
 pub(super) const EVENT_LOG_SCROLL_SPEED: f32 = 120.0;
 pub(super) const EVENT_LOG_SEPARATOR: &str = "- - - - - - - - - - - -";
 pub(super) const EVENT_LOG_WIDTH: f32 = 300.0;
+pub(super) const EVENT_LOG_ZOOM_CANCELLED: &str = "ZoomEnd\n  reason=Cancelled";
+pub(super) const EVENT_LOG_ZOOM_COMPLETED: &str = "ZoomEnd\n  reason=Completed";
 pub(super) const LOG_SCROLL_HINT_TEXT: &str = "Up/Down scroll log\n'C' clear log";
 pub(super) const LOG_TOGGLE_HINT_TEXT: &str = "'L' toggle log off and on";
 
@@ -94,12 +98,18 @@ pub(super) const PAUSED_TEXT: &str = "PAUSED";
 // projection
 pub(super) const ORTHOGRAPHIC_FAR_PLANE: f32 = 40.0;
 pub(super) const ORTHOGRAPHIC_VIEWPORT_HEIGHT: f32 = 1.0;
+pub(super) const PROJECTION_LOG_ORTHOGRAPHIC: &str = "Projection: Orthographic";
+pub(super) const PROJECTION_LOG_PERSPECTIVE: &str = "Projection: Perspective";
 
 // render layers
+pub(super) const DEFAULT_SCENE_LAYER: usize = 0;
 pub(super) const SELECTION_GIZMO_LAYER: usize = 1;
 
 // rotation
+pub(super) const FOURTH_ORBIT_MOVE_QUARTER_TURNS: f32 = 4.0;
 pub(super) const QUARTER_TURN_RADIANS: f32 = PI / 2.0;
+pub(super) const SECOND_ORBIT_MOVE_QUARTER_TURNS: f32 = 2.0;
+pub(super) const THIRD_ORBIT_MOVE_QUARTER_TURNS: f32 = 3.0;
 
 // scene
 pub(super) const GROUND_ALPHA: f32 = 0.85;

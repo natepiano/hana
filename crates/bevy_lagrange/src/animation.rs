@@ -377,15 +377,21 @@ fn handle_camera_input_interrupt(
     }
 }
 
+#[derive(PartialEq, Eq)]
+enum ReadyMoveOutcome {
+    ConsumedZeroDuration,
+    StartedTimedMove,
+}
+
 /// Handles the `Ready` state: zero-duration fast path and transition to `InProgress`.
-/// Returns `true` if the caller should `continue` the outer loop (zero-duration move consumed).
+/// Reports whether a zero-duration move was consumed or a timed move was started.
 fn handle_ready_state(
     commands: &mut Commands,
     entity: Entity,
     pan_orbit: &mut OrbitCam,
     queue: &mut CameraMoveList,
     current_move: &CameraMove,
-) -> bool {
+) -> ReadyMoveOutcome {
     if current_move.duration().is_zero() {
         commands.trigger(CameraMoveBegin {
             camera:      entity,
@@ -403,7 +409,7 @@ fn handle_ready_state(
             camera_move: current_move.clone(),
         });
         queue.camera_moves.pop_front();
-        return true;
+        return ReadyMoveOutcome::ConsumedZeroDuration;
     }
 
     // Transition to `InProgress` with captured starting orbital parameters
@@ -424,7 +430,7 @@ fn handle_ready_state(
         camera_move: current_move.clone(),
     });
 
-    false
+    ReadyMoveOutcome::StartedTimedMove
 }
 
 /// Interpolates the current move, applies easing with angle unwrapping, and advances

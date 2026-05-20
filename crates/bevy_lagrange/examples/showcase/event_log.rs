@@ -259,7 +259,7 @@ pub(crate) fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<
 }
 
 pub(crate) fn log_camera_move_end(_camera_move_end: On<CameraMoveEnd>, mut log: ResMut<EventLog>) {
-    log.push("CameraMoveEnd".into());
+    log.push(EVENT_LOG_CAMERA_MOVE_END.into());
 }
 
 pub(crate) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
@@ -274,11 +274,11 @@ pub(crate) fn log_zoom_begin(event: On<ZoomBegin>, mut log: ResMut<EventLog>) {
 pub(crate) fn log_zoom_end(event: On<ZoomEnd>, mut log: ResMut<EventLog>) {
     match event.reason {
         ZoomReason::Completed => {
-            log.push("ZoomEnd\n  reason=Completed".into());
+            log.push(EVENT_LOG_ZOOM_COMPLETED.into());
             log.separator();
         },
         ZoomReason::Cancelled => {
-            log.push_error("ZoomEnd\n  reason=Cancelled".into());
+            log.push_error(EVENT_LOG_ZOOM_CANCELLED.into());
         },
     }
 }

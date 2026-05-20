@@ -12,7 +12,11 @@ use bevy_lagrange::OrbitCamManualInputWriter;
 use fairy_dust::CameraGuidance;
 use fairy_dust::CameraGuidanceRow;
 
+const KEYBOARD_ZOOM_LABEL: &str = "+ / -";
+const MANUAL_ZOOM_LABEL: &str = "M";
+const ORBIT_LABEL: &str = "Arrows";
 const ORBIT_PIXELS: f32 = 8.0;
+const PAN_LABEL: &str = "WASD";
 const PAN_PIXELS: f32 = 6.0;
 const ZOOM_AMOUNT: f32 = 0.08;
 
@@ -21,13 +25,13 @@ struct ManualCamera;
 
 fn manual_guidance() -> CameraGuidance {
     CameraGuidance::custom([
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, "Arrows")
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, ORBIT_LABEL)
             .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, "WASD")
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, PAN_LABEL)
             .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "+ / -")
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, KEYBOARD_ZOOM_LABEL)
             .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "M")
+        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, MANUAL_ZOOM_LABEL)
             .with_camera_interaction_sources(CameraInteractionSources::MANUAL),
     ])
 }
@@ -44,62 +48,67 @@ fn write_manual_input(
             input.zoom_active();
         }
 
-        let (orbit, has_orbit) = signed_vec2(
-            (
-                keys.pressed(KeyCode::ArrowRight),
-                keys.pressed(KeyCode::ArrowLeft),
-            ),
-            (
-                keys.pressed(KeyCode::ArrowUp),
-                keys.pressed(KeyCode::ArrowDown),
-            ),
+        let orbit = signed_vec2(
+            &keys,
+            (KeyCode::ArrowRight, KeyCode::ArrowLeft),
+            (KeyCode::ArrowUp, KeyCode::ArrowDown),
             ORBIT_PIXELS,
         );
 
-        let (pan, has_pan) = signed_vec2(
-            (keys.pressed(KeyCode::KeyD), keys.pressed(KeyCode::KeyA)),
-            (keys.pressed(KeyCode::KeyW), keys.pressed(KeyCode::KeyS)),
+        let pan = signed_vec2(
+            &keys,
+            (KeyCode::KeyD, KeyCode::KeyA),
+            (KeyCode::KeyW, KeyCode::KeyS),
             PAN_PIXELS,
         );
 
-        let (zoom, has_zoom) = signed_axis(
-            keys.pressed(KeyCode::Equal),
-            keys.pressed(KeyCode::Minus),
-            ZOOM_AMOUNT,
-        );
+        let zoom = signed_axis(&keys, KeyCode::Equal, KeyCode::Minus, ZOOM_AMOUNT);
 
-        if !has_orbit && !has_pan && !has_zoom {
+        if orbit.is_none() && pan.is_none() && zoom.is_none() {
             continue;
         }
 
         let Ok(mut input) = writer.get_mut(camera, ManualInputSource::observed_keyboard()) else {
             continue;
         };
-        if has_orbit {
+        if let Some(orbit) = orbit {
             input.orbit_pixels(orbit);
         }
-        if has_pan {
+        if let Some(pan) = pan {
             input.pan_pixels(pan);
         }
-        if has_zoom {
+        if let Some(zoom) = zoom {
             input.zoom_smooth_amount(zoom);
         }
     }
 }
 
-const fn signed_axis(positive: bool, negative: bool, amount: f32) -> (f32, bool) {
-    match (positive, negative) {
-        (true, false) => (amount, true),
-        (false, true) => (-amount, true),
-        (true, true) => (0.0, true),
-        (false, false) => (0.0, false),
+fn signed_axis(
+    keys: &ButtonInput<KeyCode>,
+    positive: KeyCode,
+    negative: KeyCode,
+    amount: f32,
+) -> Option<f32> {
+    match (keys.pressed(positive), keys.pressed(negative)) {
+        (true, false) => Some(amount),
+        (false, true) => Some(-amount),
+        (true, true) => Some(0.0),
+        (false, false) => None,
     }
 }
 
-const fn signed_vec2(x_axis: (bool, bool), y_axis: (bool, bool), amount: f32) -> (Vec2, bool) {
-    let (x, x_active) = signed_axis(x_axis.0, x_axis.1, amount);
-    let (y, y_active) = signed_axis(y_axis.0, y_axis.1, amount);
-    (Vec2::new(x, y), x_active || y_active)
+fn signed_vec2(
+    keys: &ButtonInput<KeyCode>,
+    x_axis: (KeyCode, KeyCode),
+    y_axis: (KeyCode, KeyCode),
+    amount: f32,
+) -> Option<Vec2> {
+    let x = signed_axis(keys, x_axis.0, x_axis.1, amount);
+    let y = signed_axis(keys, y_axis.0, y_axis.1, amount);
+    match (x, y) {
+        (None, None) => None,
+        _ => Some(Vec2::new(x.unwrap_or(0.0), y.unwrap_or(0.0))),
+    }
 }
 
 fn main() {

@@ -86,8 +86,8 @@ type GizmoLayerQuery<'w, 's> = Query<
 /// Cameras with `FitOverlay` lose the selection gizmo layer so the outline
 /// doesn't compete with the debug overlay. Cameras without it get the layer back.
 pub(crate) fn sync_selection_gizmo_layers(mut commands: Commands, camera_query: GizmoLayerQuery) {
-    let with_selection = RenderLayers::from_layers(&[0, SELECTION_GIZMO_LAYER]);
-    let without_selection = RenderLayers::layer(0);
+    let with_selection = RenderLayers::from_layers(&[DEFAULT_SCENE_LAYER, SELECTION_GIZMO_LAYER]);
+    let without_selection = RenderLayers::layer(DEFAULT_SCENE_LAYER);
 
     for (entity, has_visualization, current_layers) in &camera_query {
         let desired = if has_visualization.is_some() {

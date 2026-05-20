@@ -35,6 +35,7 @@ use crate::constants::ANIMATE_TO_FIT_YAW;
 use crate::constants::GROUND_COLOR;
 use crate::constants::GROUND_SIZE;
 use crate::constants::INSTRUCTIONS_FONT_SIZE;
+use crate::constants::INSTRUCTIONS_TEXT;
 use crate::constants::LIGHT_TRANSLATION;
 use crate::constants::MANUAL_MODE_SMOOTHNESS_ACTIVE;
 use crate::constants::MANUAL_MODE_SMOOTHNESS_INACTIVE;
@@ -111,12 +112,7 @@ fn setup(
 
     // Instructions
     commands.spawn((
-        Text::new(
-            "M - Toggle manual orbit animation\n\
-             Space - PlayAnimation (5-step sequence)\n\
-             A - AnimateToFit (yaw=45 pitch=30)\n\
-             R - Reset camera",
-        ),
+        Text::new(INSTRUCTIONS_TEXT),
         TextFont {
             font_size: INSTRUCTIONS_FONT_SIZE,
             ..default()

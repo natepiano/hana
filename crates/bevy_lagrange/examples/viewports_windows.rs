@@ -28,11 +28,17 @@ const PRIMARY_CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 0.5, 5.0);
 const SECOND_WINDOW_CAMERA_TRANSLATION: Vec3 = Vec3::new(5.0, 1.5, 7.0);
 
 // cube
+const BACK_FACE_LABEL: &str = "BACK";
+const BOTTOM_FACE_LABEL: &str = "BOTTOM";
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_SIZE: f32 = 1.0;
 const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.8, 0.0);
-const FACE_LABEL_SIZE: f32 = 0.15;
 const FACE_LABEL_COLOR: Color = Color::srgb(0.9, 0.3, 0.1);
+const FACE_LABEL_SIZE: f32 = 0.15;
+const FRONT_FACE_LABEL: &str = "FRONT";
+const LEFT_FACE_LABEL: &str = "LEFT";
+const RIGHT_FACE_LABEL: &str = "RIGHT";
+const TOP_FACE_LABEL: &str = "TOP";
 
 // home pose (per camera)
 const PRIMARY_HOME_YAW: f32 = 0.0;
@@ -55,6 +61,9 @@ const HOME_SMOOTHNESS: f32 = 0.35;
 const MINIMAP_VIEWPORT_DIVISOR: u32 = 5;
 
 // window
+const MINIMAP_CAMERA_NAME: &str = "Minimap";
+const PRIMARY_CAMERA_NAME: &str = "Main";
+const SECOND_WINDOW_CAMERA_NAME: &str = "Second window";
 const SECOND_WINDOW_NAME: &str = "second_window";
 const SECOND_WINDOW_TITLE: &str = "Second window";
 
@@ -68,12 +77,37 @@ fn main() {
         .size(CUBE_SIZE)
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
-        .face_text(Face::Front, "FRONT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Back, "BACK", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Top, "TOP", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Bottom, "BOTTOM", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Left, "LEFT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Right, "RIGHT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(
+            Face::Front,
+            FRONT_FACE_LABEL,
+            FACE_LABEL_SIZE,
+            FACE_LABEL_COLOR,
+        )
+        .face_text(
+            Face::Back,
+            BACK_FACE_LABEL,
+            FACE_LABEL_SIZE,
+            FACE_LABEL_COLOR,
+        )
+        .face_text(Face::Top, TOP_FACE_LABEL, FACE_LABEL_SIZE, FACE_LABEL_COLOR)
+        .face_text(
+            Face::Bottom,
+            BOTTOM_FACE_LABEL,
+            FACE_LABEL_SIZE,
+            FACE_LABEL_COLOR,
+        )
+        .face_text(
+            Face::Left,
+            LEFT_FACE_LABEL,
+            FACE_LABEL_SIZE,
+            FACE_LABEL_COLOR,
+        )
+        .face_text(
+            Face::Right,
+            RIGHT_FACE_LABEL,
+            FACE_LABEL_SIZE,
+            FACE_LABEL_COLOR,
+        )
         .with_title_bar(
             TitleBar::new()
                 .with_anchor(Anchor::TopLeft)
@@ -111,7 +145,7 @@ fn setup(mut commands: Commands) {
     // --- Primary window: main camera ---
     let primary = commands
         .spawn((
-            Name::new("Main"),
+            Name::new(PRIMARY_CAMERA_NAME),
             Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
             orbit_cam_default(),
             OrbitCamPreset::BlenderLike,
@@ -121,7 +155,7 @@ fn setup(mut commands: Commands) {
     // --- Primary window: minimap viewport overlay ---
     let minimap = commands
         .spawn((
-            Name::new("Minimap"),
+            Name::new(MINIMAP_CAMERA_NAME),
             Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
             Camera {
                 order: MINIMAP_CAMERA_ORDER,
@@ -149,7 +183,7 @@ fn setup(mut commands: Commands) {
 
     let second = commands
         .spawn((
-            Name::new("Second window"),
+            Name::new(SECOND_WINDOW_CAMERA_NAME),
             Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
             Camera::default(),
             RenderTarget::Window(WindowRef::Entity(second_window)),
