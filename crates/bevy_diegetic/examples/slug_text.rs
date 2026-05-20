@@ -23,9 +23,6 @@ use bevy_diegetic::SlugTextMaterial;
 use bevy_diegetic::SlugTextMaterialInput;
 use bevy_diegetic::SlugTextRequest;
 use bevy_diegetic::SlugTextRun;
-use bevy_diegetic::SlugTextSpikePlugin;
-use bevy_diegetic::TextRendererBackend;
-use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::build_packed_glyph;
@@ -80,8 +77,6 @@ fn main() {
                 .control(TITLE_CONTROL),
         )
         .with_camera_control_panel()
-        .insert_resource(TextRendererPreference::slug())
-        .add_plugins(SlugTextSpikePlugin)
         .add_systems(Startup, setup)
         .run();
 }
@@ -92,14 +87,9 @@ fn setup(
     mut slug_materials: ResMut<Assets<SlugTextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderStorageBuffer>>,
     mut slug_backend: ResMut<SlugBackend>,
-    text_backend: Res<TextRendererPreference>,
 ) {
     match load_preview_text(&mut slug_backend) {
         Ok(preview) => {
-            if text_backend.backend() != TextRendererBackend::Slug {
-                warn!("slug_text example is not using the Slug backend preference");
-                return;
-            }
             if let Some(completion) = slug_backend.last_completion() {
                 commands.trigger(completion);
                 log_slug_backend_completion(completion);

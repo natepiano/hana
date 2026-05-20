@@ -17,6 +17,12 @@ use crate::render::text_shaping::GlyphQuadPlacement;
 use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::DEFAULT_BAND_COUNT;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBackend;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBuiltTextRun;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
 use crate::text::GlyphLookup;
@@ -50,6 +56,28 @@ struct BuiltGlyphQuads {
     quads:  Vec<(u32, GlyphQuadData)>,
     #[cfg(feature = "typography_overlay")]
     glyphs: Vec<ComputedGlyphMetrics>,
+}
+
+/// Result of building Slug run data for a [`WorldText`](super::WorldText) entity.
+#[cfg(feature = "slug_text")]
+pub(super) struct ShapedSlugWorldText {
+    /// Prepared Slug run.
+    pub(super) run:      Option<SlugBuiltTextRun>,
+    /// `Anchor` offset Y in layout units.
+    pub(super) anchor_y: f32,
+    /// Timing and queue diagnostics from the build.
+    pub(super) stats:    TextBuildStats,
+}
+
+#[cfg(feature = "slug_text")]
+impl ShapedSlugWorldText {
+    const fn empty(stats: TextBuildStats) -> Self {
+        Self {
+            run: None,
+            anchor_y: 0.0,
+            stats,
+        }
+    }
 }
 
 /// Shapes text and produces glyph quads in entity-local coordinates.
@@ -155,6 +183,81 @@ pub(super) fn shape_world_text(
         anchor_y: anchor_y * points_to_world,
         #[cfg(feature = "typography_overlay")]
         glyphs,
+        stats,
+    }
+}
+
+/// Builds Slug run data in entity-local coordinates after text shaping.
+#[cfg(feature = "slug_text")]
+pub(super) fn build_world_slug_text(
+    text: &str,
+    style: &WorldTextStyle,
+    font_registry: &FontRegistry,
+    slug_backend: &mut SlugBackend,
+    shaping_cx: &TextShapingContext,
+    cache: &mut ShapedTextCache,
+    scale: f32,
+) -> ShapedSlugWorldText {
+    let points_to_world = Unit::Points.meters_per_unit();
+    let boost = if points_to_world > 0.0 {
+        1.0 / points_to_world
+    } else {
+        1.0
+    };
+    let config = style.as_layout_config().scaled(boost);
+
+    let mut stats = TextBuildStats {
+        texts: 1,
+        ..Default::default()
+    };
+    let shape_start = std::time::Instant::now();
+    let layout_run =
+        text_shaping::shape_text_cached(text, &config, font_registry, shaping_cx, cache);
+    stats.shape_ms =
+        shape_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
+    stats.glyphs = layout_run.glyphs.len();
+    let positioned_glyphs =
+        text_shaping::positioned_glyphs(&layout_run.glyphs, font_registry, &mut stats);
+
+    if stats.failed_glyphs > 0 {
+        return ShapedSlugWorldText::empty(stats);
+    }
+
+    let boosted_size = config.size();
+    let (anchor_x, anchor_y) = measure_slug_anchor_offset(
+        &layout_run,
+        &positioned_glyphs,
+        &config.as_standalone().with_anchor(style.anchor()),
+        boosted_size,
+    );
+    let world_scale = scale * points_to_world;
+
+    let slug_start = std::time::Instant::now();
+    let prepared = match slug_backend.prepare_positioned_run(
+        &positioned_glyphs,
+        Vec2::new(anchor_x, anchor_y),
+        boosted_size,
+        world_scale,
+        DEFAULT_BAND_COUNT,
+    ) {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            slug_backend.record_failure();
+            bevy::log::warn!("world Slug text unsupported: {err}");
+            stats.failed_glyphs += positioned_glyphs.len().max(1);
+            stats.atlas_ms =
+                slug_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
+            return ShapedSlugWorldText::empty(stats);
+        },
+    };
+
+    stats.ready_glyphs = positioned_glyphs.len();
+    stats.emitted_quads = prepared.run.run.glyphs().len();
+    stats.atlas_ms = slug_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
+
+    ShapedSlugWorldText {
+        run: Some(prepared.run),
+        anchor_y: anchor_y * points_to_world,
         stats,
     }
 }
@@ -274,7 +377,7 @@ fn ensure_all_glyphs_ready(
 /// Measures the total text extent and returns the `(anchor_x, anchor_y)` offset
 /// for the given anchor mode.
 fn measure_anchor_offset(
-    shaped: &ShapedTextRun,
+    layout_run: &ShapedTextRun,
     positioned_glyphs: &[PositionedGlyph<'_>],
     style: &WorldTextStyle,
     atlas: &mut GlyphAtlas,
@@ -302,12 +405,16 @@ fn measure_anchor_offset(
         }
     }
     let max_y = if style.line_height_raw() > 0.0 {
-        let mut baselines: Vec<f32> = shaped.glyphs.iter().map(|glyph| glyph.baseline).collect();
+        let mut baselines: Vec<f32> = layout_run
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.baseline)
+            .collect();
         baselines
             .dedup_by(|current, next| (*current - *next).abs() < constants::BASELINE_DEDUP_EPSILON);
         style.line_height_raw() * baselines.len().max(1).to_f32()
     } else {
-        shaped
+        layout_run
             .line_metrics
             .iter()
             .map(|line| line.bottom)
@@ -315,6 +422,52 @@ fn measure_anchor_offset(
             .unwrap_or_else(|| style.size())
     };
     style.anchor().offset(max_x, max_y)
+}
+
+#[cfg(feature = "slug_text")]
+fn measure_slug_anchor_offset(
+    layout_run: &ShapedTextRun,
+    positioned_glyphs: &[PositionedGlyph<'_>],
+    style: &WorldTextStyle,
+    font_size: f32,
+) -> (f32, f32) {
+    let mut max_x = 0.0_f32;
+    for positioned_glyph in positioned_glyphs {
+        let layout_glyph = positioned_glyph.glyph;
+        if let Some(ink_right) = native_ink_right(positioned_glyph, font_size) {
+            max_x = max_x.max(layout_glyph.x + ink_right);
+        }
+    }
+    let max_y = if style.line_height_raw() > 0.0 {
+        let mut baselines: Vec<f32> = layout_run
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.baseline)
+            .collect();
+        baselines
+            .dedup_by(|current, next| (*current - *next).abs() < constants::BASELINE_DEDUP_EPSILON);
+        style.line_height_raw() * baselines.len().max(1).to_f32()
+    } else {
+        layout_run
+            .line_metrics
+            .iter()
+            .map(|line| line.bottom)
+            .reduce(f32::max)
+            .unwrap_or_else(|| style.size())
+    };
+    style.anchor().offset(max_x, max_y)
+}
+
+#[cfg(feature = "slug_text")]
+fn native_ink_right(positioned_glyph: &PositionedGlyph<'_>, font_size: f32) -> Option<f32> {
+    let face = ttf_parser::Face::parse(
+        positioned_glyph.font.data(),
+        positioned_glyph.font.collection_index,
+    )
+    .ok()?;
+    let bbox = face.glyph_bounding_box(GlyphId(positioned_glyph.glyph.id))?;
+    let upm = f32::from(face.units_per_em());
+    Some(f32::from(bbox.x_max) * font_size / upm)
 }
 
 /// Computes the ink bounding box for a single glyph, returned as

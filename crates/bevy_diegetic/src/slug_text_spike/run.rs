@@ -80,21 +80,35 @@ impl SlugGlyphKey {
 /// One positioned glyph in a shaped Slug text run.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SlugGlyphInstance {
-    key:     SlugGlyphKey,
-    origin:  Vec2,
-    advance: f32,
-    bounds:  SlugBounds,
+    key:          SlugGlyphKey,
+    origin:       Vec2,
+    advance:      f32,
+    bounds:       SlugBounds,
+    bounds_scale: f32,
 }
 
 impl SlugGlyphInstance {
     /// Creates a positioned glyph instance.
     #[must_use]
     pub const fn new(key: SlugGlyphKey, origin: Vec2, advance: f32, bounds: SlugBounds) -> Self {
+        Self::new_scaled(key, origin, advance, bounds, 1.0)
+    }
+
+    /// Creates a positioned glyph instance with scaled design-space bounds.
+    #[must_use]
+    pub const fn new_scaled(
+        key: SlugGlyphKey,
+        origin: Vec2,
+        advance: f32,
+        bounds: SlugBounds,
+        bounds_scale: f32,
+    ) -> Self {
         Self {
             key,
             origin,
             advance,
             bounds,
+            bounds_scale,
         }
     }
 
@@ -113,6 +127,10 @@ impl SlugGlyphInstance {
     /// Glyph bounds in font design-space units.
     #[must_use]
     pub const fn bounds(self) -> SlugBounds { self.bounds }
+
+    /// Scale from glyph design-space bounds to run layout units.
+    #[must_use]
+    pub const fn bounds_scale(self) -> f32 { self.bounds_scale }
 }
 
 /// CPU representation of one shaped Slug text run.
@@ -259,6 +277,29 @@ impl SlugGlyphCache {
             },
         }
     }
+
+    /// Loads, packs, and caches one glyph from a specific collection face.
+    pub fn get_or_insert_packed_from_face(
+        &mut self,
+        key: SlugGlyphKey,
+        font_data: &[u8],
+        face_index: u32,
+        character: char,
+        band_count: usize,
+    ) -> Result<&SlugPackedGlyph, SlugOutlineError> {
+        match self.glyphs.entry(key) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) => {
+                let glyph = geometry::load_glyph_by_id_from_face(
+                    font_data,
+                    face_index,
+                    key.glyph_id,
+                    character,
+                )?;
+                Ok(entry.insert(packing::build_packed_glyph(glyph, band_count)))
+            },
+        }
+    }
 }
 
 fn run_bounds(glyphs: &[SlugGlyphInstance]) -> SlugBounds {
@@ -278,8 +319,8 @@ fn run_bounds(glyphs: &[SlugGlyphInstance]) -> SlugBounds {
 
 fn shifted_bounds(glyph: SlugGlyphInstance) -> SlugBounds {
     SlugBounds {
-        min: glyph.origin + glyph.bounds.min,
-        max: glyph.origin + glyph.bounds.max,
+        min: glyph.origin + glyph.bounds.min * glyph.bounds_scale,
+        max: glyph.origin + glyph.bounds.max * glyph.bounds_scale,
     }
 }
 

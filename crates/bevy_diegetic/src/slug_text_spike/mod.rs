@@ -22,6 +22,7 @@ pub use geometry::SlugBounds;
 pub use geometry::SlugGlyph;
 pub use geometry::SlugOutlineError;
 pub use geometry::load_glyph;
+pub use geometry::load_glyph_by_id_from_face;
 pub use material::SlugRenderMode;
 pub use material::SlugTextMaterial;
 pub use material::SlugTextMaterialInput;

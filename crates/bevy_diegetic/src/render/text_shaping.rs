@@ -108,7 +108,7 @@ impl TextBuildStats {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct PositionedGlyph<'a> {
+pub(crate) struct PositionedGlyph<'a> {
     pub glyph: &'a ShapedGlyph,
     pub font:  ResolvedFontData<'a>,
 }

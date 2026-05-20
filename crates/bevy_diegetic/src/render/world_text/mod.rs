@@ -6,18 +6,99 @@ mod readiness;
 mod rendering;
 mod shaping;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+#[cfg(feature = "slug_text")]
+use bevy::render::storage::ShaderStorageBuffer;
+use mesh_spawning::WorldTextMesh;
+use mesh_spawning::WorldTextShadowProxy;
 pub use panel_text_child::PanelTextChild;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
 pub(super) use readiness::emit_world_text_ready;
-pub(super) use rendering::render_world_text;
 
+use super::glyph_material::GlyphMaterial;
+use super::text_backend::TextRendererPreference;
+use super::text_shaping::TextShapingContext;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
+use crate::cascade::Resolved;
+use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBackend;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugTextMaterial;
+use crate::text::AtlasSlot;
+use crate::text::FontRegistry;
+
+pub(super) fn render_world_text(
+    changed_texts: Query<
+        Entity,
+        (
+            With<WorldText>,
+            Without<PanelTextChild>,
+            Or<(
+                Changed<WorldText>,
+                Changed<WorldTextStyle>,
+                Changed<Resolved<WorldTextAlpha>>,
+                Changed<Resolved<WorldFontUnit>>,
+            )>,
+        ),
+    >,
+    pending_texts: Query<
+        Entity,
+        (
+            With<WorldText>,
+            With<PendingGlyphs>,
+            Without<PanelTextChild>,
+        ),
+    >,
+    texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
+    resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
+    resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
+    old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
+    atlas_slot: ResMut<AtlasSlot>,
+    font_registry: Res<FontRegistry>,
+    shaping_cx: Res<TextShapingContext>,
+    cache: ResMut<ShapedTextCache>,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<GlyphMaterial>>,
+    backend_services: BackendRenderServices,
+    defaults: Res<CascadeDefaults>,
+    commands: Commands,
+) {
+    rendering::render_world_text(
+        changed_texts,
+        pending_texts,
+        texts,
+        resolved_alphas,
+        resolved_units,
+        old_meshes,
+        atlas_slot,
+        font_registry,
+        shaping_cx,
+        cache,
+        meshes,
+        materials,
+        backend_services,
+        defaults,
+        commands,
+    );
+}
+
+#[derive(SystemParam)]
+pub(super) struct BackendRenderServices<'w> {
+    text_backend:    Res<'w, TextRendererPreference>,
+    #[cfg(feature = "slug_text")]
+    slug_backend:    ResMut<'w, SlugBackend>,
+    #[cfg(feature = "slug_text")]
+    slug_materials:  ResMut<'w, Assets<SlugTextMaterial>>,
+    #[cfg(feature = "slug_text")]
+    storage_buffers: ResMut<'w, Assets<ShaderStorageBuffer>>,
+}
 
 /// Computed layout data for a [`WorldText`] entity, populated by the
 /// renderer. Used by the typography debug overlay to draw glyph bounding

@@ -621,15 +621,21 @@ adds opt-in Slug routing.
   pending Slug text.
 - Phase 6 now moves GPU storage allocation/upload ownership into the
   production Slug backend path instead of leaving it in examples.
-- Phase 6 now separates shadow-pass representation from Phase 8 shadow
+- Phase 6 now separates shadow-pass representation from Phase 9 shadow
   effect quality.
 - Phase 6 cache invalidation tests now target the key dimensions that
   exist today; storage and effect profiles remain deferred.
-- Phase 7 CJK testing now stays inside the current TrueType/quadratic
+- Phase 8 CJK testing now stays inside the current TrueType/quadratic
   scope until the post-transition unsupported-text review decides CFF
   and cubic support.
 
-### Phase 6: panel and world text parity
+### Phase 6: world text opt-in routing
+
+Status: completed for `WorldText` opt-in routing. Panel text routing
+remains in the next phase because panel text is batched into panel
+render targets and needs a separate Slug batching path.
+
+Completed:
 
 - Route shared `PositionedGlyph` data into Slug run data when
   `TextRendererPreference` selects `TextRendererBackend::Slug`.
@@ -639,15 +645,29 @@ adds opt-in Slug routing.
   font-family shaping path for production Slug text.
 - Produce clear unsupported-run diagnostics when the selected font face
   or glyph cannot use the current Slug path.
+- Added `WorldText` Slug mesh spawning using the same run-level mesh and
+  storage buffers proven by the isolated example.
+- Added a `SlugBackendCompleted` observer that marks panel and world
+  text pending, matching the role atlas events play for distance-field
+  text.
+- Added backend-preference change handling that marks existing text
+  pending when the global backend changes.
+- Defined `WorldText` Slug visible and shadow-pass spawning so the
+  existing visible/shadow mode matrix remains representable. Phase 9
+  owns production-quality shadow effects and tuning.
+- Updated `examples/world_text.rs` to opt into Slug through
+  `TextRendererPreference::slug()`.
+- Kept `examples/slug_text.rs` as the manual Slug-vs-MTSDF comparison
+  target so its contrast overlay remains useful.
+
+Remaining:
+
 - Move Slug GPU storage allocation, upload handles, dirty tracking, and
-  lookup state into the production Slug backend path. The example may
-  keep local setup only as a manual comparison target.
-- Connect `SlugBackendCompleted` to pending text retries, matching the
-  role atlas swap events play for distance-field text.
-- Define Slug render entity spawning for visible and shadow passes.
-  Phase 6 should preserve the existing visible/shadow mode matrix as
-  pass representation; Phase 8 owns production-quality shadow effects
-  and tuning.
+  lookup state fully into the production Slug backend instead of
+  allocating per spawned `WorldText` mesh.
+- Add Slug routing and batching for panel text render targets.
+- Add Slug clipping for panel overlap/padding trims and panel scissor
+  clips.
 - Support Slug clipping through representations that preserve
   glyph-local coordinates for both overlap/padding trims and panel
   scissor clips.
@@ -663,10 +683,75 @@ adds opt-in Slug routing.
   and `WorldTextReady` timing. Defer storage-profile and effect-profile
   invalidation tests until those profiles exist.
 
-Exit criteria: existing panel/world text examples can opt into Slug and
-keep layout behavior stable under the accepted first-scope constraints.
+Exit criteria: partially met. `WorldText` examples can opt into Slug and
+keep distance-field rendering available as the default. Panel examples
+still use distance-field text until the panel Slug batching path exists.
 
-### Phase 7: quality and robustness
+### Retrospective
+
+**What worked:**
+
+- `TextRendererPreference::slug()` now routes production `WorldText`
+  through `SlugBackend::prepare_positioned_run`.
+- Existing `WorldText` visible/shadow modes stayed representable because
+  Slug spawning mirrors the existing visible and shadow proxy split.
+
+**What deviated from the plan:**
+
+- Panel text did not move to Slug in this phase. Panel text is batched into
+  panel render targets, so it needs its own Slug batching path instead of
+  reusing the `WorldText` mesh path.
+- Slug GPU buffers still allocate per spawned `WorldText` mesh. Backend-owned
+  upload state remains planned work.
+
+**Surprises:**
+
+- Production routing needed `PositionedGlyph.font` and `ResolvedFontData`
+  access, not the example-only font-family path.
+- The existing render system was already large enough that adding Slug
+  routing required splitting `WorldText` rendering into backend-specific
+  helpers.
+
+**Implications for remaining phases:**
+
+- The next phase must start with backend-owned Slug GPU storage before panel
+  batching, so panels do not inherit per-mesh buffer allocation.
+- Panel routing must be documented as a separate render-target batching task,
+  not as a small extension of `WorldText` spawning.
+- Quality/performance work must include production `WorldText` opt-in examples
+  and keep the isolated Slug-vs-MTSDF comparison example.
+
+### Phase 6 Review
+
+- Phase 7 now covers backend-owned GPU storage, panel Slug batching, and
+  clipping before broad quality work.
+- Phase 8 now starts with `WorldText` evidence and waits for panel routing
+  before claiming full panel/world quality.
+- Phase 9 now treats shadows as production tuning over the existing
+  `WorldText` shadow proxy path, not as creating the basic second pass.
+- Immediate cache tests now target the current `SlugGlyphKey` fields.
+  Font-generation, storage-profile, and effect-profile invalidation wait
+  until those fields or profiles exist.
+
+### Phase 7: backend-owned storage and panel routing
+
+- Move Slug GPU storage allocation, upload handles, dirty tracking, and
+  lookup state into `SlugBackend`.
+- Replace per-spawned-`WorldText` `ShaderStorageBuffer` allocation with
+  backend-owned Slug run storage references.
+- Add Slug data generation for panel text children instead of routing panel
+  text through atlas `GlyphQuadData`.
+- Add panel Slug batching that can render panel text from Slug run storage.
+- Add Slug clipping for panel overlap/padding trims and panel scissor clips
+  while preserving glyph-local coordinates.
+- Keep backend-neutral readiness behavior for backend swaps, font changes,
+  cache misses, and `WorldTextReady` timing.
+
+Exit criteria: `WorldText` and panel text can both opt into Slug through
+`TextRendererPreference`, using backend-owned Slug storage rather than
+per-mesh buffer allocation.
+
+### Phase 8: quality and robustness
 
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
   Crimson Text.
@@ -677,15 +762,19 @@ keep layout behavior stable under the accepted first-scope constraints.
   the post-transition unsupported-text review.
 - Compare screenshots against MTSDF at 32, 64, 128, and 256 px
   equivalent sizes.
-- Measure CPU preprocessing cost, GPU storage size, draw count,
-  fragment cost, upload cost, and first-render latency.
+- Start with `WorldText` opt-in screenshots and measurements using
+  `examples/world_text.rs` and `examples/slug_text.rs`.
+- Add full panel/world evidence after Phase 7 panel routing exists.
+- Measure CPU preprocessing cost, backend-owned GPU storage size, draw
+  count, fragment cost, upload cost, and first-render latency.
 
 Exit criteria: Slug has documented quality/performance envelopes and
 known cases where it is better or worse than MTSDF.
 
-### Phase 8: effects
+### Phase 9: effects
 
-- Add hard drop shadow as a second glyph pass.
+- Tune hard drop shadows using the existing `WorldText` shadow proxy path.
+- Add panel shadow parity after panel Slug routing exists.
 - Decide whether true outlines are worth implementing in
   `bevy_diegetic` or should remain out of scope.
 - If true outlines proceed, add contour-offset preprocessing and
@@ -699,9 +788,9 @@ implementation path or a documented decision to defer.
 - `slug_geometry` unit tests: outline loading, line-to-quadratic
   encoding, cubic conversion or rejection, winding, band sorting, and
   horizontal/vertical edge cases.
-- Slug cache unit tests: `SlugGlyphKey`, font-generation invalidation,
-  effect-profile invalidation, storage-profile invalidation, and failed
-  glyph states.
+- Slug cache unit tests: `SlugGlyphKey`, current preprocess-version
+  invalidation, and failed glyph states. Storage-profile and
+  effect-profile invalidation tests wait until those profiles exist.
 - Shared shaping tests: render shaping vs measurement for weight,
   slant, letter spacing, word spacing, font features, multi-line text,
   spaces, and invisible glyphs.
@@ -709,7 +798,8 @@ implementation path or a documented decision to defer.
   offsets, panel clip results, and world-scale positions compared to the
   current renderer within explicit tolerances.
 - Readiness tests: queued, pending, ready, failed, backend swap, font
-  change, cache miss recovery, and `WorldTextReady` timing.
+  change, cache miss recovery, backend-owned upload/lookup state, and
+  `WorldTextReady` timing.
 - Integration example: `examples/slug_text.rs` for manual Slug vs MTSDF
   comparison.
 - Optional screenshot tests: final integration evidence only, with

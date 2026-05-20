@@ -142,11 +142,12 @@ impl RunMeshBuilder {
 
     fn push_glyph(&mut self, glyph: SlugGlyphInstance, record_index: u32, scale: f32) {
         let bounds = glyph.bounds();
+        let bounds_scale = glyph.bounds_scale();
         let origin = glyph.origin();
-        let left = (origin.x + bounds.min.x) * scale;
-        let right = (origin.x + bounds.max.x) * scale;
-        let bottom = (origin.y + bounds.min.y) * scale;
-        let top = (origin.y + bounds.max.y) * scale;
+        let left = bounds.min.x.mul_add(bounds_scale, origin.x) * scale;
+        let right = bounds.max.x.mul_add(bounds_scale, origin.x) * scale;
+        let bottom = bounds.min.y.mul_add(bounds_scale, origin.y) * scale;
+        let top = bounds.max.y.mul_add(bounds_scale, origin.y) * scale;
         let base = (self.positions.len()).to_u32();
         let glyph_index = [record_index.to_f32(), 0.0];
 

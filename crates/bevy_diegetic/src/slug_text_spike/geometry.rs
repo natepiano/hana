@@ -145,7 +145,17 @@ pub fn load_glyph_by_id(
     glyph_id: u16,
     character: char,
 ) -> Result<SlugGlyph, SlugOutlineError> {
-    let face = Face::parse(font_data, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
+    load_glyph_by_id_from_face(font_data, 0, glyph_id, character)
+}
+
+/// Loads one glyph by resolved font face and glyph ID.
+pub fn load_glyph_by_id_from_face(
+    font_data: &[u8],
+    face_index: u32,
+    glyph_id: u16,
+    character: char,
+) -> Result<SlugGlyph, SlugOutlineError> {
+    let face = Face::parse(font_data, face_index).map_err(|_| SlugOutlineError::InvalidFont)?;
     let glyph_id = GlyphId(glyph_id);
     load_glyph_from_face(&face, glyph_id, character)
 }

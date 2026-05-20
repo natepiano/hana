@@ -17,6 +17,8 @@ use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
 use super::glyph_material::GlyphMaterial;
 use super::panel_rtt;
+#[cfg(feature = "slug_text")]
+use super::text_backend::TextRendererBackend;
 use super::text_backend::TextRendererPreference;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
@@ -27,6 +29,10 @@ use crate::cascade::CascadeEntityPlugin;
 use crate::cascade::CascadePanelChildPlugin;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBackendCompleted;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugTextSpikePlugin;
 use crate::text::AtlasSwapCompleted;
 use crate::text::AtlasSwapStarted;
 
@@ -39,6 +45,8 @@ pub(super) struct TextRenderPlugin;
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<GlyphMaterial>::default());
+        #[cfg(feature = "slug_text")]
+        app.add_plugins(SlugTextSpikePlugin);
         app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldFontUnit>::default());
@@ -58,6 +66,7 @@ impl Plugin for TextRenderPlugin {
                 reconcile_panel_image_children
                     .after(poll_atlas_glyphs)
                     .after(panel_rtt::setup_panel_rtt),
+                mark_text_pending_on_backend_changed,
                 shape_panel_text_children
                     .after(reconcile_panel_text_children)
                     .after(poll_atlas_glyphs),
@@ -69,6 +78,8 @@ impl Plugin for TextRenderPlugin {
         );
         app.add_observer(mark_text_pending_on_swap_started);
         app.add_observer(mark_text_pending_on_swap_completed);
+        #[cfg(feature = "slug_text")]
+        app.add_observer(mark_text_pending_on_slug_completed);
     }
 }
 
@@ -110,4 +121,44 @@ fn mark_text_pending_on_swap_completed(
     for entity in &world_texts {
         commands.entity(entity).insert_if_new(PendingGlyphs);
     }
+}
+
+fn mark_text_pending_on_backend_changed(
+    text_backend: Res<TextRendererPreference>,
+    panel_children: Query<Entity, With<PanelTextChild>>,
+    world_texts: Query<Entity, With<WorldText>>,
+    mut commands: Commands,
+) {
+    if !text_backend.is_changed() {
+        return;
+    }
+    #[cfg(feature = "slug_text")]
+    if text_backend.backend() == TextRendererBackend::Slug {
+        mark_all_text_pending(&panel_children, &world_texts, &mut commands);
+        return;
+    }
+    mark_all_text_pending(&panel_children, &world_texts, &mut commands);
+}
+
+fn mark_all_text_pending(
+    panel_children: &Query<Entity, With<PanelTextChild>>,
+    world_texts: &Query<Entity, With<WorldText>>,
+    commands: &mut Commands,
+) {
+    for entity in panel_children {
+        commands.entity(entity).insert_if_new(PendingGlyphs);
+    }
+    for entity in world_texts {
+        commands.entity(entity).insert_if_new(PendingGlyphs);
+    }
+}
+
+#[cfg(feature = "slug_text")]
+fn mark_text_pending_on_slug_completed(
+    _trigger: On<SlugBackendCompleted>,
+    panel_children: Query<Entity, With<PanelTextChild>>,
+    world_texts: Query<Entity, With<WorldText>>,
+    mut commands: Commands,
+) {
+    mark_all_text_pending(&panel_children, &world_texts, &mut commands);
 }

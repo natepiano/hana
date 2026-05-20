@@ -240,6 +240,8 @@ pub use slug_text_spike::build_slug_text_run;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::load_glyph;
 #[cfg(feature = "slug_text")]
+pub use slug_text_spike::load_glyph_by_id_from_face;
+#[cfg(feature = "slug_text")]
 pub use slug_text_spike::slug_text_material;
 pub use text::AtlasConfig;
 pub use text::AtlasConfigError;

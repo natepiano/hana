@@ -4,6 +4,8 @@ use std::time::Instant;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
+#[cfg(feature = "slug_text")]
+use bevy::render::storage::ShaderStorageBuffer;
 use bevy_kana::ToF32;
 
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -18,6 +20,18 @@ use crate::render::glyph_material::GlyphMaterialInput;
 use crate::render::glyph_material::GlyphShadowProxyMaterialInput;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBuiltTextRun;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugGlyphCache;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugRenderMode;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugTextMaterial;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugTextMaterialInput;
 use crate::text::GlyphAtlas;
 
 /// Marker for mesh entities spawned by the world text renderer.
@@ -61,6 +75,14 @@ pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
     pub(super) meshes:    &'a mut Assets<Mesh>,
     pub(super) materials: &'a mut Assets<GlyphMaterial>,
     pub(super) commands:  &'a mut Commands<'w, 's>,
+}
+
+#[cfg(feature = "slug_text")]
+pub(super) struct SlugMeshSpawnAssets<'a, 'w, 's> {
+    pub(super) meshes:          &'a mut Assets<Mesh>,
+    pub(super) materials:       &'a mut Assets<SlugTextMaterial>,
+    pub(super) storage_buffers: &'a mut Assets<ShaderStorageBuffer>,
+    pub(super) commands:        &'a mut Commands<'w, 's>,
 }
 
 /// Spawns visible mesh and optional shadow proxy entities for each atlas page
@@ -178,4 +200,154 @@ pub(super) fn spawn_world_text_meshes(
             .mul_add(MILLISECONDS_PER_SECOND, mesh_ms);
     }
     mesh_ms
+}
+
+/// Spawns Slug visible mesh and optional shadow proxy entities.
+#[cfg(feature = "slug_text")]
+pub(super) fn spawn_slug_world_text_meshes(
+    run: &SlugBuiltTextRun,
+    glyph_cache: &SlugGlyphCache,
+    entity: Entity,
+    style: &WorldTextStyle,
+    alpha_mode: AlphaMode,
+    assets: &mut SlugMeshSpawnAssets<'_, '_, '_>,
+) -> f32 {
+    let mesh_start = Instant::now();
+    let Ok(render_data) = slug_text_spike::build_slug_run_render_data(run, glyph_cache, 1.0) else {
+        return 0.0;
+    };
+    let mesh_handle = assets.meshes.add(render_data.mesh);
+    let curve_buffer = assets
+        .storage_buffers
+        .add(ShaderStorageBuffer::from(render_data.curves));
+    let band_buffer = assets
+        .storage_buffers
+        .add(ShaderStorageBuffer::from(render_data.bands));
+    let glyph_buffer = assets
+        .storage_buffers
+        .add(ShaderStorageBuffer::from(render_data.glyphs));
+
+    let is_invisible = style.render_mode() == GlyphRenderMode::Invisible;
+    let needs_proxy = if is_invisible {
+        style.shadow_mode() != GlyphShadowMode::None
+    } else {
+        matches!(
+            style.shadow_mode(),
+            GlyphShadowMode::Text | GlyphShadowMode::PunchOut
+        )
+    };
+    let suppress_shadow =
+        is_invisible || needs_proxy || style.shadow_mode() == GlyphShadowMode::None;
+
+    if !is_invisible {
+        let material_handle = assets.materials.add(slug_world_text_material(
+            style,
+            alpha_mode,
+            style.render_mode().into(),
+            curve_buffer.clone(),
+            band_buffer.clone(),
+            glyph_buffer.clone(),
+        ));
+        spawn_slug_visible_mesh(
+            entity,
+            mesh_handle.clone(),
+            material_handle,
+            suppress_shadow,
+            assets.commands,
+        );
+    }
+
+    if needs_proxy {
+        let material_handle = assets.materials.add(slug_world_text_material(
+            style,
+            AlphaMode::Mask(0.5),
+            slug_shadow_render_mode(style.shadow_mode()),
+            curve_buffer,
+            band_buffer,
+            glyph_buffer,
+        ));
+        assets.commands.entity(entity).with_child((
+            WorldTextShadowProxy,
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(material_handle),
+            Transform::IDENTITY,
+        ));
+    }
+
+    mesh_start
+        .elapsed()
+        .as_secs_f32()
+        .mul_add(MILLISECONDS_PER_SECOND, 0.0)
+}
+
+#[cfg(feature = "slug_text")]
+fn slug_world_text_material(
+    style: &WorldTextStyle,
+    alpha_mode: AlphaMode,
+    render_mode: SlugRenderMode,
+    curves: Handle<ShaderStorageBuffer>,
+    bands: Handle<ShaderStorageBuffer>,
+    glyphs: Handle<ShaderStorageBuffer>,
+) -> SlugTextMaterial {
+    let mut base = StandardMaterial {
+        depth_bias: -constants::LAYER_DEPTH_BIAS,
+        alpha_mode,
+        ..Default::default()
+    };
+    apply_sidedness(&mut base, style.sidedness());
+    slug_text_spike::slug_text_material(SlugTextMaterialInput {
+        base,
+        fill_color: style.color(),
+        render_mode,
+        curves,
+        bands,
+        glyphs,
+    })
+}
+
+#[cfg(feature = "slug_text")]
+const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
+    match shadow_mode {
+        GlyphShadowMode::SolidQuad => SlugRenderMode::SolidQuad,
+        GlyphShadowMode::PunchOut => SlugRenderMode::PunchOut,
+        GlyphShadowMode::None | GlyphShadowMode::Text => SlugRenderMode::Text,
+    }
+}
+
+#[cfg(feature = "slug_text")]
+fn spawn_slug_visible_mesh(
+    entity: Entity,
+    mesh: Handle<Mesh>,
+    material: Handle<SlugTextMaterial>,
+    suppress_shadow: bool,
+    commands: &mut Commands,
+) {
+    if suppress_shadow {
+        commands.entity(entity).with_child((
+            WorldTextMesh,
+            NotShadowCaster,
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::IDENTITY,
+        ));
+    } else {
+        commands.entity(entity).with_child((
+            WorldTextMesh,
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::IDENTITY,
+        ));
+    }
+}
+
+#[cfg(feature = "slug_text")]
+impl From<GlyphRenderMode> for SlugRenderMode {
+    fn from(render_mode: GlyphRenderMode) -> Self {
+        match render_mode {
+            GlyphRenderMode::Invisible => Self::Invisible,
+            GlyphRenderMode::Text => Self::Text,
+            GlyphRenderMode::PunchOut => Self::PunchOut,
+            GlyphRenderMode::SolidQuad => Self::SolidQuad,
+        }
+    }
 }

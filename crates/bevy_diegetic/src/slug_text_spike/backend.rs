@@ -2,6 +2,8 @@
 
 use bevy::prelude::Event;
 use bevy::prelude::Resource;
+use bevy::prelude::Vec2;
+use ttf_parser::Face;
 
 use super::geometry::SlugOutlineError;
 use super::packing::DEFAULT_BAND_COUNT;
@@ -9,7 +11,10 @@ use super::run;
 use super::run::SlugBuiltTextRun;
 use super::run::SlugFontKey;
 use super::run::SlugGlyphCache;
+use super::run::SlugGlyphInstance;
 use super::run::SlugGlyphKey;
+use super::run::SlugTextRun;
+use crate::render::PositionedGlyph;
 
 /// Request for one Slug text run.
 #[derive(Clone, Copy, Debug)]
@@ -102,6 +107,60 @@ impl SlugBackend {
         Ok(SlugPreparedTextRun { run, completion })
     }
 
+    /// Prepares one run from already-positioned production glyphs.
+    pub(crate) fn prepare_positioned_run(
+        &mut self,
+        glyphs: &[PositionedGlyph<'_>],
+        anchor: Vec2,
+        layout_font_size: f32,
+        world_scale: f32,
+        band_count: usize,
+    ) -> Result<SlugPreparedTextRun, SlugOutlineError> {
+        let mut instances = Vec::with_capacity(glyphs.len());
+        for positioned in glyphs {
+            let face = Face::parse(positioned.font.data(), positioned.font.collection_index)
+                .map_err(|_| SlugOutlineError::InvalidFont)?;
+            let bounds_scale = layout_font_size / f32::from(face.units_per_em());
+            let key = self.glyph_key(
+                SlugFontKey::new(positioned.glyph.font_face.blob_id),
+                positioned.glyph.id,
+            );
+            let packed_glyph = self.glyph_cache.get_or_insert_packed_from_face(
+                key,
+                positioned.font.data(),
+                positioned.font.collection_index,
+                POSITIONED_GLYPH_DIAGNOSTIC_CHAR,
+                band_count,
+            )?;
+            instances.push(SlugGlyphInstance::new_scaled(
+                key,
+                Vec2::new(
+                    positioned.glyph.x - anchor.x,
+                    -(positioned.glyph.baseline + positioned.glyph.y - anchor.y),
+                ),
+                positioned.glyph.advance,
+                packed_glyph.bounds(),
+                bounds_scale,
+            ));
+        }
+
+        self.generation = self.generation.saturating_add(1);
+        self.completed_runs = self.completed_runs.saturating_add(1);
+        let completion = SlugBackendCompleted {
+            generation:    self.generation,
+            packed_glyphs: self.glyph_cache.len(),
+        };
+        self.last_completion = Some(completion);
+        Ok(SlugPreparedTextRun {
+            run: SlugBuiltTextRun {
+                run:            SlugTextRun::new(instances),
+                baseline:       0.0,
+                reference_size: world_scale,
+            },
+            completion,
+        })
+    }
+
     /// Records a failed Slug request.
     pub const fn record_failure(&mut self) {
         self.failed_runs = self.failed_runs.saturating_add(1);
@@ -137,3 +196,5 @@ impl SlugBackend {
         SlugGlyphKey::with_preprocess_version(font, glyph_id, self.preprocess_version)
     }
 }
+
+const POSITIONED_GLYPH_DIAGNOSTIC_CHAR: char = '\u{FFFD}';

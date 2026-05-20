@@ -29,6 +29,7 @@ pub(crate) use sdf_material::sdf_primitive_material;
 pub use text_backend::TextRendererBackend;
 pub use text_backend::TextRendererPreference;
 use text_renderer::TextRenderPlugin;
+pub(crate) use text_shaping::PositionedGlyph;
 pub use transparency::StableTransparency;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
