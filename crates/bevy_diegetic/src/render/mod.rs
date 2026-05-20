@@ -7,6 +7,7 @@ mod glyph_quad;
 mod panel_geometry;
 mod panel_rtt;
 mod sdf_material;
+mod text_backend;
 mod text_renderer;
 mod text_shaping;
 mod transparency;
@@ -25,6 +26,8 @@ pub(crate) use sdf_material::SdfPrimitiveKind;
 pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_primitive_material;
+pub use text_backend::TextRendererBackend;
+pub use text_backend::TextRendererPreference;
 use text_renderer::TextRenderPlugin;
 pub use transparency::StableTransparency;
 #[cfg(feature = "typography_overlay")]

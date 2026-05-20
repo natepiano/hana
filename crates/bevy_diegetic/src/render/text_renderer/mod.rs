@@ -17,6 +17,7 @@ use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
 use super::glyph_material::GlyphMaterial;
 use super::panel_rtt;
+use super::text_backend::TextRendererPreference;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use super::world_text::PanelTextChild;
@@ -42,6 +43,7 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldFontUnit>::default());
         app.init_resource::<TextShapingContext>();
+        app.init_resource::<TextRendererPreference>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<SharedMsdfMaterials>();
         app.init_resource::<DiegeticPerfStats>();

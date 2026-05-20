@@ -540,41 +540,114 @@ rendered advances sharing the same parley shaping style inputs.
 
 ### Phase 5: Slug backend resource
 
-- Add an internal backend decision point in
+Status: completed for the isolated Slug backend boundary. Production
+panel/world routing remains Phase 6.
+
+Completed:
+
+- Added an internal backend decision point in
   `crates/bevy_diegetic/src/render/text_backend.rs`.
-- Add `TextRendererBackend { DistanceField, Slug }` and
+- Added `TextRendererBackend { DistanceField, Slug }` and
   `TextRendererPreference { backend }` behind the experimental feature.
   The first selector is a global resource used by the existing render
   modules and `examples/slug_text.rs`; per-text backend switching stays
   out of this phase.
-- Add a Slug backend resource that owns cache state, async work, GPU
-  storage, uploads, lookup state, and readiness polling.
-- Add a Slug-owned completion/wakeup path for preprocessing and GPU
-  upload work. Slug pending text must be retried when Slug work
-  completes, not only when atlas rasterization or atlas swaps complete.
-- Shape the first Slug backend path with Parley fallback disabled. If a
+- Added a `SlugBackend` resource for the isolated path. It owns the
+  reusable glyph cache, backend generation, completion count, failure
+  count, and preprocessing version.
+- Added a Slug-owned completion signal. The current isolated example
+  triggers it after CPU preprocessing. Phase 6 will connect the signal
+  to production pending-text retries when panel/world text can opt into
+  Slug.
+- Prepared the first Slug backend path with Parley fallback disabled. If a
   Slug text request would need fallback, detect that as an explicit
   unsupported/missing-glyph state instead of silently receiving an
   unregistered fallback face.
-- Treat the first Slug backend as TrueType/quadratic-outline only. If a
+- Treated the first Slug backend as TrueType/quadratic-outline only. If a
   selected registered font or glyph cannot be represented by that path,
   report a clear unsupported-text state. Do not drop glyphs and do not
   mix Slug with MTSDF inside one text run.
-- Define `SlugGlyphKey` and invalidation rules using the resolved glyph
-  face identity and the exact font bytes/face index returned by the
-  Phase 4 resolver.
-- After parley shaping, route text through the selected backend:
-  distance-field keeps producing atlas `GlyphQuadData`, and Slug
-  produces Slug run/glyph GPU data.
-- Update the existing `examples/slug_text.rs` so it exercises real
+- Extended `SlugGlyphKey` with a preprocessing version so changes to
+  curve/band preprocessing invalidate cached glyph data.
+- Updated the existing `examples/slug_text.rs` so it exercises real
   backend selection while still comparing Slug and MTSDF output.
 
-Exit criteria: shaped strings render through parley and the Slug
-backend, with glyph positions matching the existing renderer under
-explicit layout fixtures.
+Exit criteria: met for the isolated backend boundary. The existing
+`slug_text` example selects `TextRendererBackend::Slug`, prepares the
+`Typography` run through `SlugBackend`, reuses the backend-owned glyph
+cache, and emits a Slug completion signal. The production panel/world
+render systems still default to distance-field rendering until Phase 6
+adds opt-in Slug routing.
+
+### Retrospective
+
+**What worked:**
+
+- `TextRendererPreference` gives the renderer a single backend decision
+  point without disturbing the current distance-field path.
+- `SlugBackend` moved reusable glyph data out of `SlugBuiltTextRun`, so
+  the run now references backend-owned packed glyph data.
+
+**What deviated from the plan:**
+
+- Phase 5 stayed isolated to `slug_text` and shared backend selection.
+  Panel and world text still do not route through Slug.
+- Slug completion is a Bevy event the example triggers manually after
+  CPU preprocessing. It is not yet connected to production pending-text
+  retries.
+
+**Surprises:**
+
+- The existing example could use the backend resource without changing
+  the run-level shader or material layout.
+- The fallback-disabled path needed an explicit font cmap precheck so
+  parley cannot silently choose an unregistered fallback face.
+
+**Implications for remaining phases:**
+
+- Phase 6 needs the production route from shared positioned glyphs to
+  Slug run data; the backend resource exists, but panel/world systems
+  still build atlas quads.
+- Phase 6 needs to connect `SlugBackendCompleted` to the same pending
+  text retry behavior currently driven by atlas events.
+- Phase 6 should decide how Slug render entities are spawned for
+  visible and shadow passes before adding example opt-ins.
+
+### Phase 5 Review
+
+- Phase 6 now starts with production routing from `PositionedGlyph` and
+  `ResolvedFontData` into Slug run data before parity work.
+- Phase 6 now names `SlugBackendCompleted` as the wakeup path for
+  pending Slug text.
+- Phase 6 now moves GPU storage allocation/upload ownership into the
+  production Slug backend path instead of leaving it in examples.
+- Phase 6 now separates shadow-pass representation from Phase 8 shadow
+  effect quality.
+- Phase 6 cache invalidation tests now target the key dimensions that
+  exist today; storage and effect profiles remain deferred.
+- Phase 7 CJK testing now stays inside the current TrueType/quadratic
+  scope until the post-transition unsupported-text review decides CFF
+  and cubic support.
 
 ### Phase 6: panel and world text parity
 
+- Route shared `PositionedGlyph` data into Slug run data when
+  `TextRendererPreference` selects `TextRendererBackend::Slug`.
+  Distance-field rendering keeps building atlas `GlyphQuadData`.
+- Bridge production `PositionedGlyph.font` / `ResolvedFontData` to
+  `SlugFontKey` and exact font bytes. Do not reuse the example-only
+  font-family shaping path for production Slug text.
+- Produce clear unsupported-run diagnostics when the selected font face
+  or glyph cannot use the current Slug path.
+- Move Slug GPU storage allocation, upload handles, dirty tracking, and
+  lookup state into the production Slug backend path. The example may
+  keep local setup only as a manual comparison target.
+- Connect `SlugBackendCompleted` to pending text retries, matching the
+  role atlas swap events play for distance-field text.
+- Define Slug render entity spawning for visible and shadow passes.
+  Phase 6 should preserve the existing visible/shadow mode matrix as
+  pass representation; Phase 8 owns production-quality shadow effects
+  and tuning.
 - Support Slug clipping through representations that preserve
   glyph-local coordinates for both overlap/padding trims and panel
   scissor clips.
@@ -586,8 +659,9 @@ explicit layout fixtures.
   `Invisible`, `Text`, `PunchOut`, `SolidQuad`, and shadow
   `None`, `Text`, `PunchOut`, `SolidQuad`.
 - Add regression tests around glyph readiness, backend swaps, font
-  changes, cache misses, cache invalidation, and `WorldTextReady`
-  timing.
+  changes, cache misses, current cache-key invalidation dimensions,
+  and `WorldTextReady` timing. Defer storage-profile and effect-profile
+  invalidation tests until those profiles exist.
 
 Exit criteria: existing panel/world text examples can opt into Slug and
 keep layout behavior stable under the accepted first-scope constraints.
@@ -597,8 +671,10 @@ keep layout behavior stable under the accepted first-scope constraints.
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
   Crimson Text.
 - Include small text, large text, oblique world text, high zoom, dense
-  CJK glyphs from explicitly selected registered CJK fonts, and later
-  fallback strings once fallback support is deliberately enabled.
+  CJK glyphs from explicitly selected registered TrueType/quadratic CJK
+  fonts, and later fallback strings once fallback support is
+  deliberately enabled. Broad CJK testing for CFF/cubic fonts waits for
+  the post-transition unsupported-text review.
 - Compare screenshots against MTSDF at 32, 64, 128, and 256 px
   equivalent sizes.
 - Measure CPU preprocessing cost, GPU storage size, draw count,

@@ -4,6 +4,7 @@
 //! documentation. It exists to prove the Slug data path before any
 //! production text renderer refactor.
 
+mod backend;
 mod constants;
 mod fixtures;
 mod geometry;
@@ -12,6 +13,10 @@ mod packing;
 mod run;
 mod run_render;
 
+pub use backend::SlugBackend;
+pub use backend::SlugBackendCompleted;
+pub use backend::SlugPreparedTextRun;
+pub use backend::SlugTextRequest;
 pub use fixtures::FIXTURE_TEXT;
 pub use geometry::SlugBounds;
 pub use geometry::SlugGlyph;

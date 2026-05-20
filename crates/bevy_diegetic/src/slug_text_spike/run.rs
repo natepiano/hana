@@ -10,6 +10,7 @@ use parley::style::FontFamily;
 use parley::style::StyleProperty;
 use ttf_parser::Face;
 
+use super::backend::SlugTextRequest;
 use super::geometry;
 use super::geometry::SlugBounds;
 use super::geometry::SlugOutlineError;
@@ -33,14 +34,35 @@ impl SlugFontKey {
 /// Cache key for one resolved font glyph.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SlugGlyphKey {
-    font:     SlugFontKey,
-    glyph_id: u16,
+    font:               SlugFontKey,
+    glyph_id:           u16,
+    preprocess_version: u32,
 }
 
 impl SlugGlyphKey {
     /// Creates a cache key for one glyph in one resolved font face.
     #[must_use]
-    pub const fn new(font: SlugFontKey, glyph_id: u16) -> Self { Self { font, glyph_id } }
+    pub const fn new(font: SlugFontKey, glyph_id: u16) -> Self {
+        Self {
+            font,
+            glyph_id,
+            preprocess_version: 0,
+        }
+    }
+
+    /// Creates a cache key for one preprocessing version.
+    #[must_use]
+    pub const fn with_preprocess_version(
+        font: SlugFontKey,
+        glyph_id: u16,
+        preprocess_version: u32,
+    ) -> Self {
+        Self {
+            font,
+            glyph_id,
+            preprocess_version,
+        }
+    }
 
     /// Resolved font face identity.
     #[must_use]
@@ -49,6 +71,10 @@ impl SlugGlyphKey {
     /// Font glyph ID.
     #[must_use]
     pub const fn glyph_id(self) -> u16 { self.glyph_id }
+
+    /// Slug preprocessing version.
+    #[must_use]
+    pub const fn preprocess_version(self) -> u32 { self.preprocess_version }
 }
 
 /// One positioned glyph in a shaped Slug text run.
@@ -102,8 +128,6 @@ pub struct SlugTextRun {
 pub struct SlugBuiltTextRun {
     /// Per-entity shaped text run.
     pub run:            SlugTextRun,
-    /// Glyph-level packed curve/band cache used by `run`.
-    pub glyph_cache:    SlugGlyphCache,
     /// First-line baseline in font design-space units.
     pub baseline:       f32,
     /// Font size in caller world units.
@@ -149,13 +173,43 @@ pub fn build_slug_text_run(
     world_scale: f32,
     band_count: usize,
 ) -> Result<SlugBuiltTextRun, SlugOutlineError> {
-    let shaped_text = shape_slug_text(text, font_data, font_family, world_scale)?;
+    let request = SlugTextRequest {
+        text,
+        font_data,
+        font_key,
+        font_family,
+        world_scale,
+        band_count,
+        preprocess_version: 0,
+    };
     let mut glyph_cache = SlugGlyphCache::default();
+    build_slug_text_run_with_cache(request, &mut glyph_cache)
+}
+
+/// Builds one Slug text run after text shaping using a caller-owned glyph cache.
+pub fn build_slug_text_run_with_cache(
+    request: SlugTextRequest<'_>,
+    glyph_cache: &mut SlugGlyphCache,
+) -> Result<SlugBuiltTextRun, SlugOutlineError> {
+    let shaped_text = shape_slug_text(
+        request.text,
+        request.font_data,
+        request.font_family,
+        request.world_scale,
+    )?;
     let mut glyphs = Vec::with_capacity(shaped_text.glyphs.len());
     for glyph in shaped_text.glyphs {
-        let key = SlugGlyphKey::new(font_key, glyph.glyph_id);
-        let packed_glyph =
-            glyph_cache.get_or_insert_packed(key, font_data, glyph.character, band_count)?;
+        let key = SlugGlyphKey::with_preprocess_version(
+            request.font_key,
+            glyph.glyph_id,
+            request.preprocess_version,
+        );
+        let packed_glyph = glyph_cache.get_or_insert_packed(
+            key,
+            request.font_data,
+            glyph.character,
+            request.band_count,
+        )?;
         glyphs.push(SlugGlyphInstance::new(
             key,
             glyph.origin,
@@ -164,9 +218,8 @@ pub fn build_slug_text_run(
         ));
     }
     Ok(SlugBuiltTextRun {
-        run: SlugTextRun::new(glyphs),
-        glyph_cache,
-        baseline: shaped_text.baseline,
+        run:            SlugTextRun::new(glyphs),
+        baseline:       shaped_text.baseline,
         reference_size: shaped_text.reference_size,
     })
 }
@@ -259,6 +312,7 @@ fn shape_slug_text(
     world_scale: f32,
 ) -> Result<ShapedSlugText, SlugOutlineError> {
     let face = Face::parse(font_data, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
+    reject_missing_exact_font_glyphs(&face, text)?;
     let shape_size = f32::from(face.units_per_em());
 
     let mut font_context = parley::FontContext::default();
@@ -309,4 +363,13 @@ fn shape_slug_text(
         baseline,
         reference_size: shape_size * world_scale,
     })
+}
+
+fn reject_missing_exact_font_glyphs(face: &Face<'_>, text: &str) -> Result<(), SlugOutlineError> {
+    for character in text.chars() {
+        if face.glyph_index(character).is_none() {
+            return Err(SlugOutlineError::MissingGlyph(character));
+        }
+    }
+    Ok(())
 }

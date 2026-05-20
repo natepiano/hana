@@ -15,6 +15,7 @@ use super::packing::SlugBandRecord;
 use super::packing::SlugCurveRecord;
 use super::packing::SlugGlyphRecord;
 use super::run::SlugBuiltTextRun;
+use super::run::SlugGlyphCache;
 use super::run::SlugGlyphInstance;
 use super::run::SlugGlyphKey;
 
@@ -43,9 +44,10 @@ impl Display for SlugRunRenderError {
         match self {
             Self::MissingPackedGlyph(key) => write!(
                 f,
-                "missing packed glyph for font key {} glyph id {}",
+                "missing packed glyph for font key {} glyph id {} preprocessing version {}",
                 key.font().value(),
-                key.glyph_id()
+                key.glyph_id(),
+                key.preprocess_version()
             ),
         }
     }
@@ -56,13 +58,14 @@ impl Error for SlugRunRenderError {}
 /// Builds one run-level mesh and packed storage set for a Slug text run.
 pub fn build_slug_run_render_data(
     preview: &SlugBuiltTextRun,
+    glyph_cache: &SlugGlyphCache,
     scale: f32,
 ) -> Result<SlugRunRenderData, SlugRunRenderError> {
     let mut packer = RunPacker::default();
     let mut mesh_builder = RunMeshBuilder::new(preview.run.glyphs().len());
 
     for glyph in preview.run.glyphs() {
-        let record_index = packer.record_index(*glyph, preview)?;
+        let record_index = packer.record_index(*glyph, glyph_cache)?;
         mesh_builder.push_glyph(*glyph, record_index, scale);
     }
 
@@ -86,14 +89,13 @@ impl RunPacker {
     fn record_index(
         &mut self,
         glyph: SlugGlyphInstance,
-        preview: &SlugBuiltTextRun,
+        glyph_cache: &SlugGlyphCache,
     ) -> Result<u32, SlugRunRenderError> {
         if let Some(index) = self.record_indices.get(&glyph.key()).copied() {
             return Ok(index);
         }
 
-        let packed = preview
-            .glyph_cache
+        let packed = glyph_cache
             .get(glyph.key())
             .ok_or_else(|| SlugRunRenderError::MissingPackedGlyph(glyph.key()))?;
         let record_index = self.glyphs.len().to_u32();

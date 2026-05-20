@@ -175,6 +175,8 @@ pub use render::PanelTextChild;
 pub use render::PendingGlyphs;
 use render::RenderPlugin;
 pub use render::StableTransparency;
+pub use render::TextRendererBackend;
+pub use render::TextRendererPreference;
 pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
@@ -183,6 +185,10 @@ use screen_space::ScreenSpacePlugin;
 pub use slug_text_spike::DEFAULT_BAND_COUNT;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::FIXTURE_TEXT;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugBackend;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugBackendCompleted;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugBandRecord;
 #[cfg(feature = "slug_text")]
@@ -208,6 +214,8 @@ pub use slug_text_spike::SlugOutlineError;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugPackedGlyph;
 #[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugPreparedTextRun;
+#[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugRenderMode;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugRunRenderData;
@@ -217,6 +225,8 @@ pub use slug_text_spike::SlugRunRenderError;
 pub use slug_text_spike::SlugTextMaterial;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugTextMaterialInput;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugTextRequest;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugTextRun;
 #[cfg(feature = "slug_text")]

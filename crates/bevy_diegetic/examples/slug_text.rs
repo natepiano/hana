@@ -12,6 +12,8 @@ use bevy_diegetic::DEFAULT_BAND_COUNT;
 use bevy_diegetic::FIXTURE_TEXT;
 use bevy_diegetic::FontId;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::SlugBackend;
+use bevy_diegetic::SlugBackendCompleted;
 use bevy_diegetic::SlugBuiltTextRun;
 use bevy_diegetic::SlugFontKey;
 use bevy_diegetic::SlugOutlineError;
@@ -19,13 +21,15 @@ use bevy_diegetic::SlugPackedGlyph;
 use bevy_diegetic::SlugRenderMode;
 use bevy_diegetic::SlugTextMaterial;
 use bevy_diegetic::SlugTextMaterialInput;
+use bevy_diegetic::SlugTextRequest;
 use bevy_diegetic::SlugTextRun;
 use bevy_diegetic::SlugTextSpikePlugin;
+use bevy_diegetic::TextRendererBackend;
+use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::build_packed_glyph;
 use bevy_diegetic::build_slug_run_render_data;
-use bevy_diegetic::build_slug_text_run;
 use bevy_diegetic::load_glyph;
 use bevy_diegetic::slug_text_material;
 use bevy_lagrange::OrbitCamInputMode;
@@ -76,6 +80,7 @@ fn main() {
                 .control(TITLE_CONTROL),
         )
         .with_camera_control_panel()
+        .insert_resource(TextRendererPreference::slug())
         .add_plugins(SlugTextSpikePlugin)
         .add_systems(Startup, setup)
         .run();
@@ -86,11 +91,21 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut slug_materials: ResMut<Assets<SlugTextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut slug_backend: ResMut<SlugBackend>,
+    text_backend: Res<TextRendererPreference>,
 ) {
-    match load_preview_text() {
+    match load_preview_text(&mut slug_backend) {
         Ok(preview) => {
-            log_preview_metrics(&preview);
-            log_cjk_probe();
+            if text_backend.backend() != TextRendererBackend::Slug {
+                warn!("slug_text example is not using the Slug backend preference");
+                return;
+            }
+            if let Some(completion) = slug_backend.last_completion() {
+                commands.trigger(completion);
+                log_slug_backend_completion(completion);
+            }
+            log_preview_metrics(&preview, &slug_backend);
+            log_cjk_probe(&mut slug_backend);
             spawn_world_text_reference(&mut commands, &preview);
             spawn_slug_text_run(
                 &mut commands,
@@ -98,9 +113,11 @@ fn setup(
                 &mut slug_materials,
                 &mut storage_buffers,
                 &preview,
+                &slug_backend,
             );
         },
         Err(err) => {
+            slug_backend.record_failure();
             error!("slug_text feasibility example failed: {err}");
         },
     }
@@ -124,23 +141,23 @@ fn spawn_world_text_reference(commands: &mut Commands, preview: &SlugBuiltTextRu
     ));
 }
 
-fn load_preview_text() -> Result<SlugBuiltTextRun, SlugOutlineError> {
-    build_slug_text_run(
+fn load_preview_text(slug_backend: &mut SlugBackend) -> Result<SlugBuiltTextRun, SlugOutlineError> {
+    let prepared = slug_backend.prepare_text_run(SlugTextRequest::new(
         FIXTURE_TEXT,
         LATIN_FONT_DATA,
         LATIN_FONT_KEY,
         LATIN_FONT_FAMILY,
         FONT_SCALE,
-        DEFAULT_BAND_COUNT,
-    )
+    ))?;
+    Ok(prepared.run)
 }
 
-fn log_preview_metrics(preview: &SlugBuiltTextRun) {
+fn log_preview_metrics(preview: &SlugBuiltTextRun, slug_backend: &SlugBackend) {
     info!(
         "parley preview run: glyph_instances={}, unique_packed_glyphs={}, \
         advance_width={}, bounds=({}, {})..({}, {})",
         preview.run.glyphs().len(),
-        preview.glyph_cache.len(),
+        slug_backend.glyph_cache().len(),
         preview.run.advance_width(),
         preview.run.bounds().min.x,
         preview.run.bounds().min.y,
@@ -148,13 +165,20 @@ fn log_preview_metrics(preview: &SlugBuiltTextRun) {
         preview.run.bounds().max.y
     );
     for glyph in preview.run.glyphs() {
-        if let Some(packed_glyph) = preview.glyph_cache.get(glyph.key()) {
+        if let Some(packed_glyph) = slug_backend.glyph_cache().get(glyph.key()) {
             log_glyph_metrics("parley preview", packed_glyph);
         }
     }
 }
 
-fn log_cjk_probe() {
+fn log_slug_backend_completion(completion: SlugBackendCompleted) {
+    info!(
+        "slug backend completed generation {} with {} packed glyphs",
+        completion.generation, completion.packed_glyphs
+    );
+}
+
+fn log_cjk_probe(slug_backend: &mut SlugBackend) {
     match load_glyph(CJK_FONT_DATA, CJK_SAMPLE_CHAR) {
         Ok(glyph) => {
             let packed_glyph = build_packed_glyph(glyph, DEFAULT_BAND_COUNT);
@@ -169,7 +193,10 @@ fn log_cjk_probe() {
                 cubic conversion is intentionally deferred"
             );
         },
-        Err(err) => warn!("cjk probe failed: {err}"),
+        Err(err) => {
+            slug_backend.record_failure();
+            warn!("cjk probe failed: {err}");
+        },
     }
 }
 
@@ -195,14 +222,16 @@ fn spawn_slug_text_run(
     slug_materials: &mut Assets<SlugTextMaterial>,
     storage_buffers: &mut Assets<ShaderStorageBuffer>,
     preview: &SlugBuiltTextRun,
+    slug_backend: &SlugBackend,
 ) {
-    let render_data = match build_slug_run_render_data(preview, FONT_SCALE) {
-        Ok(render_data) => render_data,
-        Err(err) => {
-            error!("failed to build run-level Slug render data: {err}");
-            return;
-        },
-    };
+    let render_data =
+        match build_slug_run_render_data(preview, slug_backend.glyph_cache(), FONT_SCALE) {
+            Ok(render_data) => render_data,
+            Err(err) => {
+                error!("failed to build run-level Slug render data: {err}");
+                return;
+            },
+        };
     let curve_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.curves));
     let band_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.bands));
     let glyph_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.glyphs));

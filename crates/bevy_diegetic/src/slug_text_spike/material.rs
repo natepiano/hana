@@ -17,6 +17,7 @@ use bevy::render::render_resource::ShaderType;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy::shader::ShaderRef;
 
+use super::backend::SlugBackend;
 use super::constants::SLUG_TEXT_SHADER_PATH;
 
 /// Visible render mode for the isolated Slug shader path.
@@ -47,6 +48,7 @@ pub struct SlugTextSpikePlugin;
 impl Plugin for SlugTextSpikePlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/slug_text.wgsl");
+        app.init_resource::<SlugBackend>();
         app.add_plugins(MaterialPlugin::<SlugTextMaterial>::default());
     }
 }
