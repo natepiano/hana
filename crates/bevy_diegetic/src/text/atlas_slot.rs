@@ -73,11 +73,11 @@ impl AtlasSlot {
 
     /// Distance-field variant the world is rendering with right now.
     #[must_use]
-    pub fn distance_field(&self) -> DistanceField { self.active().distance_field() }
+    pub const fn distance_field(&self) -> DistanceField { self.active().distance_field() }
 
     /// Distance-field variant the slot is transitioning to, if any.
     #[must_use]
-    pub fn target_distance_field(&self) -> Option<DistanceField> {
+    pub const fn target_distance_field(&self) -> Option<DistanceField> {
         match self {
             Self::Single(_) => None,
             Self::Swapping { pending, .. } => Some(pending.distance_field()),

@@ -4,6 +4,16 @@
 // glyph header array). Each thread writes one texel of the output
 // atlas page after a per-edge nearest-distance search and a
 // horizontal-ray-cast sign correction (non-zero winding rule).
+//
+// Winding functions are imported from `msdf_common` so the
+// scanline-crossing state machine (fdsm port) is the single
+// source of truth for sign correction across SDF and MSDF.
+
+#import bevy_diegetic::gpu_rasterizer::msdf_common::{
+    winding_linear,
+    winding_quadratic,
+    winding_cubic,
+}
 
 const EDGE_KIND_MASK: u32 = 3u;
 const EDGE_KIND_LINEAR: u32 = 0u;
@@ -186,45 +196,6 @@ fn distance_cubic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3
         }
     }
     return best;
-}
-
-// Signed winding contribution of a single line segment for a
-// rightward horizontal ray cast from `pt`.
-fn winding_linear(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>) -> i32 {
-    let dy = p1.y - p0.y;
-    if (abs(dy) < 1e-20) { return 0; }
-    let t = (pt.y - p0.y) / dy;
-    if (t < 0.0 || t >= 1.0) { return 0; }
-    let x = p0.x + t * (p1.x - p0.x);
-    if (x < pt.x) { return 0; }
-    return select(-1, 1, dy > 0.0);
-}
-
-fn winding_quadratic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> i32 {
-    // Approximate via subdivision into linear segments.
-    var acc: i32 = 0;
-    let steps = 8u;
-    var prev = p0;
-    for (var i = 1u; i <= steps; i = i + 1u) {
-        let t = f32(i) / f32(steps);
-        let next = bezier_quadratic(t, p0, p1, p2);
-        acc = acc + winding_linear(pt, prev, next);
-        prev = next;
-    }
-    return acc;
-}
-
-fn winding_cubic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> i32 {
-    var acc: i32 = 0;
-    let steps = 12u;
-    var prev = p0;
-    for (var i = 1u; i <= steps; i = i + 1u) {
-        let t = f32(i) / f32(steps);
-        let next = bezier_cubic(t, p0, p1, p2, p3);
-        acc = acc + winding_linear(pt, prev, next);
-        prev = next;
-    }
-    return acc;
 }
 
 @compute @workgroup_size(8, 8, 1)

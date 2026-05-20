@@ -238,49 +238,49 @@ branch fires on vs fdsm's `correct_error_msdf` at 64 px and 128 px;
 if our count is lower, hypothesis confirmed.
 
 Active work queue. **"Continue to the next phase" = work the
-next unfinished item in this list, top-to-bottom.** Phase 2
-stays at #1 until its acceptance work is done, then Phase 2.1
-starts.
+next unfinished item in this list, top-to-bottom.**
 
-1. **Phase 2 — MSDF on GPU.** Code landed: enum-tagged
-   `GpuGlyphRequest::{Sdf,Msdf}`, edge-coloring in
-   `build_edge_buffer`, `msdf_gen.wgsl` with signed-pseudo-distance
-   and winding-rule sign reconciliation, second cached compute
-   pipeline. `edge_coloring_matches_cpu` parity test passes.
-   **Acceptance work remaining (do these in order):**
-   a. CPU/GPU visual comparison via the G key toggle in
-      `examples/typography.rs` — switch atlas config to `(Gpu,
-      Msdf)`, take screenshots before/after toggling G,
-      pixel-diff in the Typography text region, confirm GPU
-      result is visually clean and diff concentrates on letter
-      edges.
-   b. 3-glyph software-adapter snapshot test (A, W, V across
-      JetBrains Mono and EB Garamond). GPU-rendered MSDF page is
-      its own golden image.
-   c. Build the wgpu-device-backed bench harness (`LazyLock<App>`
-      + `RenderPlugin` per "Bench device initialization"), delete
-      the SDF gate in `bench_gpu_main_thread`, confirm
-      `warmup_burst/ebg_ascii_256_msdf` GPU ≥ 10× faster than CPU.
-2. **Phase 2.1 — GPU-only quality exploration.** Candidate tweaks
-   that fdsm doesn't or can't do (supersampling, in-shader error
-   correction, tangent pseudo-distance, hybrid f32/f64). Each one
-   measured against the Phase 2 baseline; the ones that move the
-   needle land, the ones that don't get dropped.
+1. **Phase 2 — MSDF on GPU.** Done. Visual acceptance and corner
+   parity reached via the f32 corner-endpoint tiebreaker fix and
+   the `msdf_correct.wgsl` sign-correction rewrite (both
+   documented above).
+2. **Phase 2.1 — GPU-only quality exploration.** Superseded by
+   the MTSDF decision. Of the candidate tweaks listed in the
+   table further down, only the in-shader error correction
+   landed (it ships as part of `msdf_correct.wgsl`); the others
+   were not needed because MTSDF closes the visible quality gap
+   without them.
 3. **Phase 2.5 — Per-element atlas binding.** Replace the single
    global `GlyphAtlas` with a `HashMap<RasterQuality, GlyphAtlas>`
    so a panel of small overlay text and a large headline can each
    pick a canonical size appropriate to their display size.
-4. **Phase 3 — MTSDF + text effects.** A-channel true distance for
-   outlines, shadows, glows, bevels. Generator side is a one-line
-   `#ifdef MTSDF` in `msdf_gen.wgsl` plus a third cached pipeline;
-   the consumer-side effects pipeline (parameter components, shader
-   uniforms, fragment-shader extension) is the actual remaining
-   work.
-5. **Phase 4 — Retire the runtime CPU rasterizer.** Leave it
-   `#[cfg(test)]` for the parity test reference; remove the
-   `RasterBackend` enum and the CPU/GPU swap branch. The CPU path
-   and the G key toggle stay through Phases 2 / 2.1 / 2.5 / 3 so
-   the CPU/GPU comparison stays available throughout.
+4. **Phase 3 — MTSDF + text effects.** MTSDF generation landed
+   under the active investigation above. The consumer-side effects
+   pipeline (outline / glow / shadow parameter components, shader
+   uniforms, fragment-shader extension on top of the alpha channel)
+   remains separate work, scheduled after Phase 4.
+5. **Phase 3.5 (now active) — GPU-vs-CPU artifact parity on fonts
+   where GPU regresses.** Some fonts render with major artifacts on
+   every GPU path (SDF, MSDF, MTSDF) at large pixel sizes, while
+   the CPU rasterizer renders them correctly. The artifact is
+   per-encoding-independent → root cause is in the per-edge
+   distance / winding / sign-correction stages, not the encoding
+   logic. Acceptance:
+   - Enumerate which fonts regress, with screenshots, at which
+     atlas sizes.
+   - Reproduce the artifact in `msdf_parity.rs` (Rust port of the
+     WGSL kernels — runs without a wgpu device) against the CPU
+     reference to localize which kernel stage diverges.
+   - Fix root cause(s) in `shaders/msdf_common.wgsl` and/or
+     `shaders/msdf_correct.wgsl`; confirm parity at every affected
+     font / glyph / size.
+   - Re-run the typography example side-by-side via the G key to
+     visually confirm.
+6. **Phase 4 — Retire SDF, MSDF, and the CPU rasterizer.** Gated
+   on Phase 3.5 closing. MTSDF is the only encoding the runtime
+   needs to support; CPU rasterizer remains in tree as the
+   reference until then. See the expanded Phase 4 section further
+   down for the concrete subtask list.
 
 ### Active investigation — MTSDF as the path to CJK-robust rendering (2026-05-19)
 
@@ -433,6 +433,88 @@ If artifacts vanish, polish 4–6.
   MTSDF is verified across the supported font set + CJK before
   pulling those paths.
 - CPU MTSDF generation — never planned; GPU-only by decision above.
+
+### Landed — MTSDF chosen as the sole encoding (2026-05-19)
+
+**Status: encoding decision closed. GPU-vs-CPU artifact parity on
+some fonts is NOT yet reached (see Phase 3.5 below) — CPU rasterizer
+stays in tree as the reference until those artifacts are resolved.
+Phase 4 retirement is gated on Phase 3.5 closing.**
+
+The three encodings rendered side-by-side on EB Garamond G at 64 /
+128 / 256 px showed a clear ordering: SDF renders solid but rounds
+corners; MSDF preserves corners but cuts comb-pattern holes
+through narrow features at every atlas size; MTSDF — with the right
+fragment-shader rule — preserves corners *and* fills the holes.
+MTSDF dominates visually, has no quality regime where SDF or MSDF
+wins, and the per-fragment cost difference vs MSDF is `max(a, b)`
+(two ops). Retiring the other two paths is unambiguous.
+
+#### The fragment rule that landed: `max(median, alpha)`
+
+Three rules were tried in `crates/bevy_diegetic/src/shaders/glyph_text.wgsl`
+during the visual session:
+
+1. **`clamp(median, alpha ± tolerance)` with `tolerance = 0.5 / sdf_range`**
+   — fixed-tolerance clamp around the alpha. Reduced holes vs pure
+   MSDF but did not eliminate them: when the alpha was only barely
+   interior (`alpha ≈ 0.55`) at the hole edge, the lower clamp bound
+   landed at `0.55 - 0.125 ≈ 0.425` — still outside, so MSDF's comb
+   dip passed through unchanged.
+2. **Symmetric sign-disagreement override** (`median_inside != alpha_inside`
+   → use alpha, else use median) — filled the holes cleanly but
+   rounded every sharp corner. At a corner wedge the median correctly
+   extends past the rounded true-SDF boundary, so `median > 0.5,
+   alpha < 0.5` disagrees and gets overridden to the rounded alpha
+   — destroying the corner.
+3. **`max(median, alpha)`** — landed. Behaves correctly in every
+   regime:
+   - Comb hole (median ≪ alpha): max picks alpha → fills the hole.
+   - Sharp corner wedge (median > alpha): max picks median →
+     preserves the corner extension past the rounded true-SDF edge.
+   - Smooth interior / exterior (median ≈ alpha): no change.
+   - Sub-texel inward notch at low atlas size: alpha is less
+     negative than the comb-amplified median, so `max` produces a
+     faint AA trace instead of a hard dark line; the same notch at
+     128 / 256 px is multi-texel and resolves as a clean cut.
+
+The `max` rule is a strict superset of the asymmetric override
+(`median < 0.5 && alpha > 0.5 → alpha`) — applied to the
+inside-leaning direction always rather than only when MSDF crosses
+the threshold from the outside.
+
+#### Cost profile
+
+- **Fragment cost vs MSDF: +2 ops** (`max(median, alpha)` after the
+  median). Same texture sample, same `screen_px_range` work.
+- **Atlas memory vs MSDF: identical** (already RGBA8). Vs SDF: 4×.
+  Per-page texture tax, not per-glyph.
+- **Rasterization time vs MSDF: identical.** The MTSDF alpha is
+  one `clamp(true_dist / sdf_range + 0.5, 0, 1)` at the end of the
+  correction kernel; the kernel already computes `true_signed_distance`
+  for the sign-correction stage, so the alpha encode is one extra
+  texture write component, not extra compute.
+- **Rasterization time vs SDF: much higher.** The correction kernel
+  does ~9× the per-edge work of `sdf_gen.wgsl` in the worst case
+  (8 distance-check probes + final sign correction, each a full
+  per-edge scan). This is a one-time cost per glyph per atlas
+  size, never re-paid at render time. Speed optimizations
+  (memoize `true_signed_distance` across probes, skip the final
+  sign correction when the first pass already flattened the texel,
+  reuse the encoded alpha for the `truth_inside` decision) are
+  available if bake time becomes a measured problem; not now.
+
+#### Why we are not keeping SDF as a fast-path
+
+The argument *for* keeping SDF was: dense CJK atlases (20K+ Han
+glyphs) where a corner-preserving encoding is gratuitous. The
+argument *against*: SDF was rasterizing solid on the test glyphs
+only because it rounds away the sub-texel features that MSDF and
+MTSDF expose. At higher resolution the same notches that show as
+faint traces under MTSDF show as clean cuts — SDF can never
+render them. The cost difference is per-glyph bake time, not
+runtime; rasterization speed-ups (see above) close most of that
+gap without needing a second code path.
 
 ## Motivation
 
@@ -1038,9 +1120,151 @@ The effects pipeline (parameter components on text entities,
 shader uniforms, fragment-shader extension) is a separate feature
 on top of MTSDF generation.
 
-### Phase 4 — Retire the runtime CPU rasterizer
+### Phase 3.5 — GPU-vs-CPU artifact parity (active; serif-S spur fixed 2026-05-19)
 
-Once GPU MSDF is verified across the supported font set:
+**Status:** the upper-left S-terminal spur on Crimson Text + Noto Sans
+has been root-caused and fixed. Cause: `winding_quadratic` /
+`winding_cubic` in `shaders/msdf_common.wgsl` used an 8/12-step
+polyline subdivision that miscounted nearly-horizontal curve crossings
+and shared-corner crossings exactly on the scanline. Replacement:
+direct port of fdsm's `PreparedQuadraticSegment::get_scanline_points`
+(and the cubic equivalent) — analytic root solve + `next_dy` state
+machine + endpoint lexicographic-minimum test + final consistency
+fixup. `winding_linear` was also tightened to fdsm's
+"include lower-y endpoint, exclude higher-y endpoint" convention
+(it had a latent bug for segments with `off.y < 0` whose triggering
+case did not appear on the inventoried glyphs). Verified: all 9
+`msdf_parity` tests pass with max median diff = 0 across
+JetBrains Mono / EB Garamond / Crimson Text / Noto Sans + their
+problem glyphs; visual confirmation in `examples/typography.rs`
+shows Crimson Text "Señal" clean at 64 / 256 and Noto Sans "Señal"
+clean at 64 under GPU MTSDF.
+
+Open: continue extending the inventory if further artifacts surface;
+the parity infrastructure now reliably catches winding-rule
+divergences, so any future GPU/CPU mismatch should be reproducible
+in `msdf_parity.rs` as a first step.
+
+
+Background: on some fonts at large pixel sizes the GPU rasterizer
+produces visible artifacts that the CPU rasterizer does not. The
+artifacts appear under every GPU encoding (SDF, MSDF, MTSDF), so the
+cause is in the per-edge distance / winding / sign-correction stages
+in `shaders/msdf_common.wgsl` and `shaders/msdf_correct.wgsl`, not
+in any encoding-specific path. CPU parity is the prerequisite for
+Phase 4 — we cannot retire the reference until the GPU matches it on
+the fonts we ship.
+
+**Inventory (working):**
+
+Observed pattern: a spurious horizontal spur off the upper-left
+terminal of certain glyphs, extending leftward past the actual
+glyph body. Common across multiple fonts. Confirmed datapoints:
+
+| Font | Glyph | Atlas sizes affected | Sizes clean | Encodings affected |
+|---|---|---|---|---|
+| Noto Sans | `S` (capital) | 64 only | 16, 32, 128, 256 | MSDF + SDF + MTSDF (all GPU); CPU clean |
+| Crimson Text | `S` (capital) | 64, 128, 256 (all tested) | — | MTSDF (and presumably SDF/MSDF too); CPU clean |
+
+The same artifact geometry appears across encodings on the affected
+glyph → cause is in the path common to all of them
+(`compute_bitmap_size`, `build_edge_buffer` affine transform, or
+`msdf_common.wgsl`'s per-edge distance math), not in
+encoding-specific logic.
+
+**Two distinct failure modes**, both manifesting as the same
+upper-left-terminal spur on `S`:
+
+1. **Resolution-invariant** (Crimson Text S, 64/128/256 all bad)
+   → the GPU per-edge math is picking a different nearest-edge
+   than the CPU for the texels in that region, regardless of
+   bitmap resolution. Pure geometric/algorithmic divergence.
+   Candidates: pseudo-distance extension picking the wrong edge
+   when the upper terminal's near-horizontal edge endpoint lies
+   close to the texel; cubic Newton seeds missing a local minimum
+   on a curved terminal; winding subdivision skipping a scanline
+   crossing.
+2. **Size-specific** (Noto Sans S, 64 only, clean at 16/32/128/256)
+   → degenerate dimension/alignment/precision at exactly that
+   bitmap size. Candidates: `compute_bitmap_size` rounding
+   interacting with `sdf_range`/padding, workgroup (8×8) alignment
+   modulo, or a numerical-precision threshold tied to that scale
+   factor.
+
+Both fonts are serif/transitional and the affected feature is the
+thin near-horizontal upper-left terminal of `S` — a small isolated
+geometric region with a sharp tangent change. That makes the
+"per-edge pseudo-distance pick on thin/isolated outline segments"
+hypothesis the strongest single lead for the resolution-invariant
+mode, since pseudo-distance extends along the tangent past the
+edge's endpoint and can outrank a closer edge that the CPU picks.
+
+**Subtasks:**
+
+1. **Extend the inventory.** List every other font + glyph + atlas
+   size where GPU diverges visibly from CPU. Screenshots for each.
+   For each row, record whether the artifact appears in all GPU
+   encodings or only some, and whether it is size-specific (like
+   Noto Sans `S` at 64) or present at every size. The size-specific
+   vs. all-size split is diagnostic — different root causes.
+2. **Reproduce in `msdf_parity.rs`.** The Rust port of the WGSL
+   kernels (`crates/bevy_diegetic/src/text/gpu_rasterizer/msdf_parity.rs`)
+   already runs without a wgpu device and diffs against the CPU
+   reference. For each inventoried artifact, add a parity case
+   targeting that font+glyph+size. Run `cargo nextest run -p
+   bevy_diegetic --no-fail-fast msdf_parity --no-capture`.
+3. **Localize the divergent stage.** The parity test produces
+   per-bad-texel diagnostics — channel values from both paths,
+   `dist_sq` for each edge, winding count. Patterns to look for:
+   - Same-channel divergence at corner texels → `distance_*`
+     numerical issue (precedent: the f32 corner-endpoint
+     tiebreaker fix, documented above).
+   - Winding count mismatch at scanline boundaries → polyline
+     subdivision step count in `winding_quadratic` /
+     `winding_cubic` (currently 8 / 12) is too coarse for that
+     font's curve density.
+   - Cubic distance miss near high-curvature inflections →
+     Newton seed coverage in `distance_cubic` (currently 9
+     uniformly-spaced seeds) misses a local minimum.
+4. **Fix in `shaders/msdf_common.wgsl` and/or
+   `shaders/msdf_correct.wgsl`.** Apply the same fix to the
+   Rust port in `msdf_parity.rs` so the parity test continues
+   to mirror the kernel.
+5. **Re-verify visually.** Toggle the G key in
+   `examples/typography.rs` and confirm the artifact is gone
+   across all three encodings on the affected glyphs.
+
+**Acceptance:** every font + glyph + atlas size in the inventory
+renders without visible GPU-vs-CPU divergence; `msdf_parity` parity
+cases all pass.
+
+### Phase 4 — Retire SDF, MSDF, and the runtime CPU rasterizer
+
+Gated on Phase 3.5. MTSDF is the only encoding the runtime needs to
+support; once GPU parity with CPU is reached, neither the CPU path
+nor the non-MTSDF GPU paths carry any quality the runtime can use.
+
+**Encoding cleanup (SDF + MSDF removal):**
+
+- Delete `DistanceField::Sdf` and `DistanceField::Msdf` variants
+  from `text/msdf_rasterizer/mod.rs`; the enum collapses to a
+  single variant or is removed entirely depending on which call
+  sites still need to switch on it.
+- Delete `gpu_rasterizer/shaders/sdf_gen.wgsl` and its pipeline /
+  request / dispatch arms (`sdf_pipeline` in `pipeline.rs`, the
+  `GpuGlyphRequest::Sdf` variant in `request.rs`, the SDF arms
+  in `dispatch.rs` and `edges.rs`). `msdf_gen.wgsl` stays —
+  MTSDF generation reuses it to write the scratch RGB; only the
+  alpha channel differs (handled by `#ifdef MTSDF` in
+  `msdf_correct.wgsl`, already in place).
+- Collapse the three-branch `if uniforms.distance_field == ...`
+  in `shaders/glyph_text.wgsl` `compute_alpha` to a single
+  `max(median(rgb), alpha)`. Delete the `distance_field` uniform
+  field from `GlyphMaterialUniform` and its Rust-side mirror.
+- Delete the M / S / X chips and `toggle_distance_field` system
+  from `examples/typography.rs`; MTSDF is the only path.
+
+**Backend cleanup (CPU rasterizer removal):**
 
 - Delete the `RasterBackend` enum and every branch on it. Touch
   sites: `atlas_config.rs` (the enum + `backend` field), the
@@ -1050,17 +1274,72 @@ Once GPU MSDF is verified across the supported font set:
   `atlas_slot.rs` itself is otherwise backend-agnostic.
 - Delete the CPU worker-pool branch in `atlas.rs` that
   `spawn`s `rasterizer.rasterize(...)` when the GPU dispatcher
-  is absent or `allocate_gpu_region` returns `None`. Test sites
-  in `text/atlas.rs` and elsewhere that construct
-  `RasterBackend::Cpu` also disappear.
-- Delete the `G` chip from the typography example; one less
-  runtime knob.
-- Move `text/msdf_rasterizer/` and the `fdsm` /
-  `fdsm-ttf-parser` dependencies behind `#[cfg(test)]`. The
-  parity tests are the only consumers; they stay in-tree as the
-  algorithmic reference.
-- Move the fdsm dependency from `dependencies` to
-  `dev-dependencies` in `crates/bevy_diegetic/Cargo.toml`.
+  is absent or `allocate_gpu_region` returns `None`. The
+  `Rasterizer` trait and its `MsdfRasterizer` / `SdfRasterizer`
+  implementations in `text/msdf_rasterizer/` disappear with it
+  (no MTSDF CPU implementation was ever planned — fdsm doesn't
+  expose MTSDF, and porting msdfgen's MTSDF generation to Rust
+  is real work for zero runtime benefit).
+- Delete the `G` chip and `toggle_backend` system from the
+  typography example.
+- **Extract the CPU rasterizer into a sibling workspace crate**
+  (working name: `bevy_diegetic_reference`) and make
+  `bevy_diegetic` depend on it only under `[dev-dependencies]`.
+  Move targets: every file under
+  `crates/bevy_diegetic/src/text/msdf_rasterizer/`
+  (`mod.rs`, `sdf.rs`, `parity.rs`) plus the `fdsm` /
+  `fdsm-ttf-parser` deps move to the new crate. Production
+  `bevy_diegetic` loses the CPU code path AND those deps in one
+  step — no `#[cfg(feature = "cpu-reference")]` gates in the main
+  source tree.
+
+  Consumers after the move:
+  - `crates/bevy_diegetic/src/text/gpu_rasterizer/msdf_parity.rs`
+    (the test file) keeps importing `MsdfRasterizer` etc., but
+    now from the extracted crate — works because dev-deps are
+    available during `cargo test` / `cargo nextest`.
+  - `crates/bevy_diegetic/src/text/msdf_rasterizer/parity.rs`
+    (the CPU-vs-CPU "fdsm-vs-msdfgen-reference" parity report,
+    if kept) moves with the rest.
+  - Re-export surface needed: `MsdfRasterizer`, `SdfRasterizer`,
+    `RasterizedBitmap`, `MsdfBitmap`, `SdfBitmap`, the `Rasterizer`
+    trait, and the `DEFAULT_GLYPH_PADDING` / `DEFAULT_SDF_RANGE`
+    constants. None of these are touched by the GPU rasterizer or
+    by atlas slot logic post-Phase-4, so they leave cleanly.
+
+  Why a separate crate instead of `#[cfg(feature = ...)]`:
+  - Dev-deps don't pollute downstream feature graphs. A consumer
+    that depends on `bevy_diegetic` never has the option to flip
+    on the CPU rasterizer, which is what we want — there's no
+    runtime reason to use it post-Phase-4.
+  - `fdsm` and `fdsm-ttf-parser` actually leave the production
+    crate's resolver graph. A feature gate keeps them as
+    `optional = true` deps that still appear in `Cargo.lock` and
+    bloat `cargo metadata` output.
+  - The reference code can grow new comparison tooling
+    (per-glyph diff PNGs, per-edge dumps, ground-truth fixtures)
+    without enlarging the production crate's source tree or
+    affecting compile times for users.
+
+**Oversized-glyph policy (no CPU fallback):**
+
+1. If the glyph doesn't fit on any existing page, allocate a new
+   page sized to `max(default_page_size, bitmap_size + 2 ×
+   padding)`. Existing pages keep their dimensions; pages are no
+   longer required to be uniform within an atlas.
+2. If `bitmap_size` exceeds
+   `RenderDevice::limits().max_texture_dimension_2d`, log a
+   structured `warn!` (font + codepoint + bitmap size + device
+   limit) and mark the glyph invisible. This is the only
+   unservable case and it's a hardware limit, not a config knob.
+
+Per-page dimensions become part of the atlas page metadata
+(`PageDescriptor.width / height` instead of a single
+`AtlasConfig.page_size()`). Touch sites: `atlas.rs` page
+allocation; `atlas_config.rs::page_size` becomes the *default*
+page size, not a guarantee. The fragment shader already binds
+per-page textures and UV math is per-glyph, so non-uniform page
+dimensions need no sampler-side change.
 
 When a real `(backend, distance_field)` rejection comes back —
 e.g. `(Gpu, Mtsdf)` on a device that lacks 4-channel storage

@@ -61,6 +61,8 @@ use crate::text::msdf_rasterizer::Rasterizer;
 
 const JETBRAINS_MONO: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 const EB_GARAMOND: &[u8] = include_bytes!("../../../assets/fonts/EBGaramond-Regular.ttf");
+const CRIMSON_TEXT: &[u8] = include_bytes!("../../../assets/fonts/CrimsonText-Regular.ttf");
+const NOTO_SANS: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
 
 const CANONICAL_SIZE: u32 = 64;
 const SDF_RANGE: f64 = 4.0;
@@ -355,45 +357,256 @@ fn signed_pseudo_distance(
 }
 
 fn winding_linear(pt: Vec2, p0: Vec2, p1: Vec2) -> i32 {
-    let dy = p1.y - p0.y;
-    if dy.abs() < 1e-20 {
+    let off_y = p1.y - p0.y;
+    let dy = pt.y - p0.y;
+    let in_range = (dy >= 0.0 && dy < off_y) || (dy >= off_y && dy < 0.0);
+    if !in_range {
         return 0;
     }
-    let t = (pt.y - p0.y) / dy;
-    if !(0.0..1.0).contains(&t) {
+    if off_y.abs() < 1e-20 {
         return 0;
     }
+    let t = dy / off_y;
     let x = p0.x + t * (p1.x - p0.x);
     if x < pt.x {
         return 0;
     }
-    if dy > 0.0 { 1 } else { -1 }
+    if off_y > 0.0 { 1 } else { -1 }
 }
 
-fn winding_subdivided(
-    pt: Vec2,
-    p0: Vec2,
-    p_end: Vec2,
-    eval: impl Fn(f32) -> Vec2,
-    steps: u32,
-) -> i32 {
-    let mut acc = 0;
-    let mut prev = p0;
-    for i in 1..=steps {
-        let t = i.to_f32() / steps.to_f32();
-        let next = if i == steps { p_end } else { eval(t) };
-        acc += winding_linear(pt, prev, next);
-        prev = next;
+fn solve_segment_quadratic(qa: f32, qb: f32, qc: f32) -> ([f32; 2], usize) {
+    if qa.abs() < 1e-12 {
+        if qb.abs() < 1e-20 {
+            return ([-1.0; 2], 0);
+        }
+        return ([-qc / qb, -1.0], 1);
     }
-    acc
+    let disc = qb * qb - 4.0 * qa * qc;
+    if disc < 0.0 {
+        return ([-1.0; 2], 0);
+    }
+    let sq = disc.sqrt();
+    let inv2a = 0.5 / qa;
+    let r0 = (-qb - sq) * inv2a;
+    let r1 = (-qb + sq) * inv2a;
+    ([r0.min(r1), r0.max(r1)], 2)
 }
+
+/// Maps `next_dy ∈ {-1, +1}` to a unit-magnitude `f32` without going
+/// through `i32 as f32` (which `clippy::cast_precision_loss` flags
+/// even when the input is a single bit of sign information).
+const fn sign_to_f32(s: i32) -> f32 { if s > 0 { 1.0 } else { -1.0 } }
 
 fn winding_quadratic(pt: Vec2, p0: Vec2, p1: Vec2, p2: Vec2) -> i32 {
-    winding_subdivided(pt, p0, p2, |t| bezier_quadratic(t, p0, p1, p2), 8)
+    let mut xs = [0.0_f32; 2];
+    let mut deltas = [0_i32; 2];
+    let mut total = 0_usize;
+    let mut next_dy: i32 = if pt.y > p0.y { 1 } else { -1 };
+
+    let ab_y = p1.y - p0.y;
+    let br_y = p2.y - p1.y - ab_y;
+    let ab_x = p1.x - p0.x;
+    let br_x = p2.x - p1.x - ab_x;
+
+    xs[0] = p0.x;
+    #[allow(clippy::float_cmp, reason = "endpoint-on-scanline test mirrors fdsm")]
+    if p0.y == pt.y {
+        let p0_is_min = p0.y < p1.y || (p0.y == p1.y && p0.y < p2.y);
+        if p0_is_min {
+            deltas[0] = 1;
+            total = 1;
+        } else {
+            next_dy = 1;
+        }
+    }
+
+    let (sols, n_sol) = solve_segment_quadratic(br_y, 2.0 * ab_y, p0.y - pt.y);
+    for &t in &sols[..n_sol] {
+        if total >= 2 {
+            break;
+        }
+        if (0.0..=1.0).contains(&t) {
+            let x_at_t = p0.x + 2.0 * t * ab_x + t * t * br_x;
+            let dy_half = ab_y + t * br_y;
+            if sign_to_f32(next_dy) * dy_half >= 0.0 {
+                xs[total] = x_at_t;
+                deltas[total] = next_dy;
+                next_dy = -next_dy;
+                total += 1;
+            }
+        }
+    }
+
+    #[allow(clippy::float_cmp, reason = "endpoint-on-scanline test mirrors fdsm")]
+    if p2.y == pt.y {
+        if next_dy > 0 && total > 0 {
+            total -= 1;
+            next_dy = -1;
+        }
+        let p2_is_min = p2.y < p1.y || (p2.y == p1.y && p2.y < p0.y);
+        if p2_is_min && total < 2 {
+            xs[total] = p2.x;
+            if next_dy < 0 {
+                deltas[total] = -1;
+                next_dy = 1;
+                total += 1;
+            }
+        }
+    }
+
+    let expected_exit: i32 = if pt.y >= p2.y { 1 } else { -1 };
+    if next_dy != expected_exit {
+        if total > 0 {
+            total -= 1;
+        } else {
+            let x_pick = if (p2.y - pt.y).abs() < (p0.y - pt.y).abs() {
+                p2.x
+            } else {
+                p0.x
+            };
+            xs[total] = x_pick;
+            deltas[total] = next_dy;
+            total += 1;
+        }
+    }
+
+    let mut winding = 0_i32;
+    for i in 0..total {
+        if xs[i] >= pt.x {
+            winding += deltas[i];
+        }
+    }
+    winding
+}
+
+/// Solves the cubic `apex·t³ + 3·br·t² + 3·ab·t + (p0.y - pt.y) = 0`
+/// for `t`, ascending. Degenerate cases fall through to the quadratic
+/// solver. Returns the populated prefix of the 3-slot array and the
+/// count of real roots found.
+fn solve_cubic_y_roots(
+    start_y: f32,
+    query_y: f32,
+    ab_y: f32,
+    br_y: f32,
+    apex_y: f32,
+) -> ([f32; 3], usize) {
+    let mut sols = [-1.0_f32; 3];
+    let by = 3.0 * br_y;
+    let cy = 3.0 * ab_y;
+    let dy_c = start_y - query_y;
+    if apex_y.abs() < 1e-12 {
+        let (q_sols, q_n) = solve_segment_quadratic(by, cy, dy_c);
+        sols[0] = q_sols[0];
+        sols[1] = q_sols[1];
+        return (sols, q_n);
+    }
+    let inv_a = apex_y.recip();
+    let (mut roots, nr) = solve_cubic_normed(by * inv_a, cy * inv_a, dy_c * inv_a);
+    let nr_u = nr as usize;
+    if nr_u == 3 {
+        if roots[0] > roots[1] {
+            roots.swap(0, 1);
+        }
+        if roots[1] > roots[2] {
+            roots.swap(1, 2);
+        }
+        if roots[0] > roots[1] {
+            roots.swap(0, 1);
+        }
+    }
+    sols[..nr_u].copy_from_slice(&roots[..nr_u]);
+    (sols, nr_u)
 }
 
 fn winding_cubic(pt: Vec2, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> i32 {
-    winding_subdivided(pt, p0, p3, |t| bezier_cubic(t, p0, p1, p2, p3), 12)
+    let mut xs = [0.0_f32; 3];
+    let mut deltas = [0_i32; 3];
+    let mut total = 0_usize;
+    let mut next_dy: i32 = if pt.y > p0.y { 1 } else { -1 };
+
+    let ab_y = p1.y - p0.y;
+    let v12_y = p2.y - p1.y;
+    let br_y = v12_y - ab_y;
+    let apex_y = (p3.y - p2.y) - v12_y - br_y;
+
+    let ab_x = p1.x - p0.x;
+    let v12_x = p2.x - p1.x;
+    let br_x = v12_x - ab_x;
+    let apex_x = (p3.x - p2.x) - v12_x - br_x;
+
+    xs[0] = p0.x;
+    #[allow(clippy::float_cmp, reason = "endpoint-on-scanline test mirrors fdsm")]
+    if p0.y == pt.y {
+        let p0_is_min = p0.y < p1.y
+            || (p0.y == p1.y && p0.y < p2.y)
+            || (p0.y == p1.y && p0.y == p2.y && p0.y < p3.y);
+        if p0_is_min {
+            deltas[0] = 1;
+            total = 1;
+        } else {
+            next_dy = 1;
+        }
+    }
+
+    let (sols, n_sol) = solve_cubic_y_roots(p0.y, pt.y, ab_y, br_y, apex_y);
+    for &t in &sols[..n_sol] {
+        if total >= 3 {
+            break;
+        }
+        if (0.0..=1.0).contains(&t) {
+            let x_at_t = p0.x + 3.0 * t * ab_x + 3.0 * t * t * br_x + t * t * t * apex_x;
+            let dy_third = ab_y + 2.0 * t * br_y + t * t * apex_y;
+            if sign_to_f32(next_dy) * dy_third >= 0.0 {
+                xs[total] = x_at_t;
+                deltas[total] = next_dy;
+                next_dy = -next_dy;
+                total += 1;
+            }
+        }
+    }
+
+    #[allow(clippy::float_cmp, reason = "endpoint-on-scanline test mirrors fdsm")]
+    if p3.y == pt.y {
+        if next_dy > 0 && total > 0 {
+            total -= 1;
+            next_dy = -1;
+        }
+        let p3_is_min = p3.y < p2.y
+            || (p3.y == p2.y && p3.y < p1.y)
+            || (p3.y == p2.y && p3.y == p1.y && p3.y < p0.y);
+        if p3_is_min && total < 3 {
+            xs[total] = p3.x;
+            if next_dy < 0 {
+                deltas[total] = -1;
+                next_dy = 1;
+                total += 1;
+            }
+        }
+    }
+
+    let expected_exit: i32 = if pt.y >= p3.y { 1 } else { -1 };
+    if next_dy != expected_exit {
+        if total > 0 {
+            total -= 1;
+        } else {
+            let x_pick = if (p3.y - pt.y).abs() < (p0.y - pt.y).abs() {
+                p3.x
+            } else {
+                p0.x
+            };
+            xs[total] = x_pick;
+            deltas[total] = next_dy;
+            total += 1;
+        }
+    }
+
+    let mut winding = 0_i32;
+    for i in 0..total {
+        if xs[i] >= pt.x {
+            winding += deltas[i];
+        }
+    }
+    winding
 }
 
 fn pixel_winding(pt: Vec2, edges_buf: &[EdgeSegment]) -> i32 {
@@ -1078,12 +1291,48 @@ fn report_bad_texels(
     let fdsm_raw = fdsm_signed_pseudo_at_texels(font_data, ch, &coords);
     if let Some(first) = bad_list.first() {
         dump_per_edge_picks(edges_buf, first.x, first.y);
+        dump_per_edge_winding(edges_buf, first.x, first.y);
     }
     for (bad_texel, (sd, enc)) in bad_list.iter().zip(fdsm_raw.iter()) {
         report_bad_texel_detail(
             font_data, ch, edges_buf, cpu, width, height, bad_texel, sd, *enc,
         );
     }
+}
+
+/// Dumps per-edge winding contributions at `(x, y)`. Helps localize
+/// scanline-crossing bugs in `winding_quadratic` / `winding_cubic`.
+fn dump_per_edge_winding(edges_buf: &[EdgeSegment], x: u32, y: u32) {
+    let pt = Vec2::new(x.to_f32() + 0.5, y.to_f32() + 0.5);
+    let mut total = 0_i32;
+    eprintln!("    winding dump @ ({x},{y}) pt=({:.2},{:.2}):", pt.x, pt.y);
+    for (i, e) in edges_buf.iter().enumerate() {
+        let kind = e.kind & 0b11;
+        let (p0, p1, p2, p3) = edge_points(e);
+        let w = if kind == EDGE_KIND_LINEAR {
+            winding_linear(pt, p0, p1)
+        } else if kind == EDGE_KIND_QUADRATIC {
+            winding_quadratic(pt, p0, p1, p2)
+        } else if kind == EDGE_KIND_CUBIC {
+            winding_cubic(pt, p0, p1, p2, p3)
+        } else {
+            0
+        };
+        total += w;
+        if w != 0 {
+            let kn = match kind {
+                EDGE_KIND_LINEAR => "lin",
+                EDGE_KIND_QUADRATIC => "quad",
+                EDGE_KIND_CUBIC => "cube",
+                _ => "?",
+            };
+            eprintln!(
+                "      [{:>3}] {} w={:+} p0=({:+.2},{:+.2}) p1=({:+.2},{:+.2}) p2=({:+.2},{:+.2})",
+                i, kn, w, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y
+            );
+        }
+    }
+    eprintln!("      total winding = {total}");
 }
 
 fn report_bad_texel_detail(
@@ -1316,6 +1565,12 @@ fn msdf_parity_ebg_v() { write_parity_outputs(EB_GARAMOND, 'V', "EB Garamond"); 
 #[test]
 fn msdf_parity_ebg_h() { write_parity_outputs(EB_GARAMOND, 'h', "EB Garamond"); }
 
+#[test]
+fn msdf_parity_crimson_s() { write_parity_outputs(CRIMSON_TEXT, 'S', "Crimson Text"); }
+
+#[test]
+fn msdf_parity_noto_s() { write_parity_outputs(NOTO_SANS, 'S', "Noto Sans"); }
+
 /// MTSDF reuses the MSDF generation path one-for-one — the channel
 /// coloring, the corner list, every per-edge payload. The only delta
 /// is the GPU correction kernel's alpha write, which has no CPU
@@ -1324,7 +1579,7 @@ fn msdf_parity_ebg_h() { write_parity_outputs(EB_GARAMOND, 'h', "EB Garamond"); 
 /// the fragment shader's MTSDF clamp depends on.
 fn assert_edge_buffer_matches_msdf(font_data: &[u8], ch: char, font_label: &str) {
     let idx = glyph_index(font_data, ch);
-    let msdf = edges::build_edge_buffer(
+    let expected = edges::build_edge_buffer(
         font_data,
         idx,
         CANONICAL_SIZE,
@@ -1333,7 +1588,7 @@ fn assert_edge_buffer_matches_msdf(font_data: &[u8], ch: char, font_label: &str)
         DistanceField::Msdf,
     )
     .unwrap_or_else(|| panic!("MSDF edge buffer None for {font_label} '{ch}'"));
-    let mtsdf = edges::build_edge_buffer(
+    let actual = edges::build_edge_buffer(
         font_data,
         idx,
         CANONICAL_SIZE,
@@ -1344,27 +1599,28 @@ fn assert_edge_buffer_matches_msdf(font_data: &[u8], ch: char, font_label: &str)
     .unwrap_or_else(|| panic!("MTSDF edge buffer None for {font_label} '{ch}'"));
 
     assert_eq!(
-        msdf.bitmap_size, mtsdf.bitmap_size,
+        expected.bitmap_size, actual.bitmap_size,
         "{font_label} '{ch}': bitmap dims diverge between MSDF and MTSDF"
     );
     assert_eq!(
-        msdf.edges.len(),
-        mtsdf.edges.len(),
+        expected.edges.len(),
+        actual.edges.len(),
         "{font_label} '{ch}': edge count diverges"
     );
     assert_eq!(
-        msdf.corners.len(),
-        mtsdf.corners.len(),
+        expected.corners.len(),
+        actual.corners.len(),
         "{font_label} '{ch}': corner count diverges"
     );
-    for (i, (a, b)) in msdf.edges.iter().zip(&mtsdf.edges).enumerate() {
+    for (i, (a, b)) in expected.edges.iter().zip(&actual.edges).enumerate() {
         assert_eq!(
             a.kind, b.kind,
             "{font_label} '{ch}': edge[{i}] kind diverges ({} vs {})",
             a.kind, b.kind
         );
         assert_eq!(
-            a.points, b.points,
+            a.points.map(f32::to_bits),
+            b.points.map(f32::to_bits),
             "{font_label} '{ch}': edge[{i}] points diverge"
         );
     }

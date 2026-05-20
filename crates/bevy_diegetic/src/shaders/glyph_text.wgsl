@@ -4,12 +4,10 @@
 // `distance_field` uniform selects sampling strategy:
 //   0 = MSDF  — median of R, G, B for sharp corners.
 //   1 = SDF   — single channel (R) for smoother curves.
-//   2 = MTSDF — RGB is MSDF, alpha is signed true SDF. Takes
-//               max(median, alpha): comb holes fill (alpha wins),
-//               sharp corner wedges keep their extension past the
-//               rounded true-SDF edge (median wins), and sub-texel
-//               inward notches soften into faint AA traces instead
-//               of comb-amplified dark lines at low atlas sizes.
+//   2 = MTSDF — RGB is MSDF, alpha is signed true SDF. Uses median;
+//               alpha overrides only when median says outside AND
+//               alpha is confidently inside (> 0.7) — true comb-hole
+//               rescue without rounding sharp corners.
 // All branches feed the same adaptive anti-aliasing path.
 //
 // Supports three render modes:
@@ -108,18 +106,9 @@ fn compute_alpha(uv: vec2<f32>) -> f32 {
     if uniforms.distance_field == 1u {
         distance = atlas_sample.r;
     } else if uniforms.distance_field == 2u {
-        // MTSDF: max(median, alpha). Pushes the result toward
-        // whichever channel reports "more inside" — which gives the
-        // right answer in every regime: comb holes fill (alpha wins),
-        // sharp corners stay sharp (median wins past the rounded
-        // true-SDF edge), sub-texel inward notches at low atlas
-        // resolution soften into faint AA traces (alpha is less
-        // negative than the comb-amplified median) instead of hard
-        // dark lines while still resolving cleanly when the atlas
-        // size makes the feature multi-texel.
         let msdf_median = median(atlas_sample.r, atlas_sample.g, atlas_sample.b);
         let alpha_sdf = atlas_sample.a;
-        distance = max(msdf_median, alpha_sdf);
+        distance = select(msdf_median, alpha_sdf, msdf_median < 0.5 && alpha_sdf > 0.7);
     } else {
         distance = median(atlas_sample.r, atlas_sample.g, atlas_sample.b);
     }

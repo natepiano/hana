@@ -79,7 +79,7 @@ pub(super) struct GpuRasterizerPipeline {
     pub msdf_pipeline:          CachedComputePipelineId,
     pub msdf_correct_pipeline:  CachedComputePipelineId,
     /// MTSDF correction. Reuses the MSDF correction kernel built with
-    /// the `MTSDF=1` shader_def — the only delta is that the alpha
+    /// the `MTSDF=1` `shader_def` — the only delta is that the alpha
     /// channel carries an encoded signed true distance rather than the
     /// MSDF path's hardcoded `1.0`.
     pub mtsdf_correct_pipeline: CachedComputePipelineId,
@@ -157,38 +157,40 @@ impl GpuRasterizerPipeline {
             entry_point:                      Some(Cow::Borrowed("msdf_main")),
             zero_initialize_workgroup_memory: false,
         });
-        let msdf_correct_pipeline =
-            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-                label:                            Some(
-                    "gpu_rasterizer_msdf_correct_pipeline".into(),
-                ),
-                layout:                           vec![correction_layout.clone()],
-                push_constant_ranges:             Vec::new(),
-                shader:                           msdf_correct_shader.clone(),
-                shader_defs:                      Vec::new(),
-                entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
-                zero_initialize_workgroup_memory: false,
-            });
-        let mtsdf_correct_pipeline =
-            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-                label:                            Some(
-                    "gpu_rasterizer_mtsdf_correct_pipeline".into(),
-                ),
-                layout:                           vec![correction_layout.clone()],
-                push_constant_ranges:             Vec::new(),
-                shader:                           msdf_correct_shader.clone(),
-                shader_defs:                      vec![ShaderDefVal::Bool("MTSDF".into(), true)],
-                entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
-                zero_initialize_workgroup_memory: false,
-            });
-
         Self {
             layout,
-            correction_layout,
+            correction_layout: correction_layout.clone(),
             sdf_pipeline,
             msdf_pipeline,
-            msdf_correct_pipeline,
-            mtsdf_correct_pipeline,
+            msdf_correct_pipeline: pipeline_cache.queue_compute_pipeline(
+                ComputePipelineDescriptor {
+                    label:                            Some(
+                        "gpu_rasterizer_msdf_correct_pipeline".into(),
+                    ),
+                    layout:                           vec![correction_layout.clone()],
+                    push_constant_ranges:             Vec::new(),
+                    shader:                           msdf_correct_shader.clone(),
+                    shader_defs:                      Vec::new(),
+                    entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
+                    zero_initialize_workgroup_memory: false,
+                },
+            ),
+            mtsdf_correct_pipeline: pipeline_cache.queue_compute_pipeline(
+                ComputePipelineDescriptor {
+                    label:                            Some(
+                        "gpu_rasterizer_mtsdf_correct_pipeline".into(),
+                    ),
+                    layout:                           vec![correction_layout],
+                    push_constant_ranges:             Vec::new(),
+                    shader:                           msdf_correct_shader.clone(),
+                    shader_defs:                      vec![ShaderDefVal::Bool(
+                        "MTSDF".into(),
+                        true,
+                    )],
+                    entry_point:                      Some(Cow::Borrowed("msdf_correct_main")),
+                    zero_initialize_workgroup_memory: false,
+                },
+            ),
             sdf_shader,
             msdf_shader,
             msdf_correct_shader,

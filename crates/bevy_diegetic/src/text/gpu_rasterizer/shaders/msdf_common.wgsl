@@ -308,38 +308,267 @@ fn signed_pseudo_distance(
     return signed_main;
 }
 
+// Linear scanline crossing — mirrors fdsm's
+// `PreparedLinearSegment::get_scanline_points`. Convention: include the
+// LOWER-y endpoint, exclude the HIGHER-y endpoint, so two consecutive
+// segments sharing a corner exactly on `pt.y` count the corner once.
 fn winding_linear(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>) -> i32 {
-    let dy = p1.y - p0.y;
-    if (abs(dy) < 1e-20) { return 0; }
-    let t = (pt.y - p0.y) / dy;
-    if (t < 0.0 || t >= 1.0) { return 0; }
+    let off_y = p1.y - p0.y;
+    let dy = pt.y - p0.y;
+    let in_range = (dy >= 0.0 && dy < off_y) || (dy >= off_y && dy < 0.0);
+    if (!in_range) { return 0; }
+    if (abs(off_y) < 1e-20) { return 0; }
+    let t = dy / off_y;
     let x = p0.x + t * (p1.x - p0.x);
     if (x < pt.x) { return 0; }
-    return select(-1, 1, dy > 0.0);
+    return select(-1, 1, off_y > 0.0);
 }
 
+// Quadratic scanline winding — direct port of fdsm's
+// `PreparedQuadraticSegment::get_scanline_points`, then summed across
+// crossings with `xs >= pt.x`. The state machine (`next_dy` + endpoint
+// flags + final fixup) is what makes endpoint-tangent grazes and
+// shared-corner crossings count correctly — the naive
+// "every real root in [0, 1] is a crossing" approach silently
+// double-counts tangent endpoints and produced the upper-terminal spur
+// on serif `S` glyphs (Crimson Text, Noto Sans).
 fn winding_quadratic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> i32 {
-    var acc: i32 = 0;
-    let steps = 8u;
-    var prev = p0;
-    for (var i = 1u; i <= steps; i = i + 1u) {
-        let t = f32(i) / f32(steps);
-        let next = bezier_quadratic(t, p0, p1, p2);
-        acc = acc + winding_linear(pt, prev, next);
-        prev = next;
+    var xs: array<f32, 2> = array<f32, 2>(0.0, 0.0);
+    var deltas: array<i32, 2> = array<i32, 2>(0, 0);
+    var total: u32 = 0u;
+    var next_dy: i32 = select(-1, 1, pt.y > p0.y);
+
+    let ab_y = p1.y - p0.y;
+    let br_y = p2.y - p1.y - ab_y;
+    let ab_x = p1.x - p0.x;
+    let br_x = p2.x - p1.x - ab_x;
+
+    xs[0] = p0.x;
+    if (p0.y == pt.y) {
+        let p0_is_min = (p0.y < p1.y) || (p0.y == p1.y && p0.y < p2.y);
+        if (p0_is_min) {
+            deltas[0] = 1;
+            total = 1u;
+        } else {
+            next_dy = 1;
+        }
     }
-    return acc;
+
+    // Solve br_y * t² + 2*ab_y * t + (p0.y - pt.y) = 0.
+    var sol0: f32 = -1.0;
+    var sol1: f32 = -1.0;
+    var n_sol: u32 = 0u;
+    let qa = br_y;
+    let qb = 2.0 * ab_y;
+    let qc = p0.y - pt.y;
+    if (abs(qa) < 1e-12) {
+        if (abs(qb) > 1e-20) {
+            sol0 = -qc / qb;
+            n_sol = 1u;
+        }
+    } else {
+        let disc = qb * qb - 4.0 * qa * qc;
+        if (disc >= 0.0) {
+            let sq = sqrt(disc);
+            let inv2a = 0.5 / qa;
+            let r0 = (-qb - sq) * inv2a;
+            let r1 = (-qb + sq) * inv2a;
+            sol0 = min(r0, r1);
+            sol1 = max(r0, r1);
+            n_sol = 2u;
+        }
+    }
+
+    for (var i: u32 = 0u; i < n_sol; i = i + 1u) {
+        if (total >= 2u) { break; }
+        let t = select(sol1, sol0, i == 0u);
+        if (t >= 0.0 && t <= 1.0) {
+            let x_at_t = p0.x + 2.0 * t * ab_x + t * t * br_x;
+            let dy_half = ab_y + t * br_y;
+            if (f32(next_dy) * dy_half >= 0.0) {
+                xs[total] = x_at_t;
+                deltas[total] = next_dy;
+                next_dy = -next_dy;
+                total = total + 1u;
+            }
+        }
+    }
+
+    if (p2.y == pt.y) {
+        if (next_dy > 0 && total > 0u) {
+            total = total - 1u;
+            next_dy = -1;
+        }
+        let p2_is_min = (p2.y < p1.y) || (p2.y == p1.y && p2.y < p0.y);
+        if (p2_is_min && total < 2u) {
+            xs[total] = p2.x;
+            if (next_dy < 0) {
+                deltas[total] = -1;
+                next_dy = 1;
+                total = total + 1u;
+            }
+        }
+    }
+
+    let expected_exit = select(-1, 1, pt.y >= p2.y);
+    if (next_dy != expected_exit) {
+        if (total > 0u) {
+            total = total - 1u;
+        } else {
+            var x_pick = p0.x;
+            if (abs(p2.y - pt.y) < abs(p0.y - pt.y)) {
+                x_pick = p2.x;
+            }
+            xs[total] = x_pick;
+            deltas[total] = next_dy;
+            total = total + 1u;
+        }
+    }
+
+    var winding: i32 = 0;
+    for (var i: u32 = 0u; i < total; i = i + 1u) {
+        if (xs[i] >= pt.x) {
+            winding = winding + deltas[i];
+        }
+    }
+    return winding;
 }
 
+// Cubic scanline winding — direct port of fdsm's
+// `PreparedCubicSegment::get_scanline_points`. Three solutions max;
+// otherwise the state machine is the same as the quadratic.
 fn winding_cubic(pt: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>) -> i32 {
-    var acc: i32 = 0;
-    let steps = 12u;
-    var prev = p0;
-    for (var i = 1u; i <= steps; i = i + 1u) {
-        let t = f32(i) / f32(steps);
-        let next = bezier_cubic(t, p0, p1, p2, p3);
-        acc = acc + winding_linear(pt, prev, next);
-        prev = next;
+    var xs: array<f32, 3> = array<f32, 3>(0.0, 0.0, 0.0);
+    var deltas: array<i32, 3> = array<i32, 3>(0, 0, 0);
+    var total: u32 = 0u;
+    var next_dy: i32 = select(-1, 1, pt.y > p0.y);
+
+    let ab_y = p1.y - p0.y;
+    let v12_y = p2.y - p1.y;
+    let br_y = v12_y - ab_y;
+    let as_y = (p3.y - p2.y) - v12_y - br_y;
+
+    let ab_x = p1.x - p0.x;
+    let v12_x = p2.x - p1.x;
+    let br_x = v12_x - ab_x;
+    let as_x = (p3.x - p2.x) - v12_x - br_x;
+
+    xs[0] = p0.x;
+    if (p0.y == pt.y) {
+        let p0_is_min =
+            (p0.y < p1.y)
+            || (p0.y == p1.y && p0.y < p2.y)
+            || (p0.y == p1.y && p0.y == p2.y && p0.y < p3.y);
+        if (p0_is_min) {
+            deltas[0] = 1;
+            total = 1u;
+        } else {
+            next_dy = 1;
+        }
     }
-    return acc;
+
+    // Solve as_y * t³ + 3*br_y * t² + 3*ab_y * t + (p0.y - pt.y) = 0.
+    var sols: array<f32, 3> = array<f32, 3>(-1.0, -1.0, -1.0);
+    var n_sol: u32 = 0u;
+    let ay = as_y;
+    let by = 3.0 * br_y;
+    let cy = 3.0 * ab_y;
+    let dy_c = p0.y - pt.y;
+    if (abs(ay) < 1e-12) {
+        // Degenerate cubic: quadratic in t.
+        if (abs(by) < 1e-12) {
+            if (abs(cy) > 1e-20) {
+                sols[0] = -dy_c / cy;
+                n_sol = 1u;
+            }
+        } else {
+            let disc = cy * cy - 4.0 * by * dy_c;
+            if (disc >= 0.0) {
+                let sq = sqrt(disc);
+                let inv2b = 0.5 / by;
+                let r0 = (-cy - sq) * inv2b;
+                let r1 = (-cy + sq) * inv2b;
+                sols[0] = min(r0, r1);
+                sols[1] = max(r0, r1);
+                n_sol = 2u;
+            }
+        }
+    } else {
+        let inv_a = 1.0 / ay;
+        var roots: array<f32, 3>;
+        let nr = solve_cubic_normed(by * inv_a, cy * inv_a, dy_c * inv_a, &roots);
+        // Sort up to 3 roots ascending.
+        if (nr == 3u) {
+            if (roots[0] > roots[1]) {
+                let tmp = roots[0]; roots[0] = roots[1]; roots[1] = tmp;
+            }
+            if (roots[1] > roots[2]) {
+                let tmp = roots[1]; roots[1] = roots[2]; roots[2] = tmp;
+            }
+            if (roots[0] > roots[1]) {
+                let tmp = roots[0]; roots[0] = roots[1]; roots[1] = tmp;
+            }
+        }
+        for (var k: u32 = 0u; k < nr; k = k + 1u) {
+            sols[k] = roots[k];
+        }
+        n_sol = nr;
+    }
+
+    for (var i: u32 = 0u; i < n_sol; i = i + 1u) {
+        if (total >= 3u) { break; }
+        let t = sols[i];
+        if (t >= 0.0 && t <= 1.0) {
+            let x_at_t = p0.x + 3.0 * t * ab_x + 3.0 * t * t * br_x + t * t * t * as_x;
+            let dy_third = ab_y + 2.0 * t * br_y + t * t * as_y;
+            if (f32(next_dy) * dy_third >= 0.0) {
+                xs[total] = x_at_t;
+                deltas[total] = next_dy;
+                next_dy = -next_dy;
+                total = total + 1u;
+            }
+        }
+    }
+
+    if (p3.y == pt.y) {
+        if (next_dy > 0 && total > 0u) {
+            total = total - 1u;
+            next_dy = -1;
+        }
+        let p3_is_min =
+            (p3.y < p2.y)
+            || (p3.y == p2.y && p3.y < p1.y)
+            || (p3.y == p2.y && p3.y == p1.y && p3.y < p0.y);
+        if (p3_is_min && total < 3u) {
+            xs[total] = p3.x;
+            if (next_dy < 0) {
+                deltas[total] = -1;
+                next_dy = 1;
+                total = total + 1u;
+            }
+        }
+    }
+
+    let expected_exit = select(-1, 1, pt.y >= p3.y);
+    if (next_dy != expected_exit) {
+        if (total > 0u) {
+            total = total - 1u;
+        } else {
+            var x_pick = p0.x;
+            if (abs(p3.y - pt.y) < abs(p0.y - pt.y)) {
+                x_pick = p3.x;
+            }
+            xs[total] = x_pick;
+            deltas[total] = next_dy;
+            total = total + 1u;
+        }
+    }
+
+    var winding: i32 = 0;
+    for (var i: u32 = 0u; i < total; i = i + 1u) {
+        if (xs[i] >= pt.x) {
+            winding = winding + deltas[i];
+        }
+    }
+    return winding;
 }

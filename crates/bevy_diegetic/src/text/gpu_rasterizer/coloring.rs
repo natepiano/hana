@@ -59,7 +59,7 @@ const EDGE_DISTANCE_PRECISION: u32 = 16;
 /// loop. Matches msdfgen's `MAX_RECOLOR_STEPS` (16).
 const MAX_RECOLOR_STEPS: u32 = 16;
 
-/// FIRST_POSSIBLE_COLOR[bitmask] returns the lowest-indexed color (0/1/2)
+/// `FIRST_POSSIBLE_COLOR[bitmask]` returns the lowest-indexed color (0/1/2)
 /// permitted by the 3-bit mask, where bit 0 = color 0, bit 1 = color 1,
 /// bit 2 = color 2. Index 0 is unused (no color permitted); index 7 returns
 /// 0 (all three permitted, pick the first).
@@ -482,7 +482,6 @@ fn color_second_degree_graph(
             }
         }
         coloring[i] = match possible_colors {
-            1 => 0,
             2 => 1,
             // 0 or 1 from a single seed bit.
             3 => seed_extract2(seed),
@@ -493,6 +492,7 @@ fn color_second_degree_graph(
             6 => seed_extract2(seed) + 1,
             // 0, 1, or 2, offset by vertex index for variety.
             7 => (seed_extract3(seed) + i.to_i32()).rem_euclid(3),
+            // 0 = no possible color, 1 = only color 0.
             _ => 0,
         };
     }
