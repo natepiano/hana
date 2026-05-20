@@ -122,7 +122,7 @@ pub(super) enum CameraGuidanceContent {
 /// A single camera guidance row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CameraGuidanceRow {
-    kind:                       OrbitCamInteractionKind,
+    orbit_cam_interaction_kind: OrbitCamInteractionKind,
     label:                      String,
     camera_interaction_sources: CameraInteractionSources,
 }
@@ -132,8 +132,8 @@ impl CameraGuidanceRow {
     #[must_use]
     pub fn new(kind: OrbitCamInteractionKind, label: impl Into<String>) -> Self {
         Self {
-            kind,
-            label: label.into(),
+            orbit_cam_interaction_kind: kind,
+            label:                      label.into(),
             camera_interaction_sources: CameraInteractionSources::NONE,
         }
     }
@@ -150,7 +150,7 @@ impl CameraGuidanceRow {
 
     /// Returns the interaction kind matched by this row.
     #[must_use]
-    pub const fn kind(&self) -> OrbitCamInteractionKind { self.kind }
+    pub const fn kind(&self) -> OrbitCamInteractionKind { self.orbit_cam_interaction_kind }
 
     /// Returns this row's camera-interaction source metadata.
     #[must_use]

@@ -13,6 +13,7 @@ pub(crate) const HOME_CONTROL: &str = "H Home";
 pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
 pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
 pub(crate) const HOME_KEY: KeyCode = KeyCode::KeyH;
+pub(crate) const HOME_MIN_EXTENT: f32 = 0.001;
 
 // camera restart
 pub(crate) const RESTART_CAMERA_RESTORE_DURATION: Duration = Duration::from_secs(2);
@@ -25,6 +26,7 @@ pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
 pub(crate) const CARGO_TARGET_DIR: &str = "target";
 
 // cascade shadow
+pub(crate) const CASCADE_COUNT: usize = 2;
 pub(crate) const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
 pub(crate) const CASCADE_MAX_DISTANCE: f32 = 18.0;
 pub(crate) const CASCADE_MIN_DISTANCE: f32 = 0.1;

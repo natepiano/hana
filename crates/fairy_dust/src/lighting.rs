@@ -4,6 +4,7 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::prelude::*;
 
+use crate::constants::CASCADE_COUNT;
 use crate::constants::CASCADE_FIRST_FAR_BOUND;
 use crate::constants::CASCADE_MAX_DISTANCE;
 use crate::constants::CASCADE_MIN_DISTANCE;
@@ -62,7 +63,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
             ..default()
         },
         CascadeShadowConfigBuilder {
-            num_cascades: 2,
+            num_cascades: CASCADE_COUNT,
             minimum_distance: CASCADE_MIN_DISTANCE,
             maximum_distance: CASCADE_MAX_DISTANCE,
             first_cascade_far_bound: CASCADE_FIRST_FAR_BOUND,

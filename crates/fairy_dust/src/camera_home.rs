@@ -21,6 +21,7 @@ use bevy_lagrange::OrbitCamInteractionStarted;
 
 use crate::constants::HOME_CONTROL;
 use crate::constants::HOME_KEY;
+use crate::constants::HOME_MIN_EXTENT;
 use crate::orbit_cam::FairyDustOrbitCam;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
@@ -111,7 +112,7 @@ fn on_set_camera_home_from_entity(
     let world_extents = (Vec3::from(aabb.half_extents) * scale * 2.0).abs();
     // Avoid a zero-thickness slab when the source is a 2D mesh — AnimateToFit
     // needs non-zero extents on every axis to compute a fit radius.
-    let safe_extents = world_extents.max(Vec3::splat(0.001));
+    let safe_extents = world_extents.max(Vec3::splat(HOME_MIN_EXTENT));
     let Ok(mut t) = transforms.get_mut(home.0) else {
         return;
     };
