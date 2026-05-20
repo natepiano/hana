@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Update `bevy_enhanced_input` from 0.24 to 0.25.0
+
 ## [0.0.5] - 2026-04-06
 
 ### Added
