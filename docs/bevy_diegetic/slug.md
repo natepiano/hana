@@ -362,7 +362,9 @@ future verification work.
 
 ### Phase 2: SlugTextRun and glyph cache in the example
 
-Status: next.
+Status: completed.
+
+Completed:
 
 - Add CPU-only `SlugTextRun` data for one shaped text entity. The run
   stores an ordered list of glyph instances with glyph ID, origin,
@@ -381,9 +383,9 @@ Status: next.
 - Defer the final GPU representation decision until this data shape
   exists and exposes real bottlenecks.
 
-Exit criteria: the example renders from `SlugTextRun` data and reuses
-packed glyph data through `SlugGlyphCache`, while producing the same
-visible Slug output as Phase 1.
+Exit criteria: met. The example renders from `SlugTextRun` data and
+reuses packed glyph data through `SlugGlyphCache`, while keeping the
+same visible Slug output target as Phase 1.
 
 ### Phase 3: shared text prerequisites
 

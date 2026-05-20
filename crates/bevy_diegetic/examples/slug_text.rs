@@ -7,26 +7,26 @@
 
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
-use bevy_diegetic::slug_text_spike::build_packed_glyph;
-use bevy_diegetic::slug_text_spike::load_glyph;
-use bevy_diegetic::slug_text_spike::slug_text_material;
+use bevy_diegetic::Anchor;
+use bevy_diegetic::FontId;
+use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::WorldText;
+use bevy_diegetic::WorldTextStyle;
+use bevy_diegetic::slug_text_spike::DEFAULT_BAND_COUNT;
+use bevy_diegetic::slug_text_spike::FIXTURE_TEXT;
 use bevy_diegetic::slug_text_spike::SlugFontKey;
 use bevy_diegetic::slug_text_spike::SlugGlyphCache;
 use bevy_diegetic::slug_text_spike::SlugGlyphInstance;
 use bevy_diegetic::slug_text_spike::SlugGlyphKey;
 use bevy_diegetic::slug_text_spike::SlugOutlineError;
 use bevy_diegetic::slug_text_spike::SlugPackedGlyph;
-use bevy_diegetic::slug_text_spike::SlugTextRun;
 use bevy_diegetic::slug_text_spike::SlugTextMaterial;
 use bevy_diegetic::slug_text_spike::SlugTextMaterialInput;
+use bevy_diegetic::slug_text_spike::SlugTextRun;
 use bevy_diegetic::slug_text_spike::SlugTextSpikePlugin;
-use bevy_diegetic::slug_text_spike::DEFAULT_BAND_COUNT;
-use bevy_diegetic::slug_text_spike::FIXTURE_TEXT;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::FontId;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
+use bevy_diegetic::slug_text_spike::build_packed_glyph;
+use bevy_diegetic::slug_text_spike::load_glyph;
+use bevy_diegetic::slug_text_spike::slug_text_material;
 use bevy_kana::ToU16;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::TitleBar;
@@ -208,6 +208,7 @@ fn shape_preview_glyphs() -> Result<ShapedPreviewText, SlugOutlineError> {
             let PositionedLayoutItem::GlyphRun(run) = item else {
                 continue;
             };
+            let mut advance_x = 0.0_f32;
             for cluster in run.run().clusters() {
                 for glyph in cluster.glyphs() {
                     let Some(character) = characters.next() else {
@@ -219,6 +220,7 @@ fn shape_preview_glyphs() -> Result<ShapedPreviewText, SlugOutlineError> {
                         origin: Vec2::new(run.offset() + advance_x + glyph.x, glyph.y),
                         advance: glyph.advance,
                     });
+                    advance_x += glyph.advance;
                 }
             }
         }
@@ -295,7 +297,10 @@ fn spawn_glyphs(
     let run_origin_x = total_width * -0.5;
     for glyph in preview.run.glyphs() {
         let Some(packed_glyph) = preview.glyph_cache.get(glyph.key()) else {
-            warn!("slug glyph cache missing glyph id {}", glyph.key().glyph_id());
+            warn!(
+                "slug glyph cache missing glyph id {}",
+                glyph.key().glyph_id()
+            );
             continue;
         };
         spawn_glyph(
