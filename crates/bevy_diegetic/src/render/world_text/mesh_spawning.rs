@@ -112,7 +112,7 @@ pub(super) fn spawn_world_text_meshes(
                 render_mode: u32::from(style.render_mode()),
                 distance_field: atlas.distance_field(),
                 clip_rect: constants::UNCLIPPED_TEXT_CLIP_RECT,
-                oit_depth_offset: constants::OIT_DEPTH_STEP,
+                oit_depth_offset: 0.0,
                 alpha_mode,
             });
 

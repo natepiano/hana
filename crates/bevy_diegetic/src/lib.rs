@@ -55,6 +55,9 @@ mod layout;
 mod panel;
 mod render;
 mod screen_space;
+#[cfg(feature = "slug_text")]
+#[doc(hidden)]
+pub mod slug_text_spike;
 mod text;
 
 #[cfg(feature = "bench_support")]
