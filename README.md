@@ -15,7 +15,7 @@
 
 ---
 
-> **Work in progress.** This crate is in active development (v0.0.5) and not
+> **Work in progress.** This crate is in active development (v0.0.6) and not
 > subject to semver stability guarantees. APIs will change without notice
 > between commits. Do not depend on this in production code yet.
 
@@ -92,7 +92,7 @@ let index = positions.len().to_u32();
 
 | bevy_kana | Bevy |
 |-----------|------|
-| 0.0.5 | 0.18 |
+| 0.0.6 | 0.18 |
 
 ## Usage
 
@@ -100,7 +100,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy_kana = "0.0.5"
+bevy_kana = "0.0.6"
 ```
 
 Run the example:
