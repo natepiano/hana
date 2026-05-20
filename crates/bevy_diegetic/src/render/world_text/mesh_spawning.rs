@@ -4,7 +4,6 @@ use std::time::Instant;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
-#[cfg(feature = "slug_text")]
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy_kana::ToF32;
 
@@ -20,19 +19,12 @@ use crate::render::glyph_material::GlyphMaterialInput;
 use crate::render::glyph_material::GlyphShadowProxyMaterialInput;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugPreparedTextRun;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRenderMode;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRunStorageKey;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterial;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterialInput;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::slug_text_material as make_slug_text_material;
 use crate::text::GlyphAtlas;
 
@@ -79,7 +71,6 @@ pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
     pub(super) commands:  &'a mut Commands<'w, 's>,
 }
 
-#[cfg(feature = "slug_text")]
 pub(super) struct SlugMeshSpawnAssets<'a, 'w, 's> {
     pub(super) meshes:          &'a mut Assets<Mesh>,
     pub(super) materials:       &'a mut Assets<SlugTextMaterial>,
@@ -205,7 +196,6 @@ pub(super) fn spawn_world_text_meshes(
 }
 
 /// Spawns Slug visible mesh and optional shadow proxy entities.
-#[cfg(feature = "slug_text")]
 pub(super) fn spawn_slug_world_text_meshes(
     prepared: &SlugPreparedTextRun,
     slug_backend: &mut SlugBackend,
@@ -280,7 +270,6 @@ pub(super) fn spawn_slug_world_text_meshes(
         .mul_add(MILLISECONDS_PER_SECOND, 0.0)
 }
 
-#[cfg(feature = "slug_text")]
 fn slug_world_text_material(
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
@@ -305,7 +294,6 @@ fn slug_world_text_material(
     })
 }
 
-#[cfg(feature = "slug_text")]
 const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
     match shadow_mode {
         GlyphShadowMode::SolidQuad => SlugRenderMode::SolidQuad,
@@ -314,7 +302,6 @@ const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode
     }
 }
 
-#[cfg(feature = "slug_text")]
 fn spawn_slug_visible_mesh(
     entity: Entity,
     mesh: Handle<Mesh>,
@@ -343,7 +330,6 @@ fn spawn_slug_visible_mesh(
     }
 }
 
-#[cfg(feature = "slug_text")]
 impl From<GlyphRenderMode> for SlugRenderMode {
     fn from(render_mode: GlyphRenderMode) -> Self {
         match render_mode {

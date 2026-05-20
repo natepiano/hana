@@ -8,7 +8,6 @@ mod shaping;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-#[cfg(feature = "slug_text")]
 use bevy::render::storage::ShaderStorageBuffer;
 use mesh_spawning::WorldTextMesh;
 use mesh_spawning::WorldTextShadowProxy;
@@ -27,9 +26,7 @@ use crate::cascade::Resolved;
 use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterial;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
@@ -92,11 +89,8 @@ pub(super) fn render_world_text(
 #[derive(SystemParam)]
 pub(super) struct BackendRenderServices<'w> {
     text_backend:    Res<'w, TextRendererPreference>,
-    #[cfg(feature = "slug_text")]
     slug_backend:    ResMut<'w, SlugBackend>,
-    #[cfg(feature = "slug_text")]
     slug_materials:  ResMut<'w, Assets<SlugTextMaterial>>,
-    #[cfg(feature = "slug_text")]
     storage_buffers: ResMut<'w, Assets<ShaderStorageBuffer>>,
 }
 

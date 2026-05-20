@@ -17,11 +17,8 @@ use crate::render::text_shaping::GlyphQuadPlacement;
 use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::DEFAULT_BAND_COUNT;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
@@ -59,7 +56,6 @@ struct BuiltGlyphQuads {
 }
 
 /// Result of building Slug run data for a [`WorldText`](super::WorldText) entity.
-#[cfg(feature = "slug_text")]
 pub(super) struct ShapedSlugWorldText {
     /// Prepared Slug run.
     pub(super) prepared: Option<SlugPreparedTextRun>,
@@ -69,7 +65,6 @@ pub(super) struct ShapedSlugWorldText {
     pub(super) stats:    TextBuildStats,
 }
 
-#[cfg(feature = "slug_text")]
 impl ShapedSlugWorldText {
     const fn empty(stats: TextBuildStats) -> Self {
         Self {
@@ -188,7 +183,6 @@ pub(super) fn shape_world_text(
 }
 
 /// Builds Slug run data in entity-local coordinates after text shaping.
-#[cfg(feature = "slug_text")]
 pub(super) fn build_world_slug_text(
     text: &str,
     style: &WorldTextStyle,
@@ -424,7 +418,6 @@ fn measure_anchor_offset(
     style.anchor().offset(max_x, max_y)
 }
 
-#[cfg(feature = "slug_text")]
 fn measure_slug_anchor_offset(
     layout_run: &ShapedTextRun,
     positioned_glyphs: &[PositionedGlyph<'_>],
@@ -458,7 +451,6 @@ fn measure_slug_anchor_offset(
     style.anchor().offset(max_x, max_y)
 }
 
-#[cfg(feature = "slug_text")]
 fn native_ink_right(positioned_glyph: &PositionedGlyph<'_>, font_size: f32) -> Option<f32> {
     let face = ttf_parser::Face::parse(
         positioned_glyph.font.data(),

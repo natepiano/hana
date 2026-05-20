@@ -9,7 +9,6 @@ pub enum TextRendererBackend {
     #[default]
     DistanceField,
     /// Experimental Slug curve-backed renderer.
-    #[cfg(feature = "slug_text")]
     Slug,
 }
 
@@ -25,7 +24,6 @@ impl TextRendererPreference {
     pub const fn new(backend: TextRendererBackend) -> Self { Self { backend } }
 
     /// Creates a preference for the experimental Slug renderer.
-    #[cfg(feature = "slug_text")]
     #[must_use]
     pub const fn slug() -> Self {
         Self {

@@ -7,7 +7,6 @@ use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
 use bevy::pbr::MaterialPlugin;
 use bevy::pbr::StandardMaterial;
-use bevy::prelude::AlphaMode;
 use bevy::prelude::App;
 use bevy::prelude::Handle;
 use bevy::prelude::Plugin;
@@ -112,7 +111,6 @@ pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
         bands,
         glyphs,
     } = input;
-    base.alpha_mode = AlphaMode::Mask(0.5);
     base.unlit = true;
 
     let linear: LinearRgba = fill_color.into();

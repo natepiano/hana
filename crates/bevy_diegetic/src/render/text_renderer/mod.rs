@@ -10,7 +10,6 @@ use bevy::prelude::*;
 use self::batching::PanelTextAlpha;
 use self::batching::SharedMsdfMaterials;
 use self::batching::build_panel_batched_meshes;
-#[cfg(feature = "slug_text")]
 use self::batching::build_panel_slug_meshes;
 use self::batching::sync_panel_hue_offset;
 use self::reconcile::poll_atlas_glyphs;
@@ -19,7 +18,6 @@ use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
 use super::glyph_material::GlyphMaterial;
 use super::panel_rtt;
-#[cfg(feature = "slug_text")]
 use super::text_backend::TextRendererBackend;
 use super::text_backend::TextRendererPreference;
 use super::text_shaping::TextShapingContext;
@@ -31,11 +29,8 @@ use crate::cascade::CascadeEntityPlugin;
 use crate::cascade::CascadePanelChildPlugin;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackendCompleted;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextSpikePlugin;
 use crate::text::AtlasSwapCompleted;
 use crate::text::AtlasSwapStarted;
@@ -49,7 +44,6 @@ pub(super) struct TextRenderPlugin;
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<GlyphMaterial>::default());
-        #[cfg(feature = "slug_text")]
         app.add_plugins(SlugTextSpikePlugin);
         app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
         app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
@@ -64,7 +58,6 @@ impl Plugin for TextRenderPlugin {
             (
                 panel_rtt::setup_panel_rtt,
                 poll_atlas_glyphs,
-                #[cfg(feature = "slug_text")]
                 clear_slug_storage_on_msdf_backend_changed,
                 reconcile_panel_text_children
                     .after(poll_atlas_glyphs)
@@ -77,7 +70,6 @@ impl Plugin for TextRenderPlugin {
                     .after(reconcile_panel_text_children)
                     .after(poll_atlas_glyphs),
                 build_panel_batched_meshes.after(shape_panel_text_children),
-                #[cfg(feature = "slug_text")]
                 build_panel_slug_meshes.after(shape_panel_text_children),
                 sync_panel_hue_offset.after(build_panel_batched_meshes),
                 world_text::render_world_text.after(poll_atlas_glyphs),
@@ -86,7 +78,6 @@ impl Plugin for TextRenderPlugin {
         );
         app.add_observer(mark_text_pending_on_swap_started);
         app.add_observer(mark_text_pending_on_swap_completed);
-        #[cfg(feature = "slug_text")]
         app.add_observer(mark_text_pending_on_slug_completed);
     }
 }
@@ -140,7 +131,6 @@ fn mark_text_pending_on_backend_changed(
     if !text_backend.is_changed() {
         return;
     }
-    #[cfg(feature = "slug_text")]
     if text_backend.backend() == TextRendererBackend::Slug {
         mark_all_text_pending(&panel_children, &world_texts, &mut commands);
         return;
@@ -148,7 +138,6 @@ fn mark_text_pending_on_backend_changed(
     mark_all_text_pending(&panel_children, &world_texts, &mut commands);
 }
 
-#[cfg(feature = "slug_text")]
 fn clear_slug_storage_on_msdf_backend_changed(
     text_backend: Res<TextRendererPreference>,
     mut slug_backend: ResMut<SlugBackend>,
@@ -171,7 +160,6 @@ fn mark_all_text_pending(
     }
 }
 
-#[cfg(feature = "slug_text")]
 fn mark_text_pending_on_slug_completed(
     _trigger: On<SlugBackendCompleted>,
     panel_children: Query<Entity, With<PanelTextChild>>,

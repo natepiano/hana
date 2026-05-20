@@ -5,7 +5,6 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::math::Vec4;
 use bevy::prelude::*;
-#[cfg(feature = "slug_text")]
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy_kana::ToF32;
 
@@ -29,21 +28,13 @@ use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
 use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelTextChild;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugPreparedTextRun;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRenderMode;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRunStorage;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRunStorageKey;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterial;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterialInput;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::slug_text_material as make_slug_text_material;
 use crate::text::AtlasSlot;
 use crate::text::GlyphAtlas;
@@ -109,7 +100,6 @@ pub(super) struct PanelTextQuads {
 }
 
 /// Stores a prepared Slug run for a panel [`WorldText`](crate::WorldText) child.
-#[cfg(feature = "slug_text")]
 #[derive(Component)]
 pub(super) struct PanelSlugTextRun {
     /// Prepared Slug run.
@@ -301,7 +291,6 @@ pub(super) fn build_panel_batched_meshes(
 }
 
 /// Builds Slug meshes for panels whose Slug text runs changed.
-#[cfg(feature = "slug_text")]
 pub(super) fn build_panel_slug_meshes(
     changed_runs: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
     panel_children: Query<(Entity, &PanelSlugTextRun, &PanelTextChild, &ChildOf)>,
@@ -312,7 +301,6 @@ pub(super) fn build_panel_slug_meshes(
     panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
-    rtt_registry: Res<PanelRttRegistry>,
     mut slug_backend: ResMut<SlugBackend>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SlugTextMaterial>>,
@@ -337,9 +325,6 @@ pub(super) fn build_panel_slug_meshes(
         }
 
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let content_layer = rtt_registry
-            .get_layer(panel_entity)
-            .map_or_else(|| scene_layer.clone(), RenderLayers::layer);
         let is_geometry = panel.render_mode() == RenderMode::Geometry;
         let text_base = slug_panel_base_material(panel, is_geometry);
 
@@ -358,7 +343,7 @@ pub(super) fn build_panel_slug_meshes(
                 text_base: &text_base,
                 resolved_alpha,
                 is_geometry,
-                content_layer: &content_layer,
+                content_layer: &scene_layer,
                 scene_layer: &scene_layer,
                 slug_backend: &mut slug_backend,
                 meshes: &mut meshes,
@@ -374,7 +359,6 @@ pub(super) fn build_panel_slug_meshes(
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
 }
 
-#[cfg(feature = "slug_text")]
 fn collect_dirty_panels(
     changed_children: &Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
 ) -> Vec<Entity> {
@@ -388,7 +372,6 @@ fn collect_dirty_panels(
     dirty_panels
 }
 
-#[cfg(feature = "slug_text")]
 struct PanelSlugSpawnRequest<'a, 'w, 's> {
     panel_entity:     Entity,
     panel_run:        &'a PanelSlugTextRun,
@@ -405,7 +388,6 @@ struct PanelSlugSpawnRequest<'a, 'w, 's> {
     commands:         &'a mut Commands<'w, 's>,
 }
 
-#[cfg(feature = "slug_text")]
 fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
     let PanelSlugSpawnRequest {
         panel_entity,
@@ -493,7 +475,6 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
     }
 }
 
-#[cfg(feature = "slug_text")]
 fn slug_panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMaterial {
     let mut base = panel
         .text_material()
@@ -508,7 +489,6 @@ fn slug_panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> Standar
     base
 }
 
-#[cfg(feature = "slug_text")]
 fn slug_panel_material(
     base: &StandardMaterial,
     depth_bias: f32,
@@ -530,7 +510,6 @@ fn slug_panel_material(
     })
 }
 
-#[cfg(feature = "slug_text")]
 fn spawn_slug_visible_mesh(
     panel_entity: Entity,
     mesh_handle: Handle<Mesh>,
@@ -565,7 +544,6 @@ fn spawn_slug_visible_mesh(
     }
 }
 
-#[cfg(feature = "slug_text")]
 const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
     match shadow_mode {
         GlyphShadowMode::SolidQuad => SlugRenderMode::SolidQuad,
@@ -574,7 +552,6 @@ const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode
     }
 }
 
-#[cfg(feature = "slug_text")]
 const fn slug_render_mode(render_mode: GlyphRenderMode) -> SlugRenderMode {
     match render_mode {
         GlyphRenderMode::Invisible => SlugRenderMode::Invisible,

@@ -27,6 +27,7 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::LagrangePlugin;
@@ -131,34 +132,35 @@ impl LightingPreset {
 }
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            LagrangePlugin,
-            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-            MeshPickingPlugin,
-            DiegeticUiPlugin,
-        ))
-        .init_resource::<LightingPreset>()
-        .init_resource::<TaaEnabled>()
-        .insert_resource(bevy::light::GlobalAmbientLight {
-            color:                      Color::BLACK,
-            brightness:                 0.0,
-            affects_lightmapped_meshes: false,
-        })
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                zoom_to_panel,
-                cycle_lighting_preset,
-                adjust_illuminance,
-                home_camera,
-                toggle_taa,
-                update_hud,
-            ),
-        )
-        .run();
+    let mut app = App::new();
+    app.add_plugins((
+        DefaultPlugins,
+        LagrangePlugin,
+        BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
+        MeshPickingPlugin,
+        DiegeticUiPlugin,
+    ))
+    .init_resource::<LightingPreset>()
+    .init_resource::<TaaEnabled>()
+    .insert_resource(bevy::light::GlobalAmbientLight {
+        color:                      Color::BLACK,
+        brightness:                 0.0,
+        affects_lightmapped_meshes: false,
+    })
+    .add_systems(Startup, setup)
+    .add_systems(
+        Update,
+        (
+            zoom_to_panel,
+            cycle_lighting_preset,
+            adjust_illuminance,
+            home_camera,
+            toggle_taa,
+            update_hud,
+        ),
+    );
+    app.insert_resource(TextRendererPreference::slug());
+    app.run();
 }
 
 fn zoom_to_panel(

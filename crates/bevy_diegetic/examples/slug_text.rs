@@ -12,8 +12,6 @@ use bevy::render::storage::ShaderStorageBuffer;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DEFAULT_BAND_COUNT;
 use bevy_diegetic::FIXTURE_TEXT;
-use bevy_diegetic::FontId;
-use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::SlugBackend;
 use bevy_diegetic::SlugBackendCompleted;
 use bevy_diegetic::SlugBuiltTextRun;
@@ -25,8 +23,6 @@ use bevy_diegetic::SlugTextMaterial;
 use bevy_diegetic::SlugTextMaterialInput;
 use bevy_diegetic::SlugTextRequest;
 use bevy_diegetic::SlugTextRun;
-use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::build_packed_glyph;
 use bevy_diegetic::build_slug_run_render_data;
 use bevy_diegetic::load_glyph;
@@ -40,16 +36,22 @@ const LATIN_FONT_FAMILY: &str = "JetBrains Mono";
 const LATIN_FONT_KEY: SlugFontKey = SlugFontKey::new(0);
 const CJK_FONT_DATA: &[u8] = include_bytes!("../assets/fonts/NotoSansCJKsc-Regular.otf");
 const CJK_SAMPLE_CHAR: char = '漢';
-const FONT_SCALE: f32 = 0.0015;
-const GLYPH_BASELINE_Y: f32 = -0.6;
-const PREVIEW_ELEVATION: f32 = 1.2;
-const WORLD_TEXT_REFERENCE_Z: f32 = -0.0001;
+const DISPLAY_SIZE: f32 = 0.48;
+const DISPLAY_Y: f32 = 0.5;
+const DISPLAY_Z: f32 = 2.0;
+const JETBRAINS_UNITS_PER_EM: f32 = 1000.0;
+const FONT_SCALE: f32 = DISPLAY_SIZE / JETBRAINS_UNITS_PER_EM;
 const SLUG_FILL_COLOR: Color = Color::srgba(1.0, 0.38, 0.20, 1.0);
-const WORLD_TEXT_REFERENCE_COLOR: Color = Color::WHITE;
-const HOME_FOCUS: Vec3 = Vec3::new(0.0, PREVIEW_ELEVATION, 0.0);
-const HOME_FRAME_SIZE: f32 = 10.8;
-const HOME_PITCH: f32 = 0.0;
+const GROUND_SIZE: f32 = 5.4;
+const GROUND_DEPTH_SCALE: f32 = 0.7;
+const GROUND_CENTER_Z: f32 = GROUND_SIZE * 0.5 * (1.0 - GROUND_DEPTH_SCALE);
+const GROUND_COLOR: Color = Color::srgb(0.08, 0.08, 0.08);
+const HOME_FOCUS: Vec3 = Vec3::new(-0.001, 0.461, 2.002);
+const HOME_RADIUS: f32 = 2.84;
+const HOME_PITCH: f32 = 0.055;
 const HOME_YAW: f32 = 0.0;
+const LIGHT_AIM: Vec3 = Vec3::new(0.0, DISPLAY_Y, DISPLAY_Z);
+const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
 const TITLE_CONTROL: &str = "Scroll Zoom";
 
 #[derive(Component)]
@@ -62,14 +64,25 @@ fn main() {
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
+        .aim_at(LIGHT_AIM)
+        .key_light_pos(KEY_LIGHT_POS)
         .with_ground_plane()
+        .size(GROUND_SIZE)
+        .transform(
+            Transform::from_xyz(0.0, 0.0, GROUND_CENTER_Z).with_scale(Vec3::new(
+                1.0,
+                1.0,
+                GROUND_DEPTH_SCALE,
+            )),
+        )
+        .color(GROUND_COLOR)
         .with_orbit_cam(
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
         .with_stable_transparency()
         .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
+            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),
         )
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
@@ -100,7 +113,6 @@ fn setup(
             }
             log_preview_metrics(&preview, &slug_backend, prepare_ms);
             log_cjk_probe(&mut slug_backend);
-            spawn_world_text_reference(&mut commands, &preview);
             spawn_slug_text_run(
                 &mut commands,
                 &mut meshes,
@@ -115,24 +127,6 @@ fn setup(
             error!("slug_text feasibility example failed: {err}");
         },
     }
-}
-
-fn spawn_world_text_reference(commands: &mut Commands, preview: &SlugBuiltTextRun) {
-    let baseline_y = PREVIEW_ELEVATION + GLYPH_BASELINE_Y;
-    commands.spawn((
-        Name::new("WorldText Typography Reference"),
-        WorldText::new(FIXTURE_TEXT),
-        WorldTextStyle::new(preview.reference_size)
-            .with_font(FontId::MONOSPACE.0)
-            .with_color(WORLD_TEXT_REFERENCE_COLOR)
-            .with_anchor(Anchor::TopLeft)
-            .with_shadow_mode(GlyphShadowMode::None),
-        Transform::from_xyz(
-            text_width(&preview.run) * -0.5,
-            preview.baseline.mul_add(FONT_SCALE, baseline_y),
-            WORLD_TEXT_REFERENCE_Z,
-        ),
-    ));
 }
 
 fn load_preview_text(slug_backend: &mut SlugBackend) -> Result<SlugBuiltTextRun, SlugOutlineError> {
@@ -252,12 +246,13 @@ fn spawn_slug_text_run(
         glyphs:      glyph_buffer,
     }));
     let run_origin_x = text_width(&preview.run) * -0.5;
+    let transform = Transform::from_xyz(run_origin_x, DISPLAY_Y, DISPLAY_Z);
     commands.spawn((
         Name::new("SlugTextRun Typography"),
         SlugGlyphPreview,
         Mesh3d(meshes.add(render_data.mesh)),
         MeshMaterial3d(material),
-        Transform::from_xyz(run_origin_x, PREVIEW_ELEVATION + GLYPH_BASELINE_Y, 0.0),
+        transform,
     ));
 }
 

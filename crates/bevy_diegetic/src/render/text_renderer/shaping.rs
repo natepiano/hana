@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::batching;
-#[cfg(feature = "slug_text")]
 use super::batching::PanelSlugTextRun;
 use super::batching::PanelTextAlpha;
 use super::batching::PanelTextQuads;
@@ -20,9 +19,7 @@ use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-#[cfg(feature = "slug_text")]
 use crate::render::TextRendererBackend;
-#[cfg(feature = "slug_text")]
 use crate::render::TextRendererPreference;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::glyph_quad;
@@ -37,9 +34,7 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::DEFAULT_BAND_COUNT;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
@@ -70,8 +65,8 @@ pub(super) fn shape_panel_text_children(
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
-    #[cfg(feature = "slug_text")] text_backend: Res<TextRendererPreference>,
-    #[cfg(feature = "slug_text")] mut slug_backend: ResMut<SlugBackend>,
+    text_backend: Res<TextRendererPreference>,
+    mut slug_backend: ResMut<SlugBackend>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -118,7 +113,6 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        #[cfg(feature = "slug_text")]
         if text_backend.backend() == TextRendererBackend::Slug {
             let (panel_slug_run, stats) = build_panel_slug_text(
                 &world_text.0,
@@ -209,7 +203,6 @@ fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
         .entity(entity)
         .remove::<PendingGlyphs>()
         .remove::<PanelTextQuads>();
-    #[cfg(feature = "slug_text")]
     commands.entity(entity).remove::<PanelSlugTextRun>();
 }
 
@@ -242,7 +235,6 @@ fn apply_panel_quad_result(
                 .get(entity)
                 .is_ok_and(|current| current.0 == resolved);
             commands.entity(entity).insert(panel_text_quads);
-            #[cfg(feature = "slug_text")]
             commands.entity(entity).remove::<PanelSlugTextRun>();
             if !alpha_unchanged {
                 commands.entity(entity).insert(Resolved(resolved));
@@ -364,7 +356,6 @@ fn shape_text_to_quads(
     (quads, stats)
 }
 
-#[cfg(feature = "slug_text")]
 fn build_panel_slug_text(
     text: &str,
     config: &LayoutTextStyle,
@@ -435,7 +426,6 @@ fn build_panel_slug_text(
     )
 }
 
-#[cfg(feature = "slug_text")]
 fn panel_slug_layout_anchor(placement: &QuadPlacement) -> Vec2 {
     Vec2::new(
         placement.anchor.x / placement.scale.x - placement.bounds.x,
@@ -443,7 +433,6 @@ fn panel_slug_layout_anchor(placement: &QuadPlacement) -> Vec2 {
     )
 }
 
-#[cfg(feature = "slug_text")]
 fn apply_panel_slug_result(
     entity: Entity,
     panel_entity: Entity,

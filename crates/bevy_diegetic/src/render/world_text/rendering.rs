@@ -11,7 +11,6 @@ use super::WorldText;
 use super::WorldTextAlpha;
 use super::mesh_spawning;
 use super::mesh_spawning::MeshSpawnAssets;
-#[cfg(feature = "slug_text")]
 use super::mesh_spawning::SlugMeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::mesh_spawning::WorldTextShadowProxy;
@@ -31,7 +30,6 @@ use crate::render::text_backend::TextRendererBackend;
 use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
-#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
@@ -114,7 +112,6 @@ pub(super) fn render_world_text(
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
-        #[cfg(feature = "slug_text")]
         if backend_services.text_backend.backend() == TextRendererBackend::Slug {
             let mut shared_services = SlugWorldTextRenderServices::new(
                 &font_registry,
@@ -272,7 +269,6 @@ impl DistanceFieldWorldTextRenderServices<'_, '_, '_, '_, '_, '_, '_> {
     }
 }
 
-#[cfg(feature = "slug_text")]
 struct SlugWorldTextRenderServices<
     'a,
     'alpha_world,
@@ -301,7 +297,6 @@ struct SlugWorldTextRenderServices<
     defaults:        &'a CascadeDefaults,
 }
 
-#[cfg(feature = "slug_text")]
 impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mesh_data>
     SlugWorldTextRenderServices<
         'a,

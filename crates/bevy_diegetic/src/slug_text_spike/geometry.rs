@@ -160,6 +160,12 @@ pub fn load_glyph_by_id_from_face(
     load_glyph_from_face(&face, glyph_id, character)
 }
 
+/// Returns whether `glyph_id` can produce visible Slug curve data.
+#[must_use]
+pub fn glyph_id_has_visible_outline(face: &Face<'_>, glyph_id: u16) -> bool {
+    glyph_id < face.number_of_glyphs() && face.glyph_bounding_box(GlyphId(glyph_id)).is_some()
+}
+
 fn load_glyph_from_face(
     face: &Face<'_>,
     glyph_id: GlyphId,

@@ -221,6 +221,7 @@ pub fn build_slug_text_run_with_cache(
     request: SlugTextRequest<'_>,
     glyph_cache: &mut SlugGlyphCache,
 ) -> Result<SlugBuiltTextRun, SlugOutlineError> {
+    let face = Face::parse(request.font_data, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
     let shaped_text = shape_slug_text(
         request.text,
         request.font_data,
@@ -234,6 +235,9 @@ pub fn build_slug_text_run_with_cache(
             glyph.glyph_id,
             request.preprocess_version,
         );
+        if !geometry::glyph_id_has_visible_outline(&face, glyph.glyph_id) {
+            continue;
+        }
         let packed_glyph = glyph_cache.get_or_insert_packed(
             key,
             request.font_data,

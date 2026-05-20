@@ -57,10 +57,10 @@ modules until the renderer proves that it can draw correct text. The
 first branch should be a feasibility study, not a shared-renderer
 refactor.
 
-Initial code should live behind an experimental feature in a private
-Slug spike module and a standalone example. It should not add
-`TextRendererBackend`, rewrite `GlyphQuadData`, or change panel/world
-text systems until plain Slug text is rendering.
+Initial code should stay in a private Slug spike module and a standalone
+example. This branch now compiles Slug unconditionally to keep testing
+simple; if the experiment fails, remove the branch code instead of
+carrying feature-gate ceremony.
 
 Allowed dependencies for the isolated spike:
 
@@ -270,6 +270,12 @@ buffer access.
 
 ## WorldText behavior compatibility
 
+The renderer swap contract is behavioral, not architectural. Users
+should be able to choose the distance-field renderer or the Slug
+renderer at runtime and keep the same public text capabilities. The two
+renderers do not need matching internals, mesh layouts, material
+structures, alpha-mode choices, shadow passes, or cache shapes.
+
 Slug must replace the glyph silhouette source, not the public text
 behavior contract. The current `WorldText` and panel text feature set is
 valuable, but Slug does not need to copy the exact MTSDF implementation
@@ -355,8 +361,7 @@ Status: completed.
 
 Completed:
 
-- Created a private experimental Slug module behind the experimental
-  feature path.
+- Created a private experimental Slug module for the feasibility path.
 - Added standalone `examples/slug_text.rs`.
 - Kept the code separate from production panel/world text modules.
 - Avoided `TextRendererBackend`, shared glyph instance types, and
@@ -548,10 +553,9 @@ Completed:
 - Added an internal backend decision point in
   `crates/bevy_diegetic/src/render/text_backend.rs`.
 - Added `TextRendererBackend { DistanceField, Slug }` and
-  `TextRendererPreference { backend }` behind the experimental feature.
-  The first selector is a global resource used by the existing render
-  modules and `examples/slug_text.rs`; per-text backend switching stays
-  out of this phase.
+  `TextRendererPreference { backend }`. The first selector is a global
+  resource used by the existing render modules and `examples/slug_text.rs`;
+  per-text backend switching stays out of this phase.
 - Added a `SlugBackend` resource for the isolated path. It owns the
   reusable glyph cache, backend generation, completion count, failure
   count, and preprocessing version.
@@ -884,33 +888,66 @@ known cases where it is better or worse than MTSDF.
   Sans all prepare `Typography` successfully.
 - Slug is not yet ready as a full MSDF replacement for CJK, emoji,
   fallback fonts, panel text, or cubic-outline fonts.
-- Phase 9 should fix and investigate panel Slug readiness before effects.
-  Separate follow-up work should decide the final production cache policy
+- Phase 9 should return to the isolated `slug_text` example and prove
+  basic Slug text quality before more panel work. The panel example
+  mixes layout, clipping, picking, layers, and camera controls, so it is
+  the wrong place to judge the Slug shader.
+- Separate follow-up work should decide the final production cache policy
   for backend-owned storage and whether CFF/cubic support comes before or
   after MSDF removal.
 
 ### Phase 8 Review
 
-- Phase 9 is now a fix/investigate phase for panel Slug readiness instead
-  of an effects phase.
-- Phase 9 now includes the panel Slug face/glyph identity failure found by
-  `panel_rendering` with `TextRendererPreference::slug()`.
-- Phase 9 now includes panel screenshot evidence, current per-child Slug
-  mesh measurement, and the merged-batching decision before final panel
-  performance claims.
-- Phase 9 now records the future interactive-panel constraint: batching
+- Phase 9 is now an isolated Slug quality gate instead of a panel
+  readiness phase.
+- Phase 9 now requires screenshot evidence from `examples/slug_text.rs`
+  at small and large sizes before any replacement claims.
+- Phase 9 now records the panel findings as deferred follow-up: no-outline
+  glyphs such as space must be skipped, panel text must stay off RTT as a
+  Slug quality path, and the panel example exposed clipping/picking/layer
+  issues that should not drive shader-quality decisions.
+- Phase 10 now covers panel Slug readiness, including the panel
+  screenshot evidence, current per-child Slug mesh measurement, and the
+  merged-batching decision before final panel performance claims.
+- Phase 10 now records the future interactive-panel constraint: batching
   must not prevent per-element behavior for buttons, sliders, dropdowns,
   or similar panel controls.
-- Phase 9 now includes production storage lifetime policy work for
+- Phase 10 now includes production storage lifetime policy work for
   backend-owned Slug run storage.
-- Phase 10 is now the effects phase. It stays focused on validating and
+- Phase 11 is now the effects phase. It stays focused on validating and
   tuning existing shadow proxy paths, and names the concrete Slug
   `HueOffset` implementation hooks.
 - The test matrix now records that dense CJK quality tests require a
   quadratic CJK font fixture or cubic-outline support.
 
-### Phase 9: panel Slug readiness
+### Phase 9: isolated Slug quality gate
 
+Status: in progress.
+
+- Keep the next quality work in `examples/slug_text.rs`: one selected
+  font, one word, direct Slug mesh rendering, camera controls, and no
+  panels.
+- Capture screenshot evidence for large text, small text, straight-on
+  viewing, and zoomed edge inspection.
+- Compare against the current `WorldText` reference only as an optional
+  visual reference. The Slug result should be judged on its own edge
+  quality, spacing, and stability.
+- Replace or materially improve the current five-sample coverage
+  approximation before claiming Slug is visually better than MSDF.
+- Keep the existing no-outline glyph fix: space and other blank glyphs
+  must advance layout but must not produce Slug mesh/storage records.
+- Do not use panel render-to-texture as evidence for Slug quality.
+
+Exit criteria: the isolated Slug example renders `Typography` clearly at
+large and small sizes, camera controls work, screenshots are recorded,
+and any remaining quality gap is tied to the shader algorithm rather than
+panel infrastructure.
+
+### Phase 10: panel Slug readiness
+
+- Keep Slug panel text on the direct mesh path. Do not use panel
+  render-to-texture as quality evidence for Slug replacement work; RTT
+  stays a legacy/compatibility path, not the target for analytic text.
 - Fix or explain the panel Slug face/glyph identity failure found by
   temporarily running `panel_rendering` with
   `TextRendererPreference::slug()`: repeated `font does not contain glyph
@@ -937,7 +974,7 @@ Exit criteria: panel Slug text renders reliably enough to inspect and
 measure; the remaining panel performance and storage policy decisions are
 explicit enough to support effects and replacement work.
 
-### Phase 10: effects
+### Phase 11: effects
 
 - Validate and tune hard drop shadows using the existing `WorldText`
   Slug shadow proxy path. The basic proxy path already exists; this

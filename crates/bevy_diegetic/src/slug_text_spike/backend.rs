@@ -12,6 +12,7 @@ use bevy::prelude::Vec2;
 use bevy::render::storage::ShaderStorageBuffer;
 use ttf_parser::Face;
 
+use super::geometry;
 use super::geometry::SlugOutlineError;
 use super::packing::DEFAULT_BAND_COUNT;
 use super::run;
@@ -168,6 +169,9 @@ impl SlugBackend {
         for positioned in glyphs {
             let face = Face::parse(positioned.font.data(), positioned.font.collection_index)
                 .map_err(|_| SlugOutlineError::InvalidFont)?;
+            if !geometry::glyph_id_has_visible_outline(&face, positioned.glyph.id) {
+                continue;
+            }
             let bounds_scale =
                 placement_scale * (layout_font_size / f32::from(face.units_per_em()));
             let key = self.glyph_key(
@@ -370,6 +374,27 @@ mod tests {
         let removed = backend.remove_run_storage(prepared.storage_key);
         assert!(removed.is_some());
         assert_eq!(backend.stored_runs(), 0);
+    }
+
+    #[test]
+    fn text_runs_skip_invisible_space_glyphs() {
+        let mut backend = SlugBackend::default();
+        let prepared = prepare(&mut backend, "A A");
+
+        assert_eq!(prepared.run.run.glyphs().len(), 2);
+        assert_eq!(backend.glyph_cache().len(), 1);
+        assert!(prepared.run.run.advance_width() > 0.0);
+    }
+
+    #[test]
+    fn space_only_text_run_is_invisible_not_failed() {
+        let mut backend = SlugBackend::default();
+        let prepared = prepare(&mut backend, " ");
+
+        assert!(prepared.run.run.glyphs().is_empty());
+        assert!(backend.glyph_cache().is_empty());
+        assert_eq!(backend.completed_runs(), 1);
+        assert_eq!(backend.failed_runs(), 0);
     }
 
     #[test]

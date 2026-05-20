@@ -15,8 +15,7 @@ workspace = true
 
 [features]
 bench_support      = []
-default            = ["slug_text", "typography_overlay"]
-slug_text          = []
+default            = ["typography_overlay"]
 trace_chrome       = ["bevy/trace_chrome"]
 typography_overlay = []
 
@@ -127,5 +126,4 @@ name = "taa_shimmer"
 name = "two_window_panels"
 
 [[example]]
-name              = "slug_text"
-required-features = ["slug_text"]
+name = "slug_text"
