@@ -95,7 +95,7 @@ pub(super) fn shape_world_text(
 
     let atlas_start = std::time::Instant::now();
     if style.loading_policy() == GlyphLoadingPolicy::WhenReady
-        && !ensure_all_glyphs_ready(&shaped.glyphs, style, atlas, font_data, &mut stats)
+        && !ensure_all_glyphs_ready(&shaped.glyphs, atlas, font_data, &mut stats)
     {
         stats.atlas_ms =
             atlas_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
@@ -134,7 +134,6 @@ pub(super) fn shape_world_text(
         glyphs,
     } = build_glyph_quads(
         &shaped.glyphs,
-        style,
         atlas,
         font_data,
         boosted_size,
@@ -166,7 +165,6 @@ pub(super) fn shape_world_text(
 
 fn build_glyph_quads(
     glyphs: &[ShapedGlyph],
-    style: &WorldTextStyle,
     atlas: &mut GlyphAtlas,
     font_data: &[u8],
     boosted_size: f32,
@@ -183,7 +181,7 @@ fn build_glyph_quads(
 
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
-            font_id:     style.font_id(),
+            font_id:     shaped_glyph.font_face.requested_font_id,
             glyph_index: shaped_glyph.id,
         };
 
@@ -252,7 +250,6 @@ fn build_glyph_quads(
 /// in the run is already cached in the atlas.
 fn ensure_all_glyphs_ready(
     glyphs: &[ShapedGlyph],
-    style: &WorldTextStyle,
     atlas: &mut GlyphAtlas,
     font_data: &[u8],
     stats: &mut TextBuildStats,
@@ -260,7 +257,7 @@ fn ensure_all_glyphs_ready(
     let mut all_ready = true;
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
-            font_id:     style.font_id(),
+            font_id:     shaped_glyph.font_face.requested_font_id,
             glyph_index: shaped_glyph.id,
         };
         match atlas.lookup_or_queue(glyph_key, font_data) {
@@ -291,7 +288,7 @@ fn measure_anchor_offset(
     let mut max_x = 0.0_f32;
     for shaped_glyph in glyphs {
         let glyph_key = GlyphKey {
-            font_id:     style.font_id(),
+            font_id:     shaped_glyph.font_face.requested_font_id,
             glyph_index: shaped_glyph.id,
         };
         if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {

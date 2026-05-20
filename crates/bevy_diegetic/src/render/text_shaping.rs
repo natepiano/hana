@@ -8,13 +8,18 @@ use bevy::prelude::*;
 use bevy_kana::ToU16;
 use parley::Layout;
 use parley::LayoutContext;
+use parley::RangedBuilder;
 use parley::layout::PositionedLayoutItem;
 use parley::style::FontFeatures;
+use parley::style::FontStyle;
+use parley::style::FontWeight;
 use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
+use crate::layout::FontSlant;
 use crate::layout::LayoutTextStyle;
 use crate::layout::LineMetricsSnapshot;
+use crate::layout::ResolvedFontFace;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
@@ -117,30 +122,7 @@ pub(super) fn shape_text_cached(
         .unwrap_or(DEFAULT_FAMILY);
 
     let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, true);
-    builder.push_default(StyleProperty::FontSize(config.size()));
-    builder.push_default(StyleProperty::FontFamily(parley::style::FontFamily::named(
-        family_name,
-    )));
-    if config.line_height_raw() > 0.0 {
-        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
-            config.line_height_raw(),
-        )));
-    }
-
-    let font_features = config.font_features();
-    if !font_features.is_default() {
-        let parley_features: Vec<parley::style::FontFeature> = font_features
-            .to_parley_settings()
-            .into_iter()
-            .map(|(tag, value)| parley::FontFeature {
-                tag: parley::setting::Tag::from_bytes(tag),
-                value,
-            })
-            .collect();
-        builder.push_default(StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(
-            parley_features,
-        ))));
-    }
+    apply_text_style(&mut builder, config, family_name);
 
     builder.build_into(&mut layout, text);
     layout.break_all_lines(None);
@@ -148,51 +130,132 @@ pub(super) fn shape_text_cached(
     drop(font_context);
     drop(layout_context);
 
+    let shaped_text_run = collect_shaped_run(&layout, config.font_id());
+    let dimensions = text_dimensions(&layout, config);
+    drop(layout);
+    cache.insert_shaped(text, &measure, shaped_text_run.clone(), dimensions);
+    shaped_text_run
+}
+
+fn apply_text_style(builder: &mut RangedBuilder<'_, ()>, config: &LayoutTextStyle, family: &str) {
+    builder.push_default(StyleProperty::FontSize(config.size()));
+    builder.push_default(StyleProperty::FontFamily(parley::style::FontFamily::named(
+        family,
+    )));
+    builder.push_default(StyleProperty::FontWeight(FontWeight::new(
+        config.weight().0,
+    )));
+    builder.push_default(StyleProperty::FontStyle(font_style(config.slant())));
+    if config.letter_spacing() != 0.0 {
+        builder.push_default(StyleProperty::LetterSpacing(config.letter_spacing()));
+    }
+    if config.word_spacing() != 0.0 {
+        builder.push_default(StyleProperty::WordSpacing(config.word_spacing()));
+    }
+    if config.line_height_raw() > 0.0 {
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+            config.line_height_raw(),
+        )));
+    }
+    push_font_features(builder, config.font_features());
+}
+
+const fn font_style(slant: FontSlant) -> FontStyle {
+    match slant {
+        FontSlant::Normal => FontStyle::Normal,
+        FontSlant::Italic => FontStyle::Italic,
+        FontSlant::Oblique => FontStyle::Oblique(None),
+    }
+}
+
+fn push_font_features(builder: &mut RangedBuilder<'_, ()>, font_features: crate::FontFeatures) {
+    if font_features.is_default() {
+        return;
+    }
+    let parley_features: Vec<parley::style::FontFeature> = font_features
+        .to_parley_settings()
+        .into_iter()
+        .map(|(tag, value)| parley::FontFeature {
+            tag: parley::setting::Tag::from_bytes(tag),
+            value,
+        })
+        .collect();
+    builder.push_default(StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(
+        parley_features,
+    ))));
+}
+
+fn collect_shaped_run(layout: &Layout<()>, requested_font_id: u16) -> ShapedTextRun {
+    ShapedTextRun {
+        glyphs:       collect_glyphs(layout, requested_font_id),
+        line_metrics: collect_line_metrics(layout),
+    }
+}
+
+fn collect_line_metrics(layout: &Layout<()>) -> Vec<LineMetricsSnapshot> {
+    layout
+        .lines()
+        .map(|line| {
+            let metrics = line.metrics();
+            LineMetricsSnapshot {
+                ascent:   metrics.ascent,
+                descent:  metrics.descent,
+                baseline: metrics.baseline,
+                top:      metrics.block_min_coord,
+                bottom:   metrics.block_max_coord,
+            }
+        })
+        .collect()
+}
+
+fn collect_glyphs(layout: &Layout<()>, requested_font_id: u16) -> Vec<ShapedGlyph> {
     let mut glyphs = Vec::new();
-    let mut line_metrics = Vec::new();
     for line in layout.lines() {
-        let line_metrics_snapshot = line.metrics();
-        line_metrics.push(LineMetricsSnapshot {
-            ascent:   line_metrics_snapshot.ascent,
-            descent:  line_metrics_snapshot.descent,
-            baseline: line_metrics_snapshot.baseline,
-            top:      line_metrics_snapshot.block_min_coord,
-            bottom:   line_metrics_snapshot.block_max_coord,
-        });
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(run) = item else {
                 continue;
             };
-            let glyph_run = run.run();
-            let mut advance_x = 0.0_f32;
-            for cluster in glyph_run.clusters() {
-                for glyph in cluster.glyphs() {
-                    glyphs.push(ShapedGlyph {
-                        id:       glyph.id.to_u16(),
-                        x:        run.offset() + advance_x + glyph.x,
-                        y:        glyph.y,
-                        baseline: run.baseline(),
-                        advance:  glyph.advance,
-                    });
-                    advance_x += glyph.advance;
-                }
-            }
+            append_run_glyphs(&mut glyphs, &run, requested_font_id);
         }
     }
+    glyphs
+}
 
-    let dimensions = TextDimensions {
+fn append_run_glyphs(
+    glyphs: &mut Vec<ShapedGlyph>,
+    run: &parley::layout::GlyphRun<'_, ()>,
+    requested_font_id: u16,
+) {
+    let glyph_run = run.run();
+    let font = glyph_run.font();
+    let font_face = ResolvedFontFace {
+        requested_font_id,
+        blob_id: font.data.id(),
+        collection_index: font.index,
+    };
+    let mut advance_x = 0.0_f32;
+    for cluster in glyph_run.clusters() {
+        for glyph in cluster.glyphs() {
+            glyphs.push(ShapedGlyph {
+                font_face,
+                id: glyph.id.to_u16(),
+                x: run.offset() + advance_x + glyph.x,
+                y: glyph.y,
+                baseline: run.baseline(),
+                advance: glyph.advance,
+            });
+            advance_x += glyph.advance;
+        }
+    }
+}
+
+fn text_dimensions(layout: &Layout<()>, config: &LayoutTextStyle) -> TextDimensions {
+    TextDimensions {
         width:       layout.full_width(),
         height:      layout.height(),
         line_height: layout
             .lines()
             .next()
             .map_or_else(|| config.size(), |line| line.metrics().line_height),
-    };
-    drop(layout);
-    let shaped_text_run = ShapedTextRun {
-        glyphs,
-        line_metrics,
-    };
-    cache.insert_shaped(text, &measure, shaped_text_run.clone(), dimensions);
-    shaped_text_run
+    }
 }

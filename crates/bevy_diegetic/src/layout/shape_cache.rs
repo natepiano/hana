@@ -26,21 +26,34 @@ use super::text_props::FontSlant;
 use super::text_props::TextDimensions;
 use super::text_props::TextMeasure;
 
-/// A single shaped glyph from parley — glyph ID plus its position relative
-/// to the text origin.
+/// Resolved font face used by a shaped glyph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct ResolvedFontFace {
+    /// Requested `FontId` from the text style.
+    pub requested_font_id: u16,
+    /// Parley/fontique blob identity for the actual face used by shaping.
+    pub blob_id:           u64,
+    /// Face index inside a font collection.
+    pub collection_index:  u32,
+}
+
+/// A single shaped glyph from parley: resolved font, glyph ID, and position
+/// relative to the text origin.
 #[derive(Clone, Debug)]
 pub struct ShapedGlyph {
+    /// Resolved font face used by this glyph.
+    pub font_face: ResolvedFontFace,
     /// Glyph index within the font.
-    pub id:       u16,
+    pub id:        u16,
     /// X position relative to the text origin (accumulated advance + fine
     /// offset).
-    pub x:        f32,
+    pub x:         f32,
     /// Y position relative to the text origin (baseline-relative).
-    pub y:        f32,
+    pub y:         f32,
     /// Baseline of the line this glyph belongs to.
-    pub baseline: f32,
+    pub baseline:  f32,
     /// Horizontal advance returned by the shaper.
-    pub advance:  f32,
+    pub advance:   f32,
 }
 
 /// Snapshot of parley's per-line metrics, captured during text shaping.

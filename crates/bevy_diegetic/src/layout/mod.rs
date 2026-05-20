@@ -65,6 +65,7 @@ pub use render::RectangleSource;
 pub use render::RenderCommand;
 pub use render::RenderCommandKind;
 pub use shape_cache::LineMetricsSnapshot;
+pub use shape_cache::ResolvedFontFace;
 pub use shape_cache::ShapedGlyph;
 pub use shape_cache::ShapedTextCache;
 pub use shape_cache::ShapedTextRun;

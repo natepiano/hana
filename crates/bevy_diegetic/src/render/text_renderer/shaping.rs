@@ -232,7 +232,7 @@ fn shape_text_to_quads(
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
     for shaped_glyph in &shaped.glyphs {
         let glyph_key = GlyphKey {
-            font_id:     config.font_id(),
+            font_id:     shaped_glyph.font_face.requested_font_id,
             glyph_index: shaped_glyph.id,
         };
 
@@ -303,7 +303,7 @@ fn all_glyphs_ready_when_required(
     let mut all_ready = true;
     for shaped_glyph in shaped_glyphs {
         let glyph_key = GlyphKey {
-            font_id:     config.font_id(),
+            font_id:     shaped_glyph.font_face.requested_font_id,
             glyph_index: shaped_glyph.id,
         };
         match atlas.lookup_or_queue(glyph_key, font_data) {
