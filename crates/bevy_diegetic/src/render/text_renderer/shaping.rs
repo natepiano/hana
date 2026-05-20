@@ -14,7 +14,6 @@ use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLoadingPolicy;
 use crate::layout::LayoutTextStyle;
-use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
@@ -23,7 +22,9 @@ use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
 use crate::render::text_shaping;
+use crate::render::text_shaping::GlyphQuadPlacement;
 use crate::render::text_shaping::GlyphReadiness;
+use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
@@ -31,11 +32,8 @@ use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
 use crate::text::AtlasSlot;
-use crate::text::Font;
-use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
-use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
@@ -132,7 +130,7 @@ pub(super) fn shape_panel_text_children(
             GlyphReadiness::from(&stats)
         };
         match readiness {
-            GlyphReadiness::Ready => {
+            GlyphReadiness::Ready | GlyphReadiness::Invisible => {
                 let panel_text_quads = PanelTextQuads {
                     quads,
                     render_mode: config.render_mode(),
@@ -157,6 +155,12 @@ pub(super) fn shape_panel_text_children(
             },
             GlyphReadiness::Pending => {
                 commands.entity(entity).insert_if_new(PendingGlyphs);
+            },
+            GlyphReadiness::Failed => {
+                commands
+                    .entity(entity)
+                    .remove::<PendingGlyphs>()
+                    .remove::<PanelTextQuads>();
             },
             GlyphReadiness::Idle => {},
         }
@@ -214,13 +218,13 @@ fn shape_text_to_quads(
     let shaped = text_shaping::shape_text_cached(text, config, font_registry, shaping_cx, cache);
     stats.shape_ms = shape_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     stats.glyphs = shaped.glyphs.len();
-
-    let font_data = font_registry
-        .font(FontId(config.font_id()))
-        .map_or(crate::text::EMBEDDED_FONT, Font::data);
+    let positioned_glyphs =
+        text_shaping::positioned_glyphs(&shaped.glyphs, font_registry, &mut stats);
 
     let atlas_start = Instant::now();
-    if !all_glyphs_ready_when_required(config, &shaped.glyphs, font_data, atlas, &mut stats) {
+    if stats.failed_glyphs > 0
+        || !all_glyphs_ready_when_required(config, &positioned_glyphs, atlas, &mut stats)
+    {
         stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
         return (Vec::new(), stats);
     }
@@ -230,14 +234,16 @@ fn shape_text_to_quads(
     let em_scale = config.size() / atlas.canonical_size().to_f32();
 
     let mut quads = Vec::with_capacity(shaped.glyphs.len());
-    for shaped_glyph in &shaped.glyphs {
-        let glyph_key = GlyphKey {
-            font_id:     shaped_glyph.font_face.requested_font_id,
-            glyph_index: shaped_glyph.id,
-        };
-
-        let metrics = match atlas.lookup_or_queue(glyph_key, font_data) {
+    for positioned_glyph in positioned_glyphs {
+        let metrics = match atlas.lookup_or_queue(
+            text_shaping::glyph_key(positioned_glyph),
+            positioned_glyph.font.data(),
+        ) {
             GlyphLookup::Ready(metrics) => {
+                if metrics.pixel_width == 0 || metrics.pixel_height == 0 {
+                    stats.invisible_glyphs += 1;
+                    continue;
+                }
                 stats.ready_glyphs += 1;
                 metrics
             },
@@ -251,6 +257,7 @@ fn shape_text_to_quads(
             },
         };
 
+        let shaped_glyph = positioned_glyph.glyph;
         let glyph_x = bounds.x + shaped_glyph.x;
         let glyph_y = bounds.y + shaped_glyph.baseline + shaped_glyph.y;
         let quad_width = metrics.pixel_width.to_f32() * em_scale;
@@ -260,15 +267,14 @@ fn shape_text_to_quads(
             (-(metrics.bearing_y + metrics.pad_y_em)).mul_add(config.size(), glyph_y);
         let local_x = quad_layout_x.mul_add(scale.x, -anchor.x);
         let local_y = (-quad_layout_y).mul_add(scale.y, anchor.y);
+        let placement = GlyphQuadPlacement {
+            position: [local_x, local_y, TEXT_Z_OFFSET],
+            size:     [quad_width * scale.x, quad_height * scale.y],
+        };
 
         quads.push((
             metrics.page_index,
-            GlyphQuadData {
-                position: [local_x, local_y, TEXT_Z_OFFSET],
-                size: [quad_width * scale.x, quad_height * scale.y],
-                uv_rect: metrics.uv_rect,
-                color,
-            },
+            placement.into_atlas_quad(metrics, color),
         ));
     }
 
@@ -291,8 +297,7 @@ fn shape_text_to_quads(
 
 fn all_glyphs_ready_when_required(
     config: &LayoutTextStyle,
-    shaped_glyphs: &[ShapedGlyph],
-    font_data: &[u8],
+    positioned_glyphs: &[PositionedGlyph<'_>],
     atlas: &mut GlyphAtlas,
     stats: &mut TextBuildStats,
 ) -> bool {
@@ -301,12 +306,11 @@ fn all_glyphs_ready_when_required(
     }
 
     let mut all_ready = true;
-    for shaped_glyph in shaped_glyphs {
-        let glyph_key = GlyphKey {
-            font_id:     shaped_glyph.font_face.requested_font_id,
-            glyph_index: shaped_glyph.id,
-        };
-        match atlas.lookup_or_queue(glyph_key, font_data) {
+    for positioned_glyph in positioned_glyphs {
+        match atlas.lookup_or_queue(
+            text_shaping::glyph_key(*positioned_glyph),
+            positioned_glyph.font.data(),
+        ) {
             GlyphLookup::Ready(_) => {},
             GlyphLookup::Pending => {
                 stats.pending_glyphs += 1;

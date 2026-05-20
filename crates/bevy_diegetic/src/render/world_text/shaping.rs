@@ -5,21 +5,20 @@ use ttf_parser::GlyphId;
 #[cfg(feature = "typography_overlay")]
 use super::ComputedGlyphMetrics;
 use crate::layout::GlyphLoadingPolicy;
-use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
+use crate::layout::ShapedTextRun;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
 use crate::render::constants;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
 use crate::render::text_shaping;
+use crate::render::text_shaping::GlyphQuadPlacement;
+use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
-use crate::text::Font;
-use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
-use crate::text::GlyphKey;
 use crate::text::GlyphLookup;
 
 /// Result of shaping and building glyph quads for a [`WorldText`](super::WorldText) entity.
@@ -88,14 +87,13 @@ pub(super) fn shape_world_text(
     stats.shape_ms =
         shape_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
     stats.glyphs = shaped.glyphs.len();
-
-    let font_data = font_registry
-        .font(FontId(style.font_id()))
-        .map_or(crate::text::EMBEDDED_FONT, Font::data);
+    let positioned_glyphs =
+        text_shaping::positioned_glyphs(&shaped.glyphs, font_registry, &mut stats);
 
     let atlas_start = std::time::Instant::now();
-    if style.loading_policy() == GlyphLoadingPolicy::WhenReady
-        && !ensure_all_glyphs_ready(&shaped.glyphs, atlas, font_data, &mut stats)
+    if stats.failed_glyphs > 0
+        || (style.loading_policy() == GlyphLoadingPolicy::WhenReady
+            && !ensure_all_glyphs_ready(&positioned_glyphs, atlas, &mut stats))
     {
         stats.atlas_ms =
             atlas_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
@@ -117,11 +115,10 @@ pub(super) fn shape_world_text(
     // standalone and restore the *original* style's anchor so the offset
     // computation uses the user's intended anchor, not the default Center.
     let (anchor_x, anchor_y) = measure_anchor_offset(
-        &shaped.glyphs,
+        &shaped,
+        &positioned_glyphs,
         &config.as_standalone().with_anchor(style.anchor()),
-        font_registry,
         atlas,
-        font_data,
         em_scale,
     );
 
@@ -133,9 +130,8 @@ pub(super) fn shape_world_text(
         #[cfg(feature = "typography_overlay")]
         glyphs,
     } = build_glyph_quads(
-        &shaped.glyphs,
+        &positioned_glyphs,
         atlas,
-        font_data,
         boosted_size,
         em_scale,
         anchor_x,
@@ -164,9 +160,8 @@ pub(super) fn shape_world_text(
 }
 
 fn build_glyph_quads(
-    glyphs: &[ShapedGlyph],
+    positioned_glyphs: &[PositionedGlyph<'_>],
     atlas: &mut GlyphAtlas,
-    font_data: &[u8],
     boosted_size: f32,
     em_scale: f32,
     anchor_x: f32,
@@ -175,18 +170,20 @@ fn build_glyph_quads(
     color_arr: [f32; 4],
     stats: &mut TextBuildStats,
 ) -> BuiltGlyphQuads {
-    let mut quads = Vec::with_capacity(glyphs.len());
+    let mut quads = Vec::with_capacity(positioned_glyphs.len());
     #[cfg(feature = "typography_overlay")]
-    let mut computed_glyphs = Vec::with_capacity(glyphs.len());
+    let mut computed_glyphs = Vec::with_capacity(positioned_glyphs.len());
 
-    for shaped_glyph in glyphs {
-        let glyph_key = GlyphKey {
-            font_id:     shaped_glyph.font_face.requested_font_id,
-            glyph_index: shaped_glyph.id,
-        };
-
-        let metrics = match atlas.lookup_or_queue(glyph_key, font_data) {
+    for positioned_glyph in positioned_glyphs {
+        let metrics = match atlas.lookup_or_queue(
+            text_shaping::glyph_key(*positioned_glyph),
+            positioned_glyph.font.data(),
+        ) {
             GlyphLookup::Ready(metrics) => {
+                if metrics.pixel_width == 0 || metrics.pixel_height == 0 {
+                    stats.invisible_glyphs += 1;
+                    continue;
+                }
                 stats.ready_glyphs += 1;
                 metrics
             },
@@ -203,25 +200,26 @@ fn build_glyph_quads(
         let quad_width = metrics.pixel_width.to_f32() * em_scale;
         let quad_height = metrics.pixel_height.to_f32() * em_scale;
 
+        let shaped_glyph = positioned_glyph.glyph;
         let quad_x =
             (metrics.bearing_x - metrics.pad_x_em).mul_add(boosted_size, shaped_glyph.x) - anchor_x;
         let quad_y = -((metrics.bearing_y + metrics.pad_y_em)
             .mul_add(-boosted_size, shaped_glyph.baseline + shaped_glyph.y)
             - anchor_y);
+        let placement = GlyphQuadPlacement {
+            position: [quad_x * world_scale, quad_y * world_scale, 0.0],
+            size:     [quad_width * world_scale, quad_height * world_scale],
+        };
 
         quads.push((
             metrics.page_index,
-            GlyphQuadData {
-                position: [quad_x * world_scale, quad_y * world_scale, 0.0],
-                size:     [quad_width * world_scale, quad_height * world_scale],
-                uv_rect:  metrics.uv_rect,
-                color:    color_arr,
-            },
+            placement.into_atlas_quad(metrics, color_arr),
         ));
 
         #[cfg(feature = "typography_overlay")]
         if let Some(rect) = ink_rect(
-            font_data,
+            positioned_glyph.font.data(),
+            positioned_glyph.font.collection_index,
             shaped_glyph.id,
             boosted_size,
             shaped_glyph.x,
@@ -249,18 +247,16 @@ fn build_glyph_quads(
 /// Queues all glyphs for async rasterization and returns `true` if every glyph
 /// in the run is already cached in the atlas.
 fn ensure_all_glyphs_ready(
-    glyphs: &[ShapedGlyph],
+    positioned_glyphs: &[PositionedGlyph<'_>],
     atlas: &mut GlyphAtlas,
-    font_data: &[u8],
     stats: &mut TextBuildStats,
 ) -> bool {
     let mut all_ready = true;
-    for shaped_glyph in glyphs {
-        let glyph_key = GlyphKey {
-            font_id:     shaped_glyph.font_face.requested_font_id,
-            glyph_index: shaped_glyph.id,
-        };
-        match atlas.lookup_or_queue(glyph_key, font_data) {
+    for positioned_glyph in positioned_glyphs {
+        match atlas.lookup_or_queue(
+            text_shaping::glyph_key(*positioned_glyph),
+            positioned_glyph.font.data(),
+        ) {
             GlyphLookup::Ready(_) => {},
             GlyphLookup::Pending => {
                 stats.pending_glyphs += 1;
@@ -278,20 +274,19 @@ fn ensure_all_glyphs_ready(
 /// Measures the total text extent and returns the `(anchor_x, anchor_y)` offset
 /// for the given anchor mode.
 fn measure_anchor_offset(
-    glyphs: &[ShapedGlyph],
+    shaped: &ShapedTextRun,
+    positioned_glyphs: &[PositionedGlyph<'_>],
     style: &WorldTextStyle,
-    font_registry: &FontRegistry,
     atlas: &mut GlyphAtlas,
-    font_data: &[u8],
     em_scale: f32,
 ) -> (f32, f32) {
     let mut max_x = 0.0_f32;
-    for shaped_glyph in glyphs {
-        let glyph_key = GlyphKey {
-            font_id:     shaped_glyph.font_face.requested_font_id,
-            glyph_index: shaped_glyph.id,
-        };
-        if let Some(metrics) = atlas.get_or_insert(glyph_key, font_data) {
+    for positioned_glyph in positioned_glyphs {
+        let shaped_glyph = positioned_glyph.glyph;
+        if let Some(metrics) = atlas.get_or_insert(
+            text_shaping::glyph_key(*positioned_glyph),
+            positioned_glyph.font.data(),
+        ) {
             // Anchor measurement uses ink extent (atlas-invariant), not
             // quad extent. Derivation: quad spans bitmap = ink + 2·pad
             // and its left edge sits at (bearing - pad). The quad's
@@ -306,19 +301,19 @@ fn measure_anchor_offset(
             max_x = max_x.max(ink_right);
         }
     }
-    let mut baselines: Vec<f32> = glyphs.iter().map(|glyph| glyph.baseline).collect();
-    baselines
-        .dedup_by(|current, next| (*current - *next).abs() < constants::BASELINE_DEDUP_EPSILON);
-    let line_count = baselines.len().max(1);
-    let natural_line_height = if style.line_height_raw() > 0.0 {
-        style.line_height_raw()
+    let max_y = if style.line_height_raw() > 0.0 {
+        let mut baselines: Vec<f32> = shaped.glyphs.iter().map(|glyph| glyph.baseline).collect();
+        baselines
+            .dedup_by(|current, next| (*current - *next).abs() < constants::BASELINE_DEDUP_EPSILON);
+        style.line_height_raw() * baselines.len().max(1).to_f32()
     } else {
-        font_registry.font(FontId(style.font_id())).map_or_else(
-            || style.size(),
-            |font| font.metrics(style.size()).line_height,
-        )
+        shaped
+            .line_metrics
+            .iter()
+            .map(|line| line.bottom)
+            .reduce(f32::max)
+            .unwrap_or_else(|| style.size())
     };
-    let max_y = natural_line_height * line_count.to_f32();
     style.anchor().offset(max_x, max_y)
 }
 
@@ -328,6 +323,7 @@ fn measure_anchor_offset(
 #[cfg(feature = "typography_overlay")]
 fn ink_rect(
     font_data: &[u8],
+    collection_index: u32,
     glyph_id: u16,
     font_size: f32,
     glyph_x: f32,
@@ -335,7 +331,7 @@ fn ink_rect(
     anchor: Vec2,
     scale: f32,
 ) -> Option<[f32; 4]> {
-    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+    let face = ttf_parser::Face::parse(font_data, collection_index).ok()?;
     let bbox = face.glyph_bounding_box(GlyphId(glyph_id))?;
     let upm = f32::from(face.units_per_em());
     let font_scale = font_size / upm;

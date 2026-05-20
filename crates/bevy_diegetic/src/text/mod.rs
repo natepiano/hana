@@ -40,7 +40,6 @@ pub use atlas_slot::AtlasSwapStarted;
 use bevy::asset::AssetLoadFailedEvent;
 use bevy::prelude::*;
 pub(crate) use constants::DEFAULT_FAMILY;
-pub use constants::EMBEDDED_FONT;
 pub use font::Font;
 pub use font::FontMetrics;
 #[cfg(feature = "typography_overlay")]
@@ -52,6 +51,7 @@ pub use font_registry::FontLoadFailed;
 pub use font_registry::FontRegistered;
 pub use font_registry::FontRegistry;
 pub use font_registry::FontSource;
+pub(crate) use font_registry::ResolvedFontData;
 pub use gpu_rasterizer::GpuEnqueueResult;
 pub use gpu_rasterizer::GpuGlyphBudget;
 pub use gpu_rasterizer::GpuRasterizerPlugin;

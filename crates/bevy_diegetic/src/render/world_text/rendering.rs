@@ -128,7 +128,7 @@ pub fn render_world_text(
         };
 
         #[cfg(feature = "typography_overlay")]
-        if readiness == GlyphReadiness::Ready {
+        if readiness == GlyphReadiness::Ready || readiness == GlyphReadiness::Invisible {
             commands.entity(entity).insert(ComputedWorldText {
                 anchor_y: shaped.anchor_y,
                 glyphs:   shaped.glyphs,
@@ -141,12 +141,20 @@ pub fn render_world_text(
         }
         let total_quads: usize = page_quads.values().map(Vec::len).sum();
 
+        if !atlas_slot.is_swapping()
+            && matches!(
+                readiness,
+                GlyphReadiness::Ready | GlyphReadiness::Invisible | GlyphReadiness::Failed
+            )
+        {
+            mesh_spawning::despawn_mesh_children(entity, &old_meshes, &mut commands);
+        }
+
         // Skip mesh respawn while a swap is in flight — existing
         // meshes keep rendering against the active atlas, and we'll
         // get triggered again by the `AtlasSwapCompleted` observer
         // once the new atlas is live.
         if total_quads > 0 && !atlas_slot.is_swapping() {
-            mesh_spawning::despawn_mesh_children(entity, &old_meshes, &mut commands);
             let resolved_alpha = re_resolve_world_text_alpha(
                 entity,
                 style,
@@ -181,11 +189,13 @@ fn apply_readiness_markers(entity: Entity, readiness: GlyphReadiness, commands: 
         GlyphReadiness::Pending => {
             commands.entity(entity).insert_if_new(PendingGlyphs);
         },
-        GlyphReadiness::Ready => {
+        GlyphReadiness::Ready | GlyphReadiness::Invisible => {
             commands.entity(entity).remove::<PendingGlyphs>();
             commands.entity(entity).insert(AwaitingReady);
         },
-        GlyphReadiness::Idle => {},
+        GlyphReadiness::Failed | GlyphReadiness::Idle => {
+            commands.entity(entity).remove::<PendingGlyphs>();
+        },
     }
 }
 
@@ -193,17 +203,20 @@ fn log_render_stats(total_ms: f32, text_count: usize, stats: &TextBuildStats, me
     if total_ms <= constants::WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS
         && stats.queued_glyphs == 0
         && stats.pending_glyphs == 0
+        && stats.failed_glyphs == 0
     {
         return;
     }
     bevy::log::debug!(
-        "render_world_text: total={total_ms:.1}ms texts={text_count} text_shaping={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} queued={} pending={} quads={}",
+        "render_world_text: total={total_ms:.1}ms texts={text_count} text_shaping={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} invisible={} queued={} pending={} failed={} quads={}",
         stats.shape_ms,
         stats.atlas_ms,
         stats.glyphs,
         stats.ready_glyphs,
+        stats.invisible_glyphs,
         stats.queued_glyphs,
         stats.pending_glyphs,
+        stats.failed_glyphs,
         stats.emitted_quads,
     );
 }

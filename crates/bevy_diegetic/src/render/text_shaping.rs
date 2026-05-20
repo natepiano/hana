@@ -9,6 +9,7 @@ use bevy_kana::ToU16;
 use parley::Layout;
 use parley::LayoutContext;
 use parley::RangedBuilder;
+use parley::layout::GlyphRun;
 use parley::layout::PositionedLayoutItem;
 use parley::style::FontFeatures;
 use parley::style::FontStyle;
@@ -16,6 +17,7 @@ use parley::style::FontWeight;
 use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
+use super::glyph_quad::GlyphQuadData;
 use crate::layout::FontSlant;
 use crate::layout::LayoutTextStyle;
 use crate::layout::LineMetricsSnapshot;
@@ -27,6 +29,9 @@ use crate::layout::TextDimensions;
 use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
+use crate::text::GlyphKey;
+use crate::text::GlyphMetrics;
+use crate::text::ResolvedFontData;
 
 /// Reusable parley shaping buffers.
 ///
@@ -50,14 +55,16 @@ impl Default for TextShapingContext {
 /// Timing and queue diagnostics gathered while building text quads.
 #[derive(Clone, Debug, Default)]
 pub(super) struct TextBuildStats {
-    pub texts:          usize,
-    pub glyphs:         usize,
-    pub ready_glyphs:   usize,
-    pub queued_glyphs:  usize,
-    pub pending_glyphs: usize,
-    pub emitted_quads:  usize,
-    pub shape_ms:       f32,
-    pub atlas_ms:       f32,
+    pub texts:            usize,
+    pub glyphs:           usize,
+    pub ready_glyphs:     usize,
+    pub invisible_glyphs: usize,
+    pub queued_glyphs:    usize,
+    pub pending_glyphs:   usize,
+    pub failed_glyphs:    usize,
+    pub emitted_quads:    usize,
+    pub shape_ms:         f32,
+    pub atlas_ms:         f32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,14 +72,20 @@ pub(super) enum GlyphReadiness {
     Idle,
     Pending,
     Ready,
+    Invisible,
+    Failed,
 }
 
 impl From<&TextBuildStats> for GlyphReadiness {
     fn from(stats: &TextBuildStats) -> Self {
-        if stats.glyphs > 0 && stats.ready_glyphs == stats.glyphs {
-            Self::Ready
+        if stats.failed_glyphs > 0 {
+            Self::Failed
         } else if stats.pending_glyphs > 0 || stats.queued_glyphs > 0 {
             Self::Pending
+        } else if stats.glyphs > 0 && stats.invisible_glyphs == stats.glyphs {
+            Self::Invisible
+        } else if stats.glyphs > 0 && stats.ready_glyphs + stats.invisible_glyphs == stats.glyphs {
+            Self::Ready
         } else {
             Self::Idle
         }
@@ -84,11 +97,61 @@ impl TextBuildStats {
         self.texts += other.texts;
         self.glyphs += other.glyphs;
         self.ready_glyphs += other.ready_glyphs;
+        self.invisible_glyphs += other.invisible_glyphs;
         self.queued_glyphs += other.queued_glyphs;
         self.pending_glyphs += other.pending_glyphs;
+        self.failed_glyphs += other.failed_glyphs;
         self.emitted_quads += other.emitted_quads;
         self.shape_ms += other.shape_ms;
         self.atlas_ms += other.atlas_ms;
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PositionedGlyph<'a> {
+    pub glyph: &'a ShapedGlyph,
+    pub font:  ResolvedFontData<'a>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct GlyphQuadPlacement {
+    pub position: [f32; 3],
+    pub size:     [f32; 2],
+}
+
+impl GlyphQuadPlacement {
+    #[must_use]
+    pub const fn into_atlas_quad(self, metrics: GlyphMetrics, color: [f32; 4]) -> GlyphQuadData {
+        GlyphQuadData {
+            position: self.position,
+            size: self.size,
+            uv_rect: metrics.uv_rect,
+            color,
+        }
+    }
+}
+
+pub(super) fn positioned_glyphs<'a>(
+    glyphs: &'a [ShapedGlyph],
+    font_registry: &'a FontRegistry,
+    stats: &mut TextBuildStats,
+) -> Vec<PositionedGlyph<'a>> {
+    let mut positioned_glyphs = Vec::with_capacity(glyphs.len());
+    for glyph in glyphs {
+        let Some(font) = font_registry.resolve_font_face(glyph.font_face) else {
+            stats.failed_glyphs += 1;
+            continue;
+        };
+        positioned_glyphs.push(PositionedGlyph { glyph, font });
+    }
+    positioned_glyphs
+}
+
+#[must_use]
+pub(super) const fn glyph_key(glyph: PositionedGlyph<'_>) -> GlyphKey {
+    GlyphKey {
+        font_id:     glyph.font.font_id.0,
+        glyph_index: glyph.glyph.id,
     }
 }
 
@@ -223,7 +286,7 @@ fn collect_glyphs(layout: &Layout<()>, requested_font_id: u16) -> Vec<ShapedGlyp
 
 fn append_run_glyphs(
     glyphs: &mut Vec<ShapedGlyph>,
-    run: &parley::layout::GlyphRun<'_, ()>,
+    run: &GlyphRun<'_, ()>,
     requested_font_id: u16,
 ) {
     let glyph_run = run.run();
@@ -257,5 +320,45 @@ fn text_dimensions(layout: &Layout<()>, config: &LayoutTextStyle) -> TextDimensi
             .lines()
             .next()
             .map_or_else(|| config.size(), |line| line.metrics().line_height),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readiness_reports_failed_before_pending() {
+        let stats = TextBuildStats {
+            glyphs: 1,
+            failed_glyphs: 1,
+            pending_glyphs: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(GlyphReadiness::from(&stats), GlyphReadiness::Failed);
+    }
+
+    #[test]
+    fn readiness_reports_invisible_when_all_glyphs_have_no_quad() {
+        let stats = TextBuildStats {
+            glyphs: 2,
+            invisible_glyphs: 2,
+            ..Default::default()
+        };
+
+        assert_eq!(GlyphReadiness::from(&stats), GlyphReadiness::Invisible);
+    }
+
+    #[test]
+    fn readiness_reports_ready_for_mixed_visible_and_invisible_glyphs() {
+        let stats = TextBuildStats {
+            glyphs: 2,
+            ready_glyphs: 1,
+            invisible_glyphs: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(GlyphReadiness::from(&stats), GlyphReadiness::Ready);
     }
 }

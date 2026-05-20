@@ -1,5 +1,8 @@
 //! Font registry backed by parley's `FontContext`.
 
+use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -63,9 +66,6 @@ pub struct FontLoadFailed {
     /// Human-readable error description.
     pub error: String,
 }
-use std::fmt::Display;
-use std::fmt::Formatter;
-
 use parley::FontContext;
 use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;
@@ -73,6 +73,7 @@ use parley::fontique::FontInfoOverride;
 use super::constants::DEFAULT_FAMILY;
 use super::constants::EMBEDDED_FONT;
 use super::font::Font;
+use crate::layout::ResolvedFontFace;
 
 /// Unique identifier for a loaded font family.
 ///
@@ -113,9 +114,21 @@ impl FontId {
 #[derive(Resource)]
 pub struct FontRegistry {
     /// Shared font context — also held by the measurement closure.
-    font_cx: Arc<Mutex<FontContext>>,
+    font_cx:    Arc<Mutex<FontContext>>,
     /// Parsed fonts indexed by [`FontId`].
-    fonts:   Vec<Font>,
+    fonts:      Vec<Font>,
+    font_faces: HashMap<u64, FontId>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ResolvedFontData<'a> {
+    pub font_id:          FontId,
+    pub font:             &'a Font,
+    pub collection_index: u32,
+}
+
+impl ResolvedFontData<'_> {
+    pub fn data(&self) -> &[u8] { self.font.data() }
 }
 
 impl FontRegistry {
@@ -128,8 +141,10 @@ impl FontRegistry {
     pub fn new() -> Option<Self> {
         let mut font_cx = FontContext::default();
 
+        let embedded_blob = Blob::from(EMBEDDED_FONT.to_vec());
+        let embedded_blob_id = embedded_blob.id();
         font_cx.collection.register_fonts(
-            Blob::from(EMBEDDED_FONT.to_vec()),
+            embedded_blob,
             Some(FontInfoOverride {
                 family_name: Some(DEFAULT_FAMILY),
                 ..Default::default()
@@ -137,10 +152,13 @@ impl FontRegistry {
         );
 
         let embedded_font = Font::from_bytes(DEFAULT_FAMILY, EMBEDDED_FONT)?;
+        let mut font_faces = HashMap::new();
+        font_faces.insert(embedded_blob_id, FontId::MONOSPACE);
 
         Some(Self {
             font_cx: Arc::new(Mutex::new(font_cx)),
-            fonts:   vec![embedded_font],
+            fonts: vec![embedded_font],
+            font_faces,
         })
     }
 
@@ -153,6 +171,15 @@ impl FontRegistry {
     /// Returns the family name for a given [`FontId`].
     #[must_use]
     pub fn family_name(&self, id: FontId) -> Option<&str> { self.font(id).map(Font::name) }
+
+    pub(crate) fn resolve_font_face(&self, face: ResolvedFontFace) -> Option<ResolvedFontData<'_>> {
+        let font_id = self.font_faces.get(&face.blob_id).copied()?;
+        self.font(font_id).map(|font| ResolvedFontData {
+            font_id,
+            font,
+            collection_index: face.collection_index,
+        })
+    }
 
     /// Registers an additional font from raw TTF/OTF bytes.
     ///
@@ -177,6 +204,8 @@ impl FontRegistry {
     /// ```
     pub fn register_font(&mut self, name: &str, data: &[u8]) -> Option<FontId> {
         let font = Font::from_bytes(name, data)?;
+        let blob = Blob::from(data.to_vec());
+        let blob_id = blob.id();
 
         // Register with parley's font collection.
         let mut font_cx = self
@@ -184,7 +213,7 @@ impl FontRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         font_cx.collection.register_fonts(
-            Blob::from(data.to_vec()),
+            blob,
             Some(FontInfoOverride {
                 family_name: Some(name),
                 ..Default::default()
@@ -194,6 +223,7 @@ impl FontRegistry {
 
         let id = FontId(self.fonts.len().to_u16());
         self.fonts.push(font);
+        self.font_faces.insert(blob_id, id);
         Some(id)
     }
 

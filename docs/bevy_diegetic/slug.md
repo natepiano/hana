@@ -452,27 +452,122 @@ layout still supports the current visible/shadow mode matrix.
 
 ### Phase 4: shared text prerequisites
 
-- Align `shape_text_cached` with the parley measurement path for
-  relevant text style inputs.
-- Define the resolved font/face identity carried by shaped glyphs.
+Status: completed.
+
+Completed:
+
+- `shape_text_cached` is aligned with the parley measurement path for
+  the relevant text style inputs currently used by `LayoutTextStyle`.
+- `ShapedGlyph` carries a resolved font/face identity from parley:
+  requested font id, font blob identity, and collection face index.
+- Add a font-face resolver that maps the shaped glyph face identity back
+  to exact font bytes plus face index for atlas rasterization and Slug
+  outline extraction.
 - Define renderer-neutral positioned glyph instances.
-- Define backend-neutral lookup/readiness states.
+- Split shared placement data from atlas `GlyphQuadData` so panel and
+  world text can feed either distance-field quads or Slug glyph
+  instances.
+- Define backend-neutral lookup/readiness states that cover queued,
+  pending, ready, invisible, and failed work across atlas rasterization,
+  Slug preprocessing, Slug upload, and backend fallback.
 - Keep visible render mode and shadow mode renderer-neutral so Slug and
   distance-field backends share the same behavior contract.
+- Keep anchoring and debug bounds tied to the resolved glyph face rather
+  than assuming the requested font id and face index 0.
+- Preserve existing distance-field panel/world text rendering through
+  the refactored front half.
 
-Exit criteria: existing distance-field panel and world text still
+Exit criteria: met. Existing distance-field panel and world text still
 render through the refactored shared front half, with measured and
-rendered advances matching for style fixtures.
+rendered advances sharing the same parley shaping style inputs.
+
+### Retrospective
+
+**What worked:**
+
+- `ShapedGlyph` now carries `ResolvedFontFace`, including the requested
+  font id, parley blob id, and collection face index.
+- `shape_text_cached` now applies weight, slant, letter spacing, word
+  spacing, line height, and font features before collecting glyphs.
+- `FontRegistry` can resolve the parley face identity back to the exact
+  registered font bytes and collection face index.
+- Panel and world text now build distance-field quads from a shared
+  positioned glyph boundary instead of looking up atlas glyphs directly
+  from the requested style font.
+- Readiness now distinguishes invisible and failed glyph outcomes from
+  ordinary pending atlas work.
+
+**What deviated from the plan:**
+
+- The renderer-neutral instance type is still intentionally small:
+  `PositionedGlyph` plus `GlyphQuadPlacement`, not a production backend
+  request object.
+- Distance-field atlas quads still exist where meshes are built. Phase 4
+  only moved the boundary before atlas UVs are attached.
+
+**Surprises:**
+
+- The current shared shaped run already gives enough data to begin
+  separating the text front half from the renderer back half.
+- Failed resolved-face lookup needs to clear stale text meshes and
+  pending markers, not just skip new quad output.
+
+**Implications for remaining phases:**
+
+- Phase 5 can use `PositionedGlyph`, `ResolvedFontData`, and
+  backend-neutral readiness as the starting point for a real Slug
+  backend resource.
+- Phase 5 still needs Slug-specific cache keys, upload tracking, and
+  renderer selection; Phase 4 only prepared the shared front half.
+
+### Phase 4 Review
+
+- Phase 4 now records the completed shaping-parity and resolved-face
+  checkpoint separately from the remaining renderer-neutral contract.
+- Phase 4 now requires a face-to-font-byte resolver before Slug outline
+  extraction moves into the backend.
+- Phase 4 now makes lookup/readiness backend-neutral instead of
+  atlas-shaped.
+- Phase 4 now names the shared placement split before Phase 5 backend
+  integration.
+- Phase 4 now keeps anchoring and debug bounds tied to the resolved
+  glyph face.
+- Phase 5 now updates the existing `slug_text` example instead of
+  adding another comparison example.
+- Phase 6 now requires Slug clipping to preserve glyph-local
+  coordinates for both overlap/padding trims and panel scissor clips,
+  instead of reusing atlas UV mutation semantics.
 
 ### Phase 5: Slug backend resource
 
-- Add `TextRendererBackend::Slug` behind an experimental feature.
+- Add an internal backend decision point in
+  `crates/bevy_diegetic/src/render/text_backend.rs`.
+- Add `TextRendererBackend { DistanceField, Slug }` and
+  `TextRendererPreference { backend }` behind the experimental feature.
+  The first selector is a global resource used by the existing render
+  modules and `examples/slug_text.rs`; per-text backend switching stays
+  out of this phase.
 - Add a Slug backend resource that owns cache state, async work, GPU
   storage, uploads, lookup state, and readiness polling.
-- Define `SlugGlyphKey` and invalidation rules.
-- Batch shaped glyphs into Slug quads through the renderer-neutral
-  contract.
-- Add a small `examples/slug_text.rs` comparing Slug and MTSDF output.
+- Add a Slug-owned completion/wakeup path for preprocessing and GPU
+  upload work. Slug pending text must be retried when Slug work
+  completes, not only when atlas rasterization or atlas swaps complete.
+- Shape the first Slug backend path with Parley fallback disabled. If a
+  Slug text request would need fallback, detect that as an explicit
+  unsupported/missing-glyph state instead of silently receiving an
+  unregistered fallback face.
+- Treat the first Slug backend as TrueType/quadratic-outline only. If a
+  selected registered font or glyph cannot be represented by that path,
+  report a clear unsupported-text state. Do not drop glyphs and do not
+  mix Slug with MTSDF inside one text run.
+- Define `SlugGlyphKey` and invalidation rules using the resolved glyph
+  face identity and the exact font bytes/face index returned by the
+  Phase 4 resolver.
+- After parley shaping, route text through the selected backend:
+  distance-field keeps producing atlas `GlyphQuadData`, and Slug
+  produces Slug run/glyph GPU data.
+- Update the existing `examples/slug_text.rs` so it exercises real
+  backend selection while still comparing Slug and MTSDF output.
 
 Exit criteria: shaped strings render through parley and the Slug
 backend, with glyph positions matching the existing renderer under
@@ -480,8 +575,12 @@ explicit layout fixtures.
 
 ### Phase 6: panel and world text parity
 
-- Support panel text clipping while preserving glyph-local coordinates.
-- Support `WorldText` anchoring and backend-neutral readiness behavior.
+- Support Slug clipping through representations that preserve
+  glyph-local coordinates for both overlap/padding trims and panel
+  scissor clips.
+- Support `WorldText` anchoring from Slug/native glyph bounds, without
+  depending on distance-field atlas metrics, and preserve
+  backend-neutral readiness behavior.
 - Preserve material color, alpha mode, depth behavior, and the full
   visible/shadow mode matrix:
   `Invisible`, `Text`, `PunchOut`, `SolidQuad`, and shadow
@@ -498,7 +597,8 @@ keep layout behavior stable under the accepted first-scope constraints.
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
   Crimson Text.
 - Include small text, large text, oblique world text, high zoom, dense
-  CJK glyphs, and fallback CJK strings.
+  CJK glyphs from explicitly selected registered CJK fonts, and later
+  fallback strings once fallback support is deliberately enabled.
 - Compare screenshots against MTSDF at 32, 64, 128, and 256 px
   equivalent sizes.
 - Measure CPU preprocessing cost, GPU storage size, draw count,
@@ -644,3 +744,49 @@ reviewed.
     shader uses that record to select the correct bounds and band range.
     This removes the per-glyph material/storage path without committing
     the production backend to a final batching strategy.
+13. **Phase 5 backend boundary:** Phase 4 did not create the full
+    renderer abstraction; it prepared the shared data needed for one.
+    Phase 5 should create the internal backend decision point in
+    `render/text_backend.rs`, starting with a global experimental
+    `TextRendererPreference` resource. Panel and world text should route
+    after parley shaping: distance-field continues to build atlas quads,
+    while Slug builds Slug run/glyph GPU data. Per-text style switching
+    is deferred until the backend path works.
+14. **Slug readiness wakeup:** Slug needs its own completion signal for
+    outline preprocessing, curve/band packing, GPU storage allocation,
+    and uploads. Public `WorldTextReady` remains backend-neutral, but
+    Slug pending text must be retried from Slug backend completion
+    events rather than atlas completion or atlas swap events.
+15. **Slug fallback scope:** The first Slug backend should shape with
+    Parley fallback disabled. Missing glyphs or text that would require
+    fallback become explicit unsupported states with clear diagnostics.
+    CJK testing should use explicitly registered CJK fonts. Fallback can
+    be enabled later only after the backend can detect fallback use and
+    resolve every fallback face through `FontRegistry`.
+16. **Slug glyph scope and anchoring:** The first Slug backend targets
+    TrueType/quadratic outline glyphs only. Other font/glyph
+    representations are outside the current scope and should produce a
+    clear unsupported-text state. The backend should not drop glyphs or
+    mix Slug with MTSDF inside one run. Slug world text anchoring should
+    use Slug/native glyph bounds rather than distance-field atlas
+    metrics.
+
+## Post-transition review
+
+After Slug can replace the current distance-field path for the migrated
+examples, run a review dedicated to unsupported text cases and decide the
+next implementation steps.
+
+Review questions:
+
+- Should cubic/CFF outlines be converted to quadratics, handled directly
+  in the Slug shader path, or deferred?
+- Should fallback be enabled again, and if so how does every fallback
+  face become registered and resolvable through `FontRegistry`?
+- How should color emoji and other non-monochrome glyphs be represented:
+  Slug extension, separate renderer, or explicit unsupported state?
+- Do unsupported glyphs still fail the whole run, or is there a proven
+  need for a mixed renderer after the main Slug path is working?
+- Which examples and benchmarks prove the next scope: typography,
+  world text, units, CJK, emoji, fallback strings, or dense paragraph
+  text?
