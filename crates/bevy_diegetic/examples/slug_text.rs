@@ -114,7 +114,7 @@ fn spawn_world_text_reference(commands: &mut Commands, preview: &SlugBuiltTextRu
             .with_shadow_mode(GlyphShadowMode::None),
         Transform::from_xyz(
             text_width(&preview.run) * -0.5,
-            baseline_y + preview.baseline * FONT_SCALE,
+            preview.baseline.mul_add(FONT_SCALE, baseline_y),
             WORLD_TEXT_REFERENCE_Z,
         ),
     ));
