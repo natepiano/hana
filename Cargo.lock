@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_kana"
-version = "0.0.6-dev"
+version = "0.0.6"
 dependencies = [
  "bevy",
  "bevy_enhanced_input",
