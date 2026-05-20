@@ -16,6 +16,7 @@ use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamHeldBinding;
 use bevy_lagrange::OrbitCamInputBinding;
+use bevy_lagrange::OrbitCamInputMode;
 
 const ACTIVE_GAMEPAD_STATUS: &str = "Gamepad: active policy uses any connected controller";
 const DISCONNECTED_GAMEPAD_STATUS: &str = "Gamepad: none detected";
@@ -85,7 +86,10 @@ fn main() {
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .with_orbit_cam(common::configure_camera, bindings)
+        .with_orbit_cam(
+            common::configure_camera,
+            OrbitCamInputMode::Bindings(bindings),
+        )
         .with_camera_control_panel()
         .add_systems(Startup, (common::spawn_scene, spawn_status))
         .add_systems(Update, update_status)

@@ -45,6 +45,7 @@ use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::ZoomBegin;
@@ -167,7 +168,7 @@ fn setup(
                 pitch: Some(CAMERA_START_PITCH),
                 ..default()
             },
-            OrbitCamPreset::BlenderLike,
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         ))
         .id();
 

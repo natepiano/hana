@@ -58,7 +58,7 @@ use crate::input::OrbitCamInputContext;
 use crate::input::OrbitCamInputContextGated;
 use crate::input::OrbitCamOrbitAction;
 use crate::input::OrbitCamPanAction;
-use crate::input::OrbitCamPreset;
+use crate::input::OrbitCamResolvedBindings;
 use crate::input::OrbitCamTrackpadScroll;
 use crate::input::OrbitCamZoomCoarseAction;
 use crate::input::OrbitCamZoomSmoothAction;
@@ -172,27 +172,17 @@ fn clear_enhanced_input_components(world: &mut World, camera: Entity) {
 }
 
 pub(super) fn install_enhanced_input_entities(world: &mut World) {
-    let mut query = world.query_filtered::<(
-        Entity,
-        Option<&OrbitCamPreset>,
-        Option<&OrbitCamBindings>,
-    ), With<OrbitCam>>();
+    let mut query = world.query_filtered::<(Entity, &OrbitCamResolvedBindings), With<OrbitCam>>();
     let cameras = query
         .iter(world)
-        .filter(|(camera, _, _)| modes::input_installation_has_placeholder(world, *camera))
-        .map(|(camera, preset, bindings)| (camera, preset.copied(), bindings.cloned()))
+        .filter(|(camera, _)| modes::input_installation_has_placeholder(world, *camera))
+        .map(|(camera, bindings)| (camera, bindings.0.clone()))
         .collect::<Vec<_>>();
 
     let mut installed_cameras = 0;
     let mut installed_entities = 0;
 
-    for (camera, preset, bindings) in cameras {
-        let Some(bindings) = bindings.or_else(|| preset.unwrap_or_default().to_bindings().ok())
-        else {
-            warn!("failed to build OrbitCam input bindings for {camera:?}");
-            continue;
-        };
-
+    for (camera, bindings) in cameras {
         for installed_entity in modes::installed_input_entities(world, camera) {
             let _ = world.despawn(installed_entity);
         }

@@ -303,7 +303,7 @@ mod tests {
     use crate::OrbitCam;
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInputRoutingConfig;
-    use crate::input::OrbitCamManual;
+    use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamPreset;
     use crate::input::routing::OrbitCamRoutingPlugin;
     use crate::system_sets::LagrangeSystemSetsPlugin;
@@ -410,7 +410,10 @@ mod tests {
     #[test]
     fn held_interaction_starts_changes_and_ends() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         observe_counts(app.world_mut(), camera);
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
 
@@ -444,7 +447,10 @@ mod tests {
     #[test]
     fn coarse_zoom_impulse_starts_and_ends_same_frame() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         observe_counts(app.world_mut(), camera);
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
 
@@ -467,7 +473,7 @@ mod tests {
         let camera = spawn_camera(
             app.world_mut(),
             (
-                OrbitCamManual,
+                OrbitCamInputMode::Manual,
                 CameraInputSurfaceMetrics::camera_view_and_input_surface(Vec2::ONE, Vec2::ONE),
             ),
         );
@@ -490,7 +496,10 @@ mod tests {
     #[test]
     fn blocked_camera_ends_existing_interaction() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         observe_counts(app.world_mut(), camera);
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
 

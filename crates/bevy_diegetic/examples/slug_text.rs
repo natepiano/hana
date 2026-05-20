@@ -28,6 +28,7 @@ use bevy_diegetic::build_slug_run_render_data;
 use bevy_diegetic::build_slug_text_run;
 use bevy_diegetic::load_glyph;
 use bevy_diegetic::slug_text_material;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::TitleBar;
 
@@ -59,7 +60,10 @@ fn main() {
         .with_save_window_position()
         .with_studio_lighting()
         .with_ground_plane()
-        .with_orbit_cam(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam(
+            |_| {},
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        )
         .with_stable_transparency()
         .with_camera_home(
             Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),

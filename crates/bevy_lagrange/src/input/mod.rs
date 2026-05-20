@@ -2,10 +2,12 @@
 //!
 //! # Quick Start
 //!
-//! `OrbitCam` defaults to [`OrbitCamPreset::SimpleMouse`]. Insert
-//! [`OrbitCamPreset::BlenderLike`] for editor-style navigation, insert
-//! [`OrbitCamBindings`] when your app owns a keymap or gamepad mapping, or
-//! insert [`OrbitCamManual`] when your app computes camera intent itself.
+//! `OrbitCam` defaults to
+//! [`OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)`]. Insert
+//! [`OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)`] for editor-style
+//! navigation, [`OrbitCamInputMode::Bindings`] when your app owns a keymap or
+//! gamepad mapping, or [`OrbitCamInputMode::Manual`] when your app computes
+//! camera intent itself.
 //!
 //! App-authored manual camera input should write through
 //! [`OrbitCamManualInputWriter`] in [`OrbitCamInputPhase::WriteManual`].
@@ -105,7 +107,6 @@ pub use manual::OrbitCamManualInput;
 pub use manual::OrbitCamManualInputWriter;
 pub use metrics::CameraInputMetricKind;
 pub use metrics::CameraInputSurfaceMetrics;
-#[cfg(feature = "reflect-input-modes")]
 pub use modes::OrbitCamInputMode;
 #[cfg(feature = "reflect-input-modes")]
 pub use modes::OrbitCamInputModeApplied;
@@ -116,10 +117,13 @@ pub use modes::OrbitCamInputModeApplyStatus;
 #[cfg(feature = "reflect-input-modes")]
 pub use modes::OrbitCamInputModeDescriptor;
 #[cfg(feature = "reflect-input-modes")]
+pub use modes::OrbitCamInputModeDraft;
+#[cfg(feature = "reflect-input-modes")]
 pub use modes::OrbitCamInputModeRejected;
 pub(super) use modes::OrbitCamInputModeReplaced;
 pub(super) use modes::OrbitCamInputModesPlugin;
-pub use modes::OrbitCamManual;
+pub(crate) use modes::OrbitCamManual;
+pub(crate) use modes::OrbitCamResolvedBindings;
 pub use routing::CameraInputRouting;
 pub use routing::CameraInputRoutingConfig;
 pub(super) use routing::CameraInputSourceLatches;

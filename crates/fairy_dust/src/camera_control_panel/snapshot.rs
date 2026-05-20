@@ -4,9 +4,8 @@
 
 use bevy::prelude::*;
 use bevy_lagrange::CameraInteractionSources;
-use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
-use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::describe_orbit_cam_controls;
 
@@ -27,9 +26,7 @@ pub(super) struct CameraGuidanceSnapshot {
 pub(super) fn resolve_guidance_snapshot(
     name: Option<&Name>,
     guidance: Option<&CameraGuidance>,
-    preset: Option<&OrbitCamPreset>,
-    bindings: Option<&OrbitCamBindings>,
-    manual: Option<&OrbitCamManual>,
+    mode: Option<&OrbitCamInputMode>,
 ) -> CameraGuidanceSnapshot {
     let name_label = name.map(|n| n.as_str().to_string());
     let title_label = guidance.and_then(|g| g.title.clone());
@@ -40,7 +37,7 @@ pub(super) fn resolve_guidance_snapshot(
     });
 
     if let Some((guidance, rows)) = explicit {
-        let (mode_label, mode_value) = resolve_mode_labels(preset, bindings, manual);
+        let (mode_label, mode_value) = resolve_mode_labels(mode);
         return CameraGuidanceSnapshot {
             camera_label: name_label
                 .or(title_label)
@@ -52,7 +49,10 @@ pub(super) fn resolve_guidance_snapshot(
         };
     }
 
-    let summary = describe_orbit_cam_controls(preset, bindings, manual);
+    let summary = mode.map_or_else(
+        || describe_orbit_cam_controls(&OrbitCamInputMode::default()),
+        describe_orbit_cam_controls,
+    );
     CameraGuidanceSnapshot {
         camera_label: name_label.or(title_label).unwrap_or(summary.camera_label),
         mode_label: summary.mode_label,
@@ -62,19 +62,19 @@ pub(super) fn resolve_guidance_snapshot(
     }
 }
 
-fn resolve_mode_labels(
-    preset: Option<&OrbitCamPreset>,
-    bindings: Option<&OrbitCamBindings>,
-    manual: Option<&OrbitCamManual>,
-) -> (String, String) {
-    if manual.is_some() {
-        return ("Input".to_string(), "Manual".to_string());
+fn resolve_mode_labels(mode: Option<&OrbitCamInputMode>) -> (String, String) {
+    let Some(mode) = mode else {
+        let preset = OrbitCamPreset::default();
+        return ("Preset".to_string(), preset_mode_value(preset).to_string());
+    };
+    match mode {
+        OrbitCamInputMode::Preset(preset) => {
+            ("Preset".to_string(), preset_mode_value(*preset).to_string())
+        },
+        OrbitCamInputMode::Bindings(_) => ("Bindings".to_string(), "Custom".to_string()),
+        OrbitCamInputMode::Manual => ("Input".to_string(), "Manual".to_string()),
+        _ => ("Input".to_string(), "Custom".to_string()),
     }
-    if bindings.is_some() {
-        return ("Bindings".to_string(), "Custom".to_string());
-    }
-    let preset = preset.copied().unwrap_or_default();
-    ("Preset".to_string(), preset_mode_value(preset).to_string())
 }
 
 const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {

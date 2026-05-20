@@ -14,7 +14,7 @@ use super::constants::DEFAULT_ZOOM_LOWER_LIMIT;
 use super::constants::DEFAULT_ZOOM_SMOOTHNESS;
 use super::input::OrbitCamInput;
 use super::input::OrbitCamInputContext;
-use super::input::OrbitCamPreset;
+use super::input::OrbitCamInputMode;
 
 /// Base system set to allow ordering of `OrbitCam`.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -147,7 +147,7 @@ const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
     OrbitDragState,
     OrbitCamInput,
     OrbitCamInputContext,
-    OrbitCamPreset
+    OrbitCamInputMode
 )]
 pub struct OrbitCam {
     /// The point to orbit around, and what the camera looks at. Updated automatically.

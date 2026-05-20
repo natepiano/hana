@@ -98,7 +98,6 @@ use input::OrbitCamInputAdapterPlugin;
 pub use input::OrbitCamInputBinding;
 pub use input::OrbitCamInputContext;
 use input::OrbitCamInputLifecyclePlugin;
-#[cfg(feature = "reflect-input-modes")]
 pub use input::OrbitCamInputMode;
 #[cfg(feature = "reflect-input-modes")]
 pub use input::OrbitCamInputModeApplied;
@@ -109,6 +108,8 @@ pub use input::OrbitCamInputModeApplyStatus;
 #[cfg(feature = "reflect-input-modes")]
 pub use input::OrbitCamInputModeDescriptor;
 #[cfg(feature = "reflect-input-modes")]
+pub use input::OrbitCamInputModeDraft;
+#[cfg(feature = "reflect-input-modes")]
 pub use input::OrbitCamInputModeRejected;
 use input::OrbitCamInputModesPlugin;
 pub use input::OrbitCamInteractionEnded;
@@ -116,7 +117,6 @@ pub use input::OrbitCamInteractionKind;
 pub use input::OrbitCamInteractionSourcesChanged;
 pub use input::OrbitCamInteractionStarted;
 pub use input::OrbitCamInteractionState;
-pub use input::OrbitCamManual;
 pub use input::OrbitCamManualInput;
 pub use input::OrbitCamManualInputWriter;
 pub use input::OrbitCamMouseDrag;
@@ -310,7 +310,7 @@ mod tests {
                     orbit_smoothness: 0.0,
                     ..default()
                 },
-                OrbitCamManual,
+                OrbitCamInputMode::Manual,
                 Camera::default(),
                 RenderTarget::Window(WindowRef::Primary),
                 Transform::from_xyz(0.0, 0.0, 10.0),

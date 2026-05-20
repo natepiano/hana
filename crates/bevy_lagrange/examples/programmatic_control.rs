@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use bevy_kana::event;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
@@ -90,7 +91,10 @@ fn main() {
         .with_brp_extras()
         .with_orbit_cam(
             configure_camera,
-            (ProgrammaticCamera, OrbitCamPreset::BlenderLike),
+            (
+                ProgrammaticCamera,
+                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            ),
         )
         .with_ground_plane()
         .size(GROUND_SIZE)

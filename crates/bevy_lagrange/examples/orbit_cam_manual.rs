@@ -5,9 +5,9 @@ mod common;
 use bevy::prelude::*;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::ManualInputSource;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInputPhase;
 use bevy_lagrange::OrbitCamInteractionKind;
-use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamManualInputWriter;
 use fairy_dust::CameraGuidance;
 use fairy_dust::CameraGuidanceRow;
@@ -115,7 +115,7 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_orbit_cam(
             common::configure_camera,
-            (OrbitCamManual, ManualCamera, manual_guidance()),
+            (OrbitCamInputMode::Manual, ManualCamera, manual_guidance()),
         )
         .with_camera_control_panel()
         .add_systems(Startup, common::spawn_scene)

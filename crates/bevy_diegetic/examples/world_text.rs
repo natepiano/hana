@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
@@ -92,7 +93,10 @@ fn main() {
         .face_text(Face::Bottom, "BOTTOM", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
         .face_text(Face::Left, "LEFT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
         .face_text(Face::Right, "RIGHT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .with_orbit_cam(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam(
+            |_| {},
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        )
         .with_stable_transparency()
         .with_camera_home(
             Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),

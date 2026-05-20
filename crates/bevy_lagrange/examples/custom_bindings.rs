@@ -21,6 +21,7 @@ use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamButtonDragZoom;
 use bevy_lagrange::OrbitCamButtonDragZoomAxis;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamMouseDrag;
 use bevy_lagrange::OrbitCamMouseWheelZoom;
 use bevy_lagrange::OrbitCamPinchZoom;
@@ -136,7 +137,7 @@ fn setup(
             upside_down_policy: UpsideDownPolicy::Allow,
             ..default()
         },
-        bindings,
+        OrbitCamInputMode::Bindings(bindings),
     ));
 }
 

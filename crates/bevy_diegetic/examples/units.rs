@@ -39,6 +39,7 @@ use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::ControlActivation;
@@ -260,7 +261,7 @@ fn main() {
             |cam| {
                 cam.zoom_lower_limit = 0.000_000_1;
             },
-            OrbitCamPreset::BlenderLike,
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
         .with_stable_transparency()
         .with_camera_home(compute_home_transform())

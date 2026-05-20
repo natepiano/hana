@@ -14,6 +14,7 @@ use bevy::window::WindowRef;
 use bevy::window::WindowResized;
 use bevy_kana::event;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use bevy_window_manager::ManagedWindow;
@@ -148,7 +149,7 @@ fn setup(mut commands: Commands) {
             Name::new(PRIMARY_CAMERA_NAME),
             Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
             orbit_cam_default(),
-            OrbitCamPreset::BlenderLike,
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         ))
         .id();
 
@@ -163,7 +164,7 @@ fn setup(mut commands: Commands) {
                 ..default()
             },
             orbit_cam_default(),
-            OrbitCamPreset::BlenderLike,
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
             MinimapCamera,
         ))
         .id();
@@ -188,7 +189,7 @@ fn setup(mut commands: Commands) {
             Camera::default(),
             RenderTarget::Window(WindowRef::Entity(second_window)),
             orbit_cam_default(),
-            OrbitCamPreset::BlenderLike,
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         ))
         .id();
 

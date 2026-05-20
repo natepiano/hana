@@ -80,7 +80,7 @@ mod tests {
     use crate::input::OrbitCamInput;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamInputContext;
-    use crate::input::OrbitCamManual;
+    use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitCamPreset;
     use crate::input::OrbitCamTouchBinding;
@@ -146,7 +146,10 @@ mod tests {
     #[test]
     fn installer_replaces_placeholder_with_action_entities() {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
 
         app.update();
@@ -167,7 +170,10 @@ mod tests {
     #[test]
     fn installer_binds_adapter_actions_to_custom_inputs() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
 
         app.update();
@@ -210,7 +216,10 @@ mod tests {
     #[test]
     fn mouse_drag_action_resolves_to_orbit_input() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -231,7 +240,10 @@ mod tests {
     #[test]
     fn blender_like_shift_middle_mouse_resolves_to_pan_only() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -255,7 +267,10 @@ mod tests {
     #[test]
     fn wheel_line_adapter_resolves_to_coarse_zoom() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
             unit:  MouseScrollUnit::Line,
@@ -274,7 +289,10 @@ mod tests {
     #[test]
     fn blender_like_trackpad_shift_resolves_to_pan_only() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -300,8 +318,14 @@ mod tests {
     #[test]
     fn routed_second_blender_like_trackpad_resolves_to_orbit_only() -> TestResult {
         let mut app = test_app();
-        let primary = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
-        let second = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let primary = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
+        let second = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
         route_to(&mut app, second);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
             unit:  MouseScrollUnit::Pixel,
@@ -324,7 +348,10 @@ mod tests {
     #[test]
     fn blender_like_trackpad_control_resolves_to_zoom_only() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -355,7 +382,7 @@ mod tests {
             .zoom(OrbitCamTrackpadScroll::default())
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
             unit:  MouseScrollUnit::Pixel,
@@ -377,7 +404,10 @@ mod tests {
     #[test]
     fn pinch_adapter_resolves_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
         app.world_mut().write_message(PinchGesture(2.0));
 
@@ -395,7 +425,10 @@ mod tests {
     #[test]
     fn pinch_adapter_is_suppressed_by_routed_held_action() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -413,7 +446,10 @@ mod tests {
     #[test]
     fn blender_like_shift_modifier_suppresses_pinch() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -431,7 +467,10 @@ mod tests {
     #[test]
     fn blender_like_control_modifier_suppresses_pinch() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        );
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -453,8 +492,11 @@ mod tests {
             .zoom(OrbitCamPinchZoom)
             .build()
             .map_err(|_| "bindings should validate")?;
-        let routed = spawn_camera(app.world_mut(), bindings);
-        spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let routed = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, routed);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
@@ -479,7 +521,7 @@ mod tests {
             .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         app.insert_resource(OrbitCamTouchAdapterOverride(TouchGestures::OneFinger(
             OneFingerGestures {
@@ -502,7 +544,7 @@ mod tests {
             .zoom(OrbitCamHeldBinding::new(KeyCode::Equal, KeyCode::ShiftLeft))
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         {
             let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
@@ -529,7 +571,7 @@ mod tests {
             .gamepad(CameraInputGamepadSelectionPolicy::Active)
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         let mut gamepad = Gamepad::default();
         gamepad.analog_mut().set(GamepadAxis::LeftStickX, 0.75);
@@ -557,7 +599,7 @@ mod tests {
             ))
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         {
             let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
@@ -583,7 +625,7 @@ mod tests {
             ))
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
@@ -608,7 +650,7 @@ mod tests {
             .gamepad(CameraInputGamepadSelectionPolicy::Active)
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         let mut gamepad = Gamepad::default();
         gamepad.analog_mut().set(GamepadAxis::RightStickX, 0.5);
@@ -634,7 +676,7 @@ mod tests {
             .gamepad(CameraInputGamepadSelectionPolicy::Active)
             .build()
             .map_err(|_| "bindings should validate")?;
-        let camera = spawn_camera(app.world_mut(), bindings);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         route_to(&mut app, camera);
         let mut gamepad = Gamepad::default();
         gamepad.analog_mut().set(GamepadButton::LeftTrigger2, 0.4);
@@ -652,7 +694,7 @@ mod tests {
     #[test]
     fn manual_mode_bypasses_action_resolution() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamManual);
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Manual);
         route_to(&mut app, camera);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
             unit:  MouseScrollUnit::Line,
@@ -669,7 +711,10 @@ mod tests {
     #[test]
     fn gated_camera_clears_previous_action_input() -> TestResult {
         let mut app = test_app();
-        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
         route_to(&mut app, camera);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
             unit:  MouseScrollUnit::Line,

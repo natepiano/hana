@@ -19,6 +19,7 @@ use bevy_lagrange::AnimationSource;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
@@ -72,7 +73,10 @@ fn main() {
         .color(REFERENCE_CUBE_COLOR)
         .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
         .face_text(Face::Front, REFERENCE_LABEL, LABEL_SIZE, LABEL_COLOR)
-        .with_orbit_cam(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam(
+            |_| {},
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        )
         .with_camera_home(
             Transform::from_translation(REFERENCE_CUBE_TRANSLATION)
                 .with_scale(Vec3::splat(HOME_FRAME_SIZE)),

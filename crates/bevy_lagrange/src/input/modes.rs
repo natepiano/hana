@@ -11,8 +11,7 @@ use crate::orbit_cam::OrbitCam;
 use crate::system_sets::OrbitCamInputInternalSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ActiveInputMode {
-    Preset,
+enum RuntimeInputMode {
     Bindings,
     Manual,
 }
@@ -23,35 +22,50 @@ pub(crate) struct OrbitCamInputModeReplaced {
     pub(crate) camera: Entity,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DefaultPresetInsertion {
-    Insert,
-    Skip,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InstallationReplacement {
-    Replace,
-    KeepExisting,
-}
-
+#[derive(Clone, Debug, PartialEq)]
 struct ModeReconciliation {
-    camera:                Entity,
-    selected:              ActiveInputMode,
-    insert_default_preset: DefaultPresetInsertion,
-    replace_installation:  InstallationReplacement,
+    camera: Entity,
+    mode:   OrbitCamInputMode,
 }
 
-/// Manual input mode for an [`OrbitCam`].
+/// Selected input mode for an [`OrbitCam`].
 ///
-/// This means the app writes [`OrbitCamInput`] through [`OrbitCamManualInput`].
-/// It does not choose which camera receives ordinary routed input; later phases route
-/// device input through `CameraInputRouting`.
+/// `OrbitCam` requires this component and defaults to
+/// `OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)`. Use `Preset` for a
+/// built-in keymap, `Bindings` for app-owned validated bindings, or `Manual`
+/// when app code writes camera intent through [`OrbitCamManualInputWriter`].
 ///
-/// [`OrbitCamManualInput`]: super::OrbitCamManualInput
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+/// [`OrbitCamManualInputWriter`]: super::OrbitCamManualInputWriter
+#[derive(Component, Clone, Debug, PartialEq, Reflect)]
 #[reflect(Component, Default)]
-pub struct OrbitCamManual;
+#[non_exhaustive]
+pub enum OrbitCamInputMode {
+    /// Built-in preset mode.
+    Preset(OrbitCamPreset),
+    /// Custom validated bindings mode.
+    Bindings(OrbitCamBindings),
+    /// Manual mode where app code writes camera intent.
+    Manual,
+}
+
+impl Default for OrbitCamInputMode {
+    fn default() -> Self { Self::Preset(OrbitCamPreset::default()) }
+}
+
+impl From<OrbitCamPreset> for OrbitCamInputMode {
+    fn from(preset: OrbitCamPreset) -> Self { Self::Preset(preset) }
+}
+
+impl From<OrbitCamBindings> for OrbitCamInputMode {
+    fn from(bindings: OrbitCamBindings) -> Self { Self::Bindings(bindings) }
+}
+
+/// Runtime marker for cameras using manual app-authored input.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OrbitCamManual;
+
+#[derive(Component, Clone, Debug, PartialEq)]
+pub(crate) struct OrbitCamResolvedBindings(pub(crate) OrbitCamBindings);
 
 /// Mutable reflected draft for applying an orbit-camera input mode.
 #[cfg(feature = "reflect-input-modes")]
@@ -59,24 +73,24 @@ pub struct OrbitCamManual;
 #[reflect(Component, Default)]
 pub struct OrbitCamInputModeDescriptor {
     /// Draft mode to validate and apply.
-    pub mode: OrbitCamInputMode,
+    pub mode: OrbitCamInputModeDraft,
 }
 
 /// Reflected draft input-mode value.
 #[cfg(feature = "reflect-input-modes")]
 #[derive(Clone, Debug, PartialEq, Reflect)]
 #[non_exhaustive]
-pub enum OrbitCamInputMode {
+pub enum OrbitCamInputModeDraft {
     /// Built-in preset mode.
     Preset(OrbitCamPreset),
-    /// Custom validated bindings mode.
+    /// Custom binding descriptor mode.
     Bindings(OrbitCamBindingsDescriptor),
     /// Manual mode where app code writes camera intent.
     Manual,
 }
 
 #[cfg(feature = "reflect-input-modes")]
-impl Default for OrbitCamInputMode {
+impl Default for OrbitCamInputModeDraft {
     fn default() -> Self { Self::Preset(OrbitCamPreset::default()) }
 }
 
@@ -141,10 +155,6 @@ pub(crate) struct OrbitCamInputModesPlugin;
 
 impl Plugin for OrbitCamInputModesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_preset_mode_added)
-            .add_observer(on_bindings_mode_added)
-            .add_observer(on_manual_mode_added);
-
         #[cfg(feature = "reflect-input-modes")]
         app.add_systems(
             PreUpdate,
@@ -159,66 +169,6 @@ impl Plugin for OrbitCamInputModesPlugin {
             reconcile_input_modes.in_set(OrbitCamInputInternalSet::InputModes),
         );
     }
-}
-
-fn on_preset_mode_added(
-    added: On<Add, OrbitCamPreset>,
-    mut commands: Commands,
-    modes: Query<(Option<Ref<OrbitCamBindings>>, Option<Ref<OrbitCamManual>>)>,
-) {
-    let Ok((bindings, manual)) = modes.get(added.entity) else {
-        return;
-    };
-    if bindings.is_some_and(|bindings| bindings.is_added())
-        || manual.is_some_and(|manual| manual.is_added())
-    {
-        return;
-    }
-
-    commands
-        .entity(added.entity)
-        .remove::<OrbitCamBindings>()
-        .remove::<OrbitCamManual>();
-}
-
-fn on_bindings_mode_added(
-    added: On<Add, OrbitCamBindings>,
-    mut commands: Commands,
-    modes: Query<(Option<Ref<OrbitCamPreset>>, Option<Ref<OrbitCamManual>>)>,
-) {
-    let Ok((preset, manual)) = modes.get(added.entity) else {
-        return;
-    };
-    if preset.is_some_and(|preset| preset.is_added())
-        || manual.is_some_and(|manual| manual.is_added())
-    {
-        return;
-    }
-
-    commands
-        .entity(added.entity)
-        .remove::<OrbitCamPreset>()
-        .remove::<OrbitCamManual>();
-}
-
-fn on_manual_mode_added(
-    added: On<Add, OrbitCamManual>,
-    mut commands: Commands,
-    modes: Query<(Option<Ref<OrbitCamPreset>>, Option<Ref<OrbitCamBindings>>)>,
-) {
-    let Ok((preset, bindings)) = modes.get(added.entity) else {
-        return;
-    };
-    if preset.is_some_and(|preset| preset.is_added())
-        || bindings.is_some_and(|bindings| bindings.is_added())
-    {
-        return;
-    }
-
-    commands
-        .entity(added.entity)
-        .remove::<OrbitCamPreset>()
-        .remove::<OrbitCamBindings>();
 }
 
 #[cfg(feature = "reflect-input-modes")]
@@ -267,79 +217,39 @@ fn apply_input_mode_descriptors(world: &mut World) {
 fn apply_input_mode_descriptor(
     world: &mut World,
     camera: Entity,
-    mode: OrbitCamInputMode,
+    mode: OrbitCamInputModeDraft,
 ) -> Result<(), OrbitCamBindingsError> {
     let mut entity = world.entity_mut(camera);
     match mode {
-        OrbitCamInputMode::Preset(preset) => {
-            entity
-                .insert(preset)
-                .remove::<OrbitCamBindings>()
-                .remove::<OrbitCamManual>();
+        OrbitCamInputModeDraft::Preset(preset) => {
+            entity.insert(OrbitCamInputMode::Preset(preset));
             Ok(())
         },
-        OrbitCamInputMode::Bindings(descriptor) => {
+        OrbitCamInputModeDraft::Bindings(descriptor) => {
             let bindings = OrbitCamBindings::try_from(descriptor)?;
-            entity
-                .insert(bindings)
-                .remove::<OrbitCamPreset>()
-                .remove::<OrbitCamManual>();
+            entity.insert(OrbitCamInputMode::Bindings(bindings));
             Ok(())
         },
-        OrbitCamInputMode::Manual => {
-            entity
-                .insert(OrbitCamManual)
-                .remove::<OrbitCamPreset>()
-                .remove::<OrbitCamBindings>();
+        OrbitCamInputModeDraft::Manual => {
+            entity.insert(OrbitCamInputMode::Manual);
             Ok(())
         },
     }
 }
 
 fn reconcile_input_modes(world: &mut World) {
-    let mut query = world.query_filtered::<(
-        Entity,
-        Option<Ref<OrbitCamPreset>>,
-        Option<Ref<OrbitCamBindings>>,
-        Option<Ref<OrbitCamManual>>,
-        Option<&OrbitCamInputInstallation>,
-    ), With<OrbitCam>>();
+    let mut query = world.query_filtered::<(Entity, &OrbitCamInputMode), (
+        With<OrbitCam>,
+        Or<(
+            Changed<OrbitCamInputMode>,
+            Without<OrbitCamInputInstallation>,
+        )>,
+    )>();
     let reconciliations = query
         .iter(world)
-        .map(|(camera, preset, bindings, manual, installation)| {
-            let selected = select_input_mode(bindings.as_deref(), manual.as_deref());
-            let mode_count = usize::from(preset.is_some())
-                + usize::from(bindings.is_some())
-                + usize::from(manual.is_some());
-            let selected_changed = match selected {
-                ActiveInputMode::Preset => preset
-                    .as_ref()
-                    .is_some_and(|preset| preset.is_added() || preset.is_changed()),
-                ActiveInputMode::Bindings => bindings
-                    .as_ref()
-                    .is_some_and(|bindings| bindings.is_added() || bindings.is_changed()),
-                ActiveInputMode::Manual => manual
-                    .as_ref()
-                    .is_some_and(|manual| manual.is_added() || manual.is_changed()),
-            };
-
-            ModeReconciliation {
-                camera,
-                selected,
-                insert_default_preset: if mode_count == 0 {
-                    DefaultPresetInsertion::Insert
-                } else {
-                    DefaultPresetInsertion::Skip
-                },
-                replace_installation: if mode_count != 1
-                    || selected_changed
-                    || installation.is_none()
-                {
-                    InstallationReplacement::Replace
-                } else {
-                    InstallationReplacement::KeepExisting
-                },
-            }
+        .map(|(camera, mode)| ModeReconciliation {
+            camera,
+            mode: mode.clone(),
         })
         .collect::<Vec<_>>();
 
@@ -348,58 +258,56 @@ fn reconcile_input_modes(world: &mut World) {
     }
 }
 
-const fn select_input_mode(
-    bindings: Option<&OrbitCamBindings>,
-    manual: Option<&OrbitCamManual>,
-) -> ActiveInputMode {
-    if manual.is_some() {
-        ActiveInputMode::Manual
-    } else if bindings.is_some() {
-        ActiveInputMode::Bindings
-    } else {
-        ActiveInputMode::Preset
-    }
+fn apply_mode_reconciliation(world: &mut World, reconciliation: ModeReconciliation) {
+    clear_orbit_cam_input(world, reconciliation.camera);
+    let runtime_mode = apply_runtime_input_mode(world, &reconciliation);
+    replace_input_installation(world, reconciliation.camera, runtime_mode);
+    world
+        .entity_mut(reconciliation.camera)
+        .trigger(|camera| OrbitCamInputModeReplaced { camera });
 }
 
-fn apply_mode_reconciliation(world: &mut World, reconciliation: ModeReconciliation) {
-    {
-        let mut entity = world.entity_mut(reconciliation.camera);
-        match reconciliation.selected {
-            ActiveInputMode::Preset => {
-                if matches!(
-                    reconciliation.insert_default_preset,
-                    DefaultPresetInsertion::Insert
-                ) {
-                    entity.insert(OrbitCamPreset::default());
+fn apply_runtime_input_mode(
+    world: &mut World,
+    reconciliation: &ModeReconciliation,
+) -> RuntimeInputMode {
+    match &reconciliation.mode {
+        OrbitCamInputMode::Preset(preset) => {
+            match preset.to_bindings() {
+                Ok(bindings) => {
+                    world
+                        .entity_mut(reconciliation.camera)
+                        .insert(OrbitCamResolvedBindings(bindings))
+                        .remove::<OrbitCamManual>();
+                },
+                Err(error) => {
                     warn!(
-                        "restored default OrbitCam input mode for {:?}",
+                        "failed to build OrbitCam preset bindings for {:?}: {error}",
                         reconciliation.camera
                     );
-                }
-                entity
-                    .remove::<OrbitCamBindings>()
-                    .remove::<OrbitCamManual>();
-            },
-            ActiveInputMode::Bindings => {
-                entity.remove::<OrbitCamPreset>().remove::<OrbitCamManual>();
-            },
-            ActiveInputMode::Manual => {
-                entity
-                    .remove::<OrbitCamPreset>()
-                    .remove::<OrbitCamBindings>();
-            },
-        }
-    }
-
-    if matches!(
-        reconciliation.replace_installation,
-        InstallationReplacement::Replace
-    ) {
-        clear_orbit_cam_input(world, reconciliation.camera);
-        replace_input_installation(world, reconciliation.camera, reconciliation.selected);
-        world
-            .entity_mut(reconciliation.camera)
-            .trigger(|camera| OrbitCamInputModeReplaced { camera });
+                    world
+                        .entity_mut(reconciliation.camera)
+                        .remove::<OrbitCamResolvedBindings>()
+                        .insert(OrbitCamManual);
+                    return RuntimeInputMode::Manual;
+                },
+            }
+            RuntimeInputMode::Bindings
+        },
+        OrbitCamInputMode::Bindings(bindings) => {
+            world
+                .entity_mut(reconciliation.camera)
+                .insert(OrbitCamResolvedBindings(bindings.clone()))
+                .remove::<OrbitCamManual>();
+            RuntimeInputMode::Bindings
+        },
+        OrbitCamInputMode::Manual => {
+            world
+                .entity_mut(reconciliation.camera)
+                .remove::<OrbitCamResolvedBindings>()
+                .insert(OrbitCamManual);
+            RuntimeInputMode::Manual
+        },
     }
 }
 
@@ -409,13 +317,13 @@ fn clear_orbit_cam_input(world: &mut World, camera: Entity) {
     }
 }
 
-fn replace_input_installation(world: &mut World, camera: Entity, mode: ActiveInputMode) {
+fn replace_input_installation(world: &mut World, camera: Entity, mode: RuntimeInputMode) {
     for installed_entity in installed_input_entities(world, camera) {
         let _ = world.despawn(installed_entity);
     }
 
     let entities = match mode {
-        ActiveInputMode::Preset | ActiveInputMode::Bindings => {
+        RuntimeInputMode::Bindings => {
             vec![
                 world
                     .spawn((
@@ -425,7 +333,7 @@ fn replace_input_installation(world: &mut World, camera: Entity, mode: ActiveInp
                     .id(),
             ]
         },
-        ActiveInputMode::Manual => Vec::new(),
+        RuntimeInputMode::Manual => Vec::new(),
     };
 
     world
@@ -507,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn preinput_restores_default_preset_when_mode_is_missing() {
+    fn preinput_lowers_required_default_preset() {
         let mut app = test_app();
         let camera = app
             .world_mut()
@@ -517,30 +425,37 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<OrbitCamPreset>(camera),
-            Some(&OrbitCamPreset::SimpleMouse)
+            app.world().get::<OrbitCamInputMode>(camera),
+            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse))
+        );
+        assert!(
+            app.world()
+                .get::<OrbitCamResolvedBindings>(camera)
+                .is_some()
         );
         assert_eq!(installed_input_entities(app.world(), camera).len(), 1);
     }
 
     #[test]
-    fn preinput_enforces_manual_over_other_modes() {
+    fn preinput_lowers_manual_mode() {
         let mut app = test_app();
         let camera = app
             .world_mut()
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamPreset::BlenderLike,
-                OrbitCamManual,
+                OrbitCamInputMode::Manual,
             ))
             .id();
 
         app.update();
 
         assert!(app.world().get::<OrbitCamManual>(camera).is_some());
-        assert!(app.world().get::<OrbitCamPreset>(camera).is_none());
-        assert!(app.world().get::<OrbitCamBindings>(camera).is_none());
+        assert!(
+            app.world()
+                .get::<OrbitCamResolvedBindings>(camera)
+                .is_none()
+        );
         assert!(installed_input_entities(app.world(), camera).is_empty());
     }
 
@@ -553,7 +468,7 @@ mod tests {
                 OrbitCam::default(),
                 OrbitCamInput::default(),
                 OrbitCamInputModeDescriptor {
-                    mode: OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+                    mode: OrbitCamInputModeDraft::Preset(OrbitCamPreset::BlenderLike),
                 },
             ))
             .id();
@@ -561,8 +476,8 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<OrbitCamPreset>(camera),
-            Some(&OrbitCamPreset::BlenderLike)
+            app.world().get::<OrbitCamInputMode>(camera),
+            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike))
         );
         assert_eq!(
             app.world()
@@ -580,9 +495,9 @@ mod tests {
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamPreset::BlenderLike,
+                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
                 OrbitCamInputModeDescriptor {
-                    mode: OrbitCamInputMode::Bindings(
+                    mode: OrbitCamInputModeDraft::Bindings(
                         bindings::invalid_bindings_descriptor_for_tests(),
                     ),
                 },
@@ -595,8 +510,8 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world().get::<OrbitCamPreset>(camera),
-            Some(&OrbitCamPreset::BlenderLike)
+            app.world().get::<OrbitCamInputMode>(camera),
+            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike))
         );
         assert_eq!(
             app.world()
@@ -627,7 +542,7 @@ mod tests {
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamManual,
+                OrbitCamInputMode::Manual,
             ))
             .id();
         let preset = app
@@ -635,7 +550,7 @@ mod tests {
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamPreset::SimpleMouse,
+                OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
             ))
             .id();
         app.insert_resource(ManualWriterTestCamera { manual, preset })
@@ -657,7 +572,7 @@ mod tests {
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamManual,
+                OrbitCamInputMode::Manual,
             ))
             .id();
         app.init_resource::<ModeReplacementEvents>();

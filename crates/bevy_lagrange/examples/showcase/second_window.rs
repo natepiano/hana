@@ -85,7 +85,7 @@ pub(crate) fn toggle_second_window(
     let camera = commands
         .spawn((
             second_camera,
-            OrbitCamPreset::BlenderLike,
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
             RenderTarget::Window(WindowRef::Entity(window)),
             SecondWindowCamera,
         ))

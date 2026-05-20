@@ -20,12 +20,11 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Fit;
-use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionEnded;
 use bevy_lagrange::OrbitCamInteractionSourcesChanged;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::OrbitCamManual;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use display::CameraGuidanceDisplay;
@@ -108,7 +107,11 @@ fn spawn_panel(mut commands: Commands, background: Res<CameraControlPanelBackgro
 
 /// Placeholder snapshot rendered until the first route resolution completes.
 fn default_snapshot() -> CameraGuidanceSnapshot {
-    resolve_guidance_snapshot(None, None, Some(&OrbitCamPreset::BlenderLike), None, None)
+    resolve_guidance_snapshot(
+        None,
+        None,
+        Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)),
+    )
 }
 
 /// Rebuilds the panel snapshot when the routed camera changes, or when the
@@ -120,19 +123,9 @@ fn rebind_panel_on_route_change(
         Option<&Name>,
         Option<&CameraGuidance>,
         Option<&OrbitCamInteractionState>,
-        Option<&OrbitCamPreset>,
-        Option<&OrbitCamBindings>,
-        Option<&OrbitCamManual>,
+        Option<&OrbitCamInputMode>,
     )>,
-    changed_cameras: Query<
-        Entity,
-        Or<(
-            Changed<CameraGuidance>,
-            Changed<OrbitCamPreset>,
-            Changed<OrbitCamBindings>,
-            Changed<OrbitCamManual>,
-        )>,
-    >,
+    changed_cameras: Query<Entity, Or<(Changed<CameraGuidance>, Changed<OrbitCamInputMode>)>>,
     panel: Single<(
         Entity,
         &mut CameraGuidancePanel,
@@ -154,11 +147,11 @@ fn rebind_panel_on_route_change(
     let Some(cam) = routed else {
         return;
     };
-    let Ok((name, guidance, state, preset, bindings, manual)) = cameras.get(cam) else {
+    let Ok((name, guidance, state, mode)) = cameras.get(cam) else {
         return;
     };
 
-    let snapshot = resolve_guidance_snapshot(name, guidance, preset, bindings, manual);
+    let snapshot = resolve_guidance_snapshot(name, guidance, mode);
     let display = CameraGuidanceDisplay::from_interaction_state(state.copied().unwrap_or_default());
     *display_state = CameraGuidanceDisplayState::from_display(display);
     commands.entity(panel_entity).insert(snapshot.clone());

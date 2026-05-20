@@ -41,6 +41,7 @@ use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::ControlActivation;
 use fairy_dust::RestartCameraRestore;
@@ -221,7 +222,10 @@ fn main() {
             )),
         )
         .color(GROUND_COLOR)
-        .with_orbit_cam(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam(
+            |_| {},
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        )
         .with_stable_transparency()
         .with_camera_home(
             Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),

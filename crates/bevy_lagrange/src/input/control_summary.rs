@@ -10,8 +10,8 @@ use super::HeldActionBindingEntry;
 use super::HeldCameraAction;
 use super::OrbitCamBindings;
 use super::OrbitCamButtonDragZoom;
+use super::OrbitCamInputMode;
 use super::OrbitCamInteractionKind;
-use super::OrbitCamManual;
 use super::OrbitCamPreset;
 use super::OrbitCamTouchBinding;
 use super::OrbitCamTrackpadScroll;
@@ -64,24 +64,16 @@ pub struct OrbitCamControlRow {
     pub camera_interaction_sources: CameraInteractionSources,
 }
 
-/// Describes the effective `OrbitCam` controls from the same precedence used by
-/// camera input mode selection: manual input, custom bindings, then preset.
+/// Describes the effective `OrbitCam` controls for an input mode.
 #[must_use]
-pub fn describe_orbit_cam_controls(
-    preset: Option<&OrbitCamPreset>,
-    bindings: Option<&OrbitCamBindings>,
-    manual: Option<&OrbitCamManual>,
-) -> OrbitCamControlSummary {
-    if manual.is_some() {
-        return describe_manual_controls();
+pub fn describe_orbit_cam_controls(mode: &OrbitCamInputMode) -> OrbitCamControlSummary {
+    match mode {
+        OrbitCamInputMode::Preset(preset) => describe_preset(*preset),
+        OrbitCamInputMode::Bindings(bindings) => {
+            describe_bindings(BINDINGS_MODE_LABEL, CUSTOM_MODE_VALUE, bindings)
+        },
+        OrbitCamInputMode::Manual => describe_manual_controls(),
     }
-
-    if let Some(bindings) = bindings {
-        return describe_bindings(BINDINGS_MODE_LABEL, CUSTOM_MODE_VALUE, bindings);
-    }
-
-    let preset = preset.copied().unwrap_or_default();
-    describe_preset(preset)
 }
 
 fn describe_preset(preset: OrbitCamPreset) -> OrbitCamControlSummary {
@@ -591,7 +583,8 @@ mod tests {
 
     #[test]
     fn blender_like_summary_reflects_preset_bindings() {
-        let summary = describe_orbit_cam_controls(Some(&OrbitCamPreset::BlenderLike), None, None);
+        let summary =
+            describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike));
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.camera_label, "OrbitCam");
@@ -611,8 +604,7 @@ mod tests {
         let bindings = OrbitCamBindings::builder()
             .orbit(OrbitCamMouseDrag::new(MouseButton::Right))
             .build()?;
-        let summary =
-            describe_orbit_cam_controls(Some(&OrbitCamPreset::BlenderLike), Some(&bindings), None);
+        let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.mode_label, "Bindings");
@@ -643,7 +635,7 @@ mod tests {
             .pan(pan_keys)
             .zoom(zoom_keys)
             .build()?;
-        let summary = describe_orbit_cam_controls(None, Some(&bindings), None);
+        let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
         let labels = summary_labels(&summary);
 
         assert!(labels.contains(&"Arrow keys"));
@@ -654,16 +646,8 @@ mod tests {
     }
 
     #[test]
-    fn manual_summary_wins_over_other_modes() -> Result<(), OrbitCamBindingsError> {
-        let bindings = OrbitCamBindings::builder()
-            .orbit(OrbitCamMouseDrag::new(MouseButton::Right))
-            .build()?;
-        let manual = OrbitCamManual;
-        let summary = describe_orbit_cam_controls(
-            Some(&OrbitCamPreset::BlenderLike),
-            Some(&bindings),
-            Some(&manual),
-        );
+    fn manual_summary_wins_over_other_modes() {
+        let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Manual);
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.mode_label, "Input");
@@ -673,8 +657,6 @@ mod tests {
             row.camera_interaction_sources
                 .contains(CameraInteractionSources::MANUAL)
         }));
-
-        Ok(())
     }
 
     fn summary_labels(summary: &OrbitCamControlSummary) -> Vec<&str> {

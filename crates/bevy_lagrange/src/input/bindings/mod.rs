@@ -15,7 +15,7 @@
 //! - [`error`] — [`OrbitCamBindingsError`].
 //! - [`validate`] — descriptor → [`OrbitCamBindings`] lowering.
 //!
-//! This file holds the validated runtime [`OrbitCamBindings`] component, the
+//! This file holds the validated runtime [`OrbitCamBindings`] value, the
 //! [`PinchGestureZoom`] field-type enum, and the cross-cutting integration tests.
 
 mod action_set;
@@ -65,8 +65,7 @@ pub use preset::OrbitCamPreset;
 pub use validate::validate_bindings;
 
 /// Validated runtime binding specification for an `OrbitCam`.
-#[derive(Component, Clone, Debug, PartialEq, Reflect)]
-#[reflect(Component)]
+#[derive(Clone, Debug, PartialEq, Reflect)]
 #[reflect(opaque)]
 pub struct OrbitCamBindings {
     pub(super) orbit:            OrbitCamOrbitActionBindings,

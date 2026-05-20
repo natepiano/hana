@@ -207,7 +207,7 @@ impl SprinkleBuilder<NoOrbitCam> {
     /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
     /// The caller's `configure` closure can set `focus`, `radius`, `yaw`,
     /// `pitch`, sensitivity, limits, or other camera behavior fields. Input
-    /// uses `OrbitCamPreset::SimpleMouse` unless another input-mode component
+    /// uses `OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)` unless another input mode
     /// is inserted.
     pub fn with_orbit_cam_configured<F>(mut self, configure: F) -> SprinkleBuilder<WithOrbitCam>
     where
@@ -221,8 +221,8 @@ impl SprinkleBuilder<NoOrbitCam> {
     }
 
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
-    /// insert extra camera-side components such as `OrbitCamPreset`,
-    /// `OrbitCamBindings`, `OrbitCamManual`, or [`CameraGuidance`].
+    /// insert extra camera-side components such as `OrbitCamInputMode` or
+    /// [`CameraGuidance`].
     pub fn with_orbit_cam<F, B>(mut self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,

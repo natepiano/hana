@@ -8,6 +8,7 @@ use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamInputBinding;
+use bevy_lagrange::OrbitCamInputMode;
 
 fn keyboard_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
     let orbit_keys = OrbitCamInputBinding::cardinal_keys(
@@ -42,7 +43,10 @@ fn main() {
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .with_orbit_cam(common::configure_camera, bindings)
+        .with_orbit_cam(
+            common::configure_camera,
+            OrbitCamInputMode::Bindings(bindings),
+        )
         .with_camera_control_panel()
         .add_systems(Startup, common::spawn_scene)
         .run();

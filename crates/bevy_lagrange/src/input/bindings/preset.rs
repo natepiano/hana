@@ -2,9 +2,7 @@
 //! [`super::OrbitCamBindings`].
 //!
 //! Types:
-//! - [`OrbitCamPreset`] — `Component` selecting a built-in keymap. When inserted on an `OrbitCam`,
-//!   the modes system in `crate::input::modes` resolves it through [`OrbitCamPreset::to_bindings`]
-//!   and installs the resulting [`super::OrbitCamBindings`].
+//! - [`OrbitCamPreset`] — selects a built-in keymap for [`crate::input::OrbitCamInputMode`].
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::ModKeys;
@@ -17,8 +15,8 @@ use super::builder::OrbitCamTrackpadScroll;
 use super::error::OrbitCamBindingsError;
 
 /// Built-in orbit-camera input presets.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(Component, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Default)]
 #[non_exhaustive]
 pub enum OrbitCamPreset {
     /// Mouse-oriented default controls.

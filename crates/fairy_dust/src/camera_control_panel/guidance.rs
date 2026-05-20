@@ -5,6 +5,7 @@ use bevy_diegetic::Anchor;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCamControlRow;
 use bevy_lagrange::OrbitCamControlSummary;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::describe_orbit_cam_controls;
@@ -51,7 +52,9 @@ impl CameraGuidance {
     /// Builds guidance rows for a built-in orbit-camera preset.
     #[must_use]
     pub fn for_preset(preset: OrbitCamPreset) -> Self {
-        Self::from_summary(describe_orbit_cam_controls(Some(&preset), None, None))
+        Self::from_summary(describe_orbit_cam_controls(&OrbitCamInputMode::Preset(
+            preset,
+        )))
     }
 
     /// Builds custom camera guidance rows.
