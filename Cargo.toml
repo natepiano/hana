@@ -8,7 +8,7 @@ keywords    = ["bevy", "ecs", "gamedev", "input", "math"]
 license     = "MIT OR Apache-2.0"
 name        = "bevy_kana"
 repository  = "https://github.com/natepiano/bevy_kana"
-version     = "0.0.6"
+version     = "0.0.7-dev"
 
 [lints.clippy]
 # Our strict lints
