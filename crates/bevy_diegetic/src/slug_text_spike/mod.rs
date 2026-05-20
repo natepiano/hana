@@ -16,6 +16,8 @@ mod run_render;
 pub use backend::SlugBackend;
 pub use backend::SlugBackendCompleted;
 pub use backend::SlugPreparedTextRun;
+pub use backend::SlugRunStorage;
+pub use backend::SlugRunStorageKey;
 pub use backend::SlugTextRequest;
 pub use fixtures::FIXTURE_TEXT;
 pub use geometry::SlugBounds;

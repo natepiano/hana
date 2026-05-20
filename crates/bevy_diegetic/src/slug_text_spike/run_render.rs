@@ -61,12 +61,22 @@ pub fn build_slug_run_render_data(
     glyph_cache: &SlugGlyphCache,
     scale: f32,
 ) -> Result<SlugRunRenderData, SlugRunRenderError> {
+    build_slug_run_render_data_with_clip(preview, glyph_cache, scale, None)
+}
+
+/// Builds one run-level mesh and packed storage set clipped to a local rect.
+pub fn build_slug_run_render_data_with_clip(
+    preview: &SlugBuiltTextRun,
+    glyph_cache: &SlugGlyphCache,
+    scale: f32,
+    clip_rect: Option<[f32; 4]>,
+) -> Result<SlugRunRenderData, SlugRunRenderError> {
     let mut packer = RunPacker::default();
     let mut mesh_builder = RunMeshBuilder::new(preview.run.glyphs().len());
 
     for glyph in preview.run.glyphs() {
         let record_index = packer.record_index(*glyph, glyph_cache)?;
-        mesh_builder.push_glyph(*glyph, record_index, scale);
+        mesh_builder.push_glyph(*glyph, record_index, scale, clip_rect);
     }
 
     Ok(SlugRunRenderData {
@@ -129,6 +139,65 @@ struct RunMeshBuilder {
     indices:       Vec<u32>,
 }
 
+struct GlyphQuadExtents {
+    left:      f32,
+    right:     f32,
+    bottom:    f32,
+    top:       f32,
+    uv_left:   f32,
+    uv_right:  f32,
+    uv_top:    f32,
+    uv_bottom: f32,
+}
+
+impl GlyphQuadExtents {
+    const fn new(left: f32, right: f32, bottom: f32, top: f32) -> Self {
+        Self {
+            left,
+            right,
+            bottom,
+            top,
+            uv_left: 0.0,
+            uv_right: 1.0,
+            uv_top: 0.0,
+            uv_bottom: 1.0,
+        }
+    }
+
+    fn clipped(mut self, clip_rect: Option<[f32; 4]>) -> Option<Self> {
+        let Some([clip_left, clip_bottom, clip_right, clip_top]) = clip_rect else {
+            return Some(self);
+        };
+        if self.right <= clip_left
+            || self.left >= clip_right
+            || self.top <= clip_bottom
+            || self.bottom >= clip_top
+        {
+            return None;
+        }
+
+        let original_left = self.left;
+        let original_right = self.right;
+        let original_bottom = self.bottom;
+        let original_top = self.top;
+        self.left = self.left.max(clip_left);
+        self.right = self.right.min(clip_right);
+        self.bottom = self.bottom.max(clip_bottom);
+        self.top = self.top.min(clip_top);
+
+        let width = original_right - original_left;
+        let height = original_top - original_bottom;
+        if width <= f32::EPSILON || height <= f32::EPSILON {
+            return None;
+        }
+        self.uv_left = (self.left - original_left) / width;
+        self.uv_right = (self.right - original_left) / width;
+        self.uv_top = (original_top - self.top) / height;
+        self.uv_bottom = (original_top - self.bottom) / height;
+        Some(self)
+    }
+}
+
 impl RunMeshBuilder {
     fn new(glyph_count: usize) -> Self {
         Self {
@@ -140,25 +209,40 @@ impl RunMeshBuilder {
         }
     }
 
-    fn push_glyph(&mut self, glyph: SlugGlyphInstance, record_index: u32, scale: f32) {
+    fn push_glyph(
+        &mut self,
+        glyph: SlugGlyphInstance,
+        record_index: u32,
+        scale: f32,
+        clip_rect: Option<[f32; 4]>,
+    ) {
         let bounds = glyph.bounds();
         let bounds_scale = glyph.bounds_scale();
         let origin = glyph.origin();
-        let left = bounds.min.x.mul_add(bounds_scale, origin.x) * scale;
-        let right = bounds.max.x.mul_add(bounds_scale, origin.x) * scale;
-        let bottom = bounds.min.y.mul_add(bounds_scale, origin.y) * scale;
-        let top = bounds.max.y.mul_add(bounds_scale, origin.y) * scale;
+        let left = bounds.min.x.mul_add(bounds_scale.x, origin.x) * scale;
+        let right = bounds.max.x.mul_add(bounds_scale.x, origin.x) * scale;
+        let bottom = bounds.min.y.mul_add(bounds_scale.y, origin.y) * scale;
+        let top = bounds.max.y.mul_add(bounds_scale.y, origin.y) * scale;
+        let Some(extents) = GlyphQuadExtents::new(left, right, bottom, top).clipped(clip_rect)
+        else {
+            return;
+        };
+
         let base = (self.positions.len()).to_u32();
         let glyph_index = [record_index.to_f32(), 0.0];
 
-        self.positions.push([left, top, 0.0]);
-        self.positions.push([right, top, 0.0]);
-        self.positions.push([right, bottom, 0.0]);
-        self.positions.push([left, bottom, 0.0]);
+        self.positions.push([extents.left, extents.top, 0.0]);
+        self.positions.push([extents.right, extents.top, 0.0]);
+        self.positions.push([extents.right, extents.bottom, 0.0]);
+        self.positions.push([extents.left, extents.bottom, 0.0]);
 
         self.normals.extend([[0.0, 0.0, 1.0]; 4]);
-        self.uvs
-            .extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        self.uvs.extend([
+            [extents.uv_left, extents.uv_top],
+            [extents.uv_right, extents.uv_top],
+            [extents.uv_right, extents.uv_bottom],
+            [extents.uv_left, extents.uv_bottom],
+        ]);
         self.glyph_indices.extend([glyph_index; 4]);
 
         self.indices

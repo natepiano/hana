@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::batching;
+#[cfg(feature = "slug_text")]
+use super::batching::PanelSlugTextRun;
 use super::batching::PanelTextAlpha;
 use super::batching::PanelTextQuads;
 use crate::cascade::CascadeDefaults;
@@ -18,6 +20,10 @@ use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+#[cfg(feature = "slug_text")]
+use crate::render::TextRendererBackend;
+#[cfg(feature = "slug_text")]
+use crate::render::TextRendererPreference;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
@@ -31,6 +37,10 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::DEFAULT_BAND_COUNT;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBackend;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
@@ -60,6 +70,8 @@ pub(super) fn shape_panel_text_children(
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
+    #[cfg(feature = "slug_text")] text_backend: Res<TextRendererPreference>,
+    #[cfg(feature = "slug_text")] mut slug_backend: ResMut<SlugBackend>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -94,10 +106,7 @@ pub(super) fn shape_panel_text_children(
         };
 
         if world_text.0.is_empty() {
-            commands
-                .entity(entity)
-                .remove::<PendingGlyphs>()
-                .remove::<PanelTextQuads>();
+            clear_panel_text_output(entity, &mut commands);
             continue;
         }
 
@@ -108,6 +117,34 @@ pub(super) fn shape_panel_text_children(
             anchor:    Vec2::new(panel_text_child.anchor_x, panel_text_child.anchor_y),
             clip_rect: panel_text_child.clip_rect,
         };
+
+        #[cfg(feature = "slug_text")]
+        if text_backend.backend() == TextRendererBackend::Slug {
+            let (panel_slug_run, stats) = build_panel_slug_text(
+                &world_text.0,
+                &config,
+                &placement,
+                &mut slug_backend,
+                &font_registry,
+                &shaping_cx,
+                &mut cache,
+            );
+            aggregate.accumulate(&stats);
+            shaped_panels.insert(child_of.parent());
+            let readiness = GlyphReadiness::from(&stats);
+            apply_panel_slug_result(
+                entity,
+                child_of.parent(),
+                panel_slug_run,
+                readiness,
+                &panel_alpha,
+                &existing_child_alpha,
+                &defaults,
+                &mut commands,
+            );
+            continue;
+        }
+
         let mut services = TextQuadServices {
             font_registry: &font_registry,
             atlas:         atlas_slot.rasterize_target_mut(),
@@ -129,41 +166,17 @@ pub(super) fn shape_panel_text_children(
         } else {
             GlyphReadiness::from(&stats)
         };
-        match readiness {
-            GlyphReadiness::Ready | GlyphReadiness::Invisible => {
-                let panel_text_quads = PanelTextQuads {
-                    quads,
-                    render_mode: config.render_mode(),
-                    shadow_mode: config.shadow_mode(),
-                    alpha_mode: config.alpha_mode(),
-                };
-                let panel_fallback = panel_alpha.get(child_of.parent()).map_or_else(
-                    |_| PanelTextAlpha::global_default(&defaults),
-                    |resolved| resolved.0,
-                );
-                let resolved =
-                    PanelTextAlpha::entity_value(&panel_text_quads).unwrap_or(panel_fallback);
-                let alpha_unchanged = existing_child_alpha
-                    .get(entity)
-                    .is_ok_and(|current| current.0 == resolved);
-                commands.entity(entity).insert(panel_text_quads);
-                if !alpha_unchanged {
-                    commands.entity(entity).insert(Resolved(resolved));
-                }
-                commands.entity(entity).remove::<PendingGlyphs>();
-                commands.entity(entity).insert(AwaitingReady);
-            },
-            GlyphReadiness::Pending => {
-                commands.entity(entity).insert_if_new(PendingGlyphs);
-            },
-            GlyphReadiness::Failed => {
-                commands
-                    .entity(entity)
-                    .remove::<PendingGlyphs>()
-                    .remove::<PanelTextQuads>();
-            },
-            GlyphReadiness::Idle => {},
-        }
+        apply_panel_quad_result(
+            entity,
+            child_of.parent(),
+            quads,
+            &config,
+            readiness,
+            &panel_alpha,
+            &existing_child_alpha,
+            &defaults,
+            &mut commands,
+        );
     }
 
     perf.panel_text.shape_ms = shape_stage_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
@@ -189,6 +202,62 @@ struct QuadPlacement {
     scale:     Vec2,
     anchor:    Vec2,
     clip_rect: Option<BoundingBox>,
+}
+
+fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
+    commands
+        .entity(entity)
+        .remove::<PendingGlyphs>()
+        .remove::<PanelTextQuads>();
+    #[cfg(feature = "slug_text")]
+    commands.entity(entity).remove::<PanelSlugTextRun>();
+}
+
+fn apply_panel_quad_result(
+    entity: Entity,
+    panel_entity: Entity,
+    quads: Vec<(u32, GlyphQuadData)>,
+    config: &LayoutTextStyle,
+    readiness: GlyphReadiness,
+    panel_alpha: &Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
+    existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    defaults: &CascadeDefaults,
+    commands: &mut Commands,
+) {
+    match readiness {
+        GlyphReadiness::Ready | GlyphReadiness::Invisible => {
+            let panel_text_quads = PanelTextQuads {
+                quads,
+                render_mode: config.render_mode(),
+                shadow_mode: config.shadow_mode(),
+                alpha_mode: config.alpha_mode(),
+            };
+            let panel_fallback = panel_alpha.get(panel_entity).map_or_else(
+                |_| PanelTextAlpha::global_default(defaults),
+                |resolved| resolved.0,
+            );
+            let resolved =
+                PanelTextAlpha::entity_value(&panel_text_quads).unwrap_or(panel_fallback);
+            let alpha_unchanged = existing_child_alpha
+                .get(entity)
+                .is_ok_and(|current| current.0 == resolved);
+            commands.entity(entity).insert(panel_text_quads);
+            #[cfg(feature = "slug_text")]
+            commands.entity(entity).remove::<PanelSlugTextRun>();
+            if !alpha_unchanged {
+                commands.entity(entity).insert(Resolved(resolved));
+            }
+            commands.entity(entity).remove::<PendingGlyphs>();
+            commands.entity(entity).insert(AwaitingReady);
+        },
+        GlyphReadiness::Pending => {
+            commands.entity(entity).insert_if_new(PendingGlyphs);
+        },
+        GlyphReadiness::Failed => {
+            clear_panel_text_output(entity, commands);
+        },
+        GlyphReadiness::Idle => {},
+    }
 }
 
 /// Shapes text and produces glyph quads in panel-local coordinates.
@@ -293,6 +362,136 @@ fn shape_text_to_quads(
     stats.emitted_quads = quads.len();
 
     (quads, stats)
+}
+
+#[cfg(feature = "slug_text")]
+fn build_panel_slug_text(
+    text: &str,
+    config: &LayoutTextStyle,
+    placement: &QuadPlacement,
+    slug_backend: &mut SlugBackend,
+    font_registry: &FontRegistry,
+    shaping_cx: &TextShapingContext,
+    cache: &mut ShapedTextCache,
+) -> (Option<PanelSlugTextRun>, TextBuildStats) {
+    let mut stats = TextBuildStats {
+        texts: 1,
+        ..Default::default()
+    };
+    let layout_start = Instant::now();
+    let layout_run =
+        text_shaping::shape_text_cached(text, config, font_registry, shaping_cx, cache);
+    stats.shape_ms = layout_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    stats.glyphs = layout_run.glyphs.len();
+    let positioned_glyphs =
+        text_shaping::positioned_glyphs(&layout_run.glyphs, font_registry, &mut stats);
+    if stats.failed_glyphs > 0 {
+        return (None, stats);
+    }
+
+    let slug_start = Instant::now();
+    let anchor = panel_slug_layout_anchor(placement);
+    let prepared = match slug_backend.prepare_positioned_run_with_scale(
+        &positioned_glyphs,
+        anchor,
+        config.size(),
+        placement.scale,
+        DEFAULT_BAND_COUNT,
+    ) {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            slug_backend.record_failure();
+            bevy::log::warn!("panel Slug text unsupported: {err}");
+            stats.failed_glyphs += positioned_glyphs.len().max(1);
+            stats.atlas_ms = slug_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+            return (None, stats);
+        },
+    };
+
+    stats.ready_glyphs = positioned_glyphs.len();
+    stats.emitted_quads = prepared.run.run.glyphs().len();
+    stats.atlas_ms = slug_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+
+    let clip_rect = placement.clip_rect.map(|clip_rect| {
+        batching::panel_clip_rect_local(
+            Some(clip_rect),
+            placement.scale.x,
+            placement.scale.y,
+            placement.anchor.x,
+            placement.anchor.y,
+        )
+        .to_array()
+    });
+    (
+        Some(PanelSlugTextRun {
+            prepared,
+            render_mode: config.render_mode(),
+            shadow_mode: config.shadow_mode(),
+            alpha_mode: config.alpha_mode(),
+            fill_color: config.color(),
+            clip_rect,
+        }),
+        stats,
+    )
+}
+
+#[cfg(feature = "slug_text")]
+fn panel_slug_layout_anchor(placement: &QuadPlacement) -> Vec2 {
+    Vec2::new(
+        placement.anchor.x / placement.scale.x - placement.bounds.x,
+        placement.anchor.y / placement.scale.y - placement.bounds.y,
+    )
+}
+
+#[cfg(feature = "slug_text")]
+fn apply_panel_slug_result(
+    entity: Entity,
+    panel_entity: Entity,
+    panel_slug_run: Option<PanelSlugTextRun>,
+    readiness: GlyphReadiness,
+    panel_alpha: &Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
+    existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    defaults: &CascadeDefaults,
+    commands: &mut Commands,
+) {
+    match readiness {
+        GlyphReadiness::Ready | GlyphReadiness::Invisible => {
+            let Some(panel_slug_run) = panel_slug_run else {
+                commands.entity(entity).remove::<PendingGlyphs>();
+                return;
+            };
+            let panel_fallback = panel_alpha.get(panel_entity).map_or_else(
+                |_| PanelTextAlpha::global_default(defaults),
+                |resolved| resolved.0,
+            );
+            let resolved = panel_slug_run
+                .alpha_mode
+                .map_or(panel_fallback, PanelTextAlpha);
+            let alpha_unchanged = existing_child_alpha
+                .get(entity)
+                .is_ok_and(|current| current.0 == resolved);
+            commands
+                .entity(entity)
+                .insert(panel_slug_run)
+                .remove::<PanelTextQuads>()
+                .remove::<PendingGlyphs>()
+                .insert(AwaitingReady);
+            if !alpha_unchanged {
+                commands.entity(entity).insert(Resolved(resolved));
+            }
+        },
+        GlyphReadiness::Pending => {
+            commands.entity(entity).insert_if_new(PendingGlyphs);
+        },
+        GlyphReadiness::Failed => {
+            commands
+                .entity(entity)
+                .remove::<PendingGlyphs>()
+                .remove::<PanelTextQuads>()
+                .remove::<PanelSlugTextRun>();
+        },
+        GlyphReadiness::Idle => {},
+    }
 }
 
 fn all_glyphs_ready_when_required(

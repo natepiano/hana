@@ -21,17 +21,17 @@ use crate::render::glyph_material::GlyphShadowProxyMaterialInput;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
 #[cfg(feature = "slug_text")]
-use crate::slug_text_spike;
+use crate::slug_text_spike::SlugBackend;
 #[cfg(feature = "slug_text")]
-use crate::slug_text_spike::SlugBuiltTextRun;
-#[cfg(feature = "slug_text")]
-use crate::slug_text_spike::SlugGlyphCache;
+use crate::slug_text_spike::SlugPreparedTextRun;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRenderMode;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterial;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterialInput;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::slug_text_material as make_slug_text_material;
 use crate::text::GlyphAtlas;
 
 /// Marker for mesh entities spawned by the world text renderer.
@@ -205,27 +205,23 @@ pub(super) fn spawn_world_text_meshes(
 /// Spawns Slug visible mesh and optional shadow proxy entities.
 #[cfg(feature = "slug_text")]
 pub(super) fn spawn_slug_world_text_meshes(
-    run: &SlugBuiltTextRun,
-    glyph_cache: &SlugGlyphCache,
+    prepared: &SlugPreparedTextRun,
+    slug_backend: &mut SlugBackend,
     entity: Entity,
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
     assets: &mut SlugMeshSpawnAssets<'_, '_, '_>,
 ) -> f32 {
     let mesh_start = Instant::now();
-    let Ok(render_data) = slug_text_spike::build_slug_run_render_data(run, glyph_cache, 1.0) else {
+    let Ok(storage) =
+        slug_backend.ensure_run_storage(prepared, None, assets.meshes, assets.storage_buffers)
+    else {
         return 0.0;
     };
-    let mesh_handle = assets.meshes.add(render_data.mesh);
-    let curve_buffer = assets
-        .storage_buffers
-        .add(ShaderStorageBuffer::from(render_data.curves));
-    let band_buffer = assets
-        .storage_buffers
-        .add(ShaderStorageBuffer::from(render_data.bands));
-    let glyph_buffer = assets
-        .storage_buffers
-        .add(ShaderStorageBuffer::from(render_data.glyphs));
+    let mesh_handle = storage.mesh;
+    let curve_buffer = storage.curves;
+    let band_buffer = storage.bands;
+    let glyph_buffer = storage.glyphs;
 
     let is_invisible = style.render_mode() == GlyphRenderMode::Invisible;
     let needs_proxy = if is_invisible {
@@ -295,7 +291,7 @@ fn slug_world_text_material(
         ..Default::default()
     };
     apply_sidedness(&mut base, style.sidedness());
-    slug_text_spike::slug_text_material(SlugTextMaterialInput {
+    make_slug_text_material(SlugTextMaterialInput {
         base,
         fill_color: style.color(),
         render_mode,

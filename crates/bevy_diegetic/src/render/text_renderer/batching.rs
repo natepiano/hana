@@ -5,6 +5,8 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::math::Vec4;
 use bevy::prelude::*;
+#[cfg(feature = "slug_text")]
+use bevy::render::storage::ShaderStorageBuffer;
 use bevy_kana::ToF32;
 
 use crate::cascade::CascadeDefaults;
@@ -27,6 +29,20 @@ use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
 use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelTextChild;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBackend;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugPreparedTextRun;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugRenderMode;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugRunStorage;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugTextMaterial;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugTextMaterialInput;
+#[cfg(feature = "slug_text")]
+use crate::slug_text_spike::slug_text_material as make_slug_text_material;
 use crate::text::AtlasSlot;
 use crate::text::GlyphAtlas;
 
@@ -88,6 +104,24 @@ pub(super) struct PanelTextQuads {
     /// the entity inherits from its parent panel, which in turn inherits from
     /// [`CascadeDefaults::text_alpha`].
     pub alpha_mode:  Option<AlphaMode>,
+}
+
+/// Stores a prepared Slug run for a panel [`WorldText`](crate::WorldText) child.
+#[cfg(feature = "slug_text")]
+#[derive(Component)]
+pub(super) struct PanelSlugTextRun {
+    /// Prepared Slug run.
+    pub prepared:    SlugPreparedTextRun,
+    /// Glyph render mode for this text element.
+    pub render_mode: GlyphRenderMode,
+    /// Glyph shadow mode for this text element.
+    pub shadow_mode: GlyphShadowMode,
+    /// Per-style alpha-mode override.
+    pub alpha_mode:  Option<AlphaMode>,
+    /// Text fill color.
+    pub fill_color:  Color,
+    /// Optional panel-local clipping rect.
+    pub clip_rect:   Option<[f32; 4]>,
 }
 
 /// Cascading attribute for panel-text alpha mode.
@@ -199,9 +233,9 @@ pub(super) fn build_panel_batched_meshes(
         let Ok((panel, hue_offset, panel_layers)) = panels.get(panel_entity) else {
             continue;
         };
-        let hue = hue_offset.map_or(0.0, |panel_hue_offset| panel_hue_offset.0);
         let is_geometry = panel.render_mode() == RenderMode::Geometry;
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
+        let hue = hue_offset.map_or(0.0, |panel_hue_offset| panel_hue_offset.0);
 
         let (batches, max_command_index) =
             collect_panel_batches(panel_entity, &panel_children, &resolved_alphas, &defaults);
@@ -262,6 +296,279 @@ pub(super) fn build_panel_batched_meshes(
     perf.panel_text.mesh_build_ms =
         mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
+}
+
+/// Builds Slug meshes for panels whose Slug text runs changed.
+#[cfg(feature = "slug_text")]
+pub(super) fn build_panel_slug_meshes(
+    changed_runs: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
+    panel_children: Query<(Entity, &PanelSlugTextRun, &PanelTextChild, &ChildOf)>,
+    old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
+    panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
+    resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    defaults: Res<CascadeDefaults>,
+    rtt_registry: Res<PanelRttRegistry>,
+    mut slug_backend: ResMut<SlugBackend>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<SlugTextMaterial>>,
+    mut storage_buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut perf: ResMut<DiegeticPerfStats>,
+    mut commands: Commands,
+) {
+    let mesh_build_start = Instant::now();
+    let dirty_panels = collect_dirty_panels(&changed_runs);
+
+    for panel_entity in dirty_panels {
+        let Ok((panel, _hue_offset, panel_layers)) = panels.get(panel_entity) else {
+            continue;
+        };
+        for (mesh_entity, child_of) in &old_meshes {
+            if child_of.parent() == panel_entity {
+                commands.entity(mesh_entity).despawn();
+            }
+        }
+
+        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
+        let content_layer = rtt_registry
+            .get_layer(panel_entity)
+            .map_or_else(|| scene_layer.clone(), RenderLayers::layer);
+        let is_geometry = panel.render_mode() == RenderMode::Geometry;
+        let text_base = slug_panel_base_material(panel, is_geometry);
+
+        for (child_entity, panel_run, panel_text_child, child_of) in &panel_children {
+            if child_of.parent() != panel_entity {
+                continue;
+            }
+            let resolved_alpha = resolved_alphas.get(child_entity).map_or_else(
+                |_| PanelTextAlpha::global_default(&defaults).0,
+                |resolved| resolved.0.0,
+            );
+            spawn_panel_slug_run(PanelSlugSpawnRequest {
+                panel_entity,
+                panel_run,
+                panel_text_child,
+                text_base: &text_base,
+                resolved_alpha,
+                is_geometry,
+                content_layer: &content_layer,
+                scene_layer: &scene_layer,
+                slug_backend: &mut slug_backend,
+                meshes: &mut meshes,
+                materials: &mut materials,
+                storage_buffers: &mut storage_buffers,
+                commands: &mut commands,
+            });
+        }
+    }
+
+    perf.panel_text.mesh_build_ms =
+        mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
+}
+
+#[cfg(feature = "slug_text")]
+fn collect_dirty_panels(
+    changed_children: &Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
+) -> Vec<Entity> {
+    let mut dirty_panels = Vec::new();
+    for child_of in changed_children {
+        let panel_entity = child_of.parent();
+        if !dirty_panels.contains(&panel_entity) {
+            dirty_panels.push(panel_entity);
+        }
+    }
+    dirty_panels
+}
+
+#[cfg(feature = "slug_text")]
+struct PanelSlugSpawnRequest<'a, 'w, 's> {
+    panel_entity:     Entity,
+    panel_run:        &'a PanelSlugTextRun,
+    panel_text_child: &'a PanelTextChild,
+    text_base:        &'a StandardMaterial,
+    resolved_alpha:   AlphaMode,
+    is_geometry:      bool,
+    content_layer:    &'a RenderLayers,
+    scene_layer:      &'a RenderLayers,
+    slug_backend:     &'a mut SlugBackend,
+    meshes:           &'a mut Assets<Mesh>,
+    materials:        &'a mut Assets<SlugTextMaterial>,
+    storage_buffers:  &'a mut Assets<ShaderStorageBuffer>,
+    commands:         &'a mut Commands<'w, 's>,
+}
+
+#[cfg(feature = "slug_text")]
+fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
+    let PanelSlugSpawnRequest {
+        panel_entity,
+        panel_run,
+        panel_text_child,
+        text_base,
+        resolved_alpha,
+        is_geometry,
+        content_layer,
+        scene_layer,
+        slug_backend,
+        meshes,
+        materials,
+        storage_buffers,
+        commands,
+    } = request;
+    let Ok(storage) = slug_backend.ensure_run_storage(
+        &panel_run.prepared,
+        panel_run.clip_rect,
+        meshes,
+        storage_buffers,
+    ) else {
+        return;
+    };
+
+    let command_depth = panel_text_child.command_index.saturating_add(1).to_f32();
+    let text_depth_bias = if is_geometry {
+        command_depth * constants::LAYER_DEPTH_BIAS
+    } else {
+        0.0
+    };
+    let is_invisible = panel_run.render_mode == GlyphRenderMode::Invisible;
+    let needs_proxy = if is_invisible {
+        panel_run.shadow_mode != GlyphShadowMode::None
+    } else {
+        matches!(
+            panel_run.shadow_mode,
+            GlyphShadowMode::Text | GlyphShadowMode::PunchOut
+        )
+    };
+    let shadow_mode =
+        if is_invisible || needs_proxy || panel_run.shadow_mode == GlyphShadowMode::None {
+            TextMeshShadow::Suppress
+        } else {
+            TextMeshShadow::Cast
+        };
+
+    if !is_invisible {
+        let material = materials.add(slug_panel_material(
+            text_base,
+            text_depth_bias,
+            resolved_alpha,
+            panel_run.fill_color,
+            slug_render_mode(panel_run.render_mode),
+            &storage,
+        ));
+        spawn_slug_visible_mesh(
+            panel_entity,
+            storage.mesh.clone(),
+            material,
+            shadow_mode,
+            content_layer,
+            commands,
+        );
+    }
+
+    if needs_proxy {
+        let proxy_material = materials.add(slug_panel_material(
+            text_base,
+            text_depth_bias - constants::LAYER_DEPTH_BIAS,
+            AlphaMode::Mask(0.5),
+            panel_run.fill_color,
+            slug_shadow_render_mode(panel_run.shadow_mode),
+            &storage,
+        ));
+        commands.entity(panel_entity).with_child((
+            DiegeticShadowProxy,
+            Mesh3d(storage.mesh),
+            MeshMaterial3d(proxy_material),
+            Transform::IDENTITY,
+            scene_layer.clone(),
+        ));
+    }
+}
+
+#[cfg(feature = "slug_text")]
+fn slug_panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMaterial {
+    let mut base = panel
+        .text_material()
+        .cloned()
+        .unwrap_or_else(constants::default_panel_material);
+    base.alpha_mode = AlphaMode::Blend;
+    base.double_sided = true;
+    base.cull_mode = None;
+    if !is_geometry {
+        base.unlit = true;
+    }
+    base
+}
+
+#[cfg(feature = "slug_text")]
+fn slug_panel_material(
+    base: &StandardMaterial,
+    depth_bias: f32,
+    alpha_mode: AlphaMode,
+    fill_color: Color,
+    render_mode: impl Into<SlugRenderMode>,
+    storage: &SlugRunStorage,
+) -> SlugTextMaterial {
+    let mut base = base.clone();
+    base.depth_bias = depth_bias;
+    base.alpha_mode = alpha_mode;
+    make_slug_text_material(SlugTextMaterialInput {
+        base,
+        fill_color,
+        render_mode: render_mode.into(),
+        curves: storage.curves.clone(),
+        bands: storage.bands.clone(),
+        glyphs: storage.glyphs.clone(),
+    })
+}
+
+#[cfg(feature = "slug_text")]
+fn spawn_slug_visible_mesh(
+    panel_entity: Entity,
+    mesh_handle: Handle<Mesh>,
+    material_handle: Handle<SlugTextMaterial>,
+    shadow_mode: TextMeshShadow,
+    content_layer: &RenderLayers,
+    commands: &mut Commands,
+) {
+    match shadow_mode {
+        TextMeshShadow::Suppress => {
+            commands.entity(panel_entity).with_child((
+                DiegeticTextMesh,
+                NotShadowCaster,
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                Transform::IDENTITY,
+                content_layer.clone(),
+            ));
+        },
+        TextMeshShadow::Cast => {
+            commands.entity(panel_entity).with_child((
+                DiegeticTextMesh,
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                Transform::IDENTITY,
+                content_layer.clone(),
+            ));
+        },
+    }
+}
+
+#[cfg(feature = "slug_text")]
+const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
+    match shadow_mode {
+        GlyphShadowMode::SolidQuad => SlugRenderMode::SolidQuad,
+        GlyphShadowMode::PunchOut => SlugRenderMode::PunchOut,
+        GlyphShadowMode::None | GlyphShadowMode::Text => SlugRenderMode::Text,
+    }
+}
+
+#[cfg(feature = "slug_text")]
+const fn slug_render_mode(render_mode: GlyphRenderMode) -> SlugRenderMode {
+    match render_mode {
+        GlyphRenderMode::Invisible => SlugRenderMode::Invisible,
+        GlyphRenderMode::Text => SlugRenderMode::Text,
+        GlyphRenderMode::PunchOut => SlugRenderMode::PunchOut,
+        GlyphRenderMode::SolidQuad => SlugRenderMode::SolidQuad,
+    }
 }
 
 fn collect_panel_batches(

@@ -84,7 +84,7 @@ pub struct SlugGlyphInstance {
     origin:       Vec2,
     advance:      f32,
     bounds:       SlugBounds,
-    bounds_scale: f32,
+    bounds_scale: Vec2,
 }
 
 impl SlugGlyphInstance {
@@ -102,6 +102,18 @@ impl SlugGlyphInstance {
         advance: f32,
         bounds: SlugBounds,
         bounds_scale: f32,
+    ) -> Self {
+        Self::new_non_uniform(key, origin, advance, bounds, Vec2::splat(bounds_scale))
+    }
+
+    /// Creates a positioned glyph instance with non-uniform scaled bounds.
+    #[must_use]
+    pub const fn new_non_uniform(
+        key: SlugGlyphKey,
+        origin: Vec2,
+        advance: f32,
+        bounds: SlugBounds,
+        bounds_scale: Vec2,
     ) -> Self {
         Self {
             key,
@@ -130,7 +142,7 @@ impl SlugGlyphInstance {
 
     /// Scale from glyph design-space bounds to run layout units.
     #[must_use]
-    pub const fn bounds_scale(self) -> f32 { self.bounds_scale }
+    pub const fn bounds_scale(self) -> Vec2 { self.bounds_scale }
 }
 
 /// CPU representation of one shaped Slug text run.

@@ -22,7 +22,7 @@ use crate::slug_text_spike::DEFAULT_BAND_COUNT;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackend;
 #[cfg(feature = "slug_text")]
-use crate::slug_text_spike::SlugBuiltTextRun;
+use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
 use crate::text::GlyphLookup;
@@ -62,7 +62,7 @@ struct BuiltGlyphQuads {
 #[cfg(feature = "slug_text")]
 pub(super) struct ShapedSlugWorldText {
     /// Prepared Slug run.
-    pub(super) run:      Option<SlugBuiltTextRun>,
+    pub(super) prepared: Option<SlugPreparedTextRun>,
     /// `Anchor` offset Y in layout units.
     pub(super) anchor_y: f32,
     /// Timing and queue diagnostics from the build.
@@ -73,7 +73,7 @@ pub(super) struct ShapedSlugWorldText {
 impl ShapedSlugWorldText {
     const fn empty(stats: TextBuildStats) -> Self {
         Self {
-            run: None,
+            prepared: None,
             anchor_y: 0.0,
             stats,
         }
@@ -256,7 +256,7 @@ pub(super) fn build_world_slug_text(
     stats.atlas_ms = slug_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
 
     ShapedSlugWorldText {
-        run: Some(prepared.run),
+        prepared: Some(prepared),
         anchor_y: anchor_y * points_to_world,
         stats,
     }

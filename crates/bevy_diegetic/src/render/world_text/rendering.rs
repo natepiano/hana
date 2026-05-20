@@ -32,7 +32,7 @@ use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 #[cfg(feature = "slug_text")]
-use crate::slug_text_spike::SlugBuiltTextRun;
+use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
 
@@ -380,8 +380,8 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             mesh_spawning::despawn_mesh_children(entity, self.old_meshes, commands);
         }
 
-        if let Some(run) = slug_text.run.as_ref() {
-            mesh_ms_total += self.spawn_run(run, entity, style, backend_services, commands);
+        if let Some(prepared) = slug_text.prepared.as_ref() {
+            mesh_ms_total += self.spawn_run(prepared, entity, style, backend_services, commands);
         }
 
         apply_readiness_markers(entity, readiness, commands);
@@ -390,7 +390,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
 
     fn spawn_run(
         &mut self,
-        run: &SlugBuiltTextRun,
+        prepared: &SlugPreparedTextRun,
         entity: Entity,
         style: &WorldTextStyle,
         backend_services: &mut BackendRenderServices<'_>,
@@ -410,8 +410,8 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             commands,
         };
         mesh_spawning::spawn_slug_world_text_meshes(
-            run,
-            backend_services.slug_backend.glyph_cache(),
+            prepared,
+            &mut backend_services.slug_backend,
             entity,
             style,
             resolved_alpha.0,

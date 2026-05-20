@@ -10,6 +10,8 @@ use bevy::prelude::*;
 use self::batching::PanelTextAlpha;
 use self::batching::SharedMsdfMaterials;
 use self::batching::build_panel_batched_meshes;
+#[cfg(feature = "slug_text")]
+use self::batching::build_panel_slug_meshes;
 use self::batching::sync_panel_hue_offset;
 use self::reconcile::poll_atlas_glyphs;
 use self::reconcile::reconcile_panel_image_children;
@@ -71,6 +73,8 @@ impl Plugin for TextRenderPlugin {
                     .after(reconcile_panel_text_children)
                     .after(poll_atlas_glyphs),
                 build_panel_batched_meshes.after(shape_panel_text_children),
+                #[cfg(feature = "slug_text")]
+                build_panel_slug_meshes.after(shape_panel_text_children),
                 sync_panel_hue_offset.after(build_panel_batched_meshes),
                 world_text::render_world_text.after(poll_atlas_glyphs),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),

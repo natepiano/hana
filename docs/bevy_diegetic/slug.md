@@ -735,6 +735,8 @@ still use distance-field text until the panel Slug batching path exists.
 
 ### Phase 7: backend-owned storage and panel routing
 
+Status: completed.
+
 - Move Slug GPU storage allocation, upload handles, dirty tracking, and
   lookup state into `SlugBackend`.
 - Replace per-spawned-`WorldText` `ShaderStorageBuffer` allocation with
@@ -751,6 +753,59 @@ Exit criteria: `WorldText` and panel text can both opt into Slug through
 `TextRendererPreference`, using backend-owned Slug storage rather than
 per-mesh buffer allocation.
 
+### Retrospective
+
+**What worked:**
+
+- `SlugBackend` now owns run storage keys and GPU handles for meshes,
+  curve buffers, band buffers, and glyph buffers.
+- Panel text now has a Slug route through `PanelSlugTextRun` and
+  `build_panel_slug_meshes`, so it no longer needs atlas `GlyphQuadData`
+  when `TextRendererPreference::slug()` is active.
+- Slug clipping is handled by clipping the run mesh and UVs before upload,
+  preserving glyph-local shader coordinates.
+
+**What deviated from the plan:**
+
+- Panel Slug batching currently spawns one Slug mesh per panel text child
+  instead of merging multiple Slug runs into one panel-wide mesh.
+- Panel hue offset is still MSDF-only. Slug panel text preserves the text
+  fill color but does not yet apply `HueOffset`.
+
+**Surprises:**
+
+- Panel routing needed non-uniform Slug bounds scaling because
+  `PanelTextChild` can scale X and Y independently.
+- `WorldText` production scaling needed to move into the prepared run so
+  backend-owned storage can be reused by the spawn path without a separate
+  per-spawn scale.
+
+**Implications for remaining phases:**
+
+- Phase 8 screenshots should include at least one panel example using
+  `TextRendererPreference::slug()`.
+- Phase 8 performance notes should distinguish backend-owned storage from
+  still-unmerged panel Slug meshes.
+- Phase 9 should include panel hue-offset behavior in the effects/parity
+  review if Slug is still intended to replace MSDF.
+
+### Phase 7 Review
+
+- Phase 8 now treats panel evidence as required because panel Slug routing
+  exists.
+- Phase 8 now measures the current per-child panel Slug mesh route and
+  decides whether merged panel-level Slug batching is needed before a final
+  draw-count envelope.
+- Phase 8 now includes backend-owned storage lifetime, invalidation, and
+  cleanup behavior under repeated text changes and backend swaps.
+- Phase 8 now decides whether `SlugBackendCompleted` remains a production
+  wakeup contract or waits for async Slug work.
+- Phase 8 now adds explicit clipping validation for overlap, padding,
+  scissor, partial-glyph, and non-uniform panel scale cases.
+- Phase 9 now narrows shadow work to validation and tuning of the existing
+  `WorldText` and panel Slug proxy paths.
+- Phase 9 now includes a panel `HueOffset` parity decision for Slug text.
+
 ### Phase 8: quality and robustness
 
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
@@ -764,9 +819,19 @@ per-mesh buffer allocation.
   equivalent sizes.
 - Start with `WorldText` opt-in screenshots and measurements using
   `examples/world_text.rs` and `examples/slug_text.rs`.
-- Add full panel/world evidence after Phase 7 panel routing exists.
+- Add panel screenshots and measurements using at least one panel example
+  with `TextRendererPreference::slug()`.
+- Validate panel clipping for overlap, padding trims, scissor clips,
+  partial glyph clips, and non-uniform X/Y panel scale.
 - Measure CPU preprocessing cost, backend-owned GPU storage size, draw
   count, fragment cost, upload cost, and first-render latency.
+- Measure the current per-child panel Slug mesh route and decide whether
+  merged panel-level Slug batching is required before final draw-count
+  claims.
+- Measure backend-owned storage lifetime, invalidation, and cleanup under
+  repeated text changes and backend swaps.
+- Decide whether `SlugBackendCompleted` remains a production wakeup
+  contract now or waits for async Slug work.
 
 Exit criteria: Slug has documented quality/performance envelopes and
 known cases where it is better or worse than MTSDF.
@@ -774,7 +839,10 @@ known cases where it is better or worse than MTSDF.
 ### Phase 9: effects
 
 - Tune hard drop shadows using the existing `WorldText` shadow proxy path.
-- Add panel shadow parity after panel Slug routing exists.
+- Validate and tune panel Slug shadow proxy quality, layers, depth bias,
+  alpha mode, and proxy behavior.
+- Decide whether panel `HueOffset` should be implemented for Slug text,
+  documented as MSDF-only, or removed from Slug parity expectations.
 - Decide whether true outlines are worth implementing in
   `bevy_diegetic` or should remain out of scope.
 - If true outlines proceed, add contour-offset preprocessing and
