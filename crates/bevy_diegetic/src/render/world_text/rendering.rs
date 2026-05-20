@@ -3,12 +3,6 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
-use super::BackendRenderServices;
-use super::ComputedWorldText;
-use super::PanelTextChild;
-use super::WorldFontUnit;
-use super::WorldText;
-use super::WorldTextAlpha;
 use super::mesh_spawning;
 use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::SlugMeshSpawnAssets;
@@ -17,6 +11,12 @@ use super::mesh_spawning::WorldTextShadowProxy;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
 use super::shaping;
+use super::BackendRenderServices;
+use super::ComputedWorldText;
+use super::PanelTextChild;
+use super::WorldFontUnit;
+use super::WorldText;
+use super::WorldTextAlpha;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
 use crate::cascade::Resolved;
@@ -26,7 +26,7 @@ use crate::layout::WorldTextStyle;
 use crate::render::constants;
 use crate::render::glyph_material::GlyphMaterial;
 use crate::render::glyph_quad::GlyphQuadData;
-use crate::render::text_backend::TextRendererBackend;
+use crate::render::text_backend::TextRenderer;
 use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
@@ -100,7 +100,7 @@ pub(super) fn render_world_text(
         };
         text_count += 1;
 
-        if world_text.0.is_empty() {
+        if world_text.text().is_empty() {
             mesh_spawning::despawn_mesh_children(entity, &old_meshes, &mut commands);
             commands.entity(entity).remove::<PendingGlyphs>();
             continue;
@@ -112,7 +112,10 @@ pub(super) fn render_world_text(
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
-        if backend_services.text_backend.backend() == TextRendererBackend::Slug {
+        let selected_backend = world_text
+            .renderer()
+            .unwrap_or_else(|| backend_services.text_backend.backend());
+        if selected_backend == TextRenderer::Slug {
             let mut shared_services = SlugWorldTextRenderServices::new(
                 &font_registry,
                 &shaping_cx,
@@ -124,7 +127,7 @@ pub(super) fn render_world_text(
             );
             let (stats, mesh_ms) = shared_services.render_entity(
                 entity,
-                &world_text.0,
+                world_text.text(),
                 style,
                 scale,
                 &mut backend_services,
@@ -135,7 +138,6 @@ pub(super) fn render_world_text(
             continue;
         }
 
-        let _ = backend_services.text_backend.backend();
         let mut distance_field_services = DistanceFieldWorldTextRenderServices {
             atlas_slot:      &mut atlas_slot,
             font_registry:   &font_registry,
@@ -149,7 +151,7 @@ pub(super) fn render_world_text(
         };
         let (stats, mesh_ms) = distance_field_services.render_entity(
             entity,
-            &world_text.0,
+            world_text.text(),
             style,
             scale,
             &mut commands,

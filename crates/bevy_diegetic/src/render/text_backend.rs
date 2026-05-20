@@ -1,10 +1,11 @@
 //! Text renderer backend selection.
 
 use bevy::prelude::Resource;
+use bevy::reflect::Reflect;
 
 /// Text rendering backend used after shaping and glyph placement.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum TextRendererBackend {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+pub enum TextRenderer {
     /// Existing distance-field atlas renderer.
     #[default]
     DistanceField,
@@ -15,23 +16,23 @@ pub enum TextRendererBackend {
 /// Global text renderer preference.
 #[derive(Clone, Copy, Debug, Default, Resource)]
 pub struct TextRendererPreference {
-    backend: TextRendererBackend,
+    backend: TextRenderer,
 }
 
 impl TextRendererPreference {
     /// Creates a preference for `backend`.
     #[must_use]
-    pub const fn new(backend: TextRendererBackend) -> Self { Self { backend } }
+    pub const fn new(backend: TextRenderer) -> Self { Self { backend } }
 
     /// Creates a preference for the experimental Slug renderer.
     #[must_use]
     pub const fn slug() -> Self {
         Self {
-            backend: TextRendererBackend::Slug,
+            backend: TextRenderer::Slug,
         }
     }
 
     /// Selected text renderer backend.
     #[must_use]
-    pub const fn backend(self) -> TextRendererBackend { self.backend }
+    pub const fn backend(self) -> TextRenderer { self.backend }
 }

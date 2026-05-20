@@ -12,12 +12,13 @@ use bevy::render::storage::ShaderStorageBuffer;
 use mesh_spawning::WorldTextMesh;
 use mesh_spawning::WorldTextShadowProxy;
 pub use panel_text_child::PanelTextChild;
+pub(super) use readiness::emit_world_text_ready;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
-pub(super) use readiness::emit_world_text_ready;
 
 use super::glyph_material::GlyphMaterial;
+use super::text_backend::TextRenderer;
 use super::text_backend::TextRendererPreference;
 use super::text_shaping::TextShapingContext;
 use crate::cascade::CascadeDefaults;
@@ -127,7 +128,7 @@ pub struct ComputedGlyphMetrics {
     pub advance_x: f32,
 }
 
-/// Standalone MSDF text rendered in world space.
+/// Standalone text rendered in world space.
 ///
 /// Attach to any entity with a [`Transform`] to place text in the 3D scene.
 /// Style is controlled by the required [`TextStyle`] component (added
@@ -148,12 +149,50 @@ pub struct ComputedGlyphMetrics {
 /// ```
 #[derive(Component, Clone, Debug, Reflect)]
 #[require(WorldTextStyle, Transform, Visibility)]
-pub struct WorldText(pub String);
+pub struct WorldText {
+    text:     String,
+    renderer: Option<TextRenderer>,
+}
 
 impl WorldText {
     /// Creates a new world text with the given string.
     #[must_use]
-    pub fn new(text: impl Into<String>) -> Self { Self(text.into()) }
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text:     text.into(),
+            renderer: None,
+        }
+    }
+
+    /// Sets the renderer override for this text entity.
+    #[must_use]
+    pub const fn with_renderer(mut self, renderer: TextRenderer) -> Self {
+        self.renderer = Some(renderer);
+        self
+    }
+
+    /// Clears the renderer override so the global renderer preference applies.
+    #[must_use]
+    pub const fn with_default_renderer(mut self) -> Self {
+        self.renderer = None;
+        self
+    }
+
+    /// Text contents.
+    #[must_use]
+    pub fn text(&self) -> &str { &self.text }
+
+    /// Per-entity renderer override, if set.
+    #[must_use]
+    pub const fn renderer(&self) -> Option<TextRenderer> { self.renderer }
+
+    /// Mutates the text contents.
+    pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
+
+    /// Mutates the renderer override.
+    pub const fn set_renderer(&mut self, renderer: Option<TextRenderer>) {
+        self.renderer = renderer;
+    }
 }
 
 /// Cascading attribute for standalone-world-text alpha mode.

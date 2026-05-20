@@ -19,8 +19,6 @@ use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-use crate::render::TextRendererBackend;
-use crate::render::TextRendererPreference;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
@@ -34,8 +32,10 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
-use crate::slug_text_spike::DEFAULT_BAND_COUNT;
+use crate::render::TextRenderer;
+use crate::render::TextRendererPreference;
 use crate::slug_text_spike::SlugBackend;
+use crate::slug_text_spike::DEFAULT_BAND_COUNT;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
@@ -100,7 +100,7 @@ pub(super) fn shape_panel_text_children(
             continue;
         };
 
-        if world_text.0.is_empty() {
+        if world_text.text().is_empty() {
             clear_panel_text_output(entity, &mut commands);
             continue;
         }
@@ -113,9 +113,9 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        if text_backend.backend() == TextRendererBackend::Slug {
+        if text_backend.backend() == TextRenderer::Slug {
             let (panel_slug_run, stats) = build_panel_slug_text(
-                &world_text.0,
+                world_text.text(),
                 &config,
                 &placement,
                 &mut slug_backend,
@@ -145,7 +145,8 @@ pub(super) fn shape_panel_text_children(
             shaping_cx:    &shaping_cx,
             cache:         &mut cache,
         };
-        let (quads, stats) = shape_text_to_quads(&world_text.0, &config, &placement, &mut services);
+        let (quads, stats) =
+            shape_text_to_quads(world_text.text(), &config, &placement, &mut services);
 
         aggregate.accumulate(&stats);
         shaped_panels.insert(child_of.parent());

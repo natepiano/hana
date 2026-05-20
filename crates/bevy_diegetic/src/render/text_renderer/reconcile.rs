@@ -157,13 +157,13 @@ pub(super) fn reconcile_panel_text_children(
 
             if let Some(&child_entity) = existing_by_key.get(&key) {
                 commands.entity(child_entity).insert((
-                    WorldText(text.clone()),
+                    WorldText::new(text.clone()),
                     style,
                     panel_text_child,
                 ));
             } else {
                 commands.entity(panel_entity).with_child((
-                    WorldText(text.clone()),
+                    WorldText::new(text.clone()),
                     style,
                     panel_text_child,
                 ));

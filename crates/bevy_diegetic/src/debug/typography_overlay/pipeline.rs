@@ -102,7 +102,7 @@ pub fn build_typography_overlay(
         if !changed_entities.contains(&entity) {
             continue;
         }
-        if world_text.0.is_empty() {
+        if world_text.text().is_empty() {
             continue;
         }
 
@@ -151,7 +151,7 @@ pub fn build_typography_overlay(
 
         let measure = style.as_layout_config().scaled(boost).as_measure();
         let Some(line_metrics) = cache
-            .get_shaped(&world_text.0, &measure)
+            .get_shaped(world_text.text(), &measure)
             .and_then(|s| s.line_metrics.first().copied())
         else {
             continue;

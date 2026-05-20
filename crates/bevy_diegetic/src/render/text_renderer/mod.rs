@@ -7,18 +7,18 @@ mod shaping;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
-use self::batching::PanelTextAlpha;
-use self::batching::SharedMsdfMaterials;
 use self::batching::build_panel_batched_meshes;
 use self::batching::build_panel_slug_meshes;
 use self::batching::sync_panel_hue_offset;
+use self::batching::PanelTextAlpha;
+use self::batching::SharedMsdfMaterials;
 use self::reconcile::poll_atlas_glyphs;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
 use super::glyph_material::GlyphMaterial;
 use super::panel_rtt;
-use super::text_backend::TextRendererBackend;
+use super::text_backend::TextRenderer;
 use super::text_backend::TextRendererPreference;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
@@ -131,7 +131,7 @@ fn mark_text_pending_on_backend_changed(
     if !text_backend.is_changed() {
         return;
     }
-    if text_backend.backend() == TextRendererBackend::Slug {
+    if text_backend.backend() == TextRenderer::Slug {
         mark_all_text_pending(&panel_children, &world_texts, &mut commands);
         return;
     }
@@ -142,7 +142,7 @@ fn clear_slug_storage_on_msdf_backend_changed(
     text_backend: Res<TextRendererPreference>,
     mut slug_backend: ResMut<SlugBackend>,
 ) {
-    if text_backend.is_changed() && text_backend.backend() != TextRendererBackend::Slug {
+    if text_backend.is_changed() && text_backend.backend() != TextRenderer::Slug {
         slug_backend.clear_run_storage();
     }
 }

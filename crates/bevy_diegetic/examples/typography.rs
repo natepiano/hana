@@ -882,10 +882,10 @@ fn cycle_word(
     }
     let (word, comment) = DISPLAY_WORDS[cycle.index];
     for mut text in &mut comments {
-        text.0 = comment.to_string();
+        text.set_text(comment);
     }
     for mut text in &mut texts {
-        text.0 = word.to_string();
+        text.set_text(word);
     }
     *cycle_state = CycleState::Cycling {
         started_at:    time.elapsed(),

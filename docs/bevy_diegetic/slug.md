@@ -275,6 +275,10 @@ should be able to choose the distance-field renderer or the Slug
 renderer at runtime and keep the same public text capabilities. The two
 renderers do not need matching internals, mesh layouts, material
 structures, alpha-mode choices, shadow passes, or cache shapes.
+`WorldText` supports a per-entity renderer override, so apps can spawn
+one text entity with Slug and another with the distance-field renderer in
+the same scene while still falling back to the global preference when no
+override is set.
 
 Slug must replace the glyph silhouette source, not the public text
 behavior contract. The current `WorldText` and panel text feature set is
