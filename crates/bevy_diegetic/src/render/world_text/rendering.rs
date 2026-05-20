@@ -61,7 +61,6 @@ type PendingWorldTextQuery<'w, 's> = Query<
         Without<PanelTextChild>,
     ),
 >;
-
 /// Renders [`WorldText`] entities as MSDF glyph meshes.
 ///
 /// Processes entities in two cases:
@@ -377,6 +376,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             readiness,
             GlyphReadiness::Ready | GlyphReadiness::Invisible | GlyphReadiness::Failed
         ) {
+            backend_services.slug_backend.clear_run_storage();
             mesh_spawning::despawn_mesh_children(entity, self.old_meshes, commands);
         }
 

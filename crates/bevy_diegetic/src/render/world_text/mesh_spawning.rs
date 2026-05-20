@@ -27,6 +27,8 @@ use crate::slug_text_spike::SlugPreparedTextRun;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRenderMode;
 #[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugRunStorageKey;
+#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterial;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterialInput;
@@ -247,6 +249,7 @@ pub(super) fn spawn_slug_world_text_meshes(
         spawn_slug_visible_mesh(
             entity,
             mesh_handle.clone(),
+            prepared.storage_key,
             material_handle,
             suppress_shadow,
             assets.commands,
@@ -264,6 +267,7 @@ pub(super) fn spawn_slug_world_text_meshes(
         ));
         assets.commands.entity(entity).with_child((
             WorldTextShadowProxy,
+            prepared.storage_key,
             Mesh3d(mesh_handle),
             MeshMaterial3d(material_handle),
             Transform::IDENTITY,
@@ -314,6 +318,7 @@ const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode
 fn spawn_slug_visible_mesh(
     entity: Entity,
     mesh: Handle<Mesh>,
+    storage_key: SlugRunStorageKey,
     material: Handle<SlugTextMaterial>,
     suppress_shadow: bool,
     commands: &mut Commands,
@@ -321,6 +326,7 @@ fn spawn_slug_visible_mesh(
     if suppress_shadow {
         commands.entity(entity).with_child((
             WorldTextMesh,
+            storage_key,
             NotShadowCaster,
             Mesh3d(mesh),
             MeshMaterial3d(material),
@@ -329,6 +335,7 @@ fn spawn_slug_visible_mesh(
     } else {
         commands.entity(entity).with_child((
             WorldTextMesh,
+            storage_key,
             Mesh3d(mesh),
             MeshMaterial3d(material),
             Transform::IDENTITY,

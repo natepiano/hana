@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::Assets;
+use bevy::prelude::Component;
 use bevy::prelude::Event;
 use bevy::prelude::Handle;
 use bevy::prelude::Mesh;
@@ -86,7 +87,7 @@ pub struct SlugPreparedTextRun {
 }
 
 /// Backend key for one prepared run's GPU storage handles.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Component, Debug, Eq, Hash, PartialEq)]
 pub struct SlugRunStorageKey(u64);
 
 impl SlugRunStorageKey {
@@ -258,6 +259,14 @@ impl SlugBackend {
     #[must_use]
     pub fn stored_runs(&self) -> usize { self.run_storage.len() }
 
+    /// Removes one prepared run's backend-owned GPU handles.
+    pub fn remove_run_storage(&mut self, key: SlugRunStorageKey) -> Option<SlugRunStorage> {
+        self.run_storage.remove(&key)
+    }
+
+    /// Removes every backend-owned run storage handle.
+    pub fn clear_run_storage(&mut self) { self.run_storage.clear(); }
+
     /// Slug preprocessing version used by glyph cache keys.
     #[must_use]
     pub const fn preprocess_version(&self) -> u32 { self.preprocess_version }
@@ -292,3 +301,132 @@ impl SlugBackend {
 }
 
 const POSITIONED_GLYPH_DIAGNOSTIC_CHAR: char = '\u{FFFD}';
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should fail loudly when fixture Slug runs cannot be prepared"
+)]
+mod tests {
+    use bevy::prelude::Assets;
+
+    use super::*;
+
+    const FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+    const FONT_FAMILY: &str = "JetBrains Mono";
+    const FONT_KEY: SlugFontKey = SlugFontKey::new(11);
+    const FONT_SCALE: f32 = 0.001;
+    const CRIMSON_TEXT_DATA: &[u8] = include_bytes!("../../assets/fonts/CrimsonText-Regular.ttf");
+    const EB_GARAMOND_DATA: &[u8] = include_bytes!("../../assets/fonts/EBGaramond-Regular.ttf");
+    const LIBERATION_SANS_DATA: &[u8] =
+        include_bytes!("../../assets/fonts/LiberationSans-Regular.ttf");
+    const NOTO_SANS_DATA: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    const NOTO_CJK_DATA: &[u8] = include_bytes!("../../assets/fonts/NotoSansCJKsc-Regular.otf");
+
+    #[test]
+    fn prepared_runs_receive_distinct_storage_keys() {
+        let mut backend = SlugBackend::default();
+        let first = prepare(&mut backend, "Typography");
+        let second = prepare(&mut backend, "Typography");
+
+        assert_ne!(first.storage_key, second.storage_key);
+        assert_eq!(backend.completed_runs(), 2);
+        assert_eq!(backend.stored_runs(), 0);
+    }
+
+    #[test]
+    fn ensure_run_storage_reuses_existing_handles() {
+        let mut backend = SlugBackend::default();
+        let prepared = prepare(&mut backend, "Typography");
+        let mut meshes = Assets::<Mesh>::default();
+        let mut storage_buffers = Assets::<ShaderStorageBuffer>::default();
+
+        let first = backend
+            .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
+            .expect("fixture storage should build");
+        let second = backend
+            .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
+            .expect("fixture storage should be reused");
+
+        assert_eq!(backend.stored_runs(), 1);
+        assert_eq!(first.mesh, second.mesh);
+        assert_eq!(first.curves, second.curves);
+        assert_eq!(first.bands, second.bands);
+        assert_eq!(first.glyphs, second.glyphs);
+    }
+
+    #[test]
+    fn run_storage_can_be_removed_after_mesh_despawn() {
+        let mut backend = SlugBackend::default();
+        let prepared = prepare(&mut backend, "Typography");
+        let mut meshes = Assets::<Mesh>::default();
+        let mut storage_buffers = Assets::<ShaderStorageBuffer>::default();
+
+        backend
+            .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
+            .expect("fixture storage should build");
+        assert_eq!(backend.stored_runs(), 1);
+
+        let removed = backend.remove_run_storage(prepared.storage_key);
+        assert!(removed.is_some());
+        assert_eq!(backend.stored_runs(), 0);
+    }
+
+    #[test]
+    fn phase8_font_matrix_documents_current_outline_support() {
+        let supported_fonts = [
+            ("JetBrains Mono", FONT_DATA, SlugFontKey::new(101)),
+            ("Noto Sans", NOTO_SANS_DATA, SlugFontKey::new(102)),
+            ("EB Garamond", EB_GARAMOND_DATA, SlugFontKey::new(103)),
+            ("Crimson Text", CRIMSON_TEXT_DATA, SlugFontKey::new(104)),
+            (
+                "Liberation Sans",
+                LIBERATION_SANS_DATA,
+                SlugFontKey::new(105),
+            ),
+        ];
+
+        for (family, font_data, font_key) in supported_fonts {
+            let mut backend = SlugBackend::default();
+            let prepared = backend
+                .prepare_text_run(SlugTextRequest::new(
+                    "Typography",
+                    font_data,
+                    font_key,
+                    family,
+                    FONT_SCALE,
+                ))
+                .expect("Phase 8 Latin font fixture should prepare");
+            assert_eq!(prepared.run.run.glyphs().len(), 10);
+            assert!(!backend.glyph_cache().is_empty());
+        }
+
+        let mut backend = SlugBackend::default();
+        let unsupported = backend.prepare_text_run(SlugTextRequest::new(
+            "漢",
+            NOTO_CJK_DATA,
+            SlugFontKey::new(106),
+            "Noto Sans CJK SC",
+            FONT_SCALE,
+        ));
+        assert!(matches!(
+            unsupported,
+            Err(SlugOutlineError::CubicOutline {
+                character: '漢',
+                ..
+            })
+        ));
+    }
+
+    fn prepare(backend: &mut SlugBackend, text: &str) -> SlugPreparedTextRun {
+        backend
+            .prepare_text_run(SlugTextRequest::new(
+                text,
+                FONT_DATA,
+                FONT_KEY,
+                FONT_FAMILY,
+                FONT_SCALE,
+            ))
+            .expect("fixture text should prepare")
+    }
+}

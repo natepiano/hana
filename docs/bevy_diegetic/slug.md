@@ -808,6 +808,8 @@ per-mesh buffer allocation.
 
 ### Phase 8: quality and robustness
 
+Status: completed.
+
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
   Crimson Text.
 - Include small text, large text, oblique world text, high zoom, dense
@@ -836,13 +838,117 @@ per-mesh buffer allocation.
 Exit criteria: Slug has documented quality/performance envelopes and
 known cases where it is better or worse than MTSDF.
 
-### Phase 9: effects
+### Retrospective
 
-- Tune hard drop shadows using the existing `WorldText` shadow proxy path.
+**What worked:**
+
+- Added a Slug run storage profile API. A live `slug_text` run for
+  `Typography` measured 10 glyph instances, 8 unique glyphs, 40 mesh
+  vertices, 60 indices, 970 curve records, 256 band records, and 35,392
+  curve/band/glyph record bytes before GPU alignment.
+- Added tests for storage-key reuse/removal, run storage profiling,
+  partial clip mesh trimming, fully clipped glyph removal, and the Phase
+  8 Latin font matrix.
+- Captured BRP screenshot evidence from `crates/bevy_diegetic/examples/slug_text.rs`
+  at `/tmp/slug_text_phase8_wide.png`; the example home frame now shows
+  the whole word instead of cropping the run.
+
+**What deviated from the plan:**
+
+- The current CJK asset, `NotoSansCJKsc-Regular.otf`, uses cubic outlines
+  for `漢` and is rejected by the quadratic-only Slug preprocessor. Dense
+  CJK quality testing waits for either a quadratic CJK font fixture or
+  cubic conversion.
+- Phase 8 measured the isolated `slug_text` path and added code-level
+  panel clipping/storage coverage. Full panel screenshots and merged
+  panel draw-count measurements remain for the panel-specific follow-up.
+- Temporarily running `panel_rendering` with `TextRendererPreference::slug()`
+  exposed a production routing gap: many panel glyphs failed with
+  `font does not contain glyph id 821`, so the existing panel example
+  remains on the distance-field renderer until Slug resolves the exact
+  face/glyph identity used by panel text.
+
+**Surprises:**
+
+- The `Typography` run reuses packed glyph data as expected: 10 glyph
+  instances collapse to 8 unique glyph records.
+- Backend-owned storage needed explicit cleanup. Slug mesh children now
+  carry the run storage key, panel rebuilds remove old run storage by
+  key, and world-text Slug rebuilds clear backend run storage before
+  uploading the replacement run.
+
+**Implications for remaining phases:**
+
+- Slug is currently a strong fit for Latin TrueType/quadratic text:
+  JetBrains Mono, Noto Sans, EB Garamond, Crimson Text, and Liberation
+  Sans all prepare `Typography` successfully.
+- Slug is not yet ready as a full MSDF replacement for CJK, emoji,
+  fallback fonts, panel text, or cubic-outline fonts.
+- Phase 9 should fix and investigate panel Slug readiness before effects.
+  Separate follow-up work should decide the final production cache policy
+  for backend-owned storage and whether CFF/cubic support comes before or
+  after MSDF removal.
+
+### Phase 8 Review
+
+- Phase 9 is now a fix/investigate phase for panel Slug readiness instead
+  of an effects phase.
+- Phase 9 now includes the panel Slug face/glyph identity failure found by
+  `panel_rendering` with `TextRendererPreference::slug()`.
+- Phase 9 now includes panel screenshot evidence, current per-child Slug
+  mesh measurement, and the merged-batching decision before final panel
+  performance claims.
+- Phase 9 now records the future interactive-panel constraint: batching
+  must not prevent per-element behavior for buttons, sliders, dropdowns,
+  or similar panel controls.
+- Phase 9 now includes production storage lifetime policy work for
+  backend-owned Slug run storage.
+- Phase 10 is now the effects phase. It stays focused on validating and
+  tuning existing shadow proxy paths, and names the concrete Slug
+  `HueOffset` implementation hooks.
+- The test matrix now records that dense CJK quality tests require a
+  quadratic CJK font fixture or cubic-outline support.
+
+### Phase 9: panel Slug readiness
+
+- Fix or explain the panel Slug face/glyph identity failure found by
+  temporarily running `panel_rendering` with
+  `TextRendererPreference::slug()`: repeated `font does not contain glyph
+  id 821` warnings left the main panel text blank.
+- Add a panel example or opt-in mode that renders panel text through Slug
+  reliably enough for screenshots and manual inspection.
+- Capture panel Slug screenshots that include clipped text, overflow text,
+  padding trims, scissor clips, partial-glyph clips, and non-uniform X/Y
+  panel scale.
+- Measure the current per-child panel Slug mesh route and decide whether
+  merged panel-level Slug batching is needed before final draw-count
+  claims.
+- Preserve future per-element panel behavior while evaluating mesh
+  batching. Buttons, sliders, dropdowns, and similar controls may need
+  per-element hit testing, visibility, material state, or update routing
+  even if Slug rendering eventually merges draw work.
+- Replace the temporary world-text clear-all run-storage cleanup with a
+  production storage lifetime policy that covers reuse, invalidation,
+  backend swaps, text changes, despawn cleanup, and multi-entity scenes.
+- Decide whether `SlugBackendCompleted` remains a production wakeup
+  contract now or waits for async Slug preprocessing.
+
+Exit criteria: panel Slug text renders reliably enough to inspect and
+measure; the remaining panel performance and storage policy decisions are
+explicit enough to support effects and replacement work.
+
+### Phase 10: effects
+
+- Validate and tune hard drop shadows using the existing `WorldText`
+  Slug shadow proxy path. The basic proxy path already exists; this
+  phase is about quality, layers, depth bias, alpha mode, and proxy
+  behavior.
 - Validate and tune panel Slug shadow proxy quality, layers, depth bias,
   alpha mode, and proxy behavior.
 - Decide whether panel `HueOffset` should be implemented for Slug text,
-  documented as MSDF-only, or removed from Slug parity expectations.
+  documented as MSDF-only, or removed from Slug parity expectations. If
+  implemented, update `SlugTextUniform`, `slug_text.wgsl`, Slug material
+  construction, and the `sync_panel_hue_offset` path.
 - Decide whether true outlines are worth implementing in
   `bevy_diegetic` or should remain out of scope.
 - If true outlines proceed, add contour-offset preprocessing and
@@ -856,6 +962,9 @@ implementation path or a documented decision to defer.
 - `slug_geometry` unit tests: outline loading, line-to-quadratic
   encoding, cubic conversion or rejection, winding, band sorting, and
   horizontal/vertical edge cases.
+- Dense CJK quality tests require either a quadratic CJK font fixture or
+  cubic-outline support; the current bundled CJK OTF is intentionally
+  recorded as unsupported by the quadratic-only path.
 - Slug cache unit tests: `SlugGlyphKey`, current preprocess-version
   invalidation, and failed glyph states. Storage-profile and
   effect-profile invalidation tests wait until those profiles exist.

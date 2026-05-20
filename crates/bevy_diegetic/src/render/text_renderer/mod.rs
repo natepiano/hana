@@ -32,6 +32,8 @@ use crate::cascade::CascadePanelChildPlugin;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
 #[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugBackend;
+#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugBackendCompleted;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextSpikePlugin;
@@ -62,6 +64,8 @@ impl Plugin for TextRenderPlugin {
             (
                 panel_rtt::setup_panel_rtt,
                 poll_atlas_glyphs,
+                #[cfg(feature = "slug_text")]
+                clear_slug_storage_on_msdf_backend_changed,
                 reconcile_panel_text_children
                     .after(poll_atlas_glyphs)
                     .after(panel_rtt::setup_panel_rtt),
@@ -142,6 +146,16 @@ fn mark_text_pending_on_backend_changed(
         return;
     }
     mark_all_text_pending(&panel_children, &world_texts, &mut commands);
+}
+
+#[cfg(feature = "slug_text")]
+fn clear_slug_storage_on_msdf_backend_changed(
+    text_backend: Res<TextRendererPreference>,
+    mut slug_backend: ResMut<SlugBackend>,
+) {
+    if text_backend.is_changed() && text_backend.backend() != TextRendererBackend::Slug {
+        slug_backend.clear_run_storage();
+    }
 }
 
 fn mark_all_text_pending(

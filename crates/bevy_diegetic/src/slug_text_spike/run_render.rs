@@ -19,6 +19,37 @@ use super::run::SlugGlyphCache;
 use super::run::SlugGlyphInstance;
 use super::run::SlugGlyphKey;
 
+/// Approximate storage profile for one Slug text run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SlugRunStorageProfile {
+    /// Number of positioned glyph instances in the run.
+    pub glyph_instances: usize,
+    /// Number of unique glyph records packed for the run.
+    pub unique_glyphs:   usize,
+    /// Number of mesh vertices emitted for the run.
+    pub mesh_vertices:   usize,
+    /// Number of mesh indices emitted for the run.
+    pub mesh_indices:    usize,
+    /// Number of curve records uploaded for the run.
+    pub curve_records:   usize,
+    /// Number of band records uploaded for the run.
+    pub band_records:    usize,
+    /// Bytes used by curve records before GPU alignment.
+    pub curve_bytes:     usize,
+    /// Bytes used by band records before GPU alignment.
+    pub band_bytes:      usize,
+    /// Bytes used by glyph records before GPU alignment.
+    pub glyph_bytes:     usize,
+}
+
+impl SlugRunStorageProfile {
+    /// Total bytes used by Slug storage records before GPU alignment.
+    #[must_use]
+    pub const fn storage_bytes(self) -> usize {
+        self.curve_bytes + self.band_bytes + self.glyph_bytes
+    }
+}
+
 /// GPU-ready data for one Slug text run in the isolated spike path.
 #[derive(Clone, Debug)]
 pub struct SlugRunRenderData {
@@ -30,6 +61,24 @@ pub struct SlugRunRenderData {
     pub bands:  Vec<SlugBandRecord>,
     /// Unique glyph table indexed by each quad through `UV_1.x`.
     pub glyphs: Vec<SlugGlyphRecord>,
+}
+
+impl SlugRunRenderData {
+    /// Returns a profile for this run's mesh and storage records.
+    #[must_use]
+    pub fn profile(&self) -> SlugRunStorageProfile {
+        SlugRunStorageProfile {
+            glyph_instances: self.mesh.count_vertices() / 4,
+            unique_glyphs:   self.glyphs.len(),
+            mesh_vertices:   self.mesh.count_vertices(),
+            mesh_indices:    self.mesh.indices().map_or(0, Indices::len),
+            curve_records:   self.curves.len(),
+            band_records:    self.bands.len(),
+            curve_bytes:     self.curves.len() * std::mem::size_of::<SlugCurveRecord>(),
+            band_bytes:      self.bands.len() * std::mem::size_of::<SlugBandRecord>(),
+            glyph_bytes:     self.glyphs.len() * std::mem::size_of::<SlugGlyphRecord>(),
+        }
+    }
 }
 
 /// Error while building run-level Slug render data.
@@ -260,5 +309,135 @@ impl RunMeshBuilder {
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, self.glyph_indices);
         mesh.insert_indices(Indices::U32(self.indices));
         mesh
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "tests should fail loudly when fixture mesh data is missing"
+)]
+mod tests {
+    use bevy::mesh::MeshVertexAttribute;
+    use bevy::mesh::VertexAttributeValues;
+
+    use super::*;
+    use crate::slug_text_spike::SlugBackend;
+    use crate::slug_text_spike::SlugFontKey;
+    use crate::slug_text_spike::SlugTextRequest;
+
+    const FONT_DATA: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
+    const FONT_FAMILY: &str = "JetBrains Mono";
+    const FONT_KEY: SlugFontKey = SlugFontKey::new(7);
+    const FONT_SCALE: f32 = 0.001;
+
+    #[test]
+    fn profile_counts_unique_glyph_storage_once() {
+        let (preview, backend) = build_preview("Typography");
+        let render_data = build_slug_run_render_data(&preview, backend.glyph_cache(), FONT_SCALE)
+            .expect("fixture run should render");
+        let profile = render_data.profile();
+
+        assert_eq!(profile.glyph_instances, preview.run.glyphs().len());
+        assert_eq!(profile.mesh_vertices, profile.glyph_instances * 4);
+        assert_eq!(profile.mesh_indices, profile.glyph_instances * 6);
+        assert_eq!(profile.unique_glyphs, backend.glyph_cache().len());
+        assert!(
+            profile.unique_glyphs < profile.glyph_instances,
+            "repeated letters should share packed glyph storage"
+        );
+        assert!(profile.storage_bytes() > 0);
+    }
+
+    #[test]
+    fn clip_rect_trims_mesh_positions_and_uvs() {
+        let (preview, backend) = build_preview("H");
+        let bounds = preview.run.bounds();
+        let clip_x = bounds.min.x.midpoint(bounds.max.x) * FONT_SCALE;
+        let clip_rect = Some([
+            clip_x,
+            bounds.min.y * FONT_SCALE,
+            bounds.max.x * FONT_SCALE,
+            bounds.max.y * FONT_SCALE,
+        ]);
+
+        let render_data = build_slug_run_render_data_with_clip(
+            &preview,
+            backend.glyph_cache(),
+            FONT_SCALE,
+            clip_rect,
+        )
+        .expect("fixture run should render");
+
+        let positions = float32x3_attribute(&render_data.mesh, Mesh::ATTRIBUTE_POSITION);
+        let uvs = float32x2_attribute(&render_data.mesh, Mesh::ATTRIBUTE_UV_0);
+        assert_eq!(positions.len(), 4);
+        assert_eq!(uvs.len(), 4);
+        assert!(
+            positions.iter().all(|position| position[0] >= clip_x),
+            "clipped mesh should not extend left of the clip rect"
+        );
+        assert!(
+            uvs.iter().any(|uv| uv[0] > 0.0),
+            "left-trimmed glyph should move UVs into the glyph quad"
+        );
+    }
+
+    #[test]
+    fn fully_clipped_glyph_emits_no_mesh_vertices() {
+        let (preview, backend) = build_preview("H");
+        let bounds = preview.run.bounds();
+        let clip_rect = Some([
+            bounds.max.x.mul_add(FONT_SCALE, 1.0),
+            bounds.min.y * FONT_SCALE,
+            bounds.max.x.mul_add(FONT_SCALE, 2.0),
+            bounds.max.y * FONT_SCALE,
+        ]);
+
+        let render_data = build_slug_run_render_data_with_clip(
+            &preview,
+            backend.glyph_cache(),
+            FONT_SCALE,
+            clip_rect,
+        )
+        .expect("fixture run should render");
+
+        assert_eq!(render_data.profile().mesh_vertices, 0);
+        assert_eq!(render_data.profile().mesh_indices, 0);
+    }
+
+    fn build_preview(text: &str) -> (SlugBuiltTextRun, SlugBackend) {
+        let mut backend = SlugBackend::default();
+        let prepared = backend
+            .prepare_text_run(SlugTextRequest::new(
+                text,
+                FONT_DATA,
+                FONT_KEY,
+                FONT_FAMILY,
+                FONT_SCALE,
+            ))
+            .expect("fixture text should prepare");
+        (prepared.run, backend)
+    }
+
+    fn float32x3_attribute(mesh: &Mesh, attribute: MeshVertexAttribute) -> &[[f32; 3]] {
+        let values = mesh
+            .attribute(attribute)
+            .expect("mesh should contain requested attribute");
+        let VertexAttributeValues::Float32x3(values) = values else {
+            panic!("mesh attribute should be Float32x3");
+        };
+        values
+    }
+
+    fn float32x2_attribute(mesh: &Mesh, attribute: MeshVertexAttribute) -> &[[f32; 2]] {
+        let values = mesh
+            .attribute(attribute)
+            .expect("mesh should contain requested attribute");
+        let VertexAttributeValues::Float32x2(values) = values else {
+            panic!("mesh attribute should be Float32x2");
+        };
+        values
     }
 }

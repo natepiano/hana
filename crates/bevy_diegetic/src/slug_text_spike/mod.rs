@@ -45,4 +45,5 @@ pub use run::SlugTextRun;
 pub use run::build_slug_text_run;
 pub use run_render::SlugRunRenderData;
 pub use run_render::SlugRunRenderError;
+pub use run_render::SlugRunStorageProfile;
 pub use run_render::build_slug_run_render_data;

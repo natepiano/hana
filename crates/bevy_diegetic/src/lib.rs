@@ -226,6 +226,8 @@ pub use slug_text_spike::SlugRunStorage;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugRunStorageKey;
 #[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugRunStorageProfile;
+#[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugTextMaterial;
 #[cfg(feature = "slug_text")]
 pub use slug_text_spike::SlugTextMaterialInput;

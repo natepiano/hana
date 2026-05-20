@@ -5,6 +5,8 @@
 //! packs them into banded curve data, and renders the fixtures through the
 //! isolated Slug shader path.
 
+use std::time::Instant;
+
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy_diegetic::Anchor;
@@ -45,7 +47,7 @@ const WORLD_TEXT_REFERENCE_Z: f32 = -0.0001;
 const SLUG_FILL_COLOR: Color = Color::srgba(1.0, 0.38, 0.20, 1.0);
 const WORLD_TEXT_REFERENCE_COLOR: Color = Color::WHITE;
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, PREVIEW_ELEVATION, 0.0);
-const HOME_FRAME_SIZE: f32 = 5.2;
+const HOME_FRAME_SIZE: f32 = 10.8;
 const HOME_PITCH: f32 = 0.0;
 const HOME_YAW: f32 = 0.0;
 const TITLE_CONTROL: &str = "Scroll Zoom";
@@ -88,13 +90,15 @@ fn setup(
     mut storage_buffers: ResMut<Assets<ShaderStorageBuffer>>,
     mut slug_backend: ResMut<SlugBackend>,
 ) {
+    let prepare_start = Instant::now();
     match load_preview_text(&mut slug_backend) {
         Ok(preview) => {
+            let prepare_ms = prepare_start.elapsed().as_secs_f32() * 1000.0;
             if let Some(completion) = slug_backend.last_completion() {
                 commands.trigger(completion);
                 log_slug_backend_completion(completion);
             }
-            log_preview_metrics(&preview, &slug_backend);
+            log_preview_metrics(&preview, &slug_backend, prepare_ms);
             log_cjk_probe(&mut slug_backend);
             spawn_world_text_reference(&mut commands, &preview);
             spawn_slug_text_run(
@@ -142,10 +146,10 @@ fn load_preview_text(slug_backend: &mut SlugBackend) -> Result<SlugBuiltTextRun,
     Ok(prepared.run)
 }
 
-fn log_preview_metrics(preview: &SlugBuiltTextRun, slug_backend: &SlugBackend) {
+fn log_preview_metrics(preview: &SlugBuiltTextRun, slug_backend: &SlugBackend, prepare_ms: f32) {
     info!(
         "parley preview run: glyph_instances={}, unique_packed_glyphs={}, \
-        advance_width={}, bounds=({}, {})..({}, {})",
+        prepare_ms={prepare_ms:.3}, advance_width={}, bounds=({}, {})..({}, {})",
         preview.run.glyphs().len(),
         slug_backend.glyph_cache().len(),
         preview.run.advance_width(),
@@ -214,6 +218,7 @@ fn spawn_slug_text_run(
     preview: &SlugBuiltTextRun,
     slug_backend: &SlugBackend,
 ) {
+    let render_start = Instant::now();
     let render_data =
         match build_slug_run_render_data(preview, slug_backend.glyph_cache(), FONT_SCALE) {
             Ok(render_data) => render_data,
@@ -222,6 +227,19 @@ fn spawn_slug_text_run(
                 return;
             },
         };
+    let render_ms = render_start.elapsed().as_secs_f32() * 1000.0;
+    let profile = render_data.profile();
+    info!(
+        "slug run storage: render_ms={render_ms:.3}, glyph_instances={}, unique_glyphs={}, \
+        vertices={}, indices={}, curve_records={}, band_records={}, storage_bytes={}",
+        profile.glyph_instances,
+        profile.unique_glyphs,
+        profile.mesh_vertices,
+        profile.mesh_indices,
+        profile.curve_records,
+        profile.band_records,
+        profile.storage_bytes()
+    );
     let curve_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.curves));
     let band_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.bands));
     let glyph_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.glyphs));

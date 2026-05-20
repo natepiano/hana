@@ -38,6 +38,8 @@ use crate::slug_text_spike::SlugRenderMode;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugRunStorage;
 #[cfg(feature = "slug_text")]
+use crate::slug_text_spike::SlugRunStorageKey;
+#[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterial;
 #[cfg(feature = "slug_text")]
 use crate::slug_text_spike::SlugTextMaterialInput;
@@ -303,7 +305,10 @@ pub(super) fn build_panel_batched_meshes(
 pub(super) fn build_panel_slug_meshes(
     changed_runs: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
     panel_children: Query<(Entity, &PanelSlugTextRun, &PanelTextChild, &ChildOf)>,
-    old_meshes: Query<(Entity, &ChildOf), Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>>,
+    old_meshes: Query<
+        (Entity, &ChildOf, Option<&SlugRunStorageKey>),
+        Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>,
+    >,
     panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
@@ -322,8 +327,11 @@ pub(super) fn build_panel_slug_meshes(
         let Ok((panel, _hue_offset, panel_layers)) = panels.get(panel_entity) else {
             continue;
         };
-        for (mesh_entity, child_of) in &old_meshes {
+        for (mesh_entity, child_of, storage_key) in &old_meshes {
             if child_of.parent() == panel_entity {
+                if let Some(storage_key) = storage_key {
+                    slug_backend.remove_run_storage(*storage_key);
+                }
                 commands.entity(mesh_entity).despawn();
             }
         }
@@ -457,6 +465,7 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
         spawn_slug_visible_mesh(
             panel_entity,
             storage.mesh.clone(),
+            panel_run.prepared.storage_key,
             material,
             shadow_mode,
             content_layer,
@@ -475,6 +484,7 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
         ));
         commands.entity(panel_entity).with_child((
             DiegeticShadowProxy,
+            panel_run.prepared.storage_key,
             Mesh3d(storage.mesh),
             MeshMaterial3d(proxy_material),
             Transform::IDENTITY,
@@ -524,6 +534,7 @@ fn slug_panel_material(
 fn spawn_slug_visible_mesh(
     panel_entity: Entity,
     mesh_handle: Handle<Mesh>,
+    storage_key: SlugRunStorageKey,
     material_handle: Handle<SlugTextMaterial>,
     shadow_mode: TextMeshShadow,
     content_layer: &RenderLayers,
@@ -533,6 +544,7 @@ fn spawn_slug_visible_mesh(
         TextMeshShadow::Suppress => {
             commands.entity(panel_entity).with_child((
                 DiegeticTextMesh,
+                storage_key,
                 NotShadowCaster,
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(material_handle),
@@ -543,6 +555,7 @@ fn spawn_slug_visible_mesh(
         TextMeshShadow::Cast => {
             commands.entity(panel_entity).with_child((
                 DiegeticTextMesh,
+                storage_key,
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(material_handle),
                 Transform::IDENTITY,
