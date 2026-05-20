@@ -6,6 +6,7 @@ use bevy_kana::ToU32;
 
 use super::geometry::QuadraticSegment;
 use super::geometry::SlugGlyph;
+use bevy::math::Vec2;
 
 const QUADRATIC_SAMPLE_STEPS: u16 = 10;
 
@@ -49,7 +50,7 @@ fn append_sampled_segment(
     }
 }
 
-fn sample_quadratic(segment: &QuadraticSegment, t: f32) -> bevy::math::Vec2 {
+fn sample_quadratic(segment: &QuadraticSegment, t: f32) -> Vec2 {
     let inverse_t = 1.0 - t;
     let start_weight = inverse_t * inverse_t;
     let control_weight = 2.0 * inverse_t * t;

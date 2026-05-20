@@ -21,6 +21,7 @@ use bevy::render::render_resource::BindGroupLayout;
 use bevy::render::render_resource::Buffer;
 use bevy::render::render_resource::BufferInitDescriptor;
 use bevy::render::render_resource::BufferUsages;
+use bevy::render::render_resource::CachedComputePipelineId;
 use bevy::render::render_resource::CachedPipelineState;
 use bevy::render::render_resource::CommandEncoder;
 use bevy::render::render_resource::CommandEncoderDescriptor;
@@ -264,7 +265,7 @@ fn encode_image(
 
 fn lookup_pipeline_or_warn<'a>(
     cache: &'a PipelineCache,
-    id: bevy::render::render_resource::CachedComputePipelineId,
+    id: CachedComputePipelineId,
     label: &str,
 ) -> Option<&'a ComputePipeline> {
     let pipe = cache.get_compute_pipeline(id);

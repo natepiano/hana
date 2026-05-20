@@ -22,12 +22,13 @@
 const ROOT_EPSILON: f32 = 0.00001;
 const DISCARD_ALPHA: f32 = 0.02;
 const COVERAGE_SAMPLE_COUNT: f32 = 5.0;
+const RENDER_MODE_TEXT: u32 = 1u;
+const RENDER_MODE_PUNCH_OUT: u32 = 2u;
+const RENDER_MODE_SOLID_QUAD: u32 = 3u;
 
 struct SlugTextUniform {
-    bounds_min: vec2<f32>,
-    bounds_size: vec2<f32>,
     fill_color: vec4<f32>,
-    band_count: u32,
+    render_mode: u32,
 }
 
 struct SlugCurveRecord {
@@ -42,14 +43,34 @@ struct SlugBandRecord {
     y_max: f32,
 }
 
+struct SlugGlyphRecord {
+    bounds_min_size: vec4<f32>,
+    band_range: vec4<u32>,
+}
+
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: SlugTextUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> curves: array<SlugCurveRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<SlugBandRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<SlugGlyphRecord>;
 
-fn design_position(uv: vec2<f32>) -> vec2<f32> {
-    return uniforms.bounds_min + vec2<f32>(
-        uv.x * uniforms.bounds_size.x,
-        (1.0 - uv.y) * uniforms.bounds_size.y,
+fn glyph_index(glyph_uv: vec2<f32>) -> u32 {
+    return u32(floor(glyph_uv.x));
+}
+
+fn glyph_bounds_min(glyph: SlugGlyphRecord) -> vec2<f32> {
+    return glyph.bounds_min_size.xy;
+}
+
+fn glyph_bounds_size(glyph: SlugGlyphRecord) -> vec2<f32> {
+    return glyph.bounds_min_size.zw;
+}
+
+fn design_position(uv: vec2<f32>, glyph: SlugGlyphRecord) -> vec2<f32> {
+    let bounds_min = glyph_bounds_min(glyph);
+    let bounds_size = glyph_bounds_size(glyph);
+    return bounds_min + vec2<f32>(
+        uv.x * bounds_size.x,
+        (1.0 - uv.y) * bounds_size.y,
     );
 }
 
@@ -97,17 +118,20 @@ fn curve_crossings(curve: SlugCurveRecord, point: vec2<f32>) -> u32 {
         crossing_for_t(curve, point, (-b + root) / (2.0 * a));
 }
 
-fn band_index(point: vec2<f32>) -> u32 {
+fn band_index(point: vec2<f32>, glyph: SlugGlyphRecord) -> u32 {
+    let bounds_min = glyph_bounds_min(glyph);
+    let bounds_size = glyph_bounds_size(glyph);
+    let band_count = glyph.band_range.y;
     let normalized_y = clamp(
-        (point.y - uniforms.bounds_min.y) / max(uniforms.bounds_size.y, ROOT_EPSILON),
+        (point.y - bounds_min.y) / max(bounds_size.y, ROOT_EPSILON),
         0.0,
         0.999999,
     );
-    return min(u32(normalized_y * f32(uniforms.band_count)), uniforms.band_count - 1u);
+    return min(u32(normalized_y * f32(band_count)), band_count - 1u);
 }
 
-fn inside_at(point: vec2<f32>) -> bool {
-    let band = bands[band_index(point)];
+fn inside_at(point: vec2<f32>, glyph: SlugGlyphRecord) -> bool {
+    let band = bands[glyph.band_range.x + band_index(point, glyph)];
     var crossings = 0u;
 
     for (var offset = 0u; offset < band.count; offset += 1u) {
@@ -117,29 +141,47 @@ fn inside_at(point: vec2<f32>) -> bool {
     return (crossings & 1u) == 1u;
 }
 
-fn inside_value(point: vec2<f32>) -> f32 {
-    return select(0.0, 1.0, inside_at(point));
+fn inside_value(point: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
+    return select(0.0, 1.0, inside_at(point, glyph));
 }
 
-fn slug_coverage(uv: vec2<f32>) -> f32 {
-    let point = design_position(uv);
+fn slug_coverage(uv: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
+    let point = design_position(uv, glyph);
     let pixel = max(abs(fwidth(point)) * 0.5, vec2<f32>(ROOT_EPSILON));
     return (
-        inside_value(point) +
-        inside_value(point + vec2<f32>(pixel.x, 0.0)) +
-        inside_value(point - vec2<f32>(pixel.x, 0.0)) +
-        inside_value(point + vec2<f32>(0.0, pixel.y)) +
-        inside_value(point - vec2<f32>(0.0, pixel.y))
+        inside_value(point, glyph) +
+        inside_value(point + vec2<f32>(pixel.x, 0.0), glyph) +
+        inside_value(point - vec2<f32>(pixel.x, 0.0), glyph) +
+        inside_value(point + vec2<f32>(0.0, pixel.y), glyph) +
+        inside_value(point - vec2<f32>(0.0, pixel.y), glyph)
     ) / COVERAGE_SAMPLE_COUNT;
+}
+
+fn render_coverage(uv: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
+    if uniforms.render_mode == RENDER_MODE_SOLID_QUAD {
+        return 1.0;
+    }
+
+    let coverage = slug_coverage(uv, glyph);
+    if uniforms.render_mode == RENDER_MODE_PUNCH_OUT {
+        return 1.0 - coverage;
+    }
+
+    return coverage;
 }
 
 #ifdef PREPASS_PIPELINE
 @fragment
 fn fragment(in: VertexOutput) {
 #ifdef VERTEX_UVS_A
-    if slug_coverage(in.uv) < 0.5 {
+#ifdef VERTEX_UVS_B
+    let glyph = glyphs[glyph_index(in.uv_b)];
+    if render_coverage(in.uv, glyph) < 0.5 {
         discard;
     }
+#else
+    discard;
+#endif
 #else
     discard;
 #endif
@@ -153,8 +195,12 @@ fn fragment(
 #ifndef VERTEX_UVS_A
     discard;
 #endif
+#ifndef VERTEX_UVS_B
+    discard;
+#endif
 
-    let coverage = slug_coverage(in.uv);
+    let glyph = glyphs[glyph_index(in.uv_b)];
+    let coverage = render_coverage(in.uv, glyph);
     let final_alpha = coverage * uniforms.fill_color.a;
     if final_alpha < DISCARD_ALPHA {
         discard;

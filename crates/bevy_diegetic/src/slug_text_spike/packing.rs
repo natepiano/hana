@@ -1,3 +1,4 @@
+use bevy::math::UVec4;
 use bevy::math::Vec4;
 use bevy::render::render_resource::ShaderType;
 use bevy_kana::ToF32;
@@ -44,6 +45,26 @@ pub struct SlugBandRecord {
     pub y_min: f32,
     /// Upper band edge in font design-space units.
     pub y_max: f32,
+}
+
+/// GPU glyph record for one unique glyph in a packed Slug text run.
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
+pub struct SlugGlyphRecord {
+    /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
+    pub bounds_min_size: Vec4,
+    /// First band in `.x`, number of bands in `.y`; `.zw` are reserved.
+    pub band_range:      UVec4,
+}
+
+impl SlugGlyphRecord {
+    /// Creates a glyph record that points into the combined run band buffer.
+    #[must_use]
+    pub fn new(bounds: SlugBounds, band_start: u32, band_count: u32) -> Self {
+        Self {
+            bounds_min_size: Vec4::new(bounds.min.x, bounds.min.y, bounds.width(), bounds.height()),
+            band_range:      UVec4::new(band_start, band_count, 0, 0),
+        }
+    }
 }
 
 /// One glyph's reference-like curve and band data for the shader spike.

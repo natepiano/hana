@@ -8,34 +8,28 @@
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::DEFAULT_BAND_COUNT;
+use bevy_diegetic::FIXTURE_TEXT;
 use bevy_diegetic::FontId;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::SlugBuiltTextRun;
+use bevy_diegetic::SlugFontKey;
+use bevy_diegetic::SlugOutlineError;
+use bevy_diegetic::SlugPackedGlyph;
+use bevy_diegetic::SlugRenderMode;
+use bevy_diegetic::SlugTextMaterial;
+use bevy_diegetic::SlugTextMaterialInput;
+use bevy_diegetic::SlugTextRun;
+use bevy_diegetic::SlugTextSpikePlugin;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_diegetic::slug_text_spike::DEFAULT_BAND_COUNT;
-use bevy_diegetic::slug_text_spike::FIXTURE_TEXT;
-use bevy_diegetic::slug_text_spike::SlugFontKey;
-use bevy_diegetic::slug_text_spike::SlugGlyphCache;
-use bevy_diegetic::slug_text_spike::SlugGlyphInstance;
-use bevy_diegetic::slug_text_spike::SlugGlyphKey;
-use bevy_diegetic::slug_text_spike::SlugOutlineError;
-use bevy_diegetic::slug_text_spike::SlugPackedGlyph;
-use bevy_diegetic::slug_text_spike::SlugTextMaterial;
-use bevy_diegetic::slug_text_spike::SlugTextMaterialInput;
-use bevy_diegetic::slug_text_spike::SlugTextRun;
-use bevy_diegetic::slug_text_spike::SlugTextSpikePlugin;
-use bevy_diegetic::slug_text_spike::build_packed_glyph;
-use bevy_diegetic::slug_text_spike::load_glyph;
-use bevy_diegetic::slug_text_spike::slug_text_material;
-use bevy_kana::ToU16;
+use bevy_diegetic::build_packed_glyph;
+use bevy_diegetic::build_slug_run_render_data;
+use bevy_diegetic::build_slug_text_run;
+use bevy_diegetic::load_glyph;
+use bevy_diegetic::slug_text_material;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::TitleBar;
-use parley::fontique::Blob;
-use parley::fontique::FontInfoOverride;
-use parley::layout::PositionedLayoutItem;
-use parley::style::FontFamily;
-use parley::style::StyleProperty;
-use ttf_parser::Face;
 
 const LATIN_FONT_DATA: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
 const LATIN_FONT_FAMILY: &str = "JetBrains Mono";
@@ -56,22 +50,6 @@ const TITLE_CONTROL: &str = "Scroll Zoom";
 
 #[derive(Component)]
 struct SlugGlyphPreview;
-
-#[derive(Clone, Copy, Debug)]
-struct ShapedPreviewGlyph {
-    character: char,
-    glyph_id:  u16,
-    origin:    Vec2,
-    advance:   f32,
-}
-
-#[derive(Clone, Debug)]
-struct PreviewText {
-    run:            SlugTextRun,
-    glyph_cache:    SlugGlyphCache,
-    baseline:       f32,
-    reference_size: f32,
-}
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
@@ -110,7 +88,7 @@ fn setup(
             log_preview_metrics(&preview);
             log_cjk_probe();
             spawn_world_text_reference(&mut commands, &preview);
-            spawn_glyphs(
+            spawn_slug_text_run(
                 &mut commands,
                 &mut meshes,
                 &mut slug_materials,
@@ -124,7 +102,7 @@ fn setup(
     }
 }
 
-fn spawn_world_text_reference(commands: &mut Commands, preview: &PreviewText) {
+fn spawn_world_text_reference(commands: &mut Commands, preview: &SlugBuiltTextRun) {
     let baseline_y = PREVIEW_ELEVATION + GLYPH_BASELINE_Y;
     commands.spawn((
         Name::new("WorldText Typography Reference"),
@@ -142,97 +120,18 @@ fn spawn_world_text_reference(commands: &mut Commands, preview: &PreviewText) {
     ));
 }
 
-fn load_preview_text() -> Result<PreviewText, SlugOutlineError> {
-    let shaped_text = shape_preview_glyphs()?;
-    let mut glyph_cache = SlugGlyphCache::default();
-    let mut glyphs = Vec::with_capacity(shaped_text.glyphs.len());
-    for glyph in shaped_text.glyphs {
-        let key = SlugGlyphKey::new(LATIN_FONT_KEY, glyph.glyph_id);
-        let packed_glyph = glyph_cache.get_or_insert_packed(
-            key,
-            LATIN_FONT_DATA,
-            glyph.character,
-            DEFAULT_BAND_COUNT,
-        )?;
-        glyphs.push(SlugGlyphInstance::new(
-            key,
-            glyph.origin,
-            glyph.advance,
-            packed_glyph.bounds(),
-        ));
-    }
-    Ok(PreviewText {
-        run: SlugTextRun::new(glyphs),
-        glyph_cache,
-        baseline: shaped_text.baseline,
-        reference_size: shaped_text.reference_size,
-    })
-}
-
-#[derive(Clone, Debug)]
-struct ShapedPreviewText {
-    glyphs:         Vec<ShapedPreviewGlyph>,
-    baseline:       f32,
-    reference_size: f32,
-}
-
-fn shape_preview_glyphs() -> Result<ShapedPreviewText, SlugOutlineError> {
-    let face = Face::parse(LATIN_FONT_DATA, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
-    let shape_size = f32::from(face.units_per_em());
-
-    let mut font_context = parley::FontContext::default();
-    font_context.collection.register_fonts(
-        Blob::from(LATIN_FONT_DATA.to_vec()),
-        Some(FontInfoOverride {
-            family_name: Some(LATIN_FONT_FAMILY),
-            ..default()
-        }),
-    );
-    let mut layout_context = parley::LayoutContext::<()>::default();
-    let mut layout = parley::Layout::<()>::new();
-
-    let mut builder = layout_context.ranged_builder(&mut font_context, FIXTURE_TEXT, 1.0, true);
-    builder.push_default(StyleProperty::FontSize(shape_size));
-    builder.push_default(StyleProperty::FontFamily(FontFamily::named(
+fn load_preview_text() -> Result<SlugBuiltTextRun, SlugOutlineError> {
+    build_slug_text_run(
+        FIXTURE_TEXT,
+        LATIN_FONT_DATA,
+        LATIN_FONT_KEY,
         LATIN_FONT_FAMILY,
-    )));
-    builder.build_into(&mut layout, FIXTURE_TEXT);
-    layout.break_all_lines(None);
-
-    let mut characters = FIXTURE_TEXT.chars();
-    let mut shaped_glyphs = Vec::new();
-    let mut baseline = 0.0;
-    for line in layout.lines() {
-        baseline = line.metrics().baseline;
-        for item in line.items() {
-            let PositionedLayoutItem::GlyphRun(run) = item else {
-                continue;
-            };
-            let mut advance_x = 0.0_f32;
-            for cluster in run.run().clusters() {
-                for glyph in cluster.glyphs() {
-                    let Some(character) = characters.next() else {
-                        continue;
-                    };
-                    shaped_glyphs.push(ShapedPreviewGlyph {
-                        character,
-                        glyph_id: glyph.id.to_u16(),
-                        origin: Vec2::new(run.offset() + advance_x + glyph.x, glyph.y),
-                        advance: glyph.advance,
-                    });
-                    advance_x += glyph.advance;
-                }
-            }
-        }
-    }
-    Ok(ShapedPreviewText {
-        glyphs: shaped_glyphs,
-        baseline,
-        reference_size: shape_size * FONT_SCALE,
-    })
+        FONT_SCALE,
+        DEFAULT_BAND_COUNT,
+    )
 }
 
-fn log_preview_metrics(preview: &PreviewText) {
+fn log_preview_metrics(preview: &SlugBuiltTextRun) {
     info!(
         "parley preview run: glyph_instances={}, unique_packed_glyphs={}, \
         advance_width={}, bounds=({}, {})..({}, {})",
@@ -286,87 +185,38 @@ fn log_glyph_metrics(label: &str, packed_glyph: &SlugPackedGlyph) {
     );
 }
 
-fn spawn_glyphs(
+fn spawn_slug_text_run(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     slug_materials: &mut Assets<SlugTextMaterial>,
     storage_buffers: &mut Assets<ShaderStorageBuffer>,
-    preview: &PreviewText,
+    preview: &SlugBuiltTextRun,
 ) {
-    let total_width = text_width(&preview.run);
-    let run_origin_x = total_width * -0.5;
-    for glyph in preview.run.glyphs() {
-        let Some(packed_glyph) = preview.glyph_cache.get(glyph.key()) else {
-            warn!(
-                "slug glyph cache missing glyph id {}",
-                glyph.key().glyph_id()
-            );
-            continue;
-        };
-        spawn_glyph(
-            commands,
-            meshes,
-            slug_materials,
-            storage_buffers,
-            packed_glyph,
-            Vec2::new(run_origin_x, 0.0) + glyph.origin() * FONT_SCALE,
-        );
-    }
-}
-
-fn spawn_glyph(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    slug_materials: &mut Assets<SlugTextMaterial>,
-    storage_buffers: &mut Assets<ShaderStorageBuffer>,
-    packed_glyph: &SlugPackedGlyph,
-    origin: Vec2,
-) {
-    spawn_filled_glyph(
-        commands,
-        meshes,
-        slug_materials,
-        storage_buffers,
-        packed_glyph,
-        origin,
-    );
-}
-
-fn spawn_filled_glyph(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    slug_materials: &mut Assets<SlugTextMaterial>,
-    storage_buffers: &mut Assets<ShaderStorageBuffer>,
-    packed_glyph: &SlugPackedGlyph,
-    origin: Vec2,
-) {
-    let glyph = packed_glyph.glyph();
-    let curve_buffer =
-        storage_buffers.add(ShaderStorageBuffer::from(packed_glyph.curves().to_vec()));
-    let band_buffer = storage_buffers.add(ShaderStorageBuffer::from(packed_glyph.bands().to_vec()));
+    let render_data = match build_slug_run_render_data(preview, FONT_SCALE) {
+        Ok(render_data) => render_data,
+        Err(err) => {
+            error!("failed to build run-level Slug render data: {err}");
+            return;
+        },
+    };
+    let curve_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.curves));
+    let band_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.bands));
+    let glyph_buffer = storage_buffers.add(ShaderStorageBuffer::from(render_data.glyphs));
     let material = slug_materials.add(slug_text_material(SlugTextMaterialInput {
-        base:       StandardMaterial::default(),
-        bounds:     packed_glyph.bounds(),
-        fill_color: SLUG_FILL_COLOR,
-        curves:     curve_buffer,
-        bands:      band_buffer,
-        band_count: packed_glyph.bands().len(),
+        base:        StandardMaterial::default(),
+        fill_color:  SLUG_FILL_COLOR,
+        render_mode: SlugRenderMode::Text,
+        curves:      curve_buffer,
+        bands:       band_buffer,
+        glyphs:      glyph_buffer,
     }));
-    let bounds_width = glyph.bounds.width() * FONT_SCALE;
-    let bounds_height = glyph.bounds.height() * FONT_SCALE;
+    let run_origin_x = text_width(&preview.run) * -0.5;
     commands.spawn((
-        Name::new(format!("SlugGlyphFill {}", glyph.character)),
+        Name::new("SlugTextRun Typography"),
         SlugGlyphPreview,
-        Mesh3d(meshes.add(Rectangle::new(bounds_width, bounds_height))),
+        Mesh3d(meshes.add(render_data.mesh)),
         MeshMaterial3d(material),
-        Transform::from_xyz(
-            origin.x + glyph.bounds.min.x.mul_add(FONT_SCALE, bounds_width * 0.5),
-            PREVIEW_ELEVATION
-                + GLYPH_BASELINE_Y
-                + origin.y
-                + glyph.bounds.min.y.mul_add(FONT_SCALE, bounds_height * 0.5),
-            0.0,
-        ),
+        Transform::from_xyz(run_origin_x, PREVIEW_ELEVATION + GLYPH_BASELINE_Y, 0.0),
     ));
 }
 

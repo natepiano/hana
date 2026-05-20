@@ -2,7 +2,6 @@ use bevy::asset::Asset;
 use bevy::asset::embedded_asset;
 use bevy::color::Color;
 use bevy::color::LinearRgba;
-use bevy::math::Vec2;
 use bevy::math::Vec4;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
@@ -17,10 +16,27 @@ use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy::shader::ShaderRef;
-use bevy_kana::ToU32;
 
 use super::constants::SLUG_TEXT_SHADER_PATH;
-use super::geometry::SlugBounds;
+
+/// Visible render mode for the isolated Slug shader path.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u32)]
+pub enum SlugRenderMode {
+    /// No visible pass. The caller skips spawning visible geometry.
+    Invisible = 0,
+    /// Normal Slug coverage fill.
+    #[default]
+    Text      = 1,
+    /// Inverted Slug coverage inside each glyph quad.
+    PunchOut  = 2,
+    /// Solid glyph bounds quads without curve evaluation.
+    SolidQuad = 3,
+}
+
+impl From<SlugRenderMode> for u32 {
+    fn from(mode: SlugRenderMode) -> Self { mode as Self }
+}
 
 /// Material used by the isolated Slug shader spike.
 pub type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextExtension>;
@@ -38,14 +54,10 @@ impl Plugin for SlugTextSpikePlugin {
 /// Uniforms consumed by the Slug shader spike.
 #[derive(Clone, Debug, ShaderType)]
 pub struct SlugTextUniform {
-    /// Glyph bounds minimum in font design-space units.
-    pub bounds_min:  Vec2,
-    /// Glyph bounds size in font design-space units.
-    pub bounds_size: Vec2,
     /// Linear fill color.
     pub fill_color:  Vec4,
-    /// Number of bands in the band buffer.
-    pub band_count:  u32,
+    /// Visible render mode for this pass.
+    pub render_mode: u32,
 }
 
 /// Slug material extension over `StandardMaterial`.
@@ -60,6 +72,9 @@ pub struct SlugTextExtension {
     /// Horizontal band records.
     #[storage(102, read_only)]
     pub bands:    Handle<ShaderStorageBuffer>,
+    /// Unique glyph records for this run.
+    #[storage(103, read_only)]
+    pub glyphs:   Handle<ShaderStorageBuffer>,
 }
 
 impl MaterialExtension for SlugTextExtension {
@@ -71,17 +86,17 @@ impl MaterialExtension for SlugTextExtension {
 /// Inputs for one Slug spike material instance.
 pub struct SlugTextMaterialInput {
     /// Base material settings.
-    pub base:       StandardMaterial,
-    /// Glyph bounds in font design-space units.
-    pub bounds:     SlugBounds,
+    pub base:        StandardMaterial,
     /// Fill color.
-    pub fill_color: Color,
+    pub fill_color:  Color,
+    /// Visible render mode.
+    pub render_mode: SlugRenderMode,
     /// Band-packed quadratic curve records.
-    pub curves:     Handle<ShaderStorageBuffer>,
+    pub curves:      Handle<ShaderStorageBuffer>,
     /// Horizontal band records.
-    pub bands:      Handle<ShaderStorageBuffer>,
-    /// Number of bands in `bands`.
-    pub band_count: usize,
+    pub bands:       Handle<ShaderStorageBuffer>,
+    /// Unique glyph records.
+    pub glyphs:      Handle<ShaderStorageBuffer>,
 }
 
 /// Creates a `SlugTextMaterial` for the isolated feasibility shader.
@@ -89,11 +104,11 @@ pub struct SlugTextMaterialInput {
 pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
     let SlugTextMaterialInput {
         mut base,
-        bounds,
         fill_color,
+        render_mode,
         curves,
         bands,
-        band_count,
+        glyphs,
     } = input;
     base.alpha_mode = AlphaMode::Mask(0.5);
     base.unlit = true;
@@ -103,13 +118,12 @@ pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
         base,
         extension: SlugTextExtension {
             uniforms: SlugTextUniform {
-                bounds_min:  bounds.min,
-                bounds_size: Vec2::new(bounds.width(), bounds.height()),
                 fill_color:  Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
-                band_count:  band_count.to_u32(),
+                render_mode: u32::from(render_mode),
             },
             curves,
             bands,
+            glyphs,
         },
     }
 }

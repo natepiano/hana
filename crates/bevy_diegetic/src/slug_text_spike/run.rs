@@ -2,12 +2,19 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use bevy::math::Vec2;
+use bevy_kana::ToU16;
+use parley::fontique::Blob;
+use parley::fontique::FontInfoOverride;
+use parley::layout::PositionedLayoutItem;
+use parley::style::FontFamily;
+use parley::style::StyleProperty;
+use ttf_parser::Face;
 
+use super::geometry;
 use super::geometry::SlugBounds;
 use super::geometry::SlugOutlineError;
-use super::geometry::load_glyph_by_id;
+use super::packing;
 use super::packing::SlugPackedGlyph;
-use super::packing::build_packed_glyph;
 
 /// Stable identity for the resolved font face used by Slug shaping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -90,6 +97,19 @@ pub struct SlugTextRun {
     advance_width: f32,
 }
 
+/// Result of shaping and packing one Slug text run in the spike path.
+#[derive(Clone, Debug)]
+pub struct SlugBuiltTextRun {
+    /// Per-entity shaped text run.
+    pub run:            SlugTextRun,
+    /// Glyph-level packed curve/band cache used by `run`.
+    pub glyph_cache:    SlugGlyphCache,
+    /// First-line baseline in font design-space units.
+    pub baseline:       f32,
+    /// Font size in caller world units.
+    pub reference_size: f32,
+}
+
 impl SlugTextRun {
     /// Creates a text run from already-shaped glyph instances.
     #[must_use]
@@ -117,6 +137,38 @@ impl SlugTextRun {
     /// Total shaped advance width in design-space units.
     #[must_use]
     pub const fn advance_width(&self) -> f32 { self.advance_width }
+}
+
+/// Builds one shaped Slug text run and glyph cache using the spike-only
+/// shaping path.
+pub fn build_slug_text_run(
+    text: &str,
+    font_data: &[u8],
+    font_key: SlugFontKey,
+    font_family: &str,
+    world_scale: f32,
+    band_count: usize,
+) -> Result<SlugBuiltTextRun, SlugOutlineError> {
+    let shaped_text = shape_slug_text(text, font_data, font_family, world_scale)?;
+    let mut glyph_cache = SlugGlyphCache::default();
+    let mut glyphs = Vec::with_capacity(shaped_text.glyphs.len());
+    for glyph in shaped_text.glyphs {
+        let key = SlugGlyphKey::new(font_key, glyph.glyph_id);
+        let packed_glyph =
+            glyph_cache.get_or_insert_packed(key, font_data, glyph.character, band_count)?;
+        glyphs.push(SlugGlyphInstance::new(
+            key,
+            glyph.origin,
+            glyph.advance,
+            packed_glyph.bounds(),
+        ));
+    }
+    Ok(SlugBuiltTextRun {
+        run: SlugTextRun::new(glyphs),
+        glyph_cache,
+        baseline: shaped_text.baseline,
+        reference_size: shaped_text.reference_size,
+    })
 }
 
 /// Cache of reusable packed Slug glyph data.
@@ -149,8 +201,8 @@ impl SlugGlyphCache {
         match self.glyphs.entry(key) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
-                let glyph = load_glyph_by_id(font_data, key.glyph_id, character)?;
-                Ok(entry.insert(build_packed_glyph(glyph, band_count)))
+                let glyph = geometry::load_glyph_by_id(font_data, key.glyph_id, character)?;
+                Ok(entry.insert(packing::build_packed_glyph(glyph, band_count)))
             },
         }
     }
@@ -178,9 +230,83 @@ fn shifted_bounds(glyph: SlugGlyphInstance) -> SlugBounds {
     }
 }
 
-fn merge_bounds(left: SlugBounds, right: SlugBounds) -> SlugBounds {
+const fn merge_bounds(left: SlugBounds, right: SlugBounds) -> SlugBounds {
     SlugBounds {
         min: Vec2::new(left.min.x.min(right.min.x), left.min.y.min(right.min.y)),
         max: Vec2::new(left.max.x.max(right.max.x), left.max.y.max(right.max.y)),
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ShapedSlugGlyph {
+    character: char,
+    glyph_id:  u16,
+    origin:    Vec2,
+    advance:   f32,
+}
+
+#[derive(Clone, Debug)]
+struct ShapedSlugText {
+    glyphs:         Vec<ShapedSlugGlyph>,
+    baseline:       f32,
+    reference_size: f32,
+}
+
+fn shape_slug_text(
+    text: &str,
+    font_data: &[u8],
+    font_family: &str,
+    world_scale: f32,
+) -> Result<ShapedSlugText, SlugOutlineError> {
+    let face = Face::parse(font_data, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
+    let shape_size = f32::from(face.units_per_em());
+
+    let mut font_context = parley::FontContext::default();
+    font_context.collection.register_fonts(
+        Blob::from(font_data.to_vec()),
+        Some(FontInfoOverride {
+            family_name: Some(font_family),
+            ..Default::default()
+        }),
+    );
+    let mut layout_context = parley::LayoutContext::<()>::default();
+    let mut layout = parley::Layout::<()>::new();
+
+    let mut builder = layout_context.ranged_builder(&mut font_context, text, 1.0, true);
+    builder.push_default(StyleProperty::FontSize(shape_size));
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named(font_family)));
+    builder.build_into(&mut layout, text);
+    layout.break_all_lines(None);
+
+    let mut characters = text.chars();
+    let mut shaped_glyphs = Vec::new();
+    let mut baseline = 0.0;
+    for line in layout.lines() {
+        baseline = line.metrics().baseline;
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(run) = item else {
+                continue;
+            };
+            let mut advance_x = 0.0_f32;
+            for cluster in run.run().clusters() {
+                for glyph in cluster.glyphs() {
+                    let Some(character) = characters.next() else {
+                        continue;
+                    };
+                    shaped_glyphs.push(ShapedSlugGlyph {
+                        character,
+                        glyph_id: glyph.id.to_u16(),
+                        origin: Vec2::new(run.offset() + advance_x + glyph.x, glyph.y),
+                        advance: glyph.advance,
+                    });
+                    advance_x += glyph.advance;
+                }
+            }
+        }
+    }
+    Ok(ShapedSlugText {
+        glyphs: shaped_glyphs,
+        baseline,
+        reference_size: shape_size * world_scale,
+    })
 }

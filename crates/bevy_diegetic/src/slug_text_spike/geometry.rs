@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 use bevy::math::Vec2;
 use ttf_parser::Face;
@@ -95,8 +97,8 @@ pub enum SlugOutlineError {
     },
 }
 
-impl fmt::Display for SlugOutlineError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for SlugOutlineError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFont => formatter.write_str("font bytes could not be parsed"),
             Self::MissingGlyph(character) => {

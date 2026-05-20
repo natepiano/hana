@@ -57,7 +57,7 @@ mod render;
 mod screen_space;
 #[cfg(feature = "slug_text")]
 #[doc(hidden)]
-pub mod slug_text_spike;
+mod slug_text_spike;
 mod text;
 
 #[cfg(feature = "bench_support")]
@@ -179,6 +179,58 @@ pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
 use screen_space::ScreenSpacePlugin;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::DEFAULT_BAND_COUNT;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::FIXTURE_TEXT;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugBandRecord;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugBounds;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugBuiltTextRun;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugCurveRecord;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugFontKey;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugGlyph;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugGlyphCache;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugGlyphInstance;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugGlyphKey;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugGlyphRecord;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugOutlineError;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugPackedGlyph;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugRenderMode;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugRunRenderData;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugRunRenderError;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugTextMaterial;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugTextMaterialInput;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugTextRun;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::SlugTextSpikePlugin;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::build_packed_glyph;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::build_slug_run_render_data;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::build_slug_text_run;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::load_glyph;
+#[cfg(feature = "slug_text")]
+pub use slug_text_spike::slug_text_material;
 pub use text::AtlasConfig;
 pub use text::AtlasConfigError;
 pub use text::AtlasPreference;

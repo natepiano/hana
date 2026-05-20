@@ -268,6 +268,43 @@ early compression or clever packing beyond what is needed to match the
 reference algorithm. Once parity is established, optimize storage and
 buffer access.
 
+## WorldText behavior compatibility
+
+Slug must replace the glyph silhouette source, not the public text
+behavior contract. The current `WorldText` and panel text feature set is
+valuable, but Slug does not need to copy the exact MTSDF implementation
+mechanics when a simpler design gives the same behavior.
+
+The Slug model should be reusable run data plus one or more render
+passes:
+
+- a shaped `SlugTextRun` stores glyph positions
+- packed Slug glyph data stores curves, bands, and glyph records
+- each pass chooses how to use that run: visible, shadow-casting, or
+  both
+
+That pass model must preserve the existing choices:
+
+- visible render mode: `Invisible`, `Text`, `PunchOut`, and
+  `SolidQuad`
+- shadow mode: `None`, `Text`, `PunchOut`, and `SolidQuad`
+
+The same Slug run data can serve those policies:
+
+- `Text`: evaluate Slug coverage and draw the glyph fill.
+- `PunchOut`: evaluate Slug coverage and draw the inverse inside the
+  glyph quad.
+- `SolidQuad`: draw the glyph quad without curve evaluation.
+- `Invisible`: skip the visible pass while still allowing a shadow pass
+  when requested.
+
+Shadow support should be expressed as another pass over the same run
+data. Text and punch-out shadows evaluate Slug coverage in the
+shadow/prepass path. Solid-quad shadows can use the quad geometry. `None`
+suppresses shadow casting. This keeps run-level GPU storage compatible
+with the current feature matrix without forcing Slug to preserve every
+internal MTSDF mesh/proxy detail.
+
 ## Readiness semantics
 
 `WorldTextReady` should remain a backend-neutral public event: selected
@@ -387,19 +424,47 @@ Exit criteria: met. The example renders from `SlugTextRun` data and
 reuses packed glyph data through `SlugGlyphCache`, while keeping the
 same visible Slug output target as Phase 1.
 
-### Phase 3: shared text prerequisites
+### Phase 3: run-level Slug GPU data
+
+Status: completed.
+
+Completed:
+
+- Replaced the example's one-material, one-curve-buffer,
+  one-band-buffer-per-glyph path with one run-level render object.
+- Built one mesh for the shaped run, with one quad per glyph.
+- Packed all unique glyph curve records for the run into one curve
+  buffer.
+- Packed all unique glyph band records for the run into one band buffer.
+- Added a glyph table that maps each glyph instance to its packed
+  curve/band ranges, bounds, and glyph-local transform data.
+- Updated the WGSL shader so each quad selects the right glyph record
+  from the run-level data.
+- Kept render mode and future shadow-pass mode as explicit inputs to
+  the run-level path so `Text`, `PunchOut`, `SolidQuad`, `Invisible`,
+  and all current shadow modes remain representable.
+- Kept the `WorldText` contrast overlay in the example.
+
+Exit criteria: met. The isolated `slug_text` example renders `Typography`
+from one run-level Slug mesh/material/storage set, not one material and
+storage pair per glyph. Visual output matches Phase 2, and the data
+layout still supports the current visible/shadow mode matrix.
+
+### Phase 4: shared text prerequisites
 
 - Align `shape_text_cached` with the parley measurement path for
   relevant text style inputs.
 - Define the resolved font/face identity carried by shaped glyphs.
 - Define renderer-neutral positioned glyph instances.
 - Define backend-neutral lookup/readiness states.
+- Keep visible render mode and shadow mode renderer-neutral so Slug and
+  distance-field backends share the same behavior contract.
 
 Exit criteria: existing distance-field panel and world text still
 render through the refactored shared front half, with measured and
 rendered advances matching for style fixtures.
 
-### Phase 4: Slug backend resource
+### Phase 5: Slug backend resource
 
 - Add `TextRendererBackend::Slug` behind an experimental feature.
 - Add a Slug backend resource that owns cache state, async work, GPU
@@ -413,12 +478,14 @@ Exit criteria: shaped strings render through parley and the Slug
 backend, with glyph positions matching the existing renderer under
 explicit layout fixtures.
 
-### Phase 5: panel and world text parity
+### Phase 6: panel and world text parity
 
 - Support panel text clipping while preserving glyph-local coordinates.
 - Support `WorldText` anchoring and backend-neutral readiness behavior.
-- Preserve material color, alpha mode, depth behavior, and shadow
-  compatibility for the selected first rendering scope.
+- Preserve material color, alpha mode, depth behavior, and the full
+  visible/shadow mode matrix:
+  `Invisible`, `Text`, `PunchOut`, `SolidQuad`, and shadow
+  `None`, `Text`, `PunchOut`, `SolidQuad`.
 - Add regression tests around glyph readiness, backend swaps, font
   changes, cache misses, cache invalidation, and `WorldTextReady`
   timing.
@@ -426,7 +493,7 @@ explicit layout fixtures.
 Exit criteria: existing panel/world text examples can opt into Slug and
 keep layout behavior stable under the accepted first-scope constraints.
 
-### Phase 6: quality and robustness
+### Phase 7: quality and robustness
 
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
   Crimson Text.
@@ -440,7 +507,7 @@ keep layout behavior stable under the accepted first-scope constraints.
 Exit criteria: Slug has documented quality/performance envelopes and
 known cases where it is better or worse than MTSDF.
 
-### Phase 7: effects
+### Phase 8: effects
 
 - Add hard drop shadow as a second glyph pass.
 - Decide whether true outlines are worth implementing in
@@ -562,3 +629,18 @@ reviewed.
     First build the CPU run data and glyph cache, then use the resulting
     data and visible bottlenecks to choose the smallest GPU change that
     removes the worst current inefficiency.
+11. **WorldText behavior compatibility:** Run-level Slug rendering
+    should replace the glyph silhouette source, not the visible/shadow
+    behavior contract. The design must preserve the existing separation
+    between visible render mode (`Invisible`, `Text`, `PunchOut`,
+    `SolidQuad`) and shadow mode (`None`, `Text`, `PunchOut`,
+    `SolidQuad`). Phase 3 is now the run-level GPU data step, because
+    it proves that Slug can render a coherent text run while still
+    carrying those behavior choices forward. Shared production
+    prerequisites and backend integration follow after that proof.
+12. **Run-level GPU shape:** Phase 3 uses one mesh and one material for
+    a shaped Slug run, plus combined curve, band, and glyph-record
+    storage buffers. Each quad carries a glyph-record index, and the
+    shader uses that record to select the correct bounds and band range.
+    This removes the per-glyph material/storage path without committing
+    the production backend to a final batching strategy.
