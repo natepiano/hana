@@ -12,8 +12,10 @@
 //!   A     — `AnimateToFit` the cube (event-driven)
 //!   R     — Reset camera
 
-mod constants;
+use std::f32::consts::TAU;
+use std::time::Duration;
 
+use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_lagrange::AnimateToFit;
@@ -28,28 +30,85 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 use bevy_window_manager::WindowManagerPlugin;
 
-use crate::constants::ANIMATE_TO_FIT_DURATION;
-use crate::constants::ANIMATE_TO_FIT_MARGIN;
-use crate::constants::ANIMATE_TO_FIT_PITCH;
-use crate::constants::ANIMATE_TO_FIT_YAW;
-use crate::constants::GROUND_COLOR;
-use crate::constants::GROUND_SIZE;
-use crate::constants::INSTRUCTIONS_FONT_SIZE;
-use crate::constants::INSTRUCTIONS_TEXT;
-use crate::constants::LIGHT_TRANSLATION;
-use crate::constants::MANUAL_MODE_SMOOTHNESS_ACTIVE;
-use crate::constants::MANUAL_MODE_SMOOTHNESS_INACTIVE;
-use crate::constants::MANUAL_ORBIT_PITCH_AMPLITUDE;
-use crate::constants::MANUAL_ORBIT_RADIUS_BASE;
-use crate::constants::MANUAL_ORBIT_RADIUS_DELTA;
-use crate::constants::MANUAL_ORBIT_RADIUS_FREQUENCY;
-use crate::constants::MANUAL_ORBIT_YAW_RADIANS_PER_SECOND;
-use crate::constants::PLAY_ANIMATION_FOCUS;
-use crate::constants::PLAY_ANIMATION_STEPS;
-use crate::constants::START_POS;
-use crate::constants::TARGET_COLOR;
-use crate::constants::TARGET_SIZE;
-use crate::constants::TARGET_TRANSLATION;
+// animation
+const ANIMATE_TO_FIT_DURATION: Duration = Duration::from_millis(1200);
+const ANIMATE_TO_FIT_MARGIN: f32 = 0.15;
+const ANIMATE_TO_FIT_PITCH: f32 = TAU / 12.0;
+const ANIMATE_TO_FIT_YAW: f32 = TAU / 8.0;
+const MANUAL_MODE_SMOOTHNESS_ACTIVE: f32 = 0.0;
+const MANUAL_MODE_SMOOTHNESS_INACTIVE: f32 = 0.8;
+const MANUAL_ORBIT_PITCH_AMPLITUDE: f32 = TAU * 0.1;
+const MANUAL_ORBIT_RADIUS_BASE: f32 = 4.0;
+const MANUAL_ORBIT_RADIUS_DELTA: f32 = 2.0;
+const MANUAL_ORBIT_RADIUS_FREQUENCY: f32 = 2.0;
+const MANUAL_ORBIT_YAW_RADIANS_PER_SECOND: f32 = TAU / 24.0;
+
+// camera
+const START_POS: Vec3 = Vec3::new(0.0, 3.0, 8.0);
+
+// instructions
+const INSTRUCTIONS_FONT_SIZE: f32 = 18.0;
+const INSTRUCTIONS_TEXT: &str = "M - Toggle manual orbit animation\n\
+             Space - PlayAnimation (5-step sequence)\n\
+             A - AnimateToFit (yaw=45 pitch=30)\n\
+             R - Reset camera";
+
+// play animation
+#[derive(Clone, Copy)]
+struct OrbitAnimationStep {
+    duration: Duration,
+    easing:   EaseFunction,
+    pitch:    f32,
+    radius:   f32,
+    yaw:      f32,
+}
+
+const PLAY_ANIMATION_FOCUS: Vec3 = Vec3::new(0.0, 0.75, 0.0);
+const PLAY_ANIMATION_STEPS: [OrbitAnimationStep; 5] = [
+    OrbitAnimationStep {
+        duration: Duration::from_millis(800),
+        easing:   EaseFunction::CubicInOut,
+        pitch:    0.2,
+        radius:   4.0,
+        yaw:      1.5,
+    },
+    OrbitAnimationStep {
+        duration: Duration::from_millis(1200),
+        easing:   EaseFunction::CubicIn,
+        pitch:    1.3,
+        radius:   20.0,
+        yaw:      2.5,
+    },
+    OrbitAnimationStep {
+        duration: Duration::from_millis(1200),
+        easing:   EaseFunction::SineInOut,
+        pitch:    0.6,
+        radius:   14.0,
+        yaw:      4.5,
+    },
+    OrbitAnimationStep {
+        duration: Duration::from_secs(1),
+        easing:   EaseFunction::CubicIn,
+        pitch:    0.1,
+        radius:   2.0,
+        yaw:      5.5,
+    },
+    OrbitAnimationStep {
+        duration: Duration::from_millis(1200),
+        easing:   EaseFunction::BounceOut,
+        pitch:    0.3,
+        radius:   8.0,
+        yaw:      0.0,
+    },
+];
+
+// scene
+const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
+const GROUND_SIZE: f32 = 10.0;
+const LIGHT_TRANSLATION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+const TARGET_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const TARGET_SIZE: Vec3 = Vec3::splat(1.5);
+const TARGET_TRANSLATION: Vec3 = Vec3::new(0.0, 0.75, 0.0);
 
 #[derive(Component)]
 struct Target;

@@ -23,17 +23,28 @@ use bevy_enhanced_input::prelude::Accumulation;
 use bevy_enhanced_input::prelude::Action;
 use bevy_enhanced_input::prelude::ActionOf;
 use bevy_enhanced_input::prelude::ActionSettings;
+use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::ActionsQuery;
 use bevy_enhanced_input::prelude::Binding;
 use bevy_enhanced_input::prelude::BindingOf;
 use bevy_enhanced_input::prelude::ContextActivity;
 use bevy_enhanced_input::prelude::ContextPriority;
+use bevy_enhanced_input::prelude::ContextTime;
+use bevy_enhanced_input::prelude::CustomInput;
+use bevy_enhanced_input::prelude::CustomInputs;
 use bevy_enhanced_input::prelude::GamepadDevice;
 use bevy_enhanced_input::prelude::InputAction;
+use bevy_enhanced_input::prelude::InputCondition;
+use bevy_enhanced_input::prelude::ModKeys;
 use bevy_enhanced_input::prelude::Negate;
+use bevy_enhanced_input::prelude::Scale;
 use bevy_enhanced_input::prelude::SwizzleAxis;
+use bevy_enhanced_input::prelude::TriggerState;
 
 use super::inject::OrbitCamAdapterFrameSources;
+use super::inject::TrackpadScrollTarget;
+use crate::constants::PIXEL_SCROLL_SCALE;
 use crate::input::ActionBindingEntry;
 use crate::input::CameraInputGamepadSelectionPolicy;
 use crate::input::CameraInteractionSources;
@@ -48,8 +59,10 @@ use crate::input::OrbitCamInputContextGated;
 use crate::input::OrbitCamOrbitAction;
 use crate::input::OrbitCamPanAction;
 use crate::input::OrbitCamPreset;
+use crate::input::OrbitCamTrackpadScroll;
 use crate::input::OrbitCamZoomCoarseAction;
 use crate::input::OrbitCamZoomSmoothAction;
+use crate::input::ZoomDirection;
 use crate::input::actions::OrbitCamAdapterOrbitAction;
 use crate::input::actions::OrbitCamAdapterPanAction;
 use crate::input::actions::OrbitCamAdapterZoomCoarseAction;
@@ -83,6 +96,47 @@ pub(super) struct OrbitCamInputActionEntities {
     pub(super) zoom_smooth_sources: CameraInteractionSources,
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct OrbitCamAdapterCustomInputs {
+    pub(super) orbit:       CustomInput,
+    pub(super) pan:         CustomInput,
+    pub(super) trackpad:    CustomInput,
+    pub(super) zoom_coarse: CustomInput,
+    pub(super) zoom_smooth: CustomInput,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TrackpadBindingCondition {
+    pub(super) target:   TrackpadScrollTarget,
+    pub(super) mod_keys: ModKeys,
+    pub(super) active:   bool,
+}
+
+impl TrackpadBindingCondition {
+    const fn new(target: TrackpadScrollTarget, binding: OrbitCamTrackpadScroll) -> Self {
+        Self {
+            target,
+            mod_keys: binding.mod_keys,
+            active: false,
+        }
+    }
+}
+
+impl InputCondition for TrackpadBindingCondition {
+    fn evaluate(
+        &mut self,
+        _actions: &ActionsQuery,
+        _time: &ContextTime,
+        value: ActionValue,
+    ) -> TriggerState {
+        if self.active && value.as_bool() {
+            TriggerState::Fired
+        } else {
+            TriggerState::None
+        }
+    }
+}
+
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct OrbitCamAdapterDiagnostics {
     pub(super) installed_cameras:  usize,
@@ -113,6 +167,7 @@ fn clear_enhanced_input_components(world: &mut World, camera: Entity) {
         .remove::<Actions<OrbitCamInputContext>>()
         .remove::<OrbitCamInputActionEntities>()
         .remove::<OrbitCamInstalledBindings>()
+        .remove::<OrbitCamAdapterCustomInputs>()
         .remove::<OrbitCamAdapterFrameSources>();
 }
 
@@ -151,6 +206,7 @@ pub(super) fn install_enhanced_input_entities(world: &mut World) {
             gamepad_device_for(&bindings),
             OrbitCamInstalledBindings(bindings),
             installation.actions,
+            installation.custom_inputs,
             OrbitCamAdapterFrameSources::default(),
         ));
         modes::replace_installed_input_entities(world, camera, installation.entities);
@@ -169,8 +225,9 @@ const fn gamepad_device_for(bindings: &OrbitCamBindings) -> GamepadDevice {
 }
 
 struct SpawnedInputInstallation {
-    actions:  OrbitCamInputActionEntities,
-    entities: Vec<Entity>,
+    actions:       OrbitCamInputActionEntities,
+    custom_inputs: OrbitCamAdapterCustomInputs,
+    entities:      Vec<Entity>,
 }
 
 fn spawn_input_installation(
@@ -178,6 +235,7 @@ fn spawn_input_installation(
     camera: Entity,
     bindings: &OrbitCamBindings,
 ) -> SpawnedInputInstallation {
+    let custom_inputs = register_adapter_custom_inputs(world);
     let orbit = spawn_action::<OrbitCamOrbitAction>(world, camera);
     let orbit_engaged = spawn_action::<OrbitCamOrbitEngagedAction>(world, camera);
     let pan = spawn_action::<OrbitCamPanAction>(world, camera);
@@ -203,6 +261,26 @@ fn spawn_input_installation(
         adapter_zoom_coarse,
         adapter_zoom_smooth,
     ];
+    spawn_adapter_custom_bindings(
+        world,
+        camera,
+        &custom_inputs,
+        (
+            adapter_orbit,
+            adapter_pan,
+            adapter_zoom_coarse,
+            adapter_zoom_smooth,
+        ),
+        &mut entities,
+    );
+    spawn_trackpad_custom_bindings(
+        world,
+        camera,
+        &custom_inputs,
+        (adapter_orbit, adapter_pan, adapter_zoom_smooth),
+        bindings,
+        &mut entities,
+    );
 
     spawn_held_bindings(
         world,
@@ -255,8 +333,155 @@ fn spawn_input_installation(
             zoom_coarse_sources: action_sources(bindings.zoom_coarse().entries()),
             zoom_smooth_sources: held_sources(bindings.zoom_smooth().entries()),
         },
+        custom_inputs,
         entities,
     }
+}
+
+fn register_adapter_custom_inputs(world: &mut World) -> OrbitCamAdapterCustomInputs {
+    let mut custom_inputs = world.resource_mut::<CustomInputs>();
+    OrbitCamAdapterCustomInputs {
+        orbit:       custom_inputs.register_input(),
+        pan:         custom_inputs.register_input(),
+        trackpad:    custom_inputs.register_input(),
+        zoom_coarse: custom_inputs.register_input(),
+        zoom_smooth: custom_inputs.register_input(),
+    }
+}
+
+fn spawn_adapter_custom_bindings(
+    world: &mut World,
+    camera: Entity,
+    custom_inputs: &OrbitCamAdapterCustomInputs,
+    actions: (Entity, Entity, Entity, Entity),
+    entities: &mut Vec<Entity>,
+) {
+    let installation = OrbitCamInputInstallationOf(camera);
+    let (orbit, pan, zoom_coarse, zoom_smooth) = actions;
+    entities.push(spawn_single_binding(
+        world,
+        orbit,
+        installation,
+        Binding::Custom(custom_inputs.orbit),
+    ));
+    entities.push(spawn_single_binding(
+        world,
+        pan,
+        installation,
+        Binding::Custom(custom_inputs.pan),
+    ));
+    entities.push(spawn_single_binding(
+        world,
+        zoom_coarse,
+        installation,
+        Binding::Custom(custom_inputs.zoom_coarse),
+    ));
+    entities.push(spawn_single_binding(
+        world,
+        zoom_smooth,
+        installation,
+        Binding::Custom(custom_inputs.zoom_smooth),
+    ));
+}
+
+fn spawn_trackpad_custom_bindings(
+    world: &mut World,
+    camera: Entity,
+    custom_inputs: &OrbitCamAdapterCustomInputs,
+    actions: (Entity, Entity, Entity),
+    bindings: &OrbitCamBindings,
+    entities: &mut Vec<Entity>,
+) {
+    let (orbit, pan, zoom_smooth) = actions;
+    for binding in bindings.trackpad_orbit() {
+        entities.push(spawn_trackpad_binding(
+            world,
+            camera,
+            orbit,
+            custom_inputs.trackpad,
+            TrackpadScrollTarget::Orbit,
+            *binding,
+            TrackpadZoomTransform::None,
+        ));
+    }
+    for binding in bindings.trackpad_pan() {
+        entities.push(spawn_trackpad_binding(
+            world,
+            camera,
+            pan,
+            custom_inputs.trackpad,
+            TrackpadScrollTarget::Pan,
+            *binding,
+            TrackpadZoomTransform::None,
+        ));
+    }
+    for binding in bindings.trackpad_zoom() {
+        entities.push(spawn_trackpad_binding(
+            world,
+            camera,
+            zoom_smooth,
+            custom_inputs.trackpad,
+            TrackpadScrollTarget::Zoom,
+            *binding,
+            TrackpadZoomTransform::from(bindings.zoom_direction()),
+        ));
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrackpadZoomTransform {
+    None,
+    Normal,
+    Reversed,
+}
+
+impl From<ZoomDirection> for TrackpadZoomTransform {
+    fn from(zoom_direction: ZoomDirection) -> Self {
+        match zoom_direction {
+            ZoomDirection::Normal => Self::Normal,
+            ZoomDirection::Reversed => Self::Reversed,
+        }
+    }
+}
+
+fn spawn_trackpad_binding(
+    world: &mut World,
+    camera: Entity,
+    action: Entity,
+    input: CustomInput,
+    target: TrackpadScrollTarget,
+    binding: OrbitCamTrackpadScroll,
+    transform: TrackpadZoomTransform,
+) -> Entity {
+    let installation = OrbitCamInputInstallationOf(camera);
+    let entity = match transform {
+        TrackpadZoomTransform::None => {
+            spawn_single_binding(world, action, installation, Binding::Custom(input))
+        },
+        TrackpadZoomTransform::Normal => world
+            .spawn((
+                Binding::Custom(input),
+                BindingOf(action),
+                installation,
+                SwizzleAxis::YXZ,
+                Scale::splat(PIXEL_SCROLL_SCALE),
+            ))
+            .id(),
+        TrackpadZoomTransform::Reversed => world
+            .spawn((
+                Binding::Custom(input),
+                BindingOf(action),
+                installation,
+                SwizzleAxis::YXZ,
+                Scale::splat(PIXEL_SCROLL_SCALE),
+                Negate::all(),
+            ))
+            .id(),
+    };
+    world
+        .entity_mut(entity)
+        .insert(TrackpadBindingCondition::new(target, binding));
+    entity
 }
 
 fn spawn_action<A: InputAction>(world: &mut World, camera: Entity) -> Entity {

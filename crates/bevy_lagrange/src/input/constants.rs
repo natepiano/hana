@@ -18,6 +18,7 @@ pub(super) const MANUAL_MODE_VALUE: &str = "Manual";
 
 // row labels
 pub(super) const APP_AUTHORED_INPUT_ROW_LABEL: &str = "App-authored input";
+pub(super) const CUSTOM_INPUT_ROW_LABEL: &str = "Custom input";
 pub(super) const GAMEPAD_BINDINGS_ROW_LABEL: &str = "Gamepad bindings";
 pub(super) const ONE_FINGER_TOUCH_ROW_LABEL: &str = "One finger touch";
 pub(super) const TWO_FINGER_TOUCH_ROW_LABEL: &str = "Two finger touch";

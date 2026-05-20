@@ -551,7 +551,7 @@ dependencies = [
  "log",
  "thiserror 2.0.18",
  "tracing",
- "variadics_please",
+ "variadics_please 1.1.0",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -781,7 +781,7 @@ dependencies = [
  "bevy",
  "bevy-inspector-egui",
  "bevy_brp_extras",
- "bevy_kana 0.0.5",
+ "bevy_kana 0.0.6",
  "bevy_lagrange",
  "bevy_window_manager",
  "bitflags 2.11.0",
@@ -827,7 +827,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "tracing",
- "variadics_please",
+ "variadics_please 1.1.0",
 ]
 
 [[package]]
@@ -898,23 +898,23 @@ dependencies = [
 
 [[package]]
 name = "bevy_enhanced_input"
-version = "0.24.3"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd528e0238ebc77e1e4737e55aa8f51188b7405eebc281f2498a627ae51a2e3"
+checksum = "c8d637e6cecb97d800bc53035643bbee59d2a2adf433a4617fbeb4d2734d3a41"
 dependencies = [
  "bevy",
  "bevy_enhanced_input_macros",
  "bitflags 2.11.0",
  "log",
  "smallvec",
- "variadics_please",
+ "variadics_please 2.0.0",
 ]
 
 [[package]]
 name = "bevy_enhanced_input_macros"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17ee73d4e362e2eb15ac58331c94e5076f6b5065761f008ca7dc930d446d205b"
+checksum = "6edfb436db5809c97042e5e7a0f2c1bf5ea397a256da1089f1a43258c61a9240"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1189,9 +1189,9 @@ dependencies = [
 
 [[package]]
 name = "bevy_kana"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d61d0697743cb2bb7c083e7394878babecc4b949b68caf5d9ab54d7026010d5"
+checksum = "499352aaa5becf06fb187fb1d4735a07d0596fde6f8940dcb2698b7f2dfa61c8"
 dependencies = [
  "bevy",
  "bevy_enhanced_input",
@@ -1205,7 +1205,7 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_egui",
  "bevy_enhanced_input",
- "bevy_kana 0.0.5",
+ "bevy_kana 0.0.6",
  "bevy_window_manager",
  "bitflags 2.11.0",
  "fairy_dust",
@@ -1282,7 +1282,7 @@ dependencies = [
  "rand_distr",
  "serde",
  "thiserror 2.0.18",
- "variadics_please",
+ "variadics_please 1.1.0",
 ]
 
 [[package]]
@@ -1459,7 +1459,7 @@ dependencies = [
  "smol_str",
  "thiserror 2.0.18",
  "uuid",
- "variadics_please",
+ "variadics_please 1.1.0",
  "wgpu-types",
 ]
 
@@ -1547,7 +1547,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "tracing",
- "variadics_please",
+ "variadics_please 1.1.0",
  "wasm-bindgen",
  "web-sys",
  "wgpu",
@@ -1674,7 +1674,7 @@ dependencies = [
  "bevy_state_macros",
  "bevy_utils",
  "log",
- "variadics_please",
+ "variadics_please 1.1.0",
 ]
 
 [[package]]
@@ -2904,7 +2904,7 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_diegetic",
  "bevy_enhanced_input",
- "bevy_kana 0.0.5",
+ "bevy_kana 0.0.6",
  "bevy_lagrange",
  "bevy_window_manager",
 ]
@@ -4212,6 +4212,12 @@ checksum = "a646a88333686049925e4e9af93e8529e42f6a1cfbacf0eeb675307321c63d30"
 dependencies = [
  "cc",
 ]
+
+[[package]]
+name = "mutants"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
 
 [[package]]
 name = "naga"
@@ -6383,6 +6389,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "unsynn"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "501a7adf1a4bd9951501e5c66621e972ef8874d787628b7f90e64f936ef7ec0a"
+dependencies = [
+ "mutants",
+ "proc-macro2",
+ "rustc-hash 2.1.2",
+]
+
+[[package]]
 name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6415,6 +6432,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "variadics_please"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b53d0f7f2d0182759a549f1f313ce16b07d8f9ba93098157b5fa10ee3e61117f"
+dependencies = [
+ "quote",
+ "unsynn",
 ]
 
 [[package]]

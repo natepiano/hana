@@ -20,6 +20,7 @@ use super::bindings::InputBindingDescriptor;
 use super::bindings::InputBindingEntry;
 use super::constants::APP_AUTHORED_INPUT_ROW_LABEL;
 use super::constants::BINDINGS_MODE_LABEL;
+use super::constants::CUSTOM_INPUT_ROW_LABEL;
 use super::constants::CUSTOM_MODE_VALUE;
 use super::constants::GAMEPAD_BINDING_SOURCE_LABEL;
 use super::constants::GAMEPAD_BINDINGS_ROW_LABEL;
@@ -322,6 +323,7 @@ fn mouse_motion_mod_keys(descriptor: &InputBindingDescriptor) -> Option<ModKeys>
             | Binding::GamepadButton(_)
             | Binding::GamepadAxis(_)
             | Binding::AnyKey
+            | Binding::Custom(_)
             | Binding::None => None,
         })
 }
@@ -350,6 +352,13 @@ fn descriptor_stem(
     }) {
         return MOUSE_DESCRIPTOR_LABEL.to_string();
     }
+    if descriptor
+        .entries_slice()
+        .iter()
+        .any(|entry| matches!(entry.binding, Binding::Custom(_)))
+    {
+        return CUSTOM_INPUT_ROW_LABEL.to_string();
+    }
 
     source_stem(sources).to_string()
 }
@@ -365,6 +374,7 @@ fn keyboard_stem(entries: &[InputBindingEntry]) -> Option<String> {
             | Binding::GamepadButton(_)
             | Binding::GamepadAxis(_)
             | Binding::AnyKey
+            | Binding::Custom(_)
             | Binding::None => None,
         })
         .collect::<Option<Vec<_>>>()?;
@@ -394,6 +404,7 @@ fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
             | Binding::MouseWheel { .. }
             | Binding::GamepadButton(_)
             | Binding::AnyKey
+            | Binding::Custom(_)
             | Binding::None => None,
         })
         .collect::<Option<Vec<_>>>()?;
@@ -420,6 +431,7 @@ fn gamepad_button_stem(entries: &[InputBindingEntry]) -> Option<String> {
             | Binding::MouseWheel { .. }
             | Binding::GamepadAxis(_)
             | Binding::AnyKey
+            | Binding::Custom(_)
             | Binding::None => None,
         })
         .collect::<Option<Vec<_>>>()?;

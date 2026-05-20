@@ -7,7 +7,7 @@
 //! - [`install`] (`Installation` set) — clears stale installations, builds the action and binding
 //!   entities for each camera, and gates the input context per camera.
 //! - [`inject`] (`AdapterInjection` set) — each frame translates raw `bevy::input` resources (wheel
-//!   / pinch / touch / button-drag) into mocked adapter actions.
+//!   / pinch / touch / button-drag) into custom inputs consumed by adapter actions.
 //! - [`resolve`] (`ActionResolution` set) — reads the resulting action state and writes the
 //!   per-camera [`OrbitCamInput`].
 //!
@@ -18,6 +18,7 @@ mod install;
 mod resolve;
 
 use bevy::prelude::*;
+use bevy_enhanced_input::prelude::InputConditionAppExt;
 use install::OrbitCamAdapterDiagnostics;
 
 use crate::system_sets::OrbitCamInputInternalSet;
@@ -27,6 +28,7 @@ pub(crate) struct OrbitCamInputAdapterPlugin;
 impl Plugin for OrbitCamInputAdapterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitCamAdapterDiagnostics>()
+            .add_input_condition::<install::TrackpadBindingCondition>()
             .add_systems(
                 PreUpdate,
                 (
@@ -59,10 +61,13 @@ mod tests {
     use bevy::input::mouse::MouseScrollUnit;
     use bevy::prelude::*;
     use bevy::window::WindowRef;
+    use bevy_enhanced_input::prelude::Binding;
+    use bevy_enhanced_input::prelude::BindingOf;
 
     use super::OrbitCamInputAdapterPlugin;
     use super::inject::OrbitCamTouchAdapterOverride;
     use super::install::OrbitCamInputActionEntities;
+    use super::install::TrackpadBindingCondition;
     use crate::constants::PINCH_GESTURE_AMPLIFICATION;
     use crate::constants::PIXEL_SCROLL_SCALE;
     use crate::enhanced_input::LagrangeEnhancedInputPlugin;
@@ -160,6 +165,49 @@ mod tests {
     }
 
     #[test]
+    fn installer_binds_adapter_actions_to_custom_inputs() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
+        route_to(&mut app, camera);
+
+        app.update();
+
+        let actions = *app
+            .world()
+            .get::<OrbitCamInputActionEntities>(camera)
+            .ok_or("adapter actions should be installed")?;
+        let custom_bound_actions = modes::installed_input_entities(app.world(), camera)
+            .into_iter()
+            .filter_map(|entity| {
+                let binding = app.world().get::<Binding>(entity)?;
+                let binding_of = app.world().get::<BindingOf>(entity)?;
+                matches!(binding, Binding::Custom(_)).then_some(**binding_of)
+            })
+            .collect::<Vec<_>>();
+        let trackpad_custom_bindings = modes::installed_input_entities(app.world(), camera)
+            .into_iter()
+            .filter(|entity| {
+                app.world()
+                    .get::<Binding>(*entity)
+                    .is_some_and(|binding| matches!(binding, Binding::Custom(_)))
+            })
+            .filter(|entity| {
+                app.world()
+                    .get::<TrackpadBindingCondition>(*entity)
+                    .is_some()
+            })
+            .count();
+
+        assert_eq!(custom_bound_actions.len(), 5);
+        assert!(custom_bound_actions.contains(&actions.adapter_orbit));
+        assert!(custom_bound_actions.contains(&actions.adapter_pan));
+        assert!(custom_bound_actions.contains(&actions.adapter_zoom_coarse));
+        assert!(custom_bound_actions.contains(&actions.adapter_zoom_smooth));
+        assert_eq!(trackpad_custom_bindings, 1);
+        Ok(())
+    }
+
+    #[test]
     fn mouse_drag_action_resolves_to_orbit_input() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(app.world_mut(), OrbitCamPreset::SimpleMouse);
@@ -243,6 +291,30 @@ mod tests {
         assert_eq!(input.pan().pixels(), Vec2::new(4.0, 6.0));
         assert!(
             input
+                .sources()
+                .contains(CameraInteractionSources::SMOOTH_SCROLL)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn routed_second_blender_like_trackpad_resolves_to_orbit_only() -> TestResult {
+        let mut app = test_app();
+        let primary = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        let second = spawn_camera(app.world_mut(), OrbitCamPreset::BlenderLike);
+        route_to(&mut app, second);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(4.0, 6.0),
+        };
+
+        app.update();
+
+        assert!(!camera_input(&app, primary)?.has_input());
+        let second_input = camera_input(&app, second)?;
+        assert_eq!(second_input.orbit(), OrbitDelta::from(Vec2::new(4.0, 6.0)));
+        assert!(
+            second_input
                 .sources()
                 .contains(CameraInteractionSources::SMOOTH_SCROLL)
         );

@@ -81,6 +81,7 @@ impl InputBindingDescriptor {
             | Binding::GamepadButton(_)
             | Binding::GamepadAxis(_)
             | Binding::AnyKey
+            | Binding::Custom(_)
             | Binding::None => None,
         })
     }
@@ -127,6 +128,7 @@ fn binding_active(
         | Binding::MouseWheel { .. }
         | Binding::GamepadButton(_)
         | Binding::GamepadAxis(_)
+        | Binding::Custom(_)
         | Binding::None => false,
     }
 }

@@ -14,10 +14,10 @@ version    = "0.0.1"
 [workspace.dependencies]
 bevy = { version = "0.18.1", default-features = false }
 bevy_egui = { version = "0.39", default-features = false }
-bevy_enhanced_input = { version = ">=0.24.3, <0.25", default-features = false, features = [
+bevy_enhanced_input = { version = "0.25.0", default-features = false, features = [
   "reflect",
 ] }
-bevy_kana = "0.0.5"
+bevy_kana = "0.0.6"
 bitflags = "2"
 bytemuck = { version = "1", features = ["derive"] }
 etagere = "0.3.0"

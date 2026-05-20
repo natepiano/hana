@@ -213,9 +213,9 @@ const fn sources_for_binding(binding: Binding) -> CameraInteractionSources {
         },
         Binding::MouseWheel { .. } => CameraInteractionSources::WHEEL,
         Binding::GamepadButton(_) | Binding::GamepadAxis(_) => CameraInteractionSources::GAMEPAD,
+        Binding::Custom(_) | Binding::None => CameraInteractionSources::NONE,
         Binding::AnyKey => CameraInteractionSources::KEYBOARD
             .union(CameraInteractionSources::MOUSE)
             .union(CameraInteractionSources::GAMEPAD),
-        Binding::None => CameraInteractionSources::NONE,
     }
 }
