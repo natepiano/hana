@@ -28,11 +28,11 @@
 #[macro_export]
 macro_rules! bind_action_system {
     ($app:expr, $action:ty, $event:ty, $command:path) => {{
-        $app.add_observer(
-            |_: On<bevy_enhanced_input::action::events::Start<$action>>, mut commands: Commands| {
-                commands.trigger(<$event>::default());
-            },
-        )
+        use bevy_enhanced_input::action::events::Start;
+
+        $app.add_observer(|_: On<Start<$action>>, mut commands: Commands| {
+            commands.trigger(<$event>::default());
+        })
         .add_observer(|_: On<$event>, mut commands: Commands| {
             commands.run_system_cached($command);
         })

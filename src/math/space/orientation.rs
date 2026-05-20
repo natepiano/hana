@@ -19,11 +19,13 @@ use bevy::reflect::Reflect;
 /// # Examples
 ///
 /// ```
+/// use std::f32::consts::FRAC_PI_2;
+///
 /// use bevy::math::Quat;
 /// use bevy::math::Vec3;
 /// use bevy_kana::Orientation;
 ///
-/// let orientation = Orientation::from(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+/// let orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
 /// let rotated = orientation * Vec3::X;
 /// assert!((rotated - Vec3::NEG_Z).length() < 1e-6);
 /// ```
