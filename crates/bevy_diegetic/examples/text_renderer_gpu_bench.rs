@@ -38,6 +38,8 @@ use bevy_diegetic::TextRenderer;
 use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_kana::ToF32;
+use bevy_kana::ToF64;
 
 const BENCH_TEXT: &str = "Typography";
 const CAMERA_DISTANCE: f32 = 9.0;
@@ -120,20 +122,27 @@ impl BenchConfig {
                 "--mode" => {
                     let value = required_arg(&mut args, "--mode");
                     config.mode = BenchMode::parse(&value).unwrap_or_else(|| {
-                        eprintln!("unsupported --mode '{value}'; use empty, slug, sdf, msdf, or mtsdf");
+                        eprintln!(
+                            "unsupported --mode '{value}'; use empty, slug, sdf, msdf, or mtsdf"
+                        );
                         process::exit(2);
                     });
                 },
                 "--instances" => {
-                    config.instances = parse_usize(required_arg(&mut args, "--instances"), "--instances");
+                    config.instances =
+                        parse_usize(required_arg(&mut args, "--instances"), "--instances");
                 },
                 "--sample-frames" => {
-                    config.sample_frames =
-                        parse_usize(required_arg(&mut args, "--sample-frames"), "--sample-frames");
+                    config.sample_frames = parse_usize(
+                        required_arg(&mut args, "--sample-frames"),
+                        "--sample-frames",
+                    );
                 },
                 "--warmup-frames" => {
-                    config.warmup_frames =
-                        parse_usize(required_arg(&mut args, "--warmup-frames"), "--warmup-frames");
+                    config.warmup_frames = parse_usize(
+                        required_arg(&mut args, "--warmup-frames"),
+                        "--warmup-frames",
+                    );
                 },
                 "--help" | "-h" => {
                     print_help();
@@ -169,6 +178,14 @@ struct RunningStats {
     sum_sq:  f64,
 }
 
+#[derive(Default)]
+struct RenderElapsedTotals {
+    cpu:     f64,
+    gpu:     f64,
+    has_cpu: bool,
+    has_gpu: bool,
+}
+
 impl Default for RunningStats {
     fn default() -> Self {
         Self {
@@ -190,11 +207,13 @@ impl RunningStats {
         self.max = self.max.max(value);
     }
 
-    fn mean(&self) -> f64 { self.sum / self.samples as f64 }
+    fn mean(&self) -> f64 { self.sum / self.samples.to_f64() }
 
     fn stddev(&self) -> f64 {
         let mean = self.mean();
-        (self.sum_sq / self.samples as f64 - mean * mean).max(0.0).sqrt()
+        mean.mul_add(-mean, self.sum_sq / self.samples.to_f64())
+            .max(0.0)
+            .sqrt()
     }
 }
 
@@ -205,10 +224,12 @@ fn main() {
 
     App::new()
         .insert_resource(config)
-        .insert_resource(AtlasConfig::new()
-            .with_distance_field(distance_field)
-            .with_quality(RasterQuality::Large)
-            .with_backend(RasterBackend::Gpu))
+        .insert_resource(
+            AtlasConfig::new()
+                .with_distance_field(distance_field)
+                .with_quality(RasterQuality::Large)
+                .with_backend(RasterBackend::Gpu),
+        )
         .insert_resource(AtlasPreference {
             distance_field,
             quality: RasterQuality::Large,
@@ -246,8 +267,8 @@ fn setup(mut commands: Commands, config: Res<BenchConfig>) {
     }
 
     let rows = config.instances.div_ceil(GRID_COLUMNS);
-    let origin_x = -GRID_SPACING_X * (GRID_COLUMNS.saturating_sub(1) as f32) * 0.5;
-    let origin_y = GRID_SPACING_Y * (rows.saturating_sub(1) as f32) * 0.5;
+    let origin_x = -GRID_SPACING_X * GRID_COLUMNS.saturating_sub(1).to_f32() * 0.5;
+    let origin_y = GRID_SPACING_Y * rows.saturating_sub(1).to_f32() * 0.5;
     for index in 0..config.instances {
         let column = index % GRID_COLUMNS;
         let row = index / GRID_COLUMNS;
@@ -257,8 +278,8 @@ fn setup(mut commands: Commands, config: Res<BenchConfig>) {
                 .with_color(Color::WHITE)
                 .with_shadow_mode(GlyphShadowMode::None),
             Transform::from_xyz(
-                origin_x + column as f32 * GRID_SPACING_X,
-                origin_y - row as f32 * GRID_SPACING_Y,
+                column.to_f32().mul_add(GRID_SPACING_X, origin_x),
+                row.to_f32().mul_add(-GRID_SPACING_Y, origin_y),
                 0.0,
             ),
         ));
@@ -288,10 +309,7 @@ fn collect_samples(
         state.frame_time.push(frame_ms);
     }
 
-    let mut render_cpu = 0.0;
-    let mut render_gpu = 0.0;
-    let mut saw_cpu = false;
-    let mut saw_gpu = false;
+    let mut elapsed_totals = RenderElapsedTotals::default();
     for diagnostic in diagnostics.iter() {
         let path = diagnostic.path().as_str();
         if path.starts_with("render/")
@@ -299,11 +317,11 @@ fn collect_samples(
             && let Some(value) = diagnostic.value()
         {
             if path.ends_with("/elapsed_cpu") {
-                render_cpu += value;
-                saw_cpu = true;
+                elapsed_totals.cpu += value;
+                elapsed_totals.has_cpu = true;
             } else {
-                render_gpu += value;
-                saw_gpu = true;
+                elapsed_totals.gpu += value;
+                elapsed_totals.has_gpu = true;
             }
             state
                 .render_paths
@@ -312,11 +330,11 @@ fn collect_samples(
                 .push(value);
         }
     }
-    if saw_cpu {
-        state.render_cpu.push(render_cpu);
+    if elapsed_totals.has_cpu {
+        state.render_cpu.push(elapsed_totals.cpu);
     }
-    if saw_gpu {
-        state.render_gpu.push(render_gpu);
+    if elapsed_totals.has_gpu {
+        state.render_gpu.push(elapsed_totals.gpu);
     }
 
     if state.frame >= config.warmup_frames + config.sample_frames {

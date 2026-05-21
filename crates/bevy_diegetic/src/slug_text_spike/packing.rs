@@ -12,26 +12,51 @@ use super::geometry::SlugGlyph;
 pub const DEFAULT_BAND_COUNT: usize = 32;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
+const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;
 
 /// GPU curve record for a quadratic Bezier segment.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct SlugCurveRecord {
-    /// Segment start point in `.xy`, quadratic control point in `.zw`.
-    pub start_control: Vec4,
-    /// Segment end point in `.xy`; `.zw` is reserved for later packing.
-    pub end:           Vec4,
+    /// Segment start point in `.xy`, control-minus-start in `.zw`.
+    pub start_delta: Vec4,
+    /// Quadratic second-difference in `.xy`, segment end point in `.zw`.
+    pub curve_end:   Vec4,
+    /// Conservative control-point bounds minimum in `.xy`, maximum in `.zw`.
+    pub bounds:      Vec4,
+    /// Distance-solver coefficients in `.xyz`; `.w` is reserved.
+    pub solver:      Vec4,
 }
 
 impl From<&QuadraticSegment> for SlugCurveRecord {
     fn from(segment: &QuadraticSegment) -> Self {
+        let control_delta = segment.control - segment.start;
+        let curve_delta = segment.end - 2.0 * segment.control + segment.start;
+        let curve_norm_sq = curve_delta.length_squared();
+        let inverse_curve_norm_sq = if curve_norm_sq >= CURVE_DEGENERATE_EPS {
+            curve_norm_sq.recip()
+        } else {
+            0.0
+        };
         Self {
-            start_control: Vec4::new(
+            start_delta: Vec4::new(
                 segment.start.x,
                 segment.start.y,
-                segment.control.x,
-                segment.control.y,
+                control_delta.x,
+                control_delta.y,
             ),
-            end:           Vec4::new(segment.end.x, segment.end.y, 0.0, 0.0),
+            curve_end:   Vec4::new(curve_delta.x, curve_delta.y, segment.end.x, segment.end.y),
+            bounds:      Vec4::new(
+                segment.start.x.min(segment.control.x).min(segment.end.x),
+                segment.start.y.min(segment.control.y).min(segment.end.y),
+                segment.start.x.max(segment.control.x).max(segment.end.x),
+                segment.start.y.max(segment.control.y).max(segment.end.y),
+            ),
+            solver:      Vec4::new(
+                3.0 * control_delta.dot(curve_delta) * inverse_curve_norm_sq,
+                2.0 * control_delta.length_squared() * inverse_curve_norm_sq,
+                inverse_curve_norm_sq,
+                0.0,
+            ),
         }
     }
 }
@@ -240,27 +265,31 @@ fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis:
 fn ignored_axis_line(segment: &QuadraticSegment, axis: Axis) -> bool {
     match axis {
         Axis::Horizontal => {
-            segment.start.y == segment.control.y && segment.control.y == segment.end.y
+            (segment.start.y - segment.control.y).abs() <= f32::EPSILON
+                && (segment.control.y - segment.end.y).abs() <= f32::EPSILON
         },
-        Axis::Vertical => segment.start.x == segment.control.x && segment.control.x == segment.end.x,
+        Axis::Vertical => {
+            (segment.start.x - segment.control.x).abs() <= f32::EPSILON
+                && (segment.control.x - segment.end.x).abs() <= f32::EPSILON
+        },
     }
 }
 
-fn segment_axis_min(segment: &QuadraticSegment, axis: Axis) -> f32 {
+const fn segment_axis_min(segment: &QuadraticSegment, axis: Axis) -> f32 {
     match axis {
         Axis::Horizontal => segment.start.y.min(segment.control.y).min(segment.end.y),
         Axis::Vertical => segment.start.x.min(segment.control.x).min(segment.end.x),
     }
 }
 
-fn segment_axis_max(segment: &QuadraticSegment, axis: Axis) -> f32 {
+const fn segment_axis_max(segment: &QuadraticSegment, axis: Axis) -> f32 {
     match axis {
         Axis::Horizontal => segment.start.y.max(segment.control.y).max(segment.end.y),
         Axis::Vertical => segment.start.x.max(segment.control.x).max(segment.end.x),
     }
 }
 
-fn descending_band_sort_value(segment: &QuadraticSegment, axis: Axis) -> f32 {
+const fn descending_band_sort_value(segment: &QuadraticSegment, axis: Axis) -> f32 {
     match axis {
         Axis::Horizontal => segment.start.x.max(segment.control.x).max(segment.end.x),
         Axis::Vertical => segment.start.y.max(segment.control.y).max(segment.end.y),

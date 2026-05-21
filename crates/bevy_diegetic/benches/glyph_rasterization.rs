@@ -39,8 +39,8 @@ use std::thread;
 
 use bevy::tasks::TaskPool;
 use bevy::tasks::TaskPoolBuilder;
-use bevy_diegetic::DistanceField;
 use bevy_diegetic::DEFAULT_BAND_COUNT;
+use bevy_diegetic::DistanceField;
 use bevy_diegetic::GlyphAtlas;
 use bevy_diegetic::GlyphKey;
 use bevy_diegetic::SlugBackend;
@@ -296,31 +296,25 @@ fn bench_renderer_prep(c: &mut Criterion) {
             },
             RendererPrep::Slug => {
                 group.bench_function(case.name, |b| {
-                    b.iter_with_setup(
-                        SlugBackend::default,
-                        |mut backend| {
-                            let request = SlugTextRequest {
-                                band_count: DEFAULT_BAND_COUNT,
-                                ..SlugTextRequest::new(
-                                    ASCII_PRINTABLE,
-                                    case.font_data,
-                                    SlugFontKey::new(u64::from(FONT_ID)),
-                                    case.font_family,
-                                    slug_world_scale(case.font_data, case.canonical_size),
-                                )
-                            };
-                            let prepared = backend
-                                .prepare_text_run(request)
-                                .unwrap_or_else(|err| panic!("prepare Slug run: {err}"));
-                            let render_data = build_slug_run_render_data(
-                                &prepared.run,
-                                backend.glyph_cache(),
-                                1.0,
+                    b.iter_with_setup(SlugBackend::default, |mut backend| {
+                        let request = SlugTextRequest {
+                            band_count: DEFAULT_BAND_COUNT,
+                            ..SlugTextRequest::new(
+                                ASCII_PRINTABLE,
+                                case.font_data,
+                                SlugFontKey::new(u64::from(FONT_ID)),
+                                case.font_family,
+                                slug_world_scale(case.font_data, case.canonical_size),
                             )
-                            .unwrap_or_else(|err| panic!("build Slug render data: {err}"));
-                            black_box(render_data.profile());
-                        },
-                    );
+                        };
+                        let prepared = backend
+                            .prepare_text_run(request)
+                            .unwrap_or_else(|err| panic!("prepare Slug run: {err}"));
+                        let render_data =
+                            build_slug_run_render_data(&prepared.run, backend.glyph_cache(), 1.0)
+                                .unwrap_or_else(|err| panic!("build Slug render data: {err}"));
+                        black_box(render_data.profile());
+                    });
                 });
             },
         }

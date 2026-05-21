@@ -42,8 +42,10 @@ struct SlugTextUniform {
 }
 
 struct SlugCurveRecord {
-    start_control: vec4<f32>,
-    end: vec4<f32>,
+    start_delta: vec4<f32>,
+    curve_end: vec4<f32>,
+    bounds: vec4<f32>,
+    solver: vec4<f32>,
 }
 
 struct SlugBandRecord {
@@ -140,43 +142,42 @@ fn solve_cubic_normed(a: f32, b: f32, c: f32, roots: ptr<function, array<f32, 3>
     return 1u;
 }
 
-fn exact_quadratic_distance(
+fn exact_quadratic_distance_sq(
+    curve: SlugCurveRecord,
     point: vec2<f32>,
     start: vec2<f32>,
-    control: vec2<f32>,
+    control_delta: vec2<f32>,
+    curve_delta: vec2<f32>,
     end: vec2<f32>,
 ) -> f32 {
     let pv = point - start;
-    let pv1 = control - start;
-    let pv2 = end - 2.0 * control + start;
     var best_sq = dot(pv, pv);
 
     let end_diff = end - point;
     best_sq = min(best_sq, dot(end_diff, end_diff));
 
-    let curve_norm_sq = dot(pv2, pv2);
-    if curve_norm_sq >= DEGENERATE_EPS {
-        let inverse_curve_norm_sq = 1.0 / curve_norm_sq;
+    let inverse_curve_norm_sq = curve.solver.z;
+    if inverse_curve_norm_sq > 0.0 {
         var roots: array<f32, 3>;
         let root_count = solve_cubic_normed(
-            3.0 * dot(pv1, pv2) * inverse_curve_norm_sq,
-            (2.0 * dot(pv1, pv1) - dot(pv2, pv)) * inverse_curve_norm_sq,
-            -dot(pv1, pv) * inverse_curve_norm_sq,
+            curve.solver.x,
+            curve.solver.y - dot(curve_delta, pv) * inverse_curve_norm_sq,
+            -dot(control_delta, pv) * inverse_curve_norm_sq,
             &roots,
         );
         for (var index = 0u; index < root_count; index += 1u) {
             let t = roots[index];
             if t >= 0.0 && t <= 1.0 {
-                let closest = start + pv1 * (2.0 * t) + pv2 * (t * t);
+                let closest = start + control_delta * (2.0 * t) + curve_delta * (t * t);
                 let diff = closest - point;
                 best_sq = min(best_sq, dot(diff, diff));
             }
         }
     } else {
-        return min(sqrt(best_sq), point_line_distance(point, start, end));
+        return min(best_sq, point_line_distance_sq(point, start, end));
     }
 
-    return sqrt(best_sq);
+    return best_sq;
 }
 
 fn winding_for_t(curve: SlugCurveRecord, point: vec2<f32>, t: f32) -> i32 {
@@ -184,18 +185,14 @@ fn winding_for_t(curve: SlugCurveRecord, point: vec2<f32>, t: f32) -> i32 {
         return 0;
     }
 
-    let inverse_t = 1.0 - t;
-    let start = curve.start_control.xy;
-    let control = curve.start_control.zw;
-    let end = curve.end.xy;
-    let curve_x = inverse_t * inverse_t * start.x +
-        2.0 * inverse_t * t * control.x +
-        t * t * end.x;
+    let curve_x = curve.start_delta.x +
+        2.0 * curve.start_delta.z * t +
+        curve.curve_end.x * t * t;
     if curve_x <= point.x {
         return 0;
     }
 
-    let dy = 2.0 * (inverse_t * (control.y - start.y) + t * (end.y - control.y));
+    let dy = 2.0 * (curve.start_delta.w + curve.curve_end.y * t);
     if abs(dy) < ROOT_EPSILON {
         return 0;
     }
@@ -203,12 +200,9 @@ fn winding_for_t(curve: SlugCurveRecord, point: vec2<f32>, t: f32) -> i32 {
 }
 
 fn curve_winding(curve: SlugCurveRecord, point: vec2<f32>) -> i32 {
-    let start_y = curve.start_control.y;
-    let control_y = curve.start_control.w;
-    let end_y = curve.end.y;
-    let a = start_y - 2.0 * control_y + end_y;
-    let b = 2.0 * (control_y - start_y);
-    let c = start_y - point.y;
+    let a = curve.curve_end.y;
+    let b = 2.0 * curve.start_delta.w;
+    let c = curve.start_delta.y - point.y;
 
     if abs(a) < ROOT_EPSILON {
         if abs(b) < ROOT_EPSILON {
@@ -249,39 +243,73 @@ fn inside_at(point: vec2<f32>, glyph: SlugGlyphRecord) -> bool {
     return winding != 0;
 }
 
-fn point_line_distance(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> f32 {
+fn point_line_distance_sq(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> f32 {
     let edge = end - start;
     let edge_length_squared = max(dot(edge, edge), ROOT_EPSILON);
     let t = clamp(dot(point - start, edge) / edge_length_squared, 0.0, 1.0);
-    return length(point - (start + edge * t));
+    let diff = point - (start + edge * t);
+    return dot(diff, diff);
 }
 
-fn curve_distance(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
-    return exact_quadratic_distance(
+fn curve_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
+    return exact_quadratic_distance_sq(
+        curve,
         point,
-        curve.start_control.xy,
-        curve.start_control.zw,
-        curve.end.xy,
+        curve.start_delta.xy,
+        curve.start_delta.zw,
+        curve.curve_end.xy,
+        curve.curve_end.zw,
     );
+}
+
+fn curve_bounds_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
+    let nearest = clamp(point, curve.bounds.xy, curve.bounds.zw);
+    let diff = point - nearest;
+    return dot(diff, diff);
 }
 
 fn nearest_curve_distance(point: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
     let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
     let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
-    var distance = 1000000.0;
+    var distance_sq = 1000000000000.0;
     for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
-        distance = min(distance, curve_distance(point, curves[horizontal_band.start + offset]));
+        distance_sq = min(distance_sq, curve_distance_sq(point, curves[horizontal_band.start + offset]));
     }
     for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
-        distance = min(distance, curve_distance(point, curves[vertical_band.start + offset]));
+        distance_sq = min(distance_sq, curve_distance_sq(point, curves[vertical_band.start + offset]));
     }
-    return distance;
+    return sqrt(distance_sq);
+}
+
+fn nearest_curve_bounds_distance_sq(point: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
+    let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+    let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
+    var distance_sq = 1000000000000.0;
+    for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
+        distance_sq = min(
+            distance_sq,
+            curve_bounds_distance_sq(point, curves[horizontal_band.start + offset]),
+        );
+    }
+    for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
+        distance_sq = min(
+            distance_sq,
+            curve_bounds_distance_sq(point, curves[vertical_band.start + offset]),
+        );
+    }
+    return distance_sq;
 }
 
 fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
-    let distance = nearest_curve_distance(point, glyph);
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
-    let signed_distance = select(-distance, distance, inside_at(point, glyph));
+    let edge_width_sq = edge_width * edge_width;
+    let inside = inside_at(point, glyph);
+    if nearest_curve_bounds_distance_sq(point, glyph) > edge_width_sq {
+        return select(0.0, 1.0, inside);
+    }
+
+    let distance = nearest_curve_distance(point, glyph);
+    let signed_distance = select(-distance, distance, inside);
     return smoothstep(-edge_width, edge_width, signed_distance);
 }
 

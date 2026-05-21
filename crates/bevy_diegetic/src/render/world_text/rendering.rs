@@ -3,6 +3,12 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
+use super::BackendRenderServices;
+use super::ComputedWorldText;
+use super::PanelTextChild;
+use super::WorldFontUnit;
+use super::WorldText;
+use super::WorldTextAlpha;
 use super::mesh_spawning;
 use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::SlugMeshSpawnAssets;
@@ -11,12 +17,6 @@ use super::mesh_spawning::WorldTextShadowProxy;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
 use super::shaping;
-use super::BackendRenderServices;
-use super::ComputedWorldText;
-use super::PanelTextChild;
-use super::WorldFontUnit;
-use super::WorldText;
-use super::WorldTextAlpha;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
 use crate::cascade::Resolved;

@@ -103,17 +103,13 @@ fn main() {
                 .active_control(SLUG_CONTROL)
                 .control(DISTANCE_CONTROL),
         )
-        .wire_chip_to_state::<ActiveTextRenderer, _>(SLUG_CONTROL, |state| {
-            match state.0 {
-                TextRenderer::Slug => ControlActivation::Active,
-                TextRenderer::DistanceField => ControlActivation::Inactive,
-            }
+        .wire_chip_to_state::<ActiveTextRenderer, _>(SLUG_CONTROL, |state| match state.0 {
+            TextRenderer::Slug => ControlActivation::Active,
+            TextRenderer::DistanceField => ControlActivation::Inactive,
         })
-        .wire_chip_to_state::<ActiveTextRenderer, _>(DISTANCE_CONTROL, |state| {
-            match state.0 {
-                TextRenderer::DistanceField => ControlActivation::Active,
-                TextRenderer::Slug => ControlActivation::Inactive,
-            }
+        .wire_chip_to_state::<ActiveTextRenderer, _>(DISTANCE_CONTROL, |state| match state.0 {
+            TextRenderer::DistanceField => ControlActivation::Active,
+            TextRenderer::Slug => ControlActivation::Inactive,
         })
         .with_camera_control_panel()
         .init_resource::<ActiveTextRenderer>()
@@ -123,10 +119,7 @@ fn main() {
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut slug_backend: ResMut<SlugBackend>,
-) {
+fn setup(mut commands: Commands, mut slug_backend: ResMut<SlugBackend>) {
     let prepare_start = Instant::now();
     match load_preview_text(&mut slug_backend) {
         Ok(preview) => {

@@ -251,16 +251,7 @@ fn main() {
         .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .margin(ZOOM_TO_FIT_MARGIN)
         .with_restore_camera_on_restart()
-        .with_title_bar(
-            TitleBar::new()
-                .control("T Overlay")
-                .control("←/→ Cycle Word")
-                .control("M MSDF")
-                .control("S SDF")
-                .control("X MTSDF")
-                .control("L Slug")
-                .control("G GPU"),
-        )
+        .with_title_bar(title_bar())
         .wire_chip_to_state::<OverlayState, _>("T Overlay", |state| match state {
             OverlayState::On => ControlActivation::Active,
             OverlayState::Off => ControlActivation::Inactive,
@@ -285,7 +276,7 @@ fn main() {
             TypographyTextMode::Mtsdf => ControlActivation::Active,
             TypographyTextMode::Msdf | TypographyTextMode::Sdf | TypographyTextMode::Slug => {
                 ControlActivation::Inactive
-            }
+            },
         })
         .wire_chip_to_state::<TypographyTextMode, _>("L Slug", |mode| match mode {
             TypographyTextMode::Slug => ControlActivation::Active,
@@ -329,6 +320,17 @@ fn main() {
         .add_observer(on_font_registered)
         .add_observer(on_typography_overlay_ready)
         .run();
+}
+
+fn title_bar() -> TitleBar {
+    TitleBar::new()
+        .control("T Overlay")
+        .control("←/→ Cycle Word")
+        .control("M MSDF")
+        .control("S SDF")
+        .control("X MTSDF")
+        .control("L Slug")
+        .control("G GPU")
 }
 
 fn setup(

@@ -19,6 +19,8 @@ use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::render::TextRenderer;
+use crate::render::TextRendererPreference;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
@@ -32,10 +34,8 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
-use crate::render::TextRenderer;
-use crate::render::TextRendererPreference;
-use crate::slug_text_spike::SlugBackend;
 use crate::slug_text_spike::DEFAULT_BAND_COUNT;
+use crate::slug_text_spike::SlugBackend;
 use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
 use crate::text::GlyphAtlas;
@@ -113,9 +113,7 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        let selected_renderer = config
-            .renderer()
-            .unwrap_or_else(|| text_backend.backend());
+        let selected_renderer = config.renderer().unwrap_or_else(|| text_backend.backend());
         if selected_renderer == TextRenderer::Slug {
             let (panel_slug_run, stats) = build_panel_slug_text(
                 world_text.text(),

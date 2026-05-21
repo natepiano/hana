@@ -13,7 +13,7 @@ const CUBIC_TO_QUADRATIC_MAX_DEPTH: u8 = 10;
 const HALF: f32 = 0.5;
 const ERROR_SAMPLE_A: f32 = 0.25;
 const ERROR_SAMPLE_B: f32 = 0.75;
-const TANGENT_INTERSECTION_EPSILON: f32 = 0.000001;
+const TANGENT_INTERSECTION_EPSILON: f32 = 0.000_001;
 
 /// A single quadratic Bezier segment in font design-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -179,22 +179,22 @@ fn load_glyph_from_face(
     let rect = face
         .outline_glyph(glyph_id, &mut builder)
         .ok_or(SlugOutlineError::MissingGlyphId(glyph_id.0))?;
-    builder.finish(
+    Ok(builder.finish(
         glyph_id,
         SlugBounds {
             min: Vec2::new(f32::from(rect.x_min), f32::from(rect.y_min)),
             max: Vec2::new(f32::from(rect.x_max), f32::from(rect.y_max)),
         },
-    )
+    ))
 }
 
 #[derive(Debug)]
 struct QuadraticOutlineBuilder {
-    character:      char,
-    contours:       Vec<SlugContour>,
-    current:        Vec<QuadraticSegment>,
-    contour_start:  Option<Vec2>,
-    current_point:  Option<Vec2>,
+    character:     char,
+    contours:      Vec<SlugContour>,
+    current:       Vec<QuadraticSegment>,
+    contour_start: Option<Vec2>,
+    current_point: Option<Vec2>,
 }
 
 impl QuadraticOutlineBuilder {
@@ -208,18 +208,14 @@ impl QuadraticOutlineBuilder {
         }
     }
 
-    fn finish(
-        mut self,
-        glyph_id: GlyphId,
-        bounds: SlugBounds,
-    ) -> Result<SlugGlyph, SlugOutlineError> {
+    fn finish(mut self, glyph_id: GlyphId, bounds: SlugBounds) -> SlugGlyph {
         self.finish_contour();
-        Ok(SlugGlyph {
+        SlugGlyph {
             character: self.character,
             glyph_id: glyph_id.0,
             bounds,
             contours: self.contours,
-        })
+        }
     }
 
     fn finish_contour(&mut self) {
@@ -348,7 +344,7 @@ fn tangent_intersection_control(cubic: CubicSegment) -> Option<Vec2> {
     Some(cubic.start + start_tangent * scale)
 }
 
-fn cross(left: Vec2, right: Vec2) -> f32 { left.x * right.y - left.y * right.x }
+fn cross(left: Vec2, right: Vec2) -> f32 { left.x.mul_add(right.y, -(left.y * right.x)) }
 
 fn cubic_quadratic_error(cubic: CubicSegment, quadratic: QuadraticSegment) -> f32 {
     [ERROR_SAMPLE_A, ERROR_SAMPLE_B]

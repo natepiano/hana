@@ -7,11 +7,11 @@ mod shaping;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
+use self::batching::PanelTextAlpha;
+use self::batching::SharedMsdfMaterials;
 use self::batching::build_panel_batched_meshes;
 use self::batching::build_panel_slug_meshes;
 use self::batching::sync_panel_hue_offset;
-use self::batching::PanelTextAlpha;
-use self::batching::SharedMsdfMaterials;
 use self::reconcile::poll_atlas_glyphs;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;

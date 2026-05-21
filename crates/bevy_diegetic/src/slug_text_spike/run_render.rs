@@ -194,18 +194,18 @@ struct RunMeshBuilder {
 }
 
 struct GlyphQuadExtents {
-    left:      f32,
-    right:     f32,
-    bottom:    f32,
-    top:       f32,
-    source_left: f32,
-    source_right: f32,
+    left:          f32,
+    right:         f32,
+    bottom:        f32,
+    top:           f32,
+    source_left:   f32,
+    source_right:  f32,
     source_bottom: f32,
-    source_top: f32,
-    uv_left:   f32,
-    uv_right:  f32,
-    uv_top:    f32,
-    uv_bottom: f32,
+    source_top:    f32,
+    uv_left:       f32,
+    uv_right:      f32,
+    uv_top:        f32,
+    uv_bottom:     f32,
 }
 
 impl GlyphQuadExtents {
@@ -216,18 +216,18 @@ impl GlyphQuadExtents {
         let uv_padding_y = padding_y / height;
 
         Self {
-            left: left - padding_x,
-            right: right + padding_x,
-            bottom: bottom - padding_y,
-            top: top + padding_y,
-            source_left: left,
-            source_right: right,
+            left:          left - padding_x,
+            right:         right + padding_x,
+            bottom:        bottom - padding_y,
+            top:           top + padding_y,
+            source_left:   left,
+            source_right:  right,
             source_bottom: bottom,
-            source_top: top,
-            uv_left: -uv_padding_x,
-            uv_right: 1.0 + uv_padding_x,
-            uv_top: -uv_padding_y,
-            uv_bottom: 1.0 + uv_padding_y,
+            source_top:    top,
+            uv_left:       -uv_padding_x,
+            uv_right:      1.0 + uv_padding_x,
+            uv_top:        -uv_padding_y,
+            uv_bottom:     1.0 + uv_padding_y,
         }
     }
 
@@ -288,9 +288,8 @@ impl RunMeshBuilder {
         let top = bounds.max.y.mul_add(bounds_scale.y, origin.y) * scale;
         let padding_x = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.x.abs() * scale;
         let padding_y = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.y.abs() * scale;
-        let Some(extents) =
-            GlyphQuadExtents::new(left, right, bottom, top, padding_x, padding_y)
-                .clipped(clip_rect)
+        let Some(extents) = GlyphQuadExtents::new(left, right, bottom, top, padding_x, padding_y)
+            .clipped(clip_rect)
         else {
             return;
         };

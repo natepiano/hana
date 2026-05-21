@@ -38,10 +38,13 @@ Implementation rule:
 
 ## Terminology
 
-- `TextRendererBackend`: chooses the text rendering model, initially
+- `TextRenderer`: chooses the text rendering model, initially
   `DistanceField` or `Slug`.
 - `DistanceField`: describes the atlas texel encoding inside the
   current renderer: `Sdf`, `Msdf`, or `Mtsdf`.
+
+Experiment history lives in `docs/bevy_diegetic/slug-experiments.md`.
+Check that document before retrying shader or packing optimizations.
 - `RasterBackend`: describes who computes distance-field atlas texels:
   CPU or GPU.
 - `SlugStorageBackend`: future name for Slug curve/band storage
@@ -105,13 +108,13 @@ After the isolated Slug renderer proves it can draw text, add a
 renderer-level preference layer instead of reusing atlas configuration:
 
 ```rust
-pub enum TextRendererBackend {
+pub enum TextRenderer {
     DistanceField,
     Slug,
 }
 
 pub struct TextRendererPreference {
-    pub backend: TextRendererBackend,
+    pub renderer: TextRenderer,
 }
 ```
 
@@ -234,9 +237,9 @@ explicit:
 
 - lines can be encoded as degenerate quadratics
 - quadratic segments can pass through directly
-- cubic segments need a chosen strategy before broad font support:
-  either cubic-to-quadratic approximation with an error bound, or an
-  explicitly limited TrueType-quadratic-only spike
+- cubic segments currently use adaptive cubic-to-quadratic conversion;
+  keep the error bound explicit and covered by fixtures before claiming
+  broad font support
 
 Unsupported outline formats should produce a visible backend failure
 state, not missing glyphs.
@@ -371,7 +374,7 @@ Completed:
 - Created a private experimental Slug module for the feasibility path.
 - Added standalone `examples/slug_text.rs`.
 - Kept the code separate from production panel/world text modules.
-- Avoided `TextRendererBackend`, shared glyph instance types, and
+- Avoided `TextRenderer`, shared glyph instance types, and
   production readiness integration.
 
 Exit criteria: met. The repository has an isolated Slug feasibility
@@ -389,9 +392,10 @@ Completed:
   parley so Slug receives glyph IDs and advances from the shaper.
 - Built quadratic curve records and horizontal band records for
   supported TrueType outlines.
-- Added a CJK probe using bundled open-source Noto Sans CJK assets. The
-  current quadratic-only spike rejects the CFF/cubic outline with clear
-  diagnostics, preserving cubic support as future work.
+- Added a CJK probe using bundled open-source Noto Sans CJK assets.
+  Later phases added adaptive cubic-to-quadratic conversion so CFF/CFF2
+  outlines can enter the Slug path instead of failing at the first
+  quadratic-only boundary.
 - Ported the useful first fill path to WGSL using a private
   `MaterialExtension` path.
 - Rendered Slug fill quads in the isolated example.
@@ -559,8 +563,8 @@ Completed:
 
 - Added an internal backend decision point in
   `crates/bevy_diegetic/src/render/text_backend.rs`.
-- Added `TextRendererBackend { DistanceField, Slug }` and
-  `TextRendererPreference { backend }`. The first selector is a global
+- Added `TextRenderer { DistanceField, Slug }` and
+  `TextRendererPreference { renderer }`. The first selector is a global
   resource used by the existing render modules and `examples/slug_text.rs`;
   per-text backend switching stays out of this phase.
 - Added a `SlugBackend` resource for the isolated path. It owns the
@@ -574,8 +578,9 @@ Completed:
   Slug text request would need fallback, detect that as an explicit
   unsupported/missing-glyph state instead of silently receiving an
   unregistered fallback face.
-- Treated the first Slug backend as TrueType/quadratic-outline only. If a
-  selected registered font or glyph cannot be represented by that path,
+- Treated the first Slug backend as TrueType/quadratic-outline only.
+  Later phases added adaptive cubic-to-quadratic conversion for CFF/CFF2
+  outlines. Any remaining unsupported font or glyph format should still
   report a clear unsupported-text state. Do not drop glyphs and do not
   mix Slug with MTSDF inside one text run.
 - Extended `SlugGlyphKey` with a preprocessing version so changes to
@@ -584,7 +589,7 @@ Completed:
   backend selection while still comparing Slug and MTSDF output.
 
 Exit criteria: met for the isolated backend boundary. The existing
-`slug_text` example selects `TextRendererBackend::Slug`, prepares the
+`slug_text` example selects `TextRenderer::Slug`, prepares the
 `Typography` run through `SlugBackend`, reuses the backend-owned glyph
 cache, and emits a Slug completion signal. The production panel/world
 render systems still default to distance-field rendering until Phase 6
@@ -616,13 +621,12 @@ adds opt-in Slug routing.
 
 **Implications for remaining phases:**
 
-- Phase 6 needs the production route from shared positioned glyphs to
-  Slug run data; the backend resource exists, but panel/world systems
-  still build atlas quads.
-- Phase 6 needs to connect `SlugBackendCompleted` to the same pending
-  text retry behavior currently driven by atlas events.
-- Phase 6 should decide how Slug render entities are spawned for
-  visible and shadow passes before adding example opt-ins.
+- Phase 6 added the production route from shared positioned glyphs to
+  Slug run data.
+- Phase 6 connected `SlugBackendCompleted` to pending text retry
+  behavior.
+- Phase 6 defined how Slug render entities are spawned for visible and
+  shadow passes before broader example opt-ins.
 
 ### Phase 5 Review
 
@@ -632,24 +636,24 @@ adds opt-in Slug routing.
   pending Slug text.
 - Phase 6 now moves GPU storage allocation/upload ownership into the
   production Slug backend path instead of leaving it in examples.
-- Phase 6 now separates shadow-pass representation from Phase 9 shadow
+- Phase 6 now separates shadow-pass representation from Phase 12 shadow
   effect quality.
 - Phase 6 cache invalidation tests now target the key dimensions that
   exist today; storage and effect profiles remain deferred.
-- Phase 8 CJK testing now stays inside the current TrueType/quadratic
-  scope until the post-transition unsupported-text review decides CFF
-  and cubic support.
+- Phase 8 CJK testing now includes the adaptive cubic-to-quadratic path.
+  The post-transition unsupported-text review should decide whether that
+  conversion is sufficient or whether direct cubic handling is needed.
 
 ### Phase 6: world text opt-in routing
 
 Status: completed for `WorldText` opt-in routing. Panel text routing
-remains in the next phase because panel text is batched into panel
-render targets and needs a separate Slug batching path.
+was completed in Phase 7 because panel text is batched into panel render
+targets and needed a separate Slug batching path.
 
 Completed:
 
 - Route shared `PositionedGlyph` data into Slug run data when
-  `TextRendererPreference` selects `TextRendererBackend::Slug`.
+  `TextRendererPreference` selects `TextRenderer::Slug`.
   Distance-field rendering keeps building atlas `GlyphQuadData`.
 - Bridge production `PositionedGlyph.font` / `ResolvedFontData` to
   `SlugFontKey` and exact font bytes. Do not reuse the example-only
@@ -664,7 +668,7 @@ Completed:
 - Added backend-preference change handling that marks existing text
   pending when the global backend changes.
 - Defined `WorldText` Slug visible and shadow-pass spawning so the
-  existing visible/shadow mode matrix remains representable. Phase 9
+  existing visible/shadow mode matrix remains representable. Phase 12
   owns production-quality shadow effects and tuning.
 - Updated `examples/world_text.rs` to opt into Slug through
   `TextRendererPreference::slug()`.
@@ -725,10 +729,10 @@ still use distance-field text until the panel Slug batching path exists.
 
 **Implications for remaining phases:**
 
-- The next phase must start with backend-owned Slug GPU storage before panel
-  batching, so panels do not inherit per-mesh buffer allocation.
-- Panel routing must be documented as a separate render-target batching task,
-  not as a small extension of `WorldText` spawning.
+- Phase 7 started with backend-owned Slug GPU storage before panel
+  batching, so panels did not inherit per-mesh buffer allocation.
+- Phase 11 keeps panel routing documented as a separate render-target
+  batching task, not as a small extension of `WorldText` spawning.
 - Quality/performance work must include production `WorldText` opt-in examples
   and keep the isolated Slug-vs-MTSDF comparison example.
 
@@ -736,10 +740,11 @@ still use distance-field text until the panel Slug batching path exists.
 
 - Phase 7 now covers backend-owned GPU storage, panel Slug batching, and
   clipping before broad quality work.
-- Phase 8 now starts with `WorldText` evidence and waits for panel routing
-  before claiming full panel/world quality.
-- Phase 9 now treats shadows as production tuning over the existing
-  `WorldText` shadow proxy path, not as creating the basic second pass.
+- Phase 8 covered quality and robustness evidence after panel routing
+  existed.
+- Phase 9 isolated Slug visual quality, Phase 10 targets pixel-parity
+  shader performance, Phase 11 returns to panels, and Phase 12 treats
+  shadows as production tuning over the existing proxy paths.
 - Immediate cache tests now target the current `SlugGlyphKey` fields.
   Font-generation, storage-profile, and effect-profile invalidation wait
   until those fields or profiles exist.
@@ -793,29 +798,28 @@ per-mesh buffer allocation.
 
 **Implications for remaining phases:**
 
-- Phase 8 screenshots should include at least one panel example using
+- Phase 11 screenshots should include at least one panel example using
   `TextRendererPreference::slug()`.
-- Phase 8 performance notes should distinguish backend-owned storage from
+- Phase 11 performance notes should distinguish backend-owned storage from
   still-unmerged panel Slug meshes.
-- Phase 9 should include panel hue-offset behavior in the effects/parity
+- Phase 12 should include panel hue-offset behavior in the effects/parity
   review if Slug is still intended to replace MSDF.
 
 ### Phase 7 Review
 
-- Phase 8 now treats panel evidence as required because panel Slug routing
+- Phase 8 treated panel evidence as required because panel Slug routing
   exists.
-- Phase 8 now measures the current per-child panel Slug mesh route and
-  decides whether merged panel-level Slug batching is needed before a final
-  draw-count envelope.
-- Phase 8 now includes backend-owned storage lifetime, invalidation, and
+- Phase 8 measured the current per-child panel Slug mesh route and kept
+  the merged panel-level batching decision for Phase 11.
+- Phase 8 included backend-owned storage lifetime, invalidation, and
   cleanup behavior under repeated text changes and backend swaps.
-- Phase 8 now decides whether `SlugBackendCompleted` remains a production
+- Phase 8 decided whether `SlugBackendCompleted` remains a production
   wakeup contract or waits for async Slug work.
-- Phase 8 now adds explicit clipping validation for overlap, padding,
+- Phase 8 added explicit clipping validation for overlap, padding,
   scissor, partial-glyph, and non-uniform panel scale cases.
-- Phase 9 now narrows shadow work to validation and tuning of the existing
+- Phase 12 narrows shadow work to validation and tuning of the existing
   `WorldText` and panel Slug proxy paths.
-- Phase 9 now includes a panel `HueOffset` parity decision for Slug text.
+- Phase 12 includes a panel `HueOffset` parity decision for Slug text.
 
 ### Phase 8: quality and robustness
 
@@ -824,10 +828,10 @@ Status: completed.
 - Test EB Garamond, JetBrains Mono, Noto Sans, Liberation Sans, and
   Crimson Text.
 - Include small text, large text, oblique world text, high zoom, dense
-  CJK glyphs from explicitly selected registered TrueType/quadratic CJK
-  fonts, and later fallback strings once fallback support is
-  deliberately enabled. Broad CJK testing for CFF/cubic fonts waits for
-  the post-transition unsupported-text review.
+  CJK glyphs from explicitly selected registered CJK fonts, and later
+  fallback strings once fallback support is deliberately enabled. CFF/CFF2
+  outlines now enter through adaptive cubic-to-quadratic conversion, so
+  broad CJK testing should measure conversion quality and cost.
 - Compare screenshots against MTSDF at 32, 64, 128, and 256 px
   equivalent sizes.
 - Start with `WorldText` opt-in screenshots and measurements using
@@ -866,10 +870,10 @@ known cases where it is better or worse than MTSDF.
 
 **What deviated from the plan:**
 
-- The current CJK asset, `NotoSansCJKsc-Regular.otf`, uses cubic outlines
-  for `漢` and is rejected by the quadratic-only Slug preprocessor. Dense
-  CJK quality testing waits for either a quadratic CJK font fixture or
-  cubic conversion.
+- The first CJK fixture exposed the quadratic-only boundary. The current
+  branch now includes adaptive cubic-to-quadratic conversion and expects
+  `NotoSansCJKsc-Regular.otf` to render; dense CJK quality and
+  performance evidence still need to be gathered.
 - Phase 8 measured the isolated `slug_text` path and added code-level
   panel clipping/storage coverage. Full panel screenshots and merged
   panel draw-count measurements remain for the panel-specific follow-up.
@@ -893,64 +897,147 @@ known cases where it is better or worse than MTSDF.
 - Slug is currently a strong fit for Latin TrueType/quadratic text:
   JetBrains Mono, Noto Sans, EB Garamond, Crimson Text, and Liberation
   Sans all prepare `Typography` successfully.
-- Slug is not yet ready as a full MSDF replacement for CJK, emoji,
-  fallback fonts, panel text, or cubic-outline fonts.
-- Phase 9 should return to the isolated `slug_text` example and prove
-  basic Slug text quality before more panel work. The panel example
-  mixes layout, clipping, picking, layers, and camera controls, so it is
-  the wrong place to judge the Slug shader.
+- Slug is not yet ready as a full MSDF replacement for emoji, fallback
+  fonts, or panel text. CJK/CFF/CFF2 now has an implementation path, but
+  still needs quality and performance proof before replacement claims.
+- Phase 9 returned to the isolated `slug_text` example and moved the
+  quality question back to the Slug shader instead of panel
+  infrastructure.
+- Phase 10 should keep that exact output and reduce shader cost before
+  more panel work. The panel example mixes layout, clipping, picking,
+  layers, and camera controls, so it is the wrong place to judge Slug
+  shader changes.
 - Separate follow-up work should decide the final production cache policy
-  for backend-owned storage and whether CFF/cubic support comes before or
-  after MSDF removal.
+  for backend-owned storage and whether the current cubic conversion is
+  sufficient before any MSDF removal decision.
 
 ### Phase 8 Review
 
-- Phase 9 is now an isolated Slug quality gate instead of a panel
+- Phase 9 became the isolated Slug quality gate instead of a panel
   readiness phase.
-- Phase 9 now requires screenshot evidence from `examples/slug_text.rs`
-  at small and large sizes before any replacement claims.
-- Phase 9 now records the panel findings as deferred follow-up: no-outline
+- Phase 9 recorded the panel findings as deferred follow-up: no-outline
   glyphs such as space must be skipped, panel text must stay off RTT as a
   Slug quality path, and the panel example exposed clipping/picking/layer
   issues that should not drive shader-quality decisions.
-- Phase 10 now covers panel Slug readiness, including the panel
+- Phase 10 now covers pixel-parity Slug shader performance. It must keep
+  exact current output while reducing fragment cost.
+- Phase 11 now covers panel Slug readiness, including the panel
   screenshot evidence, current per-child Slug mesh measurement, and the
   merged-batching decision before final panel performance claims.
-- Phase 10 now records the future interactive-panel constraint: batching
+- Phase 11 now records the future interactive-panel constraint: batching
   must not prevent per-element behavior for buttons, sliders, dropdowns,
   or similar panel controls.
-- Phase 10 now includes production storage lifetime policy work for
+- Phase 11 now includes production storage lifetime policy work for
   backend-owned Slug run storage.
-- Phase 11 is now the effects phase. It stays focused on validating and
+- Phase 12 is now the effects phase. It stays focused on validating and
   tuning existing shadow proxy paths, and names the concrete Slug
   `HueOffset` implementation hooks.
-- The test matrix now records that dense CJK quality tests require a
-  quadratic CJK font fixture or cubic-outline support.
+- The test matrix now records that dense CJK quality tests should prove
+  the adaptive cubic-to-quadratic path with the bundled CJK font.
 
 ### Phase 9: isolated Slug quality gate
 
-Status: in progress.
+Status: completed for isolated quality baseline and benchmark
+instrumentation. Pixel-perfect shader performance remains Phase 10.
 
-- Keep the next quality work in `examples/slug_text.rs`: one selected
-  font, one word, direct Slug mesh rendering, camera controls, and no
-  panels.
-- Capture screenshot evidence for large text, small text, straight-on
-  viewing, and zoomed edge inspection.
-- Compare against the current `WorldText` reference only as an optional
-  visual reference. The Slug result should be judged on its own edge
-  quality, spacing, and stability.
-- Replace or materially improve the current five-sample coverage
-  approximation before claiming Slug is visually better than MSDF.
-- Keep the existing no-outline glyph fix: space and other blank glyphs
-  must advance layout but must not produce Slug mesh/storage records.
-- Do not use panel render-to-texture as evidence for Slug quality.
+Completed:
 
-Exit criteria: the isolated Slug example renders `Typography` clearly at
-large and small sizes, camera controls work, screenshots are recorded,
-and any remaining quality gap is tied to the shader algorithm rather than
-panel infrastructure.
+- Kept the quality work in `examples/slug_text.rs`: direct Slug mesh
+  rendering, camera controls, large text, small text, and no panels as
+  the primary quality surface.
+- Updated the example so `Typography` can be compared through both the
+  distance-field and Slug renderers at matching size and placement.
+- Added Slug as a selectable `WorldText` renderer in
+  `examples/typography.rs`, while carrying Slug glyph metrics through
+  the same overlay/debug path.
+- Improved Slug glyph packing with horizontal and vertical bands, band
+  overlap, padded glyph quads, and no-outline glyph handling.
+- Replaced the five-sample fill approximation with non-zero winding plus
+  analytic quadratic distance coverage in the Slug shader.
+- Kept the Slug material in the lighting/depth path instead of forcing
+  an unlit setup.
+- Added adaptive cubic-to-quadratic outline conversion for CFF/CFF2
+  fonts and updated the font matrix so Noto Sans CJK SC is expected to
+  render.
+- Added CPU renderer-prep benchmarks comparing SDF, MSDF, MTSDF, and
+  Slug.
+- Added `examples/text_renderer_gpu_bench.rs` so empty, Slug, SDF, MSDF,
+  and MTSDF render-loop costs can be measured in the same scene.
 
-### Phase 10: panel Slug readiness
+Exit criteria: met for the isolated quality surface and benchmark
+instrumentation. The remaining quality/performance work is tied to the
+shader algorithm rather than panel infrastructure, and Phase 10 will
+capture deterministic baseline screenshots before changing it.
+
+### Phase 10: pixel-parity Slug shader performance
+
+Status: in progress; first pixel-parity optimization pass completed.
+
+- Freeze the current Slug output as the visual baseline before changing
+  the shader. Capture deterministic screenshots for large text, small
+  text, zoomed edge inspection, and the GPU benchmark scene.
+- Keep the exact same visible output. Candidate shader changes must be
+  pixel-perfect against the baseline screenshots, or the difference must
+  be explained and reviewed before keeping the change.
+- Optimize the fragment path without changing the public renderer
+  contract: reduce band/curve iteration, storage fetches, branch cost,
+  redundant distance work, and avoidable coverage math while preserving
+  non-zero winding plus analytic quadratic distance coverage.
+- Keep the curve/band data format stable unless a measured improvement
+  justifies changing it and the screenshots still match.
+- Run the CPU renderer-prep benchmark after shader work to confirm the
+  prep path did not regress.
+- Run `examples/text_renderer_gpu_bench.rs` for empty, Slug, SDF, MSDF,
+  and MTSDF. When available, use command-line Xcode Metal System Trace
+  data to compare last-window GPU active and fragment intervals.
+- Treat the current Slug fragment cost as the next known bottleneck.
+  Recent local Metal traces showed Slug far above the distance-field
+  modes in the 720-instance benchmark, so performance work should start
+  in the Slug shader before larger renderer architecture changes.
+
+Exit criteria: Slug screenshots are pixel-identical to the pre-phase
+baseline, and the render-loop benchmark shows a measurable Slug GPU
+fragment-time improvement without worsening CPU prep.
+
+Progress:
+
+- Added a local `scripts/xctrace_text_renderer.sh` wrapper so record and
+  export commands share one approved command surface.
+- Captured a Slug baseline screenshot at
+  `/tmp/slug_phase10_baseline_slug_current.png`.
+- Rejected two pixel-perfect shader candidates because same-wrapper Metal
+  traces showed slower Slug fragment time.
+- Kept the squared-distance candidate: curve loops now compare squared
+  distances and take one square root after the nearest curve is known.
+  The Slug screenshot remained pixel-identical (`AE 0`).
+- Kept CPU-precomputed curve data for the shader: control deltas,
+  quadratic second differences, conservative control-point bounds, and
+  distance-solver coefficients. These fields increase packed curve bytes
+  but avoid repeated fragment work.
+- Kept a bounds-distance early return. Pixels farther than the
+  antialiasing width from every candidate curve return solid inside or
+  transparent outside after the winding test, without running the exact
+  quadratic distance solver.
+- Rejected a 64-band global packing change because it produced small
+  pixel differences against the frozen baseline.
+- Rejected a two-dimensional distance-cell grid for this phase. It may
+  become useful if reviewed as a quality change, but it did not preserve
+  exact current output.
+- Rejected a point-space solver rewrite because the Metal trace was
+  slower despite pixel-identical output.
+- Final Slug screenshot for this pass stayed pixel-identical to the
+  baseline: `/tmp/slug_phase10_final_shader.png` compared with
+  `/tmp/slug_phase10_baseline_slug_current.png` at `AE 0`.
+- Same-wrapper 720-instance Metal traces showed Slug fragment mean moving
+  from the original 5.9117 ms to 5.4053 ms. Current same-wrapper
+  fragment means: empty 0.2125 ms, Slug 5.4053 ms, SDF 1.9421 ms,
+  MSDF 2.0059 ms, MTSDF 1.8055 ms.
+- Filtered `renderer_prep` Criterion results still show Slug prep far
+  below distance-field prep after the extra packed fields: Slug about
+  1.19 ms for both 128 and 256 cases, while SDF/MSDF/MTSDF are tens to
+  hundreds of milliseconds in the same filtered run.
+
+### Phase 11: panel Slug readiness
 
 - Keep Slug panel text on the direct mesh path. Do not use panel
   render-to-texture as quality evidence for Slug replacement work; RTT
@@ -981,7 +1068,7 @@ Exit criteria: panel Slug text renders reliably enough to inspect and
 measure; the remaining panel performance and storage policy decisions are
 explicit enough to support effects and replacement work.
 
-### Phase 11: effects
+### Phase 12: effects
 
 - Validate and tune hard drop shadows using the existing `WorldText`
   Slug shadow proxy path. The basic proxy path already exists; this
@@ -1006,9 +1093,15 @@ implementation path or a documented decision to defer.
 - `slug_geometry` unit tests: outline loading, line-to-quadratic
   encoding, cubic conversion or rejection, winding, band sorting, and
   horizontal/vertical edge cases.
-- Dense CJK quality tests require either a quadratic CJK font fixture or
-  cubic-outline support; the current bundled CJK OTF is intentionally
-  recorded as unsupported by the quadratic-only path.
+- Dense CJK quality tests should use the bundled Noto Sans CJK SC font
+  and prove the adaptive cubic-to-quadratic path for representative Han,
+  Japanese, and Korean glyphs.
+- Phase 10 pixel-parity tests: compare Slug screenshots before and after
+  shader-performance edits at large text, small text, zoomed edge
+  inspection, and the GPU benchmark scene.
+- Phase 10 performance tests: run the CPU renderer-prep benchmark and
+  the render-loop GPU benchmark for empty, Slug, SDF, MSDF, and MTSDF;
+  use Metal System Trace GPU intervals when available.
 - Slug cache unit tests: `SlugGlyphKey`, current preprocess-version
   invalidation, and failed glyph states. Storage-profile and
   effect-profile invalidation tests wait until those profiles exist.
@@ -1068,10 +1161,11 @@ reviewed.
    closely as practical before optimizing or redesigning storage for
    Bevy. Try the existing Bevy material path first, but the priority is
    proving the Slug algorithm works correctly.
-3. **Curve support:** Phase 1 can be TrueType/quadratic-only and should
-   fail clearly on unsupported cubic outlines. This is only a
-   feasibility-study boundary; cubic outline support remains a future
-   extension once the reference-like quadratic path works.
+3. **Curve support:** Phase 1 started as TrueType/quadratic-only and
+   failed clearly on unsupported cubic outlines. The current branch has
+   moved past that boundary by converting CFF/CFF2 cubic outlines to
+   quadratics adaptively. Keep unsupported states for glyph formats
+   outside the current monochrome outline path.
 4. **First rendering scope:** Keep the feasibility renderer separate
    from the production text material path. Start with a bare-bones
    standalone example that proves Slug fill coverage and glyph
@@ -1150,13 +1244,14 @@ reviewed.
     CJK testing should use explicitly registered CJK fonts. Fallback can
     be enabled later only after the backend can detect fallback use and
     resolve every fallback face through `FontRegistry`.
-16. **Slug glyph scope and anchoring:** The first Slug backend targets
-    TrueType/quadratic outline glyphs only. Other font/glyph
-    representations are outside the current scope and should produce a
-    clear unsupported-text state. The backend should not drop glyphs or
-    mix Slug with MTSDF inside one run. Slug world text anchoring should
-    use Slug/native glyph bounds rather than distance-field atlas
-    metrics.
+16. **Slug glyph scope and anchoring:** The first Slug backend targeted
+    TrueType/quadratic outline glyphs only. The current branch now adds
+    adaptive cubic-to-quadratic conversion for CFF/CFF2 outlines. Other
+    font/glyph representations are outside the current scope and should
+    produce a clear unsupported-text state. The backend should not drop
+    glyphs or mix Slug with MTSDF inside one run. Slug world text
+    anchoring should use Slug/native glyph bounds rather than
+    distance-field atlas metrics.
 
 ## Post-transition review
 
@@ -1166,8 +1261,9 @@ next implementation steps.
 
 Review questions:
 
-- Should cubic/CFF outlines be converted to quadratics, handled directly
-  in the Slug shader path, or deferred?
+- Is the current adaptive cubic-to-quadratic conversion sufficient for
+  CFF/CFF2 quality and performance, or does Slug need direct cubic
+  handling or tighter error controls?
 - Should fallback be enabled again, and if so how does every fallback
   face become registered and resolvable through `FontRegistry`?
 - How should color emoji and other non-monochrome glyphs be represented:

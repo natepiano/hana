@@ -12,10 +12,10 @@ use bevy::render::storage::ShaderStorageBuffer;
 use mesh_spawning::WorldTextMesh;
 use mesh_spawning::WorldTextShadowProxy;
 pub use panel_text_child::PanelTextChild;
-pub(super) use readiness::emit_world_text_ready;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
+pub(super) use readiness::emit_world_text_ready;
 
 use super::glyph_material::GlyphMaterial;
 use super::text_backend::TextRenderer;
