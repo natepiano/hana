@@ -60,6 +60,11 @@ struct SlugGlyphRecord {
     band_range: vec4<u32>,
 }
 
+struct CoverageTerms {
+    winding: i32,
+    distance_sq: f32,
+}
+
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: SlugTextUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> curves: array<SlugCurveRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<SlugBandRecord>;
@@ -230,17 +235,24 @@ fn outside_glyph_bounds(point: vec2<f32>, glyph: SlugGlyphRecord) -> bool {
         point.y > bounds_max.y;
 }
 
-fn inside_at(point: vec2<f32>, glyph: SlugGlyphRecord) -> bool {
-    if outside_glyph_bounds(point, glyph) {
-        return false;
-    }
-
+fn horizontal_coverage_terms(
+    point: vec2<f32>,
+    edge_width_sq: f32,
+    glyph: SlugGlyphRecord,
+) -> CoverageTerms {
+    let include_winding = !outside_glyph_bounds(point, glyph);
     let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
-    var winding = 0;
+    var terms = CoverageTerms(0, 1000000000000.0);
     for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
-        winding += curve_winding(curves[horizontal_band.start + offset], point);
+        let curve = curves[horizontal_band.start + offset];
+        if include_winding {
+            terms.winding += curve_winding(curve, point);
+        }
+        if curve_bounds_distance_sq(point, curve) <= edge_width_sq {
+            terms.distance_sq = min(terms.distance_sq, curve_distance_sq(point, curve));
+        }
     }
-    return winding != 0;
+    return terms;
 }
 
 fn point_line_distance_sq(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> f32 {
@@ -268,34 +280,19 @@ fn curve_bounds_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
     return dot(diff, diff);
 }
 
-fn nearest_curve_distance(point: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
-    let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+fn nearest_vertical_curve_distance_sq(
+    point: vec2<f32>,
+    edge_width_sq: f32,
+    glyph: SlugGlyphRecord,
+    initial_distance_sq: f32,
+) -> f32 {
     let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
-    var distance_sq = 1000000000000.0;
-    for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
-        distance_sq = min(distance_sq, curve_distance_sq(point, curves[horizontal_band.start + offset]));
-    }
+    var distance_sq = initial_distance_sq;
     for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
-        distance_sq = min(distance_sq, curve_distance_sq(point, curves[vertical_band.start + offset]));
-    }
-    return sqrt(distance_sq);
-}
-
-fn nearest_curve_bounds_distance_sq(point: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
-    let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
-    let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
-    var distance_sq = 1000000000000.0;
-    for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
-        distance_sq = min(
-            distance_sq,
-            curve_bounds_distance_sq(point, curves[horizontal_band.start + offset]),
-        );
-    }
-    for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
-        distance_sq = min(
-            distance_sq,
-            curve_bounds_distance_sq(point, curves[vertical_band.start + offset]),
-        );
+        let curve = curves[vertical_band.start + offset];
+        if curve_bounds_distance_sq(point, curve) <= edge_width_sq {
+            distance_sq = min(distance_sq, curve_distance_sq(point, curve));
+        }
     }
     return distance_sq;
 }
@@ -303,12 +300,19 @@ fn nearest_curve_bounds_distance_sq(point: vec2<f32>, glyph: SlugGlyphRecord) ->
 fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
     let edge_width_sq = edge_width * edge_width;
-    let inside = inside_at(point, glyph);
-    if nearest_curve_bounds_distance_sq(point, glyph) > edge_width_sq {
+    let terms = horizontal_coverage_terms(point, edge_width_sq, glyph);
+    let inside = terms.winding != 0;
+    let distance_sq = nearest_vertical_curve_distance_sq(
+        point,
+        edge_width_sq,
+        glyph,
+        terms.distance_sq,
+    );
+    if distance_sq > edge_width_sq {
         return select(0.0, 1.0, inside);
     }
 
-    let distance = nearest_curve_distance(point, glyph);
+    let distance = sqrt(distance_sq);
     let signed_distance = select(-distance, distance, inside);
     return smoothstep(-edge_width, edge_width, signed_distance);
 }

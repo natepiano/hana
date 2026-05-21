@@ -37,6 +37,8 @@ Helper script:
 - `scripts/slug_text_g_zoom.sh --screenshot /tmp/view.png`
 - The script launches or reuses `slug_text`, applies the saved `OrbitCam`
   state and camera `Transform`, and can capture a screenshot through BRP.
+- The script waits for the async screenshot save to produce a nonempty,
+  stable file before returning.
 
 Screenshot captured from this view:
 
@@ -139,6 +141,50 @@ Reason to keep:
 - It avoids exact quadratic distance solving in obviously interior or
   exterior pixels.
 
+### Single-Pass Bounds-Gated Distance
+
+Change:
+
+- Replace the separate nearest-bounds pass and exact-distance pass with
+  one distance loop.
+- For each band candidate, first test the conservative curve bounds
+  against the antialiasing width.
+- Only run exact quadratic distance for candidates whose bounds can
+  affect the current edge pixel.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Metal trace for the 720-instance Slug benchmark showed fragment mean
+  at about `5.1004 ms`, down from the prior kept `5.4053 ms`.
+
+Reason to keep:
+
+- Edge pixels no longer pay for a bounds loop followed by another full
+  exact-distance loop.
+
+### Combined Horizontal Winding And Distance
+
+Change:
+
+- Compute horizontal-band winding and horizontal-band distance
+  candidates in the same loop.
+- Keep the vertical-band distance pass, seeded from the horizontal
+  distance result.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Metal trace for the 720-instance Slug benchmark showed fragment mean
+  at about `4.5880 ms`.
+
+Reason to keep:
+
+- The shader no longer reads the horizontal band once for winding and a
+  second time for distance.
+
 ## Rejected Experiments
 
 ### Reuse Horizontal Band for Distance and Winding
@@ -204,6 +250,26 @@ Result:
 Reason rejected:
 
 - The extra test cost outweighed skipped exact solves.
+
+### Split Outside-Bounds Winding Branch
+
+Change:
+
+- Split `horizontal_coverage_terms` into an outside-bounds distance-only
+  loop and an inside-bounds winding-plus-distance loop.
+- This removed a per-curve `include_winding` branch from the common
+  inside-glyph path.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Slower in Metal traces: the 720-instance Slug benchmark fragment mean
+  rose to about `5.7377 ms`.
+
+Reason rejected:
+
+- The extra control-flow shape was worse than the branch inside one loop.
 
 ### Global 64-Band Packing
 

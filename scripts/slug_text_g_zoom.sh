@@ -190,6 +190,10 @@ mutate_transform() {
 
 capture_screenshot() {
     local path="$1"
+    local last_size=0
+    local stable_count=0
+
+    rm -f "${path}"
     json_rpc "{
         \"jsonrpc\": \"2.0\",
         \"id\": 6,
@@ -198,6 +202,26 @@ capture_screenshot() {
             \"path\": \"${path}\"
         }
     }" >/dev/null
+
+    for _ in {1..200}; do
+        if [[ -s "${path}" ]]; then
+            local size
+            size="$(stat -f '%z' "${path}")"
+            if [[ "${size}" == "${last_size}" ]]; then
+                stable_count=$((stable_count + 1))
+                if [[ "${stable_count}" -ge 4 ]]; then
+                    return
+                fi
+            else
+                last_size="${size}"
+                stable_count=0
+            fi
+        fi
+        sleep 0.05
+    done
+
+    printf 'Timed out waiting for screenshot: %s\n' "${path}" >&2
+    exit 1
 }
 
 main() {
