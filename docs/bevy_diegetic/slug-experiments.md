@@ -592,6 +592,41 @@ Future note:
 - A tighter non-convex edge band or real interior/edge split is still the
   better next direction.
 
+### Lyon Fill Plus Stroked Edge Mesh
+
+Change:
+
+- Add `lyon_path` and `lyon_tessellation` to prototype a real split
+  renderer in the private Slug path.
+- Build a tessellated solid fill mesh from glyph contours.
+- Build a stroked contour mesh for the analytic Slug edge pass.
+- Spawn fill with `SlugRenderMode::SolidQuad` and the edge mesh with
+  `SlugRenderMode::Text`.
+
+Result:
+
+- Rejected before benchmarking.
+- The first screenshot showed severe horizontal banding from coplanar
+  fill and edge geometry.
+- Moving the analytic edge overlay slightly forward removed the simplest
+  depth-fighting explanation, but the stroked edge mesh still covered
+  large interior regions and produced visible horizontal stripes.
+
+Reason rejected:
+
+- The simple stroked-contour mesh is not a usable edge-band
+  representation for filled glyphs.
+- It does not preserve the current Slug visual output closely enough to
+  justify benchmarking.
+- A real version would need a non-overlapping interior/edge partition,
+  not "full fill plus broad stroked contours."
+
+Future note:
+
+- Lyon remains useful for future fill tessellation, but the edge band
+  should probably be generated as a controlled ring or distance-cell mesh,
+  not directly from the generic stroke tessellator.
+
 ## Open Experiment Ideas
 
 ### Edge-Only Analytic Shading
