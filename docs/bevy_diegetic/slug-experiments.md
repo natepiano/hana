@@ -187,6 +187,29 @@ Reason to keep:
 
 ## Rejected Experiments
 
+### Combined Micro-Optimizations
+
+Change:
+
+- Combine three changes that were each exact but not faster alone:
+  winding bounds cull, exact-distance local fields, and CPU-packed
+  winding reciprocal.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- The first Metal trace for the 720-instance Slug benchmark showed
+  fragment mean at about `4.4629 ms`, down from the prior kept
+  `4.5880 ms`.
+- A fresh rerun did not confirm the result: fragment mean was about
+  `4.9647 ms`.
+
+Reason rejected:
+
+- The code is more complex than the kept shader and the apparent win did
+  not survive rerun noise.
+
 ### Reuse Horizontal Band for Distance and Winding
 
 Change:
@@ -270,6 +293,191 @@ Result:
 Reason rejected:
 
 - The extra control-flow shape was worse than the branch inside one loop.
+
+### Winding Bounds Cull
+
+Change:
+
+- Add a conservative early return at the top of `curve_winding` when
+  the sample point is above, below, or to the right of a curve's control
+  bounds.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Not faster in Metal traces: the 720-instance Slug benchmark fragment
+  mean was about `4.6172 ms`, slightly slower than the committed
+  `4.5880 ms` baseline.
+
+Reason rejected:
+
+- The added branch did not beat the existing winding path on the GPU.
+
+### Expanded-Rectangle Bounds Cull
+
+Change:
+
+- Replace the exact point-to-bounds squared-distance check with four
+  comparisons against the curve control bounds expanded by the
+  antialiasing width.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Slower in Metal traces: the 720-instance Slug benchmark fragment mean
+  was about `4.6845 ms`, compared with the committed `4.5880 ms`
+  baseline.
+
+Reason rejected:
+
+- The cheaper bounds test admitted more exact quadratic solves, which
+  outweighed the simpler comparisons.
+
+### Denser Vertical Bands
+
+Change:
+
+- Keep horizontal bands at `32` so winding behavior stays unchanged.
+- Increase only vertical distance bands to `64`.
+- Try vertical band overlaps of `1`, `2`, `4`, and `8` design units.
+
+Result:
+
+- Not pixel-identical in the lowercase `g` zoom view.
+- Differences were small but nonzero:
+  `6`, `5`, `4`, and `11` pixels in the tested variants.
+
+Reason rejected:
+
+- The exact gate requires no pixel differences.
+- The result reinforces that banding is part of the visible analytic
+  answer, not just a performance detail.
+
+### Exact-Distance Local Fields
+
+Change:
+
+- Move `start`, `control_delta`, `curve_delta`, and `end` extraction
+  inside `exact_quadratic_distance_sq` instead of passing them as
+  separate parameters.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Not meaningfully faster in Metal traces: the 720-instance Slug
+  benchmark fragment mean was about `4.5986 ms`, slightly slower than
+  the committed `4.5880 ms` baseline.
+
+Reason rejected:
+
+- The compiler already handled the parameterized version well enough.
+
+### CPU-Packed Winding Reciprocal
+
+Change:
+
+- Store the quadratic winding denominator reciprocal in `solver.w`.
+- Use multiplication instead of division for the two quadratic winding
+  roots.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Slower in Metal traces: the 720-instance Slug benchmark fragment mean
+  was about `4.6550 ms`, compared with the committed `4.5880 ms`
+  baseline.
+
+Reason rejected:
+
+- Loading the additional packed value did not beat the fragment-side
+  divisions.
+
+### Skip Vertical Duplicate Curves
+
+Change:
+
+- Pass the current horizontal band into the vertical distance loop.
+- Skip a vertical candidate when the same curve should already have been
+  present in the horizontal distance pass.
+- Keep horizontal line segments in the vertical pass because horizontal
+  bands omit them.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Slower in Metal traces: the 720-instance Slug benchmark fragment mean
+  was about `4.7310 ms`.
+
+Reason rejected:
+
+- The extra duplicate-detection branch and comparisons cost more than
+  the repeated exact solves they avoided.
+
+### Combined Micro-Optimizations With Expanded-Rectangle Bounds
+
+Change:
+
+- Start from the combined micro-optimization candidate.
+- Add expanded-rectangle bounds culling in place of point-to-bounds
+  squared distance.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Slower in Metal traces: the 720-instance Slug benchmark fragment mean
+  was about `4.7761 ms`, compared with the combined micro-optimization
+  result of about `4.4629 ms`.
+
+Reason rejected:
+
+- The cheaper bounds test admitted enough extra exact quadratic solves
+  to lose even in combination.
+
+### Combined Micro-Optimizations With Duplicate Skipping
+
+Change:
+
+- Start from the combined micro-optimization candidate.
+- Add vertical duplicate skipping.
+
+Result:
+
+- Pixel-identical to the Phase 10 baseline in the normal view and the
+  lowercase `g` zoom view (`AE 0` for both).
+- Slower in Metal traces: the 720-instance Slug benchmark fragment mean
+  was about `4.6568 ms`, compared with the combined micro-optimization
+  result of about `4.4629 ms`.
+
+Reason rejected:
+
+- The extra duplicate-detection branch and comparisons still cost more
+  than the repeated exact solves they avoided.
+
+### Combined Micro-Optimizations With Denser Vertical Bands
+
+Change:
+
+- Start from the combined micro-optimization candidate.
+- Use 64 vertical bands with 16 design units of vertical overlap.
+
+Result:
+
+- Not benchmarked after the screenshot wait was increased.
+- The packed `Typography` run grew substantially: for example, `g`
+  increased from 312 to 558 packed curve records.
+
+Reason rejected:
+
+- Larger overlap erased the hoped-for vertical-band savings by expanding
+  packed curve lists.
+- This should only be revisited with a more targeted packing rule than
+  fixed larger overlap.
 
 ### Global 64-Band Packing
 

@@ -203,7 +203,7 @@ capture_screenshot() {
         }
     }" >/dev/null
 
-    for _ in {1..200}; do
+    for _ in {1..600}; do
         if [[ -s "${path}" ]]; then
             local size
             size="$(stat -f '%z' "${path}")"
