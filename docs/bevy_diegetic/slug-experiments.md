@@ -552,6 +552,46 @@ Reason rejected:
   rewritten expression increased register pressure or instruction
   latency.
 
+### Convex Hull Glyph Meshes
+
+Change:
+
+- Replace each rectangular glyph quad with a convex polygon enclosing the
+  glyph outline control points plus the existing Slug padding.
+- Keep the same Slug shader, material, curve records, band records, and
+  glyph records.
+- Clip the polygon to panel clip rectangles before uploading mesh
+  vertices.
+
+Result:
+
+- The lowercase `g` zoom was visually very close to the baseline but not
+  pixel-identical against the saved screenshot. The difference was small
+  enough that the benchmark result drove the decision.
+- The saved 720-word Slug trace before the experiment had:
+  - vertex mean: `0.0670 ms`
+  - fragment mean: `3.7242 ms`
+  - transparent pass CPU mean: `0.3152 ms`
+  - total-by-frame mean: `4.4303 ms`
+- The convex hull trace had:
+  - vertex mean: `0.0873 ms`
+  - fragment mean: `3.7171 ms`
+  - transparent pass CPU mean: `0.3289 ms`
+  - total-by-frame mean: `4.5441 ms`
+
+Reason rejected:
+
+- It did not reduce the fragment cost enough to matter.
+- The extra polygon vertices slightly increased vertex and CPU render
+  work.
+- Most large glyph pixels are still inside the convex hull, so the shader
+  still shades too much boring interior area.
+
+Future note:
+
+- A tighter non-convex edge band or real interior/edge split is still the
+  better next direction.
+
 ## Open Experiment Ideas
 
 ### Edge-Only Analytic Shading

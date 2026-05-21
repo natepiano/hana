@@ -7,16 +7,20 @@ LOG_DIR="${TMPDIR:-/tmp}"
 LOG_PATH="${LOG_DIR%/}/slug_text_g_zoom.log"
 SCREENSHOT_PATH="/tmp/slug_g_inside_curve_script_restored.png"
 TAKE_SCREENSHOT="true"
+VIEW="g"
+SHUTDOWN_ONLY="false"
 
 usage() {
     cat <<'USAGE'
 Usage:
-  scripts/slug_text_g_zoom.sh [--restart] [--port 15702]
+  scripts/slug_text_g_zoom.sh [--restart] [--port 15702] [--view home|g]
   scripts/slug_text_g_zoom.sh [--screenshot /tmp/view.png]
   scripts/slug_text_g_zoom.sh [--no-screenshot]
+  scripts/slug_text_g_zoom.sh [--shutdown-only]
 
 Launches or reuses examples/slug_text.rs, waits for BRP, and moves the
-OrbitCam to the saved lowercase-g inside-curve zoom view.
+OrbitCam to the saved lowercase-g inside-curve zoom view unless --view home
+is selected.
 USAGE
 }
 
@@ -43,8 +47,23 @@ while [[ $# -gt 0 ]]; do
             TAKE_SCREENSHOT="true"
             shift 2
             ;;
+        --view)
+            VIEW="${2:-}"
+            case "${VIEW}" in
+                home | g) ;;
+                *)
+                    usage
+                    exit 2
+                    ;;
+            esac
+            shift 2
+            ;;
         --no-screenshot)
             TAKE_SCREENSHOT="false"
+            shift
+            ;;
+        --shutdown-only)
+            SHUTDOWN_ONLY="true"
             shift
             ;;
         -h | --help)
@@ -225,19 +244,27 @@ capture_screenshot() {
 }
 
 main() {
+    if [[ "${SHUTDOWN_ONLY}" == "true" ]]; then
+        shutdown_if_running
+        printf 'slug_text shutdown requested on port %s\n' "${PORT}"
+        return
+    fi
+
     if [[ "${RESTART}" == "true" ]]; then
         shutdown_if_running
     fi
 
     launch_if_needed
-    local entity
-    entity="$(orbit_entity)"
-    mutate_orbit_cam "${entity}"
-    mutate_transform "${entity}"
+    local entity="default-camera"
+    if [[ "${VIEW}" == "g" ]]; then
+        entity="$(orbit_entity)"
+        mutate_orbit_cam "${entity}"
+        mutate_transform "${entity}"
+    fi
     if [[ "${TAKE_SCREENSHOT}" == "true" ]]; then
         capture_screenshot "${SCREENSHOT_PATH}"
     fi
-    printf 'slug_text g-curve zoom applied on port %s to entity %s\n' "${PORT}" "${entity}"
+    printf 'slug_text %s view ready on port %s using %s\n' "${VIEW}" "${PORT}" "${entity}"
     printf 'launch log: %s\n' "${LOG_PATH}"
     if [[ "${TAKE_SCREENSHOT}" == "true" ]]; then
         printf 'screenshot: %s\n' "${SCREENSHOT_PATH}"
