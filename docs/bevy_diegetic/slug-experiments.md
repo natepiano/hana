@@ -627,6 +627,50 @@ Future note:
   should probably be generated as a controlled ring or distance-cell mesh,
   not directly from the generic stroke tessellator.
 
+### Cached Distance-Cell Fill/Edge Split
+
+Change:
+
+- Split each glyph into a CPU-classified grid of fill, edge, and empty
+  cells.
+- Draw fill cells with the cheap solid Slug mode.
+- Draw edge cells with the analytic Slug shader.
+- Keep the current curve, band, and glyph storage model.
+
+Result:
+
+- Rejected after benchmarking.
+- The first implementation had the wrong cache boundary: it classified
+  cells while assembling each rendered run, so repeated text entities paid
+  the classification cost again.
+- Moving classification behind a per-`SlugGlyphKey` cache fixed that bug,
+  but the split path was still slower in the benchmark.
+- Saved baseline stdout:
+  - frame time mean: `11.8734 ms`
+  - render CPU sum mean: `0.3192 ms`
+  - transparent pass CPU mean: `0.3152 ms`
+- Cached split stdout:
+  - frame time mean: `18.5721 ms`
+  - render CPU sum mean: `0.8488 ms`
+  - transparent pass CPU mean: `0.8436 ms`
+
+Reason rejected:
+
+- The path doubled visible Slug work into fill and edge meshes.
+- For the 720-instance benchmark, that extra entity/material/draw work
+  outweighed any saved analytic fragment work.
+- A grid of rectangles is too blunt: it creates many small rectangles
+  while still leaving enough edge area to shade analytically.
+
+Future note:
+
+- Any future edge split should cache derived geometry per unique glyph
+  from the start.
+- It also needs to avoid doubling draw overhead per text entity. Better
+  candidates are one mesh with an edge/interior attribute, a tighter
+  non-rectangular edge band, or a renderer-level path that can batch the
+  split geometry cheaply.
+
 ## Open Experiment Ideas
 
 ### Edge-Only Analytic Shading
