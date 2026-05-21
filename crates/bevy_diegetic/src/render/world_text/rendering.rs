@@ -365,7 +365,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
         if readiness == GlyphReadiness::Ready || readiness == GlyphReadiness::Invisible {
             commands.entity(entity).insert(ComputedWorldText {
                 anchor_y: slug_text.anchor_y,
-                glyphs:   Vec::new(),
+                glyphs:   slug_text.glyphs,
             });
         }
 

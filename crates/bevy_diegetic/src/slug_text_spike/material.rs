@@ -104,15 +104,13 @@ pub struct SlugTextMaterialInput {
 #[must_use]
 pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
     let SlugTextMaterialInput {
-        mut base,
+        base,
         fill_color,
         render_mode,
         curves,
         bands,
         glyphs,
     } = input;
-    base.unlit = true;
-
     let linear: LinearRgba = fill_color.into();
     ExtendedMaterial {
         base,

@@ -11,6 +11,8 @@ use super::geometry::SlugGlyph;
 /// Default number of horizontal bands in the first Slug feasibility packing.
 pub const DEFAULT_BAND_COUNT: usize = 32;
 
+const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
+
 /// GPU curve record for a quadratic Bezier segment.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct SlugCurveRecord {
@@ -41,9 +43,9 @@ pub struct SlugBandRecord {
     pub start: u32,
     /// Number of curve records for this band.
     pub count: u32,
-    /// Lower band edge in font design-space units.
+    /// Lower band edge in font design-space units on the banded axis.
     pub y_min: f32,
-    /// Upper band edge in font design-space units.
+    /// Upper band edge in font design-space units on the banded axis.
     pub y_max: f32,
 }
 
@@ -52,17 +54,28 @@ pub struct SlugBandRecord {
 pub struct SlugGlyphRecord {
     /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
     pub bounds_min_size: Vec4,
-    /// First band in `.x`, number of bands in `.y`; `.zw` are reserved.
+    /// Horizontal band start/count in `.xy`, vertical band start/count in `.zw`.
     pub band_range:      UVec4,
 }
 
 impl SlugGlyphRecord {
     /// Creates a glyph record that points into the combined run band buffer.
     #[must_use]
-    pub fn new(bounds: SlugBounds, band_start: u32, band_count: u32) -> Self {
+    pub fn new(
+        bounds: SlugBounds,
+        horizontal_start: u32,
+        horizontal_count: u32,
+        vertical_start: u32,
+        vertical_count: u32,
+    ) -> Self {
         Self {
             bounds_min_size: Vec4::new(bounds.min.x, bounds.min.y, bounds.width(), bounds.height()),
-            band_range:      UVec4::new(band_start, band_count, 0, 0),
+            band_range:      UVec4::new(
+                horizontal_start,
+                horizontal_count,
+                vertical_start,
+                vertical_count,
+            ),
         }
     }
 }
@@ -121,26 +134,27 @@ pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyp
     let band_count = band_count.max(1);
     let outline_segments = glyph.segment_count();
     let mut curves = Vec::new();
-    let mut bands = Vec::with_capacity(band_count);
+    let mut bands = Vec::with_capacity(band_count * 2);
     let bounds = glyph.bounds;
-    let band_height = bounds.height().max(1.0) / band_count.to_f32();
 
-    for band_index in 0..band_count {
-        let y_min = bounds.min.y + band_height * band_index.to_f32();
-        let y_max = if band_index + 1 == band_count {
-            bounds.max.y
-        } else {
-            y_min + band_height
-        };
-        let start = curves.len().to_u32();
-        append_band_curves(&glyph, y_min, y_max, &mut curves);
-        bands.push(SlugBandRecord {
-            start,
-            count: curves.len().to_u32() - start,
-            y_min,
-            y_max,
-        });
-    }
+    append_bands(
+        &glyph,
+        bounds.min.y,
+        bounds.height(),
+        band_count,
+        Axis::Horizontal,
+        &mut curves,
+        &mut bands,
+    );
+    append_bands(
+        &glyph,
+        bounds.min.x,
+        bounds.width(),
+        band_count,
+        Axis::Vertical,
+        &mut curves,
+        &mut bands,
+    );
 
     let duplicated_curves = curves.len();
     SlugPackedGlyph {
@@ -152,25 +166,103 @@ pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyp
     }
 }
 
-fn append_band_curves(
+#[derive(Clone, Copy)]
+enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+fn append_bands(
     glyph: &SlugGlyph,
-    y_min: f32,
-    y_max: f32,
+    start_position: f32,
+    extent: f32,
+    band_count: usize,
+    axis: Axis,
     curves: &mut Vec<SlugCurveRecord>,
+    bands: &mut Vec<SlugBandRecord>,
 ) {
-    for contour in &glyph.contours {
-        curves.extend(
-            contour
-                .segments
-                .iter()
-                .filter(|segment| overlaps_y_band(segment, y_min, y_max))
-                .map(SlugCurveRecord::from),
+    let band_size = extent.max(1.0) / band_count.to_f32();
+
+    for band_index in 0..band_count {
+        let band_min = start_position + band_size * band_index.to_f32();
+        let band_max = if band_index + 1 == band_count {
+            start_position + extent
+        } else {
+            band_min + band_size
+        };
+        let start = curves.len().to_u32();
+        append_band_curves(
+            glyph,
+            band_min - BAND_OVERLAP_EM_UNITS,
+            band_max + BAND_OVERLAP_EM_UNITS,
+            axis,
+            curves,
         );
+        bands.push(SlugBandRecord {
+            start,
+            count: curves.len().to_u32() - start,
+            y_min: band_min,
+            y_max: band_max,
+        });
     }
 }
 
-fn overlaps_y_band(segment: &QuadraticSegment, y_min: f32, y_max: f32) -> bool {
-    let segment_min = segment.start.y.min(segment.control.y).min(segment.end.y);
-    let segment_max = segment.start.y.max(segment.control.y).max(segment.end.y);
-    segment_min <= y_max && segment_max >= y_min
+fn append_band_curves(
+    glyph: &SlugGlyph,
+    band_min: f32,
+    band_max: f32,
+    axis: Axis,
+    curves: &mut Vec<SlugCurveRecord>,
+) {
+    let mut segments: Vec<QuadraticSegment> = glyph
+        .contours
+        .iter()
+        .flat_map(|contour| contour.segments.iter().copied())
+        .filter(|segment| overlaps_band(segment, band_min, band_max, axis))
+        .collect();
+
+    segments.sort_by(|left, right| {
+        descending_band_sort_value(right, axis).total_cmp(&descending_band_sort_value(left, axis))
+    });
+    curves.extend(segments.iter().map(SlugCurveRecord::from));
+}
+
+fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis: Axis) -> bool {
+    if ignored_axis_line(segment, axis) {
+        return false;
+    }
+
+    let segment_min = segment_axis_min(segment, axis);
+    let segment_max = segment_axis_max(segment, axis);
+    segment_min <= band_max && segment_max >= band_min
+}
+
+fn ignored_axis_line(segment: &QuadraticSegment, axis: Axis) -> bool {
+    match axis {
+        Axis::Horizontal => {
+            segment.start.y == segment.control.y && segment.control.y == segment.end.y
+        },
+        Axis::Vertical => segment.start.x == segment.control.x && segment.control.x == segment.end.x,
+    }
+}
+
+fn segment_axis_min(segment: &QuadraticSegment, axis: Axis) -> f32 {
+    match axis {
+        Axis::Horizontal => segment.start.y.min(segment.control.y).min(segment.end.y),
+        Axis::Vertical => segment.start.x.min(segment.control.x).min(segment.end.x),
+    }
+}
+
+fn segment_axis_max(segment: &QuadraticSegment, axis: Axis) -> f32 {
+    match axis {
+        Axis::Horizontal => segment.start.y.max(segment.control.y).max(segment.end.y),
+        Axis::Vertical => segment.start.x.max(segment.control.x).max(segment.end.x),
+    }
+}
+
+fn descending_band_sort_value(segment: &QuadraticSegment, axis: Axis) -> f32 {
+    match axis {
+        Axis::Horizontal => segment.start.x.max(segment.control.x).max(segment.end.x),
+        Axis::Vertical => segment.start.y.max(segment.control.y).max(segment.end.y),
+    }
 }

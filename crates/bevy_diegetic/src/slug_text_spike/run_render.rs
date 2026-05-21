@@ -19,6 +19,8 @@ use super::run::SlugGlyphCache;
 use super::run::SlugGlyphInstance;
 use super::run::SlugGlyphKey;
 
+const GLYPH_PADDING_DESIGN_UNITS: f32 = 16.0;
+
 /// Approximate storage profile for one Slug text run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SlugRunStorageProfile {
@@ -160,6 +162,7 @@ impl RunPacker {
         let record_index = self.glyphs.len().to_u32();
         let curve_start = self.curves.len().to_u32();
         let band_start = self.bands.len().to_u32();
+        let band_count = packed.bands().len().to_u32() / 2;
 
         self.curves.extend_from_slice(packed.curves());
         self.bands
@@ -172,7 +175,9 @@ impl RunPacker {
         self.glyphs.push(SlugGlyphRecord::new(
             packed.bounds(),
             band_start,
-            packed.bands().len().to_u32(),
+            band_count,
+            band_start + band_count,
+            band_count,
         ));
         self.record_indices.insert(glyph.key(), record_index);
 
@@ -193,6 +198,10 @@ struct GlyphQuadExtents {
     right:     f32,
     bottom:    f32,
     top:       f32,
+    source_left: f32,
+    source_right: f32,
+    source_bottom: f32,
+    source_top: f32,
     uv_left:   f32,
     uv_right:  f32,
     uv_top:    f32,
@@ -200,16 +209,25 @@ struct GlyphQuadExtents {
 }
 
 impl GlyphQuadExtents {
-    const fn new(left: f32, right: f32, bottom: f32, top: f32) -> Self {
+    fn new(left: f32, right: f32, bottom: f32, top: f32, padding_x: f32, padding_y: f32) -> Self {
+        let width = (right - left).max(f32::EPSILON);
+        let height = (top - bottom).max(f32::EPSILON);
+        let uv_padding_x = padding_x / width;
+        let uv_padding_y = padding_y / height;
+
         Self {
-            left,
-            right,
-            bottom,
-            top,
-            uv_left: 0.0,
-            uv_right: 1.0,
-            uv_top: 0.0,
-            uv_bottom: 1.0,
+            left: left - padding_x,
+            right: right + padding_x,
+            bottom: bottom - padding_y,
+            top: top + padding_y,
+            source_left: left,
+            source_right: right,
+            source_bottom: bottom,
+            source_top: top,
+            uv_left: -uv_padding_x,
+            uv_right: 1.0 + uv_padding_x,
+            uv_top: -uv_padding_y,
+            uv_bottom: 1.0 + uv_padding_y,
         }
     }
 
@@ -225,24 +243,20 @@ impl GlyphQuadExtents {
             return None;
         }
 
-        let original_left = self.left;
-        let original_right = self.right;
-        let original_bottom = self.bottom;
-        let original_top = self.top;
         self.left = self.left.max(clip_left);
         self.right = self.right.min(clip_right);
         self.bottom = self.bottom.max(clip_bottom);
         self.top = self.top.min(clip_top);
 
-        let width = original_right - original_left;
-        let height = original_top - original_bottom;
+        let width = self.source_right - self.source_left;
+        let height = self.source_top - self.source_bottom;
         if width <= f32::EPSILON || height <= f32::EPSILON {
             return None;
         }
-        self.uv_left = (self.left - original_left) / width;
-        self.uv_right = (self.right - original_left) / width;
-        self.uv_top = (original_top - self.top) / height;
-        self.uv_bottom = (original_top - self.bottom) / height;
+        self.uv_left = (self.left - self.source_left) / width;
+        self.uv_right = (self.right - self.source_left) / width;
+        self.uv_top = (self.source_top - self.top) / height;
+        self.uv_bottom = (self.source_top - self.bottom) / height;
         Some(self)
     }
 }
@@ -272,7 +286,11 @@ impl RunMeshBuilder {
         let right = bounds.max.x.mul_add(bounds_scale.x, origin.x) * scale;
         let bottom = bounds.min.y.mul_add(bounds_scale.y, origin.y) * scale;
         let top = bounds.max.y.mul_add(bounds_scale.y, origin.y) * scale;
-        let Some(extents) = GlyphQuadExtents::new(left, right, bottom, top).clipped(clip_rect)
+        let padding_x = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.x.abs() * scale;
+        let padding_y = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.y.abs() * scale;
+        let Some(extents) =
+            GlyphQuadExtents::new(left, right, bottom, top, padding_x, padding_y)
+                .clipped(clip_rect)
         else {
             return;
         };

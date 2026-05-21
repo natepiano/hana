@@ -61,6 +61,9 @@ pub(super) struct ShapedSlugWorldText {
     pub(super) prepared: Option<SlugPreparedTextRun>,
     /// `Anchor` offset Y in layout units.
     pub(super) anchor_y: f32,
+    /// Per-glyph ink bounding boxes `[x, y, width, height]` in world units.
+    #[cfg(feature = "typography_overlay")]
+    pub(super) glyphs:   Vec<ComputedGlyphMetrics>,
     /// Timing and queue diagnostics from the build.
     pub(super) stats:    TextBuildStats,
 }
@@ -70,6 +73,8 @@ impl ShapedSlugWorldText {
         Self {
             prepared: None,
             anchor_y: 0.0,
+            #[cfg(feature = "typography_overlay")]
+            glyphs: Vec::new(),
             stats,
         }
     }
@@ -249,9 +254,19 @@ pub(super) fn build_world_slug_text(
     stats.emitted_quads = prepared.run.run.glyphs().len();
     stats.atlas_ms = slug_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
 
+    #[cfg(feature = "typography_overlay")]
+    let glyphs = slug_overlay_glyph_metrics(
+        &positioned_glyphs,
+        boosted_size,
+        Vec2::new(anchor_x, anchor_y),
+        world_scale,
+    );
+
     ShapedSlugWorldText {
         prepared: Some(prepared),
         anchor_y: anchor_y * points_to_world,
+        #[cfg(feature = "typography_overlay")]
+        glyphs,
         stats,
     }
 }
@@ -460,6 +475,38 @@ fn native_ink_right(positioned_glyph: &PositionedGlyph<'_>, font_size: f32) -> O
     let bbox = face.glyph_bounding_box(GlyphId(positioned_glyph.glyph.id))?;
     let upm = f32::from(face.units_per_em());
     Some(f32::from(bbox.x_max) * font_size / upm)
+}
+
+#[cfg(feature = "typography_overlay")]
+fn slug_overlay_glyph_metrics(
+    positioned_glyphs: &[PositionedGlyph<'_>],
+    font_size: f32,
+    anchor: Vec2,
+    scale: f32,
+) -> Vec<ComputedGlyphMetrics> {
+    let mut glyphs = Vec::with_capacity(positioned_glyphs.len());
+    for positioned_glyph in positioned_glyphs {
+        let shaped_glyph = positioned_glyph.glyph;
+        if let Some(rect) = ink_rect(
+            positioned_glyph.font.data(),
+            positioned_glyph.font.collection_index,
+            shaped_glyph.id,
+            font_size,
+            shaped_glyph.x,
+            shaped_glyph.baseline + shaped_glyph.y,
+            anchor,
+            scale,
+        ) {
+            let origin_x = (shaped_glyph.x - anchor.x) * scale;
+            glyphs.push(ComputedGlyphMetrics {
+                rect,
+                origin_x: origin_x.min(rect[0]),
+                origin_y: -(shaped_glyph.baseline + shaped_glyph.y - anchor.y) * scale,
+                advance_x: shaped_glyph.advance * scale,
+            });
+        }
+    }
+    glyphs
 }
 
 /// Computes the ink bounding box for a single glyph, returned as

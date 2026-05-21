@@ -398,8 +398,8 @@ mod tests {
     }
 
     #[test]
-    fn phase8_font_matrix_documents_current_outline_support() {
-        let supported_fonts = [
+    fn font_matrix_supports_quadratic_and_cubic_outlines() {
+        let latin_fonts = [
             ("JetBrains Mono", FONT_DATA, SlugFontKey::new(101)),
             ("Noto Sans", NOTO_SANS_DATA, SlugFontKey::new(102)),
             ("EB Garamond", EB_GARAMOND_DATA, SlugFontKey::new(103)),
@@ -411,7 +411,7 @@ mod tests {
             ),
         ];
 
-        for (family, font_data, font_key) in supported_fonts {
+        for (family, font_data, font_key) in latin_fonts {
             let mut backend = SlugBackend::default();
             let prepared = backend
                 .prepare_text_run(SlugTextRequest::new(
@@ -427,20 +427,17 @@ mod tests {
         }
 
         let mut backend = SlugBackend::default();
-        let unsupported = backend.prepare_text_run(SlugTextRequest::new(
-            "漢",
-            NOTO_CJK_DATA,
-            SlugFontKey::new(106),
-            "Noto Sans CJK SC",
-            FONT_SCALE,
-        ));
-        assert!(matches!(
-            unsupported,
-            Err(SlugOutlineError::CubicOutline {
-                character: '漢',
-                ..
-            })
-        ));
+        let prepared = backend
+            .prepare_text_run(SlugTextRequest::new(
+                "漢",
+                NOTO_CJK_DATA,
+                SlugFontKey::new(106),
+                "Noto Sans CJK SC",
+                FONT_SCALE,
+            ))
+            .expect("CFF cubic font fixture should prepare through quadratic conversion");
+        assert_eq!(prepared.run.run.glyphs().len(), 1);
+        assert!(!backend.glyph_cache().is_empty());
     }
 
     fn prepare(backend: &mut SlugBackend, text: &str) -> SlugPreparedTextRun {

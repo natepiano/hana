@@ -40,8 +40,14 @@ use std::thread;
 use bevy::tasks::TaskPool;
 use bevy::tasks::TaskPoolBuilder;
 use bevy_diegetic::DistanceField;
+use bevy_diegetic::DEFAULT_BAND_COUNT;
 use bevy_diegetic::GlyphAtlas;
 use bevy_diegetic::GlyphKey;
+use bevy_diegetic::SlugBackend;
+use bevy_diegetic::SlugFontKey;
+use bevy_diegetic::SlugTextRequest;
+use bevy_diegetic::build_slug_run_render_data;
+use bevy_kana::ToF32;
 use criterion::Criterion;
 use criterion::Throughput;
 use criterion::criterion_group;
@@ -56,6 +62,7 @@ const JETBRAINS_MONO_DATA: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono
 const EB_GARAMOND_DATA: &[u8] = include_bytes!("../assets/fonts/EBGaramond-Regular.ttf");
 
 const FONT_ID: u16 = 0;
+const JETBRAINS_MONO_FAMILY: &str = "JetBrains Mono";
 
 fn shared_pool(threads: usize) -> Arc<TaskPool> {
     Arc::new(
@@ -125,6 +132,12 @@ const WARMUP_CASES: &[WarmupCase] = &[
         distance_field: DistanceField::Sdf,
     },
     WarmupCase {
+        name:           "jbm_ascii_128_mtsdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        canonical_size: 128,
+        distance_field: DistanceField::Mtsdf,
+    },
+    WarmupCase {
         name:           "ebg_ascii_128_msdf",
         font_data:      EB_GARAMOND_DATA,
         canonical_size: 128,
@@ -141,6 +154,84 @@ const WARMUP_CASES: &[WarmupCase] = &[
 // Keep in sync with `DEFAULT_GLYPH_WORKER_THREADS` in
 // `src/text/constants.rs` so `warmup_burst` reflects production wall-time.
 const WARMUP_THREADS: usize = 8;
+
+#[derive(Clone, Copy)]
+enum RendererPrep {
+    DistanceField(DistanceField),
+    Slug,
+}
+
+struct RendererPrepCase {
+    name:           &'static str,
+    font_data:      &'static [u8],
+    font_family:    &'static str,
+    canonical_size: u32,
+    renderer:       RendererPrep,
+}
+
+const RENDERER_PREP_CASES: &[RendererPrepCase] = &[
+    RendererPrepCase {
+        name:           "jbm_ascii_128_sdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 128,
+        renderer:       RendererPrep::DistanceField(DistanceField::Sdf),
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_128_msdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 128,
+        renderer:       RendererPrep::DistanceField(DistanceField::Msdf),
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_128_mtsdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 128,
+        renderer:       RendererPrep::DistanceField(DistanceField::Mtsdf),
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_128_slug",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 128,
+        renderer:       RendererPrep::Slug,
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_256_sdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 256,
+        renderer:       RendererPrep::DistanceField(DistanceField::Sdf),
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_256_msdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 256,
+        renderer:       RendererPrep::DistanceField(DistanceField::Msdf),
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_256_mtsdf",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 256,
+        renderer:       RendererPrep::DistanceField(DistanceField::Mtsdf),
+    },
+    RendererPrepCase {
+        name:           "jbm_ascii_256_slug",
+        font_data:      JETBRAINS_MONO_DATA,
+        font_family:    JETBRAINS_MONO_FAMILY,
+        canonical_size: 256,
+        renderer:       RendererPrep::Slug,
+    },
+];
+
+fn slug_world_scale(font_data: &[u8], canonical_size: u32) -> f32 {
+    let face = Face::parse(font_data, 0).unwrap_or_else(|e| panic!("parse font: {e}"));
+    canonical_size.to_f32() / f32::from(face.units_per_em())
+}
 
 fn bench_warmup_burst(c: &mut Criterion) {
     let pool = shared_pool(WARMUP_THREADS);
@@ -169,6 +260,70 @@ fn bench_warmup_burst(c: &mut Criterion) {
                 },
             );
         });
+    }
+    group.finish();
+}
+
+fn bench_renderer_prep(c: &mut Criterion) {
+    let pool = shared_pool(WARMUP_THREADS);
+    let mut group = c.benchmark_group("renderer_prep");
+    group.sample_size(20);
+    for case in RENDERER_PREP_CASES {
+        group.throughput(Throughput::Elements(count_glyphs(
+            case.font_data,
+            ASCII_PRINTABLE,
+        )));
+        match case.renderer {
+            RendererPrep::DistanceField(distance_field) => {
+                group.bench_function(case.name, |b| {
+                    b.iter_with_setup(
+                        || {
+                            GlyphAtlas::with_config(
+                                ATLAS_PAGE_SIZE,
+                                case.canonical_size,
+                                WARMUP_THREADS,
+                                distance_field,
+                                Some(Arc::clone(&pool)),
+                            )
+                        },
+                        |mut atlas| {
+                            queue_all(&mut atlas, case.font_data, ASCII_PRINTABLE);
+                            drain(&mut atlas);
+                            black_box(atlas.glyph_count());
+                        },
+                    );
+                });
+            },
+            RendererPrep::Slug => {
+                group.bench_function(case.name, |b| {
+                    b.iter_with_setup(
+                        SlugBackend::default,
+                        |mut backend| {
+                            let request = SlugTextRequest {
+                                band_count: DEFAULT_BAND_COUNT,
+                                ..SlugTextRequest::new(
+                                    ASCII_PRINTABLE,
+                                    case.font_data,
+                                    SlugFontKey::new(u64::from(FONT_ID)),
+                                    case.font_family,
+                                    slug_world_scale(case.font_data, case.canonical_size),
+                                )
+                            };
+                            let prepared = backend
+                                .prepare_text_run(request)
+                                .unwrap_or_else(|err| panic!("prepare Slug run: {err}"));
+                            let render_data = build_slug_run_render_data(
+                                &prepared.run,
+                                backend.glyph_cache(),
+                                1.0,
+                            )
+                            .unwrap_or_else(|err| panic!("build Slug render data: {err}"));
+                            black_box(render_data.profile());
+                        },
+                    );
+                });
+            },
+        }
     }
     group.finish();
 }
@@ -437,6 +592,7 @@ fn bench_build_edge_buffer(font_data: &[u8], glyph_index: u16, _canonical_size: 
 criterion_group!(
     benches,
     bench_warmup_burst,
+    bench_renderer_prep,
     bench_thread_scaling,
     bench_single_glyph,
     bench_face_parse,

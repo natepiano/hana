@@ -35,6 +35,8 @@ use bevy_diegetic::RasterBackend;
 use bevy_diegetic::RasterQuality;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::TextRenderer;
+use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::WorldText;
@@ -93,7 +95,7 @@ const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
 const CYCLE_HIGHLIGHT_MIN: Duration = Duration::from_millis(500);
 
 const FONTS_PANEL_WIDTH: Px = CAM_HELP_WIDTH;
-const FONTS_PANEL_HEIGHT: Px = Px(208.0);
+const FONTS_PANEL_HEIGHT: Px = Px(232.0);
 const FONTS_PANEL_GAP: Px = Px(10.0);
 const FONTS_PANEL_ROW_HEIGHT: Px = Px(24.0);
 const FONTS_PANEL_KEY_WIDTH: Px = Px(18.0);
@@ -123,11 +125,13 @@ const FONT_KEYS: &[(&str, &str, KeyCode)] = &[
     ("4", "Crimson Text", KeyCode::Digit4),
     ("5", "Liberation Sans", KeyCode::Digit5),
     ("6", "Liberation Serif", KeyCode::Digit6),
+    ("7", "Noto Sans CJK SC", KeyCode::Digit7),
 ];
 const CRIMSON_TEXT_REGULAR_FONT_ASSET_PATH: &str = "fonts/CrimsonText-Regular.ttf";
 const EB_GARAMOND_REGULAR_FONT_ASSET_PATH: &str = "fonts/EBGaramond-Regular.ttf";
 const LIBERATION_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/LiberationSans-Regular.ttf";
 const LIBERATION_SERIF_REGULAR_FONT_ASSET_PATH: &str = "fonts/LiberationSerif-Regular.ttf";
+const NOTO_SANS_CJK_SC_REGULAR_FONT_ASSET_PATH: &str = "fonts/NotoSansCJKsc-Regular.otf";
 const NOTO_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/NotoSans-Regular.ttf";
 
 const DISPLAY_WORDS: &[(&str, &str)] = &[
@@ -156,6 +160,9 @@ const DISPLAY_WORDS: &[(&str, &str)] = &[
     ("::=>!=", "calt sequences (contextual alternates)"),
     ("Thirsty", "Th + st discretionary ligatures (dlig)"),
     ("AVOW Type", "kerning pairs AV, OW, Ty (kern)"),
+    ("漢字", "Chinese Han glyphs"),
+    ("かなカナ", "Japanese hiragana + katakana"),
+    ("한글", "Korean Hangul syllables"),
 ];
 
 #[derive(Component)]
@@ -203,6 +210,15 @@ struct FontHandles(Vec<Handle<Font>>);
 #[derive(Resource)]
 struct SelectedFont(usize);
 
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+enum TypographyTextMode {
+    #[default]
+    Msdf,
+    Sdf,
+    Mtsdf,
+    Slug,
+}
+
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -242,6 +258,7 @@ fn main() {
                 .control("M MSDF")
                 .control("S SDF")
                 .control("X MTSDF")
+                .control("L Slug")
                 .control("G GPU"),
         )
         .wire_chip_to_state::<OverlayState, _>("T Overlay", |state| match state {
@@ -252,19 +269,29 @@ fn main() {
             CycleState::Cycling { .. } => ControlActivation::Active,
             CycleState::Idle => ControlActivation::Inactive,
         })
-        .wire_chip_to_state::<AtlasSlot, _>("M MSDF", |slot| match slot.active().distance_field() {
-            DistanceField::Msdf => ControlActivation::Active,
-            DistanceField::Sdf | DistanceField::Mtsdf => ControlActivation::Inactive,
+        .wire_chip_to_state::<TypographyTextMode, _>("M MSDF", |mode| match mode {
+            TypographyTextMode::Msdf => ControlActivation::Active,
+            TypographyTextMode::Sdf | TypographyTextMode::Mtsdf | TypographyTextMode::Slug => {
+                ControlActivation::Inactive
+            },
         })
-        .wire_chip_to_state::<AtlasSlot, _>("S SDF", |slot| match slot.active().distance_field() {
-            DistanceField::Sdf => ControlActivation::Active,
-            DistanceField::Msdf | DistanceField::Mtsdf => ControlActivation::Inactive,
+        .wire_chip_to_state::<TypographyTextMode, _>("S SDF", |mode| match mode {
+            TypographyTextMode::Sdf => ControlActivation::Active,
+            TypographyTextMode::Msdf | TypographyTextMode::Mtsdf | TypographyTextMode::Slug => {
+                ControlActivation::Inactive
+            },
         })
-        .wire_chip_to_state::<AtlasSlot, _>("X MTSDF", |slot| {
-            match slot.active().distance_field() {
-                DistanceField::Mtsdf => ControlActivation::Active,
-                DistanceField::Msdf | DistanceField::Sdf => ControlActivation::Inactive,
+        .wire_chip_to_state::<TypographyTextMode, _>("X MTSDF", |mode| match mode {
+            TypographyTextMode::Mtsdf => ControlActivation::Active,
+            TypographyTextMode::Msdf | TypographyTextMode::Sdf | TypographyTextMode::Slug => {
+                ControlActivation::Inactive
             }
+        })
+        .wire_chip_to_state::<TypographyTextMode, _>("L Slug", |mode| match mode {
+            TypographyTextMode::Slug => ControlActivation::Active,
+            TypographyTextMode::Msdf | TypographyTextMode::Sdf | TypographyTextMode::Mtsdf => {
+                ControlActivation::Inactive
+            },
         })
         .wire_chip_to_state::<AtlasSlot, _>("G GPU", |slot| match slot.active().backend() {
             RasterBackend::Gpu => ControlActivation::Active,
@@ -275,11 +302,13 @@ fn main() {
             quality: RasterQuality::Medium,
             ..default()
         })
+        .insert_resource(TextRendererPreference::new(TextRenderer::DistanceField))
         .insert_resource(WordCycle {
             index: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
         })
         .insert_resource(SelectedFont(0))
+        .init_resource::<TypographyTextMode>()
         .init_resource::<FontHandles>()
         .init_resource::<OverlayState>()
         .init_resource::<CycleState>()
@@ -291,7 +320,7 @@ fn main() {
                 switch_font,
                 cycle_word,
                 tick_cycle_state,
-                toggle_distance_field,
+                switch_text_mode,
                 toggle_backend,
                 pick_raster_quality,
                 refresh_quality_panel,
@@ -518,6 +547,7 @@ fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
         CRIMSON_TEXT_REGULAR_FONT_ASSET_PATH,
         LIBERATION_SANS_REGULAR_FONT_ASSET_PATH,
         LIBERATION_SERIF_REGULAR_FONT_ASSET_PATH,
+        NOTO_SANS_CJK_SC_REGULAR_FONT_ASSET_PATH,
     ] {
         font_handles.0.push(asset_server.load(path));
     }
@@ -759,24 +789,28 @@ fn on_font_registered(
     }
 }
 
-/// `M` selects MSDF rasterization; `S` selects SDF; `X` selects MTSDF.
-/// Mutates [`AtlasPreference::distance_field`]; the driver picks up the
-/// mismatch on the next `PostUpdate` and starts the parallel-atlas
-/// swap.
-fn toggle_distance_field(
+/// `M` selects MSDF, `S` selects SDF, `X` selects MTSDF, and `L` selects Slug.
+fn switch_text_mode(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mut mode: ResMut<TypographyTextMode>,
     mut preference: ResMut<AtlasPreference>,
+    mut renderer: ResMut<TextRendererPreference>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyM) && preference.distance_field != DistanceField::Msdf {
+    if keyboard.just_pressed(KeyCode::KeyM) {
+        *mode = TypographyTextMode::Msdf;
         preference.distance_field = DistanceField::Msdf;
-    } else if keyboard.just_pressed(KeyCode::KeyS)
-        && preference.distance_field != DistanceField::Sdf
-    {
+        renderer.set_backend(TextRenderer::DistanceField);
+    } else if keyboard.just_pressed(KeyCode::KeyS) {
+        *mode = TypographyTextMode::Sdf;
         preference.distance_field = DistanceField::Sdf;
-    } else if keyboard.just_pressed(KeyCode::KeyX)
-        && preference.distance_field != DistanceField::Mtsdf
-    {
+        renderer.set_backend(TextRenderer::DistanceField);
+    } else if keyboard.just_pressed(KeyCode::KeyX) {
+        *mode = TypographyTextMode::Mtsdf;
         preference.distance_field = DistanceField::Mtsdf;
+        renderer.set_backend(TextRenderer::DistanceField);
+    } else if keyboard.just_pressed(KeyCode::KeyL) {
+        *mode = TypographyTextMode::Slug;
+        renderer.set_backend(TextRenderer::Slug);
     }
 }
 

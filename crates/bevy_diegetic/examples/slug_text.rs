@@ -36,8 +36,11 @@ const LATIN_FONT_KEY: SlugFontKey = SlugFontKey::new(0);
 const CJK_FONT_DATA: &[u8] = include_bytes!("../assets/fonts/NotoSansCJKsc-Regular.otf");
 const CJK_SAMPLE_CHAR: char = '漢';
 const DISPLAY_SIZE: f32 = 0.48;
+const SMALL_DISPLAY_SIZE: f32 = 0.055;
 const DISPLAY_Y: f32 = 0.5;
+const SMALL_DISPLAY_Y: f32 = 1.08;
 const DISPLAY_Z: f32 = 2.0;
+const SMALL_DISPLAY_Z: f32 = 2.0;
 const JETBRAINS_UNITS_PER_EM: f32 = 1000.0;
 const FONT_SCALE: f32 = DISPLAY_SIZE / JETBRAINS_UNITS_PER_EM;
 const SLUG_TEXT_COLOR: Color = Color::srgba(1.0, 0.38, 0.20, 1.0);
@@ -47,7 +50,7 @@ const GROUND_DEPTH_SCALE: f32 = 0.7;
 const GROUND_CENTER_Z: f32 = GROUND_SIZE * 0.5 * (1.0 - GROUND_DEPTH_SCALE);
 const GROUND_COLOR: Color = Color::srgb(0.08, 0.08, 0.08);
 const HOME_FOCUS: Vec3 = Vec3::new(-0.001, 0.461, 2.002);
-const HOME_RADIUS: f32 = 2.84;
+const HOME_FRAME_SIZE: f32 = 1.5;
 const HOME_PITCH: f32 = 0.055;
 const HOME_YAW: f32 = 0.0;
 const LIGHT_AIM: Vec3 = Vec3::new(0.0, DISPLAY_Y, DISPLAY_Z);
@@ -90,7 +93,7 @@ fn main() {
         )
         .with_stable_transparency()
         .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),
+            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
         )
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
@@ -150,6 +153,13 @@ fn spawn_world_text_renderer_comparison(commands: &mut Commands) {
         WorldText::new(FIXTURE_TEXT).with_renderer(TextRenderer::Slug),
         WorldTextStyle::new(DISPLAY_SIZE).with_color(SLUG_TEXT_COLOR),
         Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z),
+    ));
+    commands.spawn((
+        Name::new("Small WorldText Typography"),
+        DisplayText,
+        WorldText::new(FIXTURE_TEXT).with_renderer(TextRenderer::Slug),
+        WorldTextStyle::new(SMALL_DISPLAY_SIZE).with_color(SLUG_TEXT_COLOR),
+        Transform::from_xyz(0.0, SMALL_DISPLAY_Y, SMALL_DISPLAY_Z),
     ));
 }
 

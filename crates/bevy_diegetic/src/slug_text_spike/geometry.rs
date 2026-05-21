@@ -8,6 +8,13 @@ use ttf_parser::Face;
 use ttf_parser::GlyphId;
 use ttf_parser::OutlineBuilder;
 
+const CUBIC_TO_QUADRATIC_TOLERANCE: f32 = 0.25;
+const CUBIC_TO_QUADRATIC_MAX_DEPTH: u8 = 10;
+const HALF: f32 = 0.5;
+const ERROR_SAMPLE_A: f32 = 0.25;
+const ERROR_SAMPLE_B: f32 = 0.75;
+const TANGENT_INTERSECTION_EPSILON: f32 = 0.000001;
+
 /// A single quadratic Bezier segment in font design-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QuadraticSegment {
@@ -90,7 +97,7 @@ pub enum SlugOutlineError {
     MissingGlyphId(u16),
     /// The glyph has no outline.
     MissingOutline(char),
-    /// The glyph uses cubic curves, which the first spike rejects.
+    /// The glyph uses unsupported cubic outline segments.
     CubicOutline {
         character:      char,
         cubic_segments: usize,
@@ -123,11 +130,8 @@ impl Display for SlugOutlineError {
 
 impl Error for SlugOutlineError {}
 
-/// Loads one glyph from `font_data` and converts lines/quadratics into the
-/// first Slug feasibility representation.
-///
-/// This intentionally rejects cubic outlines so the first spike stays
-/// TrueType/quadratic-only.
+/// Loads one glyph from `font_data` and converts lines, quadratics, and cubics
+/// into the first Slug feasibility representation.
 pub fn load_glyph(font_data: &[u8], character: char) -> Result<SlugGlyph, SlugOutlineError> {
     let face = Face::parse(font_data, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
     let glyph_id = face
@@ -191,7 +195,6 @@ struct QuadraticOutlineBuilder {
     current:        Vec<QuadraticSegment>,
     contour_start:  Option<Vec2>,
     current_point:  Option<Vec2>,
-    cubic_segments: usize,
 }
 
 impl QuadraticOutlineBuilder {
@@ -202,7 +205,6 @@ impl QuadraticOutlineBuilder {
             current: Vec::new(),
             contour_start: None,
             current_point: None,
-            cubic_segments: 0,
         }
     }
 
@@ -212,12 +214,6 @@ impl QuadraticOutlineBuilder {
         bounds: SlugBounds,
     ) -> Result<SlugGlyph, SlugOutlineError> {
         self.finish_contour();
-        if self.cubic_segments > 0 {
-            return Err(SlugOutlineError::CubicOutline {
-                character:      self.character,
-                cubic_segments: self.cubic_segments,
-            });
-        }
         Ok(SlugGlyph {
             character: self.character,
             glyph_id: glyph_id.0,
@@ -261,6 +257,22 @@ impl QuadraticOutlineBuilder {
         }
         self.current_point = Some(end);
     }
+
+    fn push_cubic_as_quadratics(&mut self, control_a: Vec2, control_b: Vec2, end: Vec2) {
+        if let Some(start) = self.current_point {
+            append_cubic_quadratics(
+                CubicSegment {
+                    start,
+                    control_a,
+                    control_b,
+                    end,
+                },
+                0,
+                &mut self.current,
+            );
+        }
+        self.current_point = Some(end);
+    }
 }
 
 impl OutlineBuilder for QuadraticOutlineBuilder {
@@ -277,8 +289,8 @@ impl OutlineBuilder for QuadraticOutlineBuilder {
         self.push_quadratic(Vec2::new(x1, y1), Vec2::new(x, y));
     }
 
-    fn curve_to(&mut self, _x1: f32, _y1: f32, _x2: f32, _y2: f32, _x: f32, _y: f32) {
-        self.cubic_segments += 1;
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.push_cubic_as_quadratics(Vec2::new(x1, y1), Vec2::new(x2, y2), Vec2::new(x, y));
     }
 
     fn close(&mut self) {
@@ -289,4 +301,97 @@ impl OutlineBuilder for QuadraticOutlineBuilder {
         }
         self.finish_contour();
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CubicSegment {
+    start:     Vec2,
+    control_a: Vec2,
+    control_b: Vec2,
+    end:       Vec2,
+}
+
+fn append_cubic_quadratics(cubic: CubicSegment, depth: u8, segments: &mut Vec<QuadraticSegment>) {
+    let quadratic = approximate_cubic_with_quadratic(cubic);
+    let below_tolerance = cubic_quadratic_error(cubic, quadratic) <= CUBIC_TO_QUADRATIC_TOLERANCE;
+    if depth >= CUBIC_TO_QUADRATIC_MAX_DEPTH || below_tolerance {
+        segments.push(quadratic);
+        return;
+    }
+
+    let (left, right) = split_cubic(cubic);
+    append_cubic_quadratics(left, depth + 1, segments);
+    append_cubic_quadratics(right, depth + 1, segments);
+}
+
+fn approximate_cubic_with_quadratic(cubic: CubicSegment) -> QuadraticSegment {
+    let midpoint_control = || {
+        let midpoint = sample_cubic(cubic, HALF);
+        midpoint * 2.0 - (cubic.start + cubic.end) * HALF
+    };
+    QuadraticSegment {
+        start:   cubic.start,
+        control: tangent_intersection_control(cubic).unwrap_or_else(midpoint_control),
+        end:     cubic.end,
+    }
+}
+
+fn tangent_intersection_control(cubic: CubicSegment) -> Option<Vec2> {
+    let start_tangent = cubic.control_a - cubic.start;
+    let end_tangent = cubic.end - cubic.control_b;
+    let denominator = cross(start_tangent, end_tangent);
+    if denominator.abs() < TANGENT_INTERSECTION_EPSILON {
+        return None;
+    }
+
+    let scale = cross(cubic.end - cubic.start, end_tangent) / denominator;
+    Some(cubic.start + start_tangent * scale)
+}
+
+fn cross(left: Vec2, right: Vec2) -> f32 { left.x * right.y - left.y * right.x }
+
+fn cubic_quadratic_error(cubic: CubicSegment, quadratic: QuadraticSegment) -> f32 {
+    [ERROR_SAMPLE_A, ERROR_SAMPLE_B]
+        .into_iter()
+        .map(|t| sample_cubic(cubic, t).distance(sample_quadratic(quadratic, t)))
+        .fold(0.0, f32::max)
+}
+
+fn split_cubic(cubic: CubicSegment) -> (CubicSegment, CubicSegment) {
+    let start_control = cubic.start.lerp(cubic.control_a, HALF);
+    let control_midpoint = cubic.control_a.lerp(cubic.control_b, HALF);
+    let end_control = cubic.control_b.lerp(cubic.end, HALF);
+    let left_control_b = start_control.lerp(control_midpoint, HALF);
+    let right_control_a = control_midpoint.lerp(end_control, HALF);
+    let midpoint = left_control_b.lerp(right_control_a, HALF);
+
+    (
+        CubicSegment {
+            start:     cubic.start,
+            control_a: start_control,
+            control_b: left_control_b,
+            end:       midpoint,
+        },
+        CubicSegment {
+            start:     midpoint,
+            control_a: right_control_a,
+            control_b: end_control,
+            end:       cubic.end,
+        },
+    )
+}
+
+fn sample_cubic(cubic: CubicSegment, t: f32) -> Vec2 {
+    let start = cubic.start.lerp(cubic.control_a, t);
+    let control = cubic.control_a.lerp(cubic.control_b, t);
+    let end = cubic.control_b.lerp(cubic.end, t);
+    let start_control = start.lerp(control, t);
+    let control_end = control.lerp(end, t);
+    start_control.lerp(control_end, t)
+}
+
+fn sample_quadratic(quadratic: QuadraticSegment, t: f32) -> Vec2 {
+    let start = quadratic.start.lerp(quadratic.control, t);
+    let end = quadratic.control.lerp(quadratic.end, t);
+    start.lerp(end, t)
 }
