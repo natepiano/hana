@@ -41,6 +41,7 @@ fdsm-ttf-parser = { workspace = true }
 image = { workspace = true }
 nalgebra = { workspace = true }
 parley = { workspace = true }
+rayon = { workspace = true }
 smallvec = { workspace = true }
 ttf-parser = { workspace = true }
 

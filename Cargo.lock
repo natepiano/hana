@@ -796,6 +796,7 @@ dependencies = [
  "msdfgen",
  "nalgebra",
  "parley",
+ "rayon",
  "smallvec",
  "ttf-parser 0.18.1",
  "ttf-parser 0.25.1",

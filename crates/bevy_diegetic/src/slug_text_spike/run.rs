@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 
 use bevy::math::Vec2;
@@ -8,6 +9,7 @@ use parley::fontique::FontInfoOverride;
 use parley::layout::PositionedLayoutItem;
 use parley::style::FontFamily;
 use parley::style::StyleProperty;
+use rayon::prelude::*;
 use ttf_parser::Face;
 
 use super::backend::SlugTextRequest;
@@ -228,8 +230,8 @@ pub fn build_slug_text_run_with_cache(
         request.font_family,
         request.world_scale,
     )?;
-    let mut glyphs = Vec::with_capacity(shaped_text.glyphs.len());
-    for glyph in shaped_text.glyphs {
+    let mut visible_glyphs = Vec::with_capacity(shaped_text.glyphs.len());
+    for glyph in &shaped_text.glyphs {
         let key = SlugGlyphKey::with_preprocess_version(
             request.font_key,
             glyph.glyph_id,
@@ -238,14 +240,27 @@ pub fn build_slug_text_run_with_cache(
         if !geometry::glyph_id_has_visible_outline(&face, glyph.glyph_id) {
             continue;
         }
-        let packed_glyph = glyph_cache.get_or_insert_packed(
+        visible_glyphs.push(VisibleSlugGlyph {
             key,
-            request.font_data,
-            glyph.character,
-            request.band_count,
-        )?;
+            character: glyph.character,
+            origin: glyph.origin,
+            advance: glyph.advance,
+        });
+    }
+
+    glyph_cache.insert_missing_packed_parallel(
+        &visible_glyphs,
+        request.font_data,
+        request.band_count,
+    )?;
+
+    let mut glyphs = Vec::with_capacity(visible_glyphs.len());
+    for glyph in visible_glyphs {
+        let packed_glyph = glyph_cache
+            .get(glyph.key)
+            .ok_or_else(|| SlugOutlineError::MissingGlyphId(glyph.key.glyph_id()))?;
         glyphs.push(SlugGlyphInstance::new(
-            key,
+            glyph.key,
             glyph.origin,
             glyph.advance,
             packed_glyph.bounds(),
@@ -276,6 +291,31 @@ impl SlugGlyphCache {
     /// Returns whether the cache has no packed glyphs.
     #[must_use]
     pub fn is_empty(&self) -> bool { self.glyphs.is_empty() }
+
+    fn insert_missing_packed_parallel(
+        &mut self,
+        glyphs: &[VisibleSlugGlyph],
+        font_data: &[u8],
+        band_count: usize,
+    ) -> Result<(), SlugOutlineError> {
+        let missing = unique_missing_glyphs(glyphs, &self.glyphs);
+        let packed = missing
+            .par_iter()
+            .map(|glyph| {
+                let outline = geometry::load_glyph_by_id(
+                    font_data,
+                    glyph.key.glyph_id,
+                    glyph.character,
+                )?;
+                Ok((*glyph, packing::build_packed_glyph(outline, band_count)))
+            })
+            .collect::<Result<Vec<_>, SlugOutlineError>>()?;
+
+        for (glyph, packed_glyph) in packed {
+            self.glyphs.entry(glyph.key).or_insert(packed_glyph);
+        }
+        Ok(())
+    }
 
     /// Loads, packs, and caches one glyph if it is not already present.
     pub fn get_or_insert_packed(
@@ -316,6 +356,29 @@ impl SlugGlyphCache {
             },
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VisibleSlugGlyph {
+    key:       SlugGlyphKey,
+    character: char,
+    origin:    Vec2,
+    advance:   f32,
+}
+
+fn unique_missing_glyphs(
+    glyphs: &[VisibleSlugGlyph],
+    cache: &HashMap<SlugGlyphKey, SlugPackedGlyph>,
+) -> Vec<VisibleSlugGlyph> {
+    let mut seen = HashSet::new();
+    let mut missing = Vec::new();
+    for glyph in glyphs {
+        if cache.contains_key(&glyph.key) || !seen.insert(glyph.key) {
+            continue;
+        }
+        missing.push(*glyph);
+    }
+    missing
 }
 
 fn run_bounds(glyphs: &[SlugGlyphInstance]) -> SlugBounds {
