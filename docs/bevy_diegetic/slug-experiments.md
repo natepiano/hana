@@ -834,21 +834,24 @@ Prep Check:
 | --- | ---: | ---: | ---: | --- |
 | `renderer_prep/jbm_ascii_128_slug` | `1.1923 ms` | `1.1703 ms` | `1.2213 ms` | One-time CPU preparation for the 94 printable ASCII glyphs. |
 
-Approximate First-Run Comparison:
+Reconstructed First-Benchmark Comparison:
 
-The first Slug performance pass only recorded the original fragment
-mean, not a full vertex-plus-fragment total, Bevy frame time, or clean
-prep number. For comparison, estimate the first total as the original
-fragment mean plus a typical Slug vertex mean:
-`5.9117 ms + 0.0600 ms = 5.9717 ms`.
+The earliest Slug benchmark example was introduced in `dda5299`. To
+reconstruct the first benchmark baseline with today's measurement setup,
+checkout `dda5299`, copy in `scripts/xctrace_text_renderer.sh`, and add
+only `WinitSettings::continuous()` to `text_renderer_gpu_bench.rs`.
+Keep the Slug implementation itself at `dda5299`.
 
-| Metric | Approx First Run | Current 96 Bands | Delta | Meaning |
+The old `5.9117 ms` fragment note did not reproduce under this setup, so
+the table below is the canonical reconstructed baseline.
+
+| Metric | Reconstructed `dda5299` | Current 96 Bands | Delta | Meaning |
 | --- | ---: | ---: | ---: | --- |
-| Vertex mean | `0.0600 ms` | `0.0599 ms` | `-0.0001 ms` | Approx unchanged GPU vertex work. |
-| Fragment mean | `5.9117 ms` | `2.5759 ms` | `-3.3358 ms` | Main Slug shader pixel cost. |
-| Vertex + fragment total | `5.9717 ms` | `3.7655 ms` | `-2.2062 ms` | Approx GPU transparent-pass work; about `36.9%` lower. |
-| Bevy frame time | not recorded | `10.9424 ms` | unknown | Whole app frame pacing, including non-text work and scheduling. |
-| Prep time | not cleanly recorded | `1.1703 ms` | unknown | One-time Slug prep for the ASCII benchmark. |
+| Vertex mean | `0.0488 ms` | `0.0599 ms` | `+0.0111 ms` | GPU vertex work for the traced transparent pass. |
+| Fragment mean | `2.9079 ms` | `2.5759 ms` | `-0.3320 ms` | Main Slug shader pixel cost. |
+| Vertex + fragment total | `4.2956 ms` | `3.7655 ms` | `-0.5301 ms` | GPU transparent-pass work; about `12.3%` lower. |
+| Bevy frame time | `10.2161 ms` | `10.9424 ms` | `+0.7263 ms` | Whole app frame pacing, including non-text work and scheduling. |
+| Prep time | `1.0761 ms` | `1.1703 ms` | `+0.0942 ms` | One-time Slug prep for the ASCII benchmark. |
 
 Assessment:
 
