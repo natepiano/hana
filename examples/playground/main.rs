@@ -83,7 +83,7 @@ fn main() {
                 sections::update_current_section_from_camera,
                 sections::update_section_info_visibility,
                 input::handle_keyboard,
-                navigation::handle_nav_buttons,
+                navigation::handle_navigation_buttons,
                 input::handle_drag,
                 ui::sync_cable_settings.run_if(resource_changed::<CableSettings>),
                 animation::animate_tube_light,

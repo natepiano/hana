@@ -11,13 +11,13 @@ use bevy_catenary::DebugGizmos;
 use bevy_catenary::Solver;
 use bevy_lagrange::ZoomToFit;
 
-use super::constants::NAV_DURATION_MS;
+use super::constants::NAVIGATION_DURATION_MS;
 use super::constants::RAY_EPSILON;
 use super::constants::SLACK_ADJUSTMENT_STEP;
 use super::constants::ZOOM_DURATION_MS;
 use super::constants::ZOOM_MARGIN_GROUND;
 use super::constants::ZOOM_MARGIN_MESH;
-use super::constants::ZOOM_MARGIN_NAV;
+use super::constants::ZOOM_MARGIN_NAVIGATION;
 use super::detach_demo;
 use super::detach_demo::DetachDemoEntity;
 use super::entities;
@@ -210,7 +210,7 @@ pub(crate) fn handle_keyboard(
         commands.trigger(
             ZoomToFit::new(scene_entities.camera, scene_entities.ground)
                 .margin(ZOOM_MARGIN_GROUND)
-                .duration(Duration::from_millis(NAV_DURATION_MS))
+                .duration(Duration::from_millis(NAVIGATION_DURATION_MS))
                 .easing(EaseFunction::CubicOut),
         );
     }
@@ -282,7 +282,7 @@ pub(crate) fn on_ground_clicked(
 
     commands.trigger(
         ZoomToFit::new(scene_entities.camera, section_bounds.0[current_section.0])
-            .margin(ZOOM_MARGIN_NAV)
+            .margin(ZOOM_MARGIN_NAVIGATION)
             .duration(Duration::from_millis(ZOOM_DURATION_MS))
             .easing(EaseFunction::CubicOut),
     );

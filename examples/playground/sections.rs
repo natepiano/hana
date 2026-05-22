@@ -17,7 +17,7 @@ use super::constants::SECTION_X;
 use super::constants::SECTION_Z;
 use super::constants::SPAN_HALF_X;
 use super::navigation;
-use super::navigation::NavLabel;
+use super::navigation::NavigationLabel;
 
 #[derive(Resource)]
 pub(crate) struct CurrentSection(pub(crate) usize);
@@ -73,7 +73,7 @@ pub(crate) fn update_section_info_visibility(
 pub(crate) fn update_current_section_from_camera(
     cameras: Query<&OrbitCam>,
     mut current_section: ResMut<CurrentSection>,
-    mut label_query: Query<&mut Text, With<NavLabel>>,
+    mut label_query: Query<&mut Text, With<NavigationLabel>>,
 ) {
     let Ok(camera) = cameras.single() else {
         return;
@@ -92,6 +92,6 @@ pub(crate) fn update_current_section_from_camera(
 
     if nearest != current_section.0 {
         current_section.0 = nearest;
-        navigation::update_nav_label(&mut label_query, nearest);
+        navigation::update_navigation_label(&mut label_query, nearest);
     }
 }
