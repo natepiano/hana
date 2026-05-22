@@ -55,6 +55,37 @@ Interpretation:
   `WinitSettings::continuous()` so unfocused windows do not change update
   pacing.
 
+### Shaded Pixel Waste Measurement
+
+Temporary instrumentation measured how much glyph quad area is sent
+through the analytic Slug shader compared with the estimated useful
+glyph area. The instrumentation was removed after recording the result.
+
+Fields:
+
+- `emitted_glyphs`: glyph quads emitted after clipping.
+- `shaded_quad`: total padded quad area that can invoke the fragment
+  shader.
+- `glyph_bounds`: visible glyph bounds area with padding removed.
+- `estimated_ink`: estimated visible ink area from signed quadratic
+  outline integration.
+- `shaded_to_bounds_ratio()`: padded quad area divided by glyph bounds.
+- `shaded_to_ink_ratio()`: padded quad area divided by estimated ink.
+- `bounds_to_ink_ratio()`: glyph bounds divided by estimated ink.
+
+Example from `examples/slug_text.rs` for `Typography` at the current
+home view setup:
+
+| Metric | Value | Meaning |
+|---|---:|---|
+| Emitted glyphs | `10` | Visible glyph quads in the word. |
+| Shaded quad | `0.786922` | Area sent through the analytic shader. |
+| Glyph bounds | `0.701398` | Visible glyph bounds area excluding padding. |
+| Estimated ink | `0.283152` | Estimated actual filled text area. |
+| Shaded to bounds | `1.12x` | Padding overhead around glyph bounds. |
+| Shaded to ink | `2.78x` | Total approximate shader-area waste versus ink. |
+| Bounds to ink | `2.48x` | Bounds area versus actual filled text area. |
+
 The frozen Phase 10 screenshot baseline was:
 
 - `/tmp/slug_phase10_baseline_slug_current.png`
