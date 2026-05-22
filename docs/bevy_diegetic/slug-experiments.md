@@ -781,6 +781,92 @@ Future note:
   fill tessellation plus a controlled analytic edge strip is more likely
   to win.
 
+### Global Band-Density Retest
+
+Change:
+
+- Retest global band counts under a perceptual/performance gate instead
+  of the earlier strict `AE 0` gate.
+- Keep the existing Slug storage and shader model.
+- Change only `DEFAULT_BAND_COUNT`.
+
+Why:
+
+- More bands reduce the number of packed curve candidates each fragment
+  needs to scan.
+- Earlier strict-parity tests rejected this because the screenshots were
+  not pixel-identical, but the differences were visually tiny.
+
+Screenshot Check:
+
+All screenshot checks used the saved lowercase `g` zoom view against the
+saved 32-band baseline.
+
+| Variant | RMSE | AE With `1%` Fuzz | Meaning |
+| --- | ---: | ---: | --- |
+| 80 bands | `6.75922` | `32` | Smallest tested image delta. |
+| 96 bands | `7.59753` | `50` | Slightly larger image delta, still visually small in the zoom view. |
+| 112 bands | `7.38058` | `46` | Similar visual delta to 96 bands. |
+
+GPU Trace:
+
+Each row is the mean of the saved Metal traces for the 720-instance
+`text_renderer_gpu_bench` Slug run. The 32-band baseline includes three
+runs; 80 bands includes two runs; 96 and 112 bands include three runs.
+
+| Metric | 32 Bands | 80 Bands | 96 Bands | 112 Bands | Meaning |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Vertex mean | `0.0602 ms` | `0.0606 ms` | `0.0599 ms` | `0.0614 ms` | GPU vertex work for the transparent pass. |
+| Fragment mean | `2.9008 ms` | `2.6449 ms` | `2.5759 ms` | `2.6627 ms` | GPU pixel work; this is the main Slug shader cost. |
+| Total-by-frame mean | `3.9883 ms` | `3.8735 ms` | `3.7655 ms` | `3.7636 ms` | Per-frame vertex plus fragment work for frames with both channels. |
+
+Bevy Diagnostics:
+
+| Metric | 32 Bands | 80 Bands | 96 Bands | 112 Bands | Meaning |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Frame time mean | `11.7047 ms` | `10.6591 ms` | `10.9424 ms` | `10.5071 ms` | Whole app frame time reported by Bevy. |
+| Render CPU sum mean | `0.3991 ms` | `0.3244 ms` | `0.3701 ms` | `0.3116 ms` | Sum of measured render CPU work. |
+| Transparent pass CPU mean | `0.3936 ms` | `0.3198 ms` | `0.3650 ms` | `0.3073 ms` | CPU time for the pass that draws Slug text. |
+
+Prep Check:
+
+| Metric | 32 Bands | 96 Bands | 112 Bands | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `renderer_prep/jbm_ascii_128_slug` | `1.1923 ms` | `1.1703 ms` | `1.2213 ms` | One-time CPU preparation for the 94 printable ASCII glyphs. |
+
+Approximate First-Run Comparison:
+
+The first Slug performance pass only recorded the original fragment
+mean, not a full vertex-plus-fragment total, Bevy frame time, or clean
+prep number. For comparison, estimate the first total as the original
+fragment mean plus a typical Slug vertex mean:
+`5.9117 ms + 0.0600 ms = 5.9717 ms`.
+
+| Metric | Approx First Run | Current 96 Bands | Delta | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| Vertex mean | `0.0600 ms` | `0.0599 ms` | `-0.0001 ms` | Approx unchanged GPU vertex work. |
+| Fragment mean | `5.9117 ms` | `2.5759 ms` | `-3.3358 ms` | Main Slug shader pixel cost. |
+| Vertex + fragment total | `5.9717 ms` | `3.7655 ms` | `-2.2062 ms` | Approx GPU transparent-pass work; about `36.9%` lower. |
+| Bevy frame time | not recorded | `10.9424 ms` | unknown | Whole app frame pacing, including non-text work and scheduling. |
+| Prep time | not cleanly recorded | `1.1703 ms` | unknown | One-time Slug prep for the ASCII benchmark. |
+
+Assessment:
+
+- 96 bands is the best tested fragment-time result and nearly ties 112
+  bands on total GPU time.
+- 112 bands has the best Bevy CPU diagnostics, but its fragment time is
+  worse than 96 and it stores more band records.
+- 80 bands has the smallest visual delta, but gives up too much of the
+  fragment improvement.
+- Keep 96 bands as the current candidate. This is a meaningful shader
+  workload reduction without adding geometry complexity.
+
+Open concern:
+
+- This is not a strict-parity change. It needs human review at normal
+  text size, the lowercase `g` zoom, and panel text size before it should
+  be treated as final.
+
 ## Open Experiment Ideas
 
 ### Edge-Only Analytic Shading
