@@ -30,12 +30,13 @@ pub(crate) fn get_default_state_path() -> Option<PathBuf> {
         executable.parent().and_then(Path::file_name) == Some(EXAMPLES_DIRECTORY_NAME.as_ref());
 
     if is_cargo_example {
-        config_dir().map(|d| {
-            d.join(env!("CARGO_PKG_NAME"))
+        config_dir().map(|config_dir| {
+            config_dir
+                .join(env!("CARGO_PKG_NAME"))
                 .join(format!("{executable_name}{RON_EXTENSION}"))
         })
     } else {
-        config_dir().map(|d| d.join(executable_name).join(STATE_FILE))
+        config_dir().map(|config_dir| config_dir.join(executable_name).join(STATE_FILE))
     }
 }
 
@@ -43,7 +44,7 @@ pub(crate) fn get_default_state_path() -> Option<PathBuf> {
 ///
 /// Returns `config_dir()/<app_name>/windows.ron`
 pub(crate) fn get_state_path_for_app(app_name: &str) -> Option<PathBuf> {
-    config_dir().map(|d| d.join(app_name).join(STATE_FILE))
+    config_dir().map(|config_dir| config_dir.join(app_name).join(STATE_FILE))
 }
 
 /// Load all window states from the given path.

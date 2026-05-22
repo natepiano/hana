@@ -35,7 +35,7 @@ pub(crate) struct WinitInfo {
 impl WinitInfo {
     /// Get window decoration dimensions as a `UVec2`.
     #[must_use]
-    pub const fn physical_decoration(&self) -> UVec2 {
+    pub(crate) const fn physical_decoration(&self) -> UVec2 {
         UVec2::new(
             self.window_decoration.physical_width,
             self.window_decoration.physical_height,

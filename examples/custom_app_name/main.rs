@@ -77,8 +77,8 @@ fn update_info_text(
     let refresh_rate = bevy_monitors
         .iter()
         .find(|monitor| monitor.physical_position == current_monitor.physical_position)
-        .and_then(|m| m.refresh_rate_millihertz)
-        .map(|r| r / MILLIHERTZ_PER_HERTZ);
+        .and_then(|monitor| monitor.refresh_rate_millihertz)
+        .map(|refresh_rate| refresh_rate / MILLIHERTZ_PER_HERTZ);
 
     let refresh_display =
         refresh_rate.map_or_else(|| NOT_AVAILABLE_TEXT.into(), |hz| format!("{hz}Hz"));

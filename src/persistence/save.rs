@@ -104,7 +104,12 @@ pub(crate) fn save_active_window_state(
 
     let app_name = current_exe()
         .ok()
-        .and_then(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
+        .and_then(|executable_path| {
+            executable_path
+                .file_stem()
+                .and_then(|file_stem| file_stem.to_str())
+                .map(String::from)
+        })
         .unwrap_or_default();
 
     let mut states = HashMap::new();
@@ -135,9 +140,13 @@ pub(crate) fn save_active_window_state(
             || (&window.mode).into(),
             |current_monitor| (&current_monitor.effective_mode).into(),
         );
-        let logical_position = physical_position.map(|p| {
-            let logical_x = (f64::from(p.x) / monitor_scale).round().to_i32();
-            let logical_y = (f64::from(p.y) / monitor_scale).round().to_i32();
+        let logical_position = physical_position.map(|physical_position| {
+            let logical_x = (f64::from(physical_position.x) / monitor_scale)
+                .round()
+                .to_i32();
+            let logical_y = (f64::from(physical_position.y) / monitor_scale)
+                .round()
+                .to_i32();
             (logical_x, logical_y)
         });
         states.insert(
@@ -176,7 +185,12 @@ fn persist_remember_all(
 ) {
     let app_name = current_exe()
         .ok()
-        .and_then(|p| p.file_stem().and_then(|s| s.to_str()).map(String::from))
+        .and_then(|executable_path| {
+            executable_path
+                .file_stem()
+                .and_then(|file_stem| file_stem.to_str())
+                .map(String::from)
+        })
         .unwrap_or_default();
 
     let mut states = load::load_all_states(&config.path).unwrap_or_default();
@@ -196,10 +210,14 @@ fn persist_remember_all(
             let monitor_index = entry.monitor.unwrap_or(PRIMARY_MONITOR_INDEX);
             let monitor_scale = monitors
                 .by_index(monitor_index)
-                .map_or(DEFAULT_SCALE_FACTOR, |m| m.scale);
-            let logical_position = entry.physical_position.map(|p| {
-                let logical_x = (f64::from(p.x) / monitor_scale).round().to_i32();
-                let logical_y = (f64::from(p.y) / monitor_scale).round().to_i32();
+                .map_or(DEFAULT_SCALE_FACTOR, |monitor| monitor.scale);
+            let logical_position = entry.physical_position.map(|physical_position| {
+                let logical_x = (f64::from(physical_position.x) / monitor_scale)
+                    .round()
+                    .to_i32();
+                let logical_y = (f64::from(physical_position.y) / monitor_scale)
+                    .round()
+                    .to_i32();
                 (logical_x, logical_y)
             });
             states.insert(
@@ -312,8 +330,8 @@ pub(crate) fn save_window_state(
         if monitor_changed {
             let previous_scale = entry
                 .monitor
-                .and_then(|i| monitors.by_index(i))
-                .map(|m| m.scale);
+                .and_then(|monitor_index| monitors.by_index(monitor_index))
+                .map(|monitor| monitor.scale);
             debug!(
                 "[save_window_state] [{window_key}] MONITOR CHANGE: {:?} (scale={previous_scale:?}) -> {monitor_index} (scale={monitor_scale})",
                 entry.monitor,

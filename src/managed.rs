@@ -131,7 +131,7 @@ pub(crate) fn on_managed_window_added(
     let existing = persistence::load_all_states(&config.path);
     let already_saved = existing
         .as_ref()
-        .is_some_and(|s| s.contains_key(&WindowKey::Managed(unique_name.clone())));
+        .is_some_and(|states| states.contains_key(&WindowKey::Managed(unique_name.clone())));
 
     if !already_saved && let Ok(window) = windows.get(entity) {
         let monitor_info = match window.position {

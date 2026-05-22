@@ -12,9 +12,9 @@ use super::persistence::WindowState;
 #[derive(Resource, Clone)]
 pub(crate) struct RestoreWindowConfig {
     /// Full path to the state file.
-    pub path:          PathBuf,
+    pub(crate) path:          PathBuf,
     /// Snapshot of window states as loaded from the file at startup.
     /// Populated during restore so downstream code can compare intended vs actual state.
     /// Entries persist as a read-only snapshot for the example's File column.
-    pub loaded_states: HashMap<WindowKey, WindowState>,
+    pub(crate) loaded_states: HashMap<WindowKey, WindowState>,
 }

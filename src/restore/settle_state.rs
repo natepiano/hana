@@ -36,7 +36,7 @@ pub(crate) struct SettleState {
 impl SettleState {
     /// Create a new settle state with default durations.
     #[must_use]
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             total_timeout:   Timer::from_seconds(SETTLE_TIMEOUT_SECS, TimerMode::Once),
             stability_timer: Timer::from_seconds(SETTLE_STABILITY_SECS, TimerMode::Once),

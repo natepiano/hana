@@ -71,16 +71,16 @@ impl Display for WindowKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct PersistedEntry {
     #[serde(rename = "key")]
-    pub window_key:   WindowKey,
+    window_key:   WindowKey,
     #[serde(rename = "state")]
-    pub window_state: WindowState,
+    window_state: WindowState,
 }
 
 /// Versioned persisted state format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct PersistedState {
-    pub version: u8,
-    pub entries: Vec<PersistedEntry>,
+    version: u8,
+    entries: Vec<PersistedEntry>,
 }
 
 /// Minimal version probe — just extract the version number from any versioned format.

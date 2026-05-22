@@ -24,28 +24,28 @@ use crate::restore::settle_state::SettleState;
 pub(crate) struct TargetPosition {
     /// Final clamped position (adjusted to fit within target monitor).
     /// None on Wayland where clients can't access window position.
-    pub physical_position:        Option<IVec2>,
+    pub(crate) physical_position:        Option<IVec2>,
     /// Pre-scale position from the saved state, preserved for event reporting.
     /// None on Wayland (no position was ever saved) or when the saved state had none.
-    pub logical_position:         Option<IVec2>,
+    pub(crate) logical_position:         Option<IVec2>,
     /// Target size in physical pixels (content area, excluding window decoration).
-    pub physical_size:            UVec2,
+    pub(crate) physical_size:            UVec2,
     /// Target size in logical pixels from the saved state.
-    pub logical_size:             UVec2,
+    pub(crate) logical_size:             UVec2,
     /// Scale factor of the target monitor.
-    pub target_scale:             f64,
+    pub(crate) target_scale:             f64,
     /// Scale factor of the monitor where the window starts (keyboard focus monitor).
-    pub starting_scale:           f64,
+    pub(crate) starting_scale:           f64,
     /// Strategy for handling scale factor differences between monitors.
-    pub monitor_scale_strategy:   MonitorScaleStrategy,
+    pub(crate) monitor_scale_strategy:   MonitorScaleStrategy,
     /// Window mode to restore.
-    pub saved_window_mode:        SavedWindowMode,
+    pub(crate) saved_window_mode:        SavedWindowMode,
     /// Target monitor index for fullscreen restore.
     /// On non-Wayland platforms, this could be derived from position, but Wayland
     /// doesn't provide window position, so we store it explicitly.
-    pub monitor_index:            usize,
+    pub(crate) monitor_index:            usize,
     /// Fullscreen restore state (DX12/DXGI workaround).
-    pub fullscreen_restore_state: Option<FullscreenRestoreState>,
+    pub(crate) fullscreen_restore_state: Option<FullscreenRestoreState>,
     /// Settling state. When set, `try_apply_restore` has completed and we're waiting
     /// for the compositor/winit to deliver stable, matching state.
     ///
@@ -58,20 +58,20 @@ pub(crate) struct TargetPosition {
     /// This handles compositor artifacts like Wayland `wl_surface.enter`/`leave` bounces
     /// where `current_monitor()` transiently reports the wrong monitor during fullscreen
     /// transitions.
-    pub(crate) settle_state:      Option<SettleState>,
+    pub(crate) settle_state:             Option<SettleState>,
 }
 
 impl TargetPosition {
     /// Scale ratio between starting and target monitors.
     #[must_use]
-    pub const fn ratio(&self) -> f64 { self.starting_scale / self.target_scale }
+    pub(super) const fn ratio(&self) -> f64 { self.starting_scale / self.target_scale }
 
     /// Position compensated for scale factor differences.
     ///
     /// Multiplies physical position by the ratio to account for winit dividing by launch scale.
     /// Returns None if position is not available (Wayland).
     #[must_use]
-    pub fn compensated_position(&self) -> Option<IVec2> {
+    pub(super) fn compensated_position(&self) -> Option<IVec2> {
         let ratio = self.ratio();
         self.physical_position.map(|position| {
             IVec2::new(
@@ -85,7 +85,7 @@ impl TargetPosition {
     ///
     /// Multiplies physical size by the ratio to account for winit dividing by launch scale.
     #[must_use]
-    pub fn compensated_size(&self) -> UVec2 {
+    pub(super) fn compensated_size(&self) -> UVec2 {
         let ratio = self.ratio();
         UVec2::new(
             (f64::from(self.physical_size.x) * ratio).to_u32(),
