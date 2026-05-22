@@ -14,6 +14,47 @@ Current shader-performance experiments use three checks:
 - CPU prep cost: run the `renderer_prep` Criterion group in
   `benches/glyph_rasterization.rs`.
 
+### Canonical Benchmark Format
+
+Future benchmark writeups should use before/after tables and include a
+plain meaning column so the numbers are readable without remembering the
+trace parser.
+
+GPU trace table:
+
+| Metric | Before | After | Delta | Meaning |
+|---|---:|---:|---:|---|
+| Vertex mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | GPU vertex work for the traced transparent pass. |
+| Fragment mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | GPU pixel/shader work for the traced transparent pass. |
+| Total-by-frame mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Approximate GPU pass cost from paired vertex and fragment intervals. |
+
+Bevy diagnostics table:
+
+| Metric | Before | After | Delta | Meaning |
+|---|---:|---:|---:|---|
+| Frame time mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Whole app frame pacing, including non-text work and scheduling. |
+| Render CPU sum | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Sum of Bevy render CPU diagnostics for sampled frames. |
+| Transparent pass CPU | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Bevy CPU work reported for the transparent 3D pass. |
+
+Verdict table:
+
+| Result | Value |
+|---|---|
+| Visual status | Screenshot comparison and human-visible result. |
+| Performance status | Kept, rejected, or still active. |
+| Reason | Short explanation of the winning or losing tradeoff. |
+
+Interpretation:
+
+- Negative timing deltas are better.
+- Positive timing deltas are worse.
+- `Fragment mean` is the primary Slug shader cost signal.
+- `Vertex mean` shows whether geometry work became too expensive.
+- `Total-by-frame mean` is the quick GPU summary.
+- Bevy CPU/frame numbers are secondary, but benchmark examples should set
+  `WinitSettings::continuous()` so unfocused windows do not change update
+  pacing.
+
 The frozen Phase 10 screenshot baseline was:
 
 - `/tmp/slug_phase10_baseline_slug_current.png`
@@ -670,6 +711,75 @@ Future note:
   candidates are one mesh with an edge/interior attribute, a tighter
   non-rectangular edge band, or a renderer-level path that can batch the
   split geometry cheaply.
+
+### Merged Single-Mesh Distance-Cell Split
+
+Change:
+
+- Keep one visible mesh and one material for normal Slug text.
+- Classify a per-glyph grid into empty, solid-fill, and analytic-edge
+  cells.
+- Merge adjacent same-class cells into larger rectangles.
+- Store the region class in the second UV channel:
+  - `0.0`: analytic edge path
+  - `1.0`: solid fill path
+- Keep punch-out, solid-quad, and shadow proxy rendering on the original
+  full-quad mesh.
+
+Result:
+
+- Rejected after benchmarking.
+- Added `WinitSettings::continuous()` to the benchmark example after
+  confirming Bevy's default `WinitSettings::game()` uses continuous mode
+  only when focused and a low-power reactive mode when unfocused. This
+  makes future frame-time and render-CPU numbers less dependent on
+  whether the benchmark window is frontmost.
+- Close `g` screenshots stayed visually clean.
+- Pixel comparison against the saved baseline `g` screenshot stayed very
+  small:
+  - `24x24`, margin `24`: RMSE `35.9259`; AE with `1%` fuzz: `69`
+  - `32x32`, margin `24`: RMSE `36.0237`; AE with `1%` fuzz: `65`
+
+Benchmarks:
+
+- Saved baseline:
+  - vertex mean: `0.0670 ms`
+  - fragment mean: `3.7242 ms`
+  - total-by-frame mean: `3.7620 ms`
+  - render CPU sum mean: `0.3192 ms`
+- `24x24`, margin `24`:
+  - vertex mean: `0.2507 ms`
+  - fragment mean: `3.7831 ms`
+  - total-by-frame mean: `3.9072 ms`
+  - render CPU sum mean: `0.3899 ms`
+- `32x32`, margin `32`:
+  - vertex mean: `0.2977 ms`
+  - fragment mean: `4.4999 ms`
+  - total-by-frame mean: `4.8345 ms`
+  - render CPU sum mean: `0.7266 ms`
+- `32x32`, margin `24`:
+  - vertex mean: `0.2783 ms`
+  - fragment mean: `3.9381 ms`
+  - total-by-frame mean: `4.3040 ms`
+  - render CPU sum mean: `0.3776 ms`
+
+Current assessment:
+
+- `24x24`, margin `24` is the best tested variant, but it is still
+  slightly slower than the saved full-quad Slug baseline.
+- The merged rectangle path avoids the two-mesh problem, but still emits
+  enough extra vertices to erase the fragment savings.
+- The coarse grid also cannot isolate the edge tightly enough; fragment
+  cost stays near baseline while vertex/CPU cost rises.
+- The renderer changes were backed out; only the benchmark focus fix and
+  this record remain.
+
+Future note:
+
+- The next serious geometry version should stop using axis-aligned grid
+  rectangles as the final mesh. A tighter band/ring around contours or
+  fill tessellation plus a controlled analytic edge strip is more likely
+  to win.
 
 ## Open Experiment Ideas
 

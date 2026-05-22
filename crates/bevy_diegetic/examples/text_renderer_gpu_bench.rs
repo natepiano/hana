@@ -27,6 +27,7 @@ use bevy::prelude::*;
 use bevy::render::diagnostic::RenderDiagnosticsPlugin;
 use bevy::window::PresentMode;
 use bevy::window::WindowResolution;
+use bevy::winit::WinitSettings;
 use bevy_diegetic::AtlasConfig;
 use bevy_diegetic::AtlasPreference;
 use bevy_diegetic::DiegeticUiPlugin;
@@ -236,6 +237,7 @@ fn main() {
             backend: RasterBackend::Gpu,
         })
         .insert_resource(TextRendererPreference::new(mode.text_renderer()))
+        .insert_resource(WinitSettings::continuous())
         .init_resource::<BenchState>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
