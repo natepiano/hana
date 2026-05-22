@@ -31,6 +31,10 @@ const LIGHT_POSITION: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
+// display formatting
+const PIXEL_WIDTH_DISPLAY_PRECISION: usize = 1;
+const WORLD_WIDTH_DISPLAY_PRECISION: usize = 4;
+
 // environment
 const GROUND_SIZE: f32 = 50.0;
 const GROUND_SUBDIVISIONS: u32 = 10;
@@ -439,20 +443,23 @@ fn update_ui(
     let width_line = match mode_toggle.outline_method {
         OutlineMethod::JumpFlood => {
             format!(
-                "Width: {:.1} px (Left / Right)",
-                width_control.jump_flood_width_px
+                "Width: {:.pixel_precision$} px (Left / Right)",
+                width_control.jump_flood_width_px,
+                pixel_precision = PIXEL_WIDTH_DISPLAY_PRECISION
             )
         },
         OutlineMethod::WorldHull => {
             format!(
-                "Width: {:.4} m (Left / Right)",
-                width_control.hull_width_world
+                "Width: {:.world_precision$} m (Left / Right)",
+                width_control.hull_width_world,
+                world_precision = WORLD_WIDTH_DISPLAY_PRECISION
             )
         },
         OutlineMethod::ScreenHull => {
             format!(
-                "Width: {:.1} px (Left / Right)",
-                width_control.shell_width_px
+                "Width: {:.pixel_precision$} px (Left / Right)",
+                width_control.shell_width_px,
+                pixel_precision = PIXEL_WIDTH_DISPLAY_PRECISION
             )
         },
     };

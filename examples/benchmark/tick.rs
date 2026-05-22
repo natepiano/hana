@@ -14,6 +14,8 @@ use crate::constants::AUTO_BENCHMARK_COMPLETE_MESSAGE;
 use crate::constants::AUTO_BENCHMARK_START_MESSAGE;
 use crate::constants::AUTO_EXIT_DELAY_SECS;
 use crate::constants::AUTO_STARTUP_DELAY_SECS;
+use crate::constants::BENCHMARK_RESULTS_FRAMES_PER_SECOND_PRECISION;
+use crate::constants::BENCHMARK_RESULTS_MILLISECONDS_PRECISION;
 use crate::constants::EXITING_MESSAGE;
 use crate::constants::MEASURE_FRAMES;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -168,12 +170,14 @@ fn handle_analyze_phase(state: &mut BenchmarkState) {
     let result_name = state.result_name();
     let result = compute_statistics(&result_name, &mut state.frame_times);
     info!(
-        "  {} — average: {:.2}ms, median: {:.2}ms, 95th: {:.2}ms, ~{:.0} FPS",
+        "  {} — average: {:.milliseconds_precision$}ms, median: {:.milliseconds_precision$}ms, 95th: {:.milliseconds_precision$}ms, ~{:.frames_per_second_precision$} FPS",
         result.name,
         result.average,
         result.median,
         result.percentile_95,
-        result.average_frames_per_second()
+        result.average_frames_per_second(),
+        frames_per_second_precision = BENCHMARK_RESULTS_FRAMES_PER_SECOND_PRECISION,
+        milliseconds_precision = BENCHMARK_RESULTS_MILLISECONDS_PRECISION,
     );
 
     if let Some(existing) = state

@@ -14,10 +14,19 @@ use bevy_kana::ToF64;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
+use crate::constants::BENCHMARK_CSV_FRAMES_PER_SECOND_PRECISION;
 use crate::constants::BENCHMARK_CSV_HEADER;
+use crate::constants::BENCHMARK_CSV_MILLISECONDS_PRECISION;
 use crate::constants::BENCHMARK_RESULTS_BANNER;
 use crate::constants::BENCHMARK_RESULTS_FILE_PREFIX;
 use crate::constants::BENCHMARK_RESULTS_FILE_SUFFIX;
+use crate::constants::BENCHMARK_RESULTS_FRAMES_COLUMN_WIDTH;
+use crate::constants::BENCHMARK_RESULTS_FRAMES_PER_SECOND_PRECISION;
+use crate::constants::BENCHMARK_RESULTS_MILLISECONDS_PRECISION;
+use crate::constants::BENCHMARK_RESULTS_NAME_COLUMN_WIDTH;
+use crate::constants::BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH;
+use crate::constants::BENCHMARK_RESULTS_SEPARATOR_FRAMES_COLUMN_WIDTH;
+use crate::constants::BENCHMARK_RESULTS_SEPARATOR_NUMERIC_COLUMN_WIDTH;
 use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE;
 use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_FPS;
 use crate::constants::BENCHMARK_RESULTS_TABLE_HEADER_FRAMES;
@@ -96,18 +105,29 @@ pub(super) fn write_results(results: &[ScenarioResult]) {
     let _ = writeln!(table, "{BENCHMARK_RESULTS_BANNER}");
     let _ = writeln!(
         table,
-        "{BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO:<18}| {BENCHMARK_RESULTS_TABLE_HEADER_FRAMES:>6} | {BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_MEDIAN:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_95:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_99:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_MIN:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_MAX:>11} | {BENCHMARK_RESULTS_TABLE_HEADER_FPS:>6}"
+        "{BENCHMARK_RESULTS_TABLE_HEADER_SCENARIO:<BENCHMARK_RESULTS_NAME_COLUMN_WIDTH$}| {BENCHMARK_RESULTS_TABLE_HEADER_FRAMES:>BENCHMARK_RESULTS_FRAMES_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE:>BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_MEDIAN:>BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_95:>BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_PERCENTILE_99:>BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_MIN:>BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_MAX:>BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH$} | {BENCHMARK_RESULTS_TABLE_HEADER_FPS:>BENCHMARK_RESULTS_FRAMES_COLUMN_WIDTH$}",
     );
     let _ = writeln!(
         table,
-        "{:-<18}|{:->8}|{:->13}|{:->13}|{:->13}|{:->13}|{:->13}|{:->13}|{:->8}",
-        "", "", "", "", "", "", "", "", ""
+        "{:-<name_width$}|{:->frames_separator_width$}|{:->numeric_separator_width$}|{:->numeric_separator_width$}|{:->numeric_separator_width$}|{:->numeric_separator_width$}|{:->numeric_separator_width$}|{:->numeric_separator_width$}|{:->frames_separator_width$}",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        frames_separator_width = BENCHMARK_RESULTS_SEPARATOR_FRAMES_COLUMN_WIDTH,
+        name_width = BENCHMARK_RESULTS_NAME_COLUMN_WIDTH,
+        numeric_separator_width = BENCHMARK_RESULTS_SEPARATOR_NUMERIC_COLUMN_WIDTH,
     );
 
     for result in results {
         let _ = writeln!(
             table,
-            "{name:<18}| {frames:>6} | {average:>11.2} | {median:>11.2} | {percentile_95:>11.2} | {percentile_99:>11.2} | {min:>11.2} | {max:>11.2} | {average_frames_per_second:>6.0}",
+            "{name:<name_width$}| {frames:>frames_width$} | {average:>numeric_width$.milliseconds_precision$} | {median:>numeric_width$.milliseconds_precision$} | {percentile_95:>numeric_width$.milliseconds_precision$} | {percentile_99:>numeric_width$.milliseconds_precision$} | {min:>numeric_width$.milliseconds_precision$} | {max:>numeric_width$.milliseconds_precision$} | {average_frames_per_second:>frames_width$.frames_per_second_precision$}",
             name = result.name,
             frames = result.frames,
             average = result.average,
@@ -116,7 +136,12 @@ pub(super) fn write_results(results: &[ScenarioResult]) {
             percentile_99 = result.percentile_99,
             min = result.min,
             max = result.max,
-            average_frames_per_second = result.average_frames_per_second()
+            average_frames_per_second = result.average_frames_per_second(),
+            frames_per_second_precision = BENCHMARK_RESULTS_FRAMES_PER_SECOND_PRECISION,
+            frames_width = BENCHMARK_RESULTS_FRAMES_COLUMN_WIDTH,
+            milliseconds_precision = BENCHMARK_RESULTS_MILLISECONDS_PRECISION,
+            name_width = BENCHMARK_RESULTS_NAME_COLUMN_WIDTH,
+            numeric_width = BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH,
         );
     }
 
@@ -161,16 +186,18 @@ fn write_csv(results: &[ScenarioResult]) -> Result<String, Error> {
     for result in results {
         writeln!(
             file,
-            "{},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.0}",
-            result.name,
-            result.frames,
-            result.average,
-            result.median,
-            result.percentile_95,
-            result.percentile_99,
-            result.min,
-            result.max,
-            result.average_frames_per_second()
+            "{name},{frames},{average:.milliseconds_precision$},{median:.milliseconds_precision$},{percentile_95:.milliseconds_precision$},{percentile_99:.milliseconds_precision$},{min:.milliseconds_precision$},{max:.milliseconds_precision$},{average_frames_per_second:.frames_per_second_precision$}",
+            name = result.name,
+            frames = result.frames,
+            average = result.average,
+            median = result.median,
+            percentile_95 = result.percentile_95,
+            percentile_99 = result.percentile_99,
+            min = result.min,
+            max = result.max,
+            average_frames_per_second = result.average_frames_per_second(),
+            frames_per_second_precision = BENCHMARK_CSV_FRAMES_PER_SECOND_PRECISION,
+            milliseconds_precision = BENCHMARK_CSV_MILLISECONDS_PRECISION,
         )?;
     }
     Ok(path.display().to_string())

@@ -19,7 +19,11 @@ use crate::constants::BENCHMARK_PHASE_ANALYZE_LABEL;
 use crate::constants::BENCHMARK_PHASE_IDLE_LABEL;
 use crate::constants::BENCHMARK_PHASE_SETUP_LABEL;
 use crate::constants::HEADS_UP_DISPLAY_CONTROLS;
+use crate::constants::HEADS_UP_DISPLAY_FPS_PRECISION;
+use crate::constants::HEADS_UP_DISPLAY_FPS_WIDTH;
+use crate::constants::HEADS_UP_DISPLAY_MILLISECONDS_PRECISION;
 use crate::constants::HEADS_UP_DISPLAY_RESULTS_HEADER;
+use crate::constants::HEADS_UP_DISPLAY_SECONDS_PRECISION;
 use crate::constants::MEASURE_FRAMES;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::constants::OUTLINE_PRESENCE_DISABLED_LABEL;
@@ -64,10 +68,13 @@ fn build_hud_text(state: &BenchmarkState, diagnostics: &DiagnosticsStore) -> Str
     let bench_stats = benchmark_stats_line(state.frame_times.as_slice(), col);
 
     let mut hud = format!(
-        "[{mode_label}] {}{progress}  Mode: {outline_method_name}\n{phase_info}\n\n{BENCHMARK_LABEL:<col$}FPS: {fps:<4.0}  Frame: {frame_time:.2}ms{bench_stats}",
+        "[{mode_label}] {}{progress}  Mode: {outline_method_name}\n{phase_info}\n\n{BENCHMARK_LABEL:<col$}FPS: {fps:<fps_width$.fps_precision$}  Frame: {frame_time:.milliseconds_precision$}ms{bench_stats}",
         scenario.name,
         fps = live_metrics.fps,
+        fps_precision = HEADS_UP_DISPLAY_FPS_PRECISION,
+        fps_width = HEADS_UP_DISPLAY_FPS_WIDTH,
         frame_time = live_metrics.frame_time,
+        milliseconds_precision = HEADS_UP_DISPLAY_MILLISECONDS_PRECISION,
     );
 
     append_results_section(&mut hud, state, col, outline_method_name);
@@ -87,7 +94,7 @@ fn benchmark_phase_label(state: &BenchmarkState) -> String {
         BenchmarkPhase::Idle => BENCHMARK_PHASE_IDLE_LABEL.to_string(),
         BenchmarkPhase::StartupDelay => {
             let remaining = AUTO_STARTUP_DELAY_SECS - state.startup_timer.elapsed_secs();
-            format!("Starting in {remaining:.0}s...")
+            format!("Starting in {remaining:.HEADS_UP_DISPLAY_SECONDS_PRECISION$}s...")
         },
         BenchmarkPhase::Setup => BENCHMARK_PHASE_SETUP_LABEL.to_string(),
         BenchmarkPhase::Warmup => format!("Warmup {}/{}", state.frame_counter, WARMUP_FRAMES),
@@ -95,7 +102,7 @@ fn benchmark_phase_label(state: &BenchmarkState) -> String {
         BenchmarkPhase::Analyze => BENCHMARK_PHASE_ANALYZE_LABEL.to_string(),
         BenchmarkPhase::ExitDelay => {
             let remaining = AUTO_EXIT_DELAY_SECS - state.exit_timer.elapsed_secs();
-            format!("Exiting in {remaining:.0}s...")
+            format!("Exiting in {remaining:.HEADS_UP_DISPLAY_SECONDS_PRECISION$}s...")
         },
     }
 }
@@ -137,7 +144,9 @@ fn benchmark_stats_line(frame_times: &[f64], col: usize) -> String {
     let sum: f64 = frame_times.iter().sum();
     let average = sum / frame_times.len().to_f64();
     let average_frames_per_second = MILLISECONDS_PER_SECOND / average;
-    format!("\n{BENCHMARK_LABEL:<col$}FPS: {average_frames_per_second:<4.0}  Frame: {average:.2}ms")
+    format!(
+        "\n{BENCHMARK_LABEL:<col$}FPS: {average_frames_per_second:<HEADS_UP_DISPLAY_FPS_WIDTH$.HEADS_UP_DISPLAY_FPS_PRECISION$}  Frame: {average:.HEADS_UP_DISPLAY_MILLISECONDS_PRECISION$}ms"
+    )
 }
 
 fn append_results_section(
@@ -191,11 +200,14 @@ fn append_result_row(
     {
         let _ = write!(
             hud,
-            "\n{label:<col$}FPS: {:<4.0}  Frame: {:.2}ms  median: {:.2}ms  95th: {:.2}ms",
-            result.average_frames_per_second(),
-            result.average,
-            result.median,
-            result.percentile_95,
+            "\n{label:<col$}FPS: {average_frames_per_second:<fps_width$.fps_precision$}  Frame: {average:.milliseconds_precision$}ms  median: {median:.milliseconds_precision$}ms  95th: {percentile_95:.milliseconds_precision$}ms",
+            average_frames_per_second = result.average_frames_per_second(),
+            average = result.average,
+            median = result.median,
+            percentile_95 = result.percentile_95,
+            fps_precision = HEADS_UP_DISPLAY_FPS_PRECISION,
+            fps_width = HEADS_UP_DISPLAY_FPS_WIDTH,
+            milliseconds_precision = HEADS_UP_DISPLAY_MILLISECONDS_PRECISION,
         );
     } else {
         let _ = write!(hud, "\n{label:<col$}---");

@@ -14,12 +14,12 @@ pub(super) const CAMERA_LOOK_AT: Vec3 = Vec3::new(0.0, 4.0, 0.0);
 pub(super) const CAMERA_POSITION: Vec3 = Vec3::new(8.0, 2.0, 14.0);
 
 // cube fill ratios
-pub(super) const CUBE_FILL_RATIO_00005: f32 = 0.45;
-pub(super) const CUBE_FILL_RATIO_00010: f32 = 0.65;
-pub(super) const CUBE_FILL_RATIO_00100: f32 = 0.55;
-pub(super) const CUBE_FILL_RATIO_01000: f32 = 0.35;
-pub(super) const CUBE_FILL_RATIO_10000: f32 = 0.25;
-pub(super) const CUBE_FILL_RATIO_50000: f32 = 0.15;
+pub(super) const CUBE_FILL_RATIO_FOR_5_ENTITIES: f32 = 0.45;
+pub(super) const CUBE_FILL_RATIO_FOR_10_ENTITIES: f32 = 0.65;
+pub(super) const CUBE_FILL_RATIO_FOR_100_ENTITIES: f32 = 0.55;
+pub(super) const CUBE_FILL_RATIO_FOR_1000_ENTITIES: f32 = 0.35;
+pub(super) const CUBE_FILL_RATIO_FOR_10000_ENTITIES: f32 = 0.25;
+pub(super) const CUBE_FILL_RATIO_FOR_50000_ENTITIES: f32 = 0.15;
 
 // grid layout
 pub(super) const DEPTH_SPACING_MULTIPLIER: f32 = 3.0;
@@ -36,18 +36,22 @@ pub(super) const VIEWPORT_FOV_DIVISOR: f32 = 2.0;
 pub(super) const VIEWPORT_HEIGHT_MULTIPLIER: f32 = 2.0;
 
 // hud
-pub(super) const HEADS_UP_DISPLAY_FONT_SIZE: f32 = 18.0;
-pub(super) const HEADS_UP_DISPLAY_PADDING: f32 = 10.0;
-pub(super) const HEADS_UP_DISPLAY_UPDATE_INTERVAL: f32 = 0.25;
 pub(super) const BENCHMARK_LABEL: &str = "Bench:";
 pub(super) const BENCHMARK_MODE_AUTO_LABEL: &str = "Auto";
 pub(super) const BENCHMARK_MODE_INTERACTIVE_LABEL: &str = "Interactive";
 pub(super) const BENCHMARK_PHASE_ANALYZE_LABEL: &str = "Analyzing...";
 pub(super) const BENCHMARK_PHASE_IDLE_LABEL: &str = "Idle";
 pub(super) const BENCHMARK_PHASE_SETUP_LABEL: &str = "Setting up...";
-pub(super) const HEADS_UP_DISPLAY_RESULTS_HEADER: &str = "\n\n--- Results ---";
 pub(super) const HEADS_UP_DISPLAY_CONTROLS: &str =
     "\n\n#: Switch scenario  M: Cycle mode  R: Auto run  L: Log results";
+pub(super) const HEADS_UP_DISPLAY_FONT_SIZE: f32 = 18.0;
+pub(super) const HEADS_UP_DISPLAY_FPS_PRECISION: usize = 0;
+pub(super) const HEADS_UP_DISPLAY_FPS_WIDTH: usize = 4;
+pub(super) const HEADS_UP_DISPLAY_MILLISECONDS_PRECISION: usize = 2;
+pub(super) const HEADS_UP_DISPLAY_PADDING: f32 = 10.0;
+pub(super) const HEADS_UP_DISPLAY_RESULTS_HEADER: &str = "\n\n--- Results ---";
+pub(super) const HEADS_UP_DISPLAY_SECONDS_PRECISION: usize = 0;
+pub(super) const HEADS_UP_DISPLAY_UPDATE_INTERVAL: f32 = 0.25;
 
 // lighting
 pub(super) const AMBIENT_LIGHT_BRIGHTNESS: f32 = 200.0;
@@ -71,10 +75,19 @@ pub(super) const OUTLINE_PRESENCE_DISABLED_LABEL: &str = "off";
 pub(super) const OUTLINE_PRESENCE_ENABLED_LABEL: &str = "on";
 
 // results
+pub(super) const BENCHMARK_CSV_FRAMES_PER_SECOND_PRECISION: usize = 0;
 pub(super) const BENCHMARK_CSV_HEADER: &str = "scenario,frames,average_ms,median_ms,percentile_95_ms,percentile_99_ms,min_ms,max_ms,average_frames_per_second";
+pub(super) const BENCHMARK_CSV_MILLISECONDS_PRECISION: usize = 2;
 pub(super) const BENCHMARK_RESULTS_BANNER: &str = "\n=== bevy_liminal Benchmark Results ===\n";
 pub(super) const BENCHMARK_RESULTS_FILE_PREFIX: &str = "benchmark_";
 pub(super) const BENCHMARK_RESULTS_FILE_SUFFIX: &str = ".csv";
+pub(super) const BENCHMARK_RESULTS_FRAMES_COLUMN_WIDTH: usize = 6;
+pub(super) const BENCHMARK_RESULTS_FRAMES_PER_SECOND_PRECISION: usize = 0;
+pub(super) const BENCHMARK_RESULTS_MILLISECONDS_PRECISION: usize = 2;
+pub(super) const BENCHMARK_RESULTS_NAME_COLUMN_WIDTH: usize = 18;
+pub(super) const BENCHMARK_RESULTS_NUMERIC_COLUMN_WIDTH: usize = 11;
+pub(super) const BENCHMARK_RESULTS_SEPARATOR_FRAMES_COLUMN_WIDTH: usize = 8;
+pub(super) const BENCHMARK_RESULTS_SEPARATOR_NUMERIC_COLUMN_WIDTH: usize = 13;
 pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_AVERAGE: &str = "Average(ms)";
 pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_FPS: &str = "FPS";
 pub(super) const BENCHMARK_RESULTS_TABLE_HEADER_FRAMES: &str = "Frames";
@@ -114,7 +127,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     1,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_00005,
+            cube_fill: CUBE_FILL_RATIO_FOR_5_ENTITIES,
         },
     },
     ScenarioDefinition {
@@ -123,7 +136,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     5,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_00005,
+            cube_fill: CUBE_FILL_RATIO_FOR_5_ENTITIES,
         },
     },
     ScenarioDefinition {
@@ -132,7 +145,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     10,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_00010,
+            cube_fill: CUBE_FILL_RATIO_FOR_10_ENTITIES,
         },
     },
     ScenarioDefinition {
@@ -141,7 +154,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     100,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_00100,
+            cube_fill: CUBE_FILL_RATIO_FOR_100_ENTITIES,
         },
     },
     ScenarioDefinition {
@@ -150,7 +163,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     1000,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_01000,
+            cube_fill: CUBE_FILL_RATIO_FOR_1000_ENTITIES,
         },
     },
     ScenarioDefinition {
@@ -159,7 +172,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     10000,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_10000,
+            cube_fill: CUBE_FILL_RATIO_FOR_10000_ENTITIES,
         },
     },
     ScenarioDefinition {
@@ -168,7 +181,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         kind: ScenarioKind::Grid {
             count:     50000,
             width:     DEFAULT_OUTLINE_WIDTH,
-            cube_fill: CUBE_FILL_RATIO_50000,
+            cube_fill: CUBE_FILL_RATIO_FOR_50000_ENTITIES,
         },
     },
 ];

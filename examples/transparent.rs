@@ -22,6 +22,9 @@ const WIDTH_STEP: f32 = 0.1;
 const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CAMERA_POSITION: Vec3 = Vec3::new(3.0, 2.0, 3.0);
 
+// Display formatting
+const WIDTH_DISPLAY_PRECISION: usize = 1;
+
 // Lighting
 const LIGHT_INTENSITY: f32 = 10_000_000.0;
 const LIGHT_POSITION: Vec3 = Vec3::new(8.0, 16.0, 8.0);
@@ -169,5 +172,7 @@ fn setup_ui(mut commands: Commands) {
 }
 
 fn width_text(width: f32) -> String {
-    format!("Decrease width (Q)\nIncrease width (W)\nCurrent width: {width:.1}")
+    format!(
+        "Decrease width (Q)\nIncrease width (W)\nCurrent width: {width:.WIDTH_DISPLAY_PRECISION$}"
+    )
 }
