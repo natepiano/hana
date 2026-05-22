@@ -812,6 +812,48 @@ Future note:
   fill tessellation plus a controlled analytic edge strip is more likely
   to win.
 
+### Single-Span Horizontal Band Classifier
+
+Change:
+
+- Store one filled X span for horizontal bands where the CPU can find
+  exactly one filled interval at the band midpoint.
+- Use the existing two spare floats in `SlugBandRecord`; no new buffer,
+  mesh, material, or draw call.
+- In the shader, return solid or empty coverage when the current point is
+  far enough from that span's edges. Fall back to the normal analytic
+  Slug path near uncertain edges and for bands with multiple spans.
+
+Why:
+
+- The shaded-pixel waste measurement showed that the main waste is inside
+  glyph bounds but outside ink, not in padded quad area.
+- A cheap per-band span classifier directly targets those pixels without
+  the entity and vertex overhead of prior grid-mesh split attempts.
+
+Results:
+
+| Variant | Close `g` RMSE | Close `g` AE With `1%` Fuzz | Fragment Mean | Frame Time | Transparent Pass CPU | Meaning |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Current 96-band baseline | baseline | baseline | `2.5759 ms` | `10.9424 ms` | `0.3650 ms` | Current documented candidate. |
+| Conservative margin, duplicate band load fixed | `138.732` | `8187` | `2.6603 ms` | `9.8550 ms` | `0.2996 ms` | Better CPU/frame diagnostics, worse fragment time. |
+| Edge-width-only margin | `148.681` | `9389` | `2.5953 ms` | `11.5604 ms` | `0.4215 ms` | Nearly matched fragment time, worse visual delta and CPU/frame diagnostics. |
+
+Reason rejected:
+
+- It did not beat the current 96-band baseline on the primary signal,
+  fragment time.
+- The more aggressive margin increased visual delta and worsened CPU/frame
+  diagnostics.
+- The classifier adds CPU preprocessing and shader branch work for a small,
+  unstable gain.
+
+Future note:
+
+- A span classifier may still be viable if it stores more exact conservative
+  spans across the whole band, not just midpoint spans.
+- Do not repeat the midpoint single-span version without a new reason.
+
 ### Global Band-Density Retest
 
 Change:
