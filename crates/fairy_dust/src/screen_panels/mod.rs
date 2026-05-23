@@ -23,7 +23,7 @@ use crate::constants::BORDER;
 use crate::constants::BORDER_ACCENT;
 use crate::constants::BORDER_DIM;
 use crate::constants::FRAME_PAD;
-use crate::constants::INNER_BG;
+use crate::constants::INNER_BACKGROUND;
 use crate::constants::INNER_BORDER_WIDTH;
 use crate::constants::INNER_PAD;
 use crate::constants::INNER_RADIUS;
@@ -85,4 +85,4 @@ fn panel_frame(
 
 /// Default background color for screen panels — exposed so per-panel
 /// builders can substitute it when no override is provided.
-pub(super) const fn default_inner_background() -> Color { INNER_BG }
+pub(super) const fn default_inner_background() -> Color { INNER_BACKGROUND }

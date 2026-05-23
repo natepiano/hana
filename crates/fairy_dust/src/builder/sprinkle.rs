@@ -215,8 +215,8 @@ impl SprinkleBuilder<NoOrbitCam> {
     {
         orbit_cam::install_with(&mut self.app, configure);
         SprinkleBuilder {
-            app:    self.app,
-            _state: PhantomData,
+            app:          self.app,
+            state_marker: PhantomData,
         }
     }
 
@@ -230,8 +230,8 @@ impl SprinkleBuilder<NoOrbitCam> {
     {
         orbit_cam::install_with_bundle(&mut self.app, configure, bundle);
         SprinkleBuilder {
-            app:    self.app,
-            _state: PhantomData,
+            app:          self.app,
+            state_marker: PhantomData,
         }
     }
 }

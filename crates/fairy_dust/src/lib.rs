@@ -99,7 +99,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     restart::install(&mut app);
     SprinkleBuilder {
         app,
-        _state: PhantomData,
+        state_marker: PhantomData,
     }
 }
 

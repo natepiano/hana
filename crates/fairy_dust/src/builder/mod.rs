@@ -39,8 +39,8 @@ pub struct WithOrbitCam;
 /// methods are defined for any `S`; camera-attached methods are gated by
 /// the typestate.
 pub struct SprinkleBuilder<S> {
-    pub(super) app:    App,
-    pub(super) _state: PhantomData<S>,
+    pub(super) app:          App,
+    pub(super) state_marker: PhantomData<S>,
 }
 
 /// Builder returned while configuring a simple scene primitive.

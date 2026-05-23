@@ -71,7 +71,7 @@ impl TitleBar {
     }
 
     /// Overrides the inner background color (including alpha) for this
-    /// title bar. Defaults to the crate's `INNER_BG` constant.
+    /// title bar. Defaults to the crate's `INNER_BACKGROUND` constant.
     #[must_use]
     pub const fn with_background_color(mut self, color: Color) -> Self {
         self.background_color = Some(color);

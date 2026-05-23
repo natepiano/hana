@@ -38,7 +38,7 @@ use layout::unlit_panel_material;
 use snapshot::CameraGuidanceSnapshot;
 use snapshot::resolve_guidance_snapshot;
 
-use crate::constants::INNER_BG;
+use crate::constants::INNER_BACKGROUND;
 use crate::ensure_plugin;
 
 /// Singleton marker for the camera control panel. `bound_camera` records
@@ -50,13 +50,13 @@ struct CameraGuidancePanel {
 }
 
 /// Inner background color for the camera control panel. Defaults to the
-/// crate's `INNER_BG` constant; override via
+/// crate's `INNER_BACKGROUND` constant; override via
 /// [`SprinkleBuilder::with_camera_control_panel_background_color`].
 #[derive(Resource, Clone, Copy, Debug)]
 pub(crate) struct CameraControlPanelBackground(pub Color);
 
 impl Default for CameraControlPanelBackground {
-    fn default() -> Self { Self(INNER_BG) }
+    fn default() -> Self { Self(INNER_BACKGROUND) }
 }
 
 pub(crate) fn install(app: &mut App) {
