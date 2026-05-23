@@ -5,7 +5,7 @@
 //! selection policy is `Active`, which routes any active gamepad through the
 //! camera input route; selected-device routing is future API work.
 
-mod common;
+mod scene_setup;
 
 use bevy::input::gamepad::Gamepad;
 use bevy::prelude::*;
@@ -87,11 +87,11 @@ fn main() {
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
         .with_orbit_cam(
-            common::configure_camera,
+            scene_setup::configure_camera,
             OrbitCamInputMode::Bindings(bindings),
         )
         .with_camera_control_panel()
-        .add_systems(Startup, (common::spawn_scene, spawn_status))
+        .add_systems(Startup, (scene_setup::spawn_scene, spawn_status))
         .add_systems(Update, update_status)
         .run();
 }

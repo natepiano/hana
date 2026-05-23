@@ -1,6 +1,6 @@
 //! Demonstrates keyboard user input through `OrbitCamBindings`.
 
-mod common;
+mod scene_setup;
 
 use bevy::prelude::*;
 use bevy_lagrange::CameraInputRoutingConfig;
@@ -44,10 +44,10 @@ fn main() {
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
         .with_orbit_cam(
-            common::configure_camera,
+            scene_setup::configure_camera,
             OrbitCamInputMode::Bindings(bindings),
         )
         .with_camera_control_panel()
-        .add_systems(Startup, common::spawn_scene)
+        .add_systems(Startup, scene_setup::spawn_scene)
         .run();
 }

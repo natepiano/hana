@@ -21,12 +21,12 @@ pub(crate) struct CameraBasis {
 
 impl From<&GlobalTransform> for CameraBasis {
     fn from(global: &GlobalTransform) -> Self {
-        let rot = global.rotation();
+        let rotation = global.rotation();
         Self {
             position: Position(global.translation()),
-            right:    rot * Vec3::X,
-            up:       rot * Vec3::Y,
-            forward:  rot * Vec3::NEG_Z,
+            right:    rotation * Vec3::X,
+            up:       rotation * Vec3::Y,
+            forward:  rotation * Vec3::NEG_Z,
         }
     }
 }
@@ -43,7 +43,7 @@ pub(crate) enum ProjectionMode {
     Orthographic,
 }
 
-pub(crate) struct ProjectionParams {
+pub(crate) struct ProjectionParameters {
     /// Half visible extent in x (perspective: `half_tan_horizontal_fov`, ortho: `area.width()/2`)
     pub half_extent_x: f32,
     /// Half visible extent in y (perspective: `half_tan_vertical_fov`, ortho: `area.height()/2`)
@@ -52,11 +52,11 @@ pub(crate) struct ProjectionParams {
     pub mode:          ProjectionMode,
 }
 
-impl ProjectionParams {
+impl ProjectionParameters {
     /// Extracts projection parameters from a `Projection` and viewport aspect ratio.
     /// Returns `None` for unsupported projection variants.
     pub(crate) fn from_projection(projection: &Projection, viewport_aspect: f32) -> Option<Self> {
-        let projection_params = match projection {
+        let projection_parameters = match projection {
             Projection::Perspective(p) => {
                 let half_tan_vertical_fov = (p.fov * 0.5).tan();
                 Some((
@@ -72,7 +72,7 @@ impl ProjectionParams {
             )),
             Projection::Custom(_) => None,
         };
-        let (half_extent_x, half_extent_y, mode) = projection_params?;
+        let (half_extent_x, half_extent_y, mode) = projection_parameters?;
         Some(Self {
             half_extent_x,
             half_extent_y,
@@ -188,11 +188,11 @@ impl ScreenSpaceBounds {
         projection: &Projection,
         viewport_aspect: f32,
     ) -> Option<(Self, PointDepths)> {
-        let ProjectionParams {
+        let ProjectionParameters {
             half_extent_x,
             half_extent_y,
             mode,
-        } = ProjectionParams::from_projection(projection, viewport_aspect)?;
+        } = ProjectionParameters::from_projection(projection, viewport_aspect)?;
 
         let camera_basis = CameraBasis::from(camera_global);
 

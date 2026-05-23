@@ -13,7 +13,7 @@ use super::convex_hull;
 use super::labels;
 use super::labels::BoundsLabel;
 use super::labels::MarginLabel;
-use super::labels::MarginLabelParams;
+use super::labels::MarginLabelParameters;
 use super::screen_space;
 use super::screen_space::MarginBalance;
 use crate::components::CurrentFitTarget;
@@ -258,7 +258,7 @@ fn draw_margin_lines_and_labels(
         labels::update_or_create_margin_label(
             commands,
             label_query,
-            MarginLabelParams {
+            MarginLabelParameters {
                 camera,
                 edge,
                 text,

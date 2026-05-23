@@ -152,11 +152,11 @@ impl CameraMove {
 
     /// Returns the target orbital parameters (yaw, pitch, radius).
     /// For `ToPosition`, decomposes from the world-space offset (may lose yaw at ±PI/2 pitch).
-    fn orbital_params(&self) -> (f32, f32, f32) {
+    fn orbital_parameters(&self) -> (f32, f32, f32) {
         match self {
             Self::ToPosition {
                 translation, focus, ..
-            } => orbital_params_from_offset(Displacement(*translation - *focus)),
+            } => orbital_parameters_from_offset(Displacement(*translation - *focus)),
             Self::ToOrbit {
                 yaw, pitch, radius, ..
             } => (*yaw, *pitch, *radius),
@@ -166,11 +166,11 @@ impl CameraMove {
 
 /// Decomposes an offset vector (camera position minus focus) into orbital parameters.
 /// Returns `(yaw, pitch, radius)`. May lose yaw information at ±PI/2 pitch due to `atan2`.
-pub(crate) fn orbital_params_from_offset(offset: Displacement) -> (f32, f32, f32) {
+pub(crate) fn orbital_parameters_from_offset(offset: Displacement) -> (f32, f32, f32) {
     let radius = offset.length();
     let yaw = offset.x.atan2(offset.z);
-    let horizontal_dist = offset.x.hypot(offset.z);
-    let pitch = offset.y.atan2(horizontal_dist);
+    let horizontal_distance = offset.x.hypot(offset.z);
+    let pitch = offset.y.atan2(horizontal_distance);
     (yaw, pitch, radius)
 }
 
@@ -346,7 +346,7 @@ fn handle_camera_input_interrupt(
         CameraInputInterruptBehavior::Complete => {
             // Jump to the final position of the entire queue
             if let Some(final_move) = interrupt_context.queue.camera_moves.back() {
-                let (yaw, pitch, radius) = final_move.orbital_params();
+                let (yaw, pitch, radius) = final_move.orbital_parameters();
                 pan_orbit.target_focus = final_move.focus();
                 pan_orbit.target_yaw = yaw;
                 pan_orbit.target_pitch = pitch;
@@ -398,7 +398,7 @@ fn handle_ready_state(
             camera_move: current_move.clone(),
         });
 
-        let (target_yaw, target_pitch, target_radius) = current_move.orbital_params();
+        let (target_yaw, target_pitch, target_radius) = current_move.orbital_parameters();
         pan_orbit.target_focus = current_move.focus();
         pan_orbit.target_radius = target_radius;
         pan_orbit.target_yaw = target_yaw;
@@ -467,10 +467,10 @@ fn handle_in_progress(
 
     // Extract target orbital parameters
     // `ToOrbit` provides them directly; `ToPosition` decomposes via atan2
-    let (canonical_yaw, canonical_pitch, canonical_radius) = current_move.orbital_params();
+    let (canonical_yaw, canonical_pitch, canonical_radius) = current_move.orbital_parameters();
 
     // Apply easing function from the move
-    let t_interp = current_move.easing().sample_unchecked(t);
+    let interpolation_factor = current_move.easing().sample_unchecked(t);
 
     // Unwrap angles to [-PI, PI] for smooth interpolation (always, including final
     // frame). Using canonical angles on the final frame causes yaw
@@ -491,11 +491,12 @@ fn handle_in_progress(
     }
     let pitch_diff = pitch_target - start.pitch;
 
-    // `ToPosition` and `ToOrbit` are both normalized to orbital params above
-    pan_orbit.target_focus = Vec3::lerp(*start.focus, current_move.focus(), t_interp);
-    pan_orbit.target_radius = (canonical_radius - start.radius).mul_add(t_interp, start.radius);
-    pan_orbit.target_yaw = yaw_diff.mul_add(t_interp, start.yaw);
-    pan_orbit.target_pitch = pitch_diff.mul_add(t_interp, start.pitch);
+    // `ToPosition` and `ToOrbit` are both normalized to orbital parameters above
+    pan_orbit.target_focus = Vec3::lerp(*start.focus, current_move.focus(), interpolation_factor);
+    pan_orbit.target_radius =
+        (canonical_radius - start.radius).mul_add(interpolation_factor, start.radius);
+    pan_orbit.target_yaw = yaw_diff.mul_add(interpolation_factor, start.yaw);
+    pan_orbit.target_pitch = pitch_diff.mul_add(interpolation_factor, start.pitch);
 
     // Save what we wrote so we can detect external changes next frame
     last_written.focus = Position(pan_orbit.target_focus);

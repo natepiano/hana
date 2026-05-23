@@ -19,7 +19,7 @@ pub(super) struct MarginLabel {
 }
 
 /// Parameters for creating or updating a margin label.
-pub(super) struct MarginLabelParams {
+pub(super) struct MarginLabelParameters {
     pub(super) camera:          Entity,
     pub(super) edge:            Edge,
     pub(super) text:            String,
@@ -117,35 +117,39 @@ fn margin_label_node(edge: Edge, screen_position: ScreenPosition, viewport_size:
 pub(super) fn update_or_create_margin_label(
     commands: &mut Commands,
     label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
-    params: MarginLabelParams,
+    parameters: MarginLabelParameters,
 ) {
-    let existing = label_query
-        .iter_mut()
-        .find(|(_, label, _, _, _)| label.camera == params.camera && label.edge == params.edge);
+    let existing = label_query.iter_mut().find(|(_, label, _, _, _)| {
+        label.camera == parameters.camera && label.edge == parameters.edge
+    });
 
     if let Some((_, _, mut label_text, mut node, mut text_color)) = existing {
-        (**label_text).clone_from(&params.text);
-        text_color.0 = params.color;
+        (**label_text).clone_from(&parameters.text);
+        text_color.0 = parameters.color;
         apply_margin_label_anchor(
             &mut node,
-            params.edge,
-            params.screen_position,
-            params.viewport_size,
+            parameters.edge,
+            parameters.screen_position,
+            parameters.viewport_size,
         );
     } else {
         commands.spawn((
-            Text::new(params.text),
+            Text::new(parameters.text),
             TextFont {
                 font_size: LABEL_FONT_SIZE,
                 ..default()
             },
-            TextColor(params.color),
-            margin_label_node(params.edge, params.screen_position, params.viewport_size),
+            TextColor(parameters.color),
+            margin_label_node(
+                parameters.edge,
+                parameters.screen_position,
+                parameters.viewport_size,
+            ),
             MarginLabel {
-                edge:   params.edge,
-                camera: params.camera,
+                edge:   parameters.edge,
+                camera: parameters.camera,
             },
-            UiTargetCamera(params.camera),
+            UiTargetCamera(parameters.camera),
         ));
     }
 }

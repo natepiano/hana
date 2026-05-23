@@ -79,7 +79,7 @@ pub(super) fn on_zoom_to_fit(
     };
 
     if duration > Duration::ZERO {
-        // Animated path: use `ToOrbit` to pass orbital params directly, avoiding
+        // Animated path: use `ToOrbit` to pass orbital parameters directly, avoiding
         // gimbal lock from atan2 decomposition at extreme pitch angles.
         let camera_moves = VecDeque::from([CameraMove::ToOrbit {
             focus: *fit.focus,

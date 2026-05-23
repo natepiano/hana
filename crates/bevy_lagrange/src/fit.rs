@@ -136,7 +136,7 @@ const fn calculate_target_margins(bounds: &ScreenSpaceBounds, zoom_multiplier: f
 // ============================================================================
 
 /// Pre-computed parameters for the fit binary search.
-struct FitParams {
+struct FitParameters {
     rotation:                    Quat,
     aspect_ratio:                f32,
     orthographic_fixed_distance: Option<f32>,
@@ -193,7 +193,7 @@ pub(crate) fn calculate_fit(
         projection::projection_aspect_ratio(projection, camera.logical_viewport_size())
             .ok_or(FitError::NoViewport)?;
 
-    let params = FitParams {
+    let parameters = FitParameters {
         rotation: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
         aspect_ratio,
         orthographic_fixed_distance,
@@ -206,7 +206,13 @@ pub(crate) fn calculate_fit(
         .map(|c| (*c - geometric_center).length())
         .fold(0.0_f32, f32::max);
 
-    binary_search_for_fit(points, geometric_center, object_radius, projection, &params)
+    binary_search_for_fit(
+        points,
+        geometric_center,
+        object_radius,
+        projection,
+        &parameters,
+    )
 }
 
 /// Determines which screen dimension constrains the fit and returns the current margin,
@@ -258,7 +264,7 @@ fn binary_search_for_fit(
     geometric_center: Vec3,
     object_radius: f32,
     projection: &Projection,
-    params: &FitParams,
+    parameters: &FitParameters,
 ) -> Result<FitSolution, FitError> {
     let mut min_radius = object_radius * MIN_RADIUS_MULTIPLIER;
     let mut max_radius = object_radius * MAX_RADIUS_MULTIPLIER;
@@ -278,21 +284,23 @@ fn binary_search_for_fit(
             geometric_center,
             test_radius,
             &test_projection,
-            params,
+            parameters,
         );
 
-        let camera_distance = params.orthographic_fixed_distance.unwrap_or(test_radius);
+        let camera_distance = parameters
+            .orthographic_fixed_distance
+            .unwrap_or(test_radius);
         let camera_position =
-            centered_focus + params.rotation * Vec3::new(0.0, 0.0, camera_distance);
+            centered_focus + parameters.rotation * Vec3::new(0.0, 0.0, camera_distance);
         let camera_global = GlobalTransform::from(
-            Transform::from_translation(camera_position).with_rotation(params.rotation),
+            Transform::from_translation(camera_position).with_rotation(parameters.rotation),
         );
 
         let Some((bounds, _)) = ScreenSpaceBounds::from_points(
             points,
             &camera_global,
             &test_projection,
-            params.aspect_ratio,
+            parameters.aspect_ratio,
         ) else {
             warn!(
                 "Iteration {iteration}: Points behind camera at radius {test_radius:.1}, searching higher"
@@ -303,7 +311,7 @@ fn binary_search_for_fit(
         bounds_search = BoundsSearch::Projectable;
 
         let (target_margin_x, target_margin_y) =
-            calculate_target_margins(&bounds, params.zoom_multiplier);
+            calculate_target_margins(&bounds, parameters.zoom_multiplier);
         let (current_margin, target_margin, dimension) =
             find_constraining_margin(&bounds, target_margin_x, target_margin_y);
 
@@ -396,12 +404,12 @@ fn refine_focus_centering(
     initial_focus: Vec3,
     radius: f32,
     projection: &Projection,
-    params: &FitParams,
+    parameters: &FitParameters,
 ) -> Vec3 {
-    let rotation = params.rotation;
-    let aspect_ratio = params.aspect_ratio;
-    let orthographic_fixed_distance = params.orthographic_fixed_distance;
-    let projection_mode = params.projection_mode;
+    let rotation = parameters.rotation;
+    let aspect_ratio = parameters.aspect_ratio;
+    let orthographic_fixed_distance = parameters.orthographic_fixed_distance;
+    let projection_mode = parameters.projection_mode;
     let camera_right = rotation * Vec3::X;
     let camera_up = rotation * Vec3::Y;
 

@@ -61,8 +61,9 @@ pub(super) fn on_look_at(
             .source(AnimationSource::LookAt),
         );
     } else {
-        let (yaw, pitch, radius) =
-            animation::orbital_params_from_offset(Displacement(camera_position - target_position));
+        let (yaw, pitch, radius) = animation::orbital_parameters_from_offset(Displacement(
+            camera_position - target_position,
+        ));
         snap_orbit::snap_to_orbit(
             &mut commands,
             &mut orbit_cam,
@@ -116,7 +117,7 @@ pub(super) fn on_look_at_and_zoom_to_fit(
     };
     let target_position = target_global_transform.translation();
     let (yaw, pitch, _) =
-        animation::orbital_params_from_offset(Displacement(camera_position - target_position));
+        animation::orbital_parameters_from_offset(Displacement(camera_position - target_position));
 
     let Some(fit) = fit_request::prepare_fit_for_target(
         &FitRequest {
@@ -301,7 +302,7 @@ mod tests {
             },
         }
 
-        let (expected_yaw, expected_pitch, _) = animation::orbital_params_from_offset(
+        let (expected_yaw, expected_pitch, _) = animation::orbital_parameters_from_offset(
             Displacement(TEST_CAMERA_POSITION - TEST_TARGET_POSITION),
         );
         match fit_move {
