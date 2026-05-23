@@ -1332,3 +1332,43 @@ prefilter), structural curve-record reduction (eliminate the
 double-cubic-per-curve in the second band loop), or a fundamentally
 different curve representation (analytical depressed cubic, lookup
 table).
+
+## Skip vertical-band distance pass (rejected, 2026-05-23)
+
+**Hypothesis.** `distance_coverage` calls
+`nearest_vertical_curve_distance_sq` after
+`horizontal_coverage_terms`, adding a second per-curve loop that
+re-checks distance via the vertical band. Skipping this entirely
+eliminates the second band loop and cuts per-fragment curve work
+roughly in half. Quantifies how much the vertical band actually
+contributes to distance accuracy.
+
+**Setup.** `shaders/slug_text.wgsl`, replaced the
+`nearest_vertical_curve_distance_sq(...)` call with
+`terms.distance_sq` directly. 720-instance `text_renderer_gpu_bench`,
+AC power.
+
+**Visual.** Catastrophic. `2,621,400 / 7,271,424` pixels differ at
+`-fuzz 50 %` (`36 %` of pixels with >50% color difference). Glyph
+edges lose AA entirely in any region where the closest curve has y
+outside the fragment's horizontal-band overlap zone. Failed visual
+gate immediately; no trace recorded.
+
+**Result.** Rejected. The vertical band's distance contribution is
+required for correct AA at fragment positions where the closest
+curve has y outside the fragment's horizontal-band overlap zone.
+That covers a substantial fraction of edge fragments.
+
+**Implication for future experiments.** Cannot drop the vertical band
+without a replacement. To reduce the double-cubic cost while keeping
+correctness:
+
+- Split the vertical band into a *distance-only* band that EXCLUDES
+  curves already in the fragment's horizontal band (requires
+  per-curve uniqueness tracking — complex packing change).
+- Make the horizontal band's curve-inclusion overlap large enough
+  to capture all curves within `edge_width`, then drop the vertical
+  band (but overlap grows with pixel size, requires per-glyph
+  pixel-size estimation at pack time).
+- Replace the per-curve distance loop with a precomputed coarse SDF
+  prefilter that's accurate at the smoothstep edge.
