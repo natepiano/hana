@@ -1384,6 +1384,74 @@ Pareto-optimal point for the current architecture.
 
 These are **proposals**, not authorized work. Pick which to start.
 
+## Newton-deflation cubic solver (rejected, 2026-05-23)
+
+**Hypothesis.** Proposal D executed. Replace the trigonometric
+3-roots branch + cbrt 1-root branch in `solve_cubic_normed` with: 8
+iterations of damped Newton from `t = 0.5` to find first real root
+`r1`, then synthetic division `f(t) = (t - r1)(t² + p*t + q)` with
+`p = a + r1`, `q = b + r1 * p`, solve the deflated quadratic for the
+other two roots. Fixed iteration count, no new per-lane branches.
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`,
+AC power. Short-warmup protocol (`warmup_frames=180 sample_frames=240`,
+15s xctrace `time-limit`) — the actually-working protocol per
+surviving file evidence; the `WARMUP_FRAMES=1800 SAMPLE_FRAMES=1800`
+"long-warmup" numbers cited elsewhere in this doc are unverified
+(no trace bundles ever generated under that protocol).
+
+**Visual.** Pixel-identical to baseline on the lowercase-g
+inside-curve view (MD5 match: `95206bb1738e9bae01a26d4f2651a332`,
+0 / 7,271,424 pixels differ at zero fuzz and at `-fuzz 1%`).
+Newton converges to enough precision that 8-bit color quantization
+collapses all differences to zero.
+
+**Performance (short-warmup, baseline n=6 / Newton n=4 valid).**
+
+| Metric | Baseline-trig median (range) | Newton-deflation median (range) | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0564 ms` (0.0085) | `0.0598 ms` (0.0070) | `+0.0034 ms` (within range, noise) |
+| Fragment per frame          | `3.2968 ms` (0.4199) | `4.1742 ms` (0.5150) | `+0.8774 ms` (real signal) |
+| Vertex + fragment per frame | `3.3531 ms` (0.4284) | `4.2340 ms` (0.5219) | `+0.8808 ms` (real signal) |
+| Bevy frame time             | `7.6837 ms` (last trace only, stddev 3.7144, n=240) | unavailable — Newton stdout overwritten by baseline batch | — |
+| Prep time                   | n/a — shader-only change | n/a | — |
+
+Per-trace V+F samples:
+- Baseline-trig: `3.4764, 3.5522, 3.1357, 3.2686, 3.4377, 3.1238`
+- Newton: `3.8685, 4.3686, 4.3904, 4.0993` (trace 1 dropped: parser
+  found no `text_renderer_gpu_bench` intervals — xctrace attached
+  after bench exit, a known short-warmup race condition)
+
+Distributions do not overlap on V+F or F: Newton min `3.8685 ms` >
+baseline max `3.5522 ms`. The vertex-per-frame delta is well within
+the per-condition range and is noise. Fragment-per-frame carries
+the entire signal, as expected for a shader-only change to the
+per-fragment cubic solver.
+
+**Result.** Rejected. Newton-deflation is `+0.88 ms` slower than
+the trigonometric solver on Metal, the opposite direction of the
+`-0.4 to -0.8 ms` expected impact. Experiment 3 (shared sincos)
+already flagged that Metal's trig ops are highly optimized; this
+experiment confirms the whole trig path beats an 8-iteration Newton
+loop even when that loop has no transcendentals.
+
+**Lesson.** On Apple M-series GPUs, `acos`/`cos`/`sin` are not the
+expensive part of the cubic solver — likely 1-2 cycle hardware
+intrinsics. Replacing them with arithmetic (~8 iterations × 7 ops
+= ~56 ops) loses outright. Proposal D's theoretical "2x win" was
+based on assuming 4-8 cycle trig; Metal beats that.
+
+**Implication for future experiments.** Proposal C (F16 cubic
+intermediates) shares the same risk — narrowing the trig path's
+precision won't help if the trig itself is already cheap. Suggests
+re-ordering remaining proposals: **A** (per-curve dedup) and **B**
+(SDF prefilter) attack work *quantity*, not work *cost per curve* —
+those should be the next two to try. Proposal C may need re-scoping
+or skipping.
+
+**Files.** `crates/bevy_diegetic/src/slug_text_spike/shaders/slug_text.wgsl`
+(reverted to trig solver after experiment).
+
 ## Proposal A — Per-curve dedup between horizontal/vertical bands
 
 **Hypothesis.** A curve overlapping both a horizontal band `H` and a
