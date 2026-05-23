@@ -302,11 +302,8 @@ impl SlugGlyphCache {
         let packed = missing
             .par_iter()
             .map(|glyph| {
-                let outline = geometry::load_glyph_by_id(
-                    font_data,
-                    glyph.key.glyph_id,
-                    glyph.character,
-                )?;
+                let outline =
+                    geometry::load_glyph_by_id(font_data, glyph.key.glyph_id, glyph.character)?;
                 Ok((*glyph, packing::build_packed_glyph(outline, band_count)))
             })
             .collect::<Result<Vec<_>, SlugOutlineError>>()?;

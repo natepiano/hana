@@ -23,7 +23,9 @@ pub struct SlugCurveRecord {
     pub curve_end:   Vec4,
     /// Conservative control-point bounds minimum in `.xy`, maximum in `.zw`.
     pub bounds:      Vec4,
-    /// Distance-solver coefficients in `.xyz`; `.w` is reserved.
+    /// Distance-solver coefficients in `.xyz`; `.w` is 1.0 when the curve is
+    /// assigned to the vertical band for distance (skipped by the horizontal
+    /// band's distance loop to avoid duplicate solves), 0.0 otherwise.
     pub solver:      Vec4,
 }
 
@@ -162,8 +164,18 @@ pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyp
     let mut bands = Vec::with_capacity(band_count * 2);
     let bounds = glyph.bounds;
 
+    let oriented_segments: Vec<(QuadraticSegment, CurveOrientation)> = glyph
+        .contours
+        .iter()
+        .flat_map(|contour| contour.segments.iter().copied())
+        .map(|segment| {
+            let orientation = segment_orientation(&segment);
+            (segment, orientation)
+        })
+        .collect();
+
     append_bands(
-        &glyph,
+        &oriented_segments,
         bounds.min.y,
         bounds.height(),
         band_count,
@@ -172,7 +184,7 @@ pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyp
         &mut bands,
     );
     append_bands(
-        &glyph,
+        &oriented_segments,
         bounds.min.x,
         bounds.width(),
         band_count,
@@ -197,8 +209,14 @@ enum Axis {
     Vertical,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CurveOrientation {
+    Horizontal,
+    Vertical,
+}
+
 fn append_bands(
-    glyph: &SlugGlyph,
+    oriented_segments: &[(QuadraticSegment, CurveOrientation)],
     start_position: f32,
     extent: f32,
     band_count: usize,
@@ -217,7 +235,7 @@ fn append_bands(
         };
         let start = curves.len().to_u32();
         append_band_curves(
-            glyph,
+            oriented_segments,
             band_min - BAND_OVERLAP_EM_UNITS,
             band_max + BAND_OVERLAP_EM_UNITS,
             axis,
@@ -233,23 +251,45 @@ fn append_bands(
 }
 
 fn append_band_curves(
-    glyph: &SlugGlyph,
+    oriented_segments: &[(QuadraticSegment, CurveOrientation)],
     band_min: f32,
     band_max: f32,
     axis: Axis,
     curves: &mut Vec<SlugCurveRecord>,
 ) {
-    let mut segments: Vec<QuadraticSegment> = glyph
-        .contours
+    let mut filtered: Vec<(QuadraticSegment, CurveOrientation)> = oriented_segments
         .iter()
-        .flat_map(|contour| contour.segments.iter().copied())
-        .filter(|segment| overlaps_band(segment, band_min, band_max, axis))
+        .copied()
+        .filter(|(segment, _)| overlaps_band(segment, band_min, band_max, axis))
+        .filter(|(_, orientation)| match axis {
+            Axis::Horizontal => true,
+            Axis::Vertical => *orientation == CurveOrientation::Vertical,
+        })
         .collect();
 
-    segments.sort_by(|left, right| {
-        descending_band_sort_value(right, axis).total_cmp(&descending_band_sort_value(left, axis))
+    filtered.sort_by(|left, right| {
+        descending_band_sort_value(&right.0, axis)
+            .total_cmp(&descending_band_sort_value(&left.0, axis))
     });
-    curves.extend(segments.iter().map(SlugCurveRecord::from));
+    curves.extend(filtered.iter().map(|(segment, orientation)| {
+        let mut record = SlugCurveRecord::from(segment);
+        if *orientation == CurveOrientation::Vertical {
+            record.solver.w = 1.0;
+        }
+        record
+    }));
+}
+
+const fn segment_orientation(segment: &QuadraticSegment) -> CurveOrientation {
+    let x_extent =
+        segment_axis_max(segment, Axis::Vertical) - segment_axis_min(segment, Axis::Vertical);
+    let y_extent =
+        segment_axis_max(segment, Axis::Horizontal) - segment_axis_min(segment, Axis::Horizontal);
+    if y_extent > x_extent {
+        CurveOrientation::Vertical
+    } else {
+        CurveOrientation::Horizontal
+    }
 }
 
 fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis: Axis) -> bool {

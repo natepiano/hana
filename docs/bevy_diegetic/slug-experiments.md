@@ -1452,6 +1452,85 @@ or skipping.
 **Files.** `crates/bevy_diegetic/src/slug_text_spike/shaders/slug_text.wgsl`
 (reverted to trig solver after experiment).
 
+## Per-curve dedup between horizontal/vertical bands (accepted, 2026-05-23)
+
+**Hypothesis.** Proposal A executed. A curve overlapping both a
+horizontal band `H` and a vertical band `V` is currently in both,
+so the cubic distance solve runs twice for the same
+`(fragment, curve)` pair. Assigning each curve to exactly one
+orientation at pack time eliminates the duplicate work.
+
+**Implementation.** Per-curve orientation flag computed at pack
+time: `y_extent > x_extent` → "vertical-assigned". All curves
+remain in the horizontal band (required for winding). Only
+vertical-assigned curves enter the vertical band. The flag is
+stored in `SlugCurveRecord::solver.w` (`1.0` = vertical-assigned).
+Shader change: in `horizontal_coverage_terms` the distance solve
+is skipped when `solver.w >= 0.5`; the vertical-band loop already
+does only distance, so no change there. Per-segment flag is
+computed once per glyph (not once per band) — the `flat_map` over
+contours is also collected once in `build_packed_glyph` so the
+band loop iterates a flat slice instead of a re-built iterator
+chain.
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`,
+AC power, in-session baseline taken immediately before the
+variant. Short-warmup protocol (`warmup_frames=180
+sample_frames=240`, 15s xctrace `time-limit`), 6 traces per
+condition, first 2 traces of each batch discarded as cold (lower
+sample count, V+F notably below warm-state median); one variant
+trace discarded as outlier (frame_time mean `4.91 ms` vs `~9.7`
+others — bench ran un-vsync-locked).
+
+**Visual.** Lowercase-g inside-curve view at fuzz 1%:
+`8,956 / 19,212,800` pixels differ (`0.047 %`). Within
+PBR/OIT precision noise; no structural diff visible.
+
+**Performance (short-warmup, baseline n=4 warm / variant n=4 warm).**
+
+| Metric | Baseline-trig median (range) | Proposal A median (range) | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0633 ms` (0.0028) | `0.0629 ms` (0.0029) | `-0.0004 ms` (noise) |
+| Fragment per frame          | `3.8175 ms` (0.0817) | `3.1796 ms` (0.1329) | `-0.6379 ms` (-16.7 %) |
+| Vertex + fragment per frame | `3.8797 ms` (0.0823) | `3.2428 ms` (0.1350) | `-0.6369 ms` (-16.4 %) |
+| Bevy frame time             | `10.369 ms` (range 0.88, stddev per-trace ~3.5) | `9.7015 ms` (range 0.20, stddev per-trace ~3.4) | `-0.667 ms` (-6.4 %) |
+| Prep time (`jbm_ascii_128_slug`) | `1.2095 ms` (Criterion CI [1.192, 1.233]) | `0.8364 ms` (Criterion CI [0.807, 0.860]) | `-0.373 ms` (-30.8 %) |
+
+Per-trace V+F samples (warm set):
+- Baseline-trig: `3.8524, 3.9347, 3.8767, 3.8826`
+- Proposal A: `3.1557, 3.2907, 3.2796, 3.2060` (trace 3 outlier
+  `2.4366` excluded — bench ran at `~204 fps` instead of `~100 fps`)
+
+Distributions do not overlap on V+F or F: variant max `3.2907 ms`
+< baseline min `3.8524 ms`. Vertex-per-frame delta is well within
+the per-condition range and is noise.
+
+**Result.** Accepted. Fragment-per-frame drops `0.638 ms`
+(`-16.7 %`) — in the upper half of the `0.3-0.7 ms` predicted
+range. Prep also drops `0.373 ms` (`-30.8 %`) as a bonus, because
+the same restructuring lifts segment flattening out of the
+per-band loop. Frame time drops `0.667 ms`, larger than the GPU
+delta, suggesting the prep gain and the smaller GPU draw also
+ease pressure on the present pipeline.
+
+**Lesson.** Reducing per-fragment cubic *count* delivers what
+reducing per-cubic *cost* could not (Newton-deflation rejection,
+above). Work-quantity reductions remain the most promising
+direction for Slug-style analytic text on Metal.
+
+**Implication for future experiments.** Proposal B (per-glyph
+SDF prefilter) — also a work-quantity reduction — still looks
+likely to be the largest remaining win (predicted `1.5-2.0 ms`).
+After Proposal B, the bands themselves could be revisited: with
+duplicates already removed, the optimal band count may differ
+from the 96-band baseline established before this change.
+
+**Files.** `crates/bevy_diegetic/src/slug_text_spike/packing.rs`,
+`crates/bevy_diegetic/src/slug_text_spike/shaders/slug_text.wgsl`.
+Trace evidence under
+`target/xctrace/baseline-trig-2026-05-23/` and
+`target/xctrace/variant-prop-a-v2-2026-05-23/`.
+
 ## Proposal A — Per-curve dedup between horizontal/vertical bands
 
 **Hypothesis.** A curve overlapping both a horizontal band `H` and a

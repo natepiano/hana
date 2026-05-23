@@ -248,7 +248,9 @@ fn horizontal_coverage_terms(
         if include_winding {
             terms.winding += curve_winding(curve, point);
         }
-        if curve_bounds_distance_sq(point, curve) <= edge_width_sq {
+        // solver.w == 1.0 means the curve also lives in the vertical band;
+        // skip the distance solve here to avoid computing it twice.
+        if curve.solver.w < 0.5 && curve_bounds_distance_sq(point, curve) <= edge_width_sq {
             terms.distance_sq = min(terms.distance_sq, curve_distance_sq(point, curve));
         }
     }
