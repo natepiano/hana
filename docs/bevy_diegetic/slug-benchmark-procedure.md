@@ -12,21 +12,29 @@ link back here.
 One row per metric, one column per configuration, plus `Delta` and
 `Meaning`. Delta is always `(newest configuration) − 96 Bands baseline`.
 
-| Metric | 96 Bands (baseline, 2026-05-23) | Delta | Meaning |
+| Metric | 96 Bands (baseline, 2026-05-23, long-warmup median of 5) | Delta | Meaning |
 | --- | ---: | ---: | --- |
-| Vertex per frame            | `0.0549 ms` | — | GPU vertex work, summed per frame. |
-| Fragment per frame          | `3.1724 ms` | — | GPU fragment work, summed per frame (Slug analytic + OIT sub-pass). |
-| Vertex + fragment per frame | `3.2274 ms` | — | Total GPU transparent-pass work per frame. |
-| Bevy frame time             | `8.5586 ms` | — | Whole-app frame pacing. Heavy stddev (~4 ms); sanity check only. |
+| Vertex per frame            | `0.0406 ms` | — | GPU vertex work, summed per frame. Range across 5 traces: `0.0006 ms`. |
+| Fragment per frame          | `2.6886 ms` | — | GPU fragment work, summed per frame (Slug analytic + OIT sub-pass). Range across 5 traces: `0.0395 ms`. |
+| Vertex + fragment per frame | `2.7291 ms` | — | Total GPU transparent-pass work per frame. Range across 5 traces: `0.0400 ms`. |
+| Bevy frame time             | `8.5586 ms` | — | Whole-app frame pacing. Heavy stddev (~4 ms); sanity check only. Not re-measured under the long-warmup protocol; reported value is from the short-warmup baseline and may shift. |
 | Prep time                   | `1.1703 ms` | — | One-time Slug prep (Criterion `jbm_ascii_128_slug`). Carried forward from pre-parser-fix measurement; unchanged by shader-only experiments. |
 
 The baseline is the **96-band Slug candidate** measured on AC with the
-current `parse_gpu_intervals.py`. The previous procedure-doc table is
-retired: it aggregated fragment costs per-interval rather than
-per-frame, so its fragment numbers were too low by ~0.5 ms relative to
-per-frame totals — vertex and fragment did not sum to the V+F total
-column. New columns added to the right of this baseline, with `Delta`
-set to `(new column) − (96 Bands baseline)`.
+current `parse_gpu_intervals.py`. Numbers are the **median across 5
+back-to-back traces** using the **long-warmup protocol**
+(`WARMUP_FRAMES=1800 SAMPLE_FRAMES=1800` with a 35s xctrace
+`time-limit`), which gives steady-state GPU thermal numbers. Trace-to-
+trace variation under this protocol is ≤`0.05 ms`; experiments are
+considered to have signal only when the **median delta exceeds
+`±0.05 ms`** relative to the baseline median.
+
+Previous short-warmup baselines (3.22 ms, 3.48 ms) included cold-start
+GPU boost-clock samples and had trace-to-trace variation of
+`0.16–0.60 ms`. They are not comparable to long-warmup numbers and are
+retired. The pre-2026-05-23 multi-column comparison table is also
+retired (per-interval vs per-frame aggregation mismatch — see
+`slug-experiments.md` for history).
 
 ## How To Populate A New Column
 
@@ -92,15 +100,20 @@ Run these steps from the repository root. The canonical scene is the
    pgrep -fl 'target/(debug|release)/examples/' || true
    ```
 
-2. Record the Slug trace for the canonical 720-instance scene. The script
-   builds `text_renderer_gpu_bench` in release mode, starts it with
-   `--mode slug --instances 720 --warmup-frames 180 --sample-frames 240`,
-   records a Metal System Trace, and writes stdout to
-   `target/xctrace/text-renderer-slug.stdout.log`.
+2. Record the Slug trace for the canonical 720-instance scene using
+   the **long-warmup protocol**. The script honors `WARMUP_FRAMES`
+   and `SAMPLE_FRAMES` env vars. Default short-warmup numbers are
+   noise-bound; comparisons against the canonical baseline above
+   must use the long-warmup settings.
 
    ```bash
-   bash scripts/xctrace_text_renderer.sh record slug 15s 720
+   WARMUP_FRAMES=1800 SAMPLE_FRAMES=1800 \
+     bash scripts/xctrace_text_renderer.sh record slug 35s 720
    ```
+
+   Run **5 traces back-to-back** and report the median. Single-trace
+   numbers under the short-warmup default vary by 0.16–0.60 ms and
+   cannot resolve sub-0.5 ms differences.
 
 3. Export the Metal GPU interval table:
 

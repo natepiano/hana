@@ -84,8 +84,8 @@ record_mode() {
     "${BINARY}" \
         --mode "${mode}" \
         --instances "${instances}" \
-        --warmup-frames 180 \
-        --sample-frames 240 \
+        --warmup-frames "${WARMUP_FRAMES:-180}" \
+        --sample-frames "${SAMPLE_FRAMES:-240}" \
         > "${TRACE_DIR}/text-renderer-${mode}.stdout.log" 2>&1 &
     local bench_pid="$!"
 

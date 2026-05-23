@@ -1133,3 +1133,57 @@ curves and the whole-wave path is the chord), (b) make the cubic
 itself unconditionally cheaper (e.g. shared sincos, F16
 intermediates), or (c) eliminate the second-band redundant cubic
 pass entirely (distance / winding band split).
+
+## CURVE_DEGENERATE_EPS 1e-8 -> 1.0 (inconclusive, 2026-05-23)
+
+**Hypothesis.** Pre-bake flat-curve detection on the CPU side: raise
+`CURVE_DEGENERATE_EPS` in `packing.rs` from `1e-8` to `1.0` so any
+quadratic with `|curve_delta|^2 < 1.0` gets `inverse_curve_norm_sq = 0`
+and takes the existing degenerate-curve `point_line_distance_sq` path
+in `exact_quadratic_distance_sq`. CPU-side gate adds zero shader work
+and reuses the existing branch — addresses the chord-gate divergence
+concern by not adding a new per-curve branch.
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`, AC
+power. Short-warmup protocol (this experiment ran before the
+long-warmup protocol was established).
+
+**Visual.** `0 / 7,271,424` pixels differ at zero fuzz (`magick compare
+-metric AE`). Pixel-identical.
+
+**Performance (short-warmup, 5 traces each — noise-bound).**
+
+| Metric | Baseline median | eps=1.0 median | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0563 ms` | `0.0560 ms` | `-0.0003` (noise) |
+| Fragment per frame          | `3.4238 ms` | `3.3552 ms` | `-0.0686` (within noise) |
+| Vertex + fragment per frame | `3.4831 ms` | `3.4112 ms` | `-0.0719` (within noise) |
+
+Baseline range across 5 traces: `0.156 ms`. eps=1.0 range across 5
+traces: `0.597 ms` (much wider — the eps=1.0 batch ran on a chip
+warming through the boost-to-throttled transition and showed monotonic
+drift `3.17 -> 3.41 -> 3.25 -> 3.52 -> 3.77`). With overlapping
+ranges and a `-0.07 ms` median delta well inside the `0.6 ms`
+candidate spread, the signal is below noise.
+
+**Result.** Inconclusive. The measurement protocol could not resolve a
+sub-0.5 ms change. The visual outcome (pixel-identical) confirms the
+pre-bake is safe to ship if it ever shows real benefit, but no clear
+fragment-cost change was observed.
+
+**Side effect.** This experiment surfaced the trace-to-trace noise
+problem. Established the long-warmup protocol
+(`WARMUP_FRAMES=1800 SAMPLE_FRAMES=1800` with 35s xctrace
+`time-limit`, median of 5 back-to-back traces). Under that protocol
+the baseline range tightens from `0.156 ms` to `0.040 ms` and the
+steady-state baseline drops from `3.48 ms` to `2.73 ms` V+F per
+frame — the short-warmup numbers included cold-start GPU
+boost-clock samples. Procedure doc updated with the new baseline and
+the `±0.05 ms` signal threshold. All future experiments use the
+long-warmup protocol.
+
+**Implication for future experiments.** Re-test with long-warmup
+protocol if a future experiment makes the divergence theory worth
+re-checking. Current evidence (chord-gate +0.40 ms regression on a
+single trace) suggests no win; tightening the noise floor would just
+confirm the inconclusive result.
