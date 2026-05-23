@@ -1187,3 +1187,55 @@ protocol if a future experiment makes the divergence theory worth
 re-checking. Current evidence (chord-gate +0.40 ms regression on a
 single trace) suggests no win; tightening the noise floor would just
 confirm the inconclusive result.
+
+## Shared sincos in solve_cubic_normed (rejected, 2026-05-23)
+
+**Hypothesis.** `solve_cubic_normed` computes `cos(theta/3)` and
+`sin(theta/3)` separately. Since `theta/3 ∈ [0, pi/3]`, `sin` is
+non-negative, so `sin(theta/3) = sqrt(1 - cos(theta/3)^2)` is exact.
+Replacing the `sin` call with `sqrt(max(0.0, 1.0 - cos_t3*cos_t3))`
+saves one transcendental per cubic and applies to every lane (no
+per-curve branch — addresses the wavefront-divergence trap from
+chord-gate and EDGE_FILTER).
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`, AC
+power, long-warmup protocol (median of 5 traces).
+
+**Visual.** `0 / 7,271,424` pixels differ at zero fuzz. Pixel-identical
+(as the math requires).
+
+**Performance.**
+
+| Metric | Baseline median | Sincos median | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0406 ms` | `0.0414 ms` | `+0.0008` (noise) |
+| Fragment per frame          | `2.6886 ms` | `2.7236 ms` | `+0.0350` (sub-threshold, wrong direction) |
+| Vertex + fragment per frame | `2.7291 ms` | `2.7650 ms` | `+0.0359` (sub-threshold, wrong direction) |
+
+Sincos range across 5 traces: `0.113 ms` (~3x baseline range of
+`0.040 ms`).
+
+**Result.** Rejected. Median delta of `+0.036 ms` is below the
+`±0.05 ms` signal threshold but consistently in the wrong direction
+across all 5 traces; sincos was never faster than baseline in any
+pairing. The wider per-trace variance suggests the trig replacement
+also disrupted some other optimization (instruction scheduling,
+register allocation).
+
+**Lesson.** Metal's `sin` and `cos` are already efficient on M-series
+GPUs — likely a single fused hardware op rather than separate
+operations. Hand-replacing `sin` with `sqrt(1 - cos^2)` swaps one
+fast intrinsic for a 3-op chain (mul + sub + sqrt) with no net win.
+Confirms that `solve_cubic_normed` is not single-instruction-bound at
+the trig step; the cost lives elsewhere (likely the `acos` itself, or
+memory bandwidth on the `roots` array, or instruction-level
+parallelism limits).
+
+**Implication for future experiments.** Targeting individual ALU
+operations inside the cubic is unlikely to help. Promising directions:
+(a) skip the cubic entirely on coherent wavefronts (per-glyph SDF
+prefilter so whole wavefronts exit before any cubic runs),
+(b) eliminate the double-cubic-per-curve in
+`nearest_vertical_curve_distance_sq` (the redundant-band experiment),
+(c) reduce fragment count by tightening glyph quads (the procedure
+doc notes `2.78x` shaded-to-ink waste).
