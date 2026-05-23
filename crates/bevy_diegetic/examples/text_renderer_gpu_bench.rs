@@ -25,7 +25,9 @@ use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy::render::diagnostic::RenderDiagnosticsPlugin;
+use bevy::window::MonitorSelection;
 use bevy::window::PresentMode;
+use bevy::window::WindowPosition;
 use bevy::window::WindowResolution;
 use bevy::winit::WinitSettings;
 use bevy_diegetic::AtlasConfig;
@@ -243,6 +245,7 @@ fn main() {
             primary_window: Some(Window {
                 title: format!("text_renderer_gpu_bench {}", mode.label()),
                 present_mode: PresentMode::AutoNoVsync,
+                position: WindowPosition::Centered(MonitorSelection::Primary),
                 resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
                 ..default()
             }),
