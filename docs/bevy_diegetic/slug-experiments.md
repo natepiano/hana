@@ -1024,3 +1024,55 @@ After (3), per-row fragment crossed below the 96-band candidate
 forced quad. See the procedure doc's "Next direction" section for
 where to take the experiment next without paying SDF-atlas-style prep
 cost.
+
+## EDGE_FILTER_WIDTH 1.2 -> 1.0 (rejected, 2026-05-23)
+
+**Hypothesis.** The Slug fragment shader (`shaders/slug_text.wgsl`)
+gates `solve_cubic_normed` per curve on
+`curve_bounds_distance_sq(point, curve) <= edge_width_sq`, with
+`edge_width = max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH`. Dropping
+`EDGE_FILTER_WIDTH` from `1.2` to `1.0` shrinks the area where the
+cubic fires by `(1.0/1.2)^2 = 0.69x`. Expected fragment-cost drop.
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`, AC
+power, Low Power Mode off. Same parser (`parse_gpu_intervals.py`
+after the per-frame fix) used for both columns.
+
+**Visual.** `0.265 %` of pixels differ (`19,273 / 7,271,424`),
+concentrated in a one-pixel halo around glyph edges where the AA
+smoothstep transition narrowed. RMSE `0.214 %` per channel. Larger
+than the joined-ribbon variant's `0.143 %` visual delta.
+
+**Performance (same-parser, AC, single trace each).**
+
+| Metric | EDGE = 1.2 | EDGE = 1.0 | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0549 ms` | `0.0538 ms` | `-0.0011` (noise) |
+| Fragment per frame          | `3.1724 ms` | `3.2127 ms` | **`+0.0403`** |
+| Vertex + fragment per frame | `3.2274 ms` | `3.2665 ms` | **`+0.0391`** |
+
+**Result.** Rejected. Fragment cost did **not** drop; it rose
+marginally (`+1.3 %`). The visible AA narrowing was paid for, the
+expected ALU win did not materialize.
+
+**Lesson.** GPU wavefront divergence appears to dominate the
+cubic-gate count. Apple silicon dispatches in 32-lane SIMDgroups; a
+SIMDgroup runs the cubic if even one of its 32 fragments fires the
+gate. Curves cluster along glyph edges, so the same SIMDgroups touch
+the cubic at `EDGE = 1.0` as at `1.2` — they just have fewer active
+lanes. Lane underutilization does not shorten wavefront latency.
+
+**Side effect.** This experiment surfaced a parser bug: the prior
+`parse_gpu_intervals.py` printed `fragment_mean_ms` as a per-interval
+mean while `vertex_plus_fragment_total_mean_ms` was per-frame, so
+vertex + fragment did not sum to total. Fixed in the same session;
+the procedure-doc table was rebuilt from the new same-parser 96-band
+baseline (the old multi-column comparison table is retired).
+
+**Implication for future experiments.** Tightening the cubic-fire
+gate cannot help while wavefront divergence is the bottleneck. To
+reduce fragment cost, either (a) reduce the *coherent* set of
+fragments that fire the cubic (e.g. a coarse SDF prefilter that
+exits whole wavefronts before any cubic runs), or (b) make the
+cubic itself cheaper (chord-distance approximation gated by curve
+flatness; F16 intermediates).

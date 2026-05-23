@@ -10,12 +10,21 @@ Usage:
 Output (one key=value per line for easy grep):
     process_filter=text_renderer_gpu_bench
     label_filter=main_transparent_pass_3d:main_transparent_pass_3d
-    vertex_samples=NNN
-    vertex_mean_ms=N.NNNN
-    fragment_samples=NNN
-    fragment_mean_ms=N.NNNN
-    pair_samples=NNN
-    vertex_plus_fragment_total_mean_ms=N.NNNN
+    vertex_samples=NNN                    # interval count
+    fragment_samples=NNN                  # interval count
+    frames_paired=NNN                     # frames with both V and F intervals
+    vertex_per_interval_mean_ms=N.NNNN    # mean over vertex intervals
+    fragment_per_interval_mean_ms=N.NNNN  # mean over fragment intervals
+    vertex_per_frame_mean_ms=N.NNNN       # sum of vertex per frame, averaged across frames
+    fragment_per_frame_mean_ms=N.NNNN     # sum of fragment per frame, averaged across frames
+    vertex_plus_fragment_per_frame_mean_ms=N.NNNN
+
+A frame can hold more than one fragment interval (e.g. the OIT
+sub-pass and the main transparent pass each produce one). For
+benchmark comparisons, the per_frame_mean values are the meaningful
+unit — they sum vertex_per_frame + fragment_per_frame == V+F per
+frame exactly. The per_interval columns can disagree because they
+average a different denominator.
 
 xctrace exports `metal-gpu-intervals` rows where every column is one
 child element of the row, in fixed column order:
@@ -151,21 +160,38 @@ def mean_ms(values: list[float]) -> float:
     return sum(values) / len(values) / 1_000_000.0
 
 
-def pair_frame_totals(intervals: list[Interval]) -> list[float]:
+@dataclass
+class PerFrameTotals:
+    vertex_ns: list[float]
+    fragment_ns: list[float]
+    total_ns: list[float]
+
+
+def per_frame_totals(intervals: list[Interval]) -> PerFrameTotals:
     if any(iv.frame is None for iv in intervals):
-        vertex_iter = iter(iv.duration_ns for iv in intervals if iv.channel == "Vertex")
-        fragment_iter = iter(iv.duration_ns for iv in intervals if iv.channel == "Fragment")
-        return [v + f for v, f in zip(vertex_iter, fragment_iter)]
+        vertex_list = [iv.duration_ns for iv in intervals if iv.channel == "Vertex"]
+        fragment_list = [iv.duration_ns for iv in intervals if iv.channel == "Fragment"]
+        paired = [(v, f) for v, f in zip(vertex_list, fragment_list)]
+        return PerFrameTotals(
+            vertex_ns=[v for v, _ in paired],
+            fragment_ns=[f for _, f in paired],
+            total_ns=[v + f for v, f in paired],
+        )
     by_frame: dict[int, dict[str, float]] = {}
     for iv in intervals:
         assert iv.frame is not None
         bucket = by_frame.setdefault(iv.frame, {"Vertex": 0.0, "Fragment": 0.0})
         bucket[iv.channel] += iv.duration_ns
-    return [
-        bucket["Vertex"] + bucket["Fragment"]
+    paired_buckets = [
+        bucket
         for bucket in by_frame.values()
         if bucket["Vertex"] > 0.0 and bucket["Fragment"] > 0.0
     ]
+    return PerFrameTotals(
+        vertex_ns=[b["Vertex"] for b in paired_buckets],
+        fragment_ns=[b["Fragment"] for b in paired_buckets],
+        total_ns=[b["Vertex"] + b["Fragment"] for b in paired_buckets],
+    )
 
 
 def main() -> int:
@@ -185,15 +211,17 @@ def main() -> int:
         return 3
     vertex_durations = [iv.duration_ns for iv in intervals if iv.channel == "Vertex"]
     fragment_durations = [iv.duration_ns for iv in intervals if iv.channel == "Fragment"]
-    pair_totals = pair_frame_totals(intervals)
+    per_frame = per_frame_totals(intervals)
     print(f"process_filter={PROCESS_FILTER}")
     print(f"label_filter={LABEL_FILTER}")
     print(f"vertex_samples={len(vertex_durations)}")
-    print(f"vertex_mean_ms={mean_ms(vertex_durations):.4f}")
     print(f"fragment_samples={len(fragment_durations)}")
-    print(f"fragment_mean_ms={mean_ms(fragment_durations):.4f}")
-    print(f"pair_samples={len(pair_totals)}")
-    print(f"vertex_plus_fragment_total_mean_ms={mean_ms(pair_totals):.4f}")
+    print(f"frames_paired={len(per_frame.total_ns)}")
+    print(f"vertex_per_interval_mean_ms={mean_ms(vertex_durations):.4f}")
+    print(f"fragment_per_interval_mean_ms={mean_ms(fragment_durations):.4f}")
+    print(f"vertex_per_frame_mean_ms={mean_ms(per_frame.vertex_ns):.4f}")
+    print(f"fragment_per_frame_mean_ms={mean_ms(per_frame.fragment_ns):.4f}")
+    print(f"vertex_plus_fragment_per_frame_mean_ms={mean_ms(per_frame.total_ns):.4f}")
     return 0
 
 

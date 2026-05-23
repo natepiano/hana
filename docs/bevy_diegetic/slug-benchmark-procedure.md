@@ -10,29 +10,23 @@ link back here.
 ## Comparison Table
 
 One row per metric, one column per configuration, plus `Delta` and
-`Meaning`. Delta is always `(newest configuration) − (current accepted
-candidate)`; for the current row of the table, that is the per-segment
-ribbon column minus the 96-band column.
+`Meaning`. Delta is always `(newest configuration) − 96 Bands baseline`.
 
-| Metric | Reconstructed `dda5299` | Current 96 Bands | Per-segment ribbon | Joined ribbon (best) | Delta | Meaning |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Vertex mean             | `0.0488 ms` | `0.0599 ms` | `1.1183 ms` | `0.6431 ms` | `+0.5832 ms` | GPU vertex work for the traced transparent pass. |
-| Fragment mean           | `2.9079 ms` | `2.5759 ms` | `3.0421 ms` | `2.3381 ms` | `-0.2378 ms` | Main Slug shader pixel cost. |
-| Vertex + fragment total | `4.2956 ms` | `3.7655 ms` | `5.8037 ms` | `5.3305 ms` | `+1.5650 ms` | GPU transparent-pass work. |
-| Bevy frame time         | `10.2161 ms` | `10.9424 ms` | `10.6648 ms` | `11.3125 ms` | `+0.3701 ms` | Whole app frame pacing, including non-text work and scheduling. |
-| Prep time               | `1.0761 ms` | `1.1703 ms` | `2.9226 ms` | `1.6981 ms` | `+0.5278 ms` | One-time Slug prep for the scene. |
+| Metric | 96 Bands (baseline, 2026-05-23) | Delta | Meaning |
+| --- | ---: | ---: | --- |
+| Vertex per frame            | `0.0549 ms` | — | GPU vertex work, summed per frame. |
+| Fragment per frame          | `3.1724 ms` | — | GPU fragment work, summed per frame (Slug analytic + OIT sub-pass). |
+| Vertex + fragment per frame | `3.2274 ms` | — | Total GPU transparent-pass work per frame. |
+| Bevy frame time             | `8.5586 ms` | — | Whole-app frame pacing. Heavy stddev (~4 ms); sanity check only. |
+| Prep time                   | `1.1703 ms` | — | One-time Slug prep (Criterion `jbm_ascii_128_slug`). Carried forward from pre-parser-fix measurement; unchanged by shader-only experiments. |
 
-`Joined ribbon (best)` is the joined mitered tri-strip with
-`half_width = 2.0`, `FLATTEN_STEPS = 6` — the final iteration of the
-ribbon experiment, after per-segment rectangles, joined mitered joints
-at `half = 5`, and narrowing to `half = 3` (see
-`slug-experiments.md` for the iteration trail).
-
-`Reconstructed dda5299` is the first-Slug-benchmark baseline rebuilt
-under today's measurement setup (see
-`docs/bevy_diegetic/slug-experiments.md` for how that reconstruction
-was produced). `Current 96 Bands` is the candidate adopted in the
-`### Global Band-Density Retest` section of the same document.
+The baseline is the **96-band Slug candidate** measured on AC with the
+current `parse_gpu_intervals.py`. The previous procedure-doc table is
+retired: it aggregated fragment costs per-interval rather than
+per-frame, so its fragment numbers were too low by ~0.5 ms relative to
+per-frame totals — vertex and fragment did not sum to the V+F total
+column. New columns added to the right of this baseline, with `Delta`
+set to `(new column) − (96 Bands baseline)`.
 
 ## How To Populate A New Column
 
@@ -136,14 +130,28 @@ The script filters the `metal-gpu-intervals` rows to:
 - label contains `main_transparent_pass_3d:main_transparent_pass_3d`
 - channel is `Vertex` or `Fragment`
 
-and prints, one `key=value` per line:
+and prints, one `key=value` per line. Use the **per-frame** columns
+for the comparison table; the per-interval columns are diagnostic
+only and do **not** add together cleanly because a frame can hold
+more than one fragment interval (OIT sub-pass + main transparent
+pass each count as one).
 
-- `vertex_mean_ms` → `Vertex mean` cell.
-- `fragment_mean_ms` → `Fragment mean` cell.
-- `vertex_plus_fragment_total_mean_ms` → `Vertex + fragment total` cell.
-  This is the mean of per-frame vertex + fragment durations: rows are
-  grouped by frame index when xctrace exports one, otherwise vertex
-  and fragment rows are paired in document order.
+Per-frame columns (use these for the table):
+
+- `vertex_per_frame_mean_ms` → `Vertex per frame` cell.
+- `fragment_per_frame_mean_ms` → `Fragment per frame` cell.
+- `vertex_plus_fragment_per_frame_mean_ms` → `Vertex + fragment per frame` cell.
+
+These three sum: `vertex_per_frame + fragment_per_frame ==
+vertex_plus_fragment_per_frame` exactly.
+
+Per-interval columns (diagnostic only — do not put in the table):
+
+- `vertex_per_interval_mean_ms` — mean cost of a single GPU vertex
+  interval.
+- `fragment_per_interval_mean_ms` — mean cost of a single GPU
+  fragment interval. Usually lower than `fragment_per_frame` because
+  most frames have two fragment intervals (OIT + main).
 
 If the parser exits non-zero with "no matching intervals found",
 inspect the XML — the column element names may have changed in a new
@@ -190,8 +198,8 @@ the exact case name if a different prep case is used.
 3. Use signed deltas:
    - negative timings are better
    - positive timings are worse
-4. Keep `Fragment mean` as the primary decision signal. Use vertex,
-   total, frame, and prep deltas as supporting evidence.
+4. Keep `Fragment per frame` as the primary decision signal. Use
+   vertex, V+F total, frame, and prep deltas as supporting evidence.
 5. Add a short verdict below the table: kept, rejected, or still active.
 
 ## Scope And Comparability Rules
@@ -212,75 +220,12 @@ After the table, every entry must close with one short paragraph that
 states the verdict for the newest column and the reason:
 
 - Kept / Rejected / Still active
-- One or two sentences citing the fragment-mean delta as the primary
-  signal, with vertex / total / frame / prep deltas as secondary
-  evidence.
+- One or two sentences citing the `Fragment per frame` delta as the
+  primary signal, with vertex / V+F total / frame / prep deltas as
+  secondary evidence.
 
-### Joined ribbon, best iteration (2026-05-23)
-
-**Rejected, but informative.** After four iterations the joined mitered
-strip at `half = 2`, `FLATTEN_STEPS = 6` reached `fragment_mean =
-2.3381 ms` — a real `-0.24 ms` (`-9 %`) win over the 96-band candidate
-on the per-row fragment column. Vertex still loses by `+0.58 ms`
-(`~11×`) and the per-frame V+F total loses by `+1.57 ms`, so the
-overall GPU transparent-pass work remains higher than 96 bands.
-Frame delta is vsync-bounded noise. Visual parity at the canonical
-home view is preserved (`10381 / 7,271,424` pixels differ, `0.143 %`).
-Prep `+0.53 ms` (`~1.5×`) is acceptable in the broader context (SDF
-atlas prep is `50-70 ms`), but the GPU-side loss is the deciding
-signal. Methodology note: this column was extracted with
-`scripts/parse_gpu_intervals.py`; the `dda5299` and `96 Bands`
-columns predate that parser and may use a slightly different
-aggregation — the ribbon vs 96 Bands per-row deltas should be treated
-as directional rather than gold-standard absolute. Even so, the vertex
-gap is large enough that the directional conclusion is not at risk.
-
-### Iteration trail
-
-| Variant | Vertex | Fragment | V+F total | Prep | Visual Δ |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Forced quad (same-parser ref)    | `0.0634 ms` | `2.1271 ms` | `4.1254 ms` | — | baseline |
-| Per-segment rectangles           | `1.1183 ms` | `3.0421 ms` | `5.8037 ms` | `2.9226 ms` | `0.188 %` |
-| Joined strip, `half=5, steps=12` | `0.8390 ms` | `2.7390 ms` | `5.6928 ms` | `1.9869 ms` | `0.179 %` |
-| Joined strip, `half=3, steps=12` | `0.9176 ms` | `2.7974 ms` | `5.4305 ms` | — | `0.138 %` |
-| Joined strip, `half=2, steps=6`  | `0.6431 ms` | `2.3381 ms` | `5.3305 ms` | `1.6981 ms` | `0.143 %` |
-
-Each iteration moved the candidate closer to forced-quad parity on
-fragment, but the vertex floor remained `~0.6 ms` because every
-polyline joint emits two vertices and a typical glyph contour has
-20-40 joints even at `FLATTEN_STEPS = 6`.
-
-### Next direction if pushing further
-
-The ribbon class of approaches has hit a vertex-cost floor that
-single-quad approaches sit well below. The next natural class of
-experiments is **single-quad geometry plus a shader-side classifier**
-that early-outs interior and exterior fragments and only runs the
-analytic in a narrow zone around the contour. Candidates, ordered by
-prep-cost discipline:
-
-1. **Tighter Slug band classifier.** The 96-band setup already plays
-   this role: each fragment looks up its band and exits early when the
-   band is empty (full interior or full exterior). Investigate whether
-   denser bands along the orthogonal axis, or a 2D band table, cut
-   more fragment work without paying atlas-style prep.
-2. **Coarse SDF packed into the existing per-glyph Slug storage** (no
-   new texture atlas). 8×8 or 16×16 samples per glyph extends the
-   existing curve / band buffers by one field; per-fragment lookup is a
-   storage-buffer read rather than a sampled texture. Avoids the
-   separate atlas pack / upload cost that makes SDF atlases expensive
-   in the first place.
-3. **Procedural SDF from the polyline at fragment time.** Pass the
-   flattened polyline as a storage buffer (the band-index buffer is
-   already similar). Per fragment: distance to nearest segment. Cheap
-   per-pixel for short polylines, scales with contour vertex count.
-   No prep cost beyond the polyline build.
-
-**Avoid**: a separate texture-atlas SDF. Atlas pack + GPU texture
-upload + per-add reorganization is exactly the prep regression we
-escaped by moving away from SDF atlases — recreating it for a
-classifier would give back the prep budget Slug just won.
-
-If none of (1)-(3) clear the 96-band fragment+vertex+total bar at
-constant prep, the ribbon thread and its descendants are exhausted
-and 96-band Slug is the right answer for this workload.
+_No entries under the new baseline yet. The joined-ribbon, ribbon,
+and pre-2026-05-23 entries lived under the old per-interval
+methodology and are not comparable to the new baseline; see
+`slug-experiments.md` for the full historical trail and individual
+experiment records._
