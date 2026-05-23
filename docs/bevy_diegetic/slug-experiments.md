@@ -1076,3 +1076,60 @@ fragments that fire the cubic (e.g. a coarse SDF prefilter that
 exits whole wavefronts before any cubic runs), or (b) make the
 cubic itself cheaper (chord-distance approximation gated by curve
 flatness; F16 intermediates).
+
+## Chord-distance approximation gated by curve flatness (rejected, 2026-05-23)
+
+**Hypothesis.** Replace `solve_cubic_normed` with
+`point_line_distance_sq(point, start, end)` for near-line curves.
+Gate condition: `inverse_curve_norm_sq * edge_width_sq >= 9.0`, i.e.
+sagitta `|curve_delta| / 4` no greater than `edge_width / 12` (~one
+tenth of a pixel for `EDGE_FILTER_WIDTH = 1.2`). For flat curves
+the chord IS the curve to within rounding, so the fragment shader
+skips ~30 cycles of trig + sqrt and runs ~5 cycles of line distance.
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`, AC
+power, Low Power Mode off. Same parser (`parse_gpu_intervals.py`
+after the per-frame fix). Threshold compiled into
+`shaders/slug_text.wgsl` as `CHORD_GATE_SCALE = 9.0` with
+`edge_width_sq` threaded through `curve_distance_sq` and
+`exact_quadratic_distance_sq`.
+
+**Visual.** `1.80 %` of pixels differ at `-fuzz 1 %`
+(`131,070 / 7,271,424`); `3.14 M` differ at zero fuzz with RMSE
+`0.0058 %` — almost every differing pixel is off by `< 1 / 255`,
+indicating the chord path shifts the smoothstep transition by a
+fraction of a pixel near edges rather than producing structural
+breaks. Larger than EDGE_FILTER's `0.265 %`, but quality is still
+visually unchanged.
+
+**Performance (same-parser, AC, single trace each).**
+
+| Metric | Baseline (cubic only) | Chord gate `9.0` | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0549 ms` | `0.0590 ms` | `+0.0041` |
+| Fragment per frame          | `3.1724 ms` | `3.5691 ms` | **`+0.3967`** |
+| Vertex + fragment per frame | `3.2274 ms` | `3.6281 ms` | **`+0.4007`** |
+
+**Result.** Rejected. Fragment cost rose by `+12.5 %`. The savings
+from skipping the cubic on flat curves were swamped by the
+per-iteration branch divergence cost: when any lane in a
+32-lane SIMDgroup hits a bendy curve, all lanes wait for the cubic
+to complete while flat-path lanes idle. Adding a *second* gate (on
+top of the existing degenerate-curve check) made the divergence
+worse, not better.
+
+**Lesson.** Adding fast paths to a per-curve inner loop *increases*
+fragment cost when the SIMDgroup almost always contains at least
+one cubic-path curve. The branch-prediction view is wrong here:
+divergence is per-lane, and the slow path is paid by all lanes that
+took it OR are stalled behind it. Pattern matches the EDGE_FILTER
+result.
+
+**Implication for future experiments.** Per-curve gating inside the
+cubic-call loop is a dead end. To reduce fragment cost the change
+must (a) shrink the *uniform* set of curves the SIMDgroup sees
+(e.g. pack curves by flatness so flat-curve bands hold no bendy
+curves and the whole-wave path is the chord), (b) make the cubic
+itself unconditionally cheaper (e.g. shared sincos, F16
+intermediates), or (c) eliminate the second-band redundant cubic
+pass entirely (distance / winding band split).
