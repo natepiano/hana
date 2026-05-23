@@ -1239,3 +1239,49 @@ prefilter so whole wavefronts exit before any cubic runs),
 `nearest_vertical_curve_distance_sq` (the redundant-band experiment),
 (c) reduce fragment count by tightening glyph quads (the procedure
 doc notes `2.78x` shaded-to-ink waste).
+
+## Band count 96 -> 192 (rejected, 2026-05-23)
+
+**Hypothesis.** Halving each band's spatial extent halves average
+curves per band, so each fragment runs the per-band loop with fewer
+iterations and fewer cubic calls. Trade-offs: 2x band records, more
+duplicated curves (each curve appears in more bands).
+
+**Setup.** 96-band -> 192-band Slug, 720-instance
+`text_renderer_gpu_bench`, AC power, long-warmup protocol. Single
+diagnostic trace (visual gate failed before completing the 5-trace
+batch).
+
+**Visual.** **`851,955 / 7,271,424` pixels differ at zero fuzz
+(11.7 %)**; `589,815` differ at `-fuzz 5 %` (8.1 %). RMSE `0.0084 %`
+per channel — each differing pixel is off by `1-5 %`, with the
+differences concentrated along glyph edges. Far above the
+`0.05 %` pixel-identical bar.
+
+**Root cause of visual regression.** `BAND_OVERLAP_EM_UNITS = 1.0` is
+a fixed constant; it is independent of band height. At 192 bands the
+per-band height drops to ~3 design units (from ~6 at 96 bands), but
+the curve-inclusion overlap stays at 1 unit. Curves whose closest
+point to the fragment lies more than 1 unit outside the fragment's
+band are now excluded from the per-band curve list, so distance
+queries miss them and the smoothstep transition breaks at band
+boundaries.
+
+**Performance (diagnostic single trace).**
+
+| Metric | Baseline median | 192-band trace 1 | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0406 ms` | `0.0418 ms` | `+0.0012` |
+| Fragment per frame          | `2.6886 ms` | `2.7076 ms` | `+0.0190` (noise) |
+| Vertex + fragment per frame | `2.7291 ms` | `2.7494 ms` | `+0.0203` (noise) |
+
+**Result.** Rejected on visual grounds; no performance benefit
+observed either. Even ignoring quality, `+0.02 ms` is within the
+`0.04 ms` baseline-noise floor.
+
+**Implication for future experiments.** A density bump is viable only
+if `BAND_OVERLAP_EM_UNITS` scales with band height — e.g.
+`overlap = max(1.0, edge_width_design_units)` or compile band overlap
+from the rendering scale. Otherwise the per-fragment curve count
+doesn't actually shrink (curves spill out and have to be re-fetched
+from the vertical band), and visual quality breaks.
