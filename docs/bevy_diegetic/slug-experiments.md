@@ -1372,3 +1372,149 @@ correctness:
   pixel-size estimation at pack time).
 - Replace the per-curve distance loop with a precomputed coarse SDF
   prefilter that's accurate at the smoothstep edge.
+
+# Proposed Next Experiments (2026-05-23)
+
+After 7 small-scale shader/packing experiments under the long-warmup
+benchmark protocol — all rejected — the remaining productive
+directions are structural. Each has been scoped, with an effort
+estimate, expected impact range, key risk, and the files it touches.
+The 96-band baseline (`V+F = 2.7291 ms`) is otherwise at a local
+Pareto-optimal point for the current architecture.
+
+These are **proposals**, not authorized work. Pick which to start.
+
+## Proposal A — Per-curve dedup between horizontal/vertical bands
+
+**Hypothesis.** A curve overlapping both a horizontal band `H` and a
+vertical band `V` is currently in both, so the cubic distance solve
+runs twice for the same `(fragment, curve)` pair. Assigning each
+curve to exactly one orientation at pack time eliminates the
+duplicate work without changing what's visible.
+
+**Expected impact.** If ~40-60% of curves are duplicated (typical
+for fonts with curved letterforms), per-fragment cubic count drops
+proportionally. Estimated fragment-cost win: **0.3-0.7 ms** (12-26%
+of the `2.69 ms` baseline).
+
+**Effort.** Medium. `packing.rs`: orientation-choice heuristic per
+curve (largest-axis rule, or "assign to whichever band already has
+fewer curves"). `shaders/slug_text.wgsl`: keep winding from
+horizontal band always; allow distance to come from either. New
+glyph metadata if needed. ~150-250 lines across 2 files.
+
+**Risk.** A misassigned curve could leave a fragment with no
+distance contribution from either band → AA breakage at edges. The
+chord-gate/192-band experiments both showed how quickly visual
+regressions appear when curve coverage changes. Mitigation: start
+with a conservative rule that keeps both bands populated for curves
+with similar x/y extent (only dedup clearly-axis-aligned curves);
+empirical tuning.
+
+**Files.** `crates/bevy_diegetic/src/slug_text_spike/packing.rs`,
+`crates/bevy_diegetic/src/slug_text_spike/shaders/slug_text.wgsl`.
+
+## Proposal B — Coarse per-glyph SDF prefilter
+
+**Hypothesis.** Most fragments in a padded glyph quad are far inside
+or far outside the ink, so the cubic loop is wasted on them. A small
+per-glyph SDF (e.g. `16x16`) sampled once at the start of the
+fragment shader can short-circuit the curve loop for non-edge
+fragments. Only fragments whose SDF sample falls in `[-edge_width,
++edge_width]` need the exact cubic distance.
+
+**Expected impact.** For typical text glyphs, the AA edge is ~2-4
+pixels wide; the rest of the quad is interior/exterior. If 70-85%
+of fragments skip the curve loop entirely, fragment cost could drop
+**1.5-2.0 ms** (55-75% of the `2.69 ms` baseline). This is the
+largest expected win of the four proposals.
+
+**Effort.** Large. New per-glyph SDF generation in prep (`packing.rs`
+or sibling). New GPU buffer or texture binding through the material
+pipeline. Shader: SDF sample + tier check + skip path. Prep-cost
+benchmark to confirm prep time stays manageable. ~400-600 lines
+across 4-5 files.
+
+**Risk.** SDF resolution must be high enough that the "skip" tiers
+are conservative (no false-inside / false-outside leaking into the
+AA zone). At `16x16` per glyph, sample spacing is roughly
+glyph-width/16 ≈ 30-40 design units — comparable to edge_width at
+typical scales, so the prefilter must be conservative
+(`abs(sdf_sample) > edge_width + sample_spacing`). Prep cost grows
+linearly with unique-glyph count; may regress first-frame timing.
+
+**Files.** `packing.rs`, `run.rs`, `run_render.rs`, the material
+binding setup (search for `MATERIAL_BIND_GROUP` consumers),
+`shaders/slug_text.wgsl`.
+
+## Proposal C — F16 cubic intermediates
+
+**Hypothesis.** `solve_cubic_normed`'s trig pipeline (`acos`, `cos`,
+`sin`) and surrounding arithmetic don't all need F32 precision.
+Apple M-series GPUs run F16 transcendentals at roughly 2x the
+throughput of F32. Demoting `theta`, `cos_t3`, `sin_t3`, and the
+final root assembly to F16 could roughly halve cubic ALU cost
+without changing the closest-point result above F16 precision.
+
+**Expected impact.** If cubic ALU is the dominant fragment cost
+(supported by experiments 1, 3 showing per-trig optimizations don't
+help in F32 because Metal's F32 trig is already a fused op),
+**0.5-1.0 ms** off the `2.69 ms` baseline.
+
+**Effort.** Small shader change (~30 lines) **but** Bevy 0.18.1
+doesn't enable the WGSL `f16` extension by default. Requires
+investigating Bevy's `RenderPlugin`/wgpu device feature config to
+pass `Features::SHADER_F16`, and confirming naga's WGSL backend
+emits the extension token. Possibly a 1-2 file patch to Bevy
+internals (or a runtime feature toggle) plus the shader change.
+
+**Risk.** Precision near root degeneracies. When `q3 ≈ r²` or
+`theta` is near `π/2`, F16's ~3-decimal-digit precision may produce
+visibly wrong roots → AA artifacts at glyph junctions. Mitigation:
+hybrid path — keep `q3, r2, theta` in F32, demote only `cos_t3,
+sin_t3, q_pre` to F16 at the end. Verify quality on a glyph with
+many cubic-trigonometric-case curves (any `S`, `&`, `@`).
+
+**Files.** Bevy/wgpu device-feature plumbing (probably in
+`crates/bevy_diegetic/src/lib.rs` or a `RenderPlugin` config),
+`shaders/slug_text.wgsl`.
+
+## Proposal D — Newton iteration replacing the trig cubic
+
+**Hypothesis.** Solving `t³ + at² + bt + c = 0` by Newton iteration
+from `t = 0.5` converges quadratically when not near multiple
+roots. ~3-4 iterations (`t' = t - f(t)/f'(t)`, ~10 mul/add ops
+each) total ~40 FMA ops, no transcendentals. On hardware where
+`acos`/`cos`/`sin` are 4-8 cycles each, that's a net ~2x win
+unconditionally.
+
+**Expected impact.** **0.4-0.8 ms** off the `2.69 ms` baseline,
+*assuming* Metal's trig ops are not already faster than the FMA
+count. Less certain than Proposal B because experiment 3 (sincos
+substitution) showed Metal's trig is highly optimized.
+
+**Effort.** Small. Replace `solve_cubic_normed` body. Need to find
+all three real roots for the trigonometric case — Newton finds one
+at a time, so iterate 3 times from different starting points
+(`t = 0.1`, `0.5`, `0.9`) with deflation. ~50 lines, one file.
+
+**Risk.** Convergence failure near multi-root regions: a fragment
+where two roots collapse will see Newton oscillate or land on the
+wrong root. Distance error in such cases could be substantial.
+Mitigation: cap iteration count and fall back to a single chord
+distance if not converged → adds a branch (same wavefront-divergence
+trap as experiments 1, 2, 4). May ultimately be neutral for that
+reason.
+
+**Files.** `crates/bevy_diegetic/src/slug_text_spike/shaders/slug_text.wgsl`.
+
+## Recommendation if you can only pick one
+
+**Proposal B** (SDF prefilter) has the largest expected impact and
+the most architectural support — it sidesteps the wavefront-
+divergence trap by making the skip tier *spatially coherent* across
+a wavefront (fragments in the same screen-space tile share an SDF
+tier). It's the most engineering work but the highest-ceiling win.
+
+Second pick: **Proposal A** (band dedup) — moderate effort, clear
+mechanism, no new buffers.
