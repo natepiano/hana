@@ -1285,3 +1285,50 @@ if `BAND_OVERLAP_EM_UNITS` scales with band height — e.g.
 from the rendering scale. Otherwise the per-fragment curve count
 doesn't actually shrink (curves spill out and have to be re-fetched
 from the vertical band), and visual quality breaks.
+
+## Band count 96 -> 192 with overlap 1.0 -> 2.0 (rejected, 2026-05-23)
+
+**Hypothesis.** Doubling band count halves band height; doubling
+overlap keeps the curve-inclusion zone roughly constant (was ~8 EM
+units of inclusion at 96/1.0, now ~7 at 192/2.0). Expected: similar
+visual quality, lower per-fragment curve count.
+
+**Setup.** 192 bands + `BAND_OVERLAP_EM_UNITS = 2.0`, 720-instance
+`text_renderer_gpu_bench`, AC power, long-warmup protocol.
+
+**Visual.** `851,955 / 7,271,424` pixels differ (`11.7 %`); RMSE
+`0.005 %` (vs `0.008 %` for 192/1.0). Pixel-difference count is
+**identical** to the 192/1.0 case because the band boundaries are
+at the same y-positions either way; differences come from curve
+fragments straddling band borders being assigned to different bands
+than at 96 bands. Per-pixel error magnitude dropped (overlap=2 helps
+catch more boundary curves) but the rate stayed pinned at 11.7%.
+Still fails the `0.05 %` pixel-identical bar.
+
+**Performance (diagnostic single trace).**
+
+| Metric | Baseline median | 192-band+overlap2 | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex per frame            | `0.0406 ms` | `0.0405 ms` | `-0.0001` |
+| Fragment per frame          | `2.6886 ms` | `2.6891 ms` | `+0.0005` |
+| Vertex + fragment per frame | `2.7291 ms` | `2.7297 ms` | `+0.0006` |
+
+Performance is essentially **identical** to the 96-band baseline —
+the larger overlap exactly cancels the smaller bands' per-band curve
+count. Total fragment work depends on curve geometry, not band
+parameters.
+
+**Result.** Rejected. No performance win and `11.7 %` pixel
+regression. Band-density tuning is a dead end when overlap must scale
+to preserve quality: the total per-fragment curve work is conserved
+across density/overlap trade-offs.
+
+**Implication for future experiments.** The 96-band baseline is at a
+quality/performance Pareto-optimal point along the
+band-count/overlap axis. Further fragment-cost reductions need
+**fewer total curves per fragment**, not just different band
+arrangements — i.e. either smarter spatial culling (per-glyph SDF
+prefilter), structural curve-record reduction (eliminate the
+double-cubic-per-curve in the second band loop), or a fundamentally
+different curve representation (analytical depressed cubic, lookup
+table).
