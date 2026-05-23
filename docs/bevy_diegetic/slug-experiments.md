@@ -16,44 +16,9 @@ Current shader-performance experiments use three checks:
 
 ### Canonical Benchmark Format
 
-Future benchmark writeups should use before/after tables and include a
-plain meaning column so the numbers are readable without remembering the
-trace parser.
-
-GPU trace table:
-
-| Metric | Before | After | Delta | Meaning |
-|---|---:|---:|---:|---|
-| Vertex mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | GPU vertex work for the traced transparent pass. |
-| Fragment mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | GPU pixel/shader work for the traced transparent pass. |
-| Total-by-frame mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Approximate GPU pass cost from paired vertex and fragment intervals. |
-
-Bevy diagnostics table:
-
-| Metric | Before | After | Delta | Meaning |
-|---|---:|---:|---:|---|
-| Frame time mean | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Whole app frame pacing, including non-text work and scheduling. |
-| Render CPU sum | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Sum of Bevy render CPU diagnostics for sampled frames. |
-| Transparent pass CPU | `0.0000 ms` | `0.0000 ms` | `+0.0000 ms` | Bevy CPU work reported for the transparent 3D pass. |
-
-Verdict table:
-
-| Result | Value |
-|---|---|
-| Visual status | Screenshot comparison and human-visible result. |
-| Performance status | Kept, rejected, or still active. |
-| Reason | Short explanation of the winning or losing tradeoff. |
-
-Interpretation:
-
-- Negative timing deltas are better.
-- Positive timing deltas are worse.
-- `Fragment mean` is the primary Slug shader cost signal.
-- `Vertex mean` shows whether geometry work became too expensive.
-- `Total-by-frame mean` is the quick GPU summary.
-- Bevy CPU/frame numbers are secondary, but benchmark examples should set
-  `WinitSettings::continuous()` so unfocused windows do not change update
-  pacing.
+See `docs/bevy_diegetic/slug-benchmark-procedure.md` for the single
+comparison table that all Slug benchmark entries must use. Do not
+introduce parallel formats here.
 
 ### Shaded Pixel Waste Measurement
 
@@ -915,16 +880,10 @@ checkout `dda5299`, copy in `scripts/xctrace_text_renderer.sh`, and add
 only `WinitSettings::continuous()` to `text_renderer_gpu_bench.rs`.
 Keep the Slug implementation itself at `dda5299`.
 
-The old `5.9117 ms` fragment note did not reproduce under this setup, so
-the table below is the canonical reconstructed baseline.
-
-| Metric | Reconstructed `dda5299` | Current 96 Bands | Delta | Meaning |
-| --- | ---: | ---: | ---: | --- |
-| Vertex mean | `0.0488 ms` | `0.0599 ms` | `+0.0111 ms` | GPU vertex work for the traced transparent pass. |
-| Fragment mean | `2.9079 ms` | `2.5759 ms` | `-0.3320 ms` | Main Slug shader pixel cost. |
-| Vertex + fragment total | `4.2956 ms` | `3.7655 ms` | `-0.5301 ms` | GPU transparent-pass work; about `12.3%` lower. |
-| Bevy frame time | `10.2161 ms` | `10.9424 ms` | `+0.7263 ms` | Whole app frame pacing, including non-text work and scheduling. |
-| Prep time | `1.0761 ms` | `1.1703 ms` | `+0.0942 ms` | One-time Slug prep for the ASCII benchmark. |
+The old `5.9117 ms` fragment note did not reproduce under this setup;
+the reconstructed baseline numbers (alongside the current 96-band
+column and the latest experimental column) are recorded in
+`docs/bevy_diegetic/slug-benchmark-procedure.md`.
 
 Assessment:
 
@@ -983,3 +942,85 @@ Why it matters:
 
 - Some faster candidates had tiny pixel differences that may be invisible
   or may even be better than the current baseline.
+
+## Per-segment ribbon — scene-limited visual notes (2026-05-23)
+
+Canonical performance numbers and verdict live in
+`docs/bevy_diegetic/slug-benchmark-procedure.md` (Per-segment ribbon
+column, 2026-05-23). The following notes are scene-limited observations
+that do not belong in the canonical performance table.
+
+Home view (canonical `text_renderer_gpu_bench` scene at default OrbitCam):
+
+- Visual parity vs forced-quad baseline: `13670 / 7,271,424` pixels
+  differ (`0.188 %`). RMSE `949 (0.0145)`, `AE -fuzz 1%` `8367`.
+- Baseline and ribbon screenshots are visually identical at this scale.
+
+Lowercase-g zoom view (`scripts/slug_text_g_zoom.sh --view g`):
+
+- AA degrades on the rectangle bands at this zoom. The rectangle
+  half-width is fixed in design units (5) and becomes narrower than the
+  screen-space AA zone at high zoom, so coverage softens before the
+  contour itself does. This is a property of the band geometry, not of
+  the analytic coverage function — picking a screen-space half-width
+  would address it but enlarges the band area and would change the
+  performance numbers.
+- The zoom-view artifact is documented here as scene-limited because
+  the canonical performance scene is the home view of
+  `text_renderer_gpu_bench` and that view is unaffected.
+
+Screenshot procedure caveat:
+
+- `scripts/slug_text_g_zoom.sh --restart --view home --screenshot ...`
+  triggers the BRP screenshot before the OrbitCam has settled and
+  before the first frame of text has drawn, producing a uniform-color
+  PNG (`colors=1`). The visual diff above was obtained by launching
+  first with `--no-screenshot`, then issuing a second invocation
+  without `--restart` so the app has time to draw a real frame before
+  the screenshot RPC fires.
+
+## Joined ribbon iteration trail (2026-05-23)
+
+The per-segment ribbon was the first ribbon variant; three follow-on
+iterations replaced it. Canonical numbers and verdict live in
+`docs/bevy_diegetic/slug-benchmark-procedure.md`; this section records
+what was tried and why each step was taken.
+
+1. **Join joints into a tri-strip** (`half = 5`, `FLATTEN_STEPS = 12`).
+   Replaced N independent rectangles with one mitered tri-strip per
+   contour. Each joint emits one outer + one inner vertex, shared
+   between neighbouring quads. Vertex count fell by ~2x and the
+   small-triangle rasterizer overhead at corners went away.
+
+   Result: vertex `1.1183 ms -> 0.8390 ms` (`-25 %`),
+   fragment `3.0421 -> 2.7390` (`-10 %`),
+   prep `2.9226 -> 1.9869` (`-32 %`),
+   visual `0.188 % -> 0.179 %`. Clear improvement; still over 96 bands.
+
+2. **Narrow the band** (`half = 5 -> 3`). Reduces band area, which is
+   the fragment-cost lever. Vertex count unchanged.
+
+   Result: per-row vertex / fragment moved within trace noise (`~+0.06
+   ms`), but per-frame V+F total dropped `5.6928 -> 5.4305 ms`. Visual
+   improved (`0.179 % -> 0.138 %`) because narrower bands have less
+   corner overshoot. Kept.
+
+3. **Narrow further and coarsen flatten**
+   (`half = 3 -> 2`, `FLATTEN_STEPS = 12 -> 6`). The flatten coarsening
+   actually cuts the vertex count (fewer polyline joints per quadratic
+   segment); the narrower band cuts fragment area further.
+
+   Result: vertex `0.9176 -> 0.6431 ms` (`-30 %`),
+   fragment `2.7974 -> 2.3381 ms` (`-16 %`),
+   prep `1.9869 -> 1.6981 ms` (`-15 %`),
+   visual `0.138 % -> 0.143 %` (a hair worse but still well below
+   `0.2 %`). Best ribbon variant.
+
+After (3), per-row fragment crossed below the 96-band candidate
+(`2.3381 vs 2.5759 ms`, `-9 %`), but vertex stayed `+0.58 ms` over
+96 bands and total V+F stayed `+1.57 ms` over. The vertex floor is
+~`2 verts * joints_per_contour`, which is fundamentally above the
+4-verts-per-glyph cost of single-quad approaches like 96 bands or
+forced quad. See the procedure doc's "Next direction" section for
+where to take the experiment next without paying SDF-atlas-style prep
+cost.
