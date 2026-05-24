@@ -28,7 +28,7 @@ pub use geometry::load_glyph_by_id_from_face;
 pub use material::SlugRenderMode;
 pub use material::SlugTextMaterial;
 pub use material::SlugTextMaterialInput;
-pub use material::SlugTextSpikePlugin;
+pub(crate) use material::register_slug_text_shader;
 pub use material::slug_text_material;
 pub use material::slug_text_shadow_proxy_material;
 pub use packing::DEFAULT_BAND_COUNT;

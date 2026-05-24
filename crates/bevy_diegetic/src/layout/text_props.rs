@@ -14,7 +14,6 @@ use super::FontFeatureFlags;
 use super::FontFeatures;
 use super::Unit;
 use super::constants::DEFAULT_FONT_SIZE;
-use crate::render::TextRenderer;
 
 /// Controls how the layout engine breaks text across lines.
 ///
@@ -89,10 +88,10 @@ pub enum TextAlign {
 
 /// How the visible glyph renders.
 ///
-/// Controls the MSDF shader's alpha computation. All modes use
+/// Controls the slug shader's coverage computation. All modes use
 /// `AlphaMode::Blend` for smooth anti-aliased edges.
 /// Discriminants are `#[repr(u32)]` and explicit because they map
-/// directly to shader constants in `msdf_text.wgsl`. Adding or
+/// directly to shader constants in `slug_text.wgsl`. Adding or
 /// reordering variants without updating the shader will cause a
 /// compile-time test failure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
@@ -101,12 +100,12 @@ pub enum GlyphRenderMode {
     /// No visible text — only the shadow proxy renders (if shadow mode
     /// is not `None`). Useful for shadow-only effects.
     Invisible = 0,
-    /// Normal MSDF text rendering — smooth alpha-blended edges.
+    /// Normal text rendering — smooth alpha-blended edges.
     #[default]
     Text      = 1,
     /// Background quad with the text outline cut out (inverted alpha).
     PunchOut  = 2,
-    /// Opaque quad matching the glyph outline (no MSDF decode).
+    /// Opaque quad matching the glyph outline (no coverage decode).
     SolidQuad = 3,
 }
 
@@ -138,10 +137,10 @@ pub enum GlyphShadowMode {
     None,
     /// Rectangular shadow from quad geometry.
     SolidQuad,
-    /// Shadow follows the text outline (MSDF-decoded in prepass).
+    /// Shadow follows the text outline (slug coverage in prepass).
     #[default]
     Text,
-    /// Shadow follows the punch-out outline (inverted MSDF in prepass).
+    /// Shadow follows the punch-out outline (inverted slug coverage in prepass).
     PunchOut,
 }
 
@@ -156,23 +155,6 @@ pub enum GlyphSidedness {
     DoubleSided,
     /// Render only the front face with back-face culling.
     OneSided,
-}
-
-/// Controls when text becomes visible during async glyph rasterization.
-///
-/// When glyphs are rasterized asynchronously, there is a brief window
-/// where some glyphs are ready but others are still in flight. This
-/// policy controls whether partially-rasterized text is shown.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
-pub enum GlyphLoadingPolicy {
-    /// Text is invisible until every glyph has been rasterized (default).
-    /// Async tasks are still triggered for missing glyphs — the text
-    /// simply appears all at once when the last glyph completes.
-    #[default]
-    WhenReady,
-    /// Show glyphs as they become available. Missing glyphs are skipped,
-    /// so text may appear with visible holes until rasterization finishes.
-    Progressive,
 }
 
 // ── Typestate markers ────────────────────────────────────────────────────────
@@ -232,8 +214,6 @@ pub struct TextProps<C: Send + Sync + 'static> {
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
     sidedness:      GlyphSidedness,
-    loading_policy: GlyphLoadingPolicy,
-    renderer:       Option<TextRenderer>,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from global config.
     /// Only meaningful for [`ForStandalone`] — ignored by layout text.
@@ -263,8 +243,6 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.render_mode == other.render_mode
             && self.shadow_mode == other.shadow_mode
             && self.sidedness == other.sidedness
-            && self.loading_policy == other.loading_policy
-            && self.renderer == other.renderer
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.world_scale == other.world_scale
@@ -403,35 +381,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn sidedness(&self) -> GlyphSidedness { self.sidedness }
 
-    /// Returns the glyph loading policy.
-    #[must_use]
-    pub const fn loading_policy(&self) -> GlyphLoadingPolicy { self.loading_policy }
-
-    /// Sets the glyph loading policy.
-    #[must_use]
-    pub const fn with_loading_policy(mut self, policy: GlyphLoadingPolicy) -> Self {
-        self.loading_policy = policy;
-        self
-    }
-
-    /// Returns the renderer override, if any.
-    #[must_use]
-    pub const fn renderer(&self) -> Option<TextRenderer> { self.renderer }
-
-    /// Sets the renderer override for this text.
-    #[must_use]
-    pub const fn with_renderer(mut self, renderer: TextRenderer) -> Self {
-        self.renderer = Some(renderer);
-        self
-    }
-
-    /// Clears the renderer override so the global renderer preference applies.
-    #[must_use]
-    pub const fn with_default_renderer(mut self) -> Self {
-        self.renderer = None;
-        self
-    }
-
     /// Returns the per-style alpha-mode override, if any.
     ///
     /// `None` means "inherit" — resolution falls through to panel-level
@@ -501,8 +450,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             render_mode: _,
             shadow_mode: _,
             sidedness: _,
-            loading_policy: _,
-            renderer: _,
             // Standalone-only — not relevant for layout shaping cache.
             unit: _,
             world_scale: _,
@@ -546,8 +493,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             render_mode: _,
             shadow_mode: _,
             sidedness: _,
-            loading_policy: _,
-            renderer: _,
             alpha_mode: _,
             context: _,
         } = self;
@@ -614,8 +559,6 @@ impl TextProps<ForLayout> {
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
             sidedness:      GlyphSidedness::DoubleSided,
-            loading_policy: GlyphLoadingPolicy::WhenReady,
-            renderer:       None,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
@@ -679,8 +622,6 @@ impl TextProps<ForLayout> {
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
-            loading_policy: self.loading_policy,
-            renderer:       self.renderer,
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    None,
@@ -722,8 +663,6 @@ impl TextProps<ForStandalone> {
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Text,
             sidedness:      GlyphSidedness::DoubleSided,
-            loading_policy: GlyphLoadingPolicy::WhenReady,
-            renderer:       None,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
@@ -826,8 +765,6 @@ impl TextProps<ForStandalone> {
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
-            loading_policy: self.loading_policy,
-            renderer:       self.renderer,
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    self.world_scale,
@@ -894,9 +831,9 @@ pub struct TextDimensions {
 // ── Shader discriminant assertions ──────────────────────────────────────────
 //
 // These compile-time assertions ensure that `GlyphRenderMode` discriminants
-// stay in sync with the constants in `assets/shaders/glyph_text.wgsl`.
-// If you add or reorder variants, update the shader constants to match
-// and adjust these assertions.
+// stay in sync with the `render_mode` constants in `slug_text.wgsl` (and the
+// matching `SlugRenderMode` variants). If you add or reorder variants, update
+// the shader constants to match and adjust these assertions.
 
 const _: () = assert!(GlyphRenderMode::Invisible.discriminant() == 0);
 const _: () = assert!(GlyphRenderMode::Text.discriminant() == 1);

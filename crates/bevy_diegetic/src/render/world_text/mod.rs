@@ -17,9 +17,6 @@ pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
 pub(super) use readiness::emit_world_text_ready;
 
-use super::glyph_material::GlyphMaterial;
-use super::text_backend::TextRenderer;
-use super::text_backend::TextRendererPreference;
 use super::text_shaping::TextShapingContext;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
@@ -29,7 +26,6 @@ use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
 use crate::slug_text_spike::SlugBackend;
 use crate::slug_text_spike::SlugTextMaterial;
-use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
 
 pub(super) fn render_world_text(
@@ -58,12 +54,10 @@ pub(super) fn render_world_text(
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
     resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
-    atlas_slot: ResMut<AtlasSlot>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     cache: ResMut<ShapedTextCache>,
     meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<GlyphMaterial>>,
     backend_services: BackendRenderServices,
     defaults: Res<CascadeDefaults>,
     commands: Commands,
@@ -75,12 +69,10 @@ pub(super) fn render_world_text(
         resolved_alphas,
         resolved_units,
         old_meshes,
-        atlas_slot,
         font_registry,
         shaping_cx,
         cache,
         meshes,
-        materials,
         backend_services,
         defaults,
         commands,
@@ -89,7 +81,6 @@ pub(super) fn render_world_text(
 
 #[derive(SystemParam)]
 pub(super) struct BackendRenderServices<'w> {
-    text_backend:    Res<'w, TextRendererPreference>,
     slug_backend:    ResMut<'w, SlugBackend>,
     slug_materials:  ResMut<'w, Assets<SlugTextMaterial>>,
     storage_buffers: ResMut<'w, Assets<ShaderStorageBuffer>>,
@@ -150,49 +141,20 @@ pub struct ComputedGlyphMetrics {
 #[derive(Component, Clone, Debug, Reflect)]
 #[require(WorldTextStyle, Transform, Visibility)]
 pub struct WorldText {
-    text:     String,
-    renderer: Option<TextRenderer>,
+    text: String,
 }
 
 impl WorldText {
     /// Creates a new world text with the given string.
     #[must_use]
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text:     text.into(),
-            renderer: None,
-        }
-    }
-
-    /// Sets the renderer override for this text entity.
-    #[must_use]
-    pub const fn with_renderer(mut self, renderer: TextRenderer) -> Self {
-        self.renderer = Some(renderer);
-        self
-    }
-
-    /// Clears the renderer override so the global renderer preference applies.
-    #[must_use]
-    pub const fn with_default_renderer(mut self) -> Self {
-        self.renderer = None;
-        self
-    }
+    pub fn new(text: impl Into<String>) -> Self { Self { text: text.into() } }
 
     /// Text contents.
     #[must_use]
     pub fn text(&self) -> &str { &self.text }
 
-    /// Per-entity renderer override, if set.
-    #[must_use]
-    pub const fn renderer(&self) -> Option<TextRenderer> { self.renderer }
-
     /// Mutates the text contents.
     pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
-
-    /// Mutates the renderer override.
-    pub const fn set_renderer(&mut self, renderer: Option<TextRenderer>) {
-        self.renderer = renderer;
-    }
 }
 
 /// Cascading attribute for standalone-world-text alpha mode.

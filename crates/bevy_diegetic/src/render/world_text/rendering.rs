@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Instant;
 
 use bevy::prelude::*;
@@ -10,7 +9,6 @@ use super::WorldFontUnit;
 use super::WorldText;
 use super::WorldTextAlpha;
 use super::mesh_spawning;
-use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::SlugMeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::mesh_spawning::WorldTextShadowProxy;
@@ -24,14 +22,10 @@ use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::render::constants;
-use crate::render::glyph_material::GlyphMaterial;
-use crate::render::glyph_quad::GlyphQuadData;
-use crate::render::text_backend::TextRenderer;
 use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::slug_text_spike::SlugPreparedTextRun;
-use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
 
 type ChangedWorldTextQuery<'w, 's> = Query<
@@ -74,12 +68,10 @@ pub(super) fn render_world_text(
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
     resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
     old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
-    mut atlas_slot: ResMut<AtlasSlot>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<GlyphMaterial>>,
     mut backend_services: BackendRenderServices,
     defaults: Res<CascadeDefaults>,
     mut commands: Commands,
@@ -112,48 +104,21 @@ pub(super) fn render_world_text(
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
-        let selected_backend = world_text
-            .renderer()
-            .unwrap_or_else(|| backend_services.text_backend.backend());
-        if selected_backend == TextRenderer::Slug {
-            let mut shared_services = SlugWorldTextRenderServices::new(
-                &font_registry,
-                &shaping_cx,
-                &mut cache,
-                &resolved_alphas,
-                &old_meshes,
-                &mut meshes,
-                &defaults,
-            );
-            let (stats, mesh_ms) = shared_services.render_entity(
-                entity,
-                world_text.text(),
-                style,
-                scale,
-                &mut backend_services,
-                &mut commands,
-            );
-            text_stats.accumulate(&stats);
-            mesh_ms_total += mesh_ms;
-            continue;
-        }
-
-        let mut distance_field_services = DistanceFieldWorldTextRenderServices {
-            atlas_slot:      &mut atlas_slot,
-            font_registry:   &font_registry,
-            shaping_cx:      &shaping_cx,
-            cache:           &mut cache,
-            resolved_alphas: &resolved_alphas,
-            old_meshes:      &old_meshes,
-            meshes:          &mut meshes,
-            materials:       &mut materials,
-            defaults:        &defaults,
-        };
-        let (stats, mesh_ms) = distance_field_services.render_entity(
+        let mut shared_services = SlugWorldTextRenderServices::new(
+            &font_registry,
+            &shaping_cx,
+            &mut cache,
+            &resolved_alphas,
+            &old_meshes,
+            &mut meshes,
+            &defaults,
+        );
+        let (stats, mesh_ms) = shared_services.render_entity(
             entity,
             world_text.text(),
             style,
             scale,
+            &mut backend_services,
             &mut commands,
         );
         text_stats.accumulate(&stats);
@@ -162,113 +127,6 @@ pub(super) fn render_world_text(
 
     let total_ms = total_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     log_render_stats(total_ms, text_count, &text_stats, mesh_ms_total);
-}
-
-struct DistanceFieldWorldTextRenderServices<
-    'a,
-    'alpha_world,
-    'alpha_state,
-    'alpha_data,
-    'mesh_world,
-    'mesh_state,
-    'mesh_data,
-> {
-    atlas_slot:      &'a mut AtlasSlot,
-    font_registry:   &'a FontRegistry,
-    shaping_cx:      &'a TextShapingContext,
-    cache:           &'a mut ShapedTextCache,
-    resolved_alphas: &'a Query<
-        'alpha_world,
-        'alpha_state,
-        &'alpha_data Resolved<WorldTextAlpha>,
-        Without<PanelTextChild>,
-    >,
-    old_meshes: &'a Query<
-        'mesh_world,
-        'mesh_state,
-        (Entity, &'mesh_data ChildOf),
-        Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>,
-    >,
-    meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<GlyphMaterial>,
-    defaults:        &'a CascadeDefaults,
-}
-
-impl DistanceFieldWorldTextRenderServices<'_, '_, '_, '_, '_, '_, '_> {
-    fn render_entity(
-        &mut self,
-        entity: Entity,
-        text: &str,
-        style: &WorldTextStyle,
-        scale: f32,
-        commands: &mut Commands,
-    ) -> (TextBuildStats, f32) {
-        let layout_result = shaping::shape_world_text(
-            // allow-banned: text-shaping pipeline binding
-            text,
-            style,
-            self.font_registry,
-            self.atlas_slot.rasterize_target_mut(),
-            self.shaping_cx,
-            self.cache,
-            scale,
-        );
-        let readiness = if self.atlas_slot.is_swapping() {
-            GlyphReadiness::Pending
-        } else {
-            GlyphReadiness::from(&layout_result.stats)
-        };
-
-        #[cfg(feature = "typography_overlay")]
-        if readiness == GlyphReadiness::Ready || readiness == GlyphReadiness::Invisible {
-            commands.entity(entity).insert(ComputedWorldText {
-                anchor_y: layout_result.anchor_y,
-                glyphs:   layout_result.glyphs,
-            });
-        }
-
-        let (page_quads, total_quads) = collect_page_quads(layout_result.quads);
-        let mut mesh_ms = 0.0_f32;
-        if !self.atlas_slot.is_swapping() && readiness_finished(readiness) {
-            mesh_spawning::despawn_mesh_children(entity, self.old_meshes, commands);
-        }
-
-        if total_quads > 0 && !self.atlas_slot.is_swapping() {
-            mesh_ms += self.spawn_quads(&page_quads, entity, style, commands);
-        }
-
-        apply_readiness_markers(entity, readiness, commands);
-        (layout_result.stats, mesh_ms)
-    }
-
-    fn spawn_quads(
-        &mut self,
-        page_quads: &HashMap<u32, Vec<GlyphQuadData>>,
-        entity: Entity,
-        style: &WorldTextStyle,
-        commands: &mut Commands,
-    ) -> f32 {
-        let resolved_alpha = re_resolve_world_text_alpha(
-            entity,
-            style,
-            self.resolved_alphas,
-            self.defaults,
-            commands,
-        );
-        let mut assets = MeshSpawnAssets {
-            meshes: self.meshes,
-            materials: self.materials,
-            commands,
-        };
-        mesh_spawning::spawn_world_text_meshes(
-            page_quads,
-            entity,
-            style,
-            self.atlas_slot.active(),
-            resolved_alpha.0,
-            &mut assets,
-        )
-    }
 }
 
 struct SlugWorldTextRenderServices<
@@ -415,24 +273,6 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             &mut assets,
         )
     }
-}
-
-fn collect_page_quads(
-    quads: impl IntoIterator<Item = (u32, GlyphQuadData)>,
-) -> (HashMap<u32, Vec<GlyphQuadData>>, usize) {
-    let mut page_quads: HashMap<u32, Vec<GlyphQuadData>> = HashMap::new();
-    for (page_index, quad) in quads {
-        page_quads.entry(page_index).or_default().push(quad);
-    }
-    let total_quads = page_quads.values().map(Vec::len).sum();
-    (page_quads, total_quads)
-}
-
-const fn readiness_finished(readiness: GlyphReadiness) -> bool {
-    matches!(
-        readiness,
-        GlyphReadiness::Ready | GlyphReadiness::Invisible | GlyphReadiness::Failed
-    )
 }
 
 fn apply_readiness_markers(entity: Entity, readiness: GlyphReadiness, commands: &mut Commands) {

@@ -29,16 +29,11 @@
 //!
 //! # Configuration
 //!
-//! Insert [`AtlasConfig`] and/or [`CascadeDefaults`] as resources before
-//! adding [`DiegeticUiPlugin`] to override defaults:
+//! Insert [`CascadeDefaults`] as a resource before adding
+//! [`DiegeticUiPlugin`] to override defaults:
 //!
 //! ```ignore
 //! App::new()
-//!     .insert_resource(
-//!         AtlasConfig::new()
-//!             .with_quality(RasterQuality::Tiny)
-//!             .with_glyphs_per_page(50),
-//!     )
 //!     .insert_resource(CascadeDefaults {
 //!         panel_font_unit: Unit::Millimeters,
 //!         ..default()
@@ -105,7 +100,6 @@ pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::ForLayout;
 pub use layout::ForStandalone;
-pub use layout::GlyphLoadingPolicy;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
 pub use layout::GlyphSidedness;
@@ -174,8 +168,6 @@ pub use render::PanelTextChild;
 pub use render::PendingGlyphs;
 use render::RenderPlugin;
 pub use render::StableTransparency;
-pub use render::TextRenderer;
-pub use render::TextRendererPreference;
 pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
@@ -207,21 +199,13 @@ pub use slug_text_spike::SlugTextMaterial;
 pub use slug_text_spike::SlugTextMaterialInput;
 pub use slug_text_spike::SlugTextRequest;
 pub use slug_text_spike::SlugTextRun;
-pub use slug_text_spike::SlugTextSpikePlugin;
 pub use slug_text_spike::build_packed_glyph;
 pub use slug_text_spike::build_slug_run_render_data;
 pub use slug_text_spike::build_slug_text_run;
 pub use slug_text_spike::load_glyph;
 pub use slug_text_spike::load_glyph_by_id_from_face;
 pub use slug_text_spike::slug_text_material;
-pub use text::AtlasConfig;
-pub use text::AtlasConfigError;
-pub use text::AtlasPreference;
-pub use text::AtlasSlot;
-pub use text::AtlasSwapCompleted;
-pub use text::AtlasSwapStarted;
 pub use text::DiegeticTextMeasurer;
-pub use text::DistanceField;
 pub use text::Font;
 pub use text::FontId;
 pub use text::FontLoadFailed;
@@ -229,59 +213,33 @@ pub use text::FontMetrics;
 pub use text::FontRegistered;
 pub use text::FontRegistry;
 pub use text::FontSource;
-pub use text::GlyphAtlas;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphBounds;
-pub use text::GlyphKey;
-pub use text::GlyphMetrics;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
-pub use text::GlyphWorkerThreads;
-pub use text::GpuAtlasRegion;
-pub use text::GpuEnqueueResult;
-pub use text::GpuGlyphBudget;
-pub use text::GpuRasterizerPlugin;
-pub use text::RasterBackend;
-pub use text::RasterQuality;
 use text::TextPlugin;
-pub use text::enqueue_gpu_glyph;
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///
 /// Composes layout, rendering, text, callouts, and screen-space overlay
-/// support into a single plugin. Insert configuration resources
-/// ([`AtlasConfig`], [`CascadeDefaults`]) before adding this plugin —
-/// they take effect through the child plugins at build time.
+/// support into a single plugin. Insert the [`CascadeDefaults`] resource
+/// before adding this plugin — it takes effect through the child plugins
+/// at build time.
 ///
 /// # Quick start
 ///
 /// ```ignore
 /// App::new().add_plugins(DiegeticUiPlugin)
 /// ```
-///
-/// # Custom atlas configuration
-///
-/// ```ignore
-/// App::new()
-///     .insert_resource(
-///         AtlasConfig::new()
-///             .with_quality(RasterQuality::Tiny)
-///             .with_glyphs_per_page(50)
-///             .with_glyph_worker_threads(GlyphWorkerThreads::Fixed(4)),
-///     )
-///     .add_plugins(DiegeticUiPlugin);
-/// ```
 pub struct DiegeticUiPlugin;
 
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/sdf_panel.wgsl");
-        embedded_asset!(app, "shaders/glyph_text.wgsl");
 
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((
             TextPlugin,
-            GpuRasterizerPlugin,
             PanelPlugin,
             ScreenSpacePlugin,
             RenderPlugin,

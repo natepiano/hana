@@ -186,15 +186,129 @@ plugin that only Phase 2 removes, so 1 and 2 land as a single sequence
       font and glyphs are ready, with no per-glyph reveal window). The
       `typography.rs` and `font_features.rs` call sites are removed in
       Phase 5.
-- [ ] Fold `SlugTextSpikePlugin::build` into `TextPlugin::build`.
+- [ ] Fold `SlugTextSpikePlugin` into `TextPlugin::build`. The `SlugBackend`
+      init and `MaterialPlugin::<SlugTextMaterial>` move into `TextPlugin`
+      (added before the font-parse gate so the material type and backend
+      always register). The `embedded_asset!(app, "shaders/slug_text.wgsl")`
+      registration **cannot** move yet: `embedded_asset!` resolves
+      `include_bytes!` / `file!()` relative to the calling file, and the
+      shader still lives in `slug_text_spike/shaders/` until Phase 4. So it
+      stays as a `register_slug_text_shader(app)` helper in the slug module
+      (`material.rs`) that `TextPlugin` calls; the `SlugTextSpikePlugin`
+      struct + its `Plugin` impl are deleted, the `mod.rs` re-export becomes
+      `pub(crate) use … register_slug_text_shader`, and the `lib.rs`
+      `SlugTextSpikePlugin` re-export is dropped. **Phase 4 folds the helper
+      in when the shader file moves** (tracked there).
 
 Removed public APIs (for a caller-migration note): `TextRenderer`,
 `TextRendererPreference`, `WorldText::with_renderer` /
 `with_default_renderer` / `renderer` / `set_renderer`,
-`TextProps::with_renderer`, `GlyphLoadingPolicy`, and
-`TextProps::with_loading_policy` / `loading_policy`. No replacement —
-the renderer is unconditional and slug reveals text once ready, so
-callers delete these calls.
+`TextProps::with_renderer` / `with_default_renderer` / `renderer`,
+`GlyphLoadingPolicy`, `TextProps::with_loading_policy` / `loading_policy`,
+and `SlugTextSpikePlugin` (folded into `TextPlugin`; setup is now
+automatic). No replacement — the renderer is unconditional and slug
+reveals text once ready, so callers delete these calls.
+
+Checklist gaps filled (not enumerated above, but required for the slug
+path to stay coherent once the deleted types are gone):
+`PanelTextAlpha`'s `CascadePanelChild::EntityOverride` was repointed from
+the deleted `PanelTextQuads` to `PanelSlugTextRun`;
+`reconcile.rs::poll_atlas_glyphs` lost its `SharedMsdfMaterials` param and
+the two `shared_mats.clear()` calls; and the distance-field call-trees that
+referenced the deleted `GlyphLoadingPolicy` / `PanelTextQuads` /
+`TextRenderer` (`shape_world_text` + its helpers,
+`DistanceFieldWorldTextRenderServices`, `shape_text_to_quads`,
+`all_glyphs_ready_when_required`, the whole `build_panel_batched_meshes`
+batching subsystem) were deleted with them. The still-present
+distance-field engine code that only references Phase-2 types
+(`glyph_material.rs`, the atlas modules) is left dangling as dead code until
+Phase 2 — it compiles (dead-code is a warning, not an error), so it introduces
+no Phase-1 errors. (`spawn_world_text_meshes` + `MeshSpawnAssets` in
+`mesh_spawning.rs` are now dead **and** will fail to compile once Phase 2
+deletes `glyph_material.rs`/`atlas.rs` — Phase 2 must delete them; see the
+Retrospective and Phase 2.) **The library builds green** after Phase 1 (the
+dead DF code still references Phase-2 types that exist). Only the **examples**
+that call the removed public APIs do not build (Phase 5 / the 1–3 sequence).
+
+**Phase 1 outcome — complete (2026-05-24). Verified green.** All ten checklist
+items plus the gap-fills above are implemented. `cargo build -p bevy_diegetic
+--lib` finishes (dead-code warnings only) and `cargo nextest run --lib` passes
+**234/234** (2 skipped). The workspace `nalgebra` bump `0.34 → 0.35.0` that had
+broken the `fdsm`-based rasterizers was reverted to `0.34` (nothing in the
+workspace needs 0.35 — only the to-be-deleted rasterizers use nalgebra), so the
+lib is green now rather than waiting on Phase 2. Not committed.
+
+### Retrospective
+
+**What worked:**
+- The seam was runtime-only as the plan claimed — each
+  `if selected == Slug { … } else { … }` collapsed to its slug arm
+  mechanically once the DF call-trees were traced.
+- Zero errors in any Phase-1-touched file; `cargo +nightly fmt` clean.
+
+**What deviated from the plan:**
+- The checklist under-specified deletion depth. Deleting `GlyphLoadingPolicy`
+  / `PanelTextQuads` / `TextRenderer` forced deleting their DF-only call-trees
+  (`shape_world_text` + `build_glyph_quads` / `ensure_all_glyphs_ready` /
+  `measure_anchor_offset`; `DistanceFieldWorldTextRenderServices`;
+  `shape_text_to_quads` + `TextQuadServices`; `all_glyphs_ready_when_required`;
+  the entire `build_panel_batched_meshes` subsystem) — required for compile,
+  not enumerated.
+- `PanelTextAlpha::EntityOverride` repointed `PanelTextQuads` → `PanelSlugTextRun`
+  (slug cascade dependency the checklist missed).
+- `reconcile.rs::poll_atlas_glyphs` carried a `SharedMsdfMaterials` param + two
+  `shared_mats.clear()` calls — removed (not mentioned in the checklist).
+- The `SlugTextSpikePlugin` fold could not be verbatim: `embedded_asset!` is
+  locked to its calling file, so shader registration stays as a
+  `register_slug_text_shader` helper until the file moves in Phase 4.
+
+**Surprises:**
+- The workspace `Cargo.toml` had a `nalgebra` bump `0.34 → 0.35.0` (external to
+  this work) that broke the `fdsm`-based `gpu_rasterizer` / `msdf_rasterizer`
+  (5 type errors: `fdsm 0.8` pins nalgebra 0.34, so the two versions coexisted
+  as incompatible types). Nothing in the workspace needs 0.35 — only the
+  to-be-deleted rasterizers use nalgebra — so it was **reverted to `0.34`**,
+  restoring a green lib immediately rather than waiting for Phase 2.
+- DF code that references only Phase-2 types (`spawn_world_text_meshes` +
+  `MeshSpawnAssets` in `world_text/mesh_spawning.rs`, `glyph_material.rs`, the
+  atlas modules) is now dead-but-compiling — warnings, not errors.
+
+**Implications for remaining phases:**
+- Phase 2 should also delete the now-dead `spawn_world_text_meshes` +
+  `MeshSpawnAssets` in `world_text/mesh_spawning.rs` and the
+  `atlas::GlyphLookup` (and sibling) re-exports in `text/mod.rs` — currently
+  unused-import warnings.
+- Phase 4 now owns the `register_slug_text_shader` → `TextPlugin` inlining
+  (added to its checklist).
+
+### Phase 1 Review
+
+Architect re-evaluation of Phases 2–7 against the shipped Phase 1. All findings
+folded into the plan (none rejected); the only genuine open question — the
+external `nalgebra` bump — was raised with the user directly, not gated here.
+
+- **Phase 2** gained four compile-required deletions the checklist had omitted:
+  `poll_atlas_glyphs` + `AtlasSlot` import in `reconcile.rs`; the
+  `.after(poll_atlas_glyphs)` rewiring of the four surviving systems in
+  `text_renderer/mod.rs`; gutting the MSDF atlas init in `TextPlugin::build`;
+  and deleting the now-dead `spawn_world_text_meshes` / `MeshSpawnAssets` in
+  `world_text/mesh_spawning.rs`.
+- **Phase 2** public-type list extended: `AtlasConfigError`,
+  `GlyphWorkerThreads`, `GpuEnqueueResult`, `GpuGlyphBudget`, `enqueue_gpu_glyph`.
+- **Build-green ordering** corrected: with the `nalgebra` bump reverted, the
+  **lib is green after Phase 1** (234 tests pass); only `cargo build --examples`
+  is red across the 1→2 gap, since Phase 1 touched no examples. The full suite
+  returns at the end of Phase 2.
+- **Phase 3** gained `nalgebra` removal from `bevy_diegetic/Cargo.toml` (dead
+  there once the rasterizers are gone).
+- **`nalgebra` bump reverted** to `0.34` (the cause of the only hard errors;
+  nothing needs 0.35) — lib green immediately, no longer a Phase-2 dependency.
+- **Phase 4** expose-nothing scope corrected to the full ~28 `Slug*` `lib.rs`
+  re-exports (not just the 7 `render/` consumers), with a delete-vs-private note
+  for the spike-only types (`SlugPackedGlyph`, `build_packed_glyph`).
+- **Phase 7** enumerated the `From<GlyphRenderMode>` impls + `slug_render_mode` /
+  `slug_shadow_render_mode` match arms in `mesh_spawning.rs` + `batching.rs`, and
+  the stale `GlyphShadowMode` enum doc, as part of shrinking the enums.
 
 ### Phase 2 — Delete the distance-field engine
 
@@ -217,12 +331,154 @@ callers delete these calls.
 - [ ] `drive_atlas_swap`, `target_config`, and the swap events
       (`AtlasSwapStarted` / `AtlasSwapCompleted`) from `text/mod.rs`,
       plus their `pub use` re-exports.
+- [ ] Gut the atlas setup in `TextPlugin::build` (`text/mod.rs`): the
+      `AtlasConfig` read, the `GlyphAtlas::with_config` construction, the
+      `AtlasSlot` / `AtlasPreference` inserts, and reduce
+      `init_atlas_and_embedded_font` to just its `FontRegistered` work (drop
+      the atlas upload). All reference Phase-2-deleted types. The slug setup
+      added in Phase 1 (`register_slug_text_shader`, `SlugBackend`,
+      `MaterialPlugin::<SlugTextMaterial>`) stays. *(Surfaced by Phase 1
+      review — not a green-checkpoint until this lands.)*
+- [ ] Delete `poll_atlas_glyphs` (`render/text_renderer/reconcile.rs`) plus
+      its `use crate::text::AtlasSlot` — it pumps the MSDF atlas
+      (`AtlasSlot`, `sync_to_gpu`, `poll_async_glyphs_stats`) that nothing
+      reads under slug. `reconcile_panel_text_children` /
+      `reconcile_panel_image_children` are renderer-agnostic and stay.
+      *(Surfaced by Phase 1 review.)*
+- [ ] Rewire `TextRenderPlugin` (`render/text_renderer/mod.rs`): removing
+      `poll_atlas_glyphs` strands its four `.after(poll_atlas_glyphs)` anchors
+      (`reconcile_panel_text_children`, `reconcile_panel_image_children`,
+      `shape_panel_text_children`, `world_text::render_world_text`) as hard
+      compile errors. Drop the registration + import and re-anchor the
+      survivors (`.after(setup_panel_rtt)` /
+      `.after(reconcile_panel_text_children)` / `.chain()`).
+      *(Surfaced by Phase 1 review.)*
+- [ ] Delete the now-dead DF mesh spawning in
+      `render/world_text/mesh_spawning.rs`: `spawn_world_text_meshes` +
+      `MeshSpawnAssets` (they import `GlyphMaterial` / `GlyphAtlas` /
+      `glyph_quad` and fail to compile once those are deleted). The slug spawn
+      path (`spawn_slug_world_text_meshes`, `SlugMeshSpawnAssets`,
+      `WorldTextMesh`, `WorldTextShadowProxy`) stays. *(Surfaced by Phase 1
+      review — these went dead when Phase 1 deleted their only caller.)*
 - [ ] The public types these expose: `DistanceField`, `RasterBackend`,
-      `RasterQuality`, `AtlasConfig`, `GlyphAtlas`, `AtlasSlot`,
-      `AtlasPreference`, `GlyphMaterial`, `GpuRasterizerPlugin`, plus the
-      atlas glyph-lookup types defined in `atlas.rs` (`GlyphKey`,
-      `GlyphLookup`, `GlyphMetrics`, `GpuAtlasRegion`) — including their
-      `lib.rs` and `text/mod.rs` re-exports.
+      `RasterQuality`, `AtlasConfig`, `AtlasConfigError`, `GlyphWorkerThreads`,
+      `GlyphAtlas`, `AtlasSlot`, `AtlasPreference`, `GlyphMaterial`,
+      `GpuRasterizerPlugin`, `GpuEnqueueResult`, `GpuGlyphBudget`,
+      `enqueue_gpu_glyph`, plus the atlas glyph-lookup types defined in
+      `atlas.rs` (`GlyphKey`, `GlyphLookup`, `GlyphMetrics`, `GpuAtlasRegion`)
+      — including their `lib.rs` and `text/mod.rs` re-exports. (Phase 1 already
+      left the `text/mod.rs` `GlyphLookup` re-export as an unused-import
+      warning; removing these clears it.)
+
+**Phase 2 outcome — complete (2026-05-24). Verified green.** Every checklist
+item plus the gap-fills below is implemented. Deleted: `atlas.rs`,
+`atlas_config.rs`, `atlas_slot.rs`, `bitmap_dims.rs`, `gpu_rasterizer/`,
+`msdf_rasterizer/`, `render/glyph_material.rs`, `render/glyph_quad.rs`, and
+`shaders/glyph_text.wgsl`. `cargo build -p bevy_diegetic --lib` finishes with
+**zero warnings**, `cargo clippy --lib` is clean, and `cargo nextest run --lib`
+passes **158/158** (1 skipped). The full workspace `cargo build` (all crate
+libs + the `fairy_dust` app bin) passes. Only the `bevy_diegetic` examples and
+benches remain red — they call removed public APIs and are fixed in Phase 5.
+(There is no `bevy_diegetic/tests/` directory; the red surface is examples +
+benches only.) Not committed.
+
+The **234 → 158** drop is not a regression: the deleted `atlas` /
+`gpu_rasterizer` / `msdf_rasterizer` modules carried ~76 unit tests with them.
+158 is the new green lib-test baseline (the Phase 1 note that "the full suite
+returns to 234 at the end of Phase 2" was wrong — 234 was the pre-deletion
+count).
+
+### Retrospective
+
+**What worked:**
+- The enumerated deletions (atlas/rasterizer modules, `glyph_material`, the
+  atlas-swap state machine, `poll_atlas_glyphs`, the four `.after` rewirings)
+  landed mechanically; the Phase 1 review had already mapped them.
+- `cargo +nightly fmt` clean; clippy clean; zero dead-code warnings after the
+  constant/field trims.
+
+**What deviated from the plan (gap-fills the checklist omitted):**
+- **Deleted `render/glyph_quad.rs`** (+ its `mod glyph_quad`). It built atlas
+  UV-quad meshes; its only consumers were the deleted DF mesh-spawn and
+  `text_shaping::into_atlas_quad`, so it went fully dead. Not in the checklist.
+- **Cleaned `render/text_shaping.rs`:** removed `GlyphQuadPlacement` +
+  `into_atlas_quad`, the unused `glyph_key` fn, and the now-dangling
+  `GlyphQuadData` / `GlyphKey` / `GlyphMetrics` imports (all named deleted atlas
+  types). Compile-required; the file's parley core (`shape_text_cached`,
+  `positioned_glyphs`, `PositionedGlyph`, `TextBuildStats`, `GlyphReadiness`,
+  `TextShapingContext`) is shared with slug and stayed.
+- **Removed the dead `ResolvedFontData.font_id` field** (`font_registry.rs`) —
+  its only reader was the deleted `text_shaping::glyph_key`.
+- **Trimmed dead constants** (style guide: delete dead code, don't warn):
+  `text/constants.rs` reduced to the three surviving font constants;
+  `render/constants.rs` dropped `GLYPH_QUAD_LINE_TOLERANCE` +
+  `SHADOW_PROXY_ALPHA_MASK_THRESHOLD`; root `constants.rs` dropped
+  `EMBEDDED_GLYPH_TEXT_SHADER_PATH`.
+- **Renamed `init_atlas_and_embedded_font` → `register_embedded_font`** (single
+  private call site) since it no longer touches an atlas — only fires
+  `FontRegistered`.
+- **Reworded stale MSDF/atlas doc comments beyond the enumerated three:** the
+  `lib.rs` module + `DiegeticUiPlugin` docs (deleted the `AtlasConfig`
+  "custom atlas configuration" example), `render/mod.rs` `RenderPlugin` doc,
+  `text_renderer/mod.rs` `TextRenderPlugin` doc, `text/mod.rs` module doc,
+  `font_registry.rs::register_font` doc, and `render/constants.rs`
+  `RTT_LIGHT_ILLUMINANCE`.
+
+**Surprises:**
+- `glyph_quad.rs` and most of `text_shaping.rs`'s quad helpers were DF-only
+  despite living in render-shared-looking modules. Only the parley shaping core
+  is shared with slug.
+- The `DiegeticPerfStats.atlas` sub-struct is now written by nothing
+  (`poll_atlas_glyphs` was its only writer) but still compiles and is read by
+  diagnostics — left in place; trimming it is out of Phase 2 scope.
+
+**Implications for remaining phases:**
+- Phase 3: `nalgebra` / `fdsm` / `fdsm-ttf-parser` / `msdfgen` / `ttf-parser_018`
+  now have **zero** `bevy_diegetic` src users (every consumer was deleted) — the
+  dep removals are pure cleanup, ready to land.
+- Phase 5: examples/benches/integration-tests are the only remaining red
+  targets. Any "expected test count" in Phase 6 must use **158**, not 234.
+- Phase 7: `From<GlyphRenderMode> for u32` (+ assertions in `text_props.rs`) and
+  `From<GlyphRenderMode> for SlugRenderMode` (`mesh_spawning.rs`) survived Phase
+  2 unchanged; Phase 7 still owns collapsing them.
+
+### Phase 2 Review
+
+Architect re-evaluation of Phases 3–7 + Documentation disposition against the
+shipped Phase 2. 11 findings; 10 folded into the plan, 1 surfaced to the user.
+
+- **Phase 3** — confirmed safe to drop `nalgebra`/`fdsm`/`fdsm-ttf-parser`/
+  `msdfgen`/`ttf-parser_018` workspace-wide: `bevy_lagrange` and `fairy_dust`
+  use none of them; the workspace `nalgebra` line goes too (hedge resolved).
+  `ttf-parser` 0.25 stays (slug uses it).
+- **Phase 4** — `lib.rs` `Slug*` re-export count corrected `~28 → ~31`, adding
+  `SlugBackendCompleted`, `SlugRunStorageProfile`, `slug_text_material`,
+  `load_glyph_by_id_from_face`.
+- **Phase 5** — deletion rows for `atlas_pages`, `preload_text`, and
+  `glyph_rasterization` now also strip their `[[example]]`/`[[bench]]` entries
+  from `bevy_diegetic/Cargo.toml` (a deleted `.rs` with a live manifest entry
+  fails `cargo build`). The `glyph_rasterization` bench is un-gated, so its
+  source deletion + manifest-entry removal + CI `cargo bench` edit must land
+  together.
+- **Build-green ordering** — corrected: the lib is green at the end of Phase 2
+  (`--lib` = **158**, not 234); examples/benches stay red across Phases 2–4 and
+  turn green only at the end of Phase 5. The earlier "full suite compiles at the
+  end of Phase 2" claim was wrong.
+- **Phase 6** — verification baseline pinned at **≈158** lib tests; the 234
+  figure from the Phase 1 notes is explicitly not the target.
+- **"Integration tests"** — phrasing dropped; there is no `bevy_diegetic/tests/`
+  directory, so the red surface is examples + benches only.
+- **Documentation disposition** — README flagged as a section rewrite (not a
+  reword: the MSDF `fwidth` AA subsection); `scripts/parse_gpu_intervals.py`
+  added to the artifact list; `slug-experiments.md` prep-cost reference flagged
+  as needing a recorded figure or a slug micro-bench once the bench is deleted.
+- **Phase 7** — reviewed clean: every named target (`is_shadow_proxy`,
+  `slug_shadow_render_mode`, the proxy markers/materials, the `From` impls)
+  still exists as described; no re-scope.
+- **P1 (resolved — user approved):** the dead `AtlasPerfStats` /
+  `DiegeticPerfStats.atlas` / 15 `DIAG_ATLAS_*` diagnostics surface is removed as
+  a new end-of-Phase-3 "leftover DF perf-state cleanup" item — a public-API
+  removal with zero consumers, consistent with decision #3.
 
 ### Phase 3 — Trim dependencies
 
@@ -233,24 +489,68 @@ file that imports `fdsm` / `fdsm-ttf-parser` is deleted, otherwise
 (the unused deps are still declared but harmless), confirming Phase 2
 is complete before this pure-cleanup phase.
 
-- [ ] Workspace `Cargo.toml`: remove `fdsm`, `fdsm-ttf-parser`, dev-dep
-      `msdfgen`, dev-dep `ttf-parser_018`.
-- [ ] `bevy_diegetic/Cargo.toml`: remove the same.
+- [ ] Workspace `Cargo.toml`: remove `nalgebra`, `fdsm`, `fdsm-ttf-parser`,
+      dev-dep `msdfgen`, dev-dep `ttf-parser_018`. **Cross-workspace check done
+      (Phase 2 review):** the only other members, `bevy_lagrange` and
+      `fairy_dust`, neither declare nor use any of these; `bevy_kana` is an
+      external crate, not a member. So `bevy_diegetic` is the sole user and the
+      workspace `nalgebra` line goes too (the earlier "leave it unless
+      bevy_diegetic was its only user" hedge resolves to "remove it").
+- [ ] `bevy_diegetic/Cargo.toml`: remove `nalgebra`, `fdsm`, `fdsm-ttf-parser`,
+      `msdfgen`, `ttf-parser_018`. After Phase 2, `nalgebra` / `fdsm` /
+      `fdsm-ttf-parser` have **zero** `src` users (the rasterizers are deleted)
+      and `msdfgen` / `ttf-parser_018` have zero references anywhere
+      (src/examples/benches). **Keep `ttf-parser` 0.25** — slug uses it
+      (`slug_text_spike/*`, `text/font.rs`).
 - [ ] Confirm no remaining reference to the removed crates.
+- [ ] **Leftover DF perf-state cleanup (Phase 2 review, P1).** Phase 2 deleted
+      `poll_atlas_glyphs`, the only writer of the atlas perf surface, leaving it
+      dead-but-published. Delete: the `AtlasPerfStats` struct + the
+      `DiegeticPerfStats.atlas` field (`panel/perf.rs`); the 15 `DIAG_ATLAS_*`
+      `DiagnosticPath` constants (`panel/constants.rs` lines ~38–66) and their
+      entries in the `register_diagnostic` loop; the 15 `add_measurement` calls
+      for them in `publish_perf_diagnostics` (`panel/perf.rs`); and the two
+      `pub use ... AtlasPerfStats` re-exports (`lib.rs:137`, `panel/mod.rs:27`).
+      `AtlasPerfStats` has zero consumers — a public-API removal consistent with
+      decision #3 (expose nothing).
 
 ### Phase 4 — Move slug into `text/`
 
 - [ ] Relocate `slug_text_spike/*.rs` to `text/slug/`.
 - [ ] Update `crate::slug_text_spike::X` references to `crate::text::slug::X`.
 - [ ] Delete the now-empty `slug_text_spike/` directory.
+- [ ] Fold the Phase 1 `register_slug_text_shader` helper into
+      `TextPlugin::build`. Once `slug_text.wgsl` lives under `text/slug/`,
+      `embedded_asset!` can be invoked directly from `text/mod.rs` with the
+      relocated path, so: inline the `embedded_asset!(app, …)` call into
+      `TextPlugin::build` next to the `SlugBackend` / `MaterialPlugin` setup,
+      delete `register_slug_text_shader` and its `pub(crate)` re-export, and
+      update `SLUG_TEXT_SHADER_PATH` to the new embedded path. (Helper added
+      in Phase 1 because the macro resolves paths relative to the calling
+      file and the shader had not moved yet.)
 - [ ] Make every `Slug*` type `pub(crate)` and drop all `Slug*`
       re-exports from `lib.rs` (expose-nothing — see Open decisions #3).
       The public text API is the existing agnostic surface only.
-      Optional follow-up: tighten types used only within `text/slug/`
-      to `pub(in crate::text::slug)`; only the types `render/` consumes
+      Scope note (Phase 1 review; count corrected Phase 2 review to **~31
+      `pub use` lines**, also covering `SlugBackendCompleted`,
+      `SlugRunStorageProfile`, `slug_text_material`, `load_glyph_by_id_from_face`):
+      this is the `Slug*` block in `lib.rs`
+      (lines ~180–211: `SlugBandRecord`, `SlugBounds`, `SlugBuiltTextRun`,
+      `SlugCurveRecord`, `SlugFontKey`, `SlugGlyph`, `SlugGlyphCache`,
+      `SlugGlyphInstance`, `SlugGlyphKey`, `SlugGlyphRecord`, `SlugOutlineError`,
+      `SlugPackedGlyph`, `SlugRunRenderData`/`Error`/`Profile`, `SlugTextRequest`,
+      `SlugTextRun`, `build_packed_glyph`, `build_slug_run_render_data`,
+      `build_slug_text_run`, `load_glyph`, `FIXTURE_TEXT`, `DEFAULT_BAND_COUNT`,
+      …), not just the 7 `render/` consumers — plus the matching `pub use`
+      lines in `slug_text_spike/mod.rs`. Only the 7 types `render/` consumes
       (`SlugBackend`, `SlugPreparedTextRun`, `SlugRunStorage`,
       `SlugRunStorageKey`, `SlugTextMaterial`, `SlugTextMaterialInput`,
-      `SlugRenderMode`) need `pub(crate)`.
+      `SlugRenderMode`) need `pub(crate)`; the rest become module-private
+      (`pub(in crate::text::slug)`) or, where they exist only to back the
+      Phase-5-deleted spike instrumentation (`SlugPackedGlyph`,
+      `build_packed_glyph` — used only by `slug_text.rs`'s `log_*` probes),
+      are candidates for outright deletion. Decide delete-vs-private per type
+      during the move; expose-nothing (#3) means none stay public.
 - [ ] Update doc comments that still say "Experimental" /  "spike"
       (e.g. `SlugBackend`) to reflect production status.
 
@@ -266,7 +566,10 @@ the deleted atlas preload API and is itself deleted in this sequence;
 `slug_text.rs` uses `Slug*` types that go `pub(crate)` in Phase 4. So the edits that *remove*
 deleted-type usage (and the deletions themselves) must land inside the
 Phase 1–3 sequence (and the `Slug*` de-references at Phase 4), not be
-deferred — otherwise the examples break. What remains genuinely
+deferred — otherwise the examples break. **Note (Phase 1 review): Phase 1 did
+not touch any example**, so `cargo build --examples` is red from the end of
+Phase 1 until these edits land — the example fixes are now Phase-2-or-later
+work, not Phase-1 work, even though the label says "Phase 1–3 sequence." What remains genuinely
 "Phase 5" is slug-specific polish. The rows below are the authoritative
 per-example dispositions; they are listed here for cohesion but
 **executed within the Phase 1–3 sequence** (and Phase 4 for `Slug*`
@@ -280,15 +583,18 @@ de-references), not as a separate later pass.
 | `font_features.rs` | Remove all `GlyphLoadingPolicy` usage: the `loading_policy` field threaded through its two helper structs, the `progressive` binding, every `.with_loading_policy(...)` call, and the import. The OpenType-feature demo itself is unaffected — the policy is a no-op under slug. Keep. |
 | `shadows.rs` | Keep — uses the agnostic `GlyphRenderMode` / `GlyphShadowMode` API, renders via slug unchanged (the Phase 0 slug throwaway is reverted at the end of Phase 0). Deleted in **Phase 7** when the matrix collapses. |
 | `text_renderer_gpu_bench.rs` | Convert by reduction to slug-only: drop the msdf / sdf / mtsdf / empty modes and `AtlasConfig`. Keep as a slug regression/optimization harness (note in `slug-benchmark-procedure.md` that cross-renderer comparison is gone). |
-| `atlas_pages.rs` | Delete (visualizes atlas pages; no slug analog). |
-| `preload_text.rs` | **Delete.** Built on the distance-field atlas preload API (`GlyphAtlas::preload`) and `GlyphLoadingPolicy`, both removed in the Phase 1–2 sequence. Slug needs no preload demo: per-glyph band-building is sub-millisecond — full printable ASCII preps in ≈ 0.84 ms (after per-curve dedup + 48-band tuning), well below one frame and below frame-timing resolution. There is no warm-up cost worth showcasing and no preload API is shipped. A project with very large glyph sets that notices first-frame lag can warm glyphs with its own Bevy task / async setup — no engine API required. |
-| `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). |
+| `atlas_pages.rs` | Delete (visualizes atlas pages; no slug analog). **Also remove its `[[example]] name = "atlas_pages"` entry from `bevy_diegetic/Cargo.toml`** — deleting the `.rs` while leaving the manifest entry makes `cargo build` fail with "can't find target". |
+| `preload_text.rs` | **Delete.** Built on the distance-field atlas preload API (`GlyphAtlas::preload`) and `GlyphLoadingPolicy`, both removed in the Phase 1–2 sequence. Slug needs no preload demo: per-glyph band-building is sub-millisecond — full printable ASCII preps in ≈ 0.84 ms (after per-curve dedup + 48-band tuning), well below one frame and below frame-timing resolution. There is no warm-up cost worth showcasing and no preload API is shipped. A project with very large glyph sets that notices first-frame lag can warm glyphs with its own Bevy task / async setup — no engine API required. **Also remove its `[[example]] name = "preload_text"` entry from `bevy_diegetic/Cargo.toml`.** |
+| `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). **Also remove its `[[bench]] name = "glyph_rasterization"` entry from `bevy_diegetic/Cargo.toml`.** This bench has no `required-features`, so `cargo bench --benches` (CI, `ci.yml:202`) compiles it and it imports deleted `DistanceField` / `GlyphAtlas` / `GlyphKey` — it is **red from the end of Phase 2 until this deletion lands**, so the source deletion, the manifest-entry removal, and the CI `cargo bench` edit must land together. |
 | `examples/sdf.rs` | Untouched (panel SDF). |
 
 ### Phase 6 — Verify
 
 - [ ] `cargo build`
-- [ ] `cargo nextest run`
+- [ ] `cargo nextest run` — expected baseline is **≈158 lib tests** (not 234;
+      Phase 2 deleted the atlas/rasterizer modules and their ~76 tests), plus
+      whatever example/bench targets compile after Phase 5. Do not treat the
+      234 figure from the Phase 1 notes as the target.
 - [ ] `cargo +nightly fmt`
 - [ ] Run the example suite; screenshot text to confirm parity.
 
@@ -323,12 +629,21 @@ of the Phase 1–3 sequence and leaves the build green.
       No second mesh — the visible mesh casts its own silhouette.
 - [ ] Shrink `GlyphRenderMode` to `{ Text, PunchOut }` — drop `Invisible`
       and `SolidQuad`. Update the compile-time discriminant assertions
-      (`layout/text_props.rs`), `SlugRenderMode` (`material.rs`), and the
+      (`layout/text_props.rs`), `SlugRenderMode` (`material.rs`), the
       shader's `RENDER_MODE_SOLID_QUAD` constant plus its `SolidQuad` /
-      `Invisible` branches in `render_coverage`.
+      `Invisible` branches in `render_coverage`, and (Phase 1 review) the
+      `slug_render_mode` / `slug_shadow_render_mode` helpers plus any
+      `From<GlyphRenderMode> for SlugRenderMode` match arms in **both**
+      `render/world_text/mesh_spawning.rs` and
+      `render/text_renderer/batching.rs` — they match on the dropped
+      `Invisible` / `SolidQuad` variants.
 - [ ] Collapse `GlyphShadowMode` to a cast toggle (`{ None, Cast }`),
       replacing the `None / SolidQuad / Text / PunchOut` silhouette
-      choice. Update `with_shadow_mode` and its call sites.
+      choice. Update `with_shadow_mode` and its call sites, and (Phase 1
+      review) reword the `GlyphShadowMode` enum doc in `layout/text_props.rs`
+      — it currently describes spawning "a separate shadow proxy mesh with
+      `AlphaMode::Mask` … contributes to the shadow prepass," which this phase
+      makes false.
 - [ ] Document the shadow-only recipe — spawn a cast-on glyph with fill
       alpha 0 (invisible in color, full silhouette in shadow) — on the
       cast toggle and in `slug.md`, replacing the deleted `Invisible`
@@ -357,33 +672,58 @@ everything slug.
 | --- | --- | --- |
 | `gpu_rasterizer.md` (1539 lines) | **Delete** | Documents only the GPU SDF/MSDF rasterizer being removed. No slug content. |
 | `slug.md` (1275 lines) | **Keep, update status** | The slug backend design and source/license reference. Its framing ("experimental alternative, not a replacement for MTSDF") is now stale and should be updated to reflect slug as the sole renderer. |
-| `slug-experiments.md` (1798 lines) | **Keep, fix stale refs** | The experiment log that prevents repeating failed approaches. It references `benches/glyph_rasterization.rs` for CPU prep cost; that bench is deleted in Phase 5, so the prep-cost reference needs a new home or a note. |
+| `slug-experiments.md` (1798 lines) | **Keep, fix stale refs** | The experiment log that prevents repeating failed approaches. It references `benches/glyph_rasterization.rs` for CPU prep cost; that bench is deleted in Phase 5. With both that bench and `preload_text` gone, the ≈0.84 ms prep-cost figure has no measuring harness left (Phase 2 review) — either record it in the doc as a one-time measurement (with date + conditions) or preserve a slug prep micro-bench; do not leave a dangling reference to a deleted bench. |
 | `slug-benchmark-procedure.md` (244 lines) | **Keep, fix stale ref** | Canonical slug benchmark procedure. References `text_renderer_gpu_bench` (kept, converted to slug-only) but also the deleted `glyph_rasterization` bench for prep cost — note that prep cost is no longer tracked, or point at a slug replacement. |
 | `slug_fx.md` (641 lines) | **Keep** | The effect-support plan that motivates this migration. |
 
 Other (non-`docs/`) artifacts that reference the removed engine, found
 in review — fold these into Phase 5/6:
 
-- `crates/bevy_diegetic/README.md` — describes "MSDF text rendering" as
-  the current renderer (several lines incl. the transparency section).
-  Reword to slug.
+- `crates/bevy_diegetic/README.md` — **section rewrite, not a reword**
+  (Phase 2 review). MSDF/atlas references span lines ~13, 17, 36–42, 111, 116,
+  including a whole "Transparency / Preserves MSDF anti-aliasing?" subsection
+  (~36–116) describing `fwidth`-based MSDF edge AA. slug's coverage-based AA
+  differs, so this is rewritten content, not find/replace.
 - `scripts/xctrace_text_renderer.sh` — supports `sdf` / `msdf` / `mtsdf`
   modes for `text_renderer_gpu_bench`. Reduce to `slug` / `empty`.
-- `ci.yml` — runs `cargo bench` including the deleted `glyph_rasterization`
-  bench; drop that bench from CI.
+- `scripts/parse_gpu_intervals.py` (Phase 2 review) — hard-codes
+  `PROCESS_FILTER = "text_renderer_gpu_bench"` (kept, so the script keeps
+  working) but pairs with `xctrace_text_renderer.sh`'s removed modes; sanity-
+  check it when reducing the mode list.
+- `ci.yml` — runs `cargo bench` (`ci.yml:202`) including the deleted
+  `glyph_rasterization` bench; drop that bench from CI **in the same change
+  that deletes the bench** (see Phase 5 — the bench is red between Phase 2 and
+  that deletion).
 
 ## Build-green ordering
 
-Phase 1 does not compile on its own — deleting the distance-field arms
-leaves imports, systems, and the `GlyphMaterial` material plugin
-referencing types that only Phase 2 removes. So Phases 1, 2, and 3
-land as one sequence with no green checkpoint between them; the suite
-compiles again at the end of Phase 3. The example edits that *remove*
-deleted-type usage (`typography.rs`, `font_features.rs`,
-`text_renderer_gpu_bench.rs`) and the deletion of `preload_text.rs`
-also belong in this sequence — examples are compiled by
-`cargo build --examples`. Phase 0 (verification) and the
-slug-specific polish in Phases 4–6 each leave the build green.
+As implemented, Phase 1 deleted each distance-field arm **together with its
+exclusive call-tree** (not just the `if`/`else` branch), so no live code is left
+referencing a deleted type. The surviving DF engine (`glyph_material.rs`, the
+atlas modules, and the now-dead `spawn_world_text_meshes` / `TextPlugin` atlas
+init / `poll_atlas_glyphs`) still references only types that exist until Phase 2,
+so it compiles as dead code. With the external `nalgebra` bump reverted to
+`0.34`, **the library is green at the end of Phase 1** (`cargo nextest run --lib`
+passes 234/234). The earlier expectation that "Phase 1 does not compile on its
+own" assumed a shallower arm-deletion; the thorough version leaves the lib green.
+
+What stays red after Phase 1 is **only the examples and benches** — they call
+the removed public APIs and were not touched in Phase 1, so `cargo build
+--examples` / `cargo bench --benches` is red until those edits land. **As
+actually implemented (Phase 2 review):** Phase 2 deleted `glyph_material.rs` /
+`atlas.rs` and their dead consumers (`spawn_world_text_meshes` +
+`MeshSpawnAssets`, `TextPlugin` atlas init, `poll_atlas_glyphs`, plus the
+revealed-dead `glyph_quad.rs` and `text_shaping.rs` quad helpers) in one pass,
+so the **lib is green at the end of Phase 2 — `cargo nextest run --lib` = 158**
+(not 234; the deleted modules took ~76 tests with them) and the full workspace
+`cargo build` (libs + `fairy_dust` bin) passes. Phase 2 did **not** fix the
+examples/benches — that is Phase 5 — so `cargo build --examples` /
+`cargo bench --benches` stays red across Phases 2–4 and turns green only at the
+end of Phase 5. Phase 3 is pure manifest cleanup
+(`nalgebra`/`fdsm`/`fdsm-ttf-parser`/`msdfgen`/`ttf-parser_018` are unimported
+and harmless by then, so dropping them is a no-op on `cargo build`). Phase 0
+(verification) and the slug-specific polish in Phases 4–6 each leave the lib
+green.
 
 ## Open decisions
 

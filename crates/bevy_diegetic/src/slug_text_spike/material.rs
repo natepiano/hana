@@ -5,18 +5,15 @@ use bevy::color::LinearRgba;
 use bevy::math::Vec4;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
-use bevy::pbr::MaterialPlugin;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::App;
 use bevy::prelude::Handle;
-use bevy::prelude::Plugin;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy::shader::ShaderRef;
 
-use super::backend::SlugBackend;
 use super::constants::SLUG_TEXT_SHADER_PATH;
 
 /// Visible render mode for the isolated Slug shader path.
@@ -41,15 +38,16 @@ impl From<SlugRenderMode> for u32 {
 /// Material used by the isolated Slug shader spike.
 pub type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextExtension>;
 
-/// Registers the isolated Slug shader and material type.
-pub struct SlugTextSpikePlugin;
-
-impl Plugin for SlugTextSpikePlugin {
-    fn build(&self, app: &mut App) {
-        embedded_asset!(app, "shaders/slug_text.wgsl");
-        app.init_resource::<SlugBackend>();
-        app.add_plugins(MaterialPlugin::<SlugTextMaterial>::default());
-    }
+/// Registers the embedded Slug text shader.
+///
+/// `embedded_asset!` resolves its path from the file it is invoked in, and
+/// the shader still lives in this module, so the registration stays here.
+/// [`TextPlugin`](crate::text::TextPlugin) calls this during setup, next to
+/// the `SlugBackend` and material-plugin init it now owns. When the slug
+/// files move under `text/slug/` (Phase 4 of the slug migration), this
+/// folds directly into `TextPlugin::build`.
+pub(crate) fn register_slug_text_shader(app: &mut App) {
+    embedded_asset!(app, "shaders/slug_text.wgsl");
 }
 
 /// Uniforms consumed by the Slug shader spike.

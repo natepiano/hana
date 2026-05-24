@@ -2,32 +2,22 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use bevy::prelude::*;
-use bevy_kana::ToF32;
 
 use super::batching;
 use super::batching::PanelSlugTextRun;
 use super::batching::PanelTextAlpha;
-use super::batching::PanelTextQuads;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePanelChild;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
-use crate::layout::GlyphLoadingPolicy;
 use crate::layout::LayoutTextStyle;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-use crate::render::TextRenderer;
-use crate::render::TextRendererPreference;
-use crate::render::constants::TEXT_Z_OFFSET;
-use crate::render::glyph_quad;
-use crate::render::glyph_quad::GlyphQuadData;
 use crate::render::text_shaping;
-use crate::render::text_shaping::GlyphQuadPlacement;
 use crate::render::text_shaping::GlyphReadiness;
-use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
@@ -36,10 +26,7 @@ use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
 use crate::slug_text_spike::DEFAULT_BAND_COUNT;
 use crate::slug_text_spike::SlugBackend;
-use crate::text::AtlasSlot;
 use crate::text::FontRegistry;
-use crate::text::GlyphAtlas;
-use crate::text::GlyphLookup;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
 pub(super) fn shape_panel_text_children(
@@ -61,11 +48,9 @@ pub(super) fn shape_panel_text_children(
     panel_alpha: Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
     existing_child_alpha: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
-    mut atlas_slot: ResMut<AtlasSlot>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
-    text_backend: Res<TextRendererPreference>,
     mut slug_backend: ResMut<SlugBackend>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
@@ -113,60 +98,22 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        let selected_renderer = config.renderer().unwrap_or_else(|| text_backend.backend());
-        if selected_renderer == TextRenderer::Slug {
-            let (panel_slug_run, stats) = build_panel_slug_text(
-                world_text.text(),
-                &config,
-                &placement,
-                &mut slug_backend,
-                &font_registry,
-                &shaping_cx,
-                &mut cache,
-            );
-            aggregate.accumulate(&stats);
-            shaped_panels.insert(child_of.parent());
-            let readiness = GlyphReadiness::from(&stats);
-            apply_panel_slug_result(
-                entity,
-                child_of.parent(),
-                panel_slug_run,
-                readiness,
-                &panel_alpha,
-                &existing_child_alpha,
-                &defaults,
-                &mut commands,
-            );
-            continue;
-        }
-
-        let mut services = TextQuadServices {
-            font_registry: &font_registry,
-            atlas:         atlas_slot.rasterize_target_mut(),
-            shaping_cx:    &shaping_cx,
-            cache:         &mut cache,
-        };
-        let (quads, stats) =
-            shape_text_to_quads(world_text.text(), &config, &placement, &mut services);
-
+        let (panel_slug_run, stats) = build_panel_slug_text(
+            world_text.text(),
+            &config,
+            &placement,
+            &mut slug_backend,
+            &font_registry,
+            &shaping_cx,
+            &mut cache,
+        );
         aggregate.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
-
-        // During a parallel-atlas swap, the text-shaping pass above
-        // has queued visible glyphs onto pending. Force `Pending` so
-        // we keep `PendingGlyphs` and don't replace `PanelTextQuads`
-        // (which would let the batcher build materials whose UVs
-        // came from pending but whose image still points to active).
-        let readiness = if atlas_slot.is_swapping() {
-            GlyphReadiness::Pending
-        } else {
-            GlyphReadiness::from(&stats)
-        };
-        apply_panel_quad_result(
+        let readiness = GlyphReadiness::from(&stats);
+        apply_panel_slug_result(
             entity,
             child_of.parent(),
-            quads,
-            &config,
+            panel_slug_run,
             readiness,
             &panel_alpha,
             &existing_child_alpha,
@@ -184,15 +131,7 @@ pub(super) fn shape_panel_text_children(
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
 }
 
-/// Shared text-shaping resources threaded through quad construction.
-struct TextQuadServices<'a> {
-    font_registry: &'a FontRegistry,
-    atlas:         &'a mut GlyphAtlas,
-    shaping_cx:    &'a TextShapingContext,
-    cache:         &'a mut ShapedTextCache,
-}
-
-/// Placement parameters that position shaped glyphs into panel-local space.
+/// Placement parameters that position glyphs into panel-local space.
 struct QuadPlacement {
     bounds:    BoundingBox,
     scale:     Vec2,
@@ -204,158 +143,7 @@ fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
     commands
         .entity(entity)
         .remove::<PendingGlyphs>()
-        .remove::<PanelTextQuads>();
-    commands.entity(entity).remove::<PanelSlugTextRun>();
-}
-
-fn apply_panel_quad_result(
-    entity: Entity,
-    panel_entity: Entity,
-    quads: Vec<(u32, GlyphQuadData)>,
-    config: &LayoutTextStyle,
-    readiness: GlyphReadiness,
-    panel_alpha: &Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
-    existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
-    defaults: &CascadeDefaults,
-    commands: &mut Commands,
-) {
-    match readiness {
-        GlyphReadiness::Ready | GlyphReadiness::Invisible => {
-            let panel_text_quads = PanelTextQuads {
-                quads,
-                render_mode: config.render_mode(),
-                shadow_mode: config.shadow_mode(),
-                alpha_mode: config.alpha_mode(),
-            };
-            let panel_fallback = panel_alpha.get(panel_entity).map_or_else(
-                |_| PanelTextAlpha::global_default(defaults),
-                |resolved| resolved.0,
-            );
-            let resolved =
-                PanelTextAlpha::entity_value(&panel_text_quads).unwrap_or(panel_fallback);
-            let alpha_unchanged = existing_child_alpha
-                .get(entity)
-                .is_ok_and(|current| current.0 == resolved);
-            commands.entity(entity).insert(panel_text_quads);
-            commands.entity(entity).remove::<PanelSlugTextRun>();
-            if !alpha_unchanged {
-                commands.entity(entity).insert(Resolved(resolved));
-            }
-            commands.entity(entity).remove::<PendingGlyphs>();
-            commands.entity(entity).insert(AwaitingReady);
-        },
-        GlyphReadiness::Pending => {
-            commands.entity(entity).insert_if_new(PendingGlyphs);
-        },
-        GlyphReadiness::Failed => {
-            clear_panel_text_output(entity, commands);
-        },
-        GlyphReadiness::Idle => {},
-    }
-}
-
-/// Shapes text and produces glyph quads in panel-local coordinates.
-fn shape_text_to_quads(
-    text: &str,
-    config: &LayoutTextStyle,
-    placement: &QuadPlacement,
-    services: &mut TextQuadServices<'_>,
-) -> (Vec<(u32, GlyphQuadData)>, TextBuildStats) {
-    let TextQuadServices {
-        font_registry,
-        atlas,
-        shaping_cx,
-        cache,
-    } = services;
-    let &QuadPlacement {
-        bounds,
-        scale,
-        anchor,
-        clip_rect,
-    } = placement;
-    let mut stats = TextBuildStats {
-        texts: 1,
-        ..Default::default()
-    };
-    let shape_start = Instant::now();
-    let shaped = text_shaping::shape_text_cached(text, config, font_registry, shaping_cx, cache);
-    stats.shape_ms = shape_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    stats.glyphs = shaped.glyphs.len();
-    let positioned_glyphs =
-        text_shaping::positioned_glyphs(&shaped.glyphs, font_registry, &mut stats);
-
-    let atlas_start = Instant::now();
-    if stats.failed_glyphs > 0
-        || !all_glyphs_ready_when_required(config, &positioned_glyphs, atlas, &mut stats)
-    {
-        stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-        return (Vec::new(), stats);
-    }
-
-    let linear: LinearRgba = config.color().into();
-    let color = [linear.red, linear.green, linear.blue, linear.alpha];
-    let em_scale = config.size() / atlas.canonical_size().to_f32();
-
-    let mut quads = Vec::with_capacity(shaped.glyphs.len());
-    for positioned_glyph in positioned_glyphs {
-        let metrics = match atlas.lookup_or_queue(
-            text_shaping::glyph_key(positioned_glyph),
-            positioned_glyph.font.data(),
-        ) {
-            GlyphLookup::Ready(metrics) => {
-                if metrics.pixel_width == 0 || metrics.pixel_height == 0 {
-                    stats.invisible_glyphs += 1;
-                    continue;
-                }
-                stats.ready_glyphs += 1;
-                metrics
-            },
-            GlyphLookup::Pending => {
-                stats.pending_glyphs += 1;
-                continue;
-            },
-            GlyphLookup::Queued => {
-                stats.queued_glyphs += 1;
-                continue;
-            },
-        };
-
-        let shaped_glyph = positioned_glyph.glyph;
-        let glyph_x = bounds.x + shaped_glyph.x;
-        let glyph_y = bounds.y + shaped_glyph.baseline + shaped_glyph.y;
-        let quad_width = metrics.pixel_width.to_f32() * em_scale;
-        let quad_height = metrics.pixel_height.to_f32() * em_scale;
-        let quad_layout_x = (metrics.bearing_x - metrics.pad_x_em).mul_add(config.size(), glyph_x);
-        let quad_layout_y =
-            (-(metrics.bearing_y + metrics.pad_y_em)).mul_add(config.size(), glyph_y);
-        let local_x = quad_layout_x.mul_add(scale.x, -anchor.x);
-        let local_y = (-quad_layout_y).mul_add(scale.y, anchor.y);
-        let placement = GlyphQuadPlacement {
-            position: [local_x, local_y, TEXT_Z_OFFSET],
-            size:     [quad_width * scale.x, quad_height * scale.y],
-        };
-
-        quads.push((
-            metrics.page_index,
-            placement.into_atlas_quad(metrics, color),
-        ));
-    }
-
-    let padding_world = GlyphAtlas::glyph_padding_texels() * em_scale * scale.x;
-    glyph_quad::clip_overlapping_quads(&mut quads, padding_world);
-
-    if let Some(clip_rect) = clip_rect {
-        let clip_local =
-            batching::panel_clip_rect_local(Some(clip_rect), scale.x, scale.y, anchor.x, anchor.y);
-        quads.retain(|(_, quad)| {
-            glyph_quad::clip_quad_to_rect(quad, clip_local.to_array()).is_some()
-        });
-    }
-
-    stats.atlas_ms = atlas_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    stats.emitted_quads = quads.len();
-
-    (quads, stats)
+        .remove::<PanelSlugTextRun>();
 }
 
 fn build_panel_slug_text(
@@ -464,7 +252,6 @@ fn apply_panel_slug_result(
             commands
                 .entity(entity)
                 .insert(panel_slug_run)
-                .remove::<PanelTextQuads>()
                 .remove::<PendingGlyphs>()
                 .insert(AwaitingReady);
             if !alpha_unchanged {
@@ -478,39 +265,8 @@ fn apply_panel_slug_result(
             commands
                 .entity(entity)
                 .remove::<PendingGlyphs>()
-                .remove::<PanelTextQuads>()
                 .remove::<PanelSlugTextRun>();
         },
         GlyphReadiness::Idle => {},
     }
-}
-
-fn all_glyphs_ready_when_required(
-    config: &LayoutTextStyle,
-    positioned_glyphs: &[PositionedGlyph<'_>],
-    atlas: &mut GlyphAtlas,
-    stats: &mut TextBuildStats,
-) -> bool {
-    if config.loading_policy() != GlyphLoadingPolicy::WhenReady {
-        return true;
-    }
-
-    let mut all_ready = true;
-    for positioned_glyph in positioned_glyphs {
-        match atlas.lookup_or_queue(
-            text_shaping::glyph_key(*positioned_glyph),
-            positioned_glyph.font.data(),
-        ) {
-            GlyphLookup::Ready(_) => {},
-            GlyphLookup::Pending => {
-                stats.pending_glyphs += 1;
-                all_ready = false;
-            },
-            GlyphLookup::Queued => {
-                stats.queued_glyphs += 1;
-                all_ready = false;
-            },
-        }
-    }
-    all_ready
 }

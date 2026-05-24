@@ -4,12 +4,6 @@ use bevy::asset::uuid_handle;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
-// glyph quads
-/// Two adjacent glyph quads are considered on different lines when their Y
-/// positions differ by more than this threshold. Cross-line pairs are skipped
-/// during overlap clipping.
-pub(super) const GLYPH_QUAD_LINE_TOLERANCE: f32 = 0.001;
-
 // layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
 ///
@@ -54,7 +48,7 @@ pub(super) const RTT_CAMERA_NEAR: f32 = -1.0;
 /// Z position of the per-panel RTT camera (and matching directional light)
 /// looking at the panel-local Z=0 plane.
 pub(super) const RTT_CAMERA_Z: f32 = 5.0;
-/// Illuminance of the directional light that lights MSDF text in the per-panel
+/// Illuminance of the directional light that lights panel text in the per-panel
 /// RTT pass.
 pub(super) const RTT_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
@@ -66,10 +60,6 @@ pub(crate) const SDF_AA_PADDING: f32 = 0.001;
 /// Internal-asset handle for the `sdf_stroke.wgsl` shader.
 pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");
-
-// shadow proxy
-/// Alpha threshold for shadow-only MSDF proxy materials.
-pub(super) const SHADOW_PROXY_ALPHA_MASK_THRESHOLD: f32 = 0.5;
 
 // text rendering
 /// Tolerance used when deduplicating glyph baselines during line-count

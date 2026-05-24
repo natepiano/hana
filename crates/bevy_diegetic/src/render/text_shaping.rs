@@ -17,7 +17,6 @@ use parley::style::FontWeight;
 use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
-use super::glyph_quad::GlyphQuadData;
 use crate::layout::FontSlant;
 use crate::layout::LayoutTextStyle;
 use crate::layout::LineMetricsSnapshot;
@@ -29,8 +28,6 @@ use crate::layout::TextDimensions;
 use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
-use crate::text::GlyphKey;
-use crate::text::GlyphMetrics;
 use crate::text::ResolvedFontData;
 
 /// Reusable parley shaping buffers.
@@ -113,24 +110,6 @@ pub(crate) struct PositionedGlyph<'a> {
     pub font:  ResolvedFontData<'a>,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(super) struct GlyphQuadPlacement {
-    pub position: [f32; 3],
-    pub size:     [f32; 2],
-}
-
-impl GlyphQuadPlacement {
-    #[must_use]
-    pub const fn into_atlas_quad(self, metrics: GlyphMetrics, color: [f32; 4]) -> GlyphQuadData {
-        GlyphQuadData {
-            position: self.position,
-            size: self.size,
-            uv_rect: metrics.uv_rect,
-            color,
-        }
-    }
-}
-
 pub(super) fn positioned_glyphs<'a>(
     glyphs: &'a [ShapedGlyph],
     font_registry: &'a FontRegistry,
@@ -147,15 +126,7 @@ pub(super) fn positioned_glyphs<'a>(
     positioned_glyphs
 }
 
-#[must_use]
-pub(super) const fn glyph_key(glyph: PositionedGlyph<'_>) -> GlyphKey {
-    GlyphKey {
-        font_id:     glyph.font.font_id.0,
-        glyph_index: glyph.glyph.id,
-    }
-}
-
-/// Shapes text via parley, using the cache when possible.
+/// Runs parley text shaping, using the cache when possible.
 pub(super) fn shape_text_cached(
     text: &str,
     config: &LayoutTextStyle,

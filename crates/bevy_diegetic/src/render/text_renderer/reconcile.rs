@@ -1,16 +1,12 @@
 use std::collections::HashMap;
-use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
-use super::batching::SharedMsdfMaterials;
-use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::RenderCommandKind;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
-use crate::panel::DiegeticPerfStats;
 use crate::panel::RenderMode;
 use crate::render::clip;
 use crate::render::constants;
@@ -18,72 +14,6 @@ use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::WorldText;
-use crate::text::AtlasSlot;
-
-/// Polls completed async glyph rasterizations on every contained
-/// atlas (active and pending during a swap), inserts them, and syncs
-/// to GPU. Entities with `PendingGlyphs` will be re-checked by
-/// `shape_panel_text_children` and `render_world_text`.
-pub(super) fn poll_atlas_glyphs(
-    mut atlas: ResMut<AtlasSlot>,
-    mut images: ResMut<Assets<Image>>,
-    mut shared_mats: ResMut<SharedMsdfMaterials>,
-    mut perf: ResMut<DiegeticPerfStats>,
-) {
-    let poll_start = Instant::now();
-    let dirty_before_poll = atlas.total_dirty_page_count();
-    if dirty_before_poll > 0 {
-        atlas.sync_to_gpu(&mut images);
-        shared_mats.clear();
-    }
-    let poll_stats = atlas.poll_async_glyphs_stats();
-    let poll_ms = poll_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    let dirty_pages = atlas.active().dirty_page_count();
-    let mut sync_ms = 0.0;
-
-    if poll_stats.inserted > 0 || poll_stats.invisible > 0 || atlas.total_dirty_page_count() > 0 {
-        let sync_start = Instant::now();
-        atlas.sync_to_gpu(&mut images);
-        sync_ms = sync_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-        shared_mats.clear();
-    }
-
-    let active = atlas.active();
-    perf.atlas.poll_ms = poll_ms;
-    perf.atlas.sync_ms = sync_ms;
-    perf.atlas.completed_glyphs = poll_stats.completed;
-    perf.atlas.inserted_glyphs = poll_stats.inserted;
-    perf.atlas.invisible_glyphs = poll_stats.invisible;
-    perf.atlas.pages_added = poll_stats.pages_added;
-    perf.atlas.dirty_pages = dirty_pages;
-    perf.atlas.in_flight_glyphs = active.in_flight_count();
-    perf.atlas.active_jobs = active.active_job_count();
-    perf.atlas.peak_active_jobs = active.peak_active_job_count();
-    perf.atlas.worker_threads = poll_stats.worker_threads;
-    perf.atlas.avg_raster_ms = poll_stats.avg_raster_ms;
-    perf.atlas.max_raster_ms = poll_stats.max_raster_ms;
-    perf.atlas.batch_max_active_jobs = poll_stats.max_active_jobs;
-    perf.atlas.total_glyphs = active.glyph_count();
-
-    if poll_stats.completed > 0 || sync_ms > 0.0 {
-        bevy::log::debug!(
-            "poll_atlas_glyphs: poll={poll_ms:.2}ms sync={sync_ms:.2}ms completed={} inserted={} invisible={} pages_added={} dirty_pages={} in_flight={} active_jobs={} peak_active={} workers={} avg_raster={:.2}ms max_raster={:.2}ms batch_max_active={} total_glyphs={}",
-            poll_stats.completed,
-            poll_stats.inserted,
-            poll_stats.invisible,
-            poll_stats.pages_added,
-            dirty_pages,
-            active.in_flight_count(),
-            active.active_job_count(),
-            active.peak_active_job_count(),
-            poll_stats.worker_threads,
-            poll_stats.avg_raster_ms,
-            poll_stats.max_raster_ms,
-            poll_stats.max_active_jobs,
-            active.glyph_count(),
-        );
-    }
-}
 
 /// Reconciles [`WorldText`] children for each changed [`ComputedDiegeticPanel`].
 pub(super) fn reconcile_panel_text_children(

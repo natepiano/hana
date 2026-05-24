@@ -2,12 +2,9 @@
 
 mod clip;
 mod constants;
-mod glyph_material;
-mod glyph_quad;
 mod panel_geometry;
 mod panel_rtt;
 mod sdf_material;
-mod text_backend;
 mod text_renderer;
 mod text_shaping;
 mod transparency;
@@ -26,8 +23,6 @@ pub(crate) use sdf_material::SdfPrimitiveKind;
 pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_primitive_material;
-pub use text_backend::TextRenderer;
-pub use text_backend::TextRendererPreference;
 use text_renderer::TextRenderPlugin;
 pub(crate) use text_shaping::PositionedGlyph;
 pub use transparency::StableTransparency;
@@ -40,7 +35,7 @@ pub use world_text::WorldText;
 pub use world_text::WorldTextReady;
 
 /// Umbrella render plugin — registers the three render-side sub-plugins
-/// (MSDF text, SDF panel geometry, RTT panel compositing).
+/// (slug text, SDF panel geometry, RTT panel compositing).
 pub(crate) struct RenderPlugin;
 
 impl Plugin for RenderPlugin {

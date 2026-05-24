@@ -122,7 +122,6 @@ pub struct FontRegistry {
 
 #[derive(Clone, Copy)]
 pub(crate) struct ResolvedFontData<'a> {
-    pub font_id:          FontId,
     pub font:             &'a Font,
     pub collection_index: u32,
 }
@@ -175,7 +174,6 @@ impl FontRegistry {
     pub(crate) fn resolve_font_face(&self, face: ResolvedFontFace) -> Option<ResolvedFontData<'_>> {
         let font_id = self.font_faces.get(&face.blob_id).copied()?;
         self.font(font_id).map(|font| ResolvedFontData {
-            font_id,
             font,
             collection_index: face.collection_index,
         })
@@ -187,8 +185,8 @@ impl FontRegistry {
     /// font data cannot be parsed.
     ///
     /// The font is immediately available for use in `TextConfig` and
-    /// `TextStyle` via `.with_font(id.0)`. Glyphs are rasterized
-    /// on demand into the MSDF atlas when text using this font is first
+    /// `TextStyle` via `.with_font(id.0)`. Glyph outlines are built on
+    /// demand by the slug renderer when text using this font is first
     /// rendered.
     ///
     /// # Example

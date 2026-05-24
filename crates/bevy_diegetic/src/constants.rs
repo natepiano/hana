@@ -1,8 +1,6 @@
 //! Crate-wide constants shared across multiple modules.
 
 // shader assets
-pub(crate) const EMBEDDED_GLYPH_TEXT_SHADER_PATH: &str =
-    "embedded://bevy_diegetic/shaders/glyph_text.wgsl";
 pub(crate) const EMBEDDED_SDF_PANEL_SHADER_PATH: &str =
     "embedded://bevy_diegetic/shaders/sdf_panel.wgsl";
 
