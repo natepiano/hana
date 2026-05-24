@@ -116,6 +116,22 @@ deleted in this phase.
       a hard gate on removal, not a follow-up. Do not silently fix or
       silently proceed (see Open decisions #5).
 
+**Phase 0 outcome — complete (2026-05-24). Gate cleared.** The
+suspected shadow gap was real: slug spawned a shadow-proxy mesh but had
+no main-pass discard, so the proxy painted a visible duplicate glyph in
+the color pass (doubling, blue rectangles in PunchOut cells, visible
+glyphs in the Invisible row). Surfaced to the user and resolved by
+adding an `is_shadow_proxy` uniform + main-pass discard to slug's
+material/shader, mirroring MSDF's `GlyphMaterial`; the `shadows.rs`
+matrix then matched the MSDF reference. (This fix is removed again in
+Phase 7 when the matrix collapses.) Confirmed on slug: world text,
+screen-space diegetic-panel HUD text, render modes, small-size
+crispness, and CJK glyph geometry (probe: `漢` loads/packs, no
+cubic-outline rejection). Verified by shared code path rather than fresh
+framing: world-space RTT panel text (same slug text path as the
+screen-space panel) and OIT overlap. `typography_overlay` compiles with
+the fix. The throwaway `TextRendererPreference::slug()` was reverted.
+
 ### Phase 1 — Collapse the seam (lands together with Phase 2)
 
 This phase removes the selector. It does not compile on its own: the
@@ -158,13 +174,27 @@ plugin that only Phase 2 removes, so 1 and 2 land as a single sequence
 - [ ] Delete the `renderer` field on `TextProps<C>`
       (`layout/text_props.rs`, the type behind both `LayoutTextStyle`
       and `WorldTextStyle`) plus its `with_renderer`.
+- [ ] Delete `GlyphLoadingPolicy` (`layout/text_props.rs`): the enum,
+      the `TextProps<C>` `loading_policy` field, the `loading_policy()`
+      accessor, the `with_loading_policy()` builder, its `Reflect` /
+      `PartialEq` handling, the two `WhenReady` defaults, two
+      propagations, and two destructures; plus the `lib.rs` and
+      `layout/mod.rs` re-exports. It is distance-field-only — its sole
+      readers are the two shaping arms deleted above, and slug builds
+      curve bands synchronously, so the `WhenReady` / `Progressive`
+      distinction is already a no-op under slug (text appears once the
+      font and glyphs are ready, with no per-glyph reveal window). The
+      `typography.rs` and `font_features.rs` call sites are removed in
+      Phase 5.
 - [ ] Fold `SlugTextSpikePlugin::build` into `TextPlugin::build`.
 
 Removed public APIs (for a caller-migration note): `TextRenderer`,
 `TextRendererPreference`, `WorldText::with_renderer` /
-`with_default_renderer` / `renderer` / `set_renderer`, and
-`TextProps::with_renderer`. No replacement — the renderer is
-unconditional, so callers delete these calls.
+`with_default_renderer` / `renderer` / `set_renderer`,
+`TextProps::with_renderer`, `GlyphLoadingPolicy`, and
+`TextProps::with_loading_policy` / `loading_policy`. No replacement —
+the renderer is unconditional and slug reveals text once ready, so
+callers delete these calls.
 
 ### Phase 2 — Delete the distance-field engine
 
@@ -227,27 +257,31 @@ is complete before this pure-cleanup phase.
 ### Phase 5 — Examples and benches
 
 Build-green caveat: examples are compiled by `cargo build --examples`
-and the Phase 6 suite run. `typography.rs`, `text_renderer_gpu_bench.rs`,
-and `preload_text.rs` import types deleted in Phase 2
+and the Phase 6 suite run. `typography.rs` and `text_renderer_gpu_bench.rs`
+import types deleted in Phase 2
 (`DistanceField` / `AtlasConfig` / `RasterBackend` / `RasterQuality` /
-`GlyphAtlas`); `slug_text.rs` uses `Slug*` types that go `pub(crate)`
-in Phase 4. So the edits that *remove* deleted-type usage from these
-examples must land inside the Phase 1–3 sequence (and the `Slug*`
-de-references at Phase 4), not be deferred — otherwise the examples
-break. What remains genuinely "Phase 5" is slug-specific polish and the
-preload rewrite. The rows below are the authoritative per-example
-dispositions; they are listed here for cohesion but **executed within
-the Phase 1–3 sequence** (and Phase 4 for `Slug*` de-references), not as
-a separate later pass.
+`GlyphAtlas`); `typography.rs` and `font_features.rs` also import
+`GlyphLoadingPolicy`, deleted in Phase 1; `preload_text.rs` is built on
+the deleted atlas preload API and is itself deleted in this sequence;
+`slug_text.rs` uses `Slug*` types that go `pub(crate)` in Phase 4. So the edits that *remove*
+deleted-type usage (and the deletions themselves) must land inside the
+Phase 1–3 sequence (and the `Slug*` de-references at Phase 4), not be
+deferred — otherwise the examples break. What remains genuinely
+"Phase 5" is slug-specific polish. The rows below are the authoritative
+per-example dispositions; they are listed here for cohesion but
+**executed within the Phase 1–3 sequence** (and Phase 4 for `Slug*`
+de-references), not as a separate later pass.
 
 | Target | Action |
 | --- | --- |
 | `slug_text.rs` | Rework to consume the public API (spawn `WorldText`); remove the `.with_renderer(TextRenderer::Slug)` calls and the renderer-toggle UI/state (deleted in Phase 1). **Retain the CJK demonstration** (parallel Latin + CJK render) since it backs the Phase 0 CJK check. Drop only the spike instrumentation that pokes `Slug*` internals (`log_glyph_metrics`, `log_cjk_probe`, `SlugPackedGlyph`, `build_packed_glyph`). Keep as a production text example. |
 | `world_text.rs`, `panel_rendering.rs` | Strip the renderer-choice UI/state; one renderer, no toggle. Keep. |
-| `typography.rs` | Delete the renderer-toggle entirely: the `switch_text_mode` system + its registration, `TypographyTextMode`, `toggle_backend`, `pick_raster_quality`, and the direct `DistanceField` / `RasterBackend` / `RasterQuality` / `AtlasPreference` / `TextRendererPreference` usage. Keep behind `typography_overlay`. The reusable HUD-panel layout pattern (`spawn_hud_panels`) is feature-independent and is what `preload_text` borrows. |
+| `typography.rs` | Delete the renderer-toggle entirely: the `switch_text_mode` system + its registration, `TypographyTextMode`, `toggle_backend`, `pick_raster_quality`, and the direct `DistanceField` / `RasterBackend` / `RasterQuality` / `AtlasPreference` / `TextRendererPreference` usage. Also remove the single `.with_loading_policy(GlyphLoadingPolicy::Progressive)` call and the `GlyphLoadingPolicy` import (the policy is deleted in Phase 1). Keep behind `typography_overlay`. |
+| `font_features.rs` | Remove all `GlyphLoadingPolicy` usage: the `loading_policy` field threaded through its two helper structs, the `progressive` binding, every `.with_loading_policy(...)` call, and the import. The OpenType-feature demo itself is unaffected — the policy is a no-op under slug. Keep. |
+| `shadows.rs` | Keep — uses the agnostic `GlyphRenderMode` / `GlyphShadowMode` API, renders via slug unchanged (the Phase 0 slug throwaway is reverted at the end of Phase 0). Deleted in **Phase 7** when the matrix collapses. |
 | `text_renderer_gpu_bench.rs` | Convert by reduction to slug-only: drop the msdf / sdf / mtsdf / empty modes and `AtlasConfig`. Keep as a slug regression/optimization harness (note in `slug-benchmark-procedure.md` that cross-renderer comparison is gone). |
 | `atlas_pages.rs` | Delete (visualizes atlas pages; no slug analog). |
-| `preload_text.rs` | Rewrite to a slug preload using existing public surfaces only (P1', approved): spawn the known glyph set as offscreen `WorldText` to warm the cache, read cost from the already-public `SlugBackend::last_completion()` + frame timing, and display it in a custom text panel (the `typography.rs` `spawn_hud_panels` pattern). No new public API. A formal batch-warm preload API is deferred to `slug_preload_feature.md`. |
+| `preload_text.rs` | **Delete.** Built on the distance-field atlas preload API (`GlyphAtlas::preload`) and `GlyphLoadingPolicy`, both removed in the Phase 1–2 sequence. Slug needs no preload demo: per-glyph band-building is sub-millisecond — full printable ASCII preps in ≈ 0.84 ms (after per-curve dedup + 48-band tuning), well below one frame and below frame-timing resolution. There is no warm-up cost worth showcasing and no preload API is shipped. A project with very large glyph sets that notices first-frame lag can warm glyphs with its own Bevy task / async setup — no engine API required. |
 | `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). |
 | `examples/sdf.rs` | Untouched (panel SDF). |
 
@@ -257,6 +291,61 @@ a separate later pass.
 - [ ] `cargo nextest run`
 - [ ] `cargo +nightly fmt`
 - [ ] Run the example suite; screenshot text to confirm parity.
+
+### Phase 7 — Collapse the glyph render/shadow matrix
+
+Rationale and design: `slug_fx.md` §8. With MSDF gone, slug's
+`GlyphRenderMode × GlyphShadowMode` matrix and its shadow-proxy mesh
+are the last inherited complexity. Decisions: drop mismatched-silhouette
+shadows (the sole reason the proxy exists) and `SolidQuad`; make
+shadow-only text a documented recipe; keep `PunchOut` as a fill effect.
+slug's visible mesh already casts its own matching silhouette shadow —
+its prepass discards on coverage, not alpha mode (§8.1) — so removing
+the proxy loses nothing for matching shadows. This phase is independent
+of the Phase 1–3 sequence and leaves the build green.
+
+- [ ] Delete the slug shadow-proxy material path: the `is_shadow_proxy`
+      uniform field (`slug_text_spike/material.rs` `SlugTextUniform` and
+      `shaders/slug_text.wgsl`), the `slug_text_shadow_proxy_material`
+      constructor plus the `build_slug_text_material` proxy parameter
+      (fold back to one `slug_text_material`), the main-pass
+      `is_shadow_proxy` discard in the shader, and the `mod.rs` re-export.
+- [ ] Delete the proxy spawn paths and markers: `WorldTextShadowProxy`
+      + `slug_world_text_shadow_proxy_material` + the `needs_proxy`
+      branch (`render/world_text/mesh_spawning.rs`); `DiegeticShadowProxy`
+      + `slug_panel_shadow_proxy_material` + the proxy branch
+      (`render/text_renderer/batching.rs`); and `slug_shadow_render_mode`
+      in both. The old-mesh queries that union in `WorldTextShadowProxy`
+      reduce to the visible-mesh marker only.
+- [ ] Replace the `needs_proxy` / `suppress_shadow` logic with a plain
+      cast-shadow toggle: the visible mesh is a shadow caster unless the
+      caller turns shadows off, in which case it gets `NotShadowCaster`.
+      No second mesh — the visible mesh casts its own silhouette.
+- [ ] Shrink `GlyphRenderMode` to `{ Text, PunchOut }` — drop `Invisible`
+      and `SolidQuad`. Update the compile-time discriminant assertions
+      (`layout/text_props.rs`), `SlugRenderMode` (`material.rs`), and the
+      shader's `RENDER_MODE_SOLID_QUAD` constant plus its `SolidQuad` /
+      `Invisible` branches in `render_coverage`.
+- [ ] Collapse `GlyphShadowMode` to a cast toggle (`{ None, Cast }`),
+      replacing the `None / SolidQuad / Text / PunchOut` silhouette
+      choice. Update `with_shadow_mode` and its call sites.
+- [ ] Document the shadow-only recipe — spawn a cast-on glyph with fill
+      alpha 0 (invisible in color, full silhouette in shadow) — on the
+      cast toggle and in `slug.md`, replacing the deleted `Invisible`
+      render mode (§8.3).
+- [ ] Solid-block backings: callers that used `SolidQuad` compose a
+      standard `Mesh3d` rectangle with a `StandardMaterial` (§8.2); there
+      is no slug render mode for it.
+- [ ] Delete `examples/shadows.rs` — its subject, the matrix, is gone.
+- [ ] Update any remaining `with_render_mode(Invisible | SolidQuad)` /
+      `with_shadow_mode(...)` call sites in examples and `debug/`.
+- [ ] `cargo build`, `cargo nextest run`, `cargo +nightly fmt`; rerun the
+      suite and screenshot to confirm Text and PunchOut fills, the
+      cast-shadow toggle, and the alpha-0 shadow-only recipe.
+
+Public-API note: `GlyphRenderMode` and `GlyphShadowMode` stay public
+(callers name them for fill / shadow intent) but shrink — consistent
+with decision #3, exposing only what a feature needs.
 
 ## Documentation disposition
 
@@ -290,9 +379,10 @@ leaves imports, systems, and the `GlyphMaterial` material plugin
 referencing types that only Phase 2 removes. So Phases 1, 2, and 3
 land as one sequence with no green checkpoint between them; the suite
 compiles again at the end of Phase 3. The example edits that *remove*
-deleted-type usage (`typography.rs`, `text_renderer_gpu_bench.rs`,
-`preload_text.rs`) also belong in this sequence — examples are
-compiled by `cargo build --examples`. Phase 0 (verification) and the
+deleted-type usage (`typography.rs`, `font_features.rs`,
+`text_renderer_gpu_bench.rs`) and the deletion of `preload_text.rs`
+also belong in this sequence — examples are compiled by
+`cargo build --examples`. Phase 0 (verification) and the
 slug-specific polish in Phases 4–6 each leave the build green.
 
 ## Open decisions
@@ -325,35 +415,28 @@ Surfaced by team review; outcomes recorded here as resolved.
    from `slug_shadow_render_mode` mapping `Text` to `Text` like `None`)
    blocks removal. Stop and ask the user — do not silently fix or
    silently proceed.
-6. **`preload_text` — Resolved: rewrite to a slug preload (no new API,
-   per P1').** Not deleted. Warm slug's cache by spawning the known
-   glyph set as offscreen `WorldText`, read the cost from the
-   already-public `SlugBackend::last_completion()` plus frame timing,
-   and show it in a custom text panel (the `typography.rs`
-   `spawn_hud_panels` pattern). Uses existing public surfaces only — no
-   exception to expose-nothing (decision #3). A formal public
-   batch-warm preload API is deferred to a separate follow-up feature
-   doc (`slug_preload_feature.md`).
+6. **`preload_text` — Resolved: delete; no preload demo, no preload
+   API.** Slug prep is sub-millisecond (full printable ASCII ≈ 0.84 ms
+   after per-curve dedup + 48-band tuning), so there is no warm-up cost
+   worth demonstrating, and it sits below frame-timing resolution.
+   Exposing a preload API would breach expose-nothing (decision #3) for
+   no real benefit. A project with a very large glyph set that notices
+   first-frame lag can warm glyphs with its own Bevy task / async
+   framework. The earlier rewrite-to-slug-preload plan and the deferred
+   `slug_preload_feature.md` follow-up are both dropped.
 
 ## Proposed user decisions
 
 Surfaced by review; pending sign-off.
 
 - **P1 — Preload feature: in-scope vs follow-up.** *(superseded by P1'
-  in cycle 2 — the premise that a public API is required turned out to
-  be false, so the in-scope/follow-up framing is moot.)*
-- **P1' — Preload demo needs no new public API. APPROVED.** *(severity:
-  important; source: Risk + Type System)* Cycle 2 established that
-  decision #6 (rewrite `preload_text` to a slug preload with measured
-  cost in a panel) can be done entirely with **existing public
-  surfaces**: spawn the known glyph set as offscreen `WorldText` to warm
-  slug's lazy cache, and read the cost from the already-public
-  `SlugBackend::last_completion()` (glyph count) plus frame timing. No
-  new `SlugGlyphCache` batch-warm API is needed, so decision #6 requires
-  **no exception to expose-nothing** (decision #3) — the earlier
-  "first feature-justified public addition" framing is dropped.
-  Recommendation: implement the demo with existing surfaces now; record
-  a formal public batch-warm preload API (with metrics) as a separate
-  follow-up feature doc (`slug_preload_feature.md`), decoupled from the
-  removal. The user's goal (preload + measured cost + panel) is fully
-  preserved. Confirm this revised approach.
+  in cycle 2, then dropped — see below.)*
+- **P1' — Preload demo needs no new public API.** *(dropped
+  2026-05-24)* Initially approved as a rewrite of `preload_text` to a
+  slug preload via existing surfaces. Dropped once the actual numbers
+  were checked: slug prep is sub-millisecond (full printable ASCII
+  ≈ 0.84 ms after per-curve dedup + 48-band tuning), too small to
+  demonstrate and below frame-timing resolution, so a frame-timed demo
+  would show noise. Final decision: **delete `preload_text`, ship no
+  preload API.** A project that needs warming can use its own Bevy task
+  / async setup. See Open decision #6.

@@ -30,6 +30,7 @@ pub use material::SlugTextMaterial;
 pub use material::SlugTextMaterialInput;
 pub use material::SlugTextSpikePlugin;
 pub use material::slug_text_material;
+pub use material::slug_text_shadow_proxy_material;
 pub use packing::DEFAULT_BAND_COUNT;
 pub use packing::SlugBandRecord;
 pub use packing::SlugCurveRecord;

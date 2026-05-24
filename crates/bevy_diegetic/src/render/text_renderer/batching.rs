@@ -28,6 +28,7 @@ use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
 use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelTextChild;
+use crate::slug_text_spike;
 use crate::slug_text_spike::SlugBackend;
 use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::slug_text_spike::SlugRenderMode;
@@ -35,7 +36,6 @@ use crate::slug_text_spike::SlugRunStorage;
 use crate::slug_text_spike::SlugRunStorageKey;
 use crate::slug_text_spike::SlugTextMaterial;
 use crate::slug_text_spike::SlugTextMaterialInput;
-use crate::slug_text_spike::slug_text_material as make_slug_text_material;
 use crate::text::AtlasSlot;
 use crate::text::GlyphAtlas;
 
@@ -456,7 +456,7 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
     }
 
     if needs_proxy {
-        let proxy_material = materials.add(slug_panel_material(
+        let proxy_material = materials.add(slug_panel_shadow_proxy_material(
             text_base,
             text_depth_bias - constants::LAYER_DEPTH_BIAS,
             AlphaMode::Mask(0.5),
@@ -497,17 +497,53 @@ fn slug_panel_material(
     render_mode: impl Into<SlugRenderMode>,
     storage: &SlugRunStorage,
 ) -> SlugTextMaterial {
+    slug_text_spike::slug_text_material(slug_panel_input(
+        base,
+        depth_bias,
+        alpha_mode,
+        fill_color,
+        render_mode,
+        storage,
+    ))
+}
+
+fn slug_panel_shadow_proxy_material(
+    base: &StandardMaterial,
+    depth_bias: f32,
+    alpha_mode: AlphaMode,
+    fill_color: Color,
+    render_mode: impl Into<SlugRenderMode>,
+    storage: &SlugRunStorage,
+) -> SlugTextMaterial {
+    slug_text_spike::slug_text_shadow_proxy_material(slug_panel_input(
+        base,
+        depth_bias,
+        alpha_mode,
+        fill_color,
+        render_mode,
+        storage,
+    ))
+}
+
+fn slug_panel_input(
+    base: &StandardMaterial,
+    depth_bias: f32,
+    alpha_mode: AlphaMode,
+    fill_color: Color,
+    render_mode: impl Into<SlugRenderMode>,
+    storage: &SlugRunStorage,
+) -> SlugTextMaterialInput {
     let mut base = base.clone();
     base.depth_bias = depth_bias;
     base.alpha_mode = alpha_mode;
-    make_slug_text_material(SlugTextMaterialInput {
+    SlugTextMaterialInput {
         base,
         fill_color,
         render_mode: render_mode.into(),
         curves: storage.curves.clone(),
         bands: storage.bands.clone(),
         glyphs: storage.glyphs.clone(),
-    })
+    }
 }
 
 fn spawn_slug_visible_mesh(

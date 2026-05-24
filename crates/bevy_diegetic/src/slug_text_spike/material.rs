@@ -56,9 +56,14 @@ impl Plugin for SlugTextSpikePlugin {
 #[derive(Clone, Debug, ShaderType)]
 pub struct SlugTextUniform {
     /// Linear fill color.
-    pub fill_color:  Vec4,
+    pub fill_color:      Vec4,
     /// Visible render mode for this pass.
-    pub render_mode: u32,
+    pub render_mode:     u32,
+    /// Shadow-proxy flag: `0` renders normally; `1` discards every fragment
+    /// in the main pass while still writing its coverage silhouette in the
+    /// depth/shadow prepass, so the glyph casts its silhouette shadow
+    /// without painting a second visible copy.
+    pub is_shadow_proxy: u32,
 }
 
 /// Slug material extension over `StandardMaterial`.
@@ -100,9 +105,25 @@ pub struct SlugTextMaterialInput {
     pub glyphs:      Handle<ShaderStorageBuffer>,
 }
 
-/// Creates a `SlugTextMaterial` for the isolated feasibility shader.
+/// Creates a visible `SlugTextMaterial`.
 #[must_use]
 pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
+    build_slug_text_material(input, 0)
+}
+
+/// Creates a shadow-proxy `SlugTextMaterial`: invisible in the main pass,
+/// but its coverage silhouette still writes depth in the prepass so the
+/// glyph casts a shadow without a second visible copy. The caller supplies
+/// the `AlphaMode::Mask` base so the prepass runs this fragment shader.
+#[must_use]
+pub fn slug_text_shadow_proxy_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
+    build_slug_text_material(input, 1)
+}
+
+fn build_slug_text_material(
+    input: SlugTextMaterialInput,
+    is_shadow_proxy: u32,
+) -> SlugTextMaterial {
     let SlugTextMaterialInput {
         base,
         fill_color,
@@ -116,8 +137,9 @@ pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
         base,
         extension: SlugTextExtension {
             uniforms: SlugTextUniform {
-                fill_color:  Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
+                fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
                 render_mode: u32::from(render_mode),
+                is_shadow_proxy,
             },
             curves,
             bands,

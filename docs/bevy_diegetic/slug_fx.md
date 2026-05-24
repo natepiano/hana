@@ -639,3 +639,99 @@ and the blur primitive already specified for effects 1 and 2. No
 distance field, no SDF renderer; the only addition over plain
 outline-plus-glow is the auto-contrast policy that picks the halo
 color from the background.
+
+## 8. Folding the render-mode / shadow-mode matrix into composable effects
+
+Slug inherited a `GlyphRenderMode × GlyphShadowMode` matrix from the
+MSDF path: the visible glyph is one of {Text, PunchOut, SolidQuad,
+Invisible}, the cast shadow is independently one of {None, SolidQuad,
+Text, PunchOut}, and a second "shadow proxy" mesh exists so the cast
+shadow's silhouette can differ from the visible glyph's. The proxy is
+the costly part — every combination where the shadow's silhouette
+differs from the glyph's spawns and tracks a second mesh, and it needs
+a main-pass-discard flag (`is_shadow_proxy`) so the proxy is not
+painted in the color pass.
+
+Most of this matrix falls away once two facts are taken into account,
+and the remainder reframes as ordinary composable effects. This is a
+simplification to take *after* the renderer swap lands, not a
+prerequisite of it; it is recorded here because punch-out and
+shadow-only text are themselves text effects, and they belong in the
+same composable, mix-and-match model as the effects above.
+
+### 8.1 Slug already casts its own matching shadow
+
+Slug's shadow/prepass fragment discards on geometric coverage
+(`coverage < 0.5`), independent of alpha mode — unlike MSDF, whose
+prepass discard is gated on `AlphaMode::Mask`. So a plain slug glyph,
+left as a shadow caster, writes its letter silhouette into the shadow
+map and casts a correct letter-silhouette shadow with no proxy and no
+special mode. "Text casts a text-silhouette shadow" — the common case
+— is therefore free: it is the base render with shadow casting left
+on, the same real-cast-shadow path as section 3.1, and it needs none
+of the matrix.
+
+### 8.2 Decisions: drop mismatched shadows and SolidQuad
+
+Two matrix capabilities are not wanted in hana and are dropped:
+
+- **Mismatched-silhouette shadows** — a cast shadow whose outline
+  differs from the visible glyph (Text glyph + PunchOut shadow, and
+  similar). This is the *only* capability that forces the second proxy
+  mesh. With it gone, the proxy and its `is_shadow_proxy` flag are gone
+  too: the visible mesh casts its own matching shadow per 8.1.
+- **SolidQuad** as a render or shadow mode. A solid rectangle is not a
+  glyph effect — it is an ordinary quad. If a filled block behind or
+  around text is ever wanted, compose a standard Bevy `Mesh3d`
+  rectangle with a `StandardMaterial`; it casts an ordinary rectangular
+  shadow for free. No slug render mode is needed, so the `SolidQuad`
+  value retires.
+
+### 8.3 Shadow-only text — a recipe, not a mode
+
+"Invisible glyph that still casts a shadow" stays useful (ghost text, a
+cast shadow with no visible mark), but it needs no `Invisible` render
+mode and no proxy. Because the color pass discards when `coverage ×
+fill-alpha` is ~0 while the shadow pass discards on geometric coverage
+alone, the recipe is:
+
+> Spawn the slug glyph as an ordinary shadow caster and set its fill
+> color alpha to 0.
+
+The color pass paints nothing; the shadow pass still writes the full
+letter silhouette, so the glyph is invisible yet casts. This is a
+documented composition, not a pipeline branch — the `Invisible` value
+retires with it.
+
+### 8.4 PunchOut is a fill effect
+
+PunchOut — fill the glyph's quad everywhere *except* the letter — is a
+genuine text effect, not pipeline plumbing, and it is the one matrix
+member worth keeping as a slug capability. It is `1.0 - coverage`, a
+single line in the coverage function, evaluated once per pixel at 1×.
+The compositional alternative (knock the letter out of a quad via
+stencil or destination-out blending) is *more* engine plumbing than
+the one shader line, so PunchOut stays a coverage-level fill option
+rather than a composed mesh. It belongs in the effects model as a fill
+mode alongside the normal fill, mixable with the section 1–7 effects.
+
+### 8.5 The unified model
+
+With mismatched shadows and SolidQuad dropped and shadow-only reduced
+to a recipe, the matrix collapses to: one slug fill (normal, with
+PunchOut as a fill variant), shadow casting that is simply on or off
+(the mesh casts its own matching silhouette), and alpha for the
+shadow-only trick. The `GlyphRenderMode` / `GlyphShadowMode` enums
+shrink to a fill choice plus a cast-shadow toggle, and the proxy mesh
+and `is_shadow_proxy` flag are removed.
+
+That leaves every text treatment in this document as a composable,
+opt-in-per-`WorldText` effect rather than a baked enum combination —
+the same enablement model as the legibility halo (section 7.4). Fill
+mode (normal / punch-out), cast-shadow on/off, outline, glow, drop
+shadow, emboss, rounding, distress, and halo become independent toggles
+a caller mixes as appropriate, layered on one base slug render that
+casts its own shadow. The matrix's bespoke combinations become the
+default behavior of a composable system, and the cases it cannot
+express (mismatched shadows, solid quads) are either dropped or handled
+by composing a plain mesh.

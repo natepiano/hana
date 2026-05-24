@@ -19,13 +19,13 @@ use crate::render::glyph_material::GlyphMaterialInput;
 use crate::render::glyph_material::GlyphShadowProxyMaterialInput;
 use crate::render::glyph_quad;
 use crate::render::glyph_quad::GlyphQuadData;
+use crate::slug_text_spike;
 use crate::slug_text_spike::SlugBackend;
 use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::slug_text_spike::SlugRenderMode;
 use crate::slug_text_spike::SlugRunStorageKey;
 use crate::slug_text_spike::SlugTextMaterial;
 use crate::slug_text_spike::SlugTextMaterialInput;
-use crate::slug_text_spike::slug_text_material as make_slug_text_material;
 use crate::text::GlyphAtlas;
 
 /// Marker for mesh entities spawned by the world text renderer.
@@ -247,7 +247,7 @@ pub(super) fn spawn_slug_world_text_meshes(
     }
 
     if needs_proxy {
-        let material_handle = assets.materials.add(slug_world_text_material(
+        let material_handle = assets.materials.add(slug_world_text_shadow_proxy_material(
             style,
             AlphaMode::Mask(0.5),
             slug_shadow_render_mode(style.shadow_mode()),
@@ -278,20 +278,56 @@ fn slug_world_text_material(
     bands: Handle<ShaderStorageBuffer>,
     glyphs: Handle<ShaderStorageBuffer>,
 ) -> SlugTextMaterial {
+    slug_text_spike::slug_text_material(slug_world_text_input(
+        style,
+        alpha_mode,
+        render_mode,
+        curves,
+        bands,
+        glyphs,
+    ))
+}
+
+fn slug_world_text_shadow_proxy_material(
+    style: &WorldTextStyle,
+    alpha_mode: AlphaMode,
+    render_mode: SlugRenderMode,
+    curves: Handle<ShaderStorageBuffer>,
+    bands: Handle<ShaderStorageBuffer>,
+    glyphs: Handle<ShaderStorageBuffer>,
+) -> SlugTextMaterial {
+    slug_text_spike::slug_text_shadow_proxy_material(slug_world_text_input(
+        style,
+        alpha_mode,
+        render_mode,
+        curves,
+        bands,
+        glyphs,
+    ))
+}
+
+fn slug_world_text_input(
+    style: &WorldTextStyle,
+    alpha_mode: AlphaMode,
+    render_mode: SlugRenderMode,
+    curves: Handle<ShaderStorageBuffer>,
+    bands: Handle<ShaderStorageBuffer>,
+    glyphs: Handle<ShaderStorageBuffer>,
+) -> SlugTextMaterialInput {
     let mut base = StandardMaterial {
         depth_bias: -constants::LAYER_DEPTH_BIAS,
         alpha_mode,
         ..Default::default()
     };
     apply_sidedness(&mut base, style.sidedness());
-    make_slug_text_material(SlugTextMaterialInput {
+    SlugTextMaterialInput {
         base,
         fill_color: style.color(),
         render_mode,
         curves,
         bands,
         glyphs,
-    })
+    }
 }
 
 const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
