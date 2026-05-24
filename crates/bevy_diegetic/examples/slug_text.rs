@@ -24,7 +24,6 @@ use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::build_packed_glyph;
 use bevy_diegetic::load_glyph;
-use bevy_diegetic::slug_text_material;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::ControlActivation;

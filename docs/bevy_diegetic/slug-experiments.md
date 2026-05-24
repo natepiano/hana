@@ -1531,6 +1531,137 @@ Trace evidence under
 `target/xctrace/baseline-trig-2026-05-23/` and
 `target/xctrace/variant-prop-a-v2-2026-05-23/`.
 
+## Coarse per-glyph SDF prefilter (rejected at bench scale, 2026-05-23)
+
+**Hypothesis.** Proposal B executed. A small per-glyph signed-distance
+grid sampled once at the top of the fragment shader should let
+far-interior / far-exterior fragments short-circuit the curve band
+loops, dropping fragment cost `1.5-2.0 ms`.
+
+**Implementation.** `16x16` signed-distance grid per unique glyph,
+generated on CPU in `build_packed_glyph` (exact point-to-quadratic
+distance via the same cubic solver as the shader, signed by non-zero
+winding). Combined per-run into one `array<f32>` storage buffer
+(binding 104); per-glyph offset + resolution stored in a new
+`SlugGlyphRecord.sdf` (`UVec4`). Shader: bilinear sample in
+`slug_coverage`; if `abs(sdf) > edge_width + cell_diagonal` return
+inside/outside by sign and skip both band loops. Points outside the
+glyph bounds use the exact box distance as a conservative lower
+bound. The `+ cell_diagonal` margin makes the skip provably safe for
+a 1-Lipschitz field.
+
+**Setup.** 96-band Slug, 720-instance `text_renderer_gpu_bench`, AC
+power, window pinned to the primary Retina display
+(`WindowPosition::Centered(MonitorSelection::Primary)`; drawable
+`3200x1800`). Long-warmup protocol (`warmup_frames=600
+sample_frames=240`, 25s xctrace `time-limit`) to settle GPU clock
+state. Back-to-back A/B in one thermal window: 6 traces of a no-SDF
+build (prefilter bypassed in `slug_coverage`, perf-identical to the
+band-loop baseline) immediately followed by 6 traces of the SDF
+build.
+
+**Visual.** Lowercase-g inside-curve view, prefilter-on vs
+prefilter-off, same session: `64 / 7,271,424` pixels differ
+(`0.0009 %`), all isolated cusp specks — far below the accepted
+Proposal A gate. Output is correct.
+
+**Performance (long-warmup, back-to-back, n=6 each).**
+
+| Metric | no-SDF median (range) | SDF prefilter median (range) | Delta |
+| --- | ---: | ---: | ---: |
+| Vertex + fragment per frame | `2.94 ms` (2.79-3.11) | `3.11 ms` (2.94-3.23) | `+0.17 ms` (+5.7 %) |
+| Fragment per frame          | `2.88 ms` (2.73-3.05) | `3.05 ms` (2.89-3.17) | `+0.17 ms` (+5.8 %) |
+
+Per-trace V+F (warm set):
+- no-SDF: `2.7862, 2.8153, 2.8926, 2.9834, 2.9958, 3.1135`
+- SDF: `2.9429, 2.9974, 3.0845, 3.1264, 3.1506, 3.2267`
+
+The SDF distribution is shifted up; the prefilter adds cost rather
+than removing it.
+
+**Result.** Rejected at bench scale. The predicted `1.5-2.0 ms` win
+is absent; the per-fragment bilinear grid sample is a net
+`+0.17 ms` (`~6 %`) regression. An earlier same-day session read it
+as net-neutral (`3.00` vs `2.99`); the back-to-back A/B resolves it
+to a small regression.
+
+**Lesson.** Two structural reasons the prefilter cannot win here.
+First, the expensive cubic is *already* culled per-curve by
+`curve_bounds_distance_sq(point, curve) <= edge_width_sq`, so far
+fragments never paid for it — the SDF only removes cheap band
+iteration and adds a grid sample. Second, the skip threshold scales
+with `edge_width`: at small on-screen glyph sizes one pixel spans
+many design units, so `edge_width` (and the margin) is large and the
+prefilter skips almost nothing. The win, if any, lives only at large
+on-screen glyph sizes, which this bench does not exercise.
+
+**Implication for future experiments.** The prefilter's only
+theoretical win is at large on-screen glyph sizes (small
+`edge_width` leaves real interior to skip), but that is not a
+workload that occurs at scale: real scenes are either many *small*
+glyphs (body text — margin too large, skips nothing) or a *few*
+large glyphs (display/panel — most off-screen culled, total fragment
+cost already low). So the SDF prefilter has no realistic win case
+and the large-glyph regime is not worth testing. Band-count
+re-tuning (now that per-curve dedup removed duplicates) remains the
+open forward direction.
+
+**Files.** `crates/bevy_diegetic/src/slug_text_spike/sdf.rs`,
+`packing.rs`, `run_render.rs`, `backend.rs`, `material.rs`,
+`render/world_text/mesh_spawning.rs`, `render/text_renderer/batching.rs`,
+`shaders/slug_text.wgsl`. Trace evidence under
+`/private/tmp/slug-traces-2026-05-23/` (kept outside `target/` so it
+survives `cargo clean`).
+
+## Band count 96 -> 48 (accepted, 2026-05-24)
+
+**Hypothesis.** Pre-dedup, 96 bands beat 192 (more bands meant more
+duplicated curves and worse GPU cost). After per-curve dedup removed
+the horizontal/vertical duplication, the optimal band count may have
+shifted, since GPU per-fragment cost no longer scales with
+band-driven duplication.
+
+**Setup.** 720-instance `text_renderer_gpu_bench`, AC, window pinned
+to the primary Retina display (`3200x1800`), long-warmup
+(`warmup_frames=600 sample_frames=240`, 25s). 6 GPU traces per band
+count; prep via criterion `renderer_prep/jbm_ascii_128_slug`. Band
+count is `DEFAULT_BAND_COUNT`, which drives both shaping paths and
+the prep bench.
+
+**Visual.** Band 48 vs band 96 g-zoom: `235 / 7,271,424` pixels
+differ (`0.0032 %`) — sub-visual edge pixels from float-ordering and
+band-overlap differences. Output preserved.
+
+**Performance.**
+
+| Bands | Prep (criterion) | GPU V+F (comparable-regime median) |
+| --- | ---: | ---: |
+| 16  | `416 us` | un-vsync-locked regime — indeterminate |
+| 48  | `516 us` | `~2.87 ms` |
+| 64  | —        | `2.90 ms` |
+| 96  | `~690 us` | `2.87 ms` |
+| 128 | `847 us` | `2.89 ms` |
+
+GPU V+F is flat across 48-128 (`0.03 ms` spread = noise). Prep
+scales monotonically with band count.
+
+**Result.** Accepted. `DEFAULT_BAND_COUNT` `96 -> 48`. No GPU change
+(flat), prep `-25 %` (`690 -> 516 us`). Prep is the per-unique-glyph
+cost paid on layout/resize, so cheaper prep helps resize
+responsiveness.
+
+**Lesson.** Per-curve dedup decoupled GPU cost from band count — the
+dedup already minimized per-fragment curve count, so band
+granularity (48-128) no longer moves the GPU pass. The remaining
+band-count effect is prep cost and storage, both favoring fewer
+bands. 48 was chosen over lower (16/32) because GPU below 48 could
+not be measured cleanly (those batches fell into the fast
+un-vsync-locked clock regime) and very low band counts raise
+per-band curve count for complex / CJK glyphs.
+
+**Files.** `crates/bevy_diegetic/src/slug_text_spike/packing.rs`.
+Trace evidence under `/private/tmp/slug-bands-2026-05-23/`.
+
 ## Proposal A — Per-curve dedup between horizontal/vertical bands
 
 **Hypothesis.** A curve overlapping both a horizontal band `H` and a
