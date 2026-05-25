@@ -72,7 +72,6 @@ pub(super) fn shape_panel_text_children(
     if to_process.is_empty() {
         perf.panel_text.shape_ms = 0.0;
         perf.panel_text.parley_ms = 0.0;
-        perf.panel_text.atlas_lookup_ms = 0.0;
         perf.panel_text.shaped_panels = 0;
         perf.panel_text.queued_glyphs = 0;
         perf.panel_text.pending_glyphs = 0;
@@ -124,7 +123,6 @@ pub(super) fn shape_panel_text_children(
 
     perf.panel_text.shape_ms = shape_stage_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.panel_text.parley_ms = aggregate.shape_ms;
-    perf.panel_text.atlas_lookup_ms = aggregate.atlas_ms;
     perf.panel_text.shaped_panels = shaped_panels.len();
     perf.panel_text.queued_glyphs = aggregate.queued_glyphs;
     perf.panel_text.pending_glyphs = aggregate.pending_glyphs;

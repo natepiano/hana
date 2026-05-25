@@ -134,7 +134,6 @@ pub use layout::TextWrap;
 pub use layout::Unit;
 pub use layout::WorldTextStyle;
 pub use panel::AnyUnit;
-pub use panel::AtlasPerfStats;
 pub use panel::CompatibleUnits;
 pub use panel::ComputedDiegeticPanel;
 pub use panel::CoordinateSpace;

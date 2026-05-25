@@ -36,10 +36,7 @@ bevy_kana = { workspace = true }
 bitflags = { workspace = true }
 bytemuck = { workspace = true }
 etagere = { workspace = true }
-fdsm = { workspace = true }
-fdsm-ttf-parser = { workspace = true }
 image = { workspace = true }
-nalgebra = { workspace = true }
 parley = { workspace = true }
 rayon = { workspace = true }
 smallvec = { workspace = true }
@@ -55,8 +52,6 @@ clay-layout         = { workspace = true }
 criterion           = { workspace = true }
 fairy_dust          = { path = "../fairy_dust" }
 image               = { workspace = true, features = ["png"] }
-msdfgen             = { workspace = true }
-ttf-parser_018      = { workspace = true }
 
 [[example]]
 name = "hue_offset"

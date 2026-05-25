@@ -514,6 +514,97 @@ is complete before this pure-cleanup phase.
       `AtlasPerfStats` has zero consumers — a public-API removal consistent with
       decision #3 (expose nothing).
 
+**Phase 3 outcome — complete (2026-05-24). Verified green.** All four checklist
+items are implemented. The workspace and crate manifests dropped `nalgebra`,
+`fdsm`, `fdsm-ttf-parser`, `msdfgen`, and `ttf-parser_018` (the workspace
+`nalgebra` line and its `bevy_diegetic` use both gone). The leftover DF perf
+surface is removed: the `AtlasPerfStats` struct, the `DiegeticPerfStats.atlas`
+field, the 15 `DIAG_ATLAS_*` `DiagnosticPath` constants, their 15 register-loop
+entries, the 15 `add_measurement` calls, and both `pub use … AtlasPerfStats`
+re-exports (`lib.rs`, `panel/mod.rs`). `cargo build -p bevy_diegetic --lib`
+finishes with **zero warnings**, `cargo clippy --lib` is clean,
+`cargo nextest run --lib` passes **158/158** (1 skipped), and the full workspace
+`cargo build` (libs + `fairy_dust` bin) passes. Examples and benches stay red
+until Phase 5. Not committed.
+
+### Retrospective
+
+**What worked:**
+- The dependency drops were a clean no-op on the green lib surface — `nalgebra`
+  / `msdfgen` / `ttf-parser_018` had zero source users, so removal changed
+  nothing but the manifests + `Cargo.lock`.
+- The P1 perf removal was fully mechanical: the `.atlas` field's only readers
+  were the 15 `add_measurement` calls deleted alongside it; no external consumer.
+
+**What deviated from the plan:**
+- The plan's "deps are unimported by then" was slightly inaccurate. `fdsm` /
+  `fdsm-ttf-parser` are still referenced by `benches/glyph_rasterization.rs`
+  (a `use fdsm_ttf_parser::…`, deleted in Phase 5) and a `typography.rs` doc
+  comment. That bench was already red (it imports Phase-2-deleted `DistanceField`
+  / `GlyphAtlas` / `GlyphKey`), so dropping the deps just adds one more error to
+  an already-broken target. Plain `cargo build` (lib) does not compile benches,
+  so the green surface is unaffected — consistent with the build-green ordering
+  (benches red until Phase 5).
+- P1 forced a doc-link fix not in the checklist: `PanelTextPerfStats::pending_glyphs`
+  documented `[`AtlasPerfStats::in_flight_glyphs`]` and
+  `[`AtlasPerfStats::peak_active_jobs`]` intra-doc links, which break when the
+  struct is deleted. Reworded to drop the dangling references.
+
+**Surprises:**
+- `PanelTextPerfStats` still carries MSDF-era semantics that survived Phases 1–2.
+  The `atlas_lookup_ms` field + its `DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS` path
+  (`bevy_diegetic/panel_text/atlas_lookup_ms`) name an "atlas lookup" stage that
+  no longer exists under slug, and the struct docs reference the deleted
+  `PanelTextQuads` and `build_panel_batched_meshes`. The fields are still
+  *written* (slug's `text_renderer/shaping.rs` sets `atlas_lookup_ms` /
+  `queued_glyphs` / `pending_glyphs` from the shaping aggregate), so this is live
+  data with stale naming + docs, not dead code. Out of P1 scope — flagged for the
+  Phase 3 review.
+
+**Implications for remaining phases:**
+- The stale `PanelTextPerfStats` naming/docs were flagged for the review;
+  **resolved there — the `atlas_lookup_ms` field + its diagnostic were deleted
+  outright** (see Phase 3 Review).
+- `Cargo.lock` changed (deps pruned); Phase 6's `cargo build` sees the same
+  pruned graph.
+
+### Phase 3 Review
+
+Architect re-evaluation of Phases 4–7 + Documentation disposition against the
+shipped Phase 3. 10 findings: 8 folded into the plan, 1 confirmed clean, 1
+surfaced to the user and resolved by deleting the field.
+
+- **Stale `PanelTextPerfStats` surface (findings 1 + 9 — user-resolved, landed
+  now).** The kept `PanelTextPerfStats` carried MSDF-era naming after Phase 3:
+  the `atlas_lookup_ms` field + the `DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS` diagnostic
+  (`bevy_diegetic/panel_text/atlas_lookup_ms`), still written by slug as
+  glyph-prep time. **Resolved: deleted the field** (not renamed) — the field, its
+  doc, the constant, its register entry + `add_measurement` call, and the two
+  writes in `text_renderer/shaping.rs`. Lib green, 158/158. The shared
+  `TextBuildStats.atlas_ms` stays (the world-text path still reads it at
+  `world_text/rendering.rs:304`). (The other stale `PanelTextPerfStats` docs that
+  name the deleted `PanelTextQuads` / `build_panel_batched_meshes` were left
+  untouched — out of the "just the field" scope.)
+- **Phase 4** — corrected the `Slug*` `lib.rs` re-export scope to **32 `pub use`
+  lines, `lib.rs` 174–206** (was "~31, lines ~180–211"); recorded that
+  `slug_text_shadow_proxy_material` is re-exported only from
+  `slug_text_spike/mod.rs` (not `lib.rs`) and `register_slug_text_shader` is
+  already `pub(crate)`; named `slug_text_spike/constants.rs` (→ `text/slug/`) as
+  the home of `SLUG_TEXT_SHADER_PATH`.
+- **Phase 5** — added a manifest-listing note (`text_renderer_gpu_bench`,
+  `world_text`, `sdf` are auto-discovered with no `[[example]]` row, so only the
+  manifest-listed deletions need entry removal); flagged that the
+  `glyph_rasterization` bench also imports `Slug*` types Phase 4 makes
+  `pub(crate)`; flagged the stale `fdsm` doc comment at `typography.rs:819`.
+- **Phase 7** — pinned the single `debug/` shadow-mode edit:
+  `label_shadow_mode()` `GlyphShadowMode::Text → Cast` at
+  `debug/typography_overlay/mod.rs:108` (~11 `with_shadow_mode` sites); confirmed
+  no `Invisible` / `SolidQuad` render-mode usage exists in `debug/`.
+- **Reviewed clean (finding 10):** Phase 4 module-move targets, Phase 7
+  shadow-proxy targets (`is_shadow_proxy`, `slug_text_shadow_proxy_material`, the
+  dual proxy spawn paths), and the `glyph_rasterization` un-gated + `ci.yml:202`
+  facts all still match the plan — no re-scope.
+
 ### Phase 4 — Move slug into `text/`
 
 - [ ] Relocate `slug_text_spike/*.rs` to `text/slug/`.
@@ -525,17 +616,22 @@ is complete before this pure-cleanup phase.
       relocated path, so: inline the `embedded_asset!(app, …)` call into
       `TextPlugin::build` next to the `SlugBackend` / `MaterialPlugin` setup,
       delete `register_slug_text_shader` and its `pub(crate)` re-export, and
-      update `SLUG_TEXT_SHADER_PATH` to the new embedded path. (Helper added
-      in Phase 1 because the macro resolves paths relative to the calling
-      file and the shader had not moved yet.)
+      update `SLUG_TEXT_SHADER_PATH` (defined in `slug_text_spike/constants.rs`,
+      which itself moves to `text/slug/constants.rs` in this phase) to the new
+      embedded path. (Helper added in Phase 1 because the macro resolves paths
+      relative to the calling file and the shader had not moved yet.) *(Phase 3
+      review confirmed `register_slug_text_shader` is already `pub(crate)`.)*
 - [ ] Make every `Slug*` type `pub(crate)` and drop all `Slug*`
       re-exports from `lib.rs` (expose-nothing — see Open decisions #3).
       The public text API is the existing agnostic surface only.
-      Scope note (Phase 1 review; count corrected Phase 2 review to **~31
-      `pub use` lines**, also covering `SlugBackendCompleted`,
-      `SlugRunStorageProfile`, `slug_text_material`, `load_glyph_by_id_from_face`):
+      Scope note (Phase 1 review; count corrected Phase 3 review to **32
+      `pub use` lines, `lib.rs` lines 174–206**, also covering
+      `SlugBackendCompleted`, `SlugRunStorageProfile`, `slug_text_material`,
+      `load_glyph_by_id_from_face`; note `slug_text_shadow_proxy_material` is
+      re-exported only from `slug_text_spike/mod.rs`, NOT from `lib.rs` — only
+      `slug_text_material` is, at `lib.rs:206`):
       this is the `Slug*` block in `lib.rs`
-      (lines ~180–211: `SlugBandRecord`, `SlugBounds`, `SlugBuiltTextRun`,
+      (`SlugBandRecord`, `SlugBounds`, `SlugBuiltTextRun`,
       `SlugCurveRecord`, `SlugFontKey`, `SlugGlyph`, `SlugGlyphCache`,
       `SlugGlyphInstance`, `SlugGlyphKey`, `SlugGlyphRecord`, `SlugOutlineError`,
       `SlugPackedGlyph`, `SlugRunRenderData`/`Error`/`Profile`, `SlugTextRequest`,
@@ -575,17 +671,27 @@ per-example dispositions; they are listed here for cohesion but
 **executed within the Phase 1–3 sequence** (and Phase 4 for `Slug*`
 de-references), not as a separate later pass.
 
+**Manifest-listing note (Phase 3 review):** not every example has a `[[example]]`
+row in `bevy_diegetic/Cargo.toml` — `text_renderer_gpu_bench`, `world_text`, and
+`sdf` are auto-discovered. The "delete the `.rs` and its manifest entry" rule
+below applies only to the manifest-listed deletions (`atlas_pages`,
+`preload_text`, and the `glyph_rasterization` bench); converting an
+auto-discovered example (e.g. `text_renderer_gpu_bench`) needs no manifest edit.
+The inverse risk: an auto-discovered example importing a deleted type breaks
+`cargo build --examples` with no manifest row to gate it — so every such file
+must be edited, not just the listed ones.
+
 | Target | Action |
 | --- | --- |
 | `slug_text.rs` | Rework to consume the public API (spawn `WorldText`); remove the `.with_renderer(TextRenderer::Slug)` calls and the renderer-toggle UI/state (deleted in Phase 1). **Retain the CJK demonstration** (parallel Latin + CJK render) since it backs the Phase 0 CJK check. Drop only the spike instrumentation that pokes `Slug*` internals (`log_glyph_metrics`, `log_cjk_probe`, `SlugPackedGlyph`, `build_packed_glyph`). Keep as a production text example. |
 | `world_text.rs`, `panel_rendering.rs` | Strip the renderer-choice UI/state; one renderer, no toggle. Keep. |
-| `typography.rs` | Delete the renderer-toggle entirely: the `switch_text_mode` system + its registration, `TypographyTextMode`, `toggle_backend`, `pick_raster_quality`, and the direct `DistanceField` / `RasterBackend` / `RasterQuality` / `AtlasPreference` / `TextRendererPreference` usage. Also remove the single `.with_loading_policy(GlyphLoadingPolicy::Progressive)` call and the `GlyphLoadingPolicy` import (the policy is deleted in Phase 1). Keep behind `typography_overlay`. |
+| `typography.rs` | Delete the renderer-toggle entirely: the `switch_text_mode` system + its registration, `TypographyTextMode`, `toggle_backend`, `pick_raster_quality`, and the direct `DistanceField` / `RasterBackend` / `RasterQuality` / `AtlasPreference` / `TextRendererPreference` usage. Also remove the single `.with_loading_policy(GlyphLoadingPolicy::Progressive)` call and the `GlyphLoadingPolicy` import (the policy is deleted in Phase 1). **Phase 3 review:** also drop the stale doc comment at `typography.rs:819` ("`G` flips the rasterizer backend between CPU (`fdsm`) and GPU") — its subject is the toggle being deleted, and `fdsm` was removed in Phase 3. Keep behind `typography_overlay`. |
 | `font_features.rs` | Remove all `GlyphLoadingPolicy` usage: the `loading_policy` field threaded through its two helper structs, the `progressive` binding, every `.with_loading_policy(...)` call, and the import. The OpenType-feature demo itself is unaffected — the policy is a no-op under slug. Keep. |
 | `shadows.rs` | Keep — uses the agnostic `GlyphRenderMode` / `GlyphShadowMode` API, renders via slug unchanged (the Phase 0 slug throwaway is reverted at the end of Phase 0). Deleted in **Phase 7** when the matrix collapses. |
 | `text_renderer_gpu_bench.rs` | Convert by reduction to slug-only: drop the msdf / sdf / mtsdf / empty modes and `AtlasConfig`. Keep as a slug regression/optimization harness (note in `slug-benchmark-procedure.md` that cross-renderer comparison is gone). |
 | `atlas_pages.rs` | Delete (visualizes atlas pages; no slug analog). **Also remove its `[[example]] name = "atlas_pages"` entry from `bevy_diegetic/Cargo.toml`** — deleting the `.rs` while leaving the manifest entry makes `cargo build` fail with "can't find target". |
 | `preload_text.rs` | **Delete.** Built on the distance-field atlas preload API (`GlyphAtlas::preload`) and `GlyphLoadingPolicy`, both removed in the Phase 1–2 sequence. Slug needs no preload demo: per-glyph band-building is sub-millisecond — full printable ASCII preps in ≈ 0.84 ms (after per-curve dedup + 48-band tuning), well below one frame and below frame-timing resolution. There is no warm-up cost worth showcasing and no preload API is shipped. A project with very large glyph sets that notices first-frame lag can warm glyphs with its own Bevy task / async setup — no engine API required. **Also remove its `[[example]] name = "preload_text"` entry from `bevy_diegetic/Cargo.toml`.** |
-| `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). **Also remove its `[[bench]] name = "glyph_rasterization"` entry from `bevy_diegetic/Cargo.toml`.** This bench has no `required-features`, so `cargo bench --benches` (CI, `ci.yml:202`) compiles it and it imports deleted `DistanceField` / `GlyphAtlas` / `GlyphKey` — it is **red from the end of Phase 2 until this deletion lands**, so the source deletion, the manifest-entry removal, and the CI `cargo bench` edit must land together. |
+| `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). **Also remove its `[[bench]] name = "glyph_rasterization"` entry from `bevy_diegetic/Cargo.toml`.** This bench has no `required-features`, so `cargo bench --benches` (CI, `ci.yml:202`) compiles it and it imports deleted `DistanceField` / `GlyphAtlas` / `GlyphKey` — it is **red from the end of Phase 2 until this deletion lands**, so the source deletion, the manifest-entry removal, and the CI `cargo bench` edit must land together. **Phase 3 review:** this bench *also* imports `Slug*` types (`SlugBackend`, `SlugFontKey`, `SlugTextRequest`, `build_slug_run_render_data`, `DEFAULT_BAND_COUNT`) that Phase 4 makes `pub(crate)`; since the bench is already red, Phase 4's cut only adds errors to a dead target — but its deletion must not be deferred past Phase 4 for anyone running `cargo bench`. |
 | `examples/sdf.rs` | Untouched (panel SDF). |
 
 ### Phase 6 — Verify
@@ -643,7 +749,13 @@ of the Phase 1–3 sequence and leaves the build green.
       review) reword the `GlyphShadowMode` enum doc in `layout/text_props.rs`
       — it currently describes spawning "a separate shadow proxy mesh with
       `AlphaMode::Mask` … contributes to the shadow prepass," which this phase
-      makes false.
+      makes false. **Phase 3 review:** the only `debug/` call site is
+      `label_shadow_mode()` returning `GlyphShadowMode::Text`
+      (`debug/typography_overlay/mod.rs:108`), consumed by ~11
+      `with_shadow_mode(...)` sites in `glyph.rs` / `labels.rs`; the single edit
+      is `Text → Cast` there. No `Invisible` / `SolidQuad` render-mode usage
+      exists in `debug/`, so `typography_overlay` needs only the shadow-mode
+      change for this phase.
 - [ ] Document the shadow-only recipe — spawn a cast-on glyph with fill
       alpha 0 (invisible in color, full silhouette in shadow) — on the
       cast toggle and in `slug.md`, replacing the deleted `Invisible`

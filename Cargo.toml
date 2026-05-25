@@ -21,10 +21,7 @@ bevy_kana = "0.0.6"
 bitflags = "2"
 bytemuck = { version = "1", features = ["derive"] }
 etagere = "0.3.0"
-fdsm = "0.8"
-fdsm-ttf-parser = "0.2"
 image = { version = "0.25", default-features = false }
-nalgebra = "0.34"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
 rayon = "1"
 smallvec = "1"
@@ -38,10 +35,6 @@ bevy_window_manager = "0.20.2"
 clay-layout         = { path = "vendor/clay-layout" }
 criterion           = { version = "0.8.2", features = ["html_reports"] }
 float-cmp           = "0.10.0"
-msdfgen             = "0.2"
-# msdfgen 0.2 implements FontExt on ttf-parser 0.18's Face, not 0.25.
-# Renamed import so parity tests can use both versions side by side.
-ttf-parser_018 = { package = "ttf-parser", version = "0.18" }
 
 [workspace.lints.clippy]
 # Our strict lints

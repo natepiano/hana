@@ -24,7 +24,6 @@ pub use diegetic_panel::DiegeticPanelCommands;
 pub(crate) use diegetic_panel::PanelFontUnit;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
-pub use perf::AtlasPerfStats;
 use perf::DiagnosticsPlugin;
 pub use perf::DiegeticPerfStats;
 pub use perf::PanelTextPerfStats;

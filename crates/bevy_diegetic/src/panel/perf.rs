@@ -6,24 +6,8 @@ use bevy::diagnostic::RegisterDiagnostic;
 use bevy::prelude::*;
 use bevy_kana::ToF64;
 
-use super::constants::DIAG_ATLAS_ACTIVE_JOBS;
-use super::constants::DIAG_ATLAS_AVG_RASTER_MS;
-use super::constants::DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS;
-use super::constants::DIAG_ATLAS_COMPLETED_GLYPHS;
-use super::constants::DIAG_ATLAS_DIRTY_PAGES;
-use super::constants::DIAG_ATLAS_IN_FLIGHT_GLYPHS;
-use super::constants::DIAG_ATLAS_INSERTED_GLYPHS;
-use super::constants::DIAG_ATLAS_INVISIBLE_GLYPHS;
-use super::constants::DIAG_ATLAS_MAX_RASTER_MS;
-use super::constants::DIAG_ATLAS_PAGES_ADDED;
-use super::constants::DIAG_ATLAS_PEAK_ACTIVE_JOBS;
-use super::constants::DIAG_ATLAS_POLL_MS;
-use super::constants::DIAG_ATLAS_SYNC_MS;
-use super::constants::DIAG_ATLAS_TOTAL_GLYPHS;
-use super::constants::DIAG_ATLAS_WORKER_THREADS;
 use super::constants::DIAG_LAYOUT_COMPUTE_MS;
 use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
-use super::constants::DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS;
 use super::constants::DIAG_PANEL_TEXT_MESH_BUILD_MS;
 use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
 use super::constants::DIAG_PANEL_TEXT_PENDING_GLYPHS;
@@ -52,8 +36,6 @@ pub struct DiegeticPerfStats {
     pub compute_panels: usize,
     /// Stages 2 & 3 — panel-text shape + mesh-build timings and counts.
     pub panel_text:     PanelTextPerfStats,
-    /// Async MSDF atlas polling timings and glyph-job counts.
-    pub atlas:          AtlasPerfStats,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
@@ -79,69 +61,28 @@ pub struct PanelTextPerfStats {
     /// final value is only correct because mesh build is scheduled
     /// `.after(shape_panel_text_children)`; reordering those systems would
     /// leave `total_ms` stale by one frame.
-    pub total_ms:        f32,
+    pub total_ms:       f32,
     /// Stage 2 — wall time of `shape_panel_text_children` this frame.
     /// Covers string → glyph-quad shaping for every panel-text entity that
     /// changed or is waiting on async glyph rasterization.
-    pub shape_ms:        f32,
+    pub shape_ms:       f32,
     /// Inside [`Self::shape_ms`] — time spent in parley text shaping,
     /// summed across entities. If this dominates, the cost is content-side
     /// (many strings, complex scripts, heavy font features).
-    pub parley_ms:       f32,
-    /// Inside [`Self::shape_ms`] — time spent in MSDF atlas lookups and
-    /// async glyph queueing, summed across entities. If this dominates,
-    /// the cost is atlas-side (cache misses, new glyph dispatch).
-    pub atlas_lookup_ms: f32,
+    pub parley_ms:      f32,
     /// Stage 3 — wall time of `build_panel_batched_meshes` this frame.
     /// Covers batching `PanelTextQuads` into per-page mesh entities and
     /// despawning stale meshes.
-    pub mesh_build_ms:   f32,
+    pub mesh_build_ms:  f32,
     /// Number of panels whose text was re-shaped this frame.
-    pub shaped_panels:   usize,
+    pub shaped_panels:  usize,
     /// Glyphs newly queued for async rasterization during the shape pass.
     /// Non-zero in steady-state usually indicates new characters appearing
     /// (font change, new content).
-    pub queued_glyphs:   usize,
-    /// Glyphs still awaiting async rasterization at the end of the shape
-    /// pass. Non-zero in steady-state means raster workers are saturated —
-    /// cross-reference [`AtlasPerfStats::in_flight_glyphs`] and
-    /// [`AtlasPerfStats::peak_active_jobs`].
-    pub pending_glyphs:  usize,
-}
-
-/// Atlas-poll timings and glyph-job counts.
-#[derive(Clone, Debug, Default, Reflect)]
-pub struct AtlasPerfStats {
-    /// Time spent draining async atlas results in the most recent atlas poll.
-    pub poll_ms:               f32,
-    /// Time spent syncing dirty atlas pages to GPU images in the most recent atlas poll.
-    pub sync_ms:               f32,
-    /// Number of completed async glyph jobs drained by the most recent atlas poll.
-    pub completed_glyphs:      usize,
-    /// Number of visible glyphs inserted into atlas pages by the most recent atlas poll.
-    pub inserted_glyphs:       usize,
-    /// Number of invisible glyph entries cached by the most recent atlas poll.
-    pub invisible_glyphs:      usize,
-    /// Number of atlas pages added by the most recent atlas poll.
-    pub pages_added:           usize,
-    /// Number of dirty atlas pages observed before the most recent GPU sync.
-    pub dirty_pages:           usize,
-    /// Number of glyph raster jobs still in flight after the most recent atlas poll.
-    pub in_flight_glyphs:      usize,
-    /// Number of glyph raster jobs actively executing at the end of the most recent atlas poll.
-    pub active_jobs:           usize,
-    /// Peak concurrently executing glyph raster jobs observed so far.
-    pub peak_active_jobs:      usize,
-    /// Number of distinct worker threads that completed jobs in the most recent atlas poll.
-    pub worker_threads:        usize,
-    /// Average worker-side glyph raster duration for the most recent drained batch.
-    pub avg_raster_ms:         f32,
-    /// Maximum worker-side glyph raster duration for the most recent drained batch.
-    pub max_raster_ms:         f32,
-    /// Highest active-job count reported by any job in the most recent drained batch.
-    pub batch_max_active_jobs: usize,
-    /// Total number of glyphs currently cached in the atlas.
-    pub total_glyphs:          usize,
+    pub queued_glyphs:  usize,
+    /// Glyphs not yet ready at the end of the shaping pass. Non-zero in
+    /// steady-state means glyph readiness is lagging behind new content.
+    pub pending_glyphs: usize,
 }
 
 #[derive(Resource, Default)]
@@ -165,26 +106,10 @@ impl Plugin for DiagnosticsPlugin {
             Diagnostic::new(DIAG_PANEL_TEXT_TOTAL_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_MESH_BUILD_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPED_PANELS),
             Diagnostic::new(DIAG_PANEL_TEXT_QUEUED_GLYPHS),
             Diagnostic::new(DIAG_PANEL_TEXT_PENDING_GLYPHS),
-            Diagnostic::new(DIAG_ATLAS_POLL_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_ATLAS_SYNC_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_ATLAS_COMPLETED_GLYPHS),
-            Diagnostic::new(DIAG_ATLAS_INSERTED_GLYPHS),
-            Diagnostic::new(DIAG_ATLAS_INVISIBLE_GLYPHS),
-            Diagnostic::new(DIAG_ATLAS_PAGES_ADDED),
-            Diagnostic::new(DIAG_ATLAS_DIRTY_PAGES),
-            Diagnostic::new(DIAG_ATLAS_IN_FLIGHT_GLYPHS),
-            Diagnostic::new(DIAG_ATLAS_ACTIVE_JOBS),
-            Diagnostic::new(DIAG_ATLAS_PEAK_ACTIVE_JOBS),
-            Diagnostic::new(DIAG_ATLAS_WORKER_THREADS),
-            Diagnostic::new(DIAG_ATLAS_AVG_RASTER_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_ATLAS_MAX_RASTER_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS),
-            Diagnostic::new(DIAG_ATLAS_TOTAL_GLYPHS),
         ] {
             app.register_diagnostic(diagnostic);
         }
@@ -205,9 +130,6 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_PARLEY_MS, || {
         f64::from(perf.panel_text.parley_ms)
     });
-    diagnostics.add_measurement(&DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS, || {
-        f64::from(perf.panel_text.atlas_lookup_ms)
-    });
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_MESH_BUILD_MS, || {
         f64::from(perf.panel_text.mesh_build_ms)
     });
@@ -219,40 +141,5 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     });
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_PENDING_GLYPHS, || {
         perf.panel_text.pending_glyphs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_POLL_MS, || f64::from(perf.atlas.poll_ms));
-    diagnostics.add_measurement(&DIAG_ATLAS_SYNC_MS, || f64::from(perf.atlas.sync_ms));
-    diagnostics.add_measurement(&DIAG_ATLAS_COMPLETED_GLYPHS, || {
-        perf.atlas.completed_glyphs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_INSERTED_GLYPHS, || {
-        perf.atlas.inserted_glyphs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_INVISIBLE_GLYPHS, || {
-        perf.atlas.invisible_glyphs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_PAGES_ADDED, || perf.atlas.pages_added.to_f64());
-    diagnostics.add_measurement(&DIAG_ATLAS_DIRTY_PAGES, || perf.atlas.dirty_pages.to_f64());
-    diagnostics.add_measurement(&DIAG_ATLAS_IN_FLIGHT_GLYPHS, || {
-        perf.atlas.in_flight_glyphs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_ACTIVE_JOBS, || perf.atlas.active_jobs.to_f64());
-    diagnostics.add_measurement(&DIAG_ATLAS_PEAK_ACTIVE_JOBS, || {
-        perf.atlas.peak_active_jobs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_WORKER_THREADS, || {
-        perf.atlas.worker_threads.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_AVG_RASTER_MS, || {
-        f64::from(perf.atlas.avg_raster_ms)
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_MAX_RASTER_MS, || {
-        f64::from(perf.atlas.max_raster_ms)
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_BATCH_MAX_ACTIVE_JOBS, || {
-        perf.atlas.batch_max_active_jobs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_ATLAS_TOTAL_GLYPHS, || {
-        perf.atlas.total_glyphs.to_f64()
     });
 }
