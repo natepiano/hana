@@ -382,10 +382,15 @@ fn try_apply_restore(
             return RestoreStatus::Waiting;
         },
         MonitorScaleStrategy::LowerToHigher => {
+            // Position still needs ratio compensation: on a low→high cross-scale
+            // move, `set_outer_position` is applied at the starting monitor's scale,
+            // so the move doubles it. Size must NOT be compensated: as of bevy 0.19,
+            // `request_inner_size` resolves at the target monitor's scale, so the
+            // full physical size lands correctly (compensating it would halve it).
             apply_window_geometry(
                 window,
                 target_position.compensated_position(),
-                target_position.compensated_size(),
+                target_position.physical_size,
                 RESTORE_STRATEGY_LOWER_TO_HIGHER,
                 Some(target_position.ratio()),
                 target_position.monitor_index,
