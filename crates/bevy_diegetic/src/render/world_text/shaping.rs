@@ -13,10 +13,10 @@ use crate::render::text_shaping;
 use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
+use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
-use crate::text::slug::DEFAULT_BAND_COUNT;
-use crate::text::slug::SlugBackend;
-use crate::text::slug::SlugPreparedTextRun;
+use crate::text::SlugBackend;
+use crate::text::SlugPreparedTextRun;
 
 /// Result of building Slug run data for a [`WorldText`](super::WorldText) entity.
 pub(super) struct ShapedSlugWorldText {

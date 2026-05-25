@@ -25,7 +25,7 @@ use crate::render::PositionedGlyph;
 
 /// Result of preparing one Slug text run.
 #[derive(Clone, Debug)]
-pub struct SlugPreparedTextRun {
+pub(crate) struct SlugPreparedTextRun {
     /// Prepared text run.
     pub run:         SlugBuiltTextRun,
     /// Backend-owned storage key for this run.
@@ -34,11 +34,11 @@ pub struct SlugPreparedTextRun {
 
 /// Backend key for one prepared run's GPU storage handles.
 #[derive(Clone, Copy, Component, Debug, Eq, Hash, PartialEq)]
-pub struct SlugRunStorageKey(u64);
+pub(crate) struct SlugRunStorageKey(u64);
 
 /// Backend-owned GPU handles for one prepared Slug run.
 #[derive(Clone, Debug)]
-pub struct SlugRunStorage {
+pub(crate) struct SlugRunStorage {
     /// One quad per glyph instance.
     pub mesh:   Handle<Mesh>,
     /// Band-packed quadratic curve records.
@@ -51,7 +51,7 @@ pub struct SlugRunStorage {
 
 /// Slug backend resource: owns the glyph cache and prepared-run GPU storage.
 #[derive(Debug, Default, Resource)]
-pub struct SlugBackend {
+pub(crate) struct SlugBackend {
     glyph_cache:        SlugGlyphCache,
     run_storage:        HashMap<SlugRunStorageKey, SlugRunStorage>,
     next_storage_key:   u64,
@@ -60,7 +60,7 @@ pub struct SlugBackend {
 
 impl SlugBackend {
     /// Prepares one run from already-positioned production glyphs.
-    pub(crate) fn prepare_positioned_run(
+    pub fn prepare_positioned_run(
         &mut self,
         glyphs: &[PositionedGlyph<'_>],
         anchor: Vec2,
@@ -79,7 +79,7 @@ impl SlugBackend {
 
     /// Prepares one run from already-positioned production glyphs with
     /// caller-provided X/Y placement scale.
-    pub(crate) fn prepare_positioned_run_with_scale(
+    pub fn prepare_positioned_run_with_scale(
         &mut self,
         glyphs: &[PositionedGlyph<'_>],
         anchor: Vec2,
@@ -191,8 +191,8 @@ const POSITIONED_GLYPH_DIAGNOSTIC_CHAR: char = '\u{FFFD}';
 mod tests {
     use bevy::prelude::Assets;
 
-    use super::super::test_support::prepare_fixture_run;
     use super::*;
+    use crate::text::slug::test_support;
 
     const FONT_DATA: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
     const CRIMSON_TEXT_DATA: &[u8] =
@@ -275,18 +275,20 @@ mod tests {
 
         for (font_data, font_key) in latin_fonts {
             let mut backend = SlugBackend::default();
-            let prepared = prepare_fixture_run(&mut backend, font_data, font_key, "Typography")
-                .expect("Latin font fixture should prepare");
+            let prepared =
+                test_support::prepare_fixture_run(&mut backend, font_data, font_key, "Typography")
+                    .expect("Latin font fixture should prepare");
             assert_eq!(prepared.run.run.glyphs().len(), 10);
         }
 
         let mut backend = SlugBackend::default();
-        let prepared = prepare_fixture_run(&mut backend, NOTO_CJK_DATA, 106, "漢")
+        let prepared = test_support::prepare_fixture_run(&mut backend, NOTO_CJK_DATA, 106, "漢")
             .expect("CFF cubic font fixture should prepare through quadratic conversion");
         assert_eq!(prepared.run.run.glyphs().len(), 1);
     }
 
     fn prepare(backend: &mut SlugBackend, text: &str) -> SlugPreparedTextRun {
-        prepare_fixture_run(backend, FONT_DATA, 11, text).expect("fixture text should prepare")
+        test_support::prepare_fixture_run(backend, FONT_DATA, 11, text)
+            .expect("fixture text should prepare")
     }
 }

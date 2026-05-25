@@ -192,17 +192,18 @@ Populate:
 The benchmark example uses `WinitSettings::continuous()` so frame pacing
 is less dependent on whether the window is focused.
 
-### 6. Prep-Time Benchmark
+### 6. Prep Time
 
-Run the `renderer_prep` Criterion group for the same implementation:
-
-```bash
-cargo bench -p bevy_diegetic --bench glyph_rasterization renderer_prep
-```
-
-Use the `jbm_ascii_128_slug` result for the table's `Prep time` row
-unless the experiment explicitly changes the canonical prep case. Record
-the exact case name if a different prep case is used.
+Prep cost is no longer tracked by a Criterion bench: the `glyph_rasterization`
+bench and the prep API it called (`build_slug_run_render_data` non-clip plus
+`SlugBackend::glyph_cache()`) were both removed during the slug migration. The
+last recorded figure is full printable ASCII ≈ 0.84 ms (after per-curve dedup
+and 48-band tuning) — below one frame and below frame-timing resolution, so
+there is no warm-up cost worth a per-variant column. Leave the table's
+`Prep time` row at that recorded figure unless a change is expected to move
+prep cost, in which case rebuild a micro-benchmark against
+`SlugBackend::prepare_positioned_run_with_scale` + `ensure_run_storage` and
+record the case name.
 
 ### 7. Populate The Table
 
@@ -220,12 +221,6 @@ the exact case name if a different prep case is used.
 - All columns must come from the **same scene** (currently the
   720-instance `text_renderer_gpu_bench` Slug run). Variants measured
   in a different scene cannot be added to this table.
-- Spike-only changes (anything that lives only in
-  `crates/bevy_diegetic/src/slug_text_spike` and is not wired into the
-  production text renderer used by `text_renderer_gpu_bench`) cannot
-  be compared here until the spike change is wired into the
-  benchmark's render path. Record such pre-integration runs separately
-  in `slug-experiments.md` and clearly mark them as scene-limited.
 
 ## Verdict
 

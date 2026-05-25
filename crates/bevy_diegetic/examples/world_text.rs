@@ -9,7 +9,6 @@
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCamInputMode;
@@ -127,7 +126,6 @@ fn main() {
             |e| e.axis == Vec3::Z,
         )
         .with_camera_control_panel()
-        .insert_resource(TextRendererPreference::slug())
         .init_resource::<AnchorRotation>()
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_anchor_demo)

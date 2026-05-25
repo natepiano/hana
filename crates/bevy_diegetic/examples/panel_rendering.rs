@@ -27,7 +27,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::LagrangePlugin;
@@ -159,7 +158,6 @@ fn main() {
             update_hud,
         ),
     );
-    app.insert_resource(TextRendererPreference::slug());
     app.run();
 }
 

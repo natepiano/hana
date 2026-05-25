@@ -11,8 +11,12 @@ Current shader-performance experiments use three checks:
 - Visual parity: compare screenshots with ImageMagick `compare -metric AE`.
 - Runtime cost: run `scripts/xctrace_text_renderer.sh` and parse Metal
   GPU interval exports for the `text_renderer_gpu_bench` process.
-- CPU prep cost: run the `renderer_prep` Criterion group in
-  `benches/glyph_rasterization.rs`.
+- CPU prep cost: no standing bench. The `glyph_rasterization` bench and
+  the prep API it called were removed during the slug migration; the last
+  recorded figure is full printable ASCII ≈ 0.84 ms (2026-05-24, after
+  per-curve dedup + 48-band tuning, JetBrains Mono at 128 px). Rebuild a
+  micro-bench against `SlugBackend::prepare_positioned_run_with_scale` +
+  `ensure_run_storage` only if a change is expected to move prep cost.
 
 ### Canonical Benchmark Format
 

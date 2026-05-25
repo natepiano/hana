@@ -26,7 +26,7 @@ use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::text::FontRegistry;
-use crate::text::slug::SlugPreparedTextRun;
+use crate::text::SlugPreparedTextRun;
 
 type ChangedWorldTextQuery<'w, 's> = Query<
     'w,

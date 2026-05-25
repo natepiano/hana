@@ -1,14 +1,11 @@
-//! Runtime render benchmark for the text renderer backends.
+//! Runtime render benchmark for the slug text renderer.
 //!
-//! This is a Bevy render-loop benchmark, not a Criterion CPU benchmark.
-//! Run one mode per process so the renderer cache and atlas state are not
-//! contaminated by a previous mode:
+//! This is a Bevy render-loop benchmark, not a Criterion CPU benchmark. It is
+//! a slug regression/optimization harness: `slug` renders a grid of world
+//! text, `empty` renders the same scene with no text as a baseline.
 //!
 //! ```bash
 //! cargo run -p bevy_diegetic --release --example text_renderer_gpu_bench -- --mode slug
-//! cargo run -p bevy_diegetic --release --example text_renderer_gpu_bench -- --mode msdf
-//! cargo run -p bevy_diegetic --release --example text_renderer_gpu_bench -- --mode sdf
-//! cargo run -p bevy_diegetic --release --example text_renderer_gpu_bench -- --mode mtsdf
 //! cargo run -p bevy_diegetic --release --example text_renderer_gpu_bench -- --mode empty
 //! ```
 //!
@@ -30,15 +27,8 @@ use bevy::window::PresentMode;
 use bevy::window::WindowPosition;
 use bevy::window::WindowResolution;
 use bevy::winit::WinitSettings;
-use bevy_diegetic::AtlasConfig;
-use bevy_diegetic::AtlasPreference;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::DistanceField;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::RasterBackend;
-use bevy_diegetic::RasterQuality;
-use bevy_diegetic::TextRenderer;
-use bevy_diegetic::TextRendererPreference;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
@@ -59,9 +49,6 @@ const WINDOW_WIDTH: u32 = 1600;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BenchMode {
     Empty,
-    Msdf,
-    Mtsdf,
-    Sdf,
     Slug,
 }
 
@@ -69,35 +56,14 @@ impl BenchMode {
     fn parse(value: &str) -> Option<Self> {
         match value {
             "empty" => Some(Self::Empty),
-            "msdf" => Some(Self::Msdf),
-            "mtsdf" => Some(Self::Mtsdf),
-            "sdf" => Some(Self::Sdf),
             "slug" => Some(Self::Slug),
             _ => None,
-        }
-    }
-
-    const fn text_renderer(self) -> TextRenderer {
-        match self {
-            Self::Slug => TextRenderer::Slug,
-            Self::Empty | Self::Msdf | Self::Mtsdf | Self::Sdf => TextRenderer::DistanceField,
-        }
-    }
-
-    const fn distance_field(self) -> DistanceField {
-        match self {
-            Self::Sdf => DistanceField::Sdf,
-            Self::Empty | Self::Msdf | Self::Slug => DistanceField::Msdf,
-            Self::Mtsdf => DistanceField::Mtsdf,
         }
     }
 
     const fn label(self) -> &'static str {
         match self {
             Self::Empty => "empty",
-            Self::Msdf => "msdf",
-            Self::Mtsdf => "mtsdf",
-            Self::Sdf => "sdf",
             Self::Slug => "slug",
         }
     }
@@ -125,9 +91,7 @@ impl BenchConfig {
                 "--mode" => {
                     let value = required_arg(&mut args, "--mode");
                     config.mode = BenchMode::parse(&value).unwrap_or_else(|| {
-                        eprintln!(
-                            "unsupported --mode '{value}'; use empty, slug, sdf, msdf, or mtsdf"
-                        );
+                        eprintln!("unsupported --mode '{value}'; use empty or slug");
                         process::exit(2);
                     });
                 },
@@ -223,22 +187,9 @@ impl RunningStats {
 fn main() {
     let config = BenchConfig::from_args();
     let mode = config.mode;
-    let distance_field = mode.distance_field();
 
     App::new()
         .insert_resource(config)
-        .insert_resource(
-            AtlasConfig::new()
-                .with_distance_field(distance_field)
-                .with_quality(RasterQuality::Large)
-                .with_backend(RasterBackend::Gpu),
-        )
-        .insert_resource(AtlasPreference {
-            distance_field,
-            quality: RasterQuality::Large,
-            backend: RasterBackend::Gpu,
-        })
-        .insert_resource(TextRendererPreference::new(mode.text_renderer()))
         .insert_resource(WinitSettings::continuous())
         .init_resource::<BenchState>()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -278,7 +229,7 @@ fn setup(mut commands: Commands, config: Res<BenchConfig>) {
         let column = index % GRID_COLUMNS;
         let row = index / GRID_COLUMNS;
         commands.spawn((
-            WorldText::new(BENCH_TEXT).with_renderer(config.mode.text_renderer()),
+            WorldText::new(BENCH_TEXT),
             WorldTextStyle::new(TEXT_SIZE)
                 .with_color(Color::WHITE)
                 .with_shadow_mode(GlyphShadowMode::None),
@@ -397,7 +348,7 @@ fn parse_usize(value: String, name: &str) -> usize {
 
 fn print_help() {
     eprintln!(
-        "text_renderer_gpu_bench --mode <empty|slug|sdf|msdf|mtsdf> \
+        "text_renderer_gpu_bench --mode <empty|slug> \
         [--instances N] [--warmup-frames N] [--sample-frames N]"
     );
 }

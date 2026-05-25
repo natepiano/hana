@@ -15,8 +15,8 @@ usage() {
     cat <<'USAGE'
 Usage:
   scripts/xctrace_text_renderer.sh build
-  scripts/xctrace_text_renderer.sh record <empty|slug|sdf|msdf|mtsdf> [time-limit] [instances]
-  scripts/xctrace_text_renderer.sh export <empty|slug|sdf|msdf|mtsdf>
+  scripts/xctrace_text_renderer.sh record <empty|slug> [time-limit] [instances]
+  scripts/xctrace_text_renderer.sh export <empty|slug>
   scripts/xctrace_text_renderer.sh record-all [time-limit] [instances]
   scripts/xctrace_text_renderer.sh export-all
 
@@ -28,7 +28,7 @@ USAGE
 
 require_mode() {
     case "${1:-}" in
-        empty | slug | sdf | msdf | mtsdf) ;;
+        empty | slug) ;;
         *)
             usage
             exit 2
@@ -122,13 +122,13 @@ export_mode() {
 record_all() {
     local time_limit="${1:-15s}"
     local instances="${2:-720}"
-    for mode in empty slug sdf msdf mtsdf; do
+    for mode in empty slug; do
         record_mode "${mode}" "${time_limit}" "${instances}"
     done
 }
 
 export_all() {
-    for mode in empty slug sdf msdf mtsdf; do
+    for mode in empty slug; do
         export_mode "${mode}"
     done
 }

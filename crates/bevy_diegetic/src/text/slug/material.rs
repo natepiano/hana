@@ -17,7 +17,7 @@ use super::constants::SLUG_TEXT_SHADER_PATH;
 /// Visible render mode for the Slug shader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u32)]
-pub enum SlugRenderMode {
+pub(crate) enum SlugRenderMode {
     /// No visible pass. The caller skips spawning visible geometry.
     Invisible = 0,
     /// Normal Slug coverage fill.
@@ -34,7 +34,7 @@ impl From<SlugRenderMode> for u32 {
 }
 
 /// Material used by the Slug text renderer.
-pub type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextExtension>;
+pub(crate) type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextExtension>;
 
 /// Uniforms consumed by the Slug text shader.
 #[derive(Clone, Debug, ShaderType)]
@@ -74,7 +74,7 @@ impl MaterialExtension for SlugTextExtension {
 }
 
 /// Inputs for one Slug text material instance.
-pub struct SlugTextMaterialInput {
+pub(crate) struct SlugTextMaterialInput {
     /// Base material settings.
     pub base:        StandardMaterial,
     /// Fill color.
@@ -91,7 +91,7 @@ pub struct SlugTextMaterialInput {
 
 /// Creates a visible `SlugTextMaterial`.
 #[must_use]
-pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
+pub(crate) fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
     build_slug_text_material(input, 0)
 }
 
@@ -100,7 +100,7 @@ pub fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
 /// glyph casts a shadow without a second visible copy. The caller supplies
 /// the `AlphaMode::Mask` base so the prepass runs this fragment shader.
 #[must_use]
-pub fn slug_text_shadow_proxy_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
+pub(crate) fn slug_text_shadow_proxy_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
     build_slug_text_material(input, 1)
 }
 

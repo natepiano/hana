@@ -16,7 +16,7 @@ mod font;
 mod font_loader;
 mod font_registry;
 mod measurer;
-pub(crate) mod slug;
+mod slug;
 
 use bevy::asset::AssetLoadFailedEvent;
 use bevy::asset::embedded_asset;
@@ -37,10 +37,18 @@ pub use font_registry::FontSource;
 pub(crate) use font_registry::ResolvedFontData;
 pub use measurer::DiegeticTextMeasurer;
 pub use measurer::create_parley_measurer;
+pub(crate) use slug::DEFAULT_BAND_COUNT;
+pub(crate) use slug::SlugBackend;
+pub(crate) use slug::SlugPreparedTextRun;
+pub(crate) use slug::SlugRenderMode;
+pub(crate) use slug::SlugRunStorage;
+pub(crate) use slug::SlugRunStorageKey;
+pub(crate) use slug::SlugTextMaterial;
+pub(crate) use slug::SlugTextMaterialInput;
+pub(crate) use slug::slug_text_material;
+pub(crate) use slug::slug_text_shadow_proxy_material;
 
 use self::font_loader::FontLoader;
-use self::slug::SlugBackend;
-use self::slug::SlugTextMaterial;
 
 pub(crate) struct TextPlugin;
 

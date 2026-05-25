@@ -813,6 +813,126 @@ must be edited, not just the listed ones.
 | `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). **Also remove its `[[bench]] name = "glyph_rasterization"` entry from `bevy_diegetic/Cargo.toml`.** This bench has no `required-features`, so `cargo bench --benches` (CI, `ci.yml:202`) compiles it and it imports deleted `DistanceField` / `GlyphAtlas` / `GlyphKey` — it is **red from the end of Phase 2 until this deletion lands**, so the source deletion, the manifest-entry removal, and the CI `cargo bench` edit must land together. **Phase 3 review:** this bench *also* imports `Slug*` types (`SlugBackend`, `SlugFontKey`, `SlugTextRequest`, `build_slug_run_render_data`, `DEFAULT_BAND_COUNT`) that Phase 4 makes `pub(crate)`; since the bench is already red, Phase 4's cut only adds errors to a dead target — but its deletion must not be deferred past Phase 4 for anyone running `cargo bench`. **Phase 4 review:** the bench also calls `backend.glyph_cache()` and the non-clip `build_slug_run_render_data` — both deleted in Phase 4 — so it is irrecoverably red; deletion is the only path. |
 | `examples/sdf.rs` | Untouched (panel SDF). |
 
+**Phase 5 outcome — complete (2026-05-24). Verified green.** Every table row plus
+the coupled non-`docs/` artifacts is executed. One-line strips: `world_text.rs`,
+`panel_rendering.rs` (dropped the `TextRendererPreference` import + `slug()` insert).
+`font_features.rs`: removed all `GlyphLoadingPolicy` usage (import, the `progressive`
+binding, the `loading_policy` param threaded through `build_feature_grid` /
+`build_feature_column`, and five `.with_loading_policy(...)` calls). `typography.rs`:
+deleted the renderer-toggle (the `TypographyTextMode` enum, `switch_text_mode` /
+`toggle_backend` / `pick_raster_quality` / `refresh_quality_panel`, the M/S/X/L/G
+chips, the `AtlasPreference` / `RasterQuality` / `TextRendererPreference` inserts) **and
+the whole MSDF quality panel** (`QualityPanel`, `build_quality_panel` /
+`build_quality_keys_column` / `build_quality_labels_column` / `quality_label`,
+`QUALITY_KEYS`, the two `QUALITY_PANEL_*` constants) — all of it named the deleted
+`RasterQuality` / `AtlasPreference`; kept behind `typography_overlay`, overlay + font
+switch + word cycle intact. `slug_text.rs`: near-total rewrite to a production
+`WorldText` example — Latin headline + a small line (small-size crispness) + a CJK row
+spawned from an `on_font_registered` observer once `Noto Sans CJK SC` resolves (no
+`SlugBackend` poking, no probes). `text_renderer_gpu_bench.rs`: collapsed
+`BenchMode { Empty, Msdf, Mtsdf, Sdf, Slug }` → `{ Empty, Slug }`, dropped
+`text_renderer()` / `distance_field()` and the `AtlasConfig` / `AtlasPreference` /
+`TextRendererPreference` setup; `empty` survives as the no-text baseline.
+`atlas_pages.rs`, `preload_text.rs`, `benches/glyph_rasterization.rs` deleted with
+their three `Cargo.toml` manifest entries. `shadows.rs` / `examples/sdf.rs` untouched.
+CI: `ci.yml:202` runs `cargo bench --benches` (a glob, no named target) — deleting the
+bench source + manifest entry is sufficient, **no CI edit needed**. Scripts:
+`xctrace_text_renderer.sh` mode list reduced to `empty`/`slug`;
+`parse_gpu_intervals.py` filters on the kept `text_renderer_gpu_bench` process name, so
+it needed no change. `cargo build --workspace`, `cargo build --examples --benches
+--features typography_overlay,bench_support`, `cargo clippy --all-targets` (clean),
+`cargo nextest run --lib` **158/158** (1 skipped), `cargo +nightly fmt` all green. Not
+committed.
+
+### Retrospective
+
+**What worked:**
+- The grep for deleted-type references pinned the surface to exactly the nine table
+  rows up front; each file was then a mechanical strip or delete with no surprises.
+- The `text_renderer_gpu_bench` collapse kept the `Empty` baseline, so the harness
+  still measures slug glyph cost vs. an empty scene — the cross-renderer comparison was
+  the only thing lost, matching `slug-benchmark-procedure.md`'s scope.
+
+**What deviated from the plan:**
+- `typography.rs` was larger than "delete the renderer toggle": the **entire MSDF
+  quality panel** (`build_quality_panel` + `build_quality_keys_column` +
+  `build_quality_labels_column` + `quality_label` + `QUALITY_KEYS` + `QualityPanel` +
+  two constants) had to go too, because every one named the deleted `RasterQuality` /
+  `AtlasPreference`. Removing the second HUD panel also turned the fonts panel's last
+  `unlit.clone()` into a `redundant_clone` (clippy nursery) — fixed by moving `unlit`.
+- The CI `cargo bench` line needed **no edit** — it is a `--benches` glob, not a named
+  target, so the source + manifest deletion fully removes `glyph_rasterization` from CI.
+  The plan's "the CI `cargo bench` edit must land together" framing assumed a named
+  reference that does not exist.
+
+**Surprises:**
+- Three latent clippy lints lived in `src/text/slug/run_render.rs` **test** code from
+  Phase 4 (`redundant_closure_for_method_calls` ×2, `manual_midpoint`). Phase 4 verified
+  with `cargo clippy --lib`, which does **not** compile `#[cfg(test)]` code, so they
+  were never checked; `cargo nextest run` compiled them fine (rustc does not enforce
+  pedantic). Surfaced here by `cargo clippy --all-targets` and fixed in place — a clean
+  tree now needs `--all-targets`, not `--lib`, for clippy.
+- `slug.md` does **not** reference the deleted standalone-shaping APIs
+  (`SlugTextRequest` / `prepare_text_run` / `build_slug_text_run` / `load_glyph` / the
+  dropped `SlugOutlineError` variants) — a crate-wide grep found zero hits. The Phase 4
+  review's suspicion ("a design doc this long almost certainly documents them") was
+  wrong; `slug.md`'s only staleness is the "experimental alternative" framing.
+
+**Implications for remaining phases:**
+- **Documentation disposition is now the largest unexecuted block and has no owning
+  phase.** Phase 5 executed only the doc items coupled to its own deletions (the two
+  stale `glyph_rasterization` bench references in `slug-benchmark-procedure.md` /
+  `slug-experiments.md`, plus the obsolete `slug_text_spike` spike-only rule). Still
+  unexecuted across the whole migration: **delete `gpu_rasterizer.md`** (1539 lines,
+  documents only the removed engine — dead since Phase 2), the **README MSDF
+  anti-aliasing section rewrite** (Phase 2 review flagged ~lines 13–116), and the
+  **`slug.md` status reword**. None of Phases 0–5 executed any `docs/` deletion or
+  rewrite — every review only *refined the disposition*. Phase 6 is "Verify" and Phase 7
+  is the matrix collapse; neither currently owns this doc backlog.
+- Phase 6's `cargo clippy` gate must be `--all-targets` (or `--all-targets --features
+  typography_overlay,bench_support`), not `--lib`, or it will miss test/example/bench
+  clippy debt like the three lints found here.
+- Phase 7 deletes `examples/shadows.rs`; Phase 5 confirmed it compiles clean on slug
+  today, so the only Phase-7 risk for it remains the enum-variant removal timing already
+  noted.
+
+### Phase 5 Review
+
+Architect re-evaluation of Phases 6–7 + Documentation disposition against shipped
+Phase 5. 10 findings; 9 folded into the plan, 1 surfaced to the user (approved).
+
+- **Phase 6** gained an explicit `cargo clippy --all-targets --features
+  typography_overlay,bench_support` gate — Phase 4's `clippy --lib` skipped test/
+  example/bench code, hiding the three `run_render.rs` test-code lints Phase 5 fixed;
+  and its final step was re-scoped from "screenshot to confirm parity" to a per-example
+  smoke check (no DF path left to A/B against).
+- **Phase 7 — `examples/sdf.rs:529`** added to the `with_shadow_mode` migration list:
+  it calls `.with_shadow_mode(GlyphShadowMode::Text)` and is otherwise "untouched," so
+  it breaks when the `Text` variant is removed (only the one text call site moves; the
+  panel-SDF body stays out of scope).
+- **Phase 7 — `GlyphShadowMode` default** called out: the enum's `#[default]` is `Text`
+  (`text_props.rs:141`), so the `{ None, Cast }` collapse must put `#[default]` on `Cast`
+  or all shadow-mode-unset text (most of `typography.rs` / `slug_text.rs` / `sdf.rs`)
+  silently stops casting.
+- **Phase 7 line-number corrections:** the `GlyphRenderMode` discriminant assertions are
+  at `text_props.rs` ~838–841 (not the Phase-2 checklist's "~901–904"); the `material.rs`
+  doc ranges are ~17–30 / ~41–51 (not ~20–31 / ~43–51). The WGSL coverage-discard
+  evidence (`slug_text.wgsl` ~348 prepass, ~366 main-pass) was cited so the proxy's
+  redundancy can be verified before deletion. Remaining Phase-7 targets (the proxy spawn
+  paths, `From<GlyphRenderMode>`, helpers, the `typography_overlay` `Text→Cast` edit) all
+  confirmed live post-Phase-4-move.
+- **`slug.md` API-audit clause struck:** the Phase 4 review assumed `slug.md` documents
+  the deleted standalone-shaping API; a crate-wide grep found zero references, so the
+  file's only work is the status reword.
+- **`slug-experiments.md` / `slug-benchmark-procedure.md` / `xctrace_text_renderer.sh` /
+  `parse_gpu_intervals.py` / `ci.yml`** marked done-or-no-change-needed (executed in
+  Phase 5).
+- **New Phase 8 — Documentation (user-approved):** the Documentation disposition
+  (`gpu_rasterizer.md` deletion, README MSDF-AA rewrite, `slug.md` status reword) had no
+  owning phase — flagged since Phase 2 but never executed. Added as a dedicated final
+  doc-only phase after Phase 7, with the `slug.md` reword allowed to fold into Phase 7's
+  existing `slug.md` edits.
+
 ### Phase 6 — Verify
 
 - [ ] `cargo build`
@@ -823,8 +943,18 @@ must be edited, not just the listed ones.
       Phase 2 deleted the atlas/rasterizer modules and their ~76 tests), plus
       whatever example/bench targets compile after Phase 5. Do not treat the
       234 figure from the Phase 1 notes as the target.
+- [ ] `cargo clippy --all-targets --features typography_overlay,bench_support`
+      (Phase 5 review) — **`--all-targets`, not `--lib`**. Phase 4 verified with
+      `cargo clippy --lib`, which does not compile `#[cfg(test)]` / example / bench
+      code, so it missed three pedantic lints that lived in `run_render.rs` test code
+      (caught + fixed in Phase 5 only because that pass ran `--all-targets`). The lib
+      build and `cargo nextest` do not enforce pedantic, so clippy is the only gate
+      that sees this class of debt.
 - [ ] `cargo +nightly fmt`
-- [ ] Run the example suite; screenshot text to confirm parity.
+- [ ] Run the example suite; screenshot each example to confirm it renders correctly
+      (Phase 5 review) — a per-example smoke check, **not** an MSDF parity comparison.
+      Phases 1–3 deleted the distance-field path, so there is no second renderer left
+      to A/B against; the only reference is "does slug render this example correctly."
 
 ### Phase 7 — Collapse the glyph render/shadow matrix
 
@@ -836,7 +966,13 @@ shadow-only text a documented recipe; keep `PunchOut` as a fill effect.
 slug's visible mesh already casts its own matching silhouette shadow —
 its prepass discards on coverage, not alpha mode (§8.1) — so removing
 the proxy loses nothing for matching shadows. This phase is independent
-of the Phase 1–3 sequence and leaves the build green.
+of the Phase 1–3 sequence and leaves the build green. **Phase 5 review —
+evidence:** the prepass `fragment` in `text/slug/shaders/slug_text.wgsl`
+discards where `render_coverage(in.uv, glyph) < 0.5` (≈line 348, under
+`#ifdef PREPASS_PIPELINE`); the main-pass `is_shadow_proxy` discard is at
+≈line 366. Confirm the coverage-discard still drives the prepass before
+deleting the proxy — it is the reason the visible mesh casts a matching
+silhouette without a second mesh.
 
 - [ ] Delete the slug shadow-proxy material path: the `is_shadow_proxy`
       uniform field (`text/slug/material.rs` `SlugTextUniform` and
@@ -847,9 +983,10 @@ of the Phase 1–3 sequence and leaves the build green.
       shader, and the **`pub(crate)` re-export at `text/slug/mod.rs:26`** (Phase 4
       removed all `lib.rs` slug re-exports, so this is the only surfacing point).
       **Phase 4 review:** also reword the slug-module doc comments that describe
-      the deleted behavior — the `is_shadow_proxy` uniform doc (`material.rs` ~43–51)
-      and the `SlugRenderMode` variant docs (`material.rs` ~20–31), since
-      `Invisible`/`SolidQuad`/`is_shadow_proxy` are being deleted.
+      the deleted behavior — the `is_shadow_proxy` uniform doc (`material.rs` ~41–51)
+      and the `SlugRenderMode` variant docs (`material.rs` ~17–30), since
+      `Invisible`/`SolidQuad`/`is_shadow_proxy` are being deleted. *(Phase 5 review
+      corrected these line ranges from the Phase 4 review's ~43–51 / ~20–31.)*
 - [ ] Delete the proxy spawn paths and markers: `WorldTextShadowProxy`
       + `slug_world_text_shadow_proxy_material` + the `needs_proxy`
       branch (`render/world_text/mesh_spawning.rs`); `DiegeticShadowProxy`
@@ -863,7 +1000,9 @@ of the Phase 1–3 sequence and leaves the build green.
       No second mesh — the visible mesh casts its own silhouette.
 - [ ] Shrink `GlyphRenderMode` to `{ Text, PunchOut }` — drop `Invisible`
       and `SolidQuad`. Update the compile-time discriminant assertions
-      (`layout/text_props.rs`), `SlugRenderMode` (`material.rs`), the
+      (`layout/text_props.rs` — **Phase 5 review:** the `const _: () = assert!(…)`
+      block is at lines ~838–841 and the enum + `discriminant()` fn at ~99–122, not
+      the "~901–904" the Phase 2 checklist cited), `SlugRenderMode` (`material.rs`), the
       shader's `RENDER_MODE_SOLID_QUAD` constant plus its `SolidQuad` /
       `Invisible` branches in `render_coverage`, and (Phase 1 review) the
       `slug_render_mode` / `slug_shadow_render_mode` helpers plus any
@@ -882,12 +1021,18 @@ of the Phase 1–3 sequence and leaves the build green.
       review) reword the `GlyphShadowMode` enum doc in `layout/text_props.rs`
       — it currently describes spawning "a separate shadow proxy mesh with
       `AlphaMode::Mask` … contributes to the shadow prepass," which this phase
-      makes false. **Phase 3 review:** the only `debug/` call site is
-      `label_shadow_mode()` returning `GlyphShadowMode::Text`
-      (`debug/typography_overlay/mod.rs:108`), consumed by ~11
-      `with_shadow_mode(...)` sites in `glyph.rs` / `labels.rs`; the single edit
-      is `Text → Cast` there. No `Invisible` / `SolidQuad` render-mode usage
-      exists in `debug/`, so `typography_overlay` needs only the shadow-mode
+      makes false. **Phase 5 review — set the new `#[default]` and preserve current
+      behavior:** `GlyphShadowMode` currently derives `Default` with `#[default]` on
+      `Text` (`text_props.rs:141`), so every `WorldTextStyle::new(…)` that omits a
+      shadow mode today casts a shadow. The shrink must put `#[default]` on `Cast`
+      (the `Text → cast` equivalent), matching the "visible mesh is a caster unless
+      the caller turns shadows off" rule above — otherwise all shadow-mode-unset text
+      (most of `typography.rs`, `slug_text.rs`, `sdf.rs`) silently stops casting.
+      **Phase 3 review:** the only `debug/` call site is `label_shadow_mode()`
+      returning `GlyphShadowMode::Text` (`debug/typography_overlay/mod.rs:108`),
+      consumed by ~11 `with_shadow_mode(...)` sites in `glyph.rs` / `labels.rs`; the
+      single edit is `Text → Cast` there. No `Invisible` / `SolidQuad` render-mode
+      usage exists in `debug/`, so `typography_overlay` needs only the shadow-mode
       change for this phase.
 - [ ] Document the shadow-only recipe — spawn a cast-on glyph with fill
       alpha 0 (invisible in color, full silhouette in shadow) — on the
@@ -898,7 +1043,11 @@ of the Phase 1–3 sequence and leaves the build green.
       is no slug render mode for it.
 - [ ] Delete `examples/shadows.rs` — its subject, the matrix, is gone.
 - [ ] Update any remaining `with_render_mode(Invisible | SolidQuad)` /
-      `with_shadow_mode(...)` call sites in examples and `debug/`.
+      `with_shadow_mode(...)` call sites in examples and `debug/`. **Phase 5 review:**
+      `examples/sdf.rs:529` calls `.with_shadow_mode(GlyphShadowMode::Text)` on a
+      `WorldText` row label — it is "untouched" in Phases 5 and 7's main list but will
+      not compile once the `Text` variant is removed. Migrate it to `Cast` here. (The
+      panel-SDF body of `sdf.rs` stays out of scope; only this one text call site moves.)
 - [ ] `cargo build`, `cargo nextest run`, `cargo +nightly fmt`; rerun the
       suite and screenshot to confirm Text and PunchOut fills, the
       cast-shadow toggle, and the alpha-0 shadow-only recipe.
@@ -906,6 +1055,34 @@ of the Phase 1–3 sequence and leaves the build green.
 Public-API note: `GlyphRenderMode` and `GlyphShadowMode` stay public
 (callers name them for fill / shadow intent) but shrink — consistent
 with decision #3, exposing only what a feature needs.
+
+### Phase 8 — Documentation
+
+Added by the Phase 5 review: the **Documentation disposition** (below) was flagged
+across the Phase 2–4 reviews but never executed in any phase — Phases 0–7 are code,
+verification, and the matrix collapse. This final phase owns the doc backlog so the
+migration does not finish with `docs/` describing the deleted distance-field engine.
+It is pure documentation; the build is already green. See the **Documentation
+disposition** table below for the per-file detail.
+
+- [ ] Delete `docs/bevy_diegetic/gpu_rasterizer.md` (1539 lines) — documents only the
+      removed GPU SDF/MSDF rasterizer; dead since Phase 2. The docs are committed, so
+      this is recoverable.
+- [ ] Rewrite the `crates/bevy_diegetic/README.md` MSDF anti-aliasing content
+      (~lines 13, 17, 36–42, 111, 116, incl. the whole "Transparency / Preserves MSDF
+      anti-aliasing?" subsection ~36–116). slug's coverage-based AA differs from MSDF's
+      `fwidth`-based edge AA, so this is rewritten content, not find/replace. The panel
+      SDF references (`render/sdf_material.rs`, `examples/sdf.rs`) stay — that subsystem
+      is out of scope (see the scope-boundary section).
+- [ ] Reword `docs/bevy_diegetic/slug.md`'s status framing — drop "experimental
+      alternative, not a replacement for MTSDF" → slug is the sole text renderer. No
+      API audit (Phase 5 review confirmed zero deleted-API references in the file).
+      **Sequencing:** Phase 7 already edits `slug.md` (the §8.3 shadow-only recipe + the
+      `GlyphShadowMode` enum doc). If Phase 7 ships first, do the status reword in the
+      same Phase-7 `slug.md` pass and drop this item; if not, do it here.
+- [ ] Confirm no remaining `docs/` reference describes the distance-field engine as a
+      live renderer (the plan itself, `slug_migration.md`, documenting the removal is
+      fine).
 
 ## Documentation disposition
 
@@ -916,29 +1093,31 @@ everything slug.
 | Doc | Recommendation | Reason |
 | --- | --- | --- |
 | `gpu_rasterizer.md` (1539 lines) | **Delete** | Documents only the GPU SDF/MSDF rasterizer being removed. No slug content. |
-| `slug.md` (1275 lines) | **Keep, update status + audit deleted APIs** | The slug backend design and source/license reference. Its framing ("experimental alternative, not a replacement for MTSDF") is stale → reflect slug as the sole renderer. **Phase 4 review:** a design doc this long almost certainly documents the now-deleted standalone-shaping API — audit for and rewrite references to `SlugTextRequest`, `prepare_text_run`, `build_slug_text_run`/`_with_cache`, `load_glyph`/`load_glyph_by_id`, `FIXTURE_TEXT`, and the deleted `SlugOutlineError` variants (`MissingGlyph`/`MissingOutline`/`CubicOutline`); production shaping is now parley → `prepare_positioned_run_with_scale`. Not just a status reword. |
-| `slug-experiments.md` (1798 lines) | **Keep, fix stale refs** | The experiment log that prevents repeating failed approaches. It references `benches/glyph_rasterization.rs` for CPU prep cost; that bench is deleted in Phase 5. With both that bench and `preload_text` gone, the ≈0.84 ms prep-cost figure has no measuring harness left. **Phase 4 review:** the old measuring API (`build_slug_run_render_data` non-clip + `backend.glyph_cache()`) was deleted, so no drop-in micro-bench survives — **record the figure as a one-time measurement (with date + conditions)** is now the preferred branch; a replacement bench would have to be rebuilt against `prepare_positioned_run_with_scale` + `ensure_run_storage`. Do not leave a dangling reference to a deleted bench. |
-| `slug-benchmark-procedure.md` (244 lines) | **Keep, fix stale ref** | Canonical slug benchmark procedure. References `text_renderer_gpu_bench` (kept, converted to slug-only) but also the deleted `glyph_rasterization` bench for prep cost — note that prep cost is no longer tracked (the prep API it called was deleted in Phase 4), or point at a slug replacement. |
+| `slug.md` (1275 lines) | **Keep, update status only** (not yet executed) | The slug backend design and source/license reference. Its framing ("experimental alternative, not a replacement for MTSDF") is stale → reflect slug as the sole renderer. **Phase 5 review — API-audit clause struck:** the Phase 4 review assumed this doc "almost certainly documents the now-deleted standalone-shaping API," but a crate-wide grep of `slug.md` returns **zero** hits for `SlugTextRequest` / `prepare_text_run` / `build_slug_text_run` / `load_glyph` / `FIXTURE_TEXT` / the deleted `SlugOutlineError` variants. The only work is the status reword; there are no API references to rewrite. |
+| `slug-experiments.md` (1798 lines) | **Done (Phase 5)** | The CPU-prep-cost line that pointed at `benches/glyph_rasterization.rs` was rewritten to record the figure as a one-time measurement (full printable ASCII ≈ 0.84 ms, 2026-05-24, JetBrains Mono 128 px, after per-curve dedup + 48-band tuning) and note that a replacement micro-bench would target `prepare_positioned_run_with_scale` + `ensure_run_storage`. |
+| `slug-benchmark-procedure.md` (244 lines) | **Done (Phase 5)** | The "Prep-Time Benchmark" step that ran the deleted `glyph_rasterization` Criterion group was rewritten to state prep cost is no longer bench-tracked (record the ≈0.84 ms figure), and the obsolete `slug_text_spike` "spike-only changes" comparability rule was deleted (no spike/production split survives). |
 | `slug_fx.md` (641 lines) | **Keep** | The effect-support plan that motivates this migration. |
 
 Other (non-`docs/`) artifacts that reference the removed engine, found
 in review — fold these into Phase 5/6:
 
 - `crates/bevy_diegetic/README.md` — **section rewrite, not a reword**
-  (Phase 2 review). MSDF/atlas references span lines ~13, 17, 36–42, 111, 116,
-  including a whole "Transparency / Preserves MSDF anti-aliasing?" subsection
-  (~36–116) describing `fwidth`-based MSDF edge AA. slug's coverage-based AA
-  differs, so this is rewritten content, not find/replace.
-- `scripts/xctrace_text_renderer.sh` — supports `sdf` / `msdf` / `mtsdf`
-  modes for `text_renderer_gpu_bench`. Reduce to `slug` / `empty`.
-- `scripts/parse_gpu_intervals.py` (Phase 2 review) — hard-codes
-  `PROCESS_FILTER = "text_renderer_gpu_bench"` (kept, so the script keeps
-  working) but pairs with `xctrace_text_renderer.sh`'s removed modes; sanity-
-  check it when reducing the mode list.
-- `ci.yml` — runs `cargo bench` (`ci.yml:202`) including the deleted
-  `glyph_rasterization` bench; drop that bench from CI **in the same change
-  that deletes the bench** (see Phase 5 — the bench is red between Phase 2 and
-  that deletion).
+  (Phase 2 review). **NOT yet executed.** MSDF/atlas references span lines ~13,
+  17, 36–42, 111, 116, including a whole "Transparency / Preserves MSDF
+  anti-aliasing?" subsection (~36–116) describing `fwidth`-based MSDF edge AA.
+  slug's coverage-based AA differs, so this is rewritten content, not find/replace.
+- `scripts/xctrace_text_renderer.sh` — **Done (Phase 5).** The `record` / `export`
+  usage, the `require_mode` case, and both `record-all` / `export-all` loops were
+  reduced from `empty|slug|sdf|msdf|mtsdf` to `empty|slug`.
+- `scripts/parse_gpu_intervals.py` (Phase 2 review) — **Reviewed, no change needed
+  (Phase 5).** It filters on `PROCESS_FILTER = "text_renderer_gpu_bench"` (the
+  kept process name), not on a renderer mode, so reducing the xctrace mode list
+  does not affect it.
+- `ci.yml` — **Done (Phase 5): no edit needed.** `ci.yml:202` runs
+  `cargo bench -p bevy_diegetic --benches …`, a `--benches` glob with no named
+  target, so deleting `benches/glyph_rasterization.rs` + its `[[bench]]` manifest
+  entry removes it from CI on its own. The earlier "drop that bench from CI in the
+  same change" framing assumed a named reference that does not exist.
 
 ## Build-green ordering
 

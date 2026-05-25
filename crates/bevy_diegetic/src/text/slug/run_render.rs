@@ -281,23 +281,20 @@ mod tests {
     use bevy::mesh::MeshVertexAttribute;
     use bevy::mesh::VertexAttributeValues;
 
-    use super::super::run::SlugGlyphCache;
-    use super::super::test_support::fixture_run_with_cache;
     use super::*;
+    use crate::text::slug::run::SlugGlyphCache;
+    use crate::text::slug::test_support;
 
     const FONT_DATA: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
     #[test]
     fn render_data_counts_unique_glyph_storage_once() {
-        let (preview, cache) = fixture_run_with_cache(FONT_DATA, 7, "Typography");
+        let (preview, cache) = test_support::fixture_run_with_cache(FONT_DATA, 7, "Typography");
         let render_data = build_slug_run_render_data_with_clip(&preview, &cache, 1.0, None)
             .expect("fixture run should render");
 
         let glyph_instances = preview.run.glyphs().len();
-        let mesh_indices = render_data
-            .mesh
-            .indices()
-            .map_or(0, |indices| indices.len());
+        let mesh_indices = render_data.mesh.indices().map_or(0, Indices::len);
         assert_eq!(render_data.mesh.count_vertices(), glyph_instances * 4);
         assert_eq!(mesh_indices, glyph_instances * 6);
         assert!(
@@ -309,9 +306,9 @@ mod tests {
 
     #[test]
     fn clip_rect_trims_mesh_positions_and_uvs() {
-        let (preview, cache) = fixture_run_with_cache(FONT_DATA, 7, "H");
+        let (preview, cache) = test_support::fixture_run_with_cache(FONT_DATA, 7, "H");
         let (min_x, max_x, min_y, max_y) = mesh_extent(&preview, &cache);
-        let clip_x = (min_x + max_x) / 2.0;
+        let clip_x = f32::midpoint(min_x, max_x);
         let clip_rect = Some([clip_x, min_y, max_x, max_y]);
 
         let render_data = build_slug_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
@@ -333,7 +330,7 @@ mod tests {
 
     #[test]
     fn fully_clipped_glyph_emits_no_mesh_vertices() {
-        let (preview, cache) = fixture_run_with_cache(FONT_DATA, 7, "H");
+        let (preview, cache) = test_support::fixture_run_with_cache(FONT_DATA, 7, "H");
         let (_, max_x, min_y, max_y) = mesh_extent(&preview, &cache);
         let clip_rect = Some([max_x + 1.0, min_y, max_x + 2.0, max_y]);
 
@@ -341,13 +338,7 @@ mod tests {
             .expect("fixture run should render");
 
         assert_eq!(render_data.mesh.count_vertices(), 0);
-        assert_eq!(
-            render_data
-                .mesh
-                .indices()
-                .map_or(0, |indices| indices.len()),
-            0
-        );
+        assert_eq!(render_data.mesh.indices().map_or(0, Indices::len), 0);
     }
 
     /// X/Y extent of the unclipped fixture mesh: `(min_x, max_x, min_y, max_y)`.

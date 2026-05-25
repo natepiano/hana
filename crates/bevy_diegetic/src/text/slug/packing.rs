@@ -9,7 +9,7 @@ use super::geometry::SlugBounds;
 use super::geometry::SlugGlyph;
 
 /// Default number of horizontal bands packed per Slug glyph.
-pub const DEFAULT_BAND_COUNT: usize = 48;
+pub(crate) const DEFAULT_BAND_COUNT: usize = 48;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
 const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;

@@ -74,10 +74,6 @@ harness           = false
 name              = "layout_engine_raw"
 required-features = ["bench_support"]
 
-[[bench]]
-harness = false
-name    = "glyph_rasterization"
-
 [[example]]
 name              = "typography"
 required-features = ["typography_overlay"]
@@ -86,13 +82,7 @@ required-features = ["typography_overlay"]
 name = "shadows"
 
 [[example]]
-name = "atlas_pages"
-
-[[example]]
 name = "font_loading"
-
-[[example]]
-name = "preload_text"
 
 [[example]]
 name = "font_features"

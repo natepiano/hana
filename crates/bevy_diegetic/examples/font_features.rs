@@ -21,7 +21,6 @@ use bevy_diegetic::Font;
 use bevy_diegetic::FontFeatureFlags;
 use bevy_diegetic::FontFeatures;
 use bevy_diegetic::FontRegistered;
-use bevy_diegetic::GlyphLoadingPolicy;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
@@ -312,8 +311,6 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
     let on_color = Color::WHITE;
     let off_color = Color::srgb(0.7, 0.7, 0.7);
 
-    let progressive = GlyphLoadingPolicy::Progressive;
-
     b.with(
         El::new()
             .width(Sizing::GROW)
@@ -326,9 +323,7 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
         |b| {
             b.text(
                 "Font Features",
-                LayoutTextStyle::new(SECTION_SIZE + 4.0)
-                    .with_color(section_color)
-                    .with_loading_policy(progressive),
+                LayoutTextStyle::new(SECTION_SIZE + 4.0).with_color(section_color),
             );
 
             let serif_font = serif_font_id.unwrap_or(0);
@@ -347,7 +342,6 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
                 on_color,
                 off_color,
                 column_border_color,
-                progressive,
             );
         },
     );
@@ -363,7 +357,6 @@ fn build_feature_grid(
     on_color: Color,
     off_color: Color,
     column_border_color: Color,
-    loading_policy: GlyphLoadingPolicy,
 ) {
     b.with(
         El::new()
@@ -392,7 +385,6 @@ fn build_feature_grid(
                         on_color,
                         off_color,
                         column_border_color,
-                        loading_policy,
                     );
                     build_feature_column(
                         b,
@@ -407,7 +399,6 @@ fn build_feature_grid(
                         on_color,
                         off_color,
                         column_border_color,
-                        loading_policy,
                     );
                 },
             );
@@ -431,7 +422,6 @@ fn build_feature_grid(
                         on_color,
                         off_color,
                         column_border_color,
-                        loading_policy,
                     );
                     build_feature_column(
                         b,
@@ -446,7 +436,6 @@ fn build_feature_grid(
                         on_color,
                         off_color,
                         column_border_color,
-                        loading_policy,
                     );
                 },
             );
@@ -469,7 +458,6 @@ fn build_feature_column(
     on_color: Color,
     off_color: Color,
     column_border_color: Color,
-    loading_policy: GlyphLoadingPolicy,
 ) {
     // "on" explicitly enables the feature, "off" explicitly disables it.
     // For features on by default (liga, calt, kern), "on" = default, "off" = disabled.
@@ -488,22 +476,17 @@ fn build_feature_column(
     let on_config = LayoutTextStyle::new(SAMPLE_SIZE)
         .with_font(font_id)
         .with_color(on_color)
-        .with_font_features(on_features)
-        .with_loading_policy(loading_policy);
+        .with_font_features(on_features);
 
     let off_config = LayoutTextStyle::new(SAMPLE_SIZE)
         .with_font(font_id)
         .with_color(off_color)
-        .with_font_features(off_features)
-        .with_loading_policy(loading_policy);
+        .with_font_features(off_features);
 
-    let label_config = LayoutTextStyle::new(ON_OFF_SIZE)
-        .with_color(label_color)
-        .with_loading_policy(loading_policy);
+    let label_config = LayoutTextStyle::new(ON_OFF_SIZE).with_color(label_color);
     let font_name_config = LayoutTextStyle::new(FONT_NAME_SIZE)
         .with_font(font_id)
-        .with_color(label_color)
-        .with_loading_policy(loading_policy);
+        .with_color(label_color);
 
     b.with(
         El::new()
@@ -524,9 +507,7 @@ fn build_feature_column(
                 |b| {
                     b.text(
                         title,
-                        LayoutTextStyle::new(SECTION_SIZE)
-                            .with_color(section_color)
-                            .with_loading_policy(loading_policy),
+                        LayoutTextStyle::new(SECTION_SIZE).with_color(section_color),
                     );
                     b.with(
                         El::new()
