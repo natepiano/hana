@@ -1,16 +1,17 @@
 //! Text rendering systems for panel and world-space glyph meshes.
 
-mod batching;
+mod alpha;
 mod layout;
+mod mesh_spawning;
 mod reconcile;
 mod shaping;
 
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
-use self::batching::PanelTextAlpha;
-use self::batching::build_panel_slug_meshes;
+use self::alpha::PanelTextAlpha;
 pub use self::layout::PanelTextLayout;
+use self::mesh_spawning::build_panel_slug_meshes;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;

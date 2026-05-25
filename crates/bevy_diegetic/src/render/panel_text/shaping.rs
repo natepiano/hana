@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
+use bevy::math::Vec4;
 use bevy::prelude::*;
 
 use super::PanelText;
 use super::PanelTextLayout;
-use super::batching;
-use super::batching::PanelTextAlpha;
+use super::alpha::PanelTextAlpha;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePanelChild;
 use crate::cascade::Resolved;
@@ -17,6 +17,7 @@ use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::render::constants;
 use crate::render::text_shaping;
 use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
@@ -96,7 +97,7 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        let (panel_slug_run, stats) = build_panel_slug_text(
+        let (panel_slug_run, stats) = build_panel_text(
             world_text.text(),
             &config,
             &placement,
@@ -108,7 +109,7 @@ pub(super) fn shape_panel_text_children(
         aggregate.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
         let readiness = GlyphReadiness::from(&stats);
-        apply_panel_slug_result(
+        apply_panel_result(
             entity,
             child_of.parent(),
             panel_slug_run,
@@ -141,7 +142,7 @@ fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
         .remove::<PanelText>();
 }
 
-fn build_panel_slug_text(
+fn build_panel_text(
     text: &str,
     config: &LayoutTextStyle,
     placement: &QuadPlacement,
@@ -166,7 +167,7 @@ fn build_panel_slug_text(
     }
 
     let slug_start = Instant::now();
-    let anchor = panel_slug_layout_anchor(placement);
+    let anchor = panel_layout_anchor(placement);
     let prepared = match slug_backend.prepare_positioned_run_with_scale(
         &positioned_glyphs,
         anchor,
@@ -188,7 +189,7 @@ fn build_panel_slug_text(
     stats.atlas_ms = slug_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
 
     let clip_rect = placement.clip_rect.map(|clip_rect| {
-        batching::panel_clip_rect_local(
+        panel_clip_rect_local(
             Some(clip_rect),
             placement.scale.x,
             placement.scale.y,
@@ -210,14 +211,31 @@ fn build_panel_slug_text(
     )
 }
 
-fn panel_slug_layout_anchor(placement: &QuadPlacement) -> Vec2 {
+fn panel_layout_anchor(placement: &QuadPlacement) -> Vec2 {
     Vec2::new(
         placement.anchor.x / placement.scale.x - placement.bounds.x,
         placement.anchor.y / placement.scale.y - placement.bounds.y,
     )
 }
 
-fn apply_panel_slug_result(
+fn panel_clip_rect_local(
+    clip_rect: Option<BoundingBox>,
+    scale_x: f32,
+    scale_y: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+) -> Vec4 {
+    clip_rect.map_or(constants::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
+        Vec4::new(
+            clip.x.mul_add(scale_x, -anchor_x),
+            (clip.y + clip.height).mul_add(-scale_y, anchor_y),
+            (clip.x + clip.width).mul_add(scale_x, -anchor_x),
+            clip.y.mul_add(-scale_y, anchor_y),
+        )
+    })
+}
+
+fn apply_panel_result(
     entity: Entity,
     panel_entity: Entity,
     panel_slug_run: Option<PanelText>,

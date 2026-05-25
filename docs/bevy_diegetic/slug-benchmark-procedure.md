@@ -234,6 +234,4 @@ states the verdict for the newest column and the reason:
 
 _No entries under the new baseline yet. The joined-ribbon, ribbon,
 and pre-2026-05-23 entries lived under the old per-interval
-methodology and are not comparable to the new baseline; see
-`slug-experiments.md` for the full historical trail and individual
-experiment records._
+methodology and are not comparable to the new baseline;

@@ -2,18 +2,17 @@ use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
-use bevy::math::Vec4;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy_kana::ToF32;
 
 use super::PanelText;
 use super::PanelTextLayout;
+use super::alpha::PanelTextAlpha;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePanelChild;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
-use crate::layout::BoundingBox;
 use crate::layout::GlyphShadowMode;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
@@ -31,42 +30,6 @@ use crate::text::SlugTextMaterialInput;
 /// Marker component for text mesh entities spawned by the renderer.
 #[derive(Component)]
 pub(super) struct DiegeticTextMesh;
-
-/// Cascading attribute for panel-text alpha mode.
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub(super) struct PanelTextAlpha(pub AlphaMode);
-
-impl CascadePanelChild for PanelTextAlpha {
-    type EntityOverride = PanelText;
-    type PanelOverride = DiegeticPanel;
-
-    fn entity_value(entity_override: &PanelText) -> Option<Self> {
-        entity_override.alpha_mode.map(Self)
-    }
-
-    fn panel_value(panel_override: &DiegeticPanel) -> Option<Self> {
-        panel_override.text_alpha_mode().map(Self)
-    }
-
-    fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.text_alpha) }
-}
-
-pub(super) fn panel_clip_rect_local(
-    clip_rect: Option<BoundingBox>,
-    scale_x: f32,
-    scale_y: f32,
-    anchor_x: f32,
-    anchor_y: f32,
-) -> Vec4 {
-    clip_rect.map_or(constants::UNCLIPPED_TEXT_CLIP_RECT, |clip| {
-        Vec4::new(
-            clip.x.mul_add(scale_x, -anchor_x),
-            (clip.y + clip.height).mul_add(-scale_y, anchor_y),
-            (clip.x + clip.width).mul_add(scale_x, -anchor_x),
-            clip.y.mul_add(-scale_y, anchor_y),
-        )
-    })
-}
 
 /// Builds Slug meshes for panels whose Slug text runs changed.
 pub(super) fn build_panel_slug_meshes(
