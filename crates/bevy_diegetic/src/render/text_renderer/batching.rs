@@ -16,7 +16,6 @@ use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-use crate::panel::HueOffset;
 use crate::panel::RenderMode;
 use crate::render::constants;
 use crate::render::world_text::PanelTextChild;
@@ -105,7 +104,7 @@ pub(super) fn build_panel_slug_meshes(
         (Entity, &ChildOf, Option<&SlugRunStorageKey>),
         Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>,
     >,
-    panels: Query<(&DiegeticPanel, Option<&HueOffset>, Option<&RenderLayers>)>,
+    panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
     mut slug_backend: ResMut<SlugBackend>,
@@ -119,7 +118,7 @@ pub(super) fn build_panel_slug_meshes(
     let dirty_panels = collect_dirty_panels(&changed_runs);
 
     for panel_entity in dirty_panels {
-        let Ok((panel, _hue_offset, panel_layers)) = panels.get(panel_entity) else {
+        let Ok((panel, panel_layers)) = panels.get(panel_entity) else {
             continue;
         };
         for (mesh_entity, child_of, storage_key) in &old_meshes {

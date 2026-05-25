@@ -391,11 +391,11 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 
     /// Sets the per-style alpha-mode override.
     ///
-    /// The library default is [`AlphaMode::Blend`] — see
-    /// [`StableTransparency`](crate::StableTransparency) for guidance on
-    /// when to use each mode, how `StableTransparency` pairs with
-    /// [`AlphaMode::Blend`]/[`AlphaMode::Premultiplied`], and when
-    /// [`AlphaMode::AlphaToCoverage`] + MSAA is the better path.
+    /// The library default is [`AlphaMode::Blend`]. Slug emits one mesh per
+    /// text run and orders coplanar text with per-command `depth_bias`, so
+    /// blended text composites correctly without special camera setup.
+    /// [`AlphaMode::AlphaToCoverage`] with MSAA is an alternative for
+    /// hard-edged coverage.
     #[must_use]
     pub const fn with_alpha_mode(mut self, mode: AlphaMode) -> Self {
         self.alpha_mode = Some(mode);

@@ -933,28 +933,91 @@ Phase 5. 10 findings; 9 folded into the plan, 1 surfaced to the user (approved).
   doc-only phase after Phase 7, with the `slug.md` reword allowed to fold into Phase 7's
   existing `slug.md` edits.
 
-### Phase 6 — Verify
+### Phase 6 — Verify — complete (2026-05-25)
 
-- [ ] `cargo build`
-- [ ] `cargo build --examples --benches` (Phase 4 review) — plain `cargo build`
+- [x] `cargo build`
+- [x] `cargo build --examples --benches` (Phase 4 review) — plain `cargo build`
       does **not** compile examples/benches, so assert this explicitly; it is the
       only red surface across Phases 1–5 and turns green only at the end of Phase 5.
-- [ ] `cargo nextest run` — expected baseline is **≈158 lib tests** (not 234;
+- [x] `cargo nextest run` — expected baseline is **≈158 lib tests** (not 234;
       Phase 2 deleted the atlas/rasterizer modules and their ~76 tests), plus
       whatever example/bench targets compile after Phase 5. Do not treat the
-      234 figure from the Phase 1 notes as the target.
-- [ ] `cargo clippy --all-targets --features typography_overlay,bench_support`
+      234 figure from the Phase 1 notes as the target. **Result: 252 workspace
+      tests pass / 1 skipped; bevy_diegetic lib = 158.**
+- [x] `cargo clippy --all-targets --features typography_overlay,bench_support`
       (Phase 5 review) — **`--all-targets`, not `--lib`**. Phase 4 verified with
       `cargo clippy --lib`, which does not compile `#[cfg(test)]` / example / bench
       code, so it missed three pedantic lints that lived in `run_render.rs` test code
       (caught + fixed in Phase 5 only because that pass ran `--all-targets`). The lib
       build and `cargo nextest` do not enforce pedantic, so clippy is the only gate
       that sees this class of debt.
-- [ ] `cargo +nightly fmt`
-- [ ] Run the example suite; screenshot each example to confirm it renders correctly
+- [x] `cargo +nightly fmt`
+- [x] Run the example suite; screenshot each example to confirm it renders correctly
       (Phase 5 review) — a per-example smoke check, **not** an MSDF parity comparison.
       Phases 1–3 deleted the distance-field path, so there is no second renderer left
       to A/B against; the only reference is "does slug render this example correctly."
+
+### Retrospective
+
+**What worked:**
+- All five static gates green on the slug-only tree.
+- The per-example smoke check earned its place: it found three defects the static
+  gates cannot see (a deterministic crash, a z-fight wash-out, a dead effect).
+
+**What deviated from the plan:**
+- Phase 6 was scoped as pure verification but drove three substantial changes. Two
+  became new phases — the `text_alpha` crash → **Phase 9** (with the `type Exclude`
+  small fix landed here), the `units` z-fight → **Phase 10** (full OIT/transparency
+  stack removed, complete). The third — dead `HueOffset` — was removed this session
+  (component + `hue_offset` example deleted, `text_stress` reworked to a static
+  rainbow), resolving the `slug.md` Phase 12 `HueOffset` open decision to "removed".
+
+**Surprises:**
+- `HueOffset` was already a no-op before this session: `batching.rs` queried it as
+  `_hue_offset` and ignored it; no shader applied hue. The MSDF-era
+  `sync_panel_hue_offset` system was deleted in the migration without a slug
+  equivalent. Validated against `slug_fx.md`: hue rotation transforms one per-run
+  `fill_color`, so it is a CPU color-input animation, not a per-pixel shader effect.
+- Two examples carry no `BrpExtrasPlugin` (`two_window_panels`,
+  `text_renderer_gpu_bench`), so they cannot be BRP-screenshotted; verified by
+  launch-without-panic + slug code-path equivalence.
+
+**Implications for remaining phases:**
+- Phase 10 (OIT) is done; `depth_bias` now orders coplanar text directly — relevant
+  to Phase 7's cast-shadow toggle and the shadow-only recipe (no OIT/`Msaa::Off`
+  constraint anymore).
+- The `HueOffset` removal already edited `batching.rs` (dropped the
+  `Option<&HueOffset>` query field). Phase 7 also edits `batching.rs` (proxy spawn
+  paths) — it should not reintroduce `HueOffset` language. (`slug.md`, which carried
+  the stale `HueOffset`-as-future framing, is deleted in Phase 8.)
+- `text_alpha.rs` and `units.rs` were reworked in Phase 10; Phase 7's references to
+  example shadow/alpha call sites should be checked against the current files.
+
+### Phase 6 Review
+
+- **Phase 8 `slug.md` (user decision)** — `slug.md` deleted as obsolete rather than
+  reworded. It documented only deleted/superseded concepts (`TextRendererPreference`
+  switching, the four-mode matrix, HueOffset-as-future) with no salvageable
+  unimplemented work; effects live in `slug_fx.md`, migration here. Phase 8 "reword"
+  item → "deleted (done)"; the Documentation-disposition row updated; Phase 7's
+  shadow-only-recipe doc target retargeted from `slug.md` to `slug_fx.md` §8.3.
+- **Phase 8 README** — scope shrank to README lines 13 and 17; Phase 10 already
+  rewrote the transparency section (~34–55) and TAA/AA wording (~80–98), so the
+  earlier "~36–116 subsection rewrite" estimate no longer applies.
+- **Phase 7 line refs** — refreshed against current code: prepass coverage-discard
+  `slug_text.wgsl:340`, main-pass `is_shadow_proxy` discard `:358`, `slug_render_mode`
+  `batching.rs:397`.
+- **Phase 7 `GlyphShadowMode` collapse** — added the two explicit constructor defaults
+  (`shadow_mode: GlyphShadowMode::Text` at `text_props.rs:560` and `:664`) to the
+  migration task; noted `GlyphShadowMode::None` survives the `{ None, Cast }` collapse,
+  so the `::None` example sites (`font_loading`, `text_stress`, `gpu_bench`) need no
+  edit and `sdf.rs:529` is the only `::Text` site.
+- **Phase 9 `Exclude` removal** — added the test-impl `type Exclude = ExcludeNone;`
+  sites (`cascade/target.rs:127, 244`), the `use` at `target.rs:111`, and the doc text
+  to the removal task.
+- Findings on Phase 7's shadow-proxy targets, discriminant-assertion refs, the
+  `batching.rs` HueOffset/proxy region overlap, the Phase 9 three-topology premise, and
+  the `gpu_rasterizer.md` deletion were reviewed and confirmed accurate — no change.
 
 ### Phase 7 — Collapse the glyph render/shadow matrix
 
@@ -968,9 +1031,9 @@ its prepass discards on coverage, not alpha mode (§8.1) — so removing
 the proxy loses nothing for matching shadows. This phase is independent
 of the Phase 1–3 sequence and leaves the build green. **Phase 5 review —
 evidence:** the prepass `fragment` in `text/slug/shaders/slug_text.wgsl`
-discards where `render_coverage(in.uv, glyph) < 0.5` (≈line 348, under
+discards where `render_coverage(in.uv, glyph) < 0.5` (line 340, under
 `#ifdef PREPASS_PIPELINE`); the main-pass `is_shadow_proxy` discard is at
-≈line 366. Confirm the coverage-discard still drives the prepass before
+line 358. Confirm the coverage-discard still drives the prepass before
 deleting the proxy — it is the reason the visible mesh casts a matching
 silhouette without a second mesh.
 
@@ -1012,7 +1075,7 @@ silhouette without a second mesh.
       `Invisible` / `SolidQuad` variants. **Phase 4 review:** the single
       conversion seam is `From<GlyphRenderMode> for SlugRenderMode` at
       `render/world_text/mesh_spawning.rs:237`; `slug_render_mode` is a sibling
-      `const fn` at `render/text_renderer/batching.rs:398`. The enum shrink, the
+      `const fn` at `render/text_renderer/batching.rs:397`. The enum shrink, the
       `From` impl, and both helpers must change in the same commit to keep the
       build green.
 - [ ] Collapse `GlyphShadowMode` to a cast toggle (`{ None, Cast }`),
@@ -1028,6 +1091,14 @@ silhouette without a second mesh.
       (the `Text → cast` equivalent), matching the "visible mesh is a caster unless
       the caller turns shadows off" rule above — otherwise all shadow-mode-unset text
       (most of `typography.rs`, `slug_text.rs`, `sdf.rs`) silently stops casting.
+      **Phase 6 review:** `GlyphShadowMode::None` survives the `{ None, Cast }`
+      collapse, so the `::None` sites in `font_loading.rs` / `text_stress.rs` /
+      `text_renderer_gpu_bench.rs` need no edit; `examples/sdf.rs:529` (below) is the
+      only `::Text` example site. Beyond the `#[default]`, two explicit constructors
+      hardcode `shadow_mode: GlyphShadowMode::Text` at `text_props.rs:560` and `:664` —
+      migrate both to `Cast` in the same edit or they won't compile (the sibling
+      `render_mode: GlyphRenderMode::Text` at `:559`/`:663` is unaffected — `Text`
+      survives in `GlyphRenderMode`).
       **Phase 3 review:** the only `debug/` call site is `label_shadow_mode()`
       returning `GlyphShadowMode::Text` (`debug/typography_overlay/mod.rs:108`),
       consumed by ~11 `with_shadow_mode(...)` sites in `glyph.rs` / `labels.rs`; the
@@ -1036,8 +1107,8 @@ silhouette without a second mesh.
       change for this phase.
 - [ ] Document the shadow-only recipe — spawn a cast-on glyph with fill
       alpha 0 (invisible in color, full silhouette in shadow) — on the
-      cast toggle and in `slug.md`, replacing the deleted `Invisible`
-      render mode (§8.3).
+      cast toggle and in `slug_fx.md` §8.3, replacing the deleted `Invisible`
+      render mode. (`slug.md` was deleted as obsolete — see Phase 8.)
 - [ ] Solid-block backings: callers that used `SolidQuad` compose a
       standard `Mesh3d` rectangle with a `StandardMaterial` (§8.2); there
       is no slug render mode for it.
@@ -1068,21 +1139,152 @@ disposition** table below for the per-file detail.
 - [ ] Delete `docs/bevy_diegetic/gpu_rasterizer.md` (1539 lines) — documents only the
       removed GPU SDF/MSDF rasterizer; dead since Phase 2. The docs are committed, so
       this is recoverable.
-- [ ] Rewrite the `crates/bevy_diegetic/README.md` MSDF anti-aliasing content
-      (~lines 13, 17, 36–42, 111, 116, incl. the whole "Transparency / Preserves MSDF
-      anti-aliasing?" subsection ~36–116). slug's coverage-based AA differs from MSDF's
-      `fwidth`-based edge AA, so this is rewritten content, not find/replace. The panel
-      SDF references (`render/sdf_material.rs`, `examples/sdf.rs`) stay — that subsystem
-      is out of scope (see the scope-boundary section).
-- [ ] Reword `docs/bevy_diegetic/slug.md`'s status framing — drop "experimental
-      alternative, not a replacement for MTSDF" → slug is the sole text renderer. No
-      API audit (Phase 5 review confirmed zero deleted-API references in the file).
-      **Sequencing:** Phase 7 already edits `slug.md` (the §8.3 shadow-only recipe + the
-      `GlyphShadowMode` enum doc). If Phase 7 ships first, do the status reword in the
-      same Phase-7 `slug.md` pass and drop this item; if not, do it here.
+- [ ] Rewrite the two stale MSDF lines left in `crates/bevy_diegetic/README.md`: the
+      intro at **line 13** ("Text is rendered via MSDF … atlas rasterization") and the
+      feature bullet at **line 17** ("MSDF text rendering with per-glyph async
+      rasterization, multi-page atlas"). **Phase 6 review — scope shrank:** Phase 10
+      already rewrote the "Text transparency" section (~34–55) and the TAA/AA wording
+      (~80–98) to coverage-based slug content, so the earlier "~36–116 subsection
+      rewrite" estimate no longer applies — only lines 13 and 17 remain. The panel SDF
+      references (`render/sdf_material.rs`, `examples/sdf.rs`) stay — that subsystem is
+      out of scope (see the scope-boundary section).
+- [x] Deleted `docs/bevy_diegetic/slug.md` (~1275 lines, 2026-05-25) — the obsolete slug
+      *feasibility* design doc. **Phase 6 review:** it documents only deleted or superseded
+      concepts (the `TextRendererPreference` MTSDF-switching model, the four-mode
+      render/shadow matrix Phase 7 removes, HueOffset-as-future) with no unimplemented work
+      to salvage — its effects roadmap lives in `slug_fx.md` and the migration in this doc.
+      Repo-wide grep found zero inbound references, so deletion broke no links. Recoverable
+      from git.
 - [ ] Confirm no remaining `docs/` reference describes the distance-field engine as a
       live renderer (the plan itself, `slug_migration.md`, documenting the removal is
       fine).
+
+### Phase 9 — Unify the cascade into one parent-walking hierarchy
+
+Surfaced by the **Phase 6** example smoke check: `text_alpha` crashed on every
+alpha-mode switch. Root cause — the 2-tier standalone cascade decides membership
+by "does this entity hold the `Override` component?", and `WorldTextStyle` (the
+`WorldTextAlpha`/`WorldFontUnit` override) lives on **both** standalone world text
+and panel labels. So panel labels were enrolled as standalone targets, carried a
+`Resolved<WorldTextAlpha>` nothing reads (panel labels render from
+`Resolved<PanelTextAlpha>`, the 3-tier cascade), and the global-default propagate
+loop wrote to them — including the frame a HUD rebuild despawned them, landing a
+deferred `insert` on a freed entity → panic.
+
+**Small fix already landed in Phase 6** (not deferred): added `type Exclude:
+Component` to `CascadeTarget`, filtered both write paths
+(`on_cascade_target_added`, `propagate_global_default_to_entity`) with
+`Without<A::Exclude>`, and set `Exclude = PanelTextChild` on `WorldTextAlpha` /
+`WorldFontUnit` (other impls use the new `ExcludeNone` sentinel). The standalone
+cascade now never enrolls panel labels; the crash is gone, verified by cycling all
+seven alpha modes with no panic. This phase is the **root-structure** follow-up the
+small fix points at.
+
+The deeper issue the bug exposes: the cascade module has **three fixed-depth
+topologies** (`mod.rs` table) — entity-targeted (entity → global), panel-targeted
+(panel → global), child-of-panel (child → panel → global). The last two are the
+*same chain* (`global → panel → child`) cut at different depths and built as
+separate traits/plugins. The design enumerates "how many tiers does this attribute
+have" instead of propagating along the entity tree. That is why one logical value
+(text alpha) exists as two `Resolved` types (`WorldTextAlpha` and `PanelTextAlpha`)
+and why a category-error in membership was even possible.
+
+**Goal:** replace the three topologies with one parent-walking resolution. One
+`Resolved<A>` per attribute; one rule — *my override, else my parent's `Resolved<A>`,
+else the global default at the root* — applied by following `ChildOf` links.
+Standalone text is depth-1 off the root, a panel is depth-1, a panel label is
+depth-2; a future deeper nesting needs no new type. Membership becomes "position in
+the tree," so an entity is never enrolled into the wrong cascade by an incidental
+shared component, and the `Exclude` marker introduced by the small fix is no longer
+needed.
+
+This phase is independent of the Phase 1–3 sequence and leaves the build green.
+
+- [ ] Define one uniform "override for attribute `A` at this node" accessor across
+      the node-bearing components (`WorldTextStyle`, `DiegeticPanel`, panel-child
+      override) so the walk reads every level the same way — the main new
+      abstraction this requires.
+- [ ] Collapse the per-role attribute types into one per value: `WorldTextAlpha` +
+      `PanelTextAlpha` → one `TextAlpha`; `WorldFontUnit` + `PanelFontUnit` +
+      panel-child font unit → one `FontUnit`. One `Resolved<TextAlpha>` /
+      `Resolved<FontUnit>` per entity, read by both standalone and panel render
+      paths (drop the `Without<PanelTextChild>` / `With<PanelTextChild>` split on the
+      read side).
+- [ ] Replace `CascadeTarget` (2-tier) and `CascadePanelChild` (3-tier) plus their
+      three plugins (`CascadeEntityPlugin`, `CascadePanelPlugin`,
+      `CascadePanelChildPlugin`) with one hierarchical cascade plugin that walks
+      parent links with a global-default fallback at the root.
+- [ ] Remove the `Exclude` associated type and `ExcludeNone` sentinel added by the
+      Phase 6 small fix — the tree-position membership makes them unnecessary. This
+      also removes the in-module test impls' `type Exclude = ExcludeNone;`
+      (`cascade/target.rs:127, 244`), the `use crate::cascade::ExcludeNone;`
+      (`target.rs:111`), and the `Exclude` / `ExcludeNone` doc text (`resolved.rs`
+      and the `mod.rs` re-export).
+- [ ] Re-verify `text_alpha` (cycle all alpha modes), panel text, and standalone
+      world text all resolve correctly, and the crash stays fixed.
+
+**Risk:** the uniform override accessor and a virtual global root at the top of every
+chain are real new abstraction; this is a cascade-module rewrite, larger than the
+Phase 6 small fix. Sequence it after the rest of the migration so it lands against a
+green, slug-only tree.
+
+### Phase 10 — Remove the OIT / transparency workaround stack — complete (2026-05-25)
+
+Surfaced by the **Phase 6** example smoke check: world-space panel text in
+`units` (A4 paper, business card, photo) z-fought with the panel surface and
+washed out — a 72pt heading that should be the largest text on screen was barely
+visible. Root cause was a stack of **distance-field-era workarounds**, not a slug
+bug:
+
+- The old MSDF renderer emitted one `AlphaMode::Blend` quad **per glyph**. Many
+  coplanar transparent quads sort-flipped by view angle, so a `StableTransparency`
+  camera marker enabled Bevy **order-independent transparency (OIT)** to stabilize
+  them (`render/transparency.rs`).
+- OIT stores the **unbiased** `in.position.z`, so `depth_bias` no longer separated
+  layers. The code compensated with a manual `OIT_DEPTH_STEP` / `oit_depth_offset`
+  applied in the shader before `oit_draw`, and OIT forced `Msaa::Off`, which in turn
+  required aggressive cross-camera MSAA management.
+
+Slug emits **one mesh per text run**, not per glyph, so the per-glyph sort-flip
+cannot occur. With OIT removed, `depth_bias` works again and orders coplanar text
+against the panel surface directly. Validated: removing `StableTransparency` from
+`units` cleared the z-fight (72pt heading crisp); `world_text` — the example OIT was
+originally added for — renders clean at a steep grazing angle over the coplanar
+ground text, no shading-shift artifact.
+
+**Removed (workspace-wide):**
+
+- `render/transparency.rs` (the `StableTransparency` marker + the three
+  OIT/MSAA-management observers); its registration and `pub use` in `render/mod.rs`;
+  the `pub use render::StableTransparency` in `lib.rs` (public-API removal).
+- `OIT_DEPTH_STEP` (`render/constants.rs`) and the `oit_depth_offset` uniform field
+  threaded through `render/sdf_material.rs`, `callouts/render.rs`, and
+  `panel_geometry.rs`.
+- The `#ifdef OIT_ENABLED` / `oit_draw` blocks in `text/slug/shaders/slug_text.wgsl`
+  and `shaders/sdf_panel.wgsl`.
+- fairy_dust: `src/transparency.rs` capability + the `with_stable_transparency()`
+  builder methods (`sprinkle.rs`/`primitive.rs`/`title_bar.rs`/`camera_home.rs`) +
+  doc references.
+- `.with_stable_transparency()` from the `world_text`, `slug_text`, `typography`,
+  and `units` examples.
+
+**Reworked:** `examples/text_alpha.rs` — its purpose was demoing this machinery (the
+`C`-key cycle was MSAA → `StableTransparency` → Off). Dropped the camera-state cycle;
+kept the `1`–`7` alpha-mode demo. Rewrote the per-mode descriptions for slug (they
+referenced "the MSDF shader" and recommended `StableTransparency`). README "Text
+transparency" section rewritten to the single coverage-based path.
+
+**Out of scope (left as-is):** `examples/sdf.rs` (the unrelated procedural-SDF demo —
+see the scope-boundary section) keeps its own `oit_depth_offset: 0.0`.
+
+Verified green: `cargo build --workspace --examples --features
+typography_overlay,bench_support`; `cargo clippy --workspace --all-targets …` clean;
+`cargo nextest run --lib` 158/158 (1 skipped); `cargo +nightly fmt` clean; plus the
+example checks above.
+
+The earlier `project_oit_fixes_worldtext_lighting_shift` and
+`project_depth_bias_oit_bug` memory notes describe the **former** constraints and are
+superseded by this phase.
 
 ## Documentation disposition
 
@@ -1093,7 +1295,7 @@ everything slug.
 | Doc | Recommendation | Reason |
 | --- | --- | --- |
 | `gpu_rasterizer.md` (1539 lines) | **Delete** | Documents only the GPU SDF/MSDF rasterizer being removed. No slug content. |
-| `slug.md` (1275 lines) | **Keep, update status only** (not yet executed) | The slug backend design and source/license reference. Its framing ("experimental alternative, not a replacement for MTSDF") is stale → reflect slug as the sole renderer. **Phase 5 review — API-audit clause struck:** the Phase 4 review assumed this doc "almost certainly documents the now-deleted standalone-shaping API," but a crate-wide grep of `slug.md` returns **zero** hits for `SlugTextRequest` / `prepare_text_run` / `build_slug_text_run` / `load_glyph` / `FIXTURE_TEXT` / the deleted `SlugOutlineError` variants. The only work is the status reword; there are no API references to rewrite. |
+| `slug.md` (1275 lines) | **Deleted (2026-05-25)** | Obsolete slug *feasibility* design doc. Documents only deleted/superseded concepts: the `TextRendererPreference` MTSDF-switching model, the four-mode render/shadow matrix (Phase 7 removes it), HueOffset-as-future (resolved: removed). No unimplemented work to salvage — the effects roadmap is in `slug_fx.md`, the migration in this doc. Zero inbound references repo-wide. Recoverable from git. |
 | `slug-experiments.md` (1798 lines) | **Done (Phase 5)** | The CPU-prep-cost line that pointed at `benches/glyph_rasterization.rs` was rewritten to record the figure as a one-time measurement (full printable ASCII ≈ 0.84 ms, 2026-05-24, JetBrains Mono 128 px, after per-curve dedup + 48-band tuning) and note that a replacement micro-bench would target `prepare_positioned_run_with_scale` + `ensure_run_storage`. |
 | `slug-benchmark-procedure.md` (244 lines) | **Done (Phase 5)** | The "Prep-Time Benchmark" step that ran the deleted `glyph_rasterization` Criterion group was rewritten to state prep cost is no longer bench-tracked (record the ≈0.84 ms figure), and the obsolete `slug_text_spike` "spike-only changes" comparability rule was deleted (no spike/production split survives). |
 | `slug_fx.md` (641 lines) | **Keep** | The effect-support plan that motivates this migration. |

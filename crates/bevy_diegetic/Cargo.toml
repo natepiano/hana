@@ -54,9 +54,6 @@ fairy_dust          = { path = "../fairy_dust" }
 image               = { workspace = true, features = ["png"] }
 
 [[example]]
-name = "hue_offset"
-
-[[example]]
 name = "side_by_side"
 
 [[bench]]

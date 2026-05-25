@@ -29,7 +29,6 @@ use crate::save_window_position;
 use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
-use crate::transparency;
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
@@ -244,22 +243,6 @@ impl SprinkleBuilder<WithOrbitCam> {
     #[must_use]
     pub fn with_restore_camera_on_restart(mut self) -> Self {
         restart_camera::install(&mut self.app);
-        self
-    }
-
-    /// Insert `bevy_diegetic::StableTransparency` on the spawned `OrbitCam`,
-    /// which adds `OrderIndependentTransparencySettings`, sets the camera's
-    /// depth texture to `TEXTURE_BINDING`, and forces `Msaa::Off` on the
-    /// camera and on every screen-space overlay camera in the app.
-    ///
-    /// Use this when coplanar `WorldText` shows view-angle shading shifts,
-    /// when you need animated alpha fades on text, or when you need correct
-    /// depth compositing of text with other translucent primitives. Pair
-    /// with `AlphaMode::Blend` on text. Inert without `DiegeticUiPlugin`,
-    /// which is added deduplicated.
-    #[must_use]
-    pub fn with_stable_transparency(mut self) -> Self {
-        transparency::install(&mut self.app);
         self
     }
 }

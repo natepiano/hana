@@ -8,7 +8,7 @@
 //! ```ignore
 //! fairy_dust::sprinkle_example()
 //!     .with_orbit_cam_configured(|orbit_cam| { orbit_cam.radius = Some(5.0); })
-//!     .with_stable_transparency()        // only callable after with_orbit_cam_*
+//!     .with_restore_camera_on_restart() // only callable after with_orbit_cam_*
 //!     .with_save_window_position()
 //!     .with_brp_extras()
 //!     .with_camera_control_panel()
@@ -19,8 +19,8 @@
 //! ## Typestate
 //!
 //! The builder is parameterized by a state marker (`NoOrbitCam` / `WithOrbitCam`).
-//! Methods that act on the spawned `OrbitCam` entity (currently
-//! [`SprinkleBuilder::with_stable_transparency`]) are only defined on
+//! Methods that act on the spawned `OrbitCam` entity (such as
+//! [`SprinkleBuilder::with_restore_camera_on_restart`]) are only defined on
 //! `SprinkleBuilder<WithOrbitCam>`, so calling them before
 //! [`SprinkleBuilder::with_orbit_cam_configured`] is a compile error.
 //!
@@ -42,7 +42,6 @@ mod restart;
 mod restart_camera;
 mod save_window_position;
 mod screen_panels;
-mod transparency;
 
 use std::marker::PhantomData;
 

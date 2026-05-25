@@ -6,14 +6,8 @@
 //! Rows fill columns left-to-right within a panel. When the panel reaches
 //! screen width, it pushes backward and a new panel spawns in front.
 //!
-//! ## `hue_offset` demo
-//!
-//! When idle (1 second after releasing keys), the rainbow color scheme
-//! scrolls across all panels using [`DiegeticPanel::hue_offset`]. This is
-//! a GPU-side effect — the shader rotates all vertex colors uniformly,
-//! so the animation has zero CPU cost (no tree rebuilds, no mesh changes).
-//! This is a niche feature for animating color schemes without touching
-//! layout or mesh data.
+//! Each row takes a fixed color from a rainbow spread across the panel's
+//! rows, set once when the tree is built.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -31,7 +25,6 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::HueOffset;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
@@ -121,25 +114,13 @@ const SOURCE_TEXT: &str = "bevy diegetic layout engine text rendering msdf atlas
 
 // ── Resources / components ───────────────────────────────────────────────────
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct StressControls {
     row_count:        usize,
     /// Target row count — the row count we're animating toward.
     /// When `target > row_count`, rows are added at [`ROWS_PER_FRAME`].
     /// When `target < row_count`, rows are removed at [`ROWS_PER_FRAME`].
     target_row_count: usize,
-    /// Color rotation angle in radians.
-    hue_angle:        f32,
-}
-
-impl Default for StressControls {
-    fn default() -> Self {
-        Self {
-            row_count:        0,
-            target_row_count: 0,
-            hue_angle:        0.0,
-        }
-    }
 }
 
 #[derive(Component)]
@@ -198,7 +179,6 @@ fn main() {
             (
                 handle_input,
                 animate_row_count,
-                advance_color_rotation,
                 update_status_panel,
                 update_panels,
                 resize_ground_plane,
@@ -378,33 +358,6 @@ fn animate_row_count(mut state: ResMut<StressControls>) {
     } else if state.row_count > state.target_row_count {
         let step = ROWS_PER_FRAME.min(state.row_count - state.target_row_count);
         state.row_count -= step;
-    }
-}
-
-// ── Color rotation ──────────────────────────────────────────────────────────
-
-/// Advances the rainbow hue rotation every frame at a fixed angular velocity.
-///
-/// Uses [`HueOffset`] component — a separate component from [`DiegeticPanel`],
-/// so changing it does not trigger layout recomputation or text mesh rebuilds.
-/// The library's `sync_panel_hue_offset` system propagates it to the shared
-/// GPU material automatically.
-fn advance_color_rotation(
-    mut state: ResMut<StressControls>,
-    panels: Query<Entity, With<StressPanel>>,
-    mut commands: Commands,
-) {
-    if state.row_count == 0 {
-        return;
-    }
-
-    // Fixed angular velocity — visual speed stays constant regardless of
-    // row count. One full rotation every ~5 seconds at 60 FPS.
-    let step = std::f32::consts::TAU / 300.0;
-    state.hue_angle = (state.hue_angle + step) % std::f32::consts::TAU;
-
-    for entity in &panels {
-        commands.entity(entity).insert(HueOffset(state.hue_angle));
     }
 }
 
@@ -603,10 +556,8 @@ fn update_panels(
                     .mul_add(1000.0, tree_build_ms);
                 tree_builds += 1;
             } else if panel_count_changed {
-                // Panel count changed — rebuild frozen panels once to
-                // redistribute hue spacing against the new row_count.
-                // Between boundary crossings, hue_offset on the shader
-                // handles color rotation with zero CPU cost.
+                // Panel count changed — rebuild frozen panels once so the
+                // per-row rainbow respaces against the new row_count.
                 commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words));
             }
             *transform = panel_transform(sp.0, needed, wh);

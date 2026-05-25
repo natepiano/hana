@@ -190,10 +190,9 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// panel. Per-style overrides still win; this in turn overrides
     /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
     ///
-    /// See [`StableTransparency`](crate::StableTransparency) for the full
-    /// two-path overview ([`AlphaMode::Blend`] + `StableTransparency` vs
-    /// [`AlphaMode::AlphaToCoverage`] + MSAA) and guidance on mixing modes
-    /// for creative effects.
+    /// The default is [`AlphaMode::Blend`], ordered by per-command
+    /// `depth_bias`; [`AlphaMode::AlphaToCoverage`] with MSAA is an
+    /// alternative for hard-edged coverage.
     #[must_use]
     pub const fn text_alpha_mode(mut self, mode: AlphaMode) -> Self {
         self.data.text_alpha_mode = Some(mode);

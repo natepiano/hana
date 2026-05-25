@@ -30,35 +30,30 @@ pub(crate) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelEx
 #[derive(Clone, Debug, ShaderType)]
 pub struct SdfPanelUniform {
     /// Half-size of the SDF form in world units (width/2, height/2).
-    pub half_size:        Vec2,
+    pub half_size:      Vec2,
     /// Half-size of the mesh quad in world units. Larger than `half_size`
     /// by the AA padding so the exterior anti-aliasing ramp has fragments
     /// to render on.
-    pub mesh_half_size:   Vec2,
+    pub mesh_half_size: Vec2,
     /// Per-corner radii in world units: [TL, TR, BR, BL].
-    pub corner_radii:     Vec4,
+    pub corner_radii:   Vec4,
     /// Border widths in world units: [top, right, bottom, left].
-    pub border_widths:    Vec4,
+    pub border_widths:  Vec4,
     /// Border color in linear RGBA.
-    pub border_color:     Vec4,
+    pub border_color:   Vec4,
     /// SDF selector. `0` = rounded rect, `1` = triangle, `2` = circle,
     /// `3` = diamond, `4` = line segment.
-    pub sdf_kind:         u32,
+    pub sdf_kind:       u32,
     /// Extra parameters for custom SDF forms.
-    pub sdf_params:       Vec4,
+    pub sdf_params:     Vec4,
     /// Alpha of the fill/base color. Used by the shadow prepass to
     /// distinguish filled surfaces from border-only rings.
-    pub fill_alpha:       f32,
+    pub fill_alpha:     f32,
     /// Clip rect in local quad space: `[left, bottom, right, top]`.
     /// Fragments outside this rect are discarded. Defaults to the full
     /// quad bounds (`[-half_w, -half_h, half_w, half_h]`) when no clip
     /// is active.
-    pub clip_rect:        Vec4,
-    /// Depth offset added to `position.z` before OIT fragment storage.
-    /// Separates coplanar layers in the OIT linked list so the resolve
-    /// pass composites them in the correct painter's order.
-    /// Higher values = closer to camera (reverse-Z).
-    pub oit_depth_offset: f32,
+    pub clip_rect:      Vec4,
 }
 
 /// SDF panel extension for `StandardMaterial`.
@@ -107,13 +102,12 @@ impl From<SdfPrimitiveKind> for u32 {
 
 /// Inputs for a rounded-rectangle panel material.
 pub(crate) struct SdfPanelMaterialInput {
-    pub half_size:        Vec2,
-    pub mesh_half_size:   Vec2,
-    pub corner_radii:     [f32; 4],
-    pub border_widths:    [f32; 4],
-    pub border_color:     Option<Color>,
-    pub clip_rect:        Vec4,
-    pub oit_depth_offset: f32,
+    pub half_size:      Vec2,
+    pub mesh_half_size: Vec2,
+    pub corner_radii:   [f32; 4],
+    pub border_widths:  [f32; 4],
+    pub border_color:   Option<Color>,
+    pub clip_rect:      Vec4,
 }
 
 /// Inputs for a non-rectangular SDF material.
@@ -126,7 +120,6 @@ pub(crate) struct SdfPrimitiveMaterialInput {
     pub sdf_primitive_kind: SdfPrimitiveKind,
     pub params:             Vec4,
     pub clip_rect:          Vec4,
-    pub oit_depth_offset:   f32,
 }
 
 /// Creates a new [`SdfPanelMaterial`] from a resolved base `StandardMaterial`.
@@ -150,7 +143,6 @@ pub(crate) fn sdf_panel_material(
             sdf_primitive_kind: SdfPrimitiveKind::RoundedRect,
             params:             Vec4::ZERO,
             clip_rect:          input.clip_rect,
-            oit_depth_offset:   input.oit_depth_offset,
         },
     )
 }
@@ -185,7 +177,6 @@ pub(crate) fn sdf_primitive_material(
                 sdf_params: input.params,
                 fill_alpha,
                 clip_rect: input.clip_rect,
-                oit_depth_offset: input.oit_depth_offset,
             },
         },
     }

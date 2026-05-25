@@ -1,21 +1,19 @@
-//! `text_alpha` — interactive walk-through of all `AlphaMode` variants for
-//! text, paired with the three mutually-exclusive camera states
-//! (MSAA / `StableTransparency` / Off).
+//! `text_alpha` — interactive walk-through of every `AlphaMode` variant for
+//! text.
 //!
-//! Scene launches in the library default: `AlphaMode::Blend` + `Msaa::Sample4`
-//! on the camera. You may see color/ordering flicker on the coplanar
-//! "GROUND" text as the camera moves — press `C` to cycle to
-//! `StableTransparency` and watch it stabilize.
+//! Slug renders glyph coverage as per-pixel alpha; this example shows how each
+//! `AlphaMode` composites that coverage. The scene launches in the library
+//! default (`AlphaMode::Blend` + `Msaa::Sample4`). Coplanar text such as the
+//! floating "GROUND" label stays stable as the camera moves because slug emits
+//! one mesh per run and orders it with `depth_bias`.
 //!
 //! Hotkeys:
 //! - `H` — home the camera.
-//! - `C` — cycle camera state: MSAA → `StableTransparency` → Off → MSAA.
 //! - `1..7` — select the active `AlphaMode`: 1 Blend (default) · 2 Premultiplied · 3 Coverage · 4
 //!   Add · 5 Multiply · 6 Mask · 7 Opaque.
 
 use std::time::Duration;
 
-use bevy::camera::Camera3d;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy_brp_extras::BrpExtrasPlugin;
@@ -36,7 +34,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::StableTransparency;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::CameraMove;
@@ -90,48 +87,16 @@ struct HudPanel;
 #[derive(Component)]
 struct InfoPanel;
 
-/// The three mutually-exclusive camera-pipeline states the example cycles
-/// through. `StableTransparency` and MSAA cannot coexist, so they live on
-/// the same cycle as a single choice.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum CameraState {
-    Msaa,
-    Stable,
-    None,
-}
-
-impl CameraState {
-    const fn next(self) -> Self {
-        match self {
-            Self::Msaa => Self::Stable,
-            Self::Stable => Self::None,
-            Self::None => Self::Msaa,
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Msaa => "MSAA",
-            Self::Stable => "Stable",
-            Self::None => "None",
-        }
-    }
-}
-
 #[derive(Resource)]
 struct ControlsState {
-    alpha_mode:   AlphaMode,
-    camera_state: CameraState,
+    alpha_mode: AlphaMode,
 }
 
 impl Default for ControlsState {
     fn default() -> Self {
+        // Matches `CascadeDefaults::default().text_alpha`.
         Self {
-            // Matches `CascadeDefaults::default().text_alpha`.
-            alpha_mode:   AlphaMode::Blend,
-            // Launch with MSAA on; user presses C to see StableTransparency
-            // fix the coplanar-text flicker on "GROUND".
-            camera_state: CameraState::Msaa,
+            alpha_mode: AlphaMode::Blend,
         }
     }
 }
@@ -156,69 +121,50 @@ fn alpha_mode_label(mode: AlphaMode) -> &'static str {
 const fn alpha_mode_description(mode: AlphaMode) -> &'static str {
     match mode {
         AlphaMode::Blend => {
-            "Classic alpha compositing. The MSDF shader writes fractional \
-             alpha at glyph edges for smooth anti-aliasing; Blend uses that \
-             value directly to composite each fragment with the background. \
-             Interior glyphs render fully opaque when the color's alpha is \
-             1.0; edge fragments blend smoothly.\n\n\
-             Caveat: routes through the transparent queue. Coplanar text can \
-             flicker as the camera angle changes — per-mesh back-to-front \
-             sort flips at certain angles.\n\n\
-             Recommended: camera state = Stable (press C). Routes \
-             compositing through OIT and eliminates flicker. Tradeoff: \
-             StableTransparency forces MSAA off."
+            "Classic alpha compositing. Slug emits per-pixel coverage as \
+             alpha, and Blend composites each fragment with the background: \
+             interiors render fully opaque when the color's alpha is 1.0, \
+             edges blend smoothly.\n\n\
+             Routes through the transparent queue. Slug emits one mesh per \
+             text run and orders coplanar text with depth_bias, so it stays \
+             stable as the camera angle changes."
         },
         AlphaMode::Premultiplied => {
             "Sibling of Blend; assumes RGB channels are pre-multiplied by \
              alpha. Per Bevy's docs, behaves like Blend at alphas near 1.0 \
              and like Add at alphas near 0.0. Avoids border/outline \
              artifacts that Blend can show on some textures.\n\n\
-             On lit coplanar text, Premultiplied + StableTransparency can \
-             settle on a darker, arguably more physically-correct color \
-             where Blend flips between brighter and dimmer shades.\n\n\
-             Same transparent-queue caveat as Blend. Recommended: camera \
-             state = Stable. Worth comparing with Blend on your scene."
+             Worth comparing with Blend on your scene."
         },
         AlphaMode::AlphaToCoverage => {
-            "Order-independent anti-aliasing via sub-pixel coverage. The \
-             shader's fractional alpha becomes a sample-mask pattern; MSAA \
-             smooths it into a perceived gradient. Bypasses the transparent \
-             queue entirely — no depth-sort issues.\n\n\
-             The only anti-aliased path that works with MSAA. Without MSAA, \
-             degrades to Mask(0.5) and looks jagged.\n\n\
-             Recommended: camera state = MSAA. Use this when other geometry \
-             in the scene benefits from MSAA and you want to avoid OIT."
+            "Order-independent anti-aliasing via sub-pixel coverage. Slug's \
+             fractional coverage becomes a sample-mask pattern; MSAA smooths \
+             it into a perceived gradient. Bypasses the transparent queue \
+             entirely — no depth-sort issues.\n\n\
+             Requires MSAA. Without it, degrades to Mask(0.5) and looks \
+             jagged."
         },
         AlphaMode::Add => {
             "Additive blending — glyph color is added to whatever is behind \
              it. Great for neon, glow, and holographic effects over dark \
-             backgrounds.\n\n\
-             Caveat: even though addition is mathematically commutative, \
-             Bevy still routes this through the transparent queue, and \
-             depth-test interactions on coplanar fragments can flicker.\n\n\
-             Recommended: camera state = Stable for stable compositing on \
-             coplanar text."
+             backgrounds."
         },
         AlphaMode::Multiply => {
             "Multiplicative blending — glyph color multiplies into the \
              background. Good for ink or tint effects over light \
-             backgrounds; disappears on dark ones.\n\n\
-             Same transparent-queue caveats as Add. Recommended: camera \
-             state = Stable when multiple multiplied layers overlap."
+             backgrounds; disappears on dark ones."
         },
         AlphaMode::Mask(_) => {
             "Hard alpha test at the configured threshold (0.5 here). \
              Fragments above threshold render fully opaque; below threshold \
              are discarded. Bypasses the transparent queue — no sorting \
              issues, no MSAA dependency.\n\n\
-             Caveat: the MSDF shader's smooth fractional-alpha edge is \
-             thrown away — edges look jagged.\n\n\
-             Recommended: use only for retro / pixel-art looks where \
-             crisp thresholded edges are desired."
+             Caveat: slug's smooth coverage edge is thresholded away — edges \
+             look jagged. Use only for retro / pixel-art looks."
         },
         AlphaMode::Opaque => {
             "Disables alpha handling entirely. Each glyph renders as a \
-             colored rectangle with no glyph silhouette; the MSDF outline is lost.\n\n\
+             colored rectangle with no glyph silhouette.\n\n\
              Not useful for text. Included here only for completeness \
              — try it and you'll see colored squares instead of letters."
         },
@@ -355,10 +301,6 @@ fn handle_hotkeys(
         ));
     }
 
-    if keyboard.just_pressed(KeyCode::KeyC) {
-        state.camera_state = state.camera_state.next();
-    }
-
     // Digit1..Digit7 → ALPHA_MODES[0..7].
     let digits = [
         KeyCode::Digit1,
@@ -381,46 +323,11 @@ fn apply_state_and_rebuild_hud(
     state: Res<ControlsState>,
     mut commands: Commands,
     mut defaults: ResMut<CascadeDefaults>,
-    cam: Query<(Entity, Option<&StableTransparency>), With<SceneCamera>>,
-    all_cameras: Query<Entity, With<Camera3d>>,
     hud_panels: Query<Entity, With<HudPanel>>,
     info_panels: Query<Entity, With<InfoPanel>>,
 ) {
     if !state.is_changed() {
         return;
-    }
-
-    // Apply camera state. The three cases are mutually exclusive — OIT and
-    // MSAA cannot coexist on the same camera.
-    match state.camera_state {
-        CameraState::Msaa => {
-            for e in &all_cameras {
-                commands.entity(e).insert(Msaa::Sample4);
-            }
-            if let Ok((entity, marker)) = cam.single()
-                && marker.is_some()
-            {
-                commands.entity(entity).remove::<StableTransparency>();
-            }
-        },
-        CameraState::Stable => {
-            if let Ok((entity, marker)) = cam.single()
-                && marker.is_none()
-            {
-                commands.entity(entity).insert(StableTransparency);
-            }
-            // StableTransparency's observer propagates Msaa::Off.
-        },
-        CameraState::None => {
-            for e in &all_cameras {
-                commands.entity(e).insert(Msaa::Off);
-            }
-            if let Ok((entity, marker)) = cam.single()
-                && marker.is_some()
-            {
-                commands.entity(entity).remove::<StableTransparency>();
-            }
-        },
     }
 
     defaults.text_alpha = state.alpha_mode;
@@ -431,17 +338,16 @@ fn apply_state_and_rebuild_hud(
     for e in &info_panels {
         commands.entity(e).despawn();
     }
-    spawn_hud_panel(&mut commands, &state);
+    spawn_hud_panel(&mut commands);
     spawn_info_panel(&mut commands, &state);
 }
 
-fn spawn_hud_panel(commands: &mut Commands, state: &ControlsState) {
-    let camera_state = state.camera_state;
+fn spawn_hud_panel(commands: &mut Commands) {
     let hud_panel = DiegeticPanel::screen()
         .size(HUD_WIDTH, HUD_HEIGHT)
         .anchor(Anchor::TopLeft)
         .text_alpha_mode(AlphaMode::Blend)
-        .layout(move |b| build_controls(b, camera_state))
+        .layout(build_controls)
         .build();
     let Ok(hud_panel) = hud_panel else {
         error!("failed to build HUD");
@@ -475,7 +381,7 @@ fn hud_text_style(active: bool) -> LayoutTextStyle {
     })
 }
 
-fn build_controls(b: &mut LayoutBuilder, camera_state: CameraState) {
+fn build_controls(b: &mut LayoutBuilder) {
     let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
 
     b.with(
@@ -502,10 +408,7 @@ fn build_controls(b: &mut LayoutBuilder, camera_state: CameraState) {
                     hud_divider(b);
                     b.text("H home", hud_text_style(false));
                     hud_divider(b);
-                    b.text("C camera:", hud_text_style(false));
-                    for opt in [CameraState::Msaa, CameraState::Stable, CameraState::None] {
-                        b.text(opt.label(), hud_text_style(opt == camera_state));
-                    }
+                    b.text("1-7 alpha mode", hud_text_style(false));
                 },
             );
         },

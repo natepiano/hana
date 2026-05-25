@@ -14,7 +14,6 @@ use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
 pub use coordinate_space::CoordinateSpace;
-pub use coordinate_space::HueOffset;
 pub use coordinate_space::RenderMode;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;

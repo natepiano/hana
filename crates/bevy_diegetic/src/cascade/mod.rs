@@ -100,6 +100,7 @@ pub use defaults::CascadeDefaults;
 pub(crate) use panel_child::CascadePanelChildPlugin;
 pub(crate) use resolved::CascadePanelChild;
 pub(crate) use resolved::CascadeTarget;
+pub(crate) use resolved::ExcludeNone;
 pub(crate) use resolved::Resolved;
 pub(crate) use target::CascadeEntityPlugin;
 pub(crate) use target::CascadePanelPlugin;

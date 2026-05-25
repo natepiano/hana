@@ -68,7 +68,7 @@ where
 /// first inserted.
 fn on_cascade_target_added<A: CascadeTarget>(
     trigger: On<Add, A::Override>,
-    targets: Query<&A::Override>,
+    targets: Query<&A::Override, Without<A::Exclude>>,
     defaults: Res<CascadeDefaults>,
     mut commands: Commands,
 ) {
@@ -86,7 +86,7 @@ fn on_cascade_target_added<A: CascadeTarget>(
 fn propagate_global_default_to_entity<A: CascadeTarget>(
     defaults: Res<CascadeDefaults>,
     mut last_seen: Local<Option<A>>,
-    targets: Query<(Entity, &A::Override, &Resolved<A>)>,
+    targets: Query<(Entity, &A::Override, &Resolved<A>), Without<A::Exclude>>,
     mut commands: Commands,
 ) {
     let current = A::global_default(&defaults);
@@ -108,6 +108,7 @@ fn propagate_global_default_to_entity<A: CascadeTarget>(
 )]
 mod tests {
     use super::*;
+    use crate::cascade::ExcludeNone;
     use crate::layout::Unit;
 
     // A throwaway 2-tier test attribute projected onto
@@ -123,6 +124,7 @@ mod tests {
     struct TestOverride(Option<Unit>);
 
     impl CascadeTarget for TestUnit {
+        type Exclude = ExcludeNone;
         type Override = TestOverride;
 
         fn override_value(c: &TestOverride) -> Option<Self> { c.0.map(Self) }
@@ -239,6 +241,7 @@ mod tests {
     struct TestPanelUnitOverride(Option<Unit>);
 
     impl CascadeTarget for TestPanelUnit {
+        type Exclude = ExcludeNone;
         type Override = TestPanelUnitOverride;
 
         fn override_value(c: &TestPanelUnitOverride) -> Option<Self> { c.0.map(Self) }

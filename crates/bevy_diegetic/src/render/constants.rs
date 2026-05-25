@@ -12,13 +12,6 @@ use bevy::prelude::*;
 /// order matches the painter's order. Also wins the depth test for
 /// coplanar fragments.
 pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
-/// Per-command OIT depth offset for coplanar fragment ordering.
-///
-/// Added to `position.z` in the fragment shader before `oit_draw`
-/// stores the fragment. Pipeline `depth_bias` does NOT affect
-/// `in.position.z`, so we apply this offset manually.
-/// Reverse-Z: positive = closer to camera = composited in front.
-pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 /// Render layer offset — panel layers start here to avoid conflicts with
 /// user-defined layers.
 pub(super) const PANEL_LAYER_OFFSET: usize = 16;

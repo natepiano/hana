@@ -263,7 +263,6 @@ fn main() {
             },
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        .with_stable_transparency()
         .with_camera_home(compute_home_transform())
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

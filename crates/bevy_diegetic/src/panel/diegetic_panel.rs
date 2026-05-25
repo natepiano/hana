@@ -11,6 +11,7 @@ use super::coordinate_space::RenderMode;
 use super::coordinate_space::SurfaceShadow;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
+use crate::cascade::ExcludeNone;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::InvalidSize;
@@ -435,6 +436,7 @@ fn set_tree_command(
 pub(crate) struct PanelFontUnit(pub Unit);
 
 impl CascadeTarget for PanelFontUnit {
+    type Exclude = ExcludeNone;
     type Override = DiegeticPanel;
 
     fn override_value(entity_override: &DiegeticPanel) -> Option<Self> {

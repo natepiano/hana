@@ -121,20 +121,3 @@ impl CoordinateSpace {
     #[must_use]
     pub const fn is_screen(&self) -> bool { matches!(self, Self::Screen { .. }) }
 }
-
-/// Hue rotation applied to all text in a panel, in radians.
-///
-/// Attach to the same entity as a
-/// [`DiegeticPanel`](crate::DiegeticPanel) to rotate the hue of every
-/// vertex color in the panel's text mesh. This is a GPU-side effect —
-/// changing it does not trigger layout recomputation or mesh rebuilds.
-///
-/// Individual text elements retain their per-element colors set via
-/// `TextConfig::with_color`. This rotation shifts all of them by the
-/// same amount. A value of `TAU / 3` (~2.09) shifts reds to greens,
-/// greens to blues, etc. A full `TAU` (6.28) cycles back to the original
-/// colors.
-///
-/// See the `text_stress` example for usage.
-#[derive(Component, Default, Clone, Copy, Debug, Reflect)]
-pub struct HueOffset(pub f32);

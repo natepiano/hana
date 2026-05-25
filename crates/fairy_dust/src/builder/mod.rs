@@ -31,8 +31,8 @@ pub struct NoOrbitCam;
 /// Typestate marker: the builder has spawned an `OrbitCam`.
 ///
 /// Reached via [`SprinkleBuilder::with_orbit_cam_configured`]. Camera-attached
-/// capabilities like [`SprinkleBuilder::with_stable_transparency`] become
-/// callable in this state.
+/// capabilities like [`SprinkleBuilder::with_restore_camera_on_restart`]
+/// become callable in this state.
 pub struct WithOrbitCam;
 
 /// Builder returned by [`sprinkle_example`](crate::sprinkle_example). State-agnostic capability

@@ -167,6 +167,7 @@ impl WorldText {
 pub(super) struct WorldTextAlpha(pub AlphaMode);
 
 impl CascadeTarget for WorldTextAlpha {
+    type Exclude = PanelTextChild;
     type Override = WorldTextStyle;
 
     fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
@@ -190,6 +191,7 @@ impl CascadeTarget for WorldTextAlpha {
 pub(crate) struct WorldFontUnit(pub Unit);
 
 impl CascadeTarget for WorldFontUnit {
+    type Exclude = PanelTextChild;
     type Override = WorldTextStyle;
 
     fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {

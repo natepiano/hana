@@ -67,11 +67,25 @@ pub(crate) trait CascadeTarget: CascadeAttribute {
     /// Component on the target entity carrying the tier-1 override.
     type Override: Component;
 
+    /// Marker that disqualifies an entity from this cascade even when it holds
+    /// the [`Override`](Self::Override). When two cascades share an override
+    /// component, each names the other's entity marker here so a shared-override
+    /// entity is enrolled by exactly one of them. Cascades that target every
+    /// override-holder use [`ExcludeNone`].
+    type Exclude: Component;
+
     /// Project the tier-1 override value from its component.
     fn override_value(entity_override: &Self::Override) -> Option<Self>;
     /// Read the tier-3 global default.
     fn global_default(defaults: &CascadeDefaults) -> Self;
 }
+
+/// [`CascadeTarget::Exclude`] marker for cascades that exclude no entity.
+///
+/// No entity ever holds this component, so `Without<ExcludeNone>` matches every
+/// override-holder.
+#[derive(Component)]
+pub(crate) struct ExcludeNone;
 
 /// Per-entity cache of a resolved cascading attribute.
 ///

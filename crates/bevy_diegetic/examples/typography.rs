@@ -206,7 +206,6 @@ fn main() {
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        .with_stable_transparency()
         .with_camera_home(
             Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),
         )
