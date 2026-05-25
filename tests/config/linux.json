@@ -223,6 +223,38 @@
       }
     },
     {
+      "id": "x11_cross_high_to_low",
+      "description": "X11 high->low cross-DPI restore (launch eDP scale2 -> target HDMI scale1). Validates HigherToLower after the 0.19 position-compensation removal. Position may carry a W6 title-bar offset (small constant); a ~2x delta would indicate a real regression.",
+      "automation": "full",
+      "backend": "x11",
+      "launch_monitor": 0,
+      "requires": {"min_monitors": 2, "different_scales": true},
+      "workaround_keys": ["W1", "W6"],
+      "ron_file": "cross_monitor_high_to_low.ron",
+      "expect_mismatch": true,
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+    {
+      "id": "x11_cross_low_to_high",
+      "description": "X11 low->high cross-DPI restore (launch HDMI scale1 -> target eDP scale2). Validates LowerToHigher (committed fix: compensated position + full size). Position may carry a W6 title-bar offset.",
+      "automation": "full",
+      "backend": "x11",
+      "launch_monitor": 1,
+      "requires": {"min_monitors": 2, "different_scales": true},
+      "workaround_keys": ["W1", "W6"],
+      "ron_file": "cross_monitor_low_to_high.ron",
+      "expect_mismatch": true,
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+    {
       "id": "x11_borderless_0_0",
       "description": "Borderless fullscreen restore to Monitor 0 (same monitor)",
       "automation": "full",

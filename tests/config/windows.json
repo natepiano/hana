@@ -42,6 +42,22 @@
     },
 
     {
+      "id": "cross_low_to_high",
+      "description": "Window on high-DPI monitor restores correctly when launched from low-DPI monitor (CompensateSizeOnly low->high)",
+      "automation": "full",
+      "launch_monitor": 1,
+      "requires": {"min_monitors": 2, "different_scales": true},
+
+      "ron_file": "cross_monitor_low_to_high.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
       "id": "borderless_mon0",
       "description": "Borderless fullscreen restore on Monitor 0",
       "automation": "full",

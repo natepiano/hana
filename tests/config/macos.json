@@ -53,6 +53,23 @@
     },
 
     {
+      "id": "cross_high_to_low_midmonitor",
+      "description": "High->low restore with a mid-monitor target (clear of all edges) to isolate whether high->low position needs compensation on 0.19",
+      "automation": "full",
+      "launch_monitor": 0,
+      "requires": {"min_monitors": 2, "different_scales": true},
+
+      "ron_file": "cross_monitor_high_to_low_midmonitor.ron",
+      "expect_mismatch": true,
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
       "id": "borderless_programmatic_mon0",
       "description": "Borderless fullscreen restore - starts in borderless mode via RON",
       "automation": "full",
