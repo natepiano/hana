@@ -626,7 +626,7 @@ impl TextProps<ForStandalone> {
     ///
     /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
     /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
-    /// global [`CascadeDefaults::world_font_unit`](crate::CascadeDefaults).
+    /// global [`CascadeDefaults::font_unit`](crate::CascadeDefaults).
     ///
     /// Defaults to centered anchor, white color, normal weight.
     #[must_use]

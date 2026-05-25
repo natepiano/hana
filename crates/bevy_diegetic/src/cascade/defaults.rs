@@ -32,10 +32,13 @@ pub struct CascadeDefaults {
     /// Global fallback for text alpha mode (both panel text and standalone
     /// world text).
     pub text_alpha:      AlphaMode,
-    /// Global fallback for panel-text font unit.
+    /// Construction-time seed for a panel's `Override<FontUnit>`. Read once by
+    /// the panel authoring bridge when a panel has no explicit `font_unit`;
+    /// **not** a cascade global and **not** propagated at runtime.
     pub panel_font_unit: Unit,
-    /// Global fallback for standalone-world-text font unit.
-    pub world_font_unit: Unit,
+    /// Sole cascade global for `FontUnit` — the default a standalone
+    /// `WorldText` resolves to when it carries no `Override<FontUnit>`.
+    pub font_unit:       Unit,
     /// Default `layout_unit` for newly-built panels. Read at panel
     /// construction; **not** cascade-propagated at runtime.
     pub layout_unit:     Unit,
@@ -46,7 +49,7 @@ impl Default for CascadeDefaults {
         Self {
             text_alpha:      AlphaMode::Blend,
             panel_font_unit: Unit::Points,
-            world_font_unit: Unit::Meters,
+            font_unit:       Unit::Meters,
             layout_unit:     Unit::Meters,
         }
     }

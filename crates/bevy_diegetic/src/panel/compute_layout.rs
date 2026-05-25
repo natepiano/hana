@@ -14,11 +14,10 @@ use super::coordinate_space::CoordinateSpace;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
 use super::diegetic_panel::DiegeticPanelChangeClassification;
-use super::diegetic_panel::PanelFontUnit;
 use super::diegetic_panel::ScaledLayoutTreeCache;
 use super::perf::DiegeticPerfStats;
 use crate::cascade::CascadeDefaults;
-use crate::cascade::CascadeTarget;
+use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::LayoutEngine;
@@ -43,7 +42,7 @@ pub(super) fn compute_panel_layouts(
         &mut ScaledLayoutTreeCache,
     )>,
     mut computed_panels: Query<&mut ComputedDiegeticPanel>,
-    panel_font_units: Query<&Resolved<PanelFontUnit>>,
+    panel_font_units: Query<&Resolved<FontUnit>>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -95,10 +94,12 @@ pub(super) fn compute_panel_layouts(
         };
 
         let layout_unit = panel_ref.layout_unit();
-        let font_unit = panel_font_units.get(entity).map_or_else(
-            |_| PanelFontUnit::global_default(&defaults).0,
-            |resolved| resolved.0.0,
-        );
+        // Every panel carries a seeded `Override<FontUnit>`, so `Resolved` is
+        // always present; the fallback to the construction-time
+        // `panel_font_unit` seed only guards a missing-component edge.
+        let font_unit = panel_font_units
+            .get(entity)
+            .map_or(defaults.panel_font_unit, |resolved| resolved.0.0);
         let layout_to_points = layout_unit.to_points();
         let font_to_points = font_unit.to_points();
 

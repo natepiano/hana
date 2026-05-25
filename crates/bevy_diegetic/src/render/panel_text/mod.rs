@@ -9,7 +9,7 @@ mod shaping;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
-use self::alpha::PanelTextAlpha;
+use self::alpha::seed_panel_child_alpha;
 pub use self::layout::PanelTextLayout;
 use self::mesh_spawning::build_panel_text_meshes;
 use self::reconcile::reconcile_panel_image_children;
@@ -18,8 +18,8 @@ use self::shaping::shape_panel_text_children;
 use super::panel_rtt;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
-use crate::cascade::CascadeEntityPlugin;
-use crate::cascade::CascadePanelChildPlugin;
+use crate::cascade::CascadePlugin;
+use crate::cascade::TextAlpha;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::ShapedTextCache;
@@ -35,8 +35,6 @@ pub(super) struct PanelText {
     pub render_mode: GlyphRenderMode,
     /// Glyph shadow mode for this text element.
     pub shadow_mode: GlyphShadowMode,
-    /// Per-style alpha-mode override.
-    pub alpha_mode:  Option<AlphaMode>,
     /// Text fill color.
     pub fill_color:  Color,
     /// Optional panel-local clipping rect.
@@ -51,10 +49,9 @@ pub(super) struct TextRenderPlugin;
 
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CascadePanelChildPlugin::<PanelTextAlpha>::default());
-        app.add_plugins(CascadeEntityPlugin::<world_text::WorldTextAlpha>::default());
-        app.add_plugins(CascadeEntityPlugin::<world_text::WorldFontUnit>::default());
+        app.add_plugins(CascadePlugin::<TextAlpha>::default());
         app.add_observer(world_text::seed_world_text_overrides);
+        app.add_observer(seed_panel_child_alpha);
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();

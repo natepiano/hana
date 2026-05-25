@@ -10,10 +10,9 @@ use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::RenderMode;
 use super::coordinate_space::SurfaceShadow;
 use crate::cascade::CascadeDefaults;
-use crate::cascade::CascadeTarget;
-use crate::cascade::ExcludeNone;
 use crate::cascade::FontUnit;
 use crate::cascade::Override;
+use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
@@ -377,9 +376,9 @@ impl DiegeticPanel {
     ///
     /// Multiply a font size by this value to convert from font units
     /// to layout units. Callers pass the panel's resolved font unit —
-    /// usually read from [`Resolved<PanelFontUnit>`](crate::cascade::Resolved)
-    /// on the panel entity, falling back to
-    /// [`CascadeDefaults::panel_font_unit`].
+    /// read from [`Resolved<FontUnit>`](crate::cascade::Resolved) on the panel
+    /// entity (every panel carries one, seeded from `font_unit` or
+    /// [`CascadeDefaults::panel_font_unit`]).
     #[must_use]
     pub fn font_scale(&self, panel_font_unit: Unit) -> f32 {
         let font_meters_per_unit = panel_font_unit.meters_per_unit();
@@ -428,51 +427,38 @@ fn set_tree_command(
     panel.tree_revision = panel.tree_revision.wrapping_add(1);
 }
 
-/// Cascading attribute for panel-text font unit.
-///
-/// 2-tier cascade: [`DiegeticPanel::font_unit`] (panel override) →
-/// [`CascadeDefaults::panel_font_unit`] (global). The resolved value is
-/// cached in [`Resolved<PanelFontUnit>`](crate::cascade::Resolved) on the
-/// panel entity; [`compute_panel_layouts`](crate::panel::compute_layout)
-/// reads it to scale the layout tree's font sizes.
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub(crate) struct PanelFontUnit(pub Unit);
-
-impl CascadeTarget for PanelFontUnit {
-    type Exclude = ExcludeNone;
-    type Override = Override<FontUnit>;
-
-    fn override_value(entity_override: &Override<FontUnit>) -> Option<Self> {
-        Some(Self(entity_override.0.0))
-    }
-
-    fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.panel_font_unit) }
-}
-
 /// Spawn-time authoring bridge for panel cascade overrides.
 ///
 /// Reads a newly-added [`DiegeticPanel`]'s `text_alpha_mode` / `font_unit`
-/// authoring fields and inserts the matching `Override<A>` cascade component,
-/// but only when the field is set. An absent field leaves the component absent,
-/// which the cascade reads as "inherit." `DiegeticPanel` is no longer a cascade
-/// source — the cascade reads `Override<A>`; the fields are authoring inputs the
-/// bridge consumes once at spawn. The panel twin of the standalone
-/// `WorldTextStyle` authoring bridge.
+/// authoring fields, inserts the matching `Override<A>` cascade components, and
+/// seeds the panel's `Resolved<FontUnit>` (which `compute_panel_layouts` reads).
+///
+/// A panel is depth-1 with no cascade ancestor, so it cannot inherit `FontUnit`
+/// from a parent — it therefore **always** carries `Override<FontUnit>`, from
+/// `panel.font_unit()` when set else [`CascadeDefaults::panel_font_unit`]. That
+/// is why `panel_font_unit` is a construction-time seed, not a cascade global:
+/// no panel ever reads the `FontUnit` global, and a runtime `font_unit` change
+/// does not reach existing panels. `text_alpha_mode` is the panel's optional
+/// override for the alpha its labels inherit; absent → labels resolve to
+/// [`CascadeDefaults::text_alpha`] through the parent-walk. The panel needs no
+/// `Resolved<TextAlpha>` of its own — only its labels render text, and they
+/// walk up to this `Override<TextAlpha>` directly. The panel twin of the
+/// standalone `WorldTextStyle` authoring bridge.
 pub(super) fn seed_panel_overrides(
     trigger: On<Add, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
+    defaults: Res<CascadeDefaults>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(panel) = panels.get(entity) else {
         return;
     };
+    let font_unit = panel.font_unit().unwrap_or(defaults.panel_font_unit);
     let mut entity_commands = commands.entity(entity);
+    entity_commands.insert((Override(FontUnit(font_unit)), Resolved(FontUnit(font_unit))));
     if let Some(alpha_mode) = panel.text_alpha_mode() {
         entity_commands.insert(Override(TextAlpha(alpha_mode)));
-    }
-    if let Some(unit) = panel.font_unit() {
-        entity_commands.insert(Override(FontUnit(unit)));
     }
 }
 

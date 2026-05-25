@@ -8,10 +8,9 @@ use bevy_kana::ToF32;
 
 use super::PanelText;
 use super::PanelTextLayout;
-use super::alpha::PanelTextAlpha;
 use crate::cascade::CascadeDefaults;
-use crate::cascade::CascadePanelChild;
 use crate::cascade::Resolved;
+use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::GlyphShadowMode;
 use crate::panel::DiegeticPanel;
@@ -37,13 +36,13 @@ pub(super) fn build_panel_text_meshes(
         &ChildOf,
         (
             With<PanelChild>,
-            Or<(Changed<PanelText>, Changed<Resolved<PanelTextAlpha>>)>,
+            Or<(Changed<PanelText>, Changed<Resolved<TextAlpha>>)>,
         ),
     >,
     panel_children: Query<(Entity, &PanelText, &PanelTextLayout, &ChildOf)>,
     old_meshes: Query<(Entity, &ChildOf, Option<&SlugRunStorageKey>), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
-    resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
+    resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelChild>>,
     defaults: Res<CascadeDefaults>,
     mut backend: ResMut<SlugBackend>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -76,10 +75,9 @@ pub(super) fn build_panel_text_meshes(
             if child_of.parent() != panel_entity {
                 continue;
             }
-            let resolved_alpha = resolved_alphas.get(child_entity).map_or_else(
-                |_| PanelTextAlpha::global_default(&defaults).0,
-                |resolved| resolved.0.0,
-            );
+            let resolved_alpha = resolved_alphas
+                .get(child_entity)
+                .map_or(defaults.text_alpha, |resolved| resolved.0.0);
             spawn_panel_text_run(PanelTextSpawnRequest {
                 panel_entity,
                 panel_run,
@@ -107,7 +105,7 @@ fn collect_dirty_panels(
         &ChildOf,
         (
             With<PanelChild>,
-            Or<(Changed<PanelText>, Changed<Resolved<PanelTextAlpha>>)>,
+            Or<(Changed<PanelText>, Changed<Resolved<TextAlpha>>)>,
         ),
     >,
 ) -> Vec<Entity> {

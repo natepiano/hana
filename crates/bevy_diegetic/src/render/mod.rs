@@ -26,7 +26,6 @@ pub(crate) use sdf_material::sdf_primitive_material;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
 pub use world_text::PendingGlyphs;
-pub(crate) use world_text::WorldFontUnit;
 pub use world_text::WorldText;
 pub use world_text::WorldTextReady;
 

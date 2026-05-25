@@ -6,16 +6,11 @@ use bevy::prelude::*;
 
 use super::PanelText;
 use super::PanelTextLayout;
-use super::alpha::PanelTextAlpha;
-use crate::cascade::CascadeDefaults;
-use crate::cascade::CascadePanelChild;
-use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutTextStyle;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
-use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
 use crate::render::text_shaping;
@@ -41,15 +36,11 @@ pub(super) fn shape_panel_text_children(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
                 Changed<PanelTextLayout>,
-                Changed<Resolved<PanelTextAlpha>>,
             )>,
         ),
     >,
     pending_texts: Query<Entity, (With<PanelChild>, With<WorldText>, With<PendingGlyphs>)>,
     texts: Query<(&WorldText, &WorldTextStyle, &PanelTextLayout, &ChildOf)>,
-    panel_alpha: Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
-    existing_child_alpha: Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
-    defaults: Res<CascadeDefaults>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
@@ -109,16 +100,7 @@ pub(super) fn shape_panel_text_children(
         aggregate.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
         let readiness = GlyphReadiness::from(&stats);
-        apply_panel_result(
-            entity,
-            child_of.parent(),
-            panel_text,
-            readiness,
-            &panel_alpha,
-            &existing_child_alpha,
-            &defaults,
-            &mut commands,
-        );
+        apply_panel_result(entity, panel_text, readiness, &mut commands);
     }
 
     perf.panel_text.shape_ms = shape_stage_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
@@ -203,7 +185,6 @@ fn build_panel_text(
             prepared,
             render_mode: config.render_mode(),
             shadow_mode: config.shadow_mode(),
-            alpha_mode: config.alpha_mode(),
             fill_color: config.color(),
             clip_rect,
         }),
@@ -235,14 +216,15 @@ fn panel_clip_rect_local(
     })
 }
 
+/// Stores the prepared run and readiness markers for one label.
+///
+/// The label's `Resolved<TextAlpha>` is owned by the cascade (seeded by
+/// `seed_panel_child_alpha`, kept current by the propagation pass), so this is
+/// no longer where the label's alpha is computed.
 fn apply_panel_result(
     entity: Entity,
-    panel_entity: Entity,
     panel_text: Option<PanelText>,
     readiness: GlyphReadiness,
-    panel_alpha: &Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
-    existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
-    defaults: &CascadeDefaults,
     commands: &mut Commands,
 ) {
     match readiness {
@@ -251,22 +233,11 @@ fn apply_panel_result(
                 commands.entity(entity).remove::<PendingGlyphs>();
                 return;
             };
-            let panel_fallback = panel_alpha.get(panel_entity).map_or_else(
-                |_| PanelTextAlpha::global_default(defaults),
-                |resolved| resolved.0,
-            );
-            let resolved = panel_text.alpha_mode.map_or(panel_fallback, PanelTextAlpha);
-            let alpha_unchanged = existing_child_alpha
-                .get(entity)
-                .is_ok_and(|current| current.0 == resolved);
             commands
                 .entity(entity)
                 .insert(panel_text)
                 .remove::<PendingGlyphs>()
                 .insert(AwaitingReady);
-            if !alpha_unchanged {
-                commands.entity(entity).insert(Resolved(resolved));
-            }
         },
         GlyphReadiness::Pending => {
             commands.entity(entity).insert_if_new(PendingGlyphs);
