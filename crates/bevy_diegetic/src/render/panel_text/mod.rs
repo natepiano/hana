@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use self::alpha::PanelTextAlpha;
 pub use self::layout::PanelTextLayout;
-use self::mesh_spawning::build_panel_slug_meshes;
+use self::mesh_spawning::build_panel_text_meshes;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
@@ -26,10 +26,10 @@ use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
 use crate::text::SlugPreparedTextRun;
 
-/// Stores a prepared Slug run for a panel [`WorldText`](crate::WorldText) child.
+/// Stores a prepared text run for a panel [`WorldText`](crate::WorldText) child.
 #[derive(Component)]
 pub(super) struct PanelText {
-    /// Prepared Slug run.
+    /// Prepared text run.
     pub prepared:    SlugPreparedTextRun,
     /// Glyph render mode for this text element.
     pub render_mode: GlyphRenderMode,
@@ -43,10 +43,10 @@ pub(super) struct PanelText {
     pub clip_rect:   Option<[f32; 4]>,
 }
 
-/// Plugin that adds slug text rendering for diegetic panels.
+/// Plugin that adds text rendering for diegetic panels.
 ///
 /// Reconciles panel text/image children, runs text shaping for panel
-/// text, and builds the slug glyph meshes for panel and world text.
+/// text, and builds glyph meshes for panel and world text.
 pub(super) struct TextRenderPlugin;
 
 impl Plugin for TextRenderPlugin {
@@ -64,7 +64,7 @@ impl Plugin for TextRenderPlugin {
                 reconcile_panel_text_children.after(panel_rtt::setup_panel_rtt),
                 reconcile_panel_image_children.after(panel_rtt::setup_panel_rtt),
                 shape_panel_text_children.after(reconcile_panel_text_children),
-                build_panel_slug_meshes.after(shape_panel_text_children),
+                build_panel_text_meshes.after(shape_panel_text_children),
                 world_text::render_world_text,
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),

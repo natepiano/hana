@@ -11,52 +11,44 @@
 //! Glyph rendering is handled by the slug analytic Bézier renderer; this
 //! module owns only font infrastructure and its slug shader/material setup.
 
-mod constants;
 mod font;
-mod font_loader;
-mod font_registry;
-mod measurer;
 mod slug;
 
 use bevy::asset::AssetLoadFailedEvent;
-use bevy::asset::embedded_asset;
-use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
-pub(crate) use constants::DEFAULT_FAMILY;
+pub(crate) use font::DEFAULT_FAMILY;
+pub use font::DiegeticTextMeasurer;
 pub use font::Font;
+pub use font::FontId;
+pub use font::FontLoadFailed;
+use font::FontLoader;
 pub use font::FontMetrics;
+pub use font::FontRegistered;
+pub use font::FontRegistry;
+pub use font::FontSource;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
-pub use font_registry::FontId;
-pub use font_registry::FontLoadFailed;
-pub use font_registry::FontRegistered;
-pub use font_registry::FontRegistry;
-pub use font_registry::FontSource;
-pub(crate) use font_registry::ResolvedFontData;
-pub use measurer::DiegeticTextMeasurer;
-pub use measurer::create_parley_measurer;
-pub(crate) use slug::DEFAULT_BAND_COUNT;
-pub(crate) use slug::SlugBackend;
-pub(crate) use slug::SlugPreparedTextRun;
-pub(crate) use slug::SlugRenderMode;
-pub(crate) use slug::SlugRunStorage;
-pub(crate) use slug::SlugRunStorageKey;
-pub(crate) use slug::SlugTextMaterial;
-pub(crate) use slug::SlugTextMaterialInput;
-pub(crate) use slug::slug_text_material;
+pub use font::create_parley_measurer;
+pub(crate) use slug::Backend as SlugBackend;
+pub(crate) use slug::DEFAULT_BAND_COUNT as SLUG_DEFAULT_BAND_COUNT;
+pub(crate) use slug::PositionedGlyph as SlugPositionedGlyph;
+pub(crate) use slug::PreparedTextRun as SlugPreparedTextRun;
+pub(crate) use slug::RenderMode as SlugRenderMode;
+pub(crate) use slug::RunStorage as SlugRunStorage;
+pub(crate) use slug::RunStorageKey as SlugRunStorageKey;
+pub(crate) use slug::TextMaterial as SlugTextMaterial;
+pub(crate) use slug::TextMaterialInput as SlugTextMaterialInput;
+pub(crate) use slug::text_material as slug_text_material;
 
-use self::font_loader::FontLoader;
+use self::slug::SlugPlugin;
 
 pub(crate) struct TextPlugin;
 
 impl Plugin for TextPlugin {
     fn build(&self, app: &mut App) {
-        // Slug glyph rendering travels with the font infrastructure.
-        embedded_asset!(app, "slug/shaders/slug_text.wgsl");
-        app.init_resource::<SlugBackend>();
-        app.add_plugins(MaterialPlugin::<SlugTextMaterial>::default());
+        app.add_plugins(SlugPlugin);
 
         // Preserve the font-parse-failure gate: if the embedded font fails
         // to parse, skip text setup entirely (the plugin stack is disabled).
@@ -66,7 +58,7 @@ impl Plugin for TextPlugin {
         };
 
         let measurer = DiegeticTextMeasurer {
-            measure_fn: measurer::create_parley_measurer(
+            measure_fn: create_parley_measurer(
                 font_registry.font_context(),
                 font_registry.family_names(),
             ),

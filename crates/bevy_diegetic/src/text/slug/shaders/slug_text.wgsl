@@ -1,4 +1,4 @@
-// Slug analytic coverage text shader.
+// Analytic coverage text shader.
 //
 // This first pass evaluates non-zero winding coverage from quadratic curve
 // records grouped into horizontal bands. It is deliberately separate from
@@ -27,26 +27,26 @@ const EDGE_FILTER_WIDTH: f32 = 1.2;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 
-struct SlugTextUniform {
+struct TextUniform {
     fill_color: vec4<f32>,
     render_mode: u32,
 }
 
-struct SlugCurveRecord {
+struct CurveRecord {
     start_delta: vec4<f32>,
     curve_end: vec4<f32>,
     bounds: vec4<f32>,
     solver: vec4<f32>,
 }
 
-struct SlugBandRecord {
+struct BandRecord {
     start: u32,
     count: u32,
     y_min: f32,
     y_max: f32,
 }
 
-struct SlugGlyphRecord {
+struct GlyphRecord {
     bounds_min_size: vec4<f32>,
     band_range: vec4<u32>,
 }
@@ -56,24 +56,24 @@ struct CoverageTerms {
     distance_sq: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: SlugTextUniform;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> curves: array<SlugCurveRecord>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<SlugBandRecord>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<SlugGlyphRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: TextUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> curves: array<CurveRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<BandRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<GlyphRecord>;
 
 fn glyph_index(glyph_uv: vec2<f32>) -> u32 {
     return u32(floor(glyph_uv.x));
 }
 
-fn glyph_bounds_min(glyph: SlugGlyphRecord) -> vec2<f32> {
+fn glyph_bounds_min(glyph: GlyphRecord) -> vec2<f32> {
     return glyph.bounds_min_size.xy;
 }
 
-fn glyph_bounds_size(glyph: SlugGlyphRecord) -> vec2<f32> {
+fn glyph_bounds_size(glyph: GlyphRecord) -> vec2<f32> {
     return glyph.bounds_min_size.zw;
 }
 
-fn design_position(uv: vec2<f32>, glyph: SlugGlyphRecord) -> vec2<f32> {
+fn design_position(uv: vec2<f32>, glyph: GlyphRecord) -> vec2<f32> {
     let bounds_min = glyph_bounds_min(glyph);
     let bounds_size = glyph_bounds_size(glyph);
     return bounds_min + vec2<f32>(
@@ -82,7 +82,7 @@ fn design_position(uv: vec2<f32>, glyph: SlugGlyphRecord) -> vec2<f32> {
     );
 }
 
-fn horizontal_band_index(point: vec2<f32>, glyph: SlugGlyphRecord) -> u32 {
+fn horizontal_band_index(point: vec2<f32>, glyph: GlyphRecord) -> u32 {
     let bounds_min = glyph_bounds_min(glyph);
     let bounds_size = glyph_bounds_size(glyph);
     let band_count = glyph.band_range.y;
@@ -94,7 +94,7 @@ fn horizontal_band_index(point: vec2<f32>, glyph: SlugGlyphRecord) -> u32 {
     return min(u32(normalized_y * f32(band_count)), band_count - 1u);
 }
 
-fn vertical_band_index(point: vec2<f32>, glyph: SlugGlyphRecord) -> u32 {
+fn vertical_band_index(point: vec2<f32>, glyph: GlyphRecord) -> u32 {
     let bounds_min = glyph_bounds_min(glyph);
     let bounds_size = glyph_bounds_size(glyph);
     let band_count = glyph.band_range.w;
@@ -139,7 +139,7 @@ fn solve_cubic_normed(a: f32, b: f32, c: f32, roots: ptr<function, array<f32, 3>
 }
 
 fn exact_quadratic_distance_sq(
-    curve: SlugCurveRecord,
+    curve: CurveRecord,
     point: vec2<f32>,
     start: vec2<f32>,
     control_delta: vec2<f32>,
@@ -176,7 +176,7 @@ fn exact_quadratic_distance_sq(
     return best_sq;
 }
 
-fn winding_for_t(curve: SlugCurveRecord, point: vec2<f32>, t: f32) -> i32 {
+fn winding_for_t(curve: CurveRecord, point: vec2<f32>, t: f32) -> i32 {
     if t < 0.0 || t >= 1.0 {
         return 0;
     }
@@ -195,7 +195,7 @@ fn winding_for_t(curve: SlugCurveRecord, point: vec2<f32>, t: f32) -> i32 {
     return select(-1, 1, dy > 0.0);
 }
 
-fn curve_winding(curve: SlugCurveRecord, point: vec2<f32>) -> i32 {
+fn curve_winding(curve: CurveRecord, point: vec2<f32>) -> i32 {
     let a = curve.curve_end.y;
     let b = 2.0 * curve.start_delta.w;
     let c = curve.start_delta.y - point.y;
@@ -217,7 +217,7 @@ fn curve_winding(curve: SlugCurveRecord, point: vec2<f32>) -> i32 {
         winding_for_t(curve, point, (-b + root) / (2.0 * a));
 }
 
-fn outside_glyph_bounds(point: vec2<f32>, glyph: SlugGlyphRecord) -> bool {
+fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
     let bounds_min = glyph_bounds_min(glyph);
     let bounds_max = bounds_min + glyph_bounds_size(glyph);
     return point.x < bounds_min.x ||
@@ -229,7 +229,7 @@ fn outside_glyph_bounds(point: vec2<f32>, glyph: SlugGlyphRecord) -> bool {
 fn horizontal_coverage_terms(
     point: vec2<f32>,
     edge_width_sq: f32,
-    glyph: SlugGlyphRecord,
+    glyph: GlyphRecord,
 ) -> CoverageTerms {
     let include_winding = !outside_glyph_bounds(point, glyph);
     let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
@@ -256,7 +256,7 @@ fn point_line_distance_sq(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) ->
     return dot(diff, diff);
 }
 
-fn curve_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
+fn curve_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
     return exact_quadratic_distance_sq(
         curve,
         point,
@@ -267,7 +267,7 @@ fn curve_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
     );
 }
 
-fn curve_bounds_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
+fn curve_bounds_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
     let nearest = clamp(point, curve.bounds.xy, curve.bounds.zw);
     let diff = point - nearest;
     return dot(diff, diff);
@@ -276,7 +276,7 @@ fn curve_bounds_distance_sq(point: vec2<f32>, curve: SlugCurveRecord) -> f32 {
 fn nearest_vertical_curve_distance_sq(
     point: vec2<f32>,
     edge_width_sq: f32,
-    glyph: SlugGlyphRecord,
+    glyph: GlyphRecord,
     initial_distance_sq: f32,
 ) -> f32 {
     let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
@@ -290,7 +290,7 @@ fn nearest_vertical_curve_distance_sq(
     return distance_sq;
 }
 
-fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
+fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: GlyphRecord) -> f32 {
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
     let edge_width_sq = edge_width * edge_width;
     let terms = horizontal_coverage_terms(point, edge_width_sq, glyph);
@@ -310,14 +310,14 @@ fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: SlugGlyphRecord)
     return smoothstep(-edge_width, edge_width, signed_distance);
 }
 
-fn slug_coverage(uv: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
+fn glyph_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
     let point = design_position(uv, glyph);
     let pixel = max(abs(fwidth(point)), vec2<f32>(ROOT_EPSILON));
     return distance_coverage(point, pixel, glyph);
 }
 
-fn render_coverage(uv: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
-    let coverage = slug_coverage(uv, glyph);
+fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
+    let coverage = glyph_coverage(uv, glyph);
     if uniforms.render_mode == RENDER_MODE_PUNCH_OUT {
         return 1.0 - coverage;
     }

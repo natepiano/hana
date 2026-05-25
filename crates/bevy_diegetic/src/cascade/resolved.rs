@@ -1,6 +1,6 @@
 //! [`Resolved<A>`] — the per-entity cache component — plus the attribute
-//! traits ([`CascadeAttribute`], [`CascadePanelChild`], [`CascadeTarget`])
-//! and the pure resolvers used by the plugin write paths.
+//! traits ([`CascadePanelChild`], [`CascadeTarget`]) and the pure resolvers
+//! used by the plugin write paths.
 
 use bevy::prelude::*;
 use bevy::reflect::GetTypeRegistration;
@@ -8,41 +8,14 @@ use bevy::reflect::Typed;
 
 use super::defaults::CascadeDefaults;
 
-/// Shared bounds for every cascading attribute newtype.
-///
-/// Attribute newtypes like `PanelTextAlpha(AlphaMode)` wrap a primitive; the
-/// bounds here are what the generic machinery needs:
-///
-/// - `Copy + PartialEq` — inequality-gated writes and sentinel comparisons.
-/// - `Send + Sync + 'static` — ECS requirements.
-/// - `FromReflect + TypePath + Typed + GetTypeRegistration` — required by `#[derive(Reflect)]`
-///   expansion on the generic [`Resolved<A>`] container, and by the per-monomorphization
-///   `app.register_type::<Resolved<A>>()` call each plugin makes. A concrete `#[derive(Reflect)]`
-///   type gets all of these for free.
-pub trait CascadeAttribute:
-    Copy + PartialEq + Send + Sync + FromReflect + TypePath + Typed + GetTypeRegistration + 'static
-{
-}
-
-impl<T> CascadeAttribute for T where
-    T: Copy
-        + PartialEq
-        + Send
-        + Sync
-        + FromReflect
-        + TypePath
-        + Typed
-        + GetTypeRegistration
-        + 'static
-{
-}
-
 /// A 3-tier cascade: entity override → panel override → global default.
 ///
 /// `Resolved<A>` lives on **both** the panel and every tier-1 child. The
 /// panel's copy represents the effective "default my children inherit"; each
 /// child's copy is the final rendered value.
-pub(crate) trait CascadePanelChild: CascadeAttribute {
+pub(crate) trait CascadePanelChild:
+    Copy + PartialEq + Send + Sync + FromReflect + TypePath + Typed + GetTypeRegistration + 'static
+{
     /// Tier-1 override component on the entity.
     type EntityOverride: Component;
     /// Tier-2 override component on the parent panel.
@@ -63,7 +36,9 @@ pub(crate) trait CascadePanelChild: CascadeAttribute {
 /// [`CascadePanelPlugin`](super::CascadePanelPlugin) when the override lives
 /// on a panel entity, [`CascadeEntityPlugin`](super::CascadeEntityPlugin)
 /// when it lives on an arbitrary entity.
-pub(crate) trait CascadeTarget: CascadeAttribute {
+pub(crate) trait CascadeTarget:
+    Copy + PartialEq + Send + Sync + FromReflect + TypePath + Typed + GetTypeRegistration + 'static
+{
     /// Component on the target entity carrying the tier-1 override.
     type Override: Component;
 
@@ -96,7 +71,17 @@ pub(crate) struct ExcludeNone;
 /// `Changed<Resolved<A>>`.
 #[derive(Component, Reflect, Clone, Copy, Debug)]
 #[reflect(Component)]
-pub(crate) struct Resolved<A: CascadeAttribute>(pub A);
+pub(crate) struct Resolved<A>(pub A)
+where
+    A: Copy
+        + PartialEq
+        + Send
+        + Sync
+        + FromReflect
+        + TypePath
+        + Typed
+        + GetTypeRegistration
+        + 'static;
 
 /// Resolve a 3-tier cascade from its raw inputs.
 pub(super) fn resolve_panel_child<A: CascadePanelChild>(

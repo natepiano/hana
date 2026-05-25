@@ -1,4 +1,4 @@
-//! Test helpers that build Slug runs through the production positioned-glyph
+//! Test helpers that build text runs through the production positioned-glyph
 //! path, so unit tests exercise the same entry point the renderer uses.
 #![allow(
     clippy::expect_used,
@@ -9,21 +9,20 @@ use bevy::math::Vec2;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 
-use super::backend::SlugBackend;
-use super::backend::SlugPreparedTextRun;
-use super::geometry::SlugOutlineError;
-use super::packing::DEFAULT_BAND_COUNT;
-use super::run::SlugBuiltTextRun;
-use super::run::SlugFontKey;
-use super::run::SlugGlyphCache;
-use super::run::SlugGlyphInstance;
-use super::run::SlugGlyphKey;
-use super::run::SlugTextRun;
 use crate::layout::ResolvedFontFace;
 use crate::layout::ShapedGlyph;
-use crate::render::PositionedGlyph;
 use crate::text::Font;
-use crate::text::ResolvedFontData;
+use crate::text::slug::glyph::DEFAULT_BAND_COUNT;
+use crate::text::slug::glyph::OutlineError;
+use crate::text::slug::runtime::Backend;
+use crate::text::slug::runtime::BuiltTextRun;
+use crate::text::slug::runtime::FontKey;
+use crate::text::slug::runtime::GlyphCache;
+use crate::text::slug::runtime::GlyphInstance;
+use crate::text::slug::runtime::GlyphKey;
+use crate::text::slug::runtime::PositionedGlyph;
+use crate::text::slug::runtime::PreparedTextRun;
+use crate::text::slug::runtime::TextRun;
 
 /// Replacement character used as the diagnostic glyph label when packing
 /// fixture glyphs by id.
@@ -35,25 +34,23 @@ pub(super) const FIXTURE_FONT_SIZE: f32 = 1000.0;
 /// Placement scale used by run fixtures, mapping design units to world units.
 pub(super) const FIXTURE_SCALE: f32 = 0.001;
 
-/// Builds one prepared Slug run from `text` using the production path: glyph
+/// Builds one prepared text run from `text` using the production path: glyph
 /// IDs and advances come straight from the font face, mirroring what parley
-/// shaping feeds [`SlugBackend::prepare_positioned_run_with_scale`].
-pub(super) fn prepare_fixture_run(
-    backend: &mut SlugBackend,
+/// shaping feeds [`Backend::prepare_positioned_run_with_scale`].
+pub fn prepare_fixture_run(
+    backend: &mut Backend,
     font_data: &[u8],
     font_key: u64,
     text: &str,
-) -> Result<SlugPreparedTextRun, SlugOutlineError> {
+) -> Result<PreparedTextRun, OutlineError> {
     let font = Font::from_bytes("Fixture", font_data).expect("fixture font should parse");
     let glyphs = fixture_shaped_glyphs(font_data, font_key, text);
     let positioned: Vec<PositionedGlyph<'_>> = glyphs
         .iter()
         .map(|glyph| PositionedGlyph {
             glyph,
-            font: ResolvedFontData {
-                font:             &font,
-                collection_index: 0,
-            },
+            font: &font,
+            collection_index: 0,
         })
         .collect();
     backend.prepare_positioned_run_with_scale(
@@ -67,14 +64,14 @@ pub(super) fn prepare_fixture_run(
 
 /// Builds a positioned run and its populated glyph cache directly, without a
 /// backend, for run-render tests that inspect mesh and storage output.
-pub(super) fn fixture_run_with_cache(
+pub fn fixture_run_with_cache(
     font_data: &[u8],
     font_key: u64,
     text: &str,
-) -> (SlugBuiltTextRun, SlugGlyphCache) {
+) -> (BuiltTextRun, GlyphCache) {
     let face = Face::parse(font_data, 0).expect("fixture font should parse");
-    let key_seed = SlugFontKey::new(font_key);
-    let mut cache = SlugGlyphCache::default();
+    let key_seed = FontKey::new(font_key);
+    let mut cache = GlyphCache::default();
     let mut instances = Vec::new();
     let mut origin_x = 0.0_f32;
     for character in text.chars() {
@@ -82,7 +79,7 @@ pub(super) fn fixture_run_with_cache(
         let advance = face
             .glyph_hor_advance(GlyphId(glyph_id))
             .map_or(0.0, f32::from);
-        let key = SlugGlyphKey::with_preprocess_version(key_seed, glyph_id, 0);
+        let key = GlyphKey::with_preprocess_version(key_seed, glyph_id, 0);
         let bounds = cache
             .get_or_insert_packed_from_face(
                 key,
@@ -93,7 +90,7 @@ pub(super) fn fixture_run_with_cache(
             )
             .expect("fixture glyph should pack")
             .bounds();
-        instances.push(SlugGlyphInstance::new_non_uniform(
+        instances.push(GlyphInstance::new_non_uniform(
             key,
             Vec2::new(origin_x * FIXTURE_SCALE, 0.0),
             bounds,
@@ -102,8 +99,8 @@ pub(super) fn fixture_run_with_cache(
         origin_x += advance;
     }
     (
-        SlugBuiltTextRun {
-            run: SlugTextRun::new(instances),
+        BuiltTextRun {
+            run: TextRun::new(instances),
         },
         cache,
     )

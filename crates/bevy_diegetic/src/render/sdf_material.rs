@@ -28,7 +28,7 @@ pub(crate) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelEx
 
 /// Uniform data for the SDF panel extension shader.
 #[derive(Clone, Debug, ShaderType)]
-pub struct SdfPanelUniform {
+pub(crate) struct SdfPanelUniform {
     /// Half-size of the SDF form in world units (width/2, height/2).
     pub half_size:      Vec2,
     /// Half-size of the mesh quad in world units. Larger than `half_size`
@@ -62,7 +62,7 @@ pub struct SdfPanelUniform {
 /// The extension shader computes per-fragment alpha from the signed
 /// distance field and composites fill + border colors before lighting.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-pub struct SdfPanelExtension {
+pub(crate) struct SdfPanelExtension {
     /// SDF shader uniforms.
     #[uniform(100)]
     pub uniforms: SdfPanelUniform,

@@ -28,7 +28,7 @@ use crate::layout::TextDimensions;
 use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
-use crate::text::ResolvedFontData;
+use crate::text::SlugPositionedGlyph;
 
 /// Reusable parley shaping buffers.
 ///
@@ -104,24 +104,22 @@ impl TextBuildStats {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct PositionedGlyph<'a> {
-    pub glyph: &'a ShapedGlyph,
-    pub font:  ResolvedFontData<'a>,
-}
-
 pub(super) fn positioned_glyphs<'a>(
     glyphs: &'a [ShapedGlyph],
     font_registry: &'a FontRegistry,
     stats: &mut TextBuildStats,
-) -> Vec<PositionedGlyph<'a>> {
+) -> Vec<SlugPositionedGlyph<'a>> {
     let mut positioned_glyphs = Vec::with_capacity(glyphs.len());
     for glyph in glyphs {
-        let Some(font) = font_registry.resolve_font_face(glyph.font_face) else {
+        let Some((font, collection_index)) = font_registry.font_for_face(glyph.font_face) else {
             stats.failed_glyphs += 1;
             continue;
         };
-        positioned_glyphs.push(PositionedGlyph { glyph, font });
+        positioned_glyphs.push(SlugPositionedGlyph {
+            glyph,
+            font,
+            collection_index,
+        });
     }
     positioned_glyphs
 }

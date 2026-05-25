@@ -14,39 +14,39 @@ use bevy::shader::ShaderRef;
 
 use super::constants::SLUG_TEXT_SHADER_PATH;
 
-/// Visible render mode for the Slug shader.
+/// Visible render mode for the text shader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u32)]
-pub(crate) enum SlugRenderMode {
-    /// Normal Slug coverage fill.
+pub(crate) enum RenderMode {
+    /// Normal coverage fill.
     #[default]
     Text     = 1,
-    /// Inverted Slug coverage inside each glyph quad.
+    /// Inverted coverage inside each glyph quad.
     PunchOut = 2,
 }
 
-impl From<SlugRenderMode> for u32 {
-    fn from(mode: SlugRenderMode) -> Self { mode as Self }
+impl From<RenderMode> for u32 {
+    fn from(mode: RenderMode) -> Self { mode as Self }
 }
 
-/// Material used by the Slug text renderer.
-pub(crate) type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextExtension>;
+/// Material used by the text renderer.
+pub(crate) type TextMaterial = ExtendedMaterial<StandardMaterial, TextExtension>;
 
-/// Uniforms consumed by the Slug text shader.
+/// Uniforms consumed by the text shader.
 #[derive(Clone, Debug, ShaderType)]
-pub struct SlugTextUniform {
+pub struct TextUniform {
     /// Linear fill color.
     pub fill_color:  Vec4,
     /// Visible render mode for this pass.
     pub render_mode: u32,
 }
 
-/// Slug material extension over `StandardMaterial`.
+/// Text material extension over `StandardMaterial`.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-pub struct SlugTextExtension {
+pub struct TextExtension {
     /// Shader uniforms.
     #[uniform(100)]
-    pub uniforms: SlugTextUniform,
+    pub uniforms: TextUniform,
     /// Band-packed quadratic curve records.
     #[storage(101, read_only)]
     pub curves:   Handle<ShaderStorageBuffer>,
@@ -58,20 +58,20 @@ pub struct SlugTextExtension {
     pub glyphs:   Handle<ShaderStorageBuffer>,
 }
 
-impl MaterialExtension for SlugTextExtension {
+impl MaterialExtension for TextExtension {
     fn fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
 
     fn prepass_fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
 }
 
-/// Inputs for one Slug text material instance.
-pub(crate) struct SlugTextMaterialInput {
+/// Inputs for one text material instance.
+pub(crate) struct TextMaterialInput {
     /// Base material settings.
     pub base:        StandardMaterial,
     /// Fill color.
     pub fill_color:  Color,
     /// Visible render mode.
-    pub render_mode: SlugRenderMode,
+    pub render_mode: RenderMode,
     /// Band-packed quadratic curve records.
     pub curves:      Handle<ShaderStorageBuffer>,
     /// Horizontal band records.
@@ -80,11 +80,11 @@ pub(crate) struct SlugTextMaterialInput {
     pub glyphs:      Handle<ShaderStorageBuffer>,
 }
 
-/// Creates a `SlugTextMaterial` from one run's color, render mode, and
+/// Creates a `TextMaterial` from one run's color, render mode, and
 /// band-packed curve/band/glyph buffers.
 #[must_use]
-pub(crate) fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
-    let SlugTextMaterialInput {
+pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
+    let TextMaterialInput {
         base,
         fill_color,
         render_mode,
@@ -95,8 +95,8 @@ pub(crate) fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMateri
     let linear: LinearRgba = fill_color.into();
     ExtendedMaterial {
         base,
-        extension: SlugTextExtension {
-            uniforms: SlugTextUniform {
+        extension: TextExtension {
+            uniforms: TextUniform {
                 fill_color:  Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
                 render_mode: u32::from(render_mode),
             },

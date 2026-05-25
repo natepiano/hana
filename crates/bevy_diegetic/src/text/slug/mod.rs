@@ -5,22 +5,33 @@
 //! material, shader, glyph packing, and run/render data; the parent
 //! [`text`](crate::text) module supplies the font infrastructure it consumes.
 
-mod backend;
-mod constants;
-mod geometry;
-mod material;
-mod packing;
-mod run;
-mod run_render;
+mod glyph;
+mod render;
+mod runtime;
 #[cfg(test)]
-mod test_support;
+mod support;
 
-pub(crate) use backend::SlugBackend;
-pub(crate) use backend::SlugPreparedTextRun;
-pub(crate) use backend::SlugRunStorage;
-pub(crate) use backend::SlugRunStorageKey;
-pub(crate) use material::SlugRenderMode;
-pub(crate) use material::SlugTextMaterial;
-pub(crate) use material::SlugTextMaterialInput;
-pub(crate) use material::slug_text_material;
-pub(crate) use packing::DEFAULT_BAND_COUNT;
+use bevy::asset::embedded_asset;
+use bevy::pbr::MaterialPlugin;
+use bevy::prelude::*;
+pub(crate) use glyph::DEFAULT_BAND_COUNT;
+pub(crate) use render::RenderMode;
+pub(crate) use render::RunRenderError;
+pub(crate) use render::TextMaterial;
+pub(crate) use render::TextMaterialInput;
+pub(crate) use render::text_material;
+pub(crate) use runtime::Backend;
+pub(crate) use runtime::PositionedGlyph;
+pub(crate) use runtime::PreparedTextRun;
+pub(crate) use runtime::RunStorage;
+pub(crate) use runtime::RunStorageKey;
+
+pub(super) struct SlugPlugin;
+
+impl Plugin for SlugPlugin {
+    fn build(&self, app: &mut App) {
+        embedded_asset!(app, "shaders/slug_text.wgsl");
+        app.init_resource::<Backend>();
+        app.add_plugins(MaterialPlugin::<TextMaterial>::default());
+    }
+}

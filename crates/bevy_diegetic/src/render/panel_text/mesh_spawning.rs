@@ -16,7 +16,7 @@ use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::GlyphShadowMode;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-use crate::panel::RenderMode;
+use crate::panel::RenderMode as PanelRenderMode;
 use crate::render::constants;
 use crate::render::world_text::PanelChild;
 use crate::text;
@@ -31,8 +31,8 @@ use crate::text::SlugTextMaterialInput;
 #[derive(Component)]
 pub(super) struct DiegeticTextMesh;
 
-/// Builds Slug meshes for panels whose Slug text runs changed.
-pub(super) fn build_panel_slug_meshes(
+/// Builds text meshes for panels whose prepared text runs changed.
+pub(super) fn build_panel_text_meshes(
     changed_runs: Query<
         &ChildOf,
         (
@@ -45,7 +45,7 @@ pub(super) fn build_panel_slug_meshes(
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
     defaults: Res<CascadeDefaults>,
-    mut slug_backend: ResMut<SlugBackend>,
+    mut backend: ResMut<SlugBackend>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SlugTextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderStorageBuffer>>,
@@ -62,15 +62,15 @@ pub(super) fn build_panel_slug_meshes(
         for (mesh_entity, child_of, storage_key) in &old_meshes {
             if child_of.parent() == panel_entity {
                 if let Some(storage_key) = storage_key {
-                    slug_backend.remove_run_storage(*storage_key);
+                    backend.remove_run_storage(*storage_key);
                 }
                 commands.entity(mesh_entity).despawn();
             }
         }
 
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let is_geometry = panel.render_mode() == RenderMode::Geometry;
-        let text_base = slug_panel_base_material(panel, is_geometry);
+        let is_geometry = panel.render_mode() == PanelRenderMode::Geometry;
+        let text_base = panel_base_material(panel, is_geometry);
 
         for (child_entity, panel_run, panel_text_child, child_of) in &panel_children {
             if child_of.parent() != panel_entity {
@@ -80,7 +80,7 @@ pub(super) fn build_panel_slug_meshes(
                 |_| PanelTextAlpha::global_default(&defaults).0,
                 |resolved| resolved.0.0,
             );
-            spawn_panel_slug_run(PanelSlugSpawnRequest {
+            spawn_panel_text_run(PanelTextSpawnRequest {
                 panel_entity,
                 panel_run,
                 panel_text_child,
@@ -88,7 +88,7 @@ pub(super) fn build_panel_slug_meshes(
                 resolved_alpha,
                 is_geometry,
                 content_layer: &scene_layer,
-                slug_backend: &mut slug_backend,
+                backend: &mut backend,
                 meshes: &mut meshes,
                 materials: &mut materials,
                 storage_buffers: &mut storage_buffers,
@@ -121,7 +121,7 @@ fn collect_dirty_panels(
     dirty_panels
 }
 
-struct PanelSlugSpawnRequest<'a, 'w, 's> {
+struct PanelTextSpawnRequest<'a, 'w, 's> {
     panel_entity:     Entity,
     panel_run:        &'a PanelText,
     panel_text_child: &'a PanelTextLayout,
@@ -129,15 +129,15 @@ struct PanelSlugSpawnRequest<'a, 'w, 's> {
     resolved_alpha:   AlphaMode,
     is_geometry:      bool,
     content_layer:    &'a RenderLayers,
-    slug_backend:     &'a mut SlugBackend,
+    backend:          &'a mut SlugBackend,
     meshes:           &'a mut Assets<Mesh>,
     materials:        &'a mut Assets<SlugTextMaterial>,
     storage_buffers:  &'a mut Assets<ShaderStorageBuffer>,
     commands:         &'a mut Commands<'w, 's>,
 }
 
-fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
-    let PanelSlugSpawnRequest {
+fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
+    let PanelTextSpawnRequest {
         panel_entity,
         panel_run,
         panel_text_child,
@@ -145,13 +145,13 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
         resolved_alpha,
         is_geometry,
         content_layer,
-        slug_backend,
+        backend,
         meshes,
         materials,
         storage_buffers,
         commands,
     } = request;
-    let Ok(storage) = slug_backend.ensure_run_storage(
+    let Ok(storage) = backend.ensure_run_storage(
         &panel_run.prepared,
         panel_run.clip_rect,
         meshes,
@@ -167,7 +167,7 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
         0.0
     };
 
-    let material = materials.add(slug_panel_material(
+    let material = materials.add(panel_material(
         text_base,
         text_depth_bias,
         resolved_alpha,
@@ -175,10 +175,10 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
         panel_run.render_mode.into(),
         &storage,
     ));
-    spawn_slug_visible_mesh(
+    spawn_visible_mesh(
         panel_entity,
         storage.mesh,
-        panel_run.prepared.storage_key,
+        panel_run.prepared.storage_key(),
         material,
         panel_run.shadow_mode,
         content_layer,
@@ -186,7 +186,7 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
     );
 }
 
-fn slug_panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMaterial {
+fn panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMaterial {
     let mut base = panel
         .text_material()
         .cloned()
@@ -200,7 +200,7 @@ fn slug_panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> Standar
     base
 }
 
-fn slug_panel_material(
+fn panel_material(
     base: &StandardMaterial,
     depth_bias: f32,
     alpha_mode: AlphaMode,
@@ -221,7 +221,7 @@ fn slug_panel_material(
     })
 }
 
-fn spawn_slug_visible_mesh(
+fn spawn_visible_mesh(
     panel_entity: Entity,
     mesh_handle: Handle<Mesh>,
     storage_key: SlugRunStorageKey,

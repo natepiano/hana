@@ -28,14 +28,14 @@ pub struct QuadraticSegment {
 
 /// Axis-aligned glyph bounds in font design-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlugBounds {
+pub struct Bounds {
     /// Minimum corner.
     pub min: Vec2,
     /// Maximum corner.
     pub max: Vec2,
 }
 
-impl SlugBounds {
+impl Bounds {
     /// Width of the bounds.
     #[must_use]
     pub fn width(self) -> f32 { self.max.x - self.min.x }
@@ -47,34 +47,34 @@ impl SlugBounds {
 
 /// One closed glyph contour expressed as quadratic segments.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SlugContour {
+pub struct Contour {
     /// Quadratic segments for this contour.
     pub segments: Vec<QuadraticSegment>,
 }
 
-/// Quadratic-only outline representation for one Slug glyph.
+/// Quadratic-only outline representation for one glyph.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SlugGlyph {
+pub struct Glyph {
     /// Unicode scalar used to request this glyph.
     pub character: char,
     /// Font glyph ID selected for `character`.
-    pub glyph_id:  u16,
+    pub id:        u16,
     /// Glyph bounds in font design-space units.
-    pub bounds:    SlugBounds,
+    pub bounds:    Bounds,
     /// Quadratic contours extracted from the font.
-    pub contours:  Vec<SlugContour>,
+    pub contours:  Vec<Contour>,
 }
 
-/// Errors produced by the Slug outline loader.
+/// Errors produced by the outline loader.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SlugOutlineError {
+pub enum OutlineError {
     /// Font bytes could not be parsed.
     InvalidFont,
     /// The requested glyph ID has no outline entry in the font.
     MissingGlyphId(u16),
 }
 
-impl Display for SlugOutlineError {
+impl Display for OutlineError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFont => formatter.write_str("font bytes could not be parsed"),
@@ -85,7 +85,7 @@ impl Display for SlugOutlineError {
     }
 }
 
-impl Error for SlugOutlineError {}
+impl Error for OutlineError {}
 
 /// Loads one glyph by resolved font face and glyph ID.
 pub fn load_glyph_by_id_from_face(
@@ -93,13 +93,13 @@ pub fn load_glyph_by_id_from_face(
     face_index: u32,
     glyph_id: u16,
     character: char,
-) -> Result<SlugGlyph, SlugOutlineError> {
-    let face = Face::parse(font_data, face_index).map_err(|_| SlugOutlineError::InvalidFont)?;
+) -> Result<Glyph, OutlineError> {
+    let face = Face::parse(font_data, face_index).map_err(|_| OutlineError::InvalidFont)?;
     let glyph_id = GlyphId(glyph_id);
     load_glyph_from_face(&face, glyph_id, character)
 }
 
-/// Returns whether `glyph_id` can produce visible Slug curve data.
+/// Returns whether `glyph_id` can produce visible curve data.
 #[must_use]
 pub fn glyph_id_has_visible_outline(face: &Face<'_>, glyph_id: u16) -> bool {
     glyph_id < face.number_of_glyphs() && face.glyph_bounding_box(GlyphId(glyph_id)).is_some()
@@ -109,14 +109,14 @@ fn load_glyph_from_face(
     face: &Face<'_>,
     glyph_id: GlyphId,
     character: char,
-) -> Result<SlugGlyph, SlugOutlineError> {
+) -> Result<Glyph, OutlineError> {
     let mut builder = QuadraticOutlineBuilder::new(character);
     let rect = face
         .outline_glyph(glyph_id, &mut builder)
-        .ok_or(SlugOutlineError::MissingGlyphId(glyph_id.0))?;
+        .ok_or(OutlineError::MissingGlyphId(glyph_id.0))?;
     Ok(builder.finish(
         glyph_id,
-        SlugBounds {
+        Bounds {
             min: Vec2::new(f32::from(rect.x_min), f32::from(rect.y_min)),
             max: Vec2::new(f32::from(rect.x_max), f32::from(rect.y_max)),
         },
@@ -126,7 +126,7 @@ fn load_glyph_from_face(
 #[derive(Debug)]
 struct QuadraticOutlineBuilder {
     character:     char,
-    contours:      Vec<SlugContour>,
+    contours:      Vec<Contour>,
     current:       Vec<QuadraticSegment>,
     contour_start: Option<Vec2>,
     current_point: Option<Vec2>,
@@ -143,11 +143,11 @@ impl QuadraticOutlineBuilder {
         }
     }
 
-    fn finish(mut self, glyph_id: GlyphId, bounds: SlugBounds) -> SlugGlyph {
+    fn finish(mut self, glyph_id: GlyphId, bounds: Bounds) -> Glyph {
         self.finish_contour();
-        SlugGlyph {
+        Glyph {
             character: self.character,
-            glyph_id: glyph_id.0,
+            id: glyph_id.0,
             bounds,
             contours: self.contours,
         }
@@ -159,7 +159,7 @@ impl QuadraticOutlineBuilder {
             self.current_point = None;
             return;
         }
-        self.contours.push(SlugContour {
+        self.contours.push(Contour {
             segments: std::mem::take(&mut self.current),
         });
         self.contour_start = None;

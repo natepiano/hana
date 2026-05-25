@@ -88,7 +88,7 @@ pub enum TextAlign {
 
 /// How the visible glyph renders.
 ///
-/// Controls the slug shader's coverage computation. Both modes use
+/// Controls the text shader's coverage computation. Both modes use
 /// `AlphaMode::Blend` for smooth anti-aliased edges. Discriminants are
 /// `#[repr(u32)]` and explicit because they map directly to shader
 /// constants in `slug_text.wgsl`; the compile-time assertions below keep
@@ -380,7 +380,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 
     /// Sets the per-style alpha-mode override.
     ///
-    /// The library default is [`AlphaMode::Blend`]. Slug emits one mesh per
+    /// The library default is [`AlphaMode::Blend`]. Text emits one mesh per
     /// text run and orders coplanar text with per-command `depth_bias`, so
     /// blended text composites correctly without special camera setup.
     /// [`AlphaMode::AlphaToCoverage`] with MSAA is an alternative for
@@ -821,7 +821,7 @@ pub struct TextDimensions {
 //
 // These compile-time assertions ensure that `GlyphRenderMode` discriminants
 // stay in sync with the `render_mode` constants in `slug_text.wgsl` (and the
-// matching `SlugRenderMode` variants). If you add or reorder variants, update
+// matching `RenderMode` variants). If you add or reorder variants, update
 // the shader constants to match and adjust these assertions.
 
 const _: () = assert!(GlyphRenderMode::Text.discriminant() == 1);

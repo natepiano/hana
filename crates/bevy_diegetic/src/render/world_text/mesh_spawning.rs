@@ -51,32 +51,32 @@ const fn apply_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness)
     }
 }
 
-pub(super) struct SlugMeshSpawnAssets<'a, 'w, 's> {
+pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
     pub(super) meshes:          &'a mut Assets<Mesh>,
     pub(super) materials:       &'a mut Assets<SlugTextMaterial>,
     pub(super) storage_buffers: &'a mut Assets<ShaderStorageBuffer>,
     pub(super) commands:        &'a mut Commands<'w, 's>,
 }
 
-/// Spawns the Slug visible mesh for a world-text run. The mesh casts its
+/// Spawns the visible mesh for a world-text run. The mesh casts its
 /// own coverage-silhouette shadow unless the style's shadow mode is
 /// [`GlyphShadowMode::None`].
-pub(super) fn spawn_slug_world_text_meshes(
+pub(super) fn spawn_world_text_meshes(
     prepared: &SlugPreparedTextRun,
-    slug_backend: &mut SlugBackend,
+    backend: &mut SlugBackend,
     entity: Entity,
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
-    assets: &mut SlugMeshSpawnAssets<'_, '_, '_>,
+    assets: &mut MeshSpawnAssets<'_, '_, '_>,
 ) -> f32 {
     let mesh_start = Instant::now();
     let Ok(storage) =
-        slug_backend.ensure_run_storage(prepared, None, assets.meshes, assets.storage_buffers)
+        backend.ensure_run_storage(prepared, None, assets.meshes, assets.storage_buffers)
     else {
         return 0.0;
     };
 
-    let material_handle = assets.materials.add(slug_world_text_material(
+    let material_handle = assets.materials.add(world_text_material(
         style,
         alpha_mode,
         style.render_mode().into(),
@@ -84,10 +84,10 @@ pub(super) fn spawn_slug_world_text_meshes(
         storage.bands,
         storage.glyphs,
     ));
-    spawn_slug_visible_mesh(
+    spawn_visible_mesh(
         entity,
         storage.mesh,
-        prepared.storage_key,
+        prepared.storage_key(),
         material_handle,
         style.shadow_mode(),
         assets.commands,
@@ -99,7 +99,7 @@ pub(super) fn spawn_slug_world_text_meshes(
         .mul_add(MILLISECONDS_PER_SECOND, 0.0)
 }
 
-fn slug_world_text_material(
+fn world_text_material(
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
     render_mode: SlugRenderMode,
@@ -123,7 +123,7 @@ fn slug_world_text_material(
     })
 }
 
-fn spawn_slug_visible_mesh(
+fn spawn_visible_mesh(
     entity: Entity,
     mesh: Handle<Mesh>,
     storage_key: SlugRunStorageKey,

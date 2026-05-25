@@ -71,8 +71,8 @@ pub(super) fn render_world_text(
 
 #[derive(SystemParam)]
 pub(super) struct BackendRenderServices<'w> {
-    slug_backend:    ResMut<'w, SlugBackend>,
-    slug_materials:  ResMut<'w, Assets<SlugTextMaterial>>,
+    backend:         ResMut<'w, SlugBackend>,
+    materials:       ResMut<'w, Assets<SlugTextMaterial>>,
     storage_buffers: ResMut<'w, Assets<ShaderStorageBuffer>>,
 }
 

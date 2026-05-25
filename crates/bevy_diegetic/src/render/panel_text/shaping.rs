@@ -26,8 +26,8 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
-use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
+use crate::text::SLUG_DEFAULT_BAND_COUNT;
 use crate::text::SlugBackend;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
@@ -53,7 +53,7 @@ pub(super) fn shape_panel_text_children(
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
-    mut slug_backend: ResMut<SlugBackend>,
+    mut backend: ResMut<SlugBackend>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -97,11 +97,11 @@ pub(super) fn shape_panel_text_children(
             clip_rect: panel_text_child.clip_rect,
         };
 
-        let (panel_slug_run, stats) = build_panel_text(
+        let (panel_text, stats) = build_panel_text(
             world_text.text(),
             &config,
             &placement,
-            &mut slug_backend,
+            &mut backend,
             &font_registry,
             &shaping_cx,
             &mut cache,
@@ -112,7 +112,7 @@ pub(super) fn shape_panel_text_children(
         apply_panel_result(
             entity,
             child_of.parent(),
-            panel_slug_run,
+            panel_text,
             readiness,
             &panel_alpha,
             &existing_child_alpha,
@@ -146,7 +146,7 @@ fn build_panel_text(
     text: &str,
     config: &LayoutTextStyle,
     placement: &QuadPlacement,
-    slug_backend: &mut SlugBackend,
+    backend: &mut SlugBackend,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
@@ -166,27 +166,27 @@ fn build_panel_text(
         return (None, stats);
     }
 
-    let slug_start = Instant::now();
+    let run_start = Instant::now();
     let anchor = panel_layout_anchor(placement);
-    let prepared = match slug_backend.prepare_positioned_run_with_scale(
+    let prepared = match backend.prepare_positioned_run_with_scale(
         &positioned_glyphs,
         anchor,
         config.size(),
         placement.scale,
-        DEFAULT_BAND_COUNT,
+        SLUG_DEFAULT_BAND_COUNT,
     ) {
         Ok(prepared) => prepared,
         Err(err) => {
-            bevy::log::warn!("panel Slug text unsupported: {err}");
+            bevy::log::warn!("panel text unsupported: {err}");
             stats.failed_glyphs += positioned_glyphs.len().max(1);
-            stats.atlas_ms = slug_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+            stats.atlas_ms = run_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
             return (None, stats);
         },
     };
 
     stats.ready_glyphs = positioned_glyphs.len();
-    stats.emitted_quads = prepared.run.run.glyphs().len();
-    stats.atlas_ms = slug_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    stats.emitted_quads = prepared.glyph_count();
+    stats.atlas_ms = run_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
 
     let clip_rect = placement.clip_rect.map(|clip_rect| {
         panel_clip_rect_local(
@@ -238,7 +238,7 @@ fn panel_clip_rect_local(
 fn apply_panel_result(
     entity: Entity,
     panel_entity: Entity,
-    panel_slug_run: Option<PanelText>,
+    panel_text: Option<PanelText>,
     readiness: GlyphReadiness,
     panel_alpha: &Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
     existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
@@ -247,7 +247,7 @@ fn apply_panel_result(
 ) {
     match readiness {
         GlyphReadiness::Ready | GlyphReadiness::Invisible => {
-            let Some(panel_slug_run) = panel_slug_run else {
+            let Some(panel_text) = panel_text else {
                 commands.entity(entity).remove::<PendingGlyphs>();
                 return;
             };
@@ -255,15 +255,13 @@ fn apply_panel_result(
                 |_| PanelTextAlpha::global_default(defaults),
                 |resolved| resolved.0,
             );
-            let resolved = panel_slug_run
-                .alpha_mode
-                .map_or(panel_fallback, PanelTextAlpha);
+            let resolved = panel_text.alpha_mode.map_or(panel_fallback, PanelTextAlpha);
             let alpha_unchanged = existing_child_alpha
                 .get(entity)
                 .is_ok_and(|current| current.0 == resolved);
             commands
                 .entity(entity)
-                .insert(panel_slug_run)
+                .insert(panel_text)
                 .remove::<PendingGlyphs>()
                 .insert(AwaitingReady);
             if !alpha_unchanged {

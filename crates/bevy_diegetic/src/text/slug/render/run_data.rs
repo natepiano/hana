@@ -11,37 +11,37 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
-use super::packing::SlugBandRecord;
-use super::packing::SlugCurveRecord;
-use super::packing::SlugGlyphRecord;
-use super::run::SlugBuiltTextRun;
-use super::run::SlugGlyphCache;
-use super::run::SlugGlyphInstance;
-use super::run::SlugGlyphKey;
+use crate::text::slug::glyph::BandRecord;
+use crate::text::slug::glyph::CurveRecord;
+use crate::text::slug::glyph::GlyphRecord;
+use crate::text::slug::runtime::BuiltTextRun;
+use crate::text::slug::runtime::GlyphCache;
+use crate::text::slug::runtime::GlyphInstance;
+use crate::text::slug::runtime::GlyphKey;
 
 const GLYPH_PADDING_DESIGN_UNITS: f32 = 16.0;
 
-/// GPU-ready data for one Slug text run.
+/// GPU-ready data for one text run.
 #[derive(Clone, Debug)]
-pub struct SlugRunRenderData {
+pub struct RunRenderData {
     /// One quad per glyph instance in the run.
     pub mesh:   Mesh,
     /// Combined curve records for all unique glyphs in this run.
-    pub curves: Vec<SlugCurveRecord>,
+    pub curves: Vec<CurveRecord>,
     /// Combined band records for all unique glyphs in this run.
-    pub bands:  Vec<SlugBandRecord>,
+    pub bands:  Vec<BandRecord>,
     /// Unique glyph table indexed by each quad through `UV_1.x`.
-    pub glyphs: Vec<SlugGlyphRecord>,
+    pub glyphs: Vec<GlyphRecord>,
 }
 
-/// Error while building run-level Slug render data.
+/// Error while building run-level render data.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SlugRunRenderError {
+pub(crate) enum RunRenderError {
     /// The shaped run referenced a glyph missing from its packed glyph cache.
-    MissingPackedGlyph(SlugGlyphKey),
+    MissingPackedGlyph(GlyphKey),
 }
 
-impl Display for SlugRunRenderError {
+impl Display for RunRenderError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingPackedGlyph(key) => write!(
@@ -55,15 +55,15 @@ impl Display for SlugRunRenderError {
     }
 }
 
-impl Error for SlugRunRenderError {}
+impl Error for RunRenderError {}
 
 /// Builds one run-level mesh and packed storage set clipped to a local rect.
-pub fn build_slug_run_render_data_with_clip(
-    preview: &SlugBuiltTextRun,
-    glyph_cache: &SlugGlyphCache,
+pub fn build_run_render_data_with_clip(
+    preview: &BuiltTextRun,
+    glyph_cache: &GlyphCache,
     scale: f32,
     clip_rect: Option<[f32; 4]>,
-) -> Result<SlugRunRenderData, SlugRunRenderError> {
+) -> Result<RunRenderData, RunRenderError> {
     let mut packer = RunPacker::default();
     let mut mesh_builder = RunMeshBuilder::new(preview.run.glyphs().len());
 
@@ -72,7 +72,7 @@ pub fn build_slug_run_render_data_with_clip(
         mesh_builder.push_glyph(*glyph, record_index, scale, clip_rect);
     }
 
-    Ok(SlugRunRenderData {
+    Ok(RunRenderData {
         mesh:   mesh_builder.finish(),
         curves: packer.curves,
         bands:  packer.bands,
@@ -82,25 +82,25 @@ pub fn build_slug_run_render_data_with_clip(
 
 #[derive(Default)]
 struct RunPacker {
-    record_indices: HashMap<SlugGlyphKey, u32>,
-    curves:         Vec<SlugCurveRecord>,
-    bands:          Vec<SlugBandRecord>,
-    glyphs:         Vec<SlugGlyphRecord>,
+    record_indices: HashMap<GlyphKey, u32>,
+    curves:         Vec<CurveRecord>,
+    bands:          Vec<BandRecord>,
+    glyphs:         Vec<GlyphRecord>,
 }
 
 impl RunPacker {
     fn record_index(
         &mut self,
-        glyph: SlugGlyphInstance,
-        glyph_cache: &SlugGlyphCache,
-    ) -> Result<u32, SlugRunRenderError> {
+        glyph: GlyphInstance,
+        glyph_cache: &GlyphCache,
+    ) -> Result<u32, RunRenderError> {
         if let Some(index) = self.record_indices.get(&glyph.key()).copied() {
             return Ok(index);
         }
 
         let packed = glyph_cache
             .get(glyph.key())
-            .ok_or_else(|| SlugRunRenderError::MissingPackedGlyph(glyph.key()))?;
+            .ok_or_else(|| RunRenderError::MissingPackedGlyph(glyph.key()))?;
         let record_index = self.glyphs.len().to_u32();
         let curve_start = self.curves.len().to_u32();
         let band_start = self.bands.len().to_u32();
@@ -108,13 +108,13 @@ impl RunPacker {
 
         self.curves.extend_from_slice(packed.curves());
         self.bands
-            .extend(packed.bands().iter().map(|band| SlugBandRecord {
+            .extend(packed.bands().iter().map(|band| BandRecord {
                 start: band.start + curve_start,
                 count: band.count,
                 y_min: band.y_min,
                 y_max: band.y_max,
             }));
-        self.glyphs.push(SlugGlyphRecord::new(
+        self.glyphs.push(GlyphRecord::new(
             packed.bounds(),
             band_start,
             band_count,
@@ -216,7 +216,7 @@ impl RunMeshBuilder {
 
     fn push_glyph(
         &mut self,
-        glyph: SlugGlyphInstance,
+        glyph: GlyphInstance,
         record_index: u32,
         scale: f32,
         clip_rect: Option<[f32; 4]>,
@@ -282,15 +282,15 @@ mod tests {
     use bevy::mesh::VertexAttributeValues;
 
     use super::*;
-    use crate::text::slug::run::SlugGlyphCache;
-    use crate::text::slug::test_support;
+    use crate::text::slug::runtime::GlyphCache;
+    use crate::text::slug::support;
 
-    const FONT_DATA: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+    const FONT_DATA: &[u8] = include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
     #[test]
     fn render_data_counts_unique_glyph_storage_once() {
-        let (preview, cache) = test_support::fixture_run_with_cache(FONT_DATA, 7, "Typography");
-        let render_data = build_slug_run_render_data_with_clip(&preview, &cache, 1.0, None)
+        let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "Typography");
+        let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, None)
             .expect("fixture run should render");
 
         let glyph_instances = preview.run.glyphs().len();
@@ -306,12 +306,12 @@ mod tests {
 
     #[test]
     fn clip_rect_trims_mesh_positions_and_uvs() {
-        let (preview, cache) = test_support::fixture_run_with_cache(FONT_DATA, 7, "H");
+        let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "H");
         let (min_x, max_x, min_y, max_y) = mesh_extent(&preview, &cache);
         let clip_x = f32::midpoint(min_x, max_x);
         let clip_rect = Some([clip_x, min_y, max_x, max_y]);
 
-        let render_data = build_slug_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
+        let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
             .expect("fixture run should render");
 
         let positions = float32x3_attribute(&render_data.mesh, Mesh::ATTRIBUTE_POSITION);
@@ -330,11 +330,11 @@ mod tests {
 
     #[test]
     fn fully_clipped_glyph_emits_no_mesh_vertices() {
-        let (preview, cache) = test_support::fixture_run_with_cache(FONT_DATA, 7, "H");
+        let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "H");
         let (_, max_x, min_y, max_y) = mesh_extent(&preview, &cache);
         let clip_rect = Some([max_x + 1.0, min_y, max_x + 2.0, max_y]);
 
-        let render_data = build_slug_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
+        let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
             .expect("fixture run should render");
 
         assert_eq!(render_data.mesh.count_vertices(), 0);
@@ -342,8 +342,8 @@ mod tests {
     }
 
     /// X/Y extent of the unclipped fixture mesh: `(min_x, max_x, min_y, max_y)`.
-    fn mesh_extent(preview: &SlugBuiltTextRun, cache: &SlugGlyphCache) -> (f32, f32, f32, f32) {
-        let render_data = build_slug_run_render_data_with_clip(preview, cache, 1.0, None)
+    fn mesh_extent(preview: &BuiltTextRun, cache: &GlyphCache) -> (f32, f32, f32, f32) {
+        let render_data = build_run_render_data_with_clip(preview, cache, 1.0, None)
             .expect("fixture run should render");
         let positions = float32x3_attribute(&render_data.mesh, Mesh::ATTRIBUTE_POSITION);
         (

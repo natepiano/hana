@@ -9,7 +9,7 @@ use super::WorldFontUnit;
 use super::WorldText;
 use super::WorldTextAlpha;
 use super::mesh_spawning;
-use super::mesh_spawning::SlugMeshSpawnAssets;
+use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
@@ -95,7 +95,7 @@ pub(super) fn render_world_text(
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
 
-        let mut shared_services = SlugWorldTextRenderServices::new(
+        let mut shared_services = WorldTextRenderServices::new(
             &font_registry,
             &shaping_cx,
             &mut cache,
@@ -120,7 +120,7 @@ pub(super) fn render_world_text(
     log_render_stats(total_ms, text_count, &text_stats, mesh_ms_total);
 }
 
-struct SlugWorldTextRenderServices<
+struct WorldTextRenderServices<
     'a,
     'alpha_world,
     'alpha_state,
@@ -145,7 +145,7 @@ struct SlugWorldTextRenderServices<
 }
 
 impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mesh_data>
-    SlugWorldTextRenderServices<
+    WorldTextRenderServices<
         'a,
         'alpha_world,
         'alpha_state,
@@ -194,23 +194,23 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
         backend_services: &mut BackendRenderServices<'_>,
         commands: &mut Commands,
     ) -> (TextBuildStats, f32) {
-        let slug_text = shaping::build_world_slug_text(
+        let text_run = shaping::build_world_text_run(
             text,
             style,
             self.font_registry,
-            &mut backend_services.slug_backend,
+            &mut backend_services.backend,
             self.shaping_cx,
             self.cache,
             scale,
         );
-        let readiness = GlyphReadiness::from(&slug_text.stats);
+        let readiness = GlyphReadiness::from(&text_run.stats);
         let mut mesh_ms_total = 0.0_f32;
 
         #[cfg(feature = "typography_overlay")]
         if readiness == GlyphReadiness::Ready || readiness == GlyphReadiness::Invisible {
             commands.entity(entity).insert(ComputedWorldText {
-                anchor_y: slug_text.anchor_y,
-                glyphs:   slug_text.glyphs,
+                anchor_y: text_run.anchor_y,
+                glyphs:   text_run.glyphs,
             });
         }
 
@@ -218,16 +218,16 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             readiness,
             GlyphReadiness::Ready | GlyphReadiness::Invisible | GlyphReadiness::Failed
         ) {
-            backend_services.slug_backend.clear_run_storage();
+            backend_services.backend.clear_run_storage();
             mesh_spawning::despawn_mesh_children(entity, self.old_meshes, commands);
         }
 
-        if let Some(prepared) = slug_text.prepared.as_ref() {
+        if let Some(prepared) = text_run.prepared.as_ref() {
             mesh_ms_total += self.spawn_run(prepared, entity, style, backend_services, commands);
         }
 
         apply_readiness_markers(entity, readiness, commands);
-        (slug_text.stats, mesh_ms_total)
+        (text_run.stats, mesh_ms_total)
     }
 
     fn spawn_run(
@@ -245,15 +245,15 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             self.defaults,
             commands,
         );
-        let mut assets = SlugMeshSpawnAssets {
+        let mut assets = MeshSpawnAssets {
             meshes: self.meshes,
-            materials: &mut backend_services.slug_materials,
+            materials: &mut backend_services.materials,
             storage_buffers: &mut backend_services.storage_buffers,
             commands,
         };
-        mesh_spawning::spawn_slug_world_text_meshes(
+        mesh_spawning::spawn_world_text_meshes(
             prepared,
-            &mut backend_services.slug_backend,
+            &mut backend_services.backend,
             entity,
             style,
             resolved_alpha.0,

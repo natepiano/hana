@@ -4,10 +4,24 @@
 //! [`Font::metrics`] to get scaled [`FontMetrics`] at any font size —
 //! pure arithmetic, no re-parsing.
 
+mod constants;
+mod loader;
+mod measurer;
+mod registry;
+
 use std::sync::Arc;
 
 use bevy::asset::Asset;
 use bevy::reflect::TypePath;
+pub(crate) use constants::DEFAULT_FAMILY;
+pub(super) use loader::FontLoader;
+pub use measurer::DiegeticTextMeasurer;
+pub use measurer::create_parley_measurer;
+pub use registry::FontId;
+pub use registry::FontLoadFailed;
+pub use registry::FontRegistered;
+pub use registry::FontRegistry;
+pub use registry::FontSource;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
 

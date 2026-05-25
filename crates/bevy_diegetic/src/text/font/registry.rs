@@ -70,9 +70,9 @@ use parley::FontContext;
 use parley::fontique::Blob;
 use parley::fontique::FontInfoOverride;
 
+use super::Font;
 use super::constants::DEFAULT_FAMILY;
 use super::constants::EMBEDDED_FONT;
-use super::font::Font;
 use crate::layout::ResolvedFontFace;
 
 /// Unique identifier for a loaded font family.
@@ -120,16 +120,6 @@ pub struct FontRegistry {
     font_faces: HashMap<u64, FontId>,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct ResolvedFontData<'a> {
-    pub font:             &'a Font,
-    pub collection_index: u32,
-}
-
-impl ResolvedFontData<'_> {
-    pub fn data(&self) -> &[u8] { self.font.data() }
-}
-
 impl FontRegistry {
     /// Creates a new registry with the embedded default font.
     ///
@@ -171,12 +161,11 @@ impl FontRegistry {
     #[must_use]
     pub fn family_name(&self, id: FontId) -> Option<&str> { self.font(id).map(Font::name) }
 
-    pub(crate) fn resolve_font_face(&self, face: ResolvedFontFace) -> Option<ResolvedFontData<'_>> {
+    /// Returns the concrete font and collection index for a shaped glyph face.
+    #[must_use]
+    pub fn font_for_face(&self, face: ResolvedFontFace) -> Option<(&Font, u32)> {
         let font_id = self.font_faces.get(&face.blob_id).copied()?;
-        self.font(font_id).map(|font| ResolvedFontData {
-            font,
-            collection_index: face.collection_index,
-        })
+        self.font(font_id).map(|font| (font, face.collection_index))
     }
 
     /// Registers an additional font from raw TTF/OTF bytes.

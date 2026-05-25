@@ -40,7 +40,7 @@ pub struct DiegeticPerfStats {
 ///
 /// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`]
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
-/// 3. `build_panel_slug_meshes` → [`Self::mesh_build_ms`] (glyphs → slug meshes)
+/// 3. `build_panel_text_meshes` → [`Self::mesh_build_ms`] (glyphs → meshes)
 ///
 /// Render-pass time is not measured here — it lives in Bevy's own diagnostics
 /// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
@@ -55,7 +55,7 @@ pub struct PanelTextPerfStats {
     ///
     /// Written twice per frame: first by `shape_panel_text_children` using
     /// the *previous* frame's `mesh_build_ms`, then overwritten by
-    /// `build_panel_slug_meshes` using the current frame's values. The
+    /// `build_panel_text_meshes` using the current frame's values. The
     /// final value is only correct because mesh build is scheduled
     /// `.after(shape_panel_text_children)`; reordering those systems would
     /// leave `total_ms` stale by one frame.
@@ -68,8 +68,8 @@ pub struct PanelTextPerfStats {
     /// summed across entities. If this dominates, the cost is content-side
     /// (many strings, complex scripts, heavy font features).
     pub parley_ms:     f32,
-    /// Stage 3 — wall time of `build_panel_slug_meshes` this frame.
-    /// Covers building slug glyph meshes and despawning stale meshes.
+    /// Stage 3 — wall time of `build_panel_text_meshes` this frame.
+    /// Covers building glyph meshes and despawning stale meshes.
     pub mesh_build_ms: f32,
     /// Number of panels whose text shaping ran this frame.
     pub shaped_panels: usize,

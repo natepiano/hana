@@ -18,8 +18,8 @@ use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
 use super::constants::DEFAULT_FAMILY;
-use crate::FontSlant;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
+use crate::layout::FontSlant;
 use crate::layout::MeasureTextFn;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;

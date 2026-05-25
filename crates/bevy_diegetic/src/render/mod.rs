@@ -23,7 +23,6 @@ pub(crate) use sdf_material::SdfPrimitiveKind;
 pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
 pub(crate) use sdf_material::sdf_panel_material;
 pub(crate) use sdf_material::sdf_primitive_material;
-pub(crate) use text_shaping::PositionedGlyph;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
 pub use world_text::PendingGlyphs;

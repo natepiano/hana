@@ -8,8 +8,8 @@ use bevy::asset::LoadContext;
 use bevy::asset::io::Reader;
 use bevy::reflect::TypePath;
 
+use super::Font;
 use super::constants::FONT_FILE_EXTENSIONS;
-use super::font::Font;
 
 /// Loads `.ttf` and `.otf` font files into [`Font`] assets.
 ///

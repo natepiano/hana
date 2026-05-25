@@ -10,17 +10,17 @@ use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
 use crate::render::constants;
 use crate::render::text_shaping;
-use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
-use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
+use crate::text::SLUG_DEFAULT_BAND_COUNT;
 use crate::text::SlugBackend;
+use crate::text::SlugPositionedGlyph;
 use crate::text::SlugPreparedTextRun;
 
-/// Result of building Slug run data for a [`WorldText`](super::WorldText) entity.
-pub(super) struct ShapedSlugWorldText {
-    /// Prepared Slug run.
+/// Result of building text run data for a [`WorldText`](super::WorldText) entity.
+pub(super) struct ShapedWorldTextRun {
+    /// Prepared text run.
     pub(super) prepared: Option<SlugPreparedTextRun>,
     /// `Anchor` offset Y in layout units.
     pub(super) anchor_y: f32,
@@ -31,7 +31,7 @@ pub(super) struct ShapedSlugWorldText {
     pub(super) stats:    TextBuildStats,
 }
 
-impl ShapedSlugWorldText {
+impl ShapedWorldTextRun {
     const fn empty(stats: TextBuildStats) -> Self {
         Self {
             prepared: None,
@@ -43,16 +43,16 @@ impl ShapedSlugWorldText {
     }
 }
 
-/// Builds Slug run data in entity-local coordinates after text shaping.
-pub(super) fn build_world_slug_text(
+/// Builds text run data in entity-local coordinates after text shaping.
+pub(super) fn build_world_text_run(
     text: &str,
     style: &WorldTextStyle,
     font_registry: &FontRegistry,
-    slug_backend: &mut SlugBackend,
+    backend: &mut SlugBackend,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
     scale: f32,
-) -> ShapedSlugWorldText {
+) -> ShapedWorldTextRun {
     let points_to_world = Unit::Points.meters_per_unit();
     let boost = if points_to_world > 0.0 {
         1.0 / points_to_world
@@ -75,11 +75,11 @@ pub(super) fn build_world_slug_text(
         text_shaping::positioned_glyphs(&layout_run.glyphs, font_registry, &mut stats);
 
     if stats.failed_glyphs > 0 {
-        return ShapedSlugWorldText::empty(stats);
+        return ShapedWorldTextRun::empty(stats);
     }
 
     let boosted_size = config.size();
-    let (anchor_x, anchor_y) = measure_slug_anchor_offset(
+    let (anchor_x, anchor_y) = measure_anchor_offset(
         &layout_run,
         &positioned_glyphs,
         &config.as_standalone().with_anchor(style.anchor()),
@@ -87,37 +87,37 @@ pub(super) fn build_world_slug_text(
     );
     let world_scale = scale * points_to_world;
 
-    let slug_start = std::time::Instant::now();
-    let prepared = match slug_backend.prepare_positioned_run(
+    let run_start = std::time::Instant::now();
+    let prepared = match backend.prepare_positioned_run(
         &positioned_glyphs,
         Vec2::new(anchor_x, anchor_y),
         boosted_size,
         world_scale,
-        DEFAULT_BAND_COUNT,
+        SLUG_DEFAULT_BAND_COUNT,
     ) {
         Ok(prepared) => prepared,
         Err(err) => {
-            bevy::log::warn!("world Slug text unsupported: {err}");
+            bevy::log::warn!("world text unsupported: {err}");
             stats.failed_glyphs += positioned_glyphs.len().max(1);
             stats.atlas_ms =
-                slug_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
-            return ShapedSlugWorldText::empty(stats);
+                run_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
+            return ShapedWorldTextRun::empty(stats);
         },
     };
 
     stats.ready_glyphs = positioned_glyphs.len();
-    stats.emitted_quads = prepared.run.run.glyphs().len();
-    stats.atlas_ms = slug_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
+    stats.emitted_quads = prepared.glyph_count();
+    stats.atlas_ms = run_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
 
     #[cfg(feature = "typography_overlay")]
-    let glyphs = slug_overlay_glyph_metrics(
+    let glyphs = overlay_glyph_metrics(
         &positioned_glyphs,
         boosted_size,
         Vec2::new(anchor_x, anchor_y),
         world_scale,
     );
 
-    ShapedSlugWorldText {
+    ShapedWorldTextRun {
         prepared: Some(prepared),
         anchor_y: anchor_y * points_to_world,
         #[cfg(feature = "typography_overlay")]
@@ -126,9 +126,9 @@ pub(super) fn build_world_slug_text(
     }
 }
 
-fn measure_slug_anchor_offset(
+fn measure_anchor_offset(
     layout_run: &ShapedTextRun,
-    positioned_glyphs: &[PositionedGlyph<'_>],
+    positioned_glyphs: &[SlugPositionedGlyph<'_>],
     style: &WorldTextStyle,
     font_size: f32,
 ) -> (f32, f32) {
@@ -159,10 +159,10 @@ fn measure_slug_anchor_offset(
     style.anchor().offset(max_x, max_y)
 }
 
-fn native_ink_right(positioned_glyph: &PositionedGlyph<'_>, font_size: f32) -> Option<f32> {
+fn native_ink_right(positioned_glyph: &SlugPositionedGlyph<'_>, font_size: f32) -> Option<f32> {
     let face = ttf_parser::Face::parse(
         positioned_glyph.font.data(),
-        positioned_glyph.font.collection_index,
+        positioned_glyph.collection_index,
     )
     .ok()?;
     let bbox = face.glyph_bounding_box(GlyphId(positioned_glyph.glyph.id))?;
@@ -171,8 +171,8 @@ fn native_ink_right(positioned_glyph: &PositionedGlyph<'_>, font_size: f32) -> O
 }
 
 #[cfg(feature = "typography_overlay")]
-fn slug_overlay_glyph_metrics(
-    positioned_glyphs: &[PositionedGlyph<'_>],
+fn overlay_glyph_metrics(
+    positioned_glyphs: &[SlugPositionedGlyph<'_>],
     font_size: f32,
     anchor: Vec2,
     scale: f32,
@@ -182,7 +182,7 @@ fn slug_overlay_glyph_metrics(
         let shaped_glyph = positioned_glyph.glyph;
         if let Some(rect) = ink_rect(
             positioned_glyph.font.data(),
-            positioned_glyph.font.collection_index,
+            positioned_glyph.collection_index,
             shaped_glyph.id,
             font_size,
             shaped_glyph.x,

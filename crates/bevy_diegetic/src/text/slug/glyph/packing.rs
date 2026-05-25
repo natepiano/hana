@@ -4,11 +4,11 @@ use bevy::render::render_resource::ShaderType;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
-use super::geometry::QuadraticSegment;
-use super::geometry::SlugBounds;
-use super::geometry::SlugGlyph;
+use super::Bounds;
+use super::Glyph;
+use super::QuadraticSegment;
 
-/// Default number of horizontal bands packed per Slug glyph.
+/// Default number of horizontal bands packed per glyph.
 pub(crate) const DEFAULT_BAND_COUNT: usize = 48;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
@@ -16,7 +16,7 @@ const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;
 
 /// GPU curve record for a quadratic Bezier segment.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct SlugCurveRecord {
+pub struct CurveRecord {
     /// Segment start point in `.xy`, control-minus-start in `.zw`.
     pub start_delta: Vec4,
     /// Quadratic second-difference in `.xy`, segment end point in `.zw`.
@@ -29,7 +29,7 @@ pub struct SlugCurveRecord {
     pub solver:      Vec4,
 }
 
-impl From<&QuadraticSegment> for SlugCurveRecord {
+impl From<&QuadraticSegment> for CurveRecord {
     fn from(segment: &QuadraticSegment) -> Self {
         let control_delta = segment.control - segment.start;
         let curve_delta = segment.end - 2.0 * segment.control + segment.start;
@@ -65,7 +65,7 @@ impl From<&QuadraticSegment> for SlugCurveRecord {
 
 /// GPU band record pointing at a contiguous curve range.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct SlugBandRecord {
+pub struct BandRecord {
     /// First curve record for this band.
     pub start: u32,
     /// Number of curve records for this band.
@@ -76,20 +76,20 @@ pub struct SlugBandRecord {
     pub y_max: f32,
 }
 
-/// GPU glyph record for one unique glyph in a packed Slug text run.
+/// GPU glyph record for one unique glyph in a packed text run.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct SlugGlyphRecord {
+pub struct GlyphRecord {
     /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
     pub bounds_min_size: Vec4,
     /// Horizontal band start/count in `.xy`, vertical band start/count in `.zw`.
     pub band_range:      UVec4,
 }
 
-impl SlugGlyphRecord {
+impl GlyphRecord {
     /// Creates a glyph record that points into the combined run band buffer.
     #[must_use]
     pub fn new(
-        bounds: SlugBounds,
+        bounds: Bounds,
         horizontal_start: u32,
         horizontal_count: u32,
         vertical_start: u32,
@@ -107,31 +107,31 @@ impl SlugGlyphRecord {
     }
 }
 
-/// One glyph's packed curve and band data for the Slug shader.
+/// One glyph's packed curve and band data for the text shader.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SlugPackedGlyph {
-    glyph:  SlugGlyph,
-    curves: Vec<SlugCurveRecord>,
-    bands:  Vec<SlugBandRecord>,
+pub struct PackedGlyph {
+    glyph:  Glyph,
+    curves: Vec<CurveRecord>,
+    bands:  Vec<BandRecord>,
 }
 
-impl SlugPackedGlyph {
+impl PackedGlyph {
     /// Glyph bounds in font design-space units.
     #[must_use]
-    pub const fn bounds(&self) -> SlugBounds { self.glyph.bounds }
+    pub const fn bounds(&self) -> Bounds { self.glyph.bounds }
 
     /// Band-packed curve records.
     #[must_use]
-    pub fn curves(&self) -> &[SlugCurveRecord] { &self.curves }
+    pub fn curves(&self) -> &[CurveRecord] { &self.curves }
 
     /// Band records.
     #[must_use]
-    pub fn bands(&self) -> &[SlugBandRecord] { &self.bands }
+    pub fn bands(&self) -> &[BandRecord] { &self.bands }
 }
 
 /// Builds horizontal band data for one quadratic glyph.
 #[must_use]
-pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyph {
+pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> PackedGlyph {
     let band_count = band_count.max(1);
     let mut curves = Vec::new();
     let mut bands = Vec::with_capacity(band_count * 2);
@@ -166,7 +166,7 @@ pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyp
         &mut bands,
     );
 
-    SlugPackedGlyph {
+    PackedGlyph {
         glyph,
         curves,
         bands,
@@ -191,8 +191,8 @@ fn append_bands(
     extent: f32,
     band_count: usize,
     axis: Axis,
-    curves: &mut Vec<SlugCurveRecord>,
-    bands: &mut Vec<SlugBandRecord>,
+    curves: &mut Vec<CurveRecord>,
+    bands: &mut Vec<BandRecord>,
 ) {
     let band_size = extent.max(1.0) / band_count.to_f32();
 
@@ -211,7 +211,7 @@ fn append_bands(
             axis,
             curves,
         );
-        bands.push(SlugBandRecord {
+        bands.push(BandRecord {
             start,
             count: curves.len().to_u32() - start,
             y_min: band_min,
@@ -225,7 +225,7 @@ fn append_band_curves(
     band_min: f32,
     band_max: f32,
     axis: Axis,
-    curves: &mut Vec<SlugCurveRecord>,
+    curves: &mut Vec<CurveRecord>,
 ) {
     let mut filtered: Vec<(QuadraticSegment, CurveOrientation)> = oriented_segments
         .iter()
@@ -242,7 +242,7 @@ fn append_band_curves(
             .total_cmp(&descending_band_sort_value(&left.0, axis))
     });
     curves.extend(filtered.iter().map(|(segment, orientation)| {
-        let mut record = SlugCurveRecord::from(segment);
+        let mut record = CurveRecord::from(segment);
         if *orientation == CurveOrientation::Vertical {
             record.solver.w = 1.0;
         }
