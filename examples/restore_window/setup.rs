@@ -23,7 +23,7 @@ pub(crate) fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(""),
         TextFont {
-            font_size: FONT_SIZE,
+            font_size: FontSize::Px(FONT_SIZE),
             ..default()
         },
         Node {
@@ -74,7 +74,7 @@ pub(crate) fn on_secondary_window_added(
     commands.spawn((
         Text::new(""),
         TextFont {
-            font_size: FONT_SIZE,
+            font_size: FontSize::Px(FONT_SIZE),
             ..default()
         },
         Node {

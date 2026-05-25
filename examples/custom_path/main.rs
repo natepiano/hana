@@ -63,7 +63,7 @@ fn setup(mut commands: Commands) {
         InfoText,
         Text::default(),
         TextFont {
-            font_size: FONT_SIZE,
+            font_size: FontSize::Px(FONT_SIZE),
             ..default()
         },
         Node {

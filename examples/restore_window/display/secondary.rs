@@ -60,7 +60,7 @@ pub(crate) fn update_secondary_displays(
             input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 
         let font = TextFont {
-            font_size: FONT_SIZE,
+            font_size: FontSize::Px(FONT_SIZE),
             ..default()
         };
 

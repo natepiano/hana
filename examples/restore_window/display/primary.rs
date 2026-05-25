@@ -58,7 +58,7 @@ pub(crate) fn update_primary_display(
         input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 
     let font = TextFont {
-        font_size: FONT_SIZE,
+        font_size: FontSize::Px(FONT_SIZE),
         ..default()
     };
 
