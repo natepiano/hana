@@ -43,10 +43,6 @@ pub(super) const DIAG_PANEL_TEXT_MESH_BUILD_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/mesh_build_ms");
 pub(super) const DIAG_PANEL_TEXT_PARLEY_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/parley_ms");
-pub(super) const DIAG_PANEL_TEXT_PENDING_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/pending_glyphs");
-pub(super) const DIAG_PANEL_TEXT_QUEUED_GLYPHS: DiagnosticPath =
-    DiagnosticPath::const_new("bevy_diegetic/panel_text/queued_glyphs");
 pub(super) const DIAG_PANEL_TEXT_SHAPED_PANELS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/shaped_panels");
 pub(super) const DIAG_PANEL_TEXT_SHAPE_MS: DiagnosticPath =

@@ -578,13 +578,20 @@ surfaced to the user and resolved by deleting the field.
   now).** The kept `PanelTextPerfStats` carried MSDF-era naming after Phase 3:
   the `atlas_lookup_ms` field + the `DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS` diagnostic
   (`bevy_diegetic/panel_text/atlas_lookup_ms`), still written by slug as
-  glyph-prep time. **Resolved: deleted the field** (not renamed) — the field, its
-  doc, the constant, its register entry + `add_measurement` call, and the two
-  writes in `text_renderer/shaping.rs`. Lib green, 158/158. The shared
-  `TextBuildStats.atlas_ms` stays (the world-text path still reads it at
-  `world_text/rendering.rs:304`). (The other stale `PanelTextPerfStats` docs that
-  name the deleted `PanelTextQuads` / `build_panel_batched_meshes` were left
-  untouched — out of the "just the field" scope.)
+  glyph-prep time. **Resolved across three rounds, all landed (lib green,
+  158/158):** (1) deleted `atlas_lookup_ms` + its
+  `DIAG_PANEL_TEXT_ATLAS_LOOKUP_MS` diagnostic, register entry, `add_measurement`,
+  and the two writes in `text_renderer/shaping.rs`; (2) rewrote the stale doc
+  comments — deleted `build_panel_batched_meshes` → `build_panel_slug_meshes`,
+  and `PanelTextQuads` / atlas / async-rasterization wording → slug terms
+  (positioned glyphs, slug meshes, glyph loading); (3) deleted `queued_glyphs` +
+  `pending_glyphs` (+ their two diagnostics, register entries, `add_measurement`
+  calls, and writes) — both are always 0 under slug (nothing increments them;
+  slug builds glyphs synchronously), the same vestigial-MSDF class as
+  `atlas_lookup_ms`. `PanelTextPerfStats` now keeps five live fields (`total_ms`,
+  `shape_ms`, `parley_ms`, `mesh_build_ms`, `shaped_panels`); the shared internal
+  `TextBuildStats` (incl. `atlas_ms`, `queued_glyphs`, `pending_glyphs`) is
+  untouched — `GlyphReadiness` + the world-text path still read it.
 - **Phase 4** — corrected the `Slug*` `lib.rs` re-export scope to **32 `pub use`
   lines, `lib.rs` 174–206** (was "~31, lines ~180–211"); recorded that
   `slug_text_shadow_proxy_material` is re-exported only from

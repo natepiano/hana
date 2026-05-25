@@ -10,8 +10,6 @@ use super::constants::DIAG_LAYOUT_COMPUTE_MS;
 use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
 use super::constants::DIAG_PANEL_TEXT_MESH_BUILD_MS;
 use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
-use super::constants::DIAG_PANEL_TEXT_PENDING_GLYPHS;
-use super::constants::DIAG_PANEL_TEXT_QUEUED_GLYPHS;
 use super::constants::DIAG_PANEL_TEXT_SHAPE_MS;
 use super::constants::DIAG_PANEL_TEXT_SHAPED_PANELS;
 use super::constants::DIAG_PANEL_TEXT_TOTAL_MS;
@@ -34,15 +32,15 @@ pub struct DiegeticPerfStats {
     pub compute_ms:     f32,
     /// Stage 1 — panels processed by the most recent layout run.
     pub compute_panels: usize,
-    /// Stages 2 & 3 — panel-text shape + mesh-build timings and counts.
+    /// Stages 2 & 3 — panel-text shaping + mesh-build timings and counts.
     pub panel_text:     PanelTextPerfStats,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
 ///
 /// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`]
-/// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → glyph quads)
-/// 3. `build_panel_batched_meshes` → [`Self::mesh_build_ms`] (quads → mesh entities)
+/// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
+/// 3. `build_panel_slug_meshes` → [`Self::mesh_build_ms`] (glyphs → slug meshes)
 ///
 /// Render-pass time is not measured here — it lives in Bevy's own diagnostics
 /// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
@@ -57,32 +55,24 @@ pub struct PanelTextPerfStats {
     ///
     /// Written twice per frame: first by `shape_panel_text_children` using
     /// the *previous* frame's `mesh_build_ms`, then overwritten by
-    /// `build_panel_batched_meshes` using the current frame's values. The
+    /// `build_panel_slug_meshes` using the current frame's values. The
     /// final value is only correct because mesh build is scheduled
     /// `.after(shape_panel_text_children)`; reordering those systems would
     /// leave `total_ms` stale by one frame.
-    pub total_ms:       f32,
+    pub total_ms:      f32,
     /// Stage 2 — wall time of `shape_panel_text_children` this frame.
-    /// Covers string → glyph-quad shaping for every panel-text entity that
-    /// changed or is waiting on async glyph rasterization.
-    pub shape_ms:       f32,
+    /// Covers turning strings into positioned glyphs for every panel-text
+    /// entity that changed or is waiting on glyph loading.
+    pub shape_ms:      f32,
     /// Inside [`Self::shape_ms`] — time spent in parley text shaping,
     /// summed across entities. If this dominates, the cost is content-side
     /// (many strings, complex scripts, heavy font features).
-    pub parley_ms:      f32,
-    /// Stage 3 — wall time of `build_panel_batched_meshes` this frame.
-    /// Covers batching `PanelTextQuads` into per-page mesh entities and
-    /// despawning stale meshes.
-    pub mesh_build_ms:  f32,
-    /// Number of panels whose text was re-shaped this frame.
-    pub shaped_panels:  usize,
-    /// Glyphs newly queued for async rasterization during the shape pass.
-    /// Non-zero in steady-state usually indicates new characters appearing
-    /// (font change, new content).
-    pub queued_glyphs:  usize,
-    /// Glyphs not yet ready at the end of the shaping pass. Non-zero in
-    /// steady-state means glyph readiness is lagging behind new content.
-    pub pending_glyphs: usize,
+    pub parley_ms:     f32,
+    /// Stage 3 — wall time of `build_panel_slug_meshes` this frame.
+    /// Covers building slug glyph meshes and despawning stale meshes.
+    pub mesh_build_ms: f32,
+    /// Number of panels whose text shaping ran this frame.
+    pub shaped_panels: usize,
 }
 
 #[derive(Resource, Default)]
@@ -108,8 +98,6 @@ impl Plugin for DiagnosticsPlugin {
             Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_MESH_BUILD_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPED_PANELS),
-            Diagnostic::new(DIAG_PANEL_TEXT_QUEUED_GLYPHS),
-            Diagnostic::new(DIAG_PANEL_TEXT_PENDING_GLYPHS),
         ] {
             app.register_diagnostic(diagnostic);
         }
@@ -135,11 +123,5 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     });
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_SHAPED_PANELS, || {
         perf.panel_text.shaped_panels.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_PANEL_TEXT_QUEUED_GLYPHS, || {
-        perf.panel_text.queued_glyphs.to_f64()
-    });
-    diagnostics.add_measurement(&DIAG_PANEL_TEXT_PENDING_GLYPHS, || {
-        perf.panel_text.pending_glyphs.to_f64()
     });
 }
