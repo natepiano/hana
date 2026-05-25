@@ -7,6 +7,7 @@ use bevy::reflect::GetTypeRegistration;
 use bevy::reflect::Typed;
 
 use super::defaults::CascadeDefaults;
+use crate::layout::Unit;
 
 /// A 3-tier cascade: entity override → panel override → global default.
 ///
@@ -61,6 +62,37 @@ pub(crate) trait CascadeTarget:
 /// override-holder.
 #[derive(Component)]
 pub(crate) struct ExcludeNone;
+
+/// Text alpha-mode cascade attribute. A pure value, wrapped in
+/// [`Override<A>`] / [`Resolved<A>`]; never inserted bare, so it is not a
+/// `Component`.
+#[derive(Clone, Copy, PartialEq, Debug, Reflect)]
+pub(crate) struct TextAlpha(pub AlphaMode);
+
+/// Font-unit cascade attribute. A pure value, wrapped in [`Override<A>`] /
+/// [`Resolved<A>`]; never inserted bare, so it is not a `Component`.
+#[derive(Clone, Copy, PartialEq, Debug, Reflect)]
+pub(crate) struct FontUnit(pub Unit);
+
+/// A node's own override for attribute `A` — the cascade input.
+///
+/// Presence on an entity means "this node overrides `A`"; absence means
+/// "inherit." There is exactly one override component type per attribute, and
+/// an entity holds at most one of any component, so "two sources for one
+/// attribute" cannot be written down.
+#[derive(Component, Reflect, Clone, Copy, Debug)]
+#[reflect(Component)]
+pub(crate) struct Override<A>(pub A)
+where
+    A: Copy
+        + PartialEq
+        + Send
+        + Sync
+        + FromReflect
+        + TypePath
+        + Typed
+        + GetTypeRegistration
+        + 'static;
 
 /// Per-entity cache of a resolved cascading attribute.
 ///

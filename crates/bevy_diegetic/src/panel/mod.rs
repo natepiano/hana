@@ -43,6 +43,9 @@ pub use sizing::Points;
 
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePanelPlugin;
+use crate::cascade::FontUnit;
+use crate::cascade::Override;
+use crate::cascade::TextAlpha;
 use crate::layout::ShapedTextCache;
 
 /// System sets for ordering panel work and its cross-module dependencies.
@@ -81,6 +84,11 @@ impl Plugin for HeadlessLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(DiagnosticsPlugin)
             .add_plugins(CascadePanelPlugin::<PanelFontUnit>::default())
+            .register_type::<TextAlpha>()
+            .register_type::<FontUnit>()
+            .register_type::<Override<TextAlpha>>()
+            .register_type::<Override<FontUnit>>()
+            .add_observer(diegetic_panel::seed_panel_overrides)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<CascadeDefaults>()

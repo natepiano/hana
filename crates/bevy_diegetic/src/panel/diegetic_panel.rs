@@ -12,6 +12,9 @@ use super::coordinate_space::SurfaceShadow;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
 use crate::cascade::ExcludeNone;
+use crate::cascade::FontUnit;
+use crate::cascade::Override;
+use crate::cascade::TextAlpha;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::InvalidSize;
@@ -437,13 +440,40 @@ pub(crate) struct PanelFontUnit(pub Unit);
 
 impl CascadeTarget for PanelFontUnit {
     type Exclude = ExcludeNone;
-    type Override = DiegeticPanel;
+    type Override = Override<FontUnit>;
 
-    fn override_value(entity_override: &DiegeticPanel) -> Option<Self> {
-        entity_override.font_unit().map(Self)
+    fn override_value(entity_override: &Override<FontUnit>) -> Option<Self> {
+        Some(Self(entity_override.0.0))
     }
 
     fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.panel_font_unit) }
+}
+
+/// Spawn-time authoring bridge for panel cascade overrides.
+///
+/// Reads a newly-added [`DiegeticPanel`]'s `text_alpha_mode` / `font_unit`
+/// authoring fields and inserts the matching `Override<A>` cascade component,
+/// but only when the field is set. An absent field leaves the component absent,
+/// which the cascade reads as "inherit." `DiegeticPanel` is no longer a cascade
+/// source — the cascade reads `Override<A>`; the fields are authoring inputs the
+/// bridge consumes once at spawn. The panel twin of the standalone
+/// `WorldTextStyle` authoring bridge.
+pub(super) fn seed_panel_overrides(
+    trigger: On<Add, DiegeticPanel>,
+    panels: Query<&DiegeticPanel>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(panel) = panels.get(entity) else {
+        return;
+    };
+    let mut entity_commands = commands.entity(entity);
+    if let Some(alpha_mode) = panel.text_alpha_mode() {
+        entity_commands.insert(Override(TextAlpha(alpha_mode)));
+    }
+    if let Some(unit) = panel.font_unit() {
+        entity_commands.insert(Override(FontUnit(unit)));
+    }
 }
 
 /// Per-frame tree-change classification consumed by the panel layout system.
