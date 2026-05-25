@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::PanelTextLayout;
+use crate::cascade::Override;
+use crate::cascade::TextAlpha;
 use crate::layout::RenderCommandKind;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -72,6 +74,11 @@ pub(super) fn reconcile_panel_text_children(
         let mut visited_keys: Vec<(usize, usize)> = Vec::new();
         for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
             let style = config.as_standalone();
+            // A label's own alpha override (`LayoutTextStyle::with_alpha_mode`)
+            // travels through `as_standalone` and becomes an `Override<TextAlpha>`
+            // on the label, which the cascade resolves ahead of the panel's
+            // inherited alpha. Absent → the label inherits.
+            let label_alpha = style.alpha_mode();
             let panel_text_child = PanelTextLayout {
                 element_idx: *element_idx,
                 command_index: *cmd_index,
@@ -87,11 +94,31 @@ pub(super) fn reconcile_panel_text_children(
             visited_keys.push(key);
 
             if let Some(&child_entity) = existing_by_key.get(&key) {
-                commands.entity(child_entity).insert((
+                let mut child = commands.entity(child_entity);
+                child.insert((
                     WorldText::new(text.clone()),
                     style,
                     panel_text_child,
                     PanelChild,
+                ));
+                match label_alpha {
+                    Some(alpha_mode) => {
+                        child.insert(Override(TextAlpha(alpha_mode)));
+                    },
+                    None => {
+                        child.remove::<Override<TextAlpha>>();
+                    },
+                }
+            } else if let Some(alpha_mode) = label_alpha {
+                // `Override<TextAlpha>` rides in the spawn bundle so it is
+                // present when `seed_panel_child_alpha` fires on `PanelChild`,
+                // seeding the label's own alpha with no settle frame.
+                commands.entity(panel_entity).with_child((
+                    WorldText::new(text.clone()),
+                    style,
+                    panel_text_child,
+                    PanelChild,
+                    Override(TextAlpha(alpha_mode)),
                 ));
             } else {
                 commands.entity(panel_entity).with_child((

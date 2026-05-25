@@ -377,14 +377,26 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 
     /// Returns the per-style alpha-mode override, if any.
     ///
-    /// For [`ForStandalone`] this is the authoring input the spawn-time
-    /// `Override<TextAlpha>` bridge reads; the cascade itself reads
-    /// `Override<TextAlpha>`, not this field. For panel-text [`ForLayout`]
-    /// configs it still feeds the per-run `PanelText` alpha. `None` means
-    /// "inherit" — resolution falls through to the panel-level override, then
-    /// to [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
+    /// This is the authoring input the cascade bridges read to insert
+    /// `Override<TextAlpha>`: the standalone bridge for [`ForStandalone`], the
+    /// panel-text reconciler for a [`ForLayout`] label. `None` means "inherit" —
+    /// resolution falls through to the panel-level override, then to
+    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
     #[must_use]
     pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
+
+    /// Sets the per-style text [`AlphaMode`] override.
+    ///
+    /// The matching cascade bridge inserts an `Override<TextAlpha>` from this
+    /// value, so the node composites with `alpha_mode` instead of inheriting
+    /// the panel-level override or the global default. On a panel label this is
+    /// the node's own override; on standalone [`WorldText`](crate::WorldText)
+    /// it is the standalone's own alpha.
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
+        self.alpha_mode = Some(alpha_mode);
+        self
+    }
 
     /// Returns the font feature overrides.
     #[must_use]

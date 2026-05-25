@@ -185,8 +185,9 @@ or the default changes.
 `render_world_text` filters `Without<PanelChild>`; the panel-text systems filter `With<PanelChild>`.
 These select which entities a render system draws (standalone vs panel text are drawn by different
 systems) and are orthogonal to the cascade — keep them. Standalone text reads `Resolved<TextAlpha>` and
-`Resolved<FontUnit>`; panel labels read `Resolved<TextAlpha>`; panel layout reads the panel's
-`Resolved<FontUnit>`. A panel-side `Override<TextAlpha>` change bumps `Changed<Resolved<TextAlpha>>` and
+`Resolved<FontUnit>`; panel labels read `Resolved<TextAlpha>` — inherited from the panel, or the label's
+own override when it authored one (`LayoutTextStyle::with_alpha_mode`, restored in Phase 4); panel layout
+reads the panel's `Resolved<FontUnit>`. A panel-side `Override<TextAlpha>` change bumps `Changed<Resolved<TextAlpha>>` and
 can wake the standalone render query to a zero-entity no-op (its `Without<PanelChild>` filter) —
 acceptable; revisit only if it shows on a profile.
 
@@ -220,7 +221,7 @@ One manifest of every cascade, mirrored by a module-header table in code:
 
 | Attribute   | Global default                | Resolution                                      | Override source today |
 | ---         | ---                           | ---                                             | --- |
-| `TextAlpha` | `CascadeDefaults::text_alpha` | panel → label inherit; standalone own → global  | `WorldTextStyle.alpha_mode`, `DiegeticPanel.text_alpha_mode`, `PanelText.alpha_mode` |
+| `TextAlpha` | `CascadeDefaults::text_alpha` | label own → panel → global; standalone own → global  | `WorldTextStyle.alpha_mode` (standalone), `DiegeticPanel.text_alpha_mode` (panel), `LayoutTextStyle.alpha_mode` → label `Override<TextAlpha>` at reconcile |
 | `FontUnit`  | `CascadeDefaults::font_unit` (standalone) | standalone own → global; panels carry a seeded override (`panel_font_unit`) that children inherit | `WorldTextStyle.unit` (cascade role), `DiegeticPanel.font_unit` |
 
 `CascadeDefaults::panel_font_unit` is the panel builder's construction-time seed for `Override<FontUnit>`
@@ -620,6 +621,10 @@ same generic plugin is caught by Bevy's built-in plugin uniqueness).
   walk — there is no value to source a per-label override from. Behavior is identical to today's
   `apply_panel_result` (whose `panel_text.alpha_mode` was always `None`, so it always fell through to the
   panel's resolved alpha).
+  **(Reversed in Phase 4, option C.)** This deviation followed from Phase 2 deleting `with_alpha_mode` as
+  "no callers" — which missed that it is documented public API (the README). Phase 4 restored
+  `with_alpha_mode` and reinstated the label-override path: `reconcile_panel_text_children` now inserts a
+  label `Override<TextAlpha>` from `style.alpha_mode()`. Labels inherit only when they author nothing.
 - **The panel carries `Resolved<FontUnit>` but not `Resolved<TextAlpha>`.** No reader reads a panel's
   alpha; only its labels render text, and they walk up to the panel's raw `Override<TextAlpha>`. The
   `compute_layout.rs` panel-font-unit fallback was repointed straight to `defaults.panel_font_unit` (not a
@@ -675,7 +680,7 @@ determinate (zero sent for user approval) and were folded into Phase 4:
   `default_changed` branch (the only path that changes standalone alpha), since `text_alpha.rs` pins every
   panel to `Blend` so the runtime mutation drives only the standalones.
 
-### Phase 4 — verification + cascade example
+### Phase 4 — verification + cascade example ✅ complete
 
 - **Generic cascade mechanics are already covered — do not re-test them here.** The `cascade/plugin.rs`
   test module (carried forward from the deleted `target.rs` / `panel_child.rs`) already proves: spawn →
@@ -732,6 +737,85 @@ determinate (zero sent for user approval) and were folded into Phase 4:
   inserting a raw `Override<TextAlpha>` directly on one label entity, with a comment that this proves the
   parent-walk honors a node's own override even though no builder authors one.
 
+### Retrospective
+
+**What worked:**
+- All seven verification tests landed and pass (167 crate tests, +10 over Phase 3's 157): two-node `ChildOf`
+  cycle + cap-exceed chain (`cascade/plugin.rs`); standalone bridge no-override / explicit-unit / explicit-alpha
+  + runtime-default-change (`render/world_text/mod.rs`); panel-label same-frame inheritance, cross-context
+  global-default, and label-own-override-via-real-reconcile (`render/panel_text/alpha.rs`); headless `FontUnit`
+  (`panel/compute_layout.rs`).
+- Stale-doc sweep done: rewrote the `cascade_set.rs` `Propagate` doc (was the deleted tier-2/tier-3 /
+  `A::PanelOverride` model); the deleted-type `rg` sweep is zero-hit; registration confirmed
+  (`CascadePlugin::<A>` registers `A`/`Override<A>`/`Resolved<A>`; `FontUnit` in `HeadlessLayoutPlugin`,
+  `TextAlpha` in `TextRenderPlugin`).
+- The same-frame label-seed test asserts against an *overridden* alpha (`Add` ≠ default `Blend`), so the
+  `build_panel_text_meshes` fallback cannot mask an ordering regression — exactly the masking risk the
+  Phase-3 review flagged.
+
+**What deviated from the plan — the big one (decided with the user, option C):**
+- **The planned tier-3 example was impossible as written, and uncovered a Phase-2 public-API regression.**
+  Item #8 said to demonstrate a label's own alpha by inserting a raw `Override<TextAlpha>` on a label entity.
+  But `Override<A>`, `TextAlpha`, `Resolved`, and `PanelChild` are all `pub(crate)` — an example is a
+  separate crate and cannot touch them. Investigating the public alpha surface surfaced that the README
+  (lines 54–56, 74–78) still documents `WorldTextStyle`/`LayoutTextStyle::with_alpha_mode` with runnable
+  snippets, but **Phase 2 deleted that method as "no callers" — missing that it is documented public API**,
+  and **Phase 3 deviation #4 then deleted the label-override path on that basis** ("labels purely inherit").
+  So the documented public API and the code had silently diverged since Phase 2.
+- **Resolution (user picked C — restore full per-style alpha):** re-added `with_alpha_mode` to the shared
+  `TextProps<C>` impl (covers both `WorldTextStyle` and `LayoutTextStyle`), and reinstated the label-override
+  path in `reconcile_panel_text_children` — it now inserts `Override<TextAlpha>` on a label from
+  `style.alpha_mode()` (in the spawn bundle alongside `PanelChild`, so `seed_panel_child_alpha` seeds the
+  label's own alpha with no settle frame; insert/remove on the update path for the propagation pass). The
+  standalone bridge already consumed `alpha_mode()`, so standalone tier-3 alpha came for free. This **reverses
+  Phase 2's deletion and Phase 3 deviation #4** and makes the README accurate again.
+- The example demonstrates tier-3 alpha through the public `with_alpha_mode` (a panel label authoring
+  `Multiply`, a standalone authoring `Add`) — **no internals exposed**, the cleaner path than widening the API
+  with the raw `Override` component. `examples/cascade.rs` (auto-discovered, no `Cargo.toml` entry).
+
+**Surprises:**
+- The README/code drift was a latent public-API regression none of the Phase-1/2/3 reviews caught, because
+  "no callers" was scanned inside the crate, not against the documented public surface.
+- `with_alpha_mode` on `WorldTextStyle` was nearly free to restore — the standalone bridge
+  (`seed_world_text_overrides`) already inserted `Override<TextAlpha>` from `alpha_mode()`; only the setter
+  was missing.
+
+**Implications:**
+- This document now contains claims that the C reversal contradicts — they must be corrected (Phase-4 Review
+  below): the changed-names table row ("labels have no alpha-authoring path… no label-level override is
+  inserted"), Phase 3 retrospective deviation #4, and the design prose in
+  [The split](#the-split--overrides-leave-worldtextstyle-diegeticpanel-and-paneltext) /
+  [Read side](#read-side--entity-selection-filters-stay) that asserts labels purely inherit alpha.
+- No phases remain after Phase 4; the review below targets the doc/code consistency the reversal exposed,
+  not future phases.
+
+### Phase 4 Review
+
+Architect review of the Phase-4 code + the option-C reversal (no future phases remain; the review targeted
+restoration completeness and doc consistency). Ten findings; four were doc edits, one closed a test gap, five
+were confirmations needing no change. None went to the user — all were determinate.
+
+- **Doc: changed-names row corrected** — the row claimed "labels have no alpha-authoring path… no label-level
+  override is inserted." Rewritten to describe the restored `LayoutTextStyle::with_alpha_mode` →
+  `reconcile_panel_text_children` → label `Override<TextAlpha>` path, including the spawn (no settle) vs.
+  runtime-update (one-frame settle) timing.
+- **Doc: registered-attributes `TextAlpha` row corrected** — "Override source today" now lists the real
+  sources (`WorldTextStyle.alpha_mode`, `DiegeticPanel.text_alpha_mode`, `LayoutTextStyle.alpha_mode` →
+  label override), and the resolution column reads "label own → panel → global."
+- **Doc: read-side prose corrected** — notes a panel label reads its own `Resolved<TextAlpha>` from either the
+  inherited panel value or its own restored override.
+- **Doc: Phase-3 deviation #4 annotated as reversed** — marked "(Reversed in Phase 4, option C)" with the
+  Phase-2 root cause (deleted documented public API as "no callers").
+- **Test gap closed (significant finding #8)** — the reconcile *update* arm (a label's alpha changing /
+  dropping to re-inherit) had no direct test; added
+  `label_alpha_change_reinherits_panel_alpha_through_reconcile` driving a real `set_tree` relayout
+  `Multiply → inherited Add`. 168 crate tests pass.
+- **Confirmations (no change):** `build_panel_text_meshes` already wakes on `Changed<Resolved<TextAlpha>>`, so
+  a label's own-alpha change re-renders; the README `with_alpha_mode` snippets compile as written; the
+  standalone `with_alpha_mode` + `Without<PanelChild>` bridge filter do not double-insert; reconcile inserts
+  only `Override<TextAlpha>` (never `Override<FontUnit>`) on labels, so the FontUnit-inherits-from-panel
+  contract is intact and the spawn-bundle ordering (override present when `seed_panel_child_alpha` fires) holds.
+
 ## Changed names
 
 | Was | Now | Location |
@@ -740,7 +824,7 @@ determinate (zero sent for user approval) and were folded into Phase 4:
 | `render/text_renderer/` module | `render/panel_text/` | — |
 | `PanelTextChild` (marker) | `PanelChild` | `render/world_text/mod.rs` (next to `WorldText`) |
 | `CascadeAttribute` (trait) | `CascadeAttr` | `cascade/resolved.rs` |
-| alpha/unit fields as the **cascade source** | `Override<TextAlpha>` / `Override<FontUnit>` components, inserted by an `On<Add>` bridge | fields stay on `WorldTextStyle` / `DiegeticPanel` as authoring inputs the bridge reads once at spawn; the cascade reads the component. `PanelText.alpha_mode` is removed in Phase 3; labels have no alpha-authoring path (it was always `None`) so they purely inherit the panel's `Override<TextAlpha>` via the walk — no label-level override is inserted |
+| alpha/unit fields as the **cascade source** | `Override<TextAlpha>` / `Override<FontUnit>` components, inserted by an `On<Add>` bridge | fields stay on `WorldTextStyle` / `DiegeticPanel` as authoring inputs the bridge reads once at spawn; the cascade reads the component. `PanelText.alpha_mode` is gone; a panel label authors its own alpha via `LayoutTextStyle::with_alpha_mode` (restored in Phase 4), which `reconcile_panel_text_children` turns into a label `Override<TextAlpha>` from `style.alpha_mode()` — present at spawn (in the `PanelChild` bundle, no settle frame) and insert/removed on update (a runtime change settles one frame later through the propagation pass). Absent → the label inherits the panel's `Override<TextAlpha>` via the walk |
 | per-role `Resolved<WorldTextAlpha>` / `Resolved<PanelTextAlpha>` | `Resolved<TextAlpha>` | one resolved type per attribute |
 | per-role `Resolved<WorldFontUnit>` / `Resolved<PanelFontUnit>` | `Resolved<FontUnit>` | one font-unit attribute; panel `Points` is a seeded override, not a second type |
 | `CascadeDefaults::world_font_unit` | `CascadeDefaults::font_unit` | sole cascade global for `FontUnit` (standalone default) |

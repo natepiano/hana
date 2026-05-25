@@ -8,12 +8,12 @@ use bevy::prelude::*;
 /// propagated values within the same frame.
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CascadeSet {
-    /// All systems that propagate cascade changes into per-entity
-    /// [`Resolved`](crate::cascade::Resolved) values. Covers both tier-2
-    /// propagation (panel override mutations, detected via
-    /// `Changed<A::PanelOverride>`) and tier-3 propagation (global-default
-    /// mutations, detected via [`CascadeDefaults`](super::CascadeDefaults)).
-    /// After this set runs in [`Update`], every `Resolved` on affected
-    /// entities reflects current sources.
+    /// All systems that keep per-entity
+    /// [`Resolved`](crate::cascade::Resolved) values current. One propagation
+    /// system per cascade attribute re-resolves a node when its own
+    /// `Override<A>` changes or is removed, its `ChildOf` changes, or
+    /// [`CascadeDefaults`](super::CascadeDefaults) changes — fanning ancestor
+    /// changes down through `Children`. After this set runs in [`Update`],
+    /// every `Resolved` on an affected entity reflects current sources.
     Propagate,
 }

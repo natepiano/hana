@@ -217,12 +217,15 @@ mod tests {
     use crate::Mm;
     use crate::Percent;
     use crate::Px;
+    use crate::cascade::FontUnit;
+    use crate::cascade::Resolved;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
     use crate::layout::RenderCommandKind;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::layout::Unit;
     use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
@@ -720,5 +723,31 @@ mod tests {
 
         assert_eq!(panel.width(), 50.0);
         assert_eq!(panel.height(), 30.0);
+    }
+
+    #[test]
+    fn headless_panel_resolves_seeded_font_unit_to_points() {
+        let mut app = make_app();
+
+        let panel = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|b| {
+                b.text("Hi", LayoutTextStyle::new(Mm(6.0)));
+            })
+            .build()
+            .expect("headless panel should build");
+        let entity = app.world_mut().spawn(panel).id();
+        app.update();
+
+        // The panel carries a seeded `Resolved<FontUnit>` from the
+        // construction-time `panel_font_unit` (`Points`); `compute_panel_layouts`
+        // reads it directly. The `.expect` proves the component is present, so
+        // the `defaults.panel_font_unit` fallback in `compute_panel_layouts` is
+        // unreached for a panel.
+        let resolved = app
+            .world()
+            .get::<Resolved<FontUnit>>(entity)
+            .expect("panel should carry seeded Resolved<FontUnit>");
+        assert_eq!(resolved.0.0, Unit::Points);
     }
 }

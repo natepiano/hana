@@ -119,6 +119,7 @@ fn collect_subtree(root: Entity, children: &Query<&Children>, dirty: &mut HashSe
 )]
 mod tests {
     use super::*;
+    use crate::cascade::constants::CASCADE_DEPTH_CAP;
     use crate::layout::Unit;
 
     // A throwaway attribute projected onto `CascadeDefaults.layout_unit` —
@@ -320,6 +321,51 @@ mod tests {
         app.world_mut().entity_mut(entity).insert(ChildOf(entity));
         app.update();
         assert_eq!(read(&app, entity), Unit::Meters);
+    }
+
+    #[test]
+    fn two_node_childof_cycle_terminates_at_global_default() {
+        let mut app = test_app();
+        let a = app.world_mut().spawn(TestNode).id();
+        let b = app.world_mut().spawn(TestNode).id();
+
+        // Form a two-node `ChildOf` cycle: a → b → a. Neither node carries an
+        // override, so the walk must traverse the whole cycle before giving up
+        // — the visited-set (debug) / depth-cap (release) guard terminates it
+        // at the global default instead of looping forever.
+        app.world_mut().entity_mut(a).insert(ChildOf(b));
+        app.world_mut().entity_mut(b).insert(ChildOf(a));
+        app.update();
+
+        assert_eq!(read(&app, a), Unit::Meters);
+        assert_eq!(read(&app, b), Unit::Meters);
+    }
+
+    #[test]
+    fn chain_beyond_depth_cap_falls_to_global_default() {
+        let mut app = test_app();
+        let root = app
+            .world_mut()
+            .spawn((TestNode, Override(TestUnit(Unit::Millimeters))))
+            .id();
+
+        // A `ChildOf` chain deeper than the cap. The root's override sits above
+        // the cap from the deepest node's vantage.
+        let mut parent = root;
+        let mut nodes = vec![root];
+        for _ in 0..CASCADE_DEPTH_CAP + 4 {
+            let child = app.world_mut().spawn((TestNode, ChildOf(parent))).id();
+            nodes.push(child);
+            parent = child;
+        }
+        app.update();
+
+        // A node within the cap reaches the root override.
+        assert_eq!(read(&app, nodes[3]), Unit::Millimeters);
+        // The deepest node exhausts the cap before reaching the root, so it
+        // resolves to the global default — no hang, no panic.
+        let deepest = *nodes.last().expect("chain is non-empty");
+        assert_eq!(read(&app, deepest), Unit::Meters);
     }
 
     #[test]

@@ -174,9 +174,9 @@ pub(crate) struct PanelChild;
 /// bridge.
 ///
 /// Filters `Without<PanelChild>`: panel labels share the [`WorldTextStyle`]
-/// component but inherit their alpha from the panel subtree (and never read a
-/// font unit of their own), so they must not be seeded as standalones. Labels
-/// are seeded by `seed_panel_child_alpha` instead.
+/// component but their alpha is seeded by the panel-label path (and they never
+/// read a font unit of their own), so they must not be seeded as standalones.
+/// Labels are seeded by `seed_panel_child_alpha` instead.
 pub(super) fn seed_world_text_overrides(
     trigger: On<Add, WorldTextStyle>,
     styles: Query<&WorldTextStyle, Without<PanelChild>>,
@@ -200,5 +200,110 @@ pub(super) fn seed_world_text_overrides(
     }
     if let Some(alpha_mode) = style.alpha_mode() {
         entity_commands.insert(Override(TextAlpha(alpha_mode)));
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
+mod tests {
+    use super::*;
+    use crate::Pt;
+    use crate::cascade::CascadePlugin;
+    use crate::layout::Unit;
+
+    fn standalone_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<CascadeDefaults>()
+            .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(CascadePlugin::<FontUnit>::default())
+            .add_observer(seed_world_text_overrides);
+        app
+    }
+
+    fn resolved_alpha(app: &App, entity: Entity) -> AlphaMode {
+        app.world()
+            .get::<Resolved<TextAlpha>>(entity)
+            .expect("standalone should carry Resolved<TextAlpha>")
+            .0
+            .0
+    }
+
+    fn resolved_unit(app: &App, entity: Entity) -> Unit {
+        app.world()
+            .get::<Resolved<FontUnit>>(entity)
+            .expect("standalone should carry Resolved<FontUnit>")
+            .0
+            .0
+    }
+
+    #[test]
+    fn no_override_standalone_seeds_resolved_to_global_defaults() {
+        let mut app = standalone_app();
+        // Default `WorldTextStyle` authors neither unit nor alpha, so the
+        // standalone carries no `Override<A>` and resolves to the globals.
+        let entity = app.world_mut().spawn(WorldText::new("hi")).id();
+        app.update();
+
+        assert_eq!(resolved_unit(&app, entity), Unit::Meters);
+        assert_eq!(resolved_alpha(&app, entity), AlphaMode::Blend);
+        assert!(app.world().get::<Override<FontUnit>>(entity).is_none());
+        assert!(app.world().get::<Override<TextAlpha>>(entity).is_none());
+    }
+
+    #[test]
+    fn explicit_unit_standalone_seeds_override_and_resolved() {
+        let mut app = standalone_app();
+        let entity = app
+            .world_mut()
+            .spawn((WorldText::new("hi"), WorldTextStyle::new(Pt(11.0))))
+            .id();
+        app.update();
+
+        assert_eq!(resolved_unit(&app, entity), Unit::Points);
+        let node_override = app
+            .world()
+            .get::<Override<FontUnit>>(entity)
+            .expect("explicit-unit standalone should carry Override<FontUnit>");
+        assert_eq!(node_override.0.0, Unit::Points);
+    }
+
+    #[test]
+    fn explicit_alpha_standalone_seeds_override_and_resolved() {
+        let mut app = standalone_app();
+        let entity = app
+            .world_mut()
+            .spawn((
+                WorldText::new("hi"),
+                WorldTextStyle::new(0.22).with_alpha_mode(AlphaMode::Add),
+            ))
+            .id();
+        app.update();
+
+        assert_eq!(resolved_alpha(&app, entity), AlphaMode::Add);
+        let node_override = app
+            .world()
+            .get::<Override<TextAlpha>>(entity)
+            .expect("explicit-alpha standalone should carry Override<TextAlpha>");
+        assert_eq!(node_override.0.0, AlphaMode::Add);
+    }
+
+    #[test]
+    fn no_override_standalone_alpha_follows_runtime_default_change() {
+        let mut app = standalone_app();
+        // No `Override<TextAlpha>` exists for standalone text (alpha has no
+        // authoring path), so its resolved alpha is purely the global default —
+        // the path the now-deleted render-side alpha re-resolve used to cover,
+        // now driven by the propagation pass's `default_changed` branch.
+        let entity = app.world_mut().spawn(WorldText::new("hi")).id();
+        app.update();
+        assert_eq!(resolved_alpha(&app, entity), AlphaMode::Blend);
+
+        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Add;
+        app.update();
+        assert_eq!(resolved_alpha(&app, entity), AlphaMode::Add);
     }
 }
