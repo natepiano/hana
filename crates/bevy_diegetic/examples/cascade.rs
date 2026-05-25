@@ -13,17 +13,10 @@
 //! Each line of text names its tier, so the rendered alpha and size can be read
 //! against the rule it demonstrates. Press `H` to home the camera.
 
-use std::time::Duration;
-
-use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy::render::view::Msaa;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
@@ -34,17 +27,14 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::CameraMove;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::PlayAnimation;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::TitleBar;
 
-// camera
-const HOME_FOCUS: Vec3 = Vec3::new(0.0, 0.4, 0.0);
-const HOME_MS: u64 = 600;
+// camera home — translation centers the framed region, scale sets its extents.
+const HOME_CENTER: Vec3 = Vec3::new(0.0, 0.6, 0.0);
+const HOME_FRAME_SIZE: f32 = 5.5;
 const HOME_PITCH: f32 = 0.15;
-const HOME_RADIUS: f32 = 4.5;
 const HOME_YAW: f32 = 0.0;
 
 // colors
@@ -59,28 +49,30 @@ const PANEL_TEXT_SIZE: f32 = 13.0;
 const PANEL_TITLE_SIZE: f32 = 16.0;
 const STANDALONE_SIZE_METERS: f32 = 0.14;
 
-#[derive(Component)]
-struct SceneCamera;
-
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            DiegeticUiPlugin,
-            LagrangePlugin,
-            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-            WindowManagerPlugin,
-        ))
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example`.
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_orbit_cam(
+            |_| {},
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        )
+        .with_camera_home(
+            Transform::from_translation(HOME_CENTER).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
+        )
+        .pitch(HOME_PITCH)
+        .yaw(HOME_YAW)
+        .with_title_bar(TitleBar::new().with_title("CASCADE"))
+        .with_camera_control_panel()
         .add_systems(Startup, setup)
-        .add_systems(Update, home_camera)
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn setup(mut commands: Commands) {
     // Tier 1 — a standalone with no overrides resolves both attributes to the
     // global defaults: alpha `Blend`, font unit `Meters`.
     commands.spawn((
@@ -113,32 +105,6 @@ fn setup(
     } else {
         error!("failed to build cascade panel");
     }
-
-    // Lighting — panels and glyph meshes respond to PBR.
-    commands.insert_resource(GlobalAmbientLight {
-        color:                      Color::WHITE,
-        brightness:                 400.0,
-        affects_lightmapped_meshes: true,
-    });
-    commands.spawn((
-        DirectionalLight {
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    // Ground for depth reference.
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 8.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.08, 0.08, 0.10),
-            ..default()
-        })),
-        Transform::from_xyz(0.0, -0.2, 0.0),
-    ));
-
-    commands.spawn((orbit_cam_home(), Msaa::Sample4, SceneCamera));
 }
 
 /// Builds the panel layout. Bare-sized labels inherit the panel's seeded
@@ -166,36 +132,4 @@ fn build_panel(b: &mut LayoutBuilder) {
             b.text("tier 3 - label's own alpha = Multiply", own);
         },
     );
-}
-
-fn orbit_cam_home() -> OrbitCam {
-    OrbitCam {
-        focus: HOME_FOCUS,
-        radius: Some(HOME_RADIUS),
-        yaw: Some(HOME_YAW),
-        pitch: Some(HOME_PITCH),
-        ..default()
-    }
-}
-
-fn home_camera(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
-    cam: Query<Entity, With<SceneCamera>>,
-) {
-    if keyboard.just_pressed(KeyCode::KeyH)
-        && let Ok(cam) = cam.single()
-    {
-        commands.trigger(PlayAnimation::new(
-            cam,
-            [CameraMove::ToOrbit {
-                focus:    HOME_FOCUS,
-                yaw:      HOME_YAW,
-                pitch:    HOME_PITCH,
-                radius:   HOME_RADIUS,
-                duration: Duration::from_millis(HOME_MS),
-                easing:   EaseFunction::CubicOut,
-            }],
-        ));
-    }
 }
