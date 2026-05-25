@@ -18,15 +18,11 @@ use super::constants::SLUG_TEXT_SHADER_PATH;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u32)]
 pub(crate) enum SlugRenderMode {
-    /// No visible pass. The caller skips spawning visible geometry.
-    Invisible = 0,
     /// Normal Slug coverage fill.
     #[default]
-    Text      = 1,
+    Text     = 1,
     /// Inverted Slug coverage inside each glyph quad.
-    PunchOut  = 2,
-    /// Solid glyph bounds quads without curve evaluation.
-    SolidQuad = 3,
+    PunchOut = 2,
 }
 
 impl From<SlugRenderMode> for u32 {
@@ -40,14 +36,9 @@ pub(crate) type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextEx
 #[derive(Clone, Debug, ShaderType)]
 pub struct SlugTextUniform {
     /// Linear fill color.
-    pub fill_color:      Vec4,
+    pub fill_color:  Vec4,
     /// Visible render mode for this pass.
-    pub render_mode:     u32,
-    /// Shadow-proxy flag: `0` renders normally; `1` discards every fragment
-    /// in the main pass while still writing its coverage silhouette in the
-    /// depth/shadow prepass, so the glyph casts its silhouette shadow
-    /// without painting a second visible copy.
-    pub is_shadow_proxy: u32,
+    pub render_mode: u32,
 }
 
 /// Slug material extension over `StandardMaterial`.
@@ -89,25 +80,10 @@ pub(crate) struct SlugTextMaterialInput {
     pub glyphs:      Handle<ShaderStorageBuffer>,
 }
 
-/// Creates a visible `SlugTextMaterial`.
+/// Creates a `SlugTextMaterial` from one run's color, render mode, and
+/// band-packed curve/band/glyph buffers.
 #[must_use]
 pub(crate) fn slug_text_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
-    build_slug_text_material(input, 0)
-}
-
-/// Creates a shadow-proxy `SlugTextMaterial`: invisible in the main pass,
-/// but its coverage silhouette still writes depth in the prepass so the
-/// glyph casts a shadow without a second visible copy. The caller supplies
-/// the `AlphaMode::Mask` base so the prepass runs this fragment shader.
-#[must_use]
-pub(crate) fn slug_text_shadow_proxy_material(input: SlugTextMaterialInput) -> SlugTextMaterial {
-    build_slug_text_material(input, 1)
-}
-
-fn build_slug_text_material(
-    input: SlugTextMaterialInput,
-    is_shadow_proxy: u32,
-) -> SlugTextMaterial {
     let SlugTextMaterialInput {
         base,
         fill_color,
@@ -121,9 +97,8 @@ fn build_slug_text_material(
         base,
         extension: SlugTextExtension {
             uniforms: SlugTextUniform {
-                fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
+                fill_color:  Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
                 render_mode: u32::from(render_mode),
-                is_shadow_proxy,
             },
             curves,
             bands,

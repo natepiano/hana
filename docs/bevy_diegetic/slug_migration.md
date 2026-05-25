@@ -1019,7 +1019,7 @@ Phase 5. 10 findings; 9 folded into the plan, 1 surfaced to the user (approved).
   `batching.rs` HueOffset/proxy region overlap, the Phase 9 three-topology premise, and
   the `gpu_rasterizer.md` deletion were reviewed and confirmed accurate — no change.
 
-### Phase 7 — Collapse the glyph render/shadow matrix
+### Phase 7 — Collapse the glyph render/shadow matrix — complete (2026-05-25)
 
 Rationale and design: `slug_fx.md` §8. With MSDF gone, slug's
 `GlyphRenderMode × GlyphShadowMode` matrix and its shadow-proxy mesh
@@ -1123,9 +1123,94 @@ silhouette without a second mesh.
       suite and screenshot to confirm Text and PunchOut fills, the
       cast-shadow toggle, and the alpha-0 shadow-only recipe.
 
+**Phase 7 outcome — complete (2026-05-25). Verified green.** Every checklist item
+is implemented. The shadow-proxy path is gone end to end: the `is_shadow_proxy`
+uniform + its shader discard, `slug_text_shadow_proxy_material` (+ its two
+`pub(crate)` re-exports in `slug/mod.rs` and `text/mod.rs`),
+`build_slug_text_material`, both `slug_*_shadow_proxy_material` spawn helpers, the
+`WorldTextShadowProxy` / `DiegeticShadowProxy` markers + every `Or<…>` query union
+that referenced them, `slug_shadow_render_mode` (both copies), and the
+`needs_proxy` / `suppress_shadow` logic were all deleted. `GlyphRenderMode` shrank
+to `{ Text = 1, PunchOut = 2 }` and `GlyphShadowMode` to `{ None, Cast }` with
+`#[default] = Cast`; `SlugRenderMode`, the shader's `RENDER_MODE_SOLID_QUAD` + its
+`SolidQuad` branch, the two discriminant assertions, the `From<GlyphRenderMode> for
+SlugRenderMode` impl, and the now-deleted `slug_render_mode` const fn all followed.
+The cast toggle is the collapsed `GlyphShadowMode` itself: a visible mesh gets
+`NotShadowCaster` only when shadow mode is `None`. Constructor defaults
+(`text_props.rs:560`/`:664`), `sdf.rs:529`, and `label_shadow_mode()`
+(`debug/typography_overlay/mod.rs`) migrated `Text → Cast`. `examples/shadows.rs`
++ its `[[example]]` manifest entry deleted. `cargo build --workspace --examples
+--benches --features typography_overlay,bench_support`, `cargo clippy --all-targets
+--features typography_overlay,bench_support` (clean), `cargo nextest run -p
+bevy_diegetic --lib` **158/158** (1 skipped), and `cargo +nightly fmt` all green.
+Verified visually in `slug_text`: normal `Text` fill, the new PunchOut row
+(inverted-coverage knockout blocks), and — at a grazing camera angle —
+letter-silhouette shadows cast onto the ground by the single visible mesh, with no
+proxy. Not committed.
+
+### Retrospective
+
+**What worked:**
+- The plan's §8.1 claim held exactly. Bevy queues an `AlphaMode::Blend` mesh into
+  the shadow pass on `shadows_enabled` + the `SHADOW_CASTER` flag (not on alpha
+  mode), tagging it `MAY_DISCARD` so the prepass coverage-discard runs — confirmed
+  against `bevy_pbr/src/render/light.rs:2334` before deleting the proxy. The
+  grazing-angle screenshot then showed the letter-silhouette shadow from the
+  visible Blend mesh.
+- Using the collapsed `GlyphShadowMode` directly as the cast toggle let the local
+  `TextMeshShadow` enum (`batching.rs`) and the `bool suppress_shadow`
+  (`mesh_spawning.rs`) both retire — one type drives the `NotShadowCaster` choice
+  on both paths.
+- The enum shrink + `From` impl + helper deletions landed in one pass; the
+  compiler named each remaining match arm to fix.
+
+**What deviated from the plan:**
+- Deleting `examples/shadows.rs` removed the only example exercising `PunchOut`.
+  At the user's request a `PunchOut` row was added to `examples/slug_text.rs` (a
+  `GlyphRenderMode::PunchOut` `WorldText`), restoring a living PunchOut demo and
+  making the Phase 7 screenshot possible. Not in the original checklist.
+- The single-use `slug_*_input` material-input helpers in both spawn files were
+  inlined into their `slug_*_material` builders once the proxy variant that shared
+  them was gone.
+- `batching.rs` lost an unused `scene_layer` request field — only the deleted
+  proxy spawn read it; the visible mesh uses `content_layer`, the same value.
+
+**Surprises:**
+- `GlyphRenderMode` kept explicit discriminants `Text = 1` / `PunchOut = 2` (gap
+  at 0) to leave the shader's `RENDER_MODE_*` constants untouched; the two
+  discriminant assertions still pin the shader-sync invariant.
+
+**Implications for remaining phases:**
+- Phase 8 (docs) is unaffected — no Phase 7 file is a doc target, and the
+  shadow-only recipe is already documented in `slug_fx.md` §8.3 plus the
+  `GlyphShadowMode` doc comment.
+- Phase 9 (cascade rewrite) is untouched: `batching.rs`'s `PanelTextAlpha` cascade
+  impl was edited only to drop `scene_layer`, not its cascade wiring.
+
 Public-API note: `GlyphRenderMode` and `GlyphShadowMode` stay public
 (callers name them for fill / shadow intent) but shrink — consistent
 with decision #3, exposing only what a feature needs.
+
+### Phase 7 Review
+
+- **Phase 9** gained a sub-note on the per-role attribute collapse: the
+  `Changed<Resolved<WorldTextAlpha>>` / `Changed<Resolved<WorldFontUnit>>` arms of the
+  `Or<(…)>` change-detection filter on the world-text render queries
+  (`world_text/mod.rs` ~36–41, `rendering.rs`'s `ChangedWorldTextQuery`) must repoint to
+  the new `Resolved<TextAlpha>` / `Resolved<FontUnit>`, or the render systems silently
+  stop re-running on alpha/unit changes (staleness, not a compile error).
+- **Phase 8** gained a `slug_fx.md` §8 done-note item: §8 still frames the matrix
+  collapse as future work, so Phase 8 prepends a one-line "implemented in Phase 7" note
+  (no rewrite); the disposition-table row updated `Keep → Keep + §8 done-note`.
+  `slug-experiments.md` left as-is — its `SolidQuad` / shadow-proxy mentions (`:644`,
+  `:726`) sit inside "Result: Rejected" experiment entries (historical log), not live
+  guidance.
+- Reviewed clean, no change: Phase 8's README lines 13/17 + `gpu_rasterizer.md` deletion
+  still accurate (README lines 84/89 are the out-of-scope panel-SDF shader); the new
+  `slug_text.rs` PunchOut row touches no later phase; Phase 9's `Exclude` / `ExcludeNone`
+  line refs (`target.rs:127, 244, 111`, `resolved.rs`, `mod.rs`) and its three-topology
+  premise still hold; the shrunk `GlyphRenderMode` / `GlyphShadowMode` + discriminant
+  assertions are self-consistent and unreferenced by Phases 8/9.
 
 ### Phase 8 — Documentation
 
@@ -1158,6 +1243,12 @@ disposition** table below for the per-file detail.
 - [ ] Confirm no remaining `docs/` reference describes the distance-field engine as a
       live renderer (the plan itself, `slug_migration.md`, documenting the removal is
       fine).
+- [ ] **Phase 7 review:** prepend a one-line "Implemented in Phase 7 (2026-05-25)"
+      note to `slug_fx.md` §8, which still frames the render/shadow matrix collapse as
+      future work ("a simplification to take *after* the renderer swap lands"); leave
+      the rationale text intact. No other `slug_fx.md` edit. Leave `slug-experiments.md`
+      as-is — its `SolidQuad` / shadow-proxy mentions (`:644`, `:726`) sit inside
+      "Result: Rejected" experiment entries, a historical log, not live guidance.
 
 ### Phase 9 — Unify the cascade into one parent-walking hierarchy
 
@@ -1209,7 +1300,13 @@ This phase is independent of the Phase 1–3 sequence and leaves the build green
       panel-child font unit → one `FontUnit`. One `Resolved<TextAlpha>` /
       `Resolved<FontUnit>` per entity, read by both standalone and panel render
       paths (drop the `Without<PanelTextChild>` / `With<PanelTextChild>` split on the
-      read side).
+      read side). **Phase 7 review:** also repoint the `Changed<Resolved<WorldTextAlpha>>`
+      / `Changed<Resolved<WorldFontUnit>>` arms of the `Or<(…)>` change-detection
+      filter on the world-text render queries (`world_text/mod.rs` ~36–41,
+      `rendering.rs` the `ChangedWorldTextQuery` alias) to the new `Resolved<TextAlpha>`
+      / `Resolved<FontUnit>`, or the render systems silently stop re-running on
+      alpha/unit changes (a staleness bug, not a compile error if the old `Resolved`
+      types linger).
 - [ ] Replace `CascadeTarget` (2-tier) and `CascadePanelChild` (3-tier) plus their
       three plugins (`CascadeEntityPlugin`, `CascadePanelPlugin`,
       `CascadePanelChildPlugin`) with one hierarchical cascade plugin that walks
@@ -1298,7 +1395,7 @@ everything slug.
 | `slug.md` (1275 lines) | **Deleted (2026-05-25)** | Obsolete slug *feasibility* design doc. Documents only deleted/superseded concepts: the `TextRendererPreference` MTSDF-switching model, the four-mode render/shadow matrix (Phase 7 removes it), HueOffset-as-future (resolved: removed). No unimplemented work to salvage — the effects roadmap is in `slug_fx.md`, the migration in this doc. Zero inbound references repo-wide. Recoverable from git. |
 | `slug-experiments.md` (1798 lines) | **Done (Phase 5)** | The CPU-prep-cost line that pointed at `benches/glyph_rasterization.rs` was rewritten to record the figure as a one-time measurement (full printable ASCII ≈ 0.84 ms, 2026-05-24, JetBrains Mono 128 px, after per-curve dedup + 48-band tuning) and note that a replacement micro-bench would target `prepare_positioned_run_with_scale` + `ensure_run_storage`. |
 | `slug-benchmark-procedure.md` (244 lines) | **Done (Phase 5)** | The "Prep-Time Benchmark" step that ran the deleted `glyph_rasterization` Criterion group was rewritten to state prep cost is no longer bench-tracked (record the ≈0.84 ms figure), and the obsolete `slug_text_spike` "spike-only changes" comparability rule was deleted (no spike/production split survives). |
-| `slug_fx.md` (641 lines) | **Keep** | The effect-support plan that motivates this migration. |
+| `slug_fx.md` (641 lines) | **Keep + §8 done-note (Phase 8)** | The effect-support plan that motivates this migration. §8's matrix-collapse rationale is framed as future work; Phase 8 prepends a one-line "implemented in Phase 7" note, no rewrite. |
 
 Other (non-`docs/`) artifacts that reference the removed engine, found
 in review — fold these into Phase 5/6:

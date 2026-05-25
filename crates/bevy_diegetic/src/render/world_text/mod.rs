@@ -10,7 +10,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 use mesh_spawning::WorldTextMesh;
-use mesh_spawning::WorldTextShadowProxy;
 pub use panel_text_child::PanelTextChild;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
@@ -53,7 +52,7 @@ pub(super) fn render_world_text(
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
     resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
-    old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
+    old_meshes: Query<(Entity, &ChildOf), With<WorldTextMesh>>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     cache: ResMut<ShapedTextCache>,

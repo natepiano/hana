@@ -76,9 +76,6 @@ name              = "typography"
 required-features = ["typography_overlay"]
 
 [[example]]
-name = "shadows"
-
-[[example]]
 name = "font_loading"
 
 [[example]]

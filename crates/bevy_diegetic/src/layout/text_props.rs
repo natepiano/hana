@@ -88,35 +88,27 @@ pub enum TextAlign {
 
 /// How the visible glyph renders.
 ///
-/// Controls the slug shader's coverage computation. All modes use
-/// `AlphaMode::Blend` for smooth anti-aliased edges.
-/// Discriminants are `#[repr(u32)]` and explicit because they map
-/// directly to shader constants in `slug_text.wgsl`. Adding or
-/// reordering variants without updating the shader will cause a
-/// compile-time test failure.
+/// Controls the slug shader's coverage computation. Both modes use
+/// `AlphaMode::Blend` for smooth anti-aliased edges. Discriminants are
+/// `#[repr(u32)]` and explicit because they map directly to shader
+/// constants in `slug_text.wgsl`; the compile-time assertions below keep
+/// them in sync.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
 #[repr(u32)]
 pub enum GlyphRenderMode {
-    /// No visible text — only the shadow proxy renders (if shadow mode
-    /// is not `None`). Useful for shadow-only effects.
-    Invisible = 0,
     /// Normal text rendering — smooth alpha-blended edges.
     #[default]
-    Text      = 1,
-    /// Background quad with the text outline cut out (inverted alpha).
-    PunchOut  = 2,
-    /// Opaque quad matching the glyph outline (no coverage decode).
-    SolidQuad = 3,
+    Text     = 1,
+    /// Glyph quad filled everywhere except the letter outline (inverted alpha).
+    PunchOut = 2,
 }
 
 impl GlyphRenderMode {
     #[must_use]
     const fn discriminant(self) -> u32 {
         match self {
-            Self::Invisible => 0,
             Self::Text => 1,
             Self::PunchOut => 2,
-            Self::SolidQuad => 3,
         }
     }
 }
@@ -125,23 +117,20 @@ impl From<GlyphRenderMode> for u32 {
     fn from(render_mode: GlyphRenderMode) -> Self { render_mode.discriminant() }
 }
 
-/// What silhouette the shadow cast by glyphs uses.
+/// Whether glyphs cast a shadow.
 ///
-/// Independent of [`GlyphRenderMode`] — the visible glyph and its shadow
-/// can use different silhouettes. Text-outline shadows (`Text`, `PunchOut`) spawn a
-/// separate shadow proxy mesh with `AlphaMode::Mask` that is invisible
-/// in the main pass but contributes to the shadow prepass.
+/// The visible glyph mesh casts its own coverage-silhouette shadow
+/// directly — there is no separate shadow proxy mesh. For a shadow with
+/// no visible fill (ghost text), spawn a `Cast` glyph and set its fill
+/// color alpha to `0`: the color pass paints nothing while the shadow
+/// pass still writes the full letter silhouette.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
 pub enum GlyphShadowMode {
-    /// No shadow casting.
+    /// Glyph casts no shadow.
     None,
-    /// Rectangular shadow from quad geometry.
-    SolidQuad,
-    /// Shadow follows the text outline (slug coverage in prepass).
+    /// Glyph casts its coverage-silhouette shadow.
     #[default]
-    Text,
-    /// Shadow follows the punch-out outline (inverted slug coverage in prepass).
-    PunchOut,
+    Cast,
 }
 
 /// Whether glyph meshes render both faces or only the front face.
@@ -557,7 +546,7 @@ impl TextProps<ForLayout> {
             align:          TextAlign::Left,
             anchor:         Anchor::Center,
             render_mode:    GlyphRenderMode::Text,
-            shadow_mode:    GlyphShadowMode::Text,
+            shadow_mode:    GlyphShadowMode::Cast,
             sidedness:      GlyphSidedness::DoubleSided,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
@@ -661,7 +650,7 @@ impl TextProps<ForStandalone> {
             align:          TextAlign::Left,
             anchor:         Anchor::Center,
             render_mode:    GlyphRenderMode::Text,
-            shadow_mode:    GlyphShadowMode::Text,
+            shadow_mode:    GlyphShadowMode::Cast,
             sidedness:      GlyphSidedness::DoubleSided,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
@@ -835,10 +824,8 @@ pub struct TextDimensions {
 // matching `SlugRenderMode` variants). If you add or reorder variants, update
 // the shader constants to match and adjust these assertions.
 
-const _: () = assert!(GlyphRenderMode::Invisible.discriminant() == 0);
 const _: () = assert!(GlyphRenderMode::Text.discriminant() == 1);
 const _: () = assert!(GlyphRenderMode::PunchOut.discriminant() == 2);
-const _: () = assert!(GlyphRenderMode::SolidQuad.discriminant() == 3);
 
 #[cfg(test)]
 #[allow(

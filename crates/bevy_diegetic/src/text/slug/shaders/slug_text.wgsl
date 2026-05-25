@@ -26,12 +26,10 @@ const DISCARD_ALPHA: f32 = 0.02;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
-const RENDER_MODE_SOLID_QUAD: u32 = 3u;
 
 struct SlugTextUniform {
     fill_color: vec4<f32>,
     render_mode: u32,
-    is_shadow_proxy: u32,
 }
 
 struct SlugCurveRecord {
@@ -319,10 +317,6 @@ fn slug_coverage(uv: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
 }
 
 fn render_coverage(uv: vec2<f32>, glyph: SlugGlyphRecord) -> f32 {
-    if uniforms.render_mode == RENDER_MODE_SOLID_QUAD {
-        return 1.0;
-    }
-
     let coverage = slug_coverage(uv, glyph);
     if uniforms.render_mode == RENDER_MODE_PUNCH_OUT {
         return 1.0 - coverage;
@@ -353,11 +347,6 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
-    // Shadow proxies only contribute depth in the prepass; they never paint
-    // in the main color pass.
-    if uniforms.is_shadow_proxy == 1u {
-        discard;
-    }
 #ifndef VERTEX_UVS_A
     discard;
 #endif

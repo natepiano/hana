@@ -526,7 +526,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
                 WorldText::new(text),
                 WorldTextStyle::new(0.06)
                     .with_color(Color::srgb(0.9, 0.9, 0.95))
-                    .with_shadow_mode(bevy_diegetic::GlyphShadowMode::Text),
+                    .with_shadow_mode(bevy_diegetic::GlyphShadowMode::Cast),
                 Transform::from_xyz(ROW_LABEL_X, y, ROW_Z),
             ));
         }

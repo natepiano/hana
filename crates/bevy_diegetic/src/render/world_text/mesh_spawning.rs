@@ -23,15 +23,10 @@ use crate::text::SlugTextMaterialInput;
 #[derive(Component)]
 pub struct WorldTextMesh;
 
-/// Marker for shadow proxy entities spawned by the world text renderer.
-#[derive(Component)]
-pub struct WorldTextShadowProxy;
-
-/// Despawns existing mesh children (text meshes and shadow proxies) of the
-/// given parent entity.
+/// Despawns existing text mesh children of the given parent entity.
 pub(super) fn despawn_mesh_children(
     parent: Entity,
-    old_meshes: &Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
+    old_meshes: &Query<(Entity, &ChildOf), With<WorldTextMesh>>,
     commands: &mut Commands,
 ) {
     for (mesh_entity, child_of) in old_meshes {
@@ -63,7 +58,9 @@ pub(super) struct SlugMeshSpawnAssets<'a, 'w, 's> {
     pub(super) commands:        &'a mut Commands<'w, 's>,
 }
 
-/// Spawns Slug visible mesh and optional shadow proxy entities.
+/// Spawns the Slug visible mesh for a world-text run. The mesh casts its
+/// own coverage-silhouette shadow unless the style's shadow mode is
+/// [`GlyphShadowMode::None`].
 pub(super) fn spawn_slug_world_text_meshes(
     prepared: &SlugPreparedTextRun,
     slug_backend: &mut SlugBackend,
@@ -78,59 +75,23 @@ pub(super) fn spawn_slug_world_text_meshes(
     else {
         return 0.0;
     };
-    let mesh_handle = storage.mesh;
-    let curve_buffer = storage.curves;
-    let band_buffer = storage.bands;
-    let glyph_buffer = storage.glyphs;
 
-    let is_invisible = style.render_mode() == GlyphRenderMode::Invisible;
-    let needs_proxy = if is_invisible {
-        style.shadow_mode() != GlyphShadowMode::None
-    } else {
-        matches!(
-            style.shadow_mode(),
-            GlyphShadowMode::Text | GlyphShadowMode::PunchOut
-        )
-    };
-    let suppress_shadow =
-        is_invisible || needs_proxy || style.shadow_mode() == GlyphShadowMode::None;
-
-    if !is_invisible {
-        let material_handle = assets.materials.add(slug_world_text_material(
-            style,
-            alpha_mode,
-            style.render_mode().into(),
-            curve_buffer.clone(),
-            band_buffer.clone(),
-            glyph_buffer.clone(),
-        ));
-        spawn_slug_visible_mesh(
-            entity,
-            mesh_handle.clone(),
-            prepared.storage_key,
-            material_handle,
-            suppress_shadow,
-            assets.commands,
-        );
-    }
-
-    if needs_proxy {
-        let material_handle = assets.materials.add(slug_world_text_shadow_proxy_material(
-            style,
-            AlphaMode::Mask(0.5),
-            slug_shadow_render_mode(style.shadow_mode()),
-            curve_buffer,
-            band_buffer,
-            glyph_buffer,
-        ));
-        assets.commands.entity(entity).with_child((
-            WorldTextShadowProxy,
-            prepared.storage_key,
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-            Transform::IDENTITY,
-        ));
-    }
+    let material_handle = assets.materials.add(slug_world_text_material(
+        style,
+        alpha_mode,
+        style.render_mode().into(),
+        storage.curves,
+        storage.bands,
+        storage.glyphs,
+    ));
+    spawn_slug_visible_mesh(
+        entity,
+        storage.mesh,
+        prepared.storage_key,
+        material_handle,
+        style.shadow_mode(),
+        assets.commands,
+    );
 
     mesh_start
         .elapsed()
@@ -146,64 +107,20 @@ fn slug_world_text_material(
     bands: Handle<ShaderStorageBuffer>,
     glyphs: Handle<ShaderStorageBuffer>,
 ) -> SlugTextMaterial {
-    text::slug_text_material(slug_world_text_input(
-        style,
-        alpha_mode,
-        render_mode,
-        curves,
-        bands,
-        glyphs,
-    ))
-}
-
-fn slug_world_text_shadow_proxy_material(
-    style: &WorldTextStyle,
-    alpha_mode: AlphaMode,
-    render_mode: SlugRenderMode,
-    curves: Handle<ShaderStorageBuffer>,
-    bands: Handle<ShaderStorageBuffer>,
-    glyphs: Handle<ShaderStorageBuffer>,
-) -> SlugTextMaterial {
-    text::slug_text_shadow_proxy_material(slug_world_text_input(
-        style,
-        alpha_mode,
-        render_mode,
-        curves,
-        bands,
-        glyphs,
-    ))
-}
-
-fn slug_world_text_input(
-    style: &WorldTextStyle,
-    alpha_mode: AlphaMode,
-    render_mode: SlugRenderMode,
-    curves: Handle<ShaderStorageBuffer>,
-    bands: Handle<ShaderStorageBuffer>,
-    glyphs: Handle<ShaderStorageBuffer>,
-) -> SlugTextMaterialInput {
     let mut base = StandardMaterial {
         depth_bias: -constants::LAYER_DEPTH_BIAS,
         alpha_mode,
         ..Default::default()
     };
     apply_sidedness(&mut base, style.sidedness());
-    SlugTextMaterialInput {
+    text::slug_text_material(SlugTextMaterialInput {
         base,
         fill_color: style.color(),
         render_mode,
         curves,
         bands,
         glyphs,
-    }
-}
-
-const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
-    match shadow_mode {
-        GlyphShadowMode::SolidQuad => SlugRenderMode::SolidQuad,
-        GlyphShadowMode::PunchOut => SlugRenderMode::PunchOut,
-        GlyphShadowMode::None | GlyphShadowMode::Text => SlugRenderMode::Text,
-    }
+    })
 }
 
 fn spawn_slug_visible_mesh(
@@ -211,36 +128,37 @@ fn spawn_slug_visible_mesh(
     mesh: Handle<Mesh>,
     storage_key: SlugRunStorageKey,
     material: Handle<SlugTextMaterial>,
-    suppress_shadow: bool,
+    shadow_mode: GlyphShadowMode,
     commands: &mut Commands,
 ) {
-    if suppress_shadow {
-        commands.entity(entity).with_child((
-            WorldTextMesh,
-            storage_key,
-            NotShadowCaster,
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::IDENTITY,
-        ));
-    } else {
-        commands.entity(entity).with_child((
-            WorldTextMesh,
-            storage_key,
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
-            Transform::IDENTITY,
-        ));
+    match shadow_mode {
+        GlyphShadowMode::None => {
+            commands.entity(entity).with_child((
+                WorldTextMesh,
+                storage_key,
+                NotShadowCaster,
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+            ));
+        },
+        GlyphShadowMode::Cast => {
+            commands.entity(entity).with_child((
+                WorldTextMesh,
+                storage_key,
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+            ));
+        },
     }
 }
 
 impl From<GlyphRenderMode> for SlugRenderMode {
     fn from(render_mode: GlyphRenderMode) -> Self {
         match render_mode {
-            GlyphRenderMode::Invisible => Self::Invisible,
             GlyphRenderMode::Text => Self::Text,
             GlyphRenderMode::PunchOut => Self::PunchOut,
-            GlyphRenderMode::SolidQuad => Self::SolidQuad,
         }
     }
 }

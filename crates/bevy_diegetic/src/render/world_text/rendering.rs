@@ -11,7 +11,6 @@ use super::WorldTextAlpha;
 use super::mesh_spawning;
 use super::mesh_spawning::SlugMeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
-use super::mesh_spawning::WorldTextShadowProxy;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
 use super::shaping;
@@ -67,7 +66,7 @@ pub(super) fn render_world_text(
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
     resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
-    old_meshes: Query<(Entity, &ChildOf), Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>>,
+    old_meshes: Query<(Entity, &ChildOf), With<WorldTextMesh>>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
@@ -147,12 +146,8 @@ struct SlugWorldTextRenderServices<
         &'alpha_data Resolved<WorldTextAlpha>,
         Without<PanelTextChild>,
     >,
-    old_meshes: &'a Query<
-        'mesh_world,
-        'mesh_state,
-        (Entity, &'mesh_data ChildOf),
-        Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>,
-    >,
+    old_meshes:
+        &'a Query<'mesh_world, 'mesh_state, (Entity, &'mesh_data ChildOf), With<WorldTextMesh>>,
     meshes:          &'a mut Assets<Mesh>,
     defaults:        &'a CascadeDefaults,
 }
@@ -182,7 +177,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             'mesh_world,
             'mesh_state,
             (Entity, &'mesh_data ChildOf),
-            Or<(With<WorldTextMesh>, With<WorldTextShadowProxy>)>,
+            With<WorldTextMesh>,
         >,
         meshes: &'a mut Assets<Mesh>,
         defaults: &'a CascadeDefaults,

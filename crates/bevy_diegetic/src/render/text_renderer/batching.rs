@@ -32,17 +32,6 @@ use crate::text::SlugTextMaterialInput;
 #[derive(Component)]
 pub(super) struct DiegeticTextMesh;
 
-/// Marker component for shadow proxy mesh entities.
-#[derive(Component)]
-pub(super) struct DiegeticShadowProxy;
-
-/// Whether a spawned visible text mesh casts shadows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TextMeshShadow {
-    Cast,
-    Suppress,
-}
-
 /// Stores a prepared Slug run for a panel [`WorldText`](crate::WorldText) child.
 #[derive(Component)]
 pub(super) struct PanelSlugTextRun {
@@ -100,10 +89,7 @@ pub(super) fn panel_clip_rect_local(
 pub(super) fn build_panel_slug_meshes(
     changed_runs: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
     panel_children: Query<(Entity, &PanelSlugTextRun, &PanelTextChild, &ChildOf)>,
-    old_meshes: Query<
-        (Entity, &ChildOf, Option<&SlugRunStorageKey>),
-        Or<(With<DiegeticTextMesh>, With<DiegeticShadowProxy>)>,
-    >,
+    old_meshes: Query<(Entity, &ChildOf, Option<&SlugRunStorageKey>), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
     defaults: Res<CascadeDefaults>,
@@ -150,7 +136,6 @@ pub(super) fn build_panel_slug_meshes(
                 resolved_alpha,
                 is_geometry,
                 content_layer: &scene_layer,
-                scene_layer: &scene_layer,
                 slug_backend: &mut slug_backend,
                 meshes: &mut meshes,
                 materials: &mut materials,
@@ -186,7 +171,6 @@ struct PanelSlugSpawnRequest<'a, 'w, 's> {
     resolved_alpha:   AlphaMode,
     is_geometry:      bool,
     content_layer:    &'a RenderLayers,
-    scene_layer:      &'a RenderLayers,
     slug_backend:     &'a mut SlugBackend,
     meshes:           &'a mut Assets<Mesh>,
     materials:        &'a mut Assets<SlugTextMaterial>,
@@ -203,7 +187,6 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
         resolved_alpha,
         is_geometry,
         content_layer,
-        scene_layer,
         slug_backend,
         meshes,
         materials,
@@ -225,60 +208,24 @@ fn spawn_panel_slug_run(request: PanelSlugSpawnRequest<'_, '_, '_>) {
     } else {
         0.0
     };
-    let is_invisible = panel_run.render_mode == GlyphRenderMode::Invisible;
-    let needs_proxy = if is_invisible {
-        panel_run.shadow_mode != GlyphShadowMode::None
-    } else {
-        matches!(
-            panel_run.shadow_mode,
-            GlyphShadowMode::Text | GlyphShadowMode::PunchOut
-        )
-    };
-    let shadow_mode =
-        if is_invisible || needs_proxy || panel_run.shadow_mode == GlyphShadowMode::None {
-            TextMeshShadow::Suppress
-        } else {
-            TextMeshShadow::Cast
-        };
 
-    if !is_invisible {
-        let material = materials.add(slug_panel_material(
-            text_base,
-            text_depth_bias,
-            resolved_alpha,
-            panel_run.fill_color,
-            slug_render_mode(panel_run.render_mode),
-            &storage,
-        ));
-        spawn_slug_visible_mesh(
-            panel_entity,
-            storage.mesh.clone(),
-            panel_run.prepared.storage_key,
-            material,
-            shadow_mode,
-            content_layer,
-            commands,
-        );
-    }
-
-    if needs_proxy {
-        let proxy_material = materials.add(slug_panel_shadow_proxy_material(
-            text_base,
-            text_depth_bias - constants::LAYER_DEPTH_BIAS,
-            AlphaMode::Mask(0.5),
-            panel_run.fill_color,
-            slug_shadow_render_mode(panel_run.shadow_mode),
-            &storage,
-        ));
-        commands.entity(panel_entity).with_child((
-            DiegeticShadowProxy,
-            panel_run.prepared.storage_key,
-            Mesh3d(storage.mesh),
-            MeshMaterial3d(proxy_material),
-            Transform::IDENTITY,
-            scene_layer.clone(),
-        ));
-    }
+    let material = materials.add(slug_panel_material(
+        text_base,
+        text_depth_bias,
+        resolved_alpha,
+        panel_run.fill_color,
+        panel_run.render_mode.into(),
+        &storage,
+    ));
+    spawn_slug_visible_mesh(
+        panel_entity,
+        storage.mesh,
+        panel_run.prepared.storage_key,
+        material,
+        panel_run.shadow_mode,
+        content_layer,
+        commands,
+    );
 }
 
 fn slug_panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMaterial {
@@ -300,56 +247,20 @@ fn slug_panel_material(
     depth_bias: f32,
     alpha_mode: AlphaMode,
     fill_color: Color,
-    render_mode: impl Into<SlugRenderMode>,
+    render_mode: SlugRenderMode,
     storage: &SlugRunStorage,
 ) -> SlugTextMaterial {
-    text::slug_text_material(slug_panel_input(
-        base,
-        depth_bias,
-        alpha_mode,
-        fill_color,
-        render_mode,
-        storage,
-    ))
-}
-
-fn slug_panel_shadow_proxy_material(
-    base: &StandardMaterial,
-    depth_bias: f32,
-    alpha_mode: AlphaMode,
-    fill_color: Color,
-    render_mode: impl Into<SlugRenderMode>,
-    storage: &SlugRunStorage,
-) -> SlugTextMaterial {
-    text::slug_text_shadow_proxy_material(slug_panel_input(
-        base,
-        depth_bias,
-        alpha_mode,
-        fill_color,
-        render_mode,
-        storage,
-    ))
-}
-
-fn slug_panel_input(
-    base: &StandardMaterial,
-    depth_bias: f32,
-    alpha_mode: AlphaMode,
-    fill_color: Color,
-    render_mode: impl Into<SlugRenderMode>,
-    storage: &SlugRunStorage,
-) -> SlugTextMaterialInput {
     let mut base = base.clone();
     base.depth_bias = depth_bias;
     base.alpha_mode = alpha_mode;
-    SlugTextMaterialInput {
+    text::slug_text_material(SlugTextMaterialInput {
         base,
         fill_color,
-        render_mode: render_mode.into(),
+        render_mode,
         curves: storage.curves.clone(),
         bands: storage.bands.clone(),
         glyphs: storage.glyphs.clone(),
-    }
+    })
 }
 
 fn spawn_slug_visible_mesh(
@@ -357,12 +268,12 @@ fn spawn_slug_visible_mesh(
     mesh_handle: Handle<Mesh>,
     storage_key: SlugRunStorageKey,
     material_handle: Handle<SlugTextMaterial>,
-    shadow_mode: TextMeshShadow,
+    shadow_mode: GlyphShadowMode,
     content_layer: &RenderLayers,
     commands: &mut Commands,
 ) {
     match shadow_mode {
-        TextMeshShadow::Suppress => {
+        GlyphShadowMode::None => {
             commands.entity(panel_entity).with_child((
                 DiegeticTextMesh,
                 storage_key,
@@ -373,7 +284,7 @@ fn spawn_slug_visible_mesh(
                 content_layer.clone(),
             ));
         },
-        TextMeshShadow::Cast => {
+        GlyphShadowMode::Cast => {
             commands.entity(panel_entity).with_child((
                 DiegeticTextMesh,
                 storage_key,
@@ -383,22 +294,5 @@ fn spawn_slug_visible_mesh(
                 content_layer.clone(),
             ));
         },
-    }
-}
-
-const fn slug_shadow_render_mode(shadow_mode: GlyphShadowMode) -> SlugRenderMode {
-    match shadow_mode {
-        GlyphShadowMode::SolidQuad => SlugRenderMode::SolidQuad,
-        GlyphShadowMode::PunchOut => SlugRenderMode::PunchOut,
-        GlyphShadowMode::None | GlyphShadowMode::Text => SlugRenderMode::Text,
-    }
-}
-
-const fn slug_render_mode(render_mode: GlyphRenderMode) -> SlugRenderMode {
-    match render_mode {
-        GlyphRenderMode::Invisible => SlugRenderMode::Invisible,
-        GlyphRenderMode::Text => SlugRenderMode::Text,
-        GlyphRenderMode::PunchOut => SlugRenderMode::PunchOut,
-        GlyphRenderMode::SolidQuad => SlugRenderMode::SolidQuad,
     }
 }

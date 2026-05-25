@@ -46,7 +46,6 @@ pub(crate) use slug::SlugRunStorageKey;
 pub(crate) use slug::SlugTextMaterial;
 pub(crate) use slug::SlugTextMaterialInput;
 pub(crate) use slug::slug_text_material;
-pub(crate) use slug::slug_text_shadow_proxy_material;
 
 use self::font_loader::FontLoader;
 

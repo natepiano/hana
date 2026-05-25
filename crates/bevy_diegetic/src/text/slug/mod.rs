@@ -23,5 +23,4 @@ pub(crate) use material::SlugRenderMode;
 pub(crate) use material::SlugTextMaterial;
 pub(crate) use material::SlugTextMaterialInput;
 pub(crate) use material::slug_text_material;
-pub(crate) use material::slug_text_shadow_proxy_material;
 pub(crate) use packing::DEFAULT_BAND_COUNT;

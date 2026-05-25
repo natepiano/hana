@@ -3,12 +3,15 @@
 //! Renders Latin and CJK world text through the slug glyph backend — hana's
 //! sole text renderer. A large headline and a small line show slug coverage
 //! across sizes; a CJK row resolved from a runtime-loaded font shows that
-//! slug builds quadratic curve bands for CFF cubic outlines too.
+//! slug builds quadratic curve bands for CFF cubic outlines too. A
+//! [`GlyphRenderMode::PunchOut`] row shows the inverted-coverage fill: each
+//! glyph quad is filled everywhere except the letter.
 
 use bevy::prelude::*;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
+use bevy_diegetic::GlyphRenderMode;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCamInputMode;
@@ -22,7 +25,11 @@ const SMALL_SIZE: f32 = 0.07;
 const SMALL_Y: f32 = 0.18;
 const CJK_TEXT: &str = "漢字 かな 한글";
 const CJK_SIZE: f32 = 0.34;
-const CJK_Y: f32 = 0.48;
+const CJK_Y: f32 = 0.52;
+const PUNCH_OUT_TEXT: &str = "PunchOut";
+const PUNCH_OUT_SIZE: f32 = 0.13;
+const PUNCH_OUT_Y: f32 = 0.30;
+const PUNCH_OUT_COLOR: Color = Color::srgba(0.45, 0.62, 1.0, 1.0);
 const DISPLAY_Z: f32 = 2.0;
 const CJK_FONT_ASSET_PATH: &str = "fonts/NotoSansCJKsc-Regular.otf";
 const CJK_FONT_FAMILY: &str = "Noto Sans CJK SC";
@@ -98,6 +105,16 @@ fn setup(
         WorldText::new(SMALL_TEXT),
         WorldTextStyle::new(SMALL_SIZE).with_color(LATIN_COLOR),
         Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z),
+    ));
+    // PunchOut fill: each glyph quad is painted everywhere except the letter,
+    // so the word reads as solid blocks with the letters knocked out.
+    commands.spawn((
+        Name::new("PunchOut row"),
+        WorldText::new(PUNCH_OUT_TEXT),
+        WorldTextStyle::new(PUNCH_OUT_SIZE)
+            .with_color(PUNCH_OUT_COLOR)
+            .with_render_mode(GlyphRenderMode::PunchOut),
+        Transform::from_xyz(0.0, PUNCH_OUT_Y, DISPLAY_Z),
     ));
 }
 

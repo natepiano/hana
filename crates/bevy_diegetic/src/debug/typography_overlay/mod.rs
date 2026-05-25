@@ -105,7 +105,7 @@ impl TypographyOverlay {
     const fn label_shadow_mode(&self) -> GlyphShadowMode {
         match self.surface_shadow {
             SurfaceShadow::Off => GlyphShadowMode::None,
-            SurfaceShadow::On => GlyphShadowMode::Text,
+            SurfaceShadow::On => GlyphShadowMode::Cast,
         }
     }
 }
