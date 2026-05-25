@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 
-/// Marker on a [`WorldText`](super::WorldText) entity whose glyphs are not yet fully
-/// rasterized in the atlas. Removed automatically when all glyphs
-/// become ready.
+/// Marker on a [`WorldText`](super::WorldText) entity whose glyphs are not yet
+/// ready. Removed automatically when all glyphs become ready.
 #[derive(Component)]
 pub struct PendingGlyphs;
 
@@ -11,7 +10,7 @@ pub struct PendingGlyphs;
 #[derive(Component)]
 pub struct AwaitingReady;
 
-/// Fired on a [`WorldText`](super::WorldText) entity when all its glyphs are rasterized
+/// Fired on a [`WorldText`](super::WorldText) entity when all its glyphs are ready
 /// and the text is fully rendered for the first time (or after a
 /// text/style change).
 ///

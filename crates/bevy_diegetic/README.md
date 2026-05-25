@@ -10,11 +10,12 @@ Diegetic UI layout engine for Bevy -- in-world panels driven by a Clay-inspired 
 
 `bevy_diegetic` renders UI panels and text directly in 3D space as regular
 Bevy entities -- no screen-space overlay, no separate UI camera. Text is
-rendered via MSDF (multi-channel signed distance field) atlas rasterization
-with async on-demand glyph generation.
+rendered with the slug glyph backend, which builds one mesh per text run
+from quadratic Bézier contours and computes analytic per-pixel coverage in
+the shader.
 
 - **Retained-mode layout** inspired by [Clay](https://github.com/nicbarker/clay) -- build a `LayoutTree` once, recompute only when it changes
-- **MSDF text rendering** with per-glyph async rasterization, multi-page atlas, and physical font sizing
+- **Slug text rendering** -- one mesh per run from Bézier contours with analytic per-pixel coverage, and physical font sizing
 - **OpenType features** -- ligatures, contextual alternates, discretionary ligatures, kerning
 - **Multiple font families** -- load fonts via Bevy `AssetServer`, render with per-element font selection
 
@@ -35,8 +36,7 @@ App::new()
 
 Slug renders anti-aliased glyph edges from per-pixel coverage. It emits one
 mesh per text run and orders coplanar text with `depth_bias`, so blended text
-composites correctly as the camera moves — no order-independent-transparency
-pass and no special camera setup are required.
+composites correctly as the camera moves with a default `Camera3d`.
 
 The `AlphaMode` you pick determines how that coverage is composited:
 

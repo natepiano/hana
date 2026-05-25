@@ -120,7 +120,7 @@ impl From<GlyphRenderMode> for u32 {
 /// Whether glyphs cast a shadow.
 ///
 /// The visible glyph mesh casts its own coverage-silhouette shadow
-/// directly — there is no separate shadow proxy mesh. For a shadow with
+/// directly. For a shadow with
 /// no visible fill (ghost text), spawn a `Cast` glyph and set its fill
 /// color alpha to `0`: the color pass paints nothing while the shadow
 /// pass still writes the full letter silhouette.

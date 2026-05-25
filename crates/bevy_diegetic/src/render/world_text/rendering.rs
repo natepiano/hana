@@ -52,11 +52,11 @@ type PendingWorldTextQuery<'w, 's> = Query<
         Without<PanelTextChild>,
     ),
 >;
-/// Renders [`WorldText`] entities as MSDF glyph meshes.
+/// Renders [`WorldText`] entities as slug glyph meshes.
 ///
 /// Processes entities in two cases:
 /// - **Changed**: `WorldText` or `TextStyle` was modified — re-shape and check glyphs.
-/// - **Pending**: entity has [`PendingGlyphs`] — re-check atlas each frame.
+/// - **Pending**: entity has [`PendingGlyphs`] — re-check glyph readiness each frame.
 ///
 /// When all glyphs are ready, builds meshes and fires [`WorldTextReady`](super::WorldTextReady).
 /// When glyphs are still missing, adds/keeps [`PendingGlyphs`].

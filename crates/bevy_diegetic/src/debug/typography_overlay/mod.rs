@@ -4,7 +4,7 @@
 //!
 //! Uses [`ComputedWorldText`](crate::render::ComputedWorldText) data
 //! populated by the renderer to ensure exact alignment with the rendered
-//! MSDF quads — no independent layout computation.
+//! slug glyphs — no independent layout computation.
 //!
 //! Metric lines are drawn using Bevy's retained [`GizmoAsset`](bevy::prelude::GizmoAsset)
 //! (spawned once, not redrawn every frame). Labels are spawned as

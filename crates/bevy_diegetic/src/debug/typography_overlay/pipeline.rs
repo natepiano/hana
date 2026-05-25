@@ -189,7 +189,7 @@ pub fn build_typography_overlay(
             );
 
             // Mark for deferred readiness check — label glyphs may still
-            // need rasterization and transform propagation.
+            // need glyph readiness and transform propagation.
             ctx.commands.entity(entity).insert(AwaitingOverlayReady {
                 target: bounds_target,
             });

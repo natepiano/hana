@@ -40,7 +40,7 @@ pub struct Font {
     raw_underline_thickness: Option<i16>,
     raw_strikeout_position:  Option<i16>,
     raw_strikeout_thickness: Option<i16>,
-    /// Raw font bytes, retained for MSDF rasterization and per-glyph queries.
+    /// Raw font bytes, retained for slug curve extraction and per-glyph queries.
     data:                    Arc<[u8]>,
 }
 

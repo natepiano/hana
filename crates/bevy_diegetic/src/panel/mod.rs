@@ -1,5 +1,5 @@
-//! Panel integration: components, layout computation, gizmo rendering,
-//! and OIT setup — the Bevy-facing half of diegetic UI.
+//! Panel integration: components, layout computation, and gizmo rendering
+//! — the Bevy-facing half of diegetic UI.
 
 mod builder;
 mod compute_layout;

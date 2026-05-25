@@ -206,7 +206,7 @@ pub(super) fn setup_panel_rtt(
                 .looking_at(Vec3::new(camera_x, camera_y, 0.0), Vec3::Y),
         ));
 
-        // The MSDF text material uses PBR lighting. A directional light
+        // The slug text material uses PBR lighting. A directional light
         // on the panel's render layer ensures text is visible in the RTT pass.
         // Panel geometry (backgrounds, borders) uses unlit materials and is
         // unaffected.

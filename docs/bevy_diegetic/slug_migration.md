@@ -1221,10 +1221,9 @@ migration does not finish with `docs/` describing the deleted distance-field eng
 It is pure documentation; the build is already green. See the **Documentation
 disposition** table below for the per-file detail.
 
-- [ ] Delete `docs/bevy_diegetic/gpu_rasterizer.md` (1539 lines) — documents only the
-      removed GPU SDF/MSDF rasterizer; dead since Phase 2. The docs are committed, so
-      this is recoverable.
-- [ ] Rewrite the two stale MSDF lines left in `crates/bevy_diegetic/README.md`: the
+- [x] Deleted `docs/bevy_diegetic/gpu_rasterizer.md` (1539 lines, 2026-05-25) — documents
+      only the removed GPU SDF/MSDF rasterizer; dead since Phase 2. Recoverable from git.
+- [x] Rewrote the two stale MSDF lines in `crates/bevy_diegetic/README.md`: the
       intro at **line 13** ("Text is rendered via MSDF … atlas rasterization") and the
       feature bullet at **line 17** ("MSDF text rendering with per-glyph async
       rasterization, multi-page atlas"). **Phase 6 review — scope shrank:** Phase 10
@@ -1240,10 +1239,21 @@ disposition** table below for the per-file detail.
       to salvage — its effects roadmap lives in `slug_fx.md` and the migration in this doc.
       Repo-wide grep found zero inbound references, so deletion broke no links. Recoverable
       from git.
-- [ ] Confirm no remaining `docs/` reference describes the distance-field engine as a
-      live renderer (the plan itself, `slug_migration.md`, documenting the removal is
-      fine).
-- [ ] **Phase 7 review:** prepend a one-line "Implemented in Phase 7 (2026-05-25)"
+- [x] Confirmed no remaining `docs/` reference describes the distance-field engine as a
+      live renderer (2026-05-25). `slug_fx.md:5` states the SDF/MSDF/MTSDF path "is
+      retired" and otherwise discusses SDF as a compared-against technique;
+      `slug-experiments.md` uses SDF only inside rejected-experiment entries. The plan
+      itself documenting the removal is fine.
+- [x] Swept all crate comments + the README for descriptions framed against removed
+      systems (2026-05-25), since `docs/bevy_diegetic/` is slated for deletion and the
+      comments become the surviving documentation. Removed the README's
+      "no atlas, no glyph rasterization" / "no order-independent-transparency pass"
+      negations; rewrote 11 doc comments that called slug code "MSDF" / "atlas" /
+      "rasterized" / referenced the deleted shadow proxy or OIT setup (`rendering.rs`,
+      `readiness.rs`, `font.rs`, `text_props.rs`, `typography_overlay/{mod,pipeline}.rs`,
+      `panel_rtt.rs`, `coordinate_space.rs`, `panel/mod.rs`). Live panel-SDF references
+      left intact (kept subsystem). Comment-only; build green, fmt clean.
+- [x] **Phase 7 review:** prepended a one-line "Implemented in Phase 7 (2026-05-25)"
       note to `slug_fx.md` §8, which still frames the render/shadow matrix collapse as
       future work ("a simplification to take *after* the renderer swap lands"); leave
       the rationale text intact. No other `slug_fx.md` edit. Leave `slug-experiments.md`
