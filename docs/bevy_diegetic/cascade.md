@@ -371,7 +371,7 @@ corrections (no user-facing forks) and were folded into Phases 2–4:
 - **Phase 4 topology check added** — verify a label is a `ChildOf` descendant of its panel with no
   `Resolved`-bearing intermediate.
 
-### Phase 2 — standalone-side field→component move
+### Phase 2 — standalone-side field→component move ✅ complete
 
 - Move the standalone cascade-source fields into components: `WorldTextStyle.alpha_mode` (cascade role)
   → `Override<TextAlpha>`, `WorldTextStyle.unit` (cascade role) → `Override<FontUnit>`. Keep `unit` on
@@ -409,6 +409,88 @@ corrections (no user-facing forks) and were folded into Phases 2–4:
 
 Commits together: the standalone data move, the authoring bridge, and the two standalone-cascade readers.
 
+### Retrospective
+
+**What worked:**
+- The repoint mirrored Phase 1 exactly: `WorldTextAlpha::override_value` / `WorldFontUnit::override_value`
+  collapse to `Some(Self(o.0.0))`, and the re-resolve helpers swap their `style: &WorldTextStyle` param for
+  an `&Query<&Override<A>, Without<PanelChild>>`. Build clean first try; 158 tests pass; workspace + examples
+  + `typography_overlay` all compile; clippy clean.
+- `with_alpha_mode` / `with_unit` had no callers (only the definitions + one doc line), so retiring them was a
+  clean delete. `unit` stays on the struct as layout-measurement input; `as_standalone` / `as_layout_config`
+  still copy it unchanged.
+
+**What deviated from the plan:**
+- **Added `Without<PanelChild>` to the standalone bridge query** (`seed_world_text_overrides`). The plan's
+  bridge bullet specified `On<Add, WorldTextStyle>` with no filter, but panel labels *are* `WorldText`
+  entities that carry `WorldTextStyle` (the original shared-component crash). Panel labels get their
+  `WorldTextStyle` from `config.as_standalone()` (`reconcile.rs:74`), whose `unit` is `Some`, so an unfiltered
+  bridge would insert `Override<FontUnit>` on every label. In Phase 2 that is unread (the `WorldFontUnit`
+  cascade excludes `PanelChild`; `PanelFontUnit` targets the panel, not the label), but in Phase 3 the unified
+  parent-walk reads `Override<FontUnit>` on *any* node — a label carrying its own would override the panel's
+  inherited value instead of inheriting it. The filter makes the bridge what its name says: the *standalone*
+  bridge. Labels are seeded by the panel cascade (Phase 1 / Phase 3), never by this bridge.
+- **Resolved alpha eagerly in the render loop** (next to the existing eager unit resolve) instead of lazily
+  inside `spawn_run`. The helper signature had to change regardless (it can no longer read `style`); resolving
+  both cascade values at the top let me drop `resolved_alphas` and `defaults` from `WorldTextRenderServices`
+  (the struct shrank from 7 lifetime params to 4 — it now holds only `font_registry`, `shaping_cx`, `cache`,
+  `old_meshes`, `meshes`). `render_entity` / `spawn_run` take the resolved `AlphaMode` by value.
+
+**Surprises:**
+- With `with_alpha_mode` retired, `WorldTextStyle.alpha_mode` has *no* setter — `new()` always sets it `None`,
+  so the bridge's `alpha_mode` branch never fires for standalone text today. It is kept for symmetry with the
+  panel bridge and for the Phase-3 authoring pattern (it is not dead code: the compiler can't prove the runtime
+  `Option` is always `None`).
+- Because no standalone carries `Override<TextAlpha>` (alpha always `None`), the cascade plugin's `On<Add,
+  Override<TextAlpha>>` observer never seeds `Resolved<WorldTextAlpha>` at spawn for standalone text. The
+  render-path `re_resolve_world_text_alpha` inserts it on first render (falling back to the global default),
+  exactly the self-healing the helpers exist for — same pattern as Phase 1's no-override panels.
+
+**Implications for remaining phases:**
+- Phase 3's unified `On<Add>` observer must seed `Resolved<A>` for *every* node at spawn (including no-override
+  nodes), which removes the first-render `re_resolve` insert + the one-frame settle the Phase-2 helpers rely on.
+  When Phase 3 deletes `re_resolve_world_font_unit` / `re_resolve_world_text_alpha`, confirm the unified spawn
+  observer covers the no-override standalone case the helpers currently cover.
+- The `Without<PanelChild>` bridge filter is the standalone-side contract Phase 3 inherits: labels never carry a
+  bridge-seeded `Override<A>`. Phase 3's label-override move (`Override<TextAlpha>` at reconcile time) is the
+  *only* sanctioned way a label gets an `Override`, so the parent-walk inheritance for `FontUnit` stays intact.
+- The eager-resolution restructure already removed `resolved_alphas`/`defaults` from the render-services struct;
+  Phase 3's reader repoint (`Resolved<WorldTextAlpha>` → `Resolved<TextAlpha>`) touches only the loop's
+  `re_resolve` calls and the `ChangedWorldTextQuery` `Or<…>`, not the struct.
+
+### Phase 2 Review
+
+Architect review of the remaining phases against the Phase-2 code + retrospective. All ten findings were
+determinate plan corrections (no user-facing forks) and were folded into Phases 3–4:
+
+- **Phase 3 spawn-observer trigger corrected** — added a dedicated bullet: the unified observer must fire per
+  cascade *node*, not `On<Add, Override<A>>` (the current `target.rs` model), because no standalone carries
+  `Override<TextAlpha>`, so an override-gated trigger would never seed standalone `Resolved`. It must seed every
+  node at spawn, replacing the deleted render-path `re_resolve_*` self-heal.
+- **Phase 3 registration ownership made concrete** — named the current split (four `register_type` + the panel
+  bridge in `HeadlessLayoutPlugin`; the standalone bridge in `TextRenderPlugin`) and the exact moves: relocate
+  `Override<A>`/value-type registration onto the generic unified plugin, remove the four calls from
+  `HeadlessLayoutPlugin`, leave both bridge observers in place.
+- **Phase 3 standalone reader-repoint scope reduced** — Phase 2's eager restructure already removed
+  `resolved_alphas`/`defaults` from `WorldTextRenderServices`; the bullet now names the narrow remainder (delete
+  the two helpers, drop params from **both** layers of `render_world_text`, swap two `Or<…>` terms).
+- **`seed_world_text_overrides` survival made explicit** — added a "keep" bullet; its `Without<PanelChild>`
+  filter is the contract that labels inherit (never override) `FontUnit` under the parent-walk.
+- **Phase 3 `Exclude`/`ExcludeNone` dependents enumerated** — the three `type Exclude =` bindings, the
+  `Without<A::Exclude>` query positions, and the `target.rs` test module (the only coverage of
+  `propagate_global_default_to_entity` / sentinel) that the unified pass must carry forward.
+- **Phase 3 label-override surface widened** — `build_panel_text`'s field set, `apply_panel_result`'s
+  `panel_alpha`/`existing_child_alpha`/`defaults`/`panel_entity` args, the `child_of.parent()` threading, and
+  the `shape_panel_text_children` params all come out together.
+- **Phase 3 two-layer `render_world_text` flagged** — the `mod.rs` `SystemParam` wrapper and the `rendering.rs`
+  impl must have params dropped in lockstep.
+- **Phase 4 no-override standalone alpha check added** — verify a standalone with no `Override<TextAlpha>`
+  re-resolves on a runtime `CascadeDefaults::text_alpha` edit (the path the deleted helper used to cover).
+- **Phase 4 headless `FontUnit` check added** — a `HeadlessLayoutPlugin`-only app resolves the panel's seeded
+  `Points`; the unified spawn observer must run headless.
+- **Phase 4 cross-fire cleanup confirmation** — the two spurious Phase-2 resolves vanish with the type deletion;
+  the existing zero-hit `rg` sweep is the confirmation, no separate removal step.
+
 ### Phase 3 — collapse the three topologies into one parent-walking cascade
 
 - Rename the existing `CascadeAttribute` trait to `CascadeAttr` (it already carries the reflection
@@ -416,10 +498,27 @@ Commits together: the standalone data move, the authoring bridge, and the two st
   `On<Add>` observer for initial resolution + a roots-first propagation pass in `CascadeSet::Propagate`
   gated on `Changed<Override<A>>`, `RemovedComponents<Override<A>>`, `Changed<ChildOf>`, parent
   `Changed<Resolved<A>>`, and `CascadeDefaults` changes; bounded walk (`CASCADE_DEPTH_CAP` + debug-only
-  visited check + warn-on-exceed). `Override<A>` and the value types are **already registered** (Phase 1,
-  in `HeadlessLayoutPlugin`); Phase 3 only adds `register_type::<Resolved<A>>()` and **relocates** the
-  existing `Override<A>`/value-type registration onto the unified plugin, so nothing is stranded when the
-  per-role plugins (each of which emits the current `register_type::<Resolved<per-role>>()`) are deleted.
+  visited check + warn-on-exceed).
+- **Spawn-observer trigger — it must fire per cascade *node*, not per `Override<A>`.** Phase 2 confirmed
+  that no standalone ever carries `Override<TextAlpha>` (alpha is always `None` after `with_alpha_mode`
+  was retired), so the current 2-tier machinery — `on_cascade_target_added` firing `On<Add, A::Override>`
+  and early-returning when the override query misses (`cascade/target.rs:69`) — would never seed
+  `Resolved<TextAlpha>` for any standalone. That is the wrong trigger for the unified design, where
+  readers query `&Resolved<A>` directly and never resolve inline, so **every** node must own a
+  `Resolved<A>` after spawn. The unified observer must therefore key off node spawn (every
+  cascade-participating entity, regardless of whether it carries `Override<A>`) and seed by walking up
+  `ChildOf` to the global default. This replaces the deleted render-path `re_resolve_*` self-heal
+  (Phase 2) for the no-override case — verify the no-override standalone gets a `Resolved` at spawn.
+- Registration ownership (the bridges and `register_type` calls currently live in two plugins): today
+  `seed_panel_overrides` plus all four `register_type` calls (`TextAlpha`, `FontUnit`,
+  `Override<TextAlpha>`, `Override<FontUnit>`) sit in `HeadlessLayoutPlugin` (`panel/mod.rs:87-91`), while
+  `seed_world_text_overrides` is registered in `TextRenderPlugin` (`panel_text/mod.rs`). Phase 3 only adds
+  `register_type::<Resolved<A>>()` and **relocates** the existing `Override<A>`/value-type registration
+  onto the generic unified plugin (added in **both** `HeadlessLayoutPlugin` and the render path), so the
+  per-attribute monomorphization registers itself once. Concretely: remove the four `register_type` calls
+  from `HeadlessLayoutPlugin`, drop the per-role `register_type::<Resolved<per-role>>()` that each deleted
+  plugin emitted, and leave the two bridge observers where they are (they are attribute-/struct-specific
+  authoring observers, not part of the generic cascade plugin). Nothing stranded, nothing duplicated.
 - Schedule + spawn ordering (state it explicitly): keep the propagation pass in `CascadeSet::Propagate`
   (`Update`); the unified `On<Add>` observer computes a node's initial `Resolved<A>` synchronously at
   spawn, which covers panel labels spawned in `PostUpdate` by `reconcile_panel_text_children` /
@@ -443,23 +542,43 @@ Commits together: the standalone data move, the authoring bridge, and the two st
   entity kind).
 - Repoint every reader/filter from the per-role `Resolved<…>` types to `Resolved<TextAlpha>` /
   `Resolved<FontUnit>`: `world_text/mod.rs`, `rendering.rs` (`ChangedWorldTextQuery`), `panel_text/shaping.rs`,
-  `panel_text/alpha.rs`, and the panel font-unit read. **Delete** the standalone tier-1 re-resolve helpers
-  `re_resolve_world_font_unit` / `re_resolve_world_text_alpha` (`rendering.rs`) rather than repointing them:
-  the unified pass now caches `Resolved<A>` and re-resolves on `Changed<Override<A>>` (an in-place `get_mut`
-  edit triggers it), so keeping the helpers would make two writers of standalone `Resolved<…>` — the exact
-  double-writer clobber the atomic commit below claims to make unrepresentable. Run
+  `panel_text/alpha.rs`, and the panel font-unit read. The standalone reader surface is already narrow after
+  Phase 2 (the eager-resolution restructure removed `resolved_alphas`/`defaults` from `WorldTextRenderServices`):
+  what remains is to **delete** the two `re_resolve_world_font_unit` / `re_resolve_world_text_alpha` helpers
+  (`rendering.rs`), drop their query params from **both** layers of `render_world_text` — the `SystemParam`
+  wrapper in `world_text/mod.rs` and the impl in `rendering.rs`, edited in lockstep or it won't compile — and
+  swap the two `Changed<Resolved<World…>>` terms in `ChangedWorldTextQuery`'s `Or<…>` (and its inline copy in
+  the `mod.rs` wrapper) for `Changed<Resolved<TextAlpha>>` / `Changed<Resolved<FontUnit>>`. Deleting (not
+  repointing) the helpers is required: the unified pass now caches `Resolved<A>` and re-resolves on
+  `Changed<Override<A>>` (an in-place `get_mut` edit triggers it), so keeping them would make two writers of
+  standalone `Resolved<…>` — the exact double-writer clobber the atomic commit below makes unrepresentable. Run
   `rg "Resolved<(World|Panel)(TextAlpha|FontUnit)>"` to confirm none are missed. **Keep** the `With` /
   `Without<PanelChild>` entity-selection filters.
+- **Keep `seed_world_text_overrides`** (`world_text/mod.rs`) and its `Without<PanelChild>` filter — it is the
+  permanent standalone authoring bridge and is *not* part of the deletions below. The filter is the contract
+  that labels never carry a bridge-seeded `Override<FontUnit>`: a label's `WorldTextStyle` comes from
+  `config.as_standalone()` (`reconcile.rs`), whose `unit` is `Some`, so an unfiltered bridge would put an
+  `Override<FontUnit>` on every label, and under the unified parent-walk that would shadow the panel's inherited
+  `Points` instead of inheriting it. The label's only sanctioned override is the `Override<TextAlpha>` inserted
+  at reconcile time (next bullet); FontUnit is always inherited from the panel.
 - Move the label's per-run override: delete `PanelText.alpha_mode`, insert `Override<TextAlpha>` on the
   label at reconcile time, and read it through the parent-walk like any other override. This **replaces**
   the hand-rolled child resolution in `apply_panel_result` (`panel_text/shaping.rs`), which today computes
   `panel_text.alpha_mode.map_or(panel_fallback, …)` against `Resolved<PanelTextAlpha>` and writes the
-  child's `Resolved` itself: remove that logic and its `panel_alpha` / `existing_child_alpha` queries (and
-  the per-run `alpha_mode: config.alpha_mode()` set in `build_panel_text`), letting the generic pass own the
-  label's `Resolved<TextAlpha>` — otherwise the label has two competing writers.
+  child's `Resolved` itself. The full surface that comes out together: the `panel_text.alpha_mode` field set
+  in `build_panel_text` (`config.alpha_mode()`), the `apply_panel_result` resolution body, its `panel_alpha` /
+  `existing_child_alpha` queries plus the `defaults` / `panel_entity` args, the `child_of.parent()` argument
+  threading, and the two corresponding query params on `shape_panel_text_children`. Letting the generic pass
+  own the label's `Resolved<TextAlpha>` — otherwise the label has two competing writers.
 - Delete the per-role types (`WorldTextAlpha` / `PanelTextAlpha` / `WorldFontUnit` / `PanelFontUnit`),
   the three plugins (`CascadeEntityPlugin` / `CascadePanelPlugin` / `CascadePanelChildPlugin`), and
-  `Exclude` / `ExcludeNone` plus their test impls.
+  `Exclude` / `ExcludeNone`. `Exclude`/`ExcludeNone` dependents that go with them: the three `type Exclude =`
+  bindings (`WorldTextAlpha`/`WorldFontUnit` → `PanelChild` at `world_text/mod.rs`; `PanelFontUnit` →
+  `ExcludeNone` at `diegetic_panel.rs`) and the `Without<A::Exclude>` query positions in `target.rs`. Deleting
+  `target.rs` also deletes its test module (`target.rs:104-276`) — the only coverage of
+  `propagate_global_default_to_entity` / `should_propagate_defaults` (global-default mutation with and without
+  an override; the `Local<Option<A>>` sentinel short-circuit). The unified pass re-implements that propagation,
+  so it must carry that test coverage forward, not just drop it.
 
 Commit atomically: the new plugin, the reader repoint, and the old-type deletions are mutually
 dependent — they cannot land separately and stay green, because old and new both writing `Resolved` in
@@ -477,12 +596,27 @@ same generic plugin is caught by Bevy's built-in plugin uniqueness).
   and a runtime `CascadeDefaults::font_unit` change re-resolves standalone text but not panels; cycling
   all alpha modes in `text_alpha.rs` stays correct; a `ChildOf(self)` self-parent and a two-node cycle
   terminate at the global default with no hang or panic.
+- **No-override standalone alpha responds to a runtime `CascadeDefaults::text_alpha` edit.** Phase 2
+  established that standalone text never carries `Override<TextAlpha>` (alpha is always `None`), so it
+  resolves purely to `CascadeDefaults::text_alpha` and a runtime mutation of that field is the *only* path
+  that changes standalone alpha. The deleted `re_resolve_world_text_alpha` used to provide this on the
+  read side; the unified propagation pass must now drive it. Verify a standalone `WorldText` with no
+  `Override<TextAlpha>` re-resolves its `Resolved<TextAlpha>` when `CascadeDefaults::text_alpha` changes at
+  runtime — this is the regression `text_alpha.rs` exercises.
+- **Headless `FontUnit` resolution.** A `HeadlessLayoutPlugin`-only app (no text renderer) resolves a
+  panel's `Resolved<FontUnit>` to the seeded `Points`, and `compute_layout.rs` reads it — the unified spawn
+  observer (and its no-override seeding) must run in `HeadlessLayoutPlugin`, not just the render path. Assert
+  the panel's seeded value resolves headless and that the panel `global_default` fallback is unreachable for
+  panels (every panel carries `Override<FontUnit>`).
 - Verify the parent-walk topology: a panel label is a `ChildOf` descendant of the panel with no
   `Resolved`-bearing intermediate entity (e.g. a glyph-mesh child) between them, so the walk resolves the
   label against the panel's subtree — `reconcile_panel_text_children` must parent labels under the panel,
   not under an intermediate.
 - Reflection sweep: `rg` for lingering `Resolved<World…>` / `Resolved<Panel…>` references; confirm
-  every attribute registers `Override<A>`, `Resolved<A>`, and its value type.
+  every attribute registers `Override<A>`, `Resolved<A>`, and its value type. This same sweep confirms the
+  two spurious cross-fire resolves Phase 2 introduced (`Resolved<WorldTextAlpha>` on panels,
+  `Resolved<PanelTextAlpha>` on standalones) are gone: Phase 3 deletes the *types*, so the components cease
+  to exist — no separate removal step is needed, a zero-hit `rg` is the confirmation.
 - Add a cascade demonstration example: one scene showing `TextAlpha` resolving at each of three tiers —
   global default → panel override → per-run label override — and `FontUnit` resolving global default
   (standalone) vs. panel-seeded override inherited by a label, with on-screen labels showing which tier

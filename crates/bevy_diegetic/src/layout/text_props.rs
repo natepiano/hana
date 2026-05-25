@@ -205,12 +205,17 @@ pub struct TextProps<C: Send + Sync + 'static> {
     sidedness:      GlyphSidedness,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from global config.
-    /// Only meaningful for [`ForStandalone`] — ignored by layout text.
+    /// On [`ForStandalone`] this is layout-measurement input only — the cascade
+    /// override role moved to `Override<FontUnit>`, seeded at spawn by the
+    /// `WorldTextStyle` bridge; render-time unit comes from `Resolved<FontUnit>`.
     unit:           Option<Unit>,
     /// Explicit meters-per-design-unit override. `None` = derive from `unit`.
-    /// Only meaningful for [`ForStandalone`] — ignored by layout text.
+    /// Only meaningful for [`ForStandalone`] — a post-cascade bypass applied by
+    /// the renderer, independent of `Resolved<FontUnit>`.
     world_scale:    Option<f32>,
-    /// Per-style alpha-mode override. `None` = inherit from panel or resource default.
+    /// Per-style alpha-mode override. `None` = inherit. On [`ForStandalone`] the
+    /// cascade override role moved to `Override<TextAlpha>`, seeded at spawn by
+    /// the `WorldTextStyle` bridge; this field is authoring input only.
     alpha_mode:     Option<AlphaMode>,
     #[reflect(ignore)]
     context:        PhantomData<C>,
@@ -372,24 +377,14 @@ impl<C: Send + Sync + 'static> TextProps<C> {
 
     /// Returns the per-style alpha-mode override, if any.
     ///
-    /// `None` means "inherit" — resolution falls through to panel-level
-    /// override (for panel text), then to
-    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
+    /// For [`ForStandalone`] this is the authoring input the spawn-time
+    /// `Override<TextAlpha>` bridge reads; the cascade itself reads
+    /// `Override<TextAlpha>`, not this field. For panel-text [`ForLayout`]
+    /// configs it still feeds the per-run `PanelText` alpha. `None` means
+    /// "inherit" — resolution falls through to the panel-level override, then
+    /// to [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
     #[must_use]
     pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
-
-    /// Sets the per-style alpha-mode override.
-    ///
-    /// The library default is [`AlphaMode::Blend`]. Text emits one mesh per
-    /// text run and orders coplanar text with per-command `depth_bias`, so
-    /// blended text composites correctly without special camera setup.
-    /// [`AlphaMode::AlphaToCoverage`] with MSAA is an alternative for
-    /// hard-edged coverage.
-    #[must_use]
-    pub const fn with_alpha_mode(mut self, mode: AlphaMode) -> Self {
-        self.alpha_mode = Some(mode);
-        self
-    }
 
     /// Returns the font feature overrides.
     #[must_use]
@@ -686,28 +681,6 @@ impl TextProps<ForStandalone> {
     #[must_use]
     pub const fn with_sidedness(mut self, sidedness: GlyphSidedness) -> Self {
         self.sidedness = sidedness;
-        self
-    }
-
-    /// Sets the unit that [`size`](Self::size) is expressed in.
-    ///
-    /// When set, the renderer converts the size to world meters using the
-    /// unit's [`meters_per_unit`](Unit::meters_per_unit) factor. When `None`
-    /// (the default), the global
-    /// [`CascadeDefaults::world_font_unit`](crate::CascadeDefaults) is used.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Explicit unit override (rare — prefer newtypes in new()):
-    /// WorldTextStyle::new(12.0).with_unit(Unit::Points)
-    ///
-    /// // Preferred — newtype carries the unit:
-    /// WorldTextStyle::new(Pt(12.0))
-    /// ```
-    #[must_use]
-    pub const fn with_unit(mut self, unit: Unit) -> Self {
-        self.unit = Some(unit);
         self
     }
 

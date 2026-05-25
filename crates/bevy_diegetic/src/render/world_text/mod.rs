@@ -17,7 +17,10 @@ pub(super) use readiness::emit_world_text_ready;
 use super::text_shaping::TextShapingContext;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
+use crate::cascade::FontUnit;
+use crate::cascade::Override;
 use crate::cascade::Resolved;
+use crate::cascade::TextAlpha;
 use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
@@ -34,6 +37,8 @@ pub(super) fn render_world_text(
             Or<(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
+                Changed<Override<TextAlpha>>,
+                Changed<Override<FontUnit>>,
                 Changed<Resolved<WorldTextAlpha>>,
                 Changed<Resolved<WorldFontUnit>>,
             )>,
@@ -41,6 +46,8 @@ pub(super) fn render_world_text(
     >,
     pending_texts: Query<Entity, (With<WorldText>, With<PendingGlyphs>, Without<PanelChild>)>,
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelChild>>,
+    text_alpha_overrides: Query<&Override<TextAlpha>, Without<PanelChild>>,
+    font_unit_overrides: Query<&Override<FontUnit>, Without<PanelChild>>,
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelChild>>,
     resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelChild>>,
     old_meshes: Query<(Entity, &ChildOf), With<WorldTextMesh>>,
@@ -56,6 +63,8 @@ pub(super) fn render_world_text(
         changed_texts,
         pending_texts,
         texts,
+        text_alpha_overrides,
+        font_unit_overrides,
         resolved_alphas,
         resolved_units,
         old_meshes,
@@ -159,19 +168,20 @@ pub(crate) struct PanelChild;
 
 /// Cascading attribute for standalone-world-text alpha mode.
 ///
-/// 2-tier cascade: [`WorldTextStyle::alpha_mode`] (entity) →
-/// [`CascadeDefaults::text_alpha`] (global). The resolved value is cached in
-/// [`Resolved<WorldTextAlpha>`] on each standalone [`WorldText`] entity;
-/// [`render_world_text`] reads it when spawning meshes.
+/// 2-tier cascade: [`Override<TextAlpha>`] (entity) →
+/// [`CascadeDefaults::text_alpha`] (global). The override is seeded at spawn by
+/// [`seed_world_text_overrides`] from [`WorldTextStyle::alpha_mode`]. The
+/// resolved value is cached in [`Resolved<WorldTextAlpha>`] on each standalone
+/// [`WorldText`] entity; [`render_world_text`] reads it when spawning meshes.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub(super) struct WorldTextAlpha(pub AlphaMode);
 
 impl CascadeTarget for WorldTextAlpha {
     type Exclude = PanelChild;
-    type Override = WorldTextStyle;
+    type Override = Override<TextAlpha>;
 
-    fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
-        entity_override.alpha_mode().map(Self)
+    fn override_value(entity_override: &Override<TextAlpha>) -> Option<Self> {
+        Some(Self(entity_override.0.0))
     }
 
     fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.text_alpha) }
@@ -179,11 +189,12 @@ impl CascadeTarget for WorldTextAlpha {
 
 /// Cascading attribute for standalone-world-text font unit.
 ///
-/// 2-tier cascade: [`WorldTextStyle::unit`] (entity) →
-/// [`CascadeDefaults::world_font_unit`] (global). The resolved value is cached
-/// in [`Resolved<WorldFontUnit>`] on each standalone [`WorldText`] entity;
-/// readers multiply by `meters_per_unit()` to convert font sizes into
-/// world-space scale.
+/// 2-tier cascade: [`Override<FontUnit>`] (entity) →
+/// [`CascadeDefaults::world_font_unit`] (global). The override is seeded at
+/// spawn by [`seed_world_text_overrides`] from [`WorldTextStyle::unit`]. The
+/// resolved value is cached in [`Resolved<WorldFontUnit>`] on each standalone
+/// [`WorldText`] entity; readers multiply by `meters_per_unit()` to convert
+/// font sizes into world-space scale.
 /// A non-`None` [`WorldTextStyle::world_scale`] short-circuits this
 /// cascade (it is a raw meters-per-unit override that bypasses the
 /// [`Unit`] abstraction).
@@ -192,11 +203,42 @@ pub(crate) struct WorldFontUnit(pub Unit);
 
 impl CascadeTarget for WorldFontUnit {
     type Exclude = PanelChild;
-    type Override = WorldTextStyle;
+    type Override = Override<FontUnit>;
 
-    fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
-        entity_override.unit().map(Self)
+    fn override_value(entity_override: &Override<FontUnit>) -> Option<Self> {
+        Some(Self(entity_override.0.0))
     }
 
     fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.world_font_unit) }
+}
+
+/// Spawn-time authoring bridge for standalone world-text cascade overrides.
+///
+/// Reads a newly-added [`WorldTextStyle`]'s `unit` / `alpha_mode` authoring
+/// fields and inserts the matching `Override<A>` cascade component, but only
+/// when the field is set. An absent field leaves the component absent, which
+/// the cascade reads as "inherit." `WorldTextStyle` is no longer a cascade
+/// source — the cascade reads `Override<A>`; the fields are authoring inputs
+/// the bridge consumes once at spawn. The standalone twin of the panel's
+/// `seed_panel_overrides` bridge.
+///
+/// Filters `Without<PanelChild>`: panel labels share the [`WorldTextStyle`]
+/// component but inherit their cascade values from the panel subtree, so they
+/// must not carry their own standalone-seeded `Override<A>`.
+pub(super) fn seed_world_text_overrides(
+    trigger: On<Add, WorldTextStyle>,
+    styles: Query<&WorldTextStyle, Without<PanelChild>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(style) = styles.get(entity) else {
+        return;
+    };
+    let mut entity_commands = commands.entity(entity);
+    if let Some(unit) = style.unit() {
+        entity_commands.insert(Override(FontUnit(unit)));
+    }
+    if let Some(alpha_mode) = style.alpha_mode() {
+        entity_commands.insert(Override(TextAlpha(alpha_mode)));
+    }
 }

@@ -16,7 +16,10 @@ use super::readiness::PendingGlyphs;
 use super::shaping;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadeTarget;
+use crate::cascade::FontUnit;
+use crate::cascade::Override;
 use crate::cascade::Resolved;
+use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
@@ -37,6 +40,8 @@ type ChangedWorldTextQuery<'w, 's> = Query<
         Or<(
             Changed<WorldText>,
             Changed<WorldTextStyle>,
+            Changed<Override<TextAlpha>>,
+            Changed<Override<FontUnit>>,
             Changed<Resolved<WorldTextAlpha>>,
             Changed<Resolved<WorldFontUnit>>,
         )>,
@@ -56,6 +61,8 @@ pub(super) fn render_world_text(
     changed_texts: ChangedWorldTextQuery<'_, '_>,
     pending_texts: PendingWorldTextQuery<'_, '_>,
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelChild>>,
+    text_alpha_overrides: Query<&Override<TextAlpha>, Without<PanelChild>>,
+    font_unit_overrides: Query<&Override<FontUnit>, Without<PanelChild>>,
     resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelChild>>,
     resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelChild>>,
     old_meshes: Query<(Entity, &ChildOf), With<WorldTextMesh>>,
@@ -89,26 +96,37 @@ pub(super) fn render_world_text(
             continue;
         }
 
-        let resolved_unit =
-            re_resolve_world_font_unit(entity, style, &resolved_units, &defaults, &mut commands);
+        let resolved_unit = re_resolve_world_font_unit(
+            entity,
+            &font_unit_overrides,
+            &resolved_units,
+            &defaults,
+            &mut commands,
+        );
         let scale = style
             .world_scale()
             .unwrap_or_else(|| resolved_unit.0.meters_per_unit());
+        let resolved_alpha = re_resolve_world_text_alpha(
+            entity,
+            &text_alpha_overrides,
+            &resolved_alphas,
+            &defaults,
+            &mut commands,
+        );
 
         let mut shared_services = WorldTextRenderServices::new(
             &font_registry,
             &shaping_cx,
             &mut cache,
-            &resolved_alphas,
             &old_meshes,
             &mut meshes,
-            &defaults,
         );
         let (stats, mesh_ms) = shared_services.render_entity(
             entity,
             world_text.text(),
             style,
             scale,
+            resolved_alpha.0,
             &mut backend_services,
             &mut commands,
         );
@@ -120,51 +138,22 @@ pub(super) fn render_world_text(
     log_render_stats(total_ms, text_count, &text_stats, mesh_ms_total);
 }
 
-struct WorldTextRenderServices<
-    'a,
-    'alpha_world,
-    'alpha_state,
-    'alpha_data,
-    'mesh_world,
-    'mesh_state,
-    'mesh_data,
-> {
-    font_registry:   &'a FontRegistry,
-    shaping_cx:      &'a TextShapingContext,
-    cache:           &'a mut ShapedTextCache,
-    resolved_alphas: &'a Query<
-        'alpha_world,
-        'alpha_state,
-        &'alpha_data Resolved<WorldTextAlpha>,
-        Without<PanelChild>,
-    >,
+struct WorldTextRenderServices<'a, 'mesh_world, 'mesh_state, 'mesh_data> {
+    font_registry: &'a FontRegistry,
+    shaping_cx:    &'a TextShapingContext,
+    cache:         &'a mut ShapedTextCache,
     old_meshes:
         &'a Query<'mesh_world, 'mesh_state, (Entity, &'mesh_data ChildOf), With<WorldTextMesh>>,
-    meshes:          &'a mut Assets<Mesh>,
-    defaults:        &'a CascadeDefaults,
+    meshes:        &'a mut Assets<Mesh>,
 }
 
-impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mesh_data>
-    WorldTextRenderServices<
-        'a,
-        'alpha_world,
-        'alpha_state,
-        'alpha_data,
-        'mesh_world,
-        'mesh_state,
-        'mesh_data,
-    >
+impl<'a, 'mesh_world, 'mesh_state, 'mesh_data>
+    WorldTextRenderServices<'a, 'mesh_world, 'mesh_state, 'mesh_data>
 {
     const fn new(
         font_registry: &'a FontRegistry,
         shaping_cx: &'a TextShapingContext,
         cache: &'a mut ShapedTextCache,
-        resolved_alphas: &'a Query<
-            'alpha_world,
-            'alpha_state,
-            &'alpha_data Resolved<WorldTextAlpha>,
-            Without<PanelChild>,
-        >,
         old_meshes: &'a Query<
             'mesh_world,
             'mesh_state,
@@ -172,16 +161,13 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             With<WorldTextMesh>,
         >,
         meshes: &'a mut Assets<Mesh>,
-        defaults: &'a CascadeDefaults,
     ) -> Self {
         Self {
             font_registry,
             shaping_cx,
             cache,
-            resolved_alphas,
             old_meshes,
             meshes,
-            defaults,
         }
     }
 
@@ -191,6 +177,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
         text: &str,
         style: &WorldTextStyle,
         scale: f32,
+        alpha_mode: AlphaMode,
         backend_services: &mut BackendRenderServices<'_>,
         commands: &mut Commands,
     ) -> (TextBuildStats, f32) {
@@ -223,7 +210,14 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
         }
 
         if let Some(prepared) = text_run.prepared.as_ref() {
-            mesh_ms_total += self.spawn_run(prepared, entity, style, backend_services, commands);
+            mesh_ms_total += self.spawn_run(
+                prepared,
+                entity,
+                style,
+                alpha_mode,
+                backend_services,
+                commands,
+            );
         }
 
         apply_readiness_markers(entity, readiness, commands);
@@ -235,16 +229,10 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
         prepared: &SlugPreparedTextRun,
         entity: Entity,
         style: &WorldTextStyle,
+        alpha_mode: AlphaMode,
         backend_services: &mut BackendRenderServices<'_>,
         commands: &mut Commands,
     ) -> f32 {
-        let resolved_alpha = re_resolve_world_text_alpha(
-            entity,
-            style,
-            self.resolved_alphas,
-            self.defaults,
-            commands,
-        );
         let mut assets = MeshSpawnAssets {
             meshes: self.meshes,
             materials: &mut backend_services.materials,
@@ -256,7 +244,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             &mut backend_services.backend,
             entity,
             style,
-            resolved_alpha.0,
+            alpha_mode,
             &mut assets,
         )
     }
@@ -312,19 +300,22 @@ fn collect_entities_to_process(
     to_process
 }
 
-/// Tier-1 re-resolve for `WorldFontUnit`: recomputes from the current
-/// [`WorldTextStyle`] and writes a fresh `Resolved<WorldFontUnit>` only
-/// when the value actually transitioned. Covers mutations to
-/// `WorldTextStyle.unit` that the cascade plugin's `On<Add>` observer
-/// doesn't see.
+/// Tier-1 re-resolve for `WorldFontUnit`: recomputes from the entity's
+/// [`Override<FontUnit>`] component and writes a fresh `Resolved<WorldFontUnit>`
+/// only when the value actually transitioned. Covers `Override<FontUnit>`
+/// mutations and the no-override case that the cascade plugin's `On<Add>`
+/// observer never seeds (no `Override<FontUnit>` → no spawn-time resolve).
 fn re_resolve_world_font_unit(
     entity: Entity,
-    style: &WorldTextStyle,
+    overrides: &Query<&Override<FontUnit>, Without<PanelChild>>,
     current: &Query<&Resolved<WorldFontUnit>, Without<PanelChild>>,
     defaults: &CascadeDefaults,
     commands: &mut Commands,
 ) -> WorldFontUnit {
-    let resolved = WorldFontUnit::override_value(style)
+    let resolved = overrides
+        .get(entity)
+        .ok()
+        .and_then(WorldFontUnit::override_value)
         .unwrap_or_else(|| WorldFontUnit::global_default(defaults));
     if current
         .get(entity)
@@ -336,15 +327,19 @@ fn re_resolve_world_font_unit(
 }
 
 /// Tier-1 re-resolve for `WorldTextAlpha`: mirrors
-/// [`re_resolve_world_font_unit`] for the alpha-mode cascade.
+/// [`re_resolve_world_font_unit`] for the alpha-mode cascade, reading the
+/// entity's [`Override<TextAlpha>`] component.
 fn re_resolve_world_text_alpha(
     entity: Entity,
-    style: &WorldTextStyle,
+    overrides: &Query<&Override<TextAlpha>, Without<PanelChild>>,
     current: &Query<&Resolved<WorldTextAlpha>, Without<PanelChild>>,
     defaults: &CascadeDefaults,
     commands: &mut Commands,
 ) -> WorldTextAlpha {
-    let resolved = WorldTextAlpha::override_value(style)
+    let resolved = overrides
+        .get(entity)
+        .ok()
+        .and_then(WorldTextAlpha::override_value)
         .unwrap_or_else(|| WorldTextAlpha::global_default(defaults));
     if current
         .get(entity)
