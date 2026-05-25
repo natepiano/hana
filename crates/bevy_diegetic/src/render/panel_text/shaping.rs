@@ -3,8 +3,9 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
+use super::PanelText;
+use super::PanelTextLayout;
 use super::batching;
-use super::batching::PanelSlugTextRun;
 use super::batching::PanelTextAlpha;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePanelChild;
@@ -21,7 +22,7 @@ use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
-use crate::render::world_text::PanelTextChild;
+use crate::render::world_text::PanelChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
 use crate::text::DEFAULT_BAND_COUNT;
@@ -33,20 +34,20 @@ pub(super) fn shape_panel_text_children(
     changed_texts: Query<
         Entity,
         (
-            With<PanelTextChild>,
+            With<PanelChild>,
             With<WorldText>,
             Or<(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
-                Changed<PanelTextChild>,
+                Changed<PanelTextLayout>,
                 Changed<Resolved<PanelTextAlpha>>,
             )>,
         ),
     >,
-    pending_texts: Query<Entity, (With<PanelTextChild>, With<WorldText>, With<PendingGlyphs>)>,
-    texts: Query<(&WorldText, &WorldTextStyle, &PanelTextChild, &ChildOf)>,
+    pending_texts: Query<Entity, (With<PanelChild>, With<WorldText>, With<PendingGlyphs>)>,
+    texts: Query<(&WorldText, &WorldTextStyle, &PanelTextLayout, &ChildOf)>,
     panel_alpha: Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
-    existing_child_alpha: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    existing_child_alpha: Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
     defaults: Res<CascadeDefaults>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -137,7 +138,7 @@ fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
     commands
         .entity(entity)
         .remove::<PendingGlyphs>()
-        .remove::<PanelSlugTextRun>();
+        .remove::<PanelText>();
 }
 
 fn build_panel_slug_text(
@@ -148,7 +149,7 @@ fn build_panel_slug_text(
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Option<PanelSlugTextRun>, TextBuildStats) {
+) -> (Option<PanelText>, TextBuildStats) {
     let mut stats = TextBuildStats {
         texts: 1,
         ..Default::default()
@@ -197,7 +198,7 @@ fn build_panel_slug_text(
         .to_array()
     });
     (
-        Some(PanelSlugTextRun {
+        Some(PanelText {
             prepared,
             render_mode: config.render_mode(),
             shadow_mode: config.shadow_mode(),
@@ -219,10 +220,10 @@ fn panel_slug_layout_anchor(placement: &QuadPlacement) -> Vec2 {
 fn apply_panel_slug_result(
     entity: Entity,
     panel_entity: Entity,
-    panel_slug_run: Option<PanelSlugTextRun>,
+    panel_slug_run: Option<PanelText>,
     readiness: GlyphReadiness,
     panel_alpha: &Query<&Resolved<PanelTextAlpha>, With<DiegeticPanel>>,
-    existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    existing_child_alpha: &Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
     defaults: &CascadeDefaults,
     commands: &mut Commands,
 ) {
@@ -258,7 +259,7 @@ fn apply_panel_slug_result(
             commands
                 .entity(entity)
                 .remove::<PendingGlyphs>()
-                .remove::<PanelSlugTextRun>();
+                .remove::<PanelText>();
         },
         GlyphReadiness::Idle => {},
     }

@@ -7,21 +7,21 @@ use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy_kana::ToF32;
 
+use super::PanelText;
+use super::PanelTextLayout;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePanelChild;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::BoundingBox;
-use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::panel::RenderMode;
 use crate::render::constants;
-use crate::render::world_text::PanelTextChild;
+use crate::render::world_text::PanelChild;
 use crate::text;
 use crate::text::SlugBackend;
-use crate::text::SlugPreparedTextRun;
 use crate::text::SlugRenderMode;
 use crate::text::SlugRunStorage;
 use crate::text::SlugRunStorageKey;
@@ -32,32 +32,15 @@ use crate::text::SlugTextMaterialInput;
 #[derive(Component)]
 pub(super) struct DiegeticTextMesh;
 
-/// Stores a prepared Slug run for a panel [`WorldText`](crate::WorldText) child.
-#[derive(Component)]
-pub(super) struct PanelSlugTextRun {
-    /// Prepared Slug run.
-    pub prepared:    SlugPreparedTextRun,
-    /// Glyph render mode for this text element.
-    pub render_mode: GlyphRenderMode,
-    /// Glyph shadow mode for this text element.
-    pub shadow_mode: GlyphShadowMode,
-    /// Per-style alpha-mode override.
-    pub alpha_mode:  Option<AlphaMode>,
-    /// Text fill color.
-    pub fill_color:  Color,
-    /// Optional panel-local clipping rect.
-    pub clip_rect:   Option<[f32; 4]>,
-}
-
 /// Cascading attribute for panel-text alpha mode.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub(super) struct PanelTextAlpha(pub AlphaMode);
 
 impl CascadePanelChild for PanelTextAlpha {
-    type EntityOverride = PanelSlugTextRun;
+    type EntityOverride = PanelText;
     type PanelOverride = DiegeticPanel;
 
-    fn entity_value(entity_override: &PanelSlugTextRun) -> Option<Self> {
+    fn entity_value(entity_override: &PanelText) -> Option<Self> {
         entity_override.alpha_mode.map(Self)
     }
 
@@ -87,11 +70,17 @@ pub(super) fn panel_clip_rect_local(
 
 /// Builds Slug meshes for panels whose Slug text runs changed.
 pub(super) fn build_panel_slug_meshes(
-    changed_runs: Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
-    panel_children: Query<(Entity, &PanelSlugTextRun, &PanelTextChild, &ChildOf)>,
+    changed_runs: Query<
+        &ChildOf,
+        (
+            With<PanelChild>,
+            Or<(Changed<PanelText>, Changed<Resolved<PanelTextAlpha>>)>,
+        ),
+    >,
+    panel_children: Query<(Entity, &PanelText, &PanelTextLayout, &ChildOf)>,
     old_meshes: Query<(Entity, &ChildOf, Option<&SlugRunStorageKey>), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
-    resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelTextChild>>,
+    resolved_alphas: Query<&Resolved<PanelTextAlpha>, With<PanelChild>>,
     defaults: Res<CascadeDefaults>,
     mut slug_backend: ResMut<SlugBackend>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -151,7 +140,13 @@ pub(super) fn build_panel_slug_meshes(
 }
 
 fn collect_dirty_panels(
-    changed_children: &Query<&ChildOf, (With<PanelTextChild>, Changed<PanelSlugTextRun>)>,
+    changed_children: &Query<
+        &ChildOf,
+        (
+            With<PanelChild>,
+            Or<(Changed<PanelText>, Changed<Resolved<PanelTextAlpha>>)>,
+        ),
+    >,
 ) -> Vec<Entity> {
     let mut dirty_panels = Vec::new();
     for child_of in changed_children {
@@ -165,8 +160,8 @@ fn collect_dirty_panels(
 
 struct PanelSlugSpawnRequest<'a, 'w, 's> {
     panel_entity:     Entity,
-    panel_run:        &'a PanelSlugTextRun,
-    panel_text_child: &'a PanelTextChild,
+    panel_run:        &'a PanelText,
+    panel_text_child: &'a PanelTextLayout,
     text_base:        &'a StandardMaterial,
     resolved_alpha:   AlphaMode,
     is_geometry:      bool,

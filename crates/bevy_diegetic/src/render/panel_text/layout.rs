@@ -2,13 +2,13 @@ use bevy::prelude::Component;
 
 use crate::layout::BoundingBox;
 
-/// Marker on a [`WorldText`](super::WorldText) entity spawned as a child of a
-/// [`DiegeticPanel`](crate::DiegeticPanel).
+/// Layout payload for a panel-text child (a [`WorldText`](crate::WorldText)
+/// entity also marked [`PanelChild`](crate::render::world_text::PanelChild)).
 ///
-/// Stores the layout-computed bounding box and panel scale factors
-/// needed to build panel-local quads.
+/// Stores the layout-computed bounding box and panel scale factors needed to
+/// build panel-local glyph meshes.
 #[derive(Component, Clone, Debug)]
-pub struct PanelTextChild {
+pub struct PanelTextLayout {
     /// Index of the source element in the layout tree.
     pub element_idx:   usize,
     /// Index of the render command that produced this text child.

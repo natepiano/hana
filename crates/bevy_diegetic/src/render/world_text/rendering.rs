@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use super::BackendRenderServices;
 use super::ComputedWorldText;
-use super::PanelTextChild;
+use super::PanelChild;
 use super::WorldFontUnit;
 use super::WorldText;
 use super::WorldTextAlpha;
@@ -33,7 +33,7 @@ type ChangedWorldTextQuery<'w, 's> = Query<
     Entity,
     (
         With<WorldText>,
-        Without<PanelTextChild>,
+        Without<PanelChild>,
         Or<(
             Changed<WorldText>,
             Changed<WorldTextStyle>,
@@ -42,16 +42,8 @@ type ChangedWorldTextQuery<'w, 's> = Query<
         )>,
     ),
 >;
-type PendingWorldTextQuery<'w, 's> = Query<
-    'w,
-    's,
-    Entity,
-    (
-        With<WorldText>,
-        With<PendingGlyphs>,
-        Without<PanelTextChild>,
-    ),
->;
+type PendingWorldTextQuery<'w, 's> =
+    Query<'w, 's, Entity, (With<WorldText>, With<PendingGlyphs>, Without<PanelChild>)>;
 /// Renders [`WorldText`] entities as slug glyph meshes.
 ///
 /// Processes entities in two cases:
@@ -63,9 +55,9 @@ type PendingWorldTextQuery<'w, 's> = Query<
 pub(super) fn render_world_text(
     changed_texts: ChangedWorldTextQuery<'_, '_>,
     pending_texts: PendingWorldTextQuery<'_, '_>,
-    texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
-    resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
-    resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
+    texts: Query<(&WorldText, &WorldTextStyle), Without<PanelChild>>,
+    resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelChild>>,
+    resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelChild>>,
     old_meshes: Query<(Entity, &ChildOf), With<WorldTextMesh>>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -144,7 +136,7 @@ struct SlugWorldTextRenderServices<
         'alpha_world,
         'alpha_state,
         &'alpha_data Resolved<WorldTextAlpha>,
-        Without<PanelTextChild>,
+        Without<PanelChild>,
     >,
     old_meshes:
         &'a Query<'mesh_world, 'mesh_state, (Entity, &'mesh_data ChildOf), With<WorldTextMesh>>,
@@ -171,7 +163,7 @@ impl<'a, 'alpha_world, 'alpha_state, 'alpha_data, 'mesh_world, 'mesh_state, 'mes
             'alpha_world,
             'alpha_state,
             &'alpha_data Resolved<WorldTextAlpha>,
-            Without<PanelTextChild>,
+            Without<PanelChild>,
         >,
         old_meshes: &'a Query<
             'mesh_world,
@@ -328,7 +320,7 @@ fn collect_entities_to_process(
 fn re_resolve_world_font_unit(
     entity: Entity,
     style: &WorldTextStyle,
-    current: &Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
+    current: &Query<&Resolved<WorldFontUnit>, Without<PanelChild>>,
     defaults: &CascadeDefaults,
     commands: &mut Commands,
 ) -> WorldFontUnit {
@@ -348,7 +340,7 @@ fn re_resolve_world_font_unit(
 fn re_resolve_world_text_alpha(
     entity: Entity,
     style: &WorldTextStyle,
-    current: &Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
+    current: &Query<&Resolved<WorldTextAlpha>, Without<PanelChild>>,
     defaults: &CascadeDefaults,
     commands: &mut Commands,
 ) -> WorldTextAlpha {

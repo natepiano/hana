@@ -1,6 +1,7 @@
 //! Text rendering systems for panel and world-space glyph meshes.
 
 mod batching;
+mod layout;
 mod reconcile;
 mod shaping;
 
@@ -9,6 +10,7 @@ use bevy::prelude::*;
 
 use self::batching::PanelTextAlpha;
 use self::batching::build_panel_slug_meshes;
+pub use self::layout::PanelTextLayout;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
@@ -17,8 +19,28 @@ use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadeEntityPlugin;
 use crate::cascade::CascadePanelChildPlugin;
+use crate::layout::GlyphRenderMode;
+use crate::layout::GlyphShadowMode;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
+use crate::text::SlugPreparedTextRun;
+
+/// Stores a prepared Slug run for a panel [`WorldText`](crate::WorldText) child.
+#[derive(Component)]
+pub(super) struct PanelText {
+    /// Prepared Slug run.
+    pub prepared:    SlugPreparedTextRun,
+    /// Glyph render mode for this text element.
+    pub render_mode: GlyphRenderMode,
+    /// Glyph shadow mode for this text element.
+    pub shadow_mode: GlyphShadowMode,
+    /// Per-style alpha-mode override.
+    pub alpha_mode:  Option<AlphaMode>,
+    /// Text fill color.
+    pub fill_color:  Color,
+    /// Optional panel-local clipping rect.
+    pub clip_rect:   Option<[f32; 4]>,
+}
 
 /// Plugin that adds slug text rendering for diegetic panels.
 ///

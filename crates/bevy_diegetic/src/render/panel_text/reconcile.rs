@@ -4,6 +4,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::PanelTextLayout;
 use crate::layout::RenderCommandKind;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -12,7 +13,7 @@ use crate::render::clip;
 use crate::render::constants;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::panel_rtt::PanelRttRegistry;
-use crate::render::world_text::PanelTextChild;
+use crate::render::world_text::PanelChild;
 use crate::render::world_text::WorldText;
 
 /// Reconciles [`WorldText`] children for each changed [`ComputedDiegeticPanel`].
@@ -21,7 +22,7 @@ pub(super) fn reconcile_panel_text_children(
         (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
         Changed<ComputedDiegeticPanel>,
     >,
-    existing_children: Query<(Entity, &PanelTextChild, &ChildOf)>,
+    existing_children: Query<(Entity, &PanelTextLayout, &ChildOf)>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, computed) in &changed_panels {
@@ -71,7 +72,7 @@ pub(super) fn reconcile_panel_text_children(
         let mut visited_keys: Vec<(usize, usize)> = Vec::new();
         for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
             let style = config.as_standalone();
-            let panel_text_child = PanelTextChild {
+            let panel_text_child = PanelTextLayout {
                 element_idx: *element_idx,
                 command_index: *cmd_index,
                 bounds: *bounds,
@@ -90,12 +91,14 @@ pub(super) fn reconcile_panel_text_children(
                     WorldText::new(text.clone()),
                     style,
                     panel_text_child,
+                    PanelChild,
                 ));
             } else {
                 commands.entity(panel_entity).with_child((
                     WorldText::new(text.clone()),
                     style,
                     panel_text_child,
+                    PanelChild,
                 ));
             }
         }
@@ -241,13 +244,13 @@ mod tests {
     use bevy_kana::ToF32;
 
     use crate::layout::BoundingBox;
-    use crate::render::world_text::PanelTextChild;
+    use crate::render::panel_text::PanelTextLayout;
 
     #[test]
     fn reconcile_keys_by_element_and_command_index() {
-        let existing: Vec<(Entity, PanelTextChild)> = (0..3)
+        let existing: Vec<(Entity, PanelTextLayout)> = (0..3)
             .map(|cmd| {
-                let panel_text_child = PanelTextChild {
+                let panel_text_child = PanelTextLayout {
                     element_idx:   7,
                     command_index: cmd,
                     bounds:        BoundingBox {

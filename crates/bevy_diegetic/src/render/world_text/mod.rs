@@ -1,7 +1,6 @@
 //! Standalone world-space text component and rendering system.
 
 mod mesh_spawning;
-mod panel_text_child;
 mod readiness;
 mod rendering;
 mod shaping;
@@ -10,7 +9,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderStorageBuffer;
 use mesh_spawning::WorldTextMesh;
-pub use panel_text_child::PanelTextChild;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
@@ -32,7 +30,7 @@ pub(super) fn render_world_text(
         Entity,
         (
             With<WorldText>,
-            Without<PanelTextChild>,
+            Without<PanelChild>,
             Or<(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
@@ -41,17 +39,10 @@ pub(super) fn render_world_text(
             )>,
         ),
     >,
-    pending_texts: Query<
-        Entity,
-        (
-            With<WorldText>,
-            With<PendingGlyphs>,
-            Without<PanelTextChild>,
-        ),
-    >,
-    texts: Query<(&WorldText, &WorldTextStyle), Without<PanelTextChild>>,
-    resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelTextChild>>,
-    resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelTextChild>>,
+    pending_texts: Query<Entity, (With<WorldText>, With<PendingGlyphs>, Without<PanelChild>)>,
+    texts: Query<(&WorldText, &WorldTextStyle), Without<PanelChild>>,
+    resolved_alphas: Query<&Resolved<WorldTextAlpha>, Without<PanelChild>>,
+    resolved_units: Query<&Resolved<WorldFontUnit>, Without<PanelChild>>,
     old_meshes: Query<(Entity, &ChildOf), With<WorldTextMesh>>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -156,6 +147,16 @@ impl WorldText {
     pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
 }
 
+/// Marker on a [`WorldText`] entity spawned as a child of a
+/// [`DiegeticPanel`](crate::DiegeticPanel).
+///
+/// Standalone-text systems filter `Without<PanelChild>` to skip panel labels
+/// (the panel-text systems render those); panel-text systems filter
+/// `With<PanelChild>`. The layout payload lives in
+/// [`PanelTextLayout`](crate::render::panel_text::PanelTextLayout).
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct PanelChild;
+
 /// Cascading attribute for standalone-world-text alpha mode.
 ///
 /// 2-tier cascade: [`WorldTextStyle::alpha_mode`] (entity) →
@@ -166,7 +167,7 @@ impl WorldText {
 pub(super) struct WorldTextAlpha(pub AlphaMode);
 
 impl CascadeTarget for WorldTextAlpha {
-    type Exclude = PanelTextChild;
+    type Exclude = PanelChild;
     type Override = WorldTextStyle;
 
     fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
@@ -190,7 +191,7 @@ impl CascadeTarget for WorldTextAlpha {
 pub(crate) struct WorldFontUnit(pub Unit);
 
 impl CascadeTarget for WorldFontUnit {
-    type Exclude = PanelTextChild;
+    type Exclude = PanelChild;
     type Override = WorldTextStyle;
 
     fn override_value(entity_override: &WorldTextStyle) -> Option<Self> {
