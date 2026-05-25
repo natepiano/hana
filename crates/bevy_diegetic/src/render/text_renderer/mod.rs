@@ -15,14 +15,10 @@ use self::shaping::shape_panel_text_children;
 use super::panel_rtt;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
-use super::world_text::PanelTextChild;
-use super::world_text::PendingGlyphs;
-use super::world_text::WorldText;
 use crate::cascade::CascadeEntityPlugin;
 use crate::cascade::CascadePanelChildPlugin;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
-use crate::slug_text_spike::SlugBackendCompleted;
 
 /// Plugin that adds slug text rendering for diegetic panels.
 ///
@@ -50,28 +46,5 @@ impl Plugin for TextRenderPlugin {
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );
-        app.add_observer(mark_text_pending_on_slug_completed);
     }
-}
-
-fn mark_all_text_pending(
-    panel_children: &Query<Entity, With<PanelTextChild>>,
-    world_texts: &Query<Entity, With<WorldText>>,
-    commands: &mut Commands,
-) {
-    for entity in panel_children {
-        commands.entity(entity).insert_if_new(PendingGlyphs);
-    }
-    for entity in world_texts {
-        commands.entity(entity).insert_if_new(PendingGlyphs);
-    }
-}
-
-fn mark_text_pending_on_slug_completed(
-    _trigger: On<SlugBackendCompleted>,
-    panel_children: Query<Entity, With<PanelTextChild>>,
-    world_texts: Query<Entity, With<WorldText>>,
-    mut commands: Commands,
-) {
-    mark_all_text_pending(&panel_children, &world_texts, &mut commands);
 }

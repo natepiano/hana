@@ -657,6 +657,122 @@ surfaced to the user and resolved by deleting the field.
 - [ ] Update doc comments that still say "Experimental" /  "spike"
       (e.g. `SlugBackend`) to reflect production status.
 
+**Phase 4 outcome — complete (2026-05-24). Verified green.** All checklist items
+plus the deletions below are implemented. `slug_text_spike/*.rs` moved to
+`text/slug/` (via `git mv`); every `crate::slug_text_spike::X` reference rewritten
+to `crate::text::slug::X`; `text/mod.rs` declares `pub(crate) mod slug` and inlines
+`embedded_asset!(app, "slug/shaders/slug_text.wgsl")` into `TextPlugin::build`
+(the `register_slug_text_shader` helper + its re-export deleted); `SLUG_TEXT_SHADER_PATH`
+updated to `embedded://bevy_diegetic/text/slug/shaders/slug_text.wgsl`. Expose-nothing
+done: all 32 `Slug*` `lib.rs` re-exports dropped, the slug `mod.rs` re-exports the 11
+cross-module symbols as `pub(crate)` (`SlugBackend`, `SlugPreparedTextRun`,
+`SlugRunStorage`, `SlugRunStorageKey`, `SlugRenderMode`, `SlugTextMaterial`,
+`SlugTextMaterialInput`, `slug_text_material`, `slug_text_shadow_proxy_material`,
+`DEFAULT_BAND_COUNT`), everything else module-private or deleted. `cargo build -p
+bevy_diegetic --lib` finishes with **zero warnings**, `cargo clippy --lib` is clean,
+`cargo nextest run --lib` passes **158/158** (1 skipped), and the full workspace
+`cargo build` (libs + `fairy_dust` bin) passes. Examples and benches stay red until
+Phase 5. Not committed.
+
+The user directed **one path** mid-phase ("just have one path — the production path —
+be consistent"). Slug's standalone string-shaping path — `prepare_text_run`,
+`SlugTextRequest`, `build_slug_text_run`/`_with_cache`, `shape_slug_text`, the
+`VisibleSlugGlyph`/`ShapedSlugGlyph`/`ShapedSlugText` structs, the parallel cache fills
+(`insert_missing_packed_parallel`, `get_or_insert_packed`), and `geometry::load_glyph`/
+`load_glyph_by_id` — was used by nothing in production (the render path feeds parley
+`PositionedGlyph`s through `prepare_positioned_run_with_scale`); it survived only as the
+slug unit-test harness. All 8 slug unit tests were re-pointed onto the production path
+via a new `#[cfg(test)] text/slug/test_support.rs` (builds `ShapedGlyph` +
+`ResolvedFontData` from font bytes — no parley needed), preserving the CJK CFF-cubic
+coverage and the dedup/clip checks. The standalone path was then deleted.
+
+### Retrospective
+
+**What worked:**
+- The move was mechanical: `git mv` + one `perl` path rewrite + a single
+  `embedded_asset!` relocation. `embedded_asset!` resolves relative to the calling
+  file, so calling it from `text/mod.rs` with `"slug/shaders/slug_text.wgsl"` yields the
+  correct `embedded://bevy_diegetic/text/slug/shaders/...` path with no macro tricks.
+- Compiler-driven dead-code sweep: each `cargo build --lib` warning named exactly the
+  next thing to delete.
+
+**What deviated from the plan:**
+- The plan scoped Phase 4 as a move + visibility change. It did not foresee that
+  expose-nothing would reveal a **large dead surface** once `lib.rs` stopped re-exporting
+  it. Beyond the standalone-shaping path (deleted per the user's "one path" call), the
+  following were dead-in-production and removed: the never-triggered `SlugBackendCompleted`
+  completion event + its render observer `mark_text_pending_on_slug_completed` (+
+  `mark_all_text_pending`) in `text_renderer/mod.rs`; the write-only backend counters
+  (`completed_runs`, `failed_runs`, `generation`, `last_completion`) and `record_failure`
+  (plus its two call sites in `world_text/shaping.rs` and `text_renderer/shaping.rs`);
+  unused introspection accessors (`SlugRunStorageKey::value`, `SlugGlyph::contour_count`/
+  `curve_bytes`/`segment_count`, `SlugPackedGlyph::glyph`/`outline_segments`/
+  `duplicated_curves`/`curve_bytes`/`band_bytes`, `SlugGlyphKey::new`,
+  `SlugGlyphInstance::new`/`new_scaled`/`advance`, `SlugBackend::glyph_cache`/
+  `stored_runs`/`preprocess_version`, `SlugGlyphCache::len`/`is_empty`); unused
+  run-metadata fields (`SlugTextRun::bounds`+`advance_width` and the `run_bounds`/
+  `shifted_bounds`/`merge_bounds` helpers, `SlugGlyphInstance::advance`,
+  `SlugBuiltTextRun::baseline`/`reference_size`); dead `SlugOutlineError` variants
+  (`MissingGlyph`, `MissingOutline`, `CubicOutline`); and `FIXTURE_TEXT`.
+- The orphan `text/slug/mesh.rs` (never declared in any `mod`, dead on disk since the
+  spike) was deleted.
+- The `Slug*` re-export count was **32**, matching the Phase 3 review's correction.
+
+**Surprises:**
+- `SlugBackendCompleted` was observed (`On<SlugBackendCompleted>`) but **never triggered**
+  — a dormant async-completion hook. Slug builds synchronously, so the
+  mark-pending-on-completion mechanism is obsolete; removing it (event + observer +
+  registration) is correct, not just cleanup.
+- Slug's outline loader had three error variants (`MissingGlyph`, `MissingOutline`,
+  `CubicOutline`) that the production path never constructs — cubics are converted to
+  quadratics, not rejected, so `CubicOutline` was always vestigial.
+
+**Implications for remaining phases:**
+- Phase 5: `slug_text.rs`'s spike instrumentation (`log_glyph_metrics`, `log_cjk_probe`,
+  `SlugPackedGlyph`, `build_packed_glyph`) now references types that are `pub(crate)` or
+  deleted — that example must drop those probes (already in the Phase 5 row). The
+  `glyph_rasterization` bench's `Slug*` imports (`SlugBackend`, `SlugFontKey`,
+  `SlugTextRequest`, `build_slug_run_render_data`, `DEFAULT_BAND_COUNT`) now name deleted
+  or private items, but the bench is deleted in Phase 5 regardless.
+- Phase 7: the slug shadow-proxy collapse is unaffected — `slug_text_shadow_proxy_material`,
+  `SlugRenderMode`, and the proxy spawn paths all survived as `pub(crate)`.
+
+### Phase 4 Review
+
+Architect re-evaluation of Phases 5–7 + Documentation disposition against the shipped
+Phase 4. 15 findings; all folded into the plan (none rejected, none required user
+sign-off — the three `significant` ones were doc-maintenance refinements of
+already-decided items, applied directly).
+
+- **Phase 5 preamble** — deleted the obsolete "fold the example fixes into the Phase 1–3
+  sequence" framing; Phase 5 is now stated as the single standalone post-Phase-4 pass
+  that turns the red example/bench surface green.
+- **Phase 5 `slug_text.rs` row** — upgraded from "trim spike probes" to **near-total
+  rewrite**: it imports a wall of Phase-1/Phase-4-deleted symbols
+  (`TextRenderer`/`TextRendererPreference`, `SlugBackendCompleted`, `SlugTextRequest`,
+  `prepare_text_run`, `SlugOutlineError::CubicOutline`, `FIXTURE_TEXT`, `build_packed_glyph`,
+  …) with no public API to port the backend-poking body to; CJK demo kept as `WorldText`.
+- **Phase 5 `text_renderer_gpu_bench.rs` row** — upgraded to **structural rewrite**: the
+  whole `BenchMode` enum + `AtlasConfig`/`with_renderer` machinery collapses to one slug
+  path (auto-discovered, no manifest edit).
+- **Phase 5 `world_text.rs` / `panel_rendering.rs` row** — corrected to a one-line strip
+  each (single `TextRendererPreference::slug()` insert; no toggle UI exists).
+- **Phase 5 `glyph_rasterization.rs` row** — noted it also calls the Phase-4-deleted
+  `backend.glyph_cache()` + non-clip `build_slug_run_render_data`; irrecoverably red,
+  deletion confirmed as the only path.
+- **Phase 6** — added an explicit `cargo build --examples --benches` gate (plain
+  `cargo build` masks the example/bench surface).
+- **Phase 7** — corrected stale `slug_text_spike/` paths to `text/slug/`; pinned the
+  shadow-proxy re-export to `text/slug/mod.rs:26` (`pub(crate)`, the only surfacing point
+  post-Phase-4); added rewording of the slug-module `is_shadow_proxy`/`SlugRenderMode`
+  doc comments; recorded the `From<GlyphRenderMode> for SlugRenderMode` seam at
+  `mesh_spawning.rs:237` + `slug_render_mode` at `batching.rs:398` must change in lockstep
+  with the enum shrink; flagged `shadows.rs` as the enum-shrink canary.
+- **Documentation** — `slug.md` upgraded to "status reword **+** audit/rewrite the deleted
+  standalone-shaping API references"; `slug-experiments.md` / `slug-benchmark-procedure.md`
+  now prefer **recording** the ≈0.84 ms prep figure (the prep API the old bench called was
+  deleted, so no drop-in micro-bench survives).
+
 ### Phase 5 — Examples and benches
 
 Build-green caveat: examples are compiled by `cargo build --examples`
@@ -666,17 +782,13 @@ import types deleted in Phase 2
 `GlyphAtlas`); `typography.rs` and `font_features.rs` also import
 `GlyphLoadingPolicy`, deleted in Phase 1; `preload_text.rs` is built on
 the deleted atlas preload API and is itself deleted in this sequence;
-`slug_text.rs` uses `Slug*` types that go `pub(crate)` in Phase 4. So the edits that *remove*
-deleted-type usage (and the deletions themselves) must land inside the
-Phase 1–3 sequence (and the `Slug*` de-references at Phase 4), not be
-deferred — otherwise the examples break. **Note (Phase 1 review): Phase 1 did
-not touch any example**, so `cargo build --examples` is red from the end of
-Phase 1 until these edits land — the example fixes are now Phase-2-or-later
-work, not Phase-1 work, even though the label says "Phase 1–3 sequence." What remains genuinely
-"Phase 5" is slug-specific polish. The rows below are the authoritative
-per-example dispositions; they are listed here for cohesion but
-**executed within the Phase 1–3 sequence** (and Phase 4 for `Slug*`
-de-references), not as a separate later pass.
+`slug_text.rs` pokes `Slug*` internals deleted/privatized in Phase 4. **As actually
+shipped (Phase 4 review): Phases 1–4 touched no example, so `cargo build --examples`
+and `cargo bench --benches` are red continuously from the end of Phase 1 through the
+end of Phase 4.** The earlier "fold the example fixes into the Phase 1–3 sequence"
+framing is dead — Phase 5 is the single standalone pass that turns the entire red
+example/bench surface green, after Phase 4. The rows below are the authoritative
+per-example dispositions, all executed here.
 
 **Manifest-listing note (Phase 3 review):** not every example has a `[[example]]`
 row in `bevy_diegetic/Cargo.toml` — `text_renderer_gpu_bench`, `world_text`, and
@@ -690,20 +802,23 @@ must be edited, not just the listed ones.
 
 | Target | Action |
 | --- | --- |
-| `slug_text.rs` | Rework to consume the public API (spawn `WorldText`); remove the `.with_renderer(TextRenderer::Slug)` calls and the renderer-toggle UI/state (deleted in Phase 1). **Retain the CJK demonstration** (parallel Latin + CJK render) since it backs the Phase 0 CJK check. Drop only the spike instrumentation that pokes `Slug*` internals (`log_glyph_metrics`, `log_cjk_probe`, `SlugPackedGlyph`, `build_packed_glyph`). Keep as a production text example. |
-| `world_text.rs`, `panel_rendering.rs` | Strip the renderer-choice UI/state; one renderer, no toggle. Keep. |
+| `slug_text.rs` | **Near-total rewrite, not a probe trim (Phase 4 review).** The file imports a wall of now-deleted/privatized symbols — `TextRenderer`/`TextRendererPreference` (Phase 1), `SlugBackendCompleted`/`SlugTextRequest`/`prepare_text_run`/`SlugOutlineError::CubicOutline`/`FIXTURE_TEXT`/`build_packed_glyph`/`SlugPackedGlyph`/`SlugBuiltTextRun`/`SlugFontKey` (Phase 4) — and there is **no surviving public API to port the `SlugBackend`-poking body to** (`load_preview_text`, `log_*` probes, the `ActiveTextRenderer` toggle state/UI all go). Rewrite as a plain production example that spawns `WorldText`. **Retain the CJK demonstration**, but as on-screen `WorldText` rendering (parallel Latin + CJK), not the `build_packed_glyph` probe. Keep as a production text example. |
+| `world_text.rs`, `panel_rendering.rs` | **One-line strip each (Phase 4 review):** neither has toggle UI/state — each only imports `TextRendererPreference` and calls `.insert_resource(TextRendererPreference::slug())` once. Delete that import + line. Keep. |
 | `typography.rs` | Delete the renderer-toggle entirely: the `switch_text_mode` system + its registration, `TypographyTextMode`, `toggle_backend`, `pick_raster_quality`, and the direct `DistanceField` / `RasterBackend` / `RasterQuality` / `AtlasPreference` / `TextRendererPreference` usage. Also remove the single `.with_loading_policy(GlyphLoadingPolicy::Progressive)` call and the `GlyphLoadingPolicy` import (the policy is deleted in Phase 1). **Phase 3 review:** also drop the stale doc comment at `typography.rs:819` ("`G` flips the rasterizer backend between CPU (`fdsm`) and GPU") — its subject is the toggle being deleted, and `fdsm` was removed in Phase 3. Keep behind `typography_overlay`. |
 | `font_features.rs` | Remove all `GlyphLoadingPolicy` usage: the `loading_policy` field threaded through its two helper structs, the `progressive` binding, every `.with_loading_policy(...)` call, and the import. The OpenType-feature demo itself is unaffected — the policy is a no-op under slug. Keep. |
-| `shadows.rs` | Keep — uses the agnostic `GlyphRenderMode` / `GlyphShadowMode` API, renders via slug unchanged (the Phase 0 slug throwaway is reverted at the end of Phase 0). Deleted in **Phase 7** when the matrix collapses. |
-| `text_renderer_gpu_bench.rs` | Convert by reduction to slug-only: drop the msdf / sdf / mtsdf / empty modes and `AtlasConfig`. Keep as a slug regression/optimization harness (note in `slug-benchmark-procedure.md` that cross-renderer comparison is gone). |
+| `shadows.rs` | Keep — uses the agnostic `GlyphRenderMode` / `GlyphShadowMode` API, renders via slug unchanged (the Phase 0 slug throwaway is reverted at the end of Phase 0). Deleted in **Phase 7** when the matrix collapses. **Phase 4 review — canary:** this is the only example exercising all four render modes + all four shadow modes (incl. `Invisible`/`SolidQuad`/`GlyphShadowMode::{SolidQuad,Text,PunchOut}`); it must compile clean at the end of Phase 5 and is then deleted in Phase 7 — if Phase 7 slips, `shadows.rs` breaks the moment those variants are removed. |
+| `text_renderer_gpu_bench.rs` | **Structural rewrite, not a reduction (Phase 4 review):** the whole `BenchMode { Empty, Msdf, Mtsdf, Sdf, Slug }` enum with its `text_renderer()` / `distance_field()` methods, the `AtlasConfig::new()…with_backend(Gpu)` setup, the CLI mode parsing, and `.with_renderer(...)` are woven through setup and all reference deleted DF types (`AtlasConfig`/`AtlasPreference`/`DistanceField`/`RasterBackend`/`RasterQuality`/`TextRenderer`/`TextRendererPreference`). Collapse to a single unconditional slug path. Auto-discovered — no manifest edit. Keep as a slug regression/optimization harness (note in `slug-benchmark-procedure.md` that cross-renderer comparison is gone). |
 | `atlas_pages.rs` | Delete (visualizes atlas pages; no slug analog). **Also remove its `[[example]] name = "atlas_pages"` entry from `bevy_diegetic/Cargo.toml`** — deleting the `.rs` while leaving the manifest entry makes `cargo build` fail with "can't find target". |
 | `preload_text.rs` | **Delete.** Built on the distance-field atlas preload API (`GlyphAtlas::preload`) and `GlyphLoadingPolicy`, both removed in the Phase 1–2 sequence. Slug needs no preload demo: per-glyph band-building is sub-millisecond — full printable ASCII preps in ≈ 0.84 ms (after per-curve dedup + 48-band tuning), well below one frame and below frame-timing resolution. There is no warm-up cost worth showcasing and no preload API is shipped. A project with very large glyph sets that notices first-frame lag can warm glyphs with its own Bevy task / async setup — no engine API required. **Also remove its `[[example]] name = "preload_text"` entry from `bevy_diegetic/Cargo.toml`.** |
-| `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). **Also remove its `[[bench]] name = "glyph_rasterization"` entry from `bevy_diegetic/Cargo.toml`.** This bench has no `required-features`, so `cargo bench --benches` (CI, `ci.yml:202`) compiles it and it imports deleted `DistanceField` / `GlyphAtlas` / `GlyphKey` — it is **red from the end of Phase 2 until this deletion lands**, so the source deletion, the manifest-entry removal, and the CI `cargo bench` edit must land together. **Phase 3 review:** this bench *also* imports `Slug*` types (`SlugBackend`, `SlugFontKey`, `SlugTextRequest`, `build_slug_run_render_data`, `DEFAULT_BAND_COUNT`) that Phase 4 makes `pub(crate)`; since the bench is already red, Phase 4's cut only adds errors to a dead target — but its deletion must not be deferred past Phase 4 for anyone running `cargo bench`. |
+| `benches/glyph_rasterization.rs` | Delete (CPU/GPU MSDF rasterizer bench; no slug analog). **Also remove its `[[bench]] name = "glyph_rasterization"` entry from `bevy_diegetic/Cargo.toml`.** This bench has no `required-features`, so `cargo bench --benches` (CI, `ci.yml:202`) compiles it and it imports deleted `DistanceField` / `GlyphAtlas` / `GlyphKey` — it is **red from the end of Phase 2 until this deletion lands**, so the source deletion, the manifest-entry removal, and the CI `cargo bench` edit must land together. **Phase 3 review:** this bench *also* imports `Slug*` types (`SlugBackend`, `SlugFontKey`, `SlugTextRequest`, `build_slug_run_render_data`, `DEFAULT_BAND_COUNT`) that Phase 4 makes `pub(crate)`; since the bench is already red, Phase 4's cut only adds errors to a dead target — but its deletion must not be deferred past Phase 4 for anyone running `cargo bench`. **Phase 4 review:** the bench also calls `backend.glyph_cache()` and the non-clip `build_slug_run_render_data` — both deleted in Phase 4 — so it is irrecoverably red; deletion is the only path. |
 | `examples/sdf.rs` | Untouched (panel SDF). |
 
 ### Phase 6 — Verify
 
 - [ ] `cargo build`
+- [ ] `cargo build --examples --benches` (Phase 4 review) — plain `cargo build`
+      does **not** compile examples/benches, so assert this explicitly; it is the
+      only red surface across Phases 1–5 and turns green only at the end of Phase 5.
 - [ ] `cargo nextest run` — expected baseline is **≈158 lib tests** (not 234;
       Phase 2 deleted the atlas/rasterizer modules and their ~76 tests), plus
       whatever example/bench targets compile after Phase 5. Do not treat the
@@ -724,11 +839,17 @@ the proxy loses nothing for matching shadows. This phase is independent
 of the Phase 1–3 sequence and leaves the build green.
 
 - [ ] Delete the slug shadow-proxy material path: the `is_shadow_proxy`
-      uniform field (`slug_text_spike/material.rs` `SlugTextUniform` and
-      `shaders/slug_text.wgsl`), the `slug_text_shadow_proxy_material`
-      constructor plus the `build_slug_text_material` proxy parameter
-      (fold back to one `slug_text_material`), the main-pass
-      `is_shadow_proxy` discard in the shader, and the `mod.rs` re-export.
+      uniform field (`text/slug/material.rs` `SlugTextUniform` and
+      `text/slug/shaders/slug_text.wgsl` — **paths moved in Phase 4**), the
+      `slug_text_shadow_proxy_material` constructor plus the
+      `build_slug_text_material` proxy parameter (fold back to one
+      `slug_text_material`), the main-pass `is_shadow_proxy` discard in the
+      shader, and the **`pub(crate)` re-export at `text/slug/mod.rs:26`** (Phase 4
+      removed all `lib.rs` slug re-exports, so this is the only surfacing point).
+      **Phase 4 review:** also reword the slug-module doc comments that describe
+      the deleted behavior — the `is_shadow_proxy` uniform doc (`material.rs` ~43–51)
+      and the `SlugRenderMode` variant docs (`material.rs` ~20–31), since
+      `Invisible`/`SolidQuad`/`is_shadow_proxy` are being deleted.
 - [ ] Delete the proxy spawn paths and markers: `WorldTextShadowProxy`
       + `slug_world_text_shadow_proxy_material` + the `needs_proxy`
       branch (`render/world_text/mesh_spawning.rs`); `DiegeticShadowProxy`
@@ -749,7 +870,12 @@ of the Phase 1–3 sequence and leaves the build green.
       `From<GlyphRenderMode> for SlugRenderMode` match arms in **both**
       `render/world_text/mesh_spawning.rs` and
       `render/text_renderer/batching.rs` — they match on the dropped
-      `Invisible` / `SolidQuad` variants.
+      `Invisible` / `SolidQuad` variants. **Phase 4 review:** the single
+      conversion seam is `From<GlyphRenderMode> for SlugRenderMode` at
+      `render/world_text/mesh_spawning.rs:237`; `slug_render_mode` is a sibling
+      `const fn` at `render/text_renderer/batching.rs:398`. The enum shrink, the
+      `From` impl, and both helpers must change in the same commit to keep the
+      build green.
 - [ ] Collapse `GlyphShadowMode` to a cast toggle (`{ None, Cast }`),
       replacing the `None / SolidQuad / Text / PunchOut` silhouette
       choice. Update `with_shadow_mode` and its call sites, and (Phase 1
@@ -790,9 +916,9 @@ everything slug.
 | Doc | Recommendation | Reason |
 | --- | --- | --- |
 | `gpu_rasterizer.md` (1539 lines) | **Delete** | Documents only the GPU SDF/MSDF rasterizer being removed. No slug content. |
-| `slug.md` (1275 lines) | **Keep, update status** | The slug backend design and source/license reference. Its framing ("experimental alternative, not a replacement for MTSDF") is now stale and should be updated to reflect slug as the sole renderer. |
-| `slug-experiments.md` (1798 lines) | **Keep, fix stale refs** | The experiment log that prevents repeating failed approaches. It references `benches/glyph_rasterization.rs` for CPU prep cost; that bench is deleted in Phase 5. With both that bench and `preload_text` gone, the ≈0.84 ms prep-cost figure has no measuring harness left (Phase 2 review) — either record it in the doc as a one-time measurement (with date + conditions) or preserve a slug prep micro-bench; do not leave a dangling reference to a deleted bench. |
-| `slug-benchmark-procedure.md` (244 lines) | **Keep, fix stale ref** | Canonical slug benchmark procedure. References `text_renderer_gpu_bench` (kept, converted to slug-only) but also the deleted `glyph_rasterization` bench for prep cost — note that prep cost is no longer tracked, or point at a slug replacement. |
+| `slug.md` (1275 lines) | **Keep, update status + audit deleted APIs** | The slug backend design and source/license reference. Its framing ("experimental alternative, not a replacement for MTSDF") is stale → reflect slug as the sole renderer. **Phase 4 review:** a design doc this long almost certainly documents the now-deleted standalone-shaping API — audit for and rewrite references to `SlugTextRequest`, `prepare_text_run`, `build_slug_text_run`/`_with_cache`, `load_glyph`/`load_glyph_by_id`, `FIXTURE_TEXT`, and the deleted `SlugOutlineError` variants (`MissingGlyph`/`MissingOutline`/`CubicOutline`); production shaping is now parley → `prepare_positioned_run_with_scale`. Not just a status reword. |
+| `slug-experiments.md` (1798 lines) | **Keep, fix stale refs** | The experiment log that prevents repeating failed approaches. It references `benches/glyph_rasterization.rs` for CPU prep cost; that bench is deleted in Phase 5. With both that bench and `preload_text` gone, the ≈0.84 ms prep-cost figure has no measuring harness left. **Phase 4 review:** the old measuring API (`build_slug_run_render_data` non-clip + `backend.glyph_cache()`) was deleted, so no drop-in micro-bench survives — **record the figure as a one-time measurement (with date + conditions)** is now the preferred branch; a replacement bench would have to be rebuilt against `prepare_positioned_run_with_scale` + `ensure_run_storage`. Do not leave a dangling reference to a deleted bench. |
+| `slug-benchmark-procedure.md` (244 lines) | **Keep, fix stale ref** | Canonical slug benchmark procedure. References `text_renderer_gpu_bench` (kept, converted to slug-only) but also the deleted `glyph_rasterization` bench for prep cost — note that prep cost is no longer tracked (the prep API it called was deleted in Phase 4), or point at a slug replacement. |
 | `slug_fx.md` (641 lines) | **Keep** | The effect-support plan that motivates this migration. |
 
 Other (non-`docs/`) artifacts that reference the removed engine, found

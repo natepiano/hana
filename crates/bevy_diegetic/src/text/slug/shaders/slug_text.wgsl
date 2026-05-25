@@ -1,4 +1,4 @@
-// Isolated Slug feasibility shader.
+// Slug analytic coverage text shader.
 //
 // This first pass evaluates non-zero winding coverage from quadratic curve
 // records grouped into horizontal bands. It is deliberately separate from

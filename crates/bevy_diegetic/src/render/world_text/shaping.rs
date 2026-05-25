@@ -13,10 +13,10 @@ use crate::render::text_shaping;
 use crate::render::text_shaping::PositionedGlyph;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
-use crate::slug_text_spike::DEFAULT_BAND_COUNT;
-use crate::slug_text_spike::SlugBackend;
-use crate::slug_text_spike::SlugPreparedTextRun;
 use crate::text::FontRegistry;
+use crate::text::slug::DEFAULT_BAND_COUNT;
+use crate::text::slug::SlugBackend;
+use crate::text::slug::SlugPreparedTextRun;
 
 /// Result of building Slug run data for a [`WorldText`](super::WorldText) entity.
 pub(super) struct ShapedSlugWorldText {
@@ -97,7 +97,6 @@ pub(super) fn build_world_slug_text(
     ) {
         Ok(prepared) => prepared,
         Err(err) => {
-            slug_backend.record_failure();
             bevy::log::warn!("world Slug text unsupported: {err}");
             stats.failed_glyphs += positioned_glyphs.len().max(1);
             stats.atlas_ms =

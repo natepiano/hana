@@ -24,9 +24,9 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
-use crate::slug_text_spike::DEFAULT_BAND_COUNT;
-use crate::slug_text_spike::SlugBackend;
 use crate::text::FontRegistry;
+use crate::text::slug::DEFAULT_BAND_COUNT;
+use crate::text::slug::SlugBackend;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
 pub(super) fn shape_panel_text_children(
@@ -175,7 +175,6 @@ fn build_panel_slug_text(
     ) {
         Ok(prepared) => prepared,
         Err(err) => {
-            slug_backend.record_failure();
             bevy::log::warn!("panel Slug text unsupported: {err}");
             stats.failed_glyphs += positioned_glyphs.len().max(1);
             stats.atlas_ms = slug_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;

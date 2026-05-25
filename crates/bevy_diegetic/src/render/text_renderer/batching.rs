@@ -20,14 +20,14 @@ use crate::panel::HueOffset;
 use crate::panel::RenderMode;
 use crate::render::constants;
 use crate::render::world_text::PanelTextChild;
-use crate::slug_text_spike;
-use crate::slug_text_spike::SlugBackend;
-use crate::slug_text_spike::SlugPreparedTextRun;
-use crate::slug_text_spike::SlugRenderMode;
-use crate::slug_text_spike::SlugRunStorage;
-use crate::slug_text_spike::SlugRunStorageKey;
-use crate::slug_text_spike::SlugTextMaterial;
-use crate::slug_text_spike::SlugTextMaterialInput;
+use crate::text::slug;
+use crate::text::slug::SlugBackend;
+use crate::text::slug::SlugPreparedTextRun;
+use crate::text::slug::SlugRenderMode;
+use crate::text::slug::SlugRunStorage;
+use crate::text::slug::SlugRunStorageKey;
+use crate::text::slug::SlugTextMaterial;
+use crate::text::slug::SlugTextMaterialInput;
 
 /// Marker component for text mesh entities spawned by the renderer.
 #[derive(Component)]
@@ -304,7 +304,7 @@ fn slug_panel_material(
     render_mode: impl Into<SlugRenderMode>,
     storage: &SlugRunStorage,
 ) -> SlugTextMaterial {
-    slug_text_spike::slug_text_material(slug_panel_input(
+    slug::slug_text_material(slug_panel_input(
         base,
         depth_bias,
         alpha_mode,
@@ -322,7 +322,7 @@ fn slug_panel_shadow_proxy_material(
     render_mode: impl Into<SlugRenderMode>,
     storage: &SlugRunStorage,
 ) -> SlugTextMaterial {
-    slug_text_spike::slug_text_shadow_proxy_material(slug_panel_input(
+    slug::slug_text_shadow_proxy_material(slug_panel_input(
         base,
         depth_bias,
         alpha_mode,

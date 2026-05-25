@@ -52,7 +52,7 @@ pub struct SlugContour {
     pub segments: Vec<QuadraticSegment>,
 }
 
-/// Quadratic-only Slug feasibility representation for one glyph.
+/// Quadratic-only outline representation for one Slug glyph.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlugGlyph {
     /// Unicode scalar used to request this glyph.
@@ -65,92 +65,27 @@ pub struct SlugGlyph {
     pub contours:  Vec<SlugContour>,
 }
 
-impl SlugGlyph {
-    /// Number of contours in this glyph outline.
-    #[must_use]
-    pub const fn contour_count(&self) -> usize { self.contours.len() }
-
-    /// Number of quadratic segments in this glyph outline.
-    #[must_use]
-    pub fn segment_count(&self) -> usize {
-        self.contours
-            .iter()
-            .map(|contour| contour.segments.len())
-            .sum()
-    }
-
-    /// Approximate unpacked curve bytes before Slug-specific packing.
-    #[must_use]
-    pub fn curve_bytes(&self) -> usize {
-        self.segment_count() * std::mem::size_of::<QuadraticSegment>()
-    }
-}
-
-/// Errors produced by the Slug feasibility outline loader.
+/// Errors produced by the Slug outline loader.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SlugOutlineError {
     /// Font bytes could not be parsed.
     InvalidFont,
-    /// The requested character has no glyph in the font.
-    MissingGlyph(char),
     /// The requested glyph ID has no outline entry in the font.
     MissingGlyphId(u16),
-    /// The glyph has no outline.
-    MissingOutline(char),
-    /// The glyph uses unsupported cubic outline segments.
-    CubicOutline {
-        character:      char,
-        cubic_segments: usize,
-    },
 }
 
 impl Display for SlugOutlineError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidFont => formatter.write_str("font bytes could not be parsed"),
-            Self::MissingGlyph(character) => {
-                write!(formatter, "font does not contain glyph for '{character}'")
-            },
             Self::MissingGlyphId(glyph_id) => {
                 write!(formatter, "font does not contain glyph id {glyph_id}")
             },
-            Self::MissingOutline(character) => {
-                write!(formatter, "glyph for '{character}' has no outline")
-            },
-            Self::CubicOutline {
-                character,
-                cubic_segments,
-            } => write!(
-                formatter,
-                "glyph for '{character}' uses {cubic_segments} cubic outline segments"
-            ),
         }
     }
 }
 
 impl Error for SlugOutlineError {}
-
-/// Loads one glyph from `font_data` and converts lines, quadratics, and cubics
-/// into the first Slug feasibility representation.
-pub fn load_glyph(font_data: &[u8], character: char) -> Result<SlugGlyph, SlugOutlineError> {
-    let face = Face::parse(font_data, 0).map_err(|_| SlugOutlineError::InvalidFont)?;
-    let glyph_id = face
-        .glyph_index(character)
-        .ok_or(SlugOutlineError::MissingGlyph(character))?;
-    load_glyph_from_face(&face, glyph_id, character)
-}
-
-/// Loads one glyph by resolved font glyph ID.
-///
-/// Parley shaping already resolves text into glyph IDs. This path keeps the
-/// Slug preprocessor from repeating Unicode character lookup.
-pub fn load_glyph_by_id(
-    font_data: &[u8],
-    glyph_id: u16,
-    character: char,
-) -> Result<SlugGlyph, SlugOutlineError> {
-    load_glyph_by_id_from_face(font_data, 0, glyph_id, character)
-}
 
 /// Loads one glyph by resolved font face and glyph ID.
 pub fn load_glyph_by_id_from_face(

@@ -1,12 +1,10 @@
 use bevy::asset::Asset;
-use bevy::asset::embedded_asset;
 use bevy::color::Color;
 use bevy::color::LinearRgba;
 use bevy::math::Vec4;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MaterialExtension;
 use bevy::pbr::StandardMaterial;
-use bevy::prelude::App;
 use bevy::prelude::Handle;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
@@ -16,7 +14,7 @@ use bevy::shader::ShaderRef;
 
 use super::constants::SLUG_TEXT_SHADER_PATH;
 
-/// Visible render mode for the isolated Slug shader path.
+/// Visible render mode for the Slug shader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u32)]
 pub enum SlugRenderMode {
@@ -35,22 +33,10 @@ impl From<SlugRenderMode> for u32 {
     fn from(mode: SlugRenderMode) -> Self { mode as Self }
 }
 
-/// Material used by the isolated Slug shader spike.
+/// Material used by the Slug text renderer.
 pub type SlugTextMaterial = ExtendedMaterial<StandardMaterial, SlugTextExtension>;
 
-/// Registers the embedded Slug text shader.
-///
-/// `embedded_asset!` resolves its path from the file it is invoked in, and
-/// the shader still lives in this module, so the registration stays here.
-/// [`TextPlugin`](crate::text::TextPlugin) calls this during setup, next to
-/// the `SlugBackend` and material-plugin init it now owns. When the slug
-/// files move under `text/slug/` (Phase 4 of the slug migration), this
-/// folds directly into `TextPlugin::build`.
-pub(crate) fn register_slug_text_shader(app: &mut App) {
-    embedded_asset!(app, "shaders/slug_text.wgsl");
-}
-
-/// Uniforms consumed by the Slug shader spike.
+/// Uniforms consumed by the Slug text shader.
 #[derive(Clone, Debug, ShaderType)]
 pub struct SlugTextUniform {
     /// Linear fill color.
@@ -87,7 +73,7 @@ impl MaterialExtension for SlugTextExtension {
     fn prepass_fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
 }
 
-/// Inputs for one Slug spike material instance.
+/// Inputs for one Slug text material instance.
 pub struct SlugTextMaterialInput {
     /// Base material settings.
     pub base:        StandardMaterial,

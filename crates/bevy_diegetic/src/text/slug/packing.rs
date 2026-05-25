@@ -8,7 +8,7 @@ use super::geometry::QuadraticSegment;
 use super::geometry::SlugBounds;
 use super::geometry::SlugGlyph;
 
-/// Default number of horizontal bands in the first Slug feasibility packing.
+/// Default number of horizontal bands packed per Slug glyph.
 pub const DEFAULT_BAND_COUNT: usize = 48;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
@@ -107,21 +107,15 @@ impl SlugGlyphRecord {
     }
 }
 
-/// One glyph's reference-like curve and band data for the shader spike.
+/// One glyph's packed curve and band data for the Slug shader.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlugPackedGlyph {
-    glyph:             SlugGlyph,
-    curves:            Vec<SlugCurveRecord>,
-    bands:             Vec<SlugBandRecord>,
-    outline_segments:  usize,
-    duplicated_curves: usize,
+    glyph:  SlugGlyph,
+    curves: Vec<SlugCurveRecord>,
+    bands:  Vec<SlugBandRecord>,
 }
 
 impl SlugPackedGlyph {
-    /// Source glyph for this packed data.
-    #[must_use]
-    pub const fn glyph(&self) -> &SlugGlyph { &self.glyph }
-
     /// Glyph bounds in font design-space units.
     #[must_use]
     pub const fn bounds(&self) -> SlugBounds { self.glyph.bounds }
@@ -133,33 +127,12 @@ impl SlugPackedGlyph {
     /// Band records.
     #[must_use]
     pub fn bands(&self) -> &[SlugBandRecord] { &self.bands }
-
-    /// Number of original outline segments before band duplication.
-    #[must_use]
-    pub const fn outline_segments(&self) -> usize { self.outline_segments }
-
-    /// Number of curve records after per-band duplication.
-    #[must_use]
-    pub const fn duplicated_curves(&self) -> usize { self.duplicated_curves }
-
-    /// Approximate bytes used by band-packed curve records before final Slug packing.
-    #[must_use]
-    pub const fn curve_bytes(&self) -> usize {
-        self.curves.len() * std::mem::size_of::<SlugCurveRecord>()
-    }
-
-    /// Approximate bytes used by band records before final Slug packing.
-    #[must_use]
-    pub const fn band_bytes(&self) -> usize {
-        self.bands.len() * std::mem::size_of::<SlugBandRecord>()
-    }
 }
 
 /// Builds horizontal band data for one quadratic glyph.
 #[must_use]
 pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyph {
     let band_count = band_count.max(1);
-    let outline_segments = glyph.segment_count();
     let mut curves = Vec::new();
     let mut bands = Vec::with_capacity(band_count * 2);
     let bounds = glyph.bounds;
@@ -193,13 +166,10 @@ pub fn build_packed_glyph(glyph: SlugGlyph, band_count: usize) -> SlugPackedGlyp
         &mut bands,
     );
 
-    let duplicated_curves = curves.len();
     SlugPackedGlyph {
         glyph,
         curves,
         bands,
-        outline_segments,
-        duplicated_curves,
     }
 }
 

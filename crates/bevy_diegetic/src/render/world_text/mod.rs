@@ -24,9 +24,9 @@ use crate::cascade::Resolved;
 use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
-use crate::slug_text_spike::SlugBackend;
-use crate::slug_text_spike::SlugTextMaterial;
 use crate::text::FontRegistry;
+use crate::text::slug::SlugBackend;
+use crate::text::slug::SlugTextMaterial;
 
 pub(super) fn render_world_text(
     changed_texts: Query<

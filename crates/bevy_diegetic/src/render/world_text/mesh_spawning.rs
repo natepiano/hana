@@ -11,13 +11,13 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
 use crate::layout::WorldTextStyle;
 use crate::render::constants;
-use crate::slug_text_spike;
-use crate::slug_text_spike::SlugBackend;
-use crate::slug_text_spike::SlugPreparedTextRun;
-use crate::slug_text_spike::SlugRenderMode;
-use crate::slug_text_spike::SlugRunStorageKey;
-use crate::slug_text_spike::SlugTextMaterial;
-use crate::slug_text_spike::SlugTextMaterialInput;
+use crate::text::slug;
+use crate::text::slug::SlugBackend;
+use crate::text::slug::SlugPreparedTextRun;
+use crate::text::slug::SlugRenderMode;
+use crate::text::slug::SlugRunStorageKey;
+use crate::text::slug::SlugTextMaterial;
+use crate::text::slug::SlugTextMaterialInput;
 
 /// Marker for mesh entities spawned by the world text renderer.
 #[derive(Component)]
@@ -146,7 +146,7 @@ fn slug_world_text_material(
     bands: Handle<ShaderStorageBuffer>,
     glyphs: Handle<ShaderStorageBuffer>,
 ) -> SlugTextMaterial {
-    slug_text_spike::slug_text_material(slug_world_text_input(
+    slug::slug_text_material(slug_world_text_input(
         style,
         alpha_mode,
         render_mode,
@@ -164,7 +164,7 @@ fn slug_world_text_shadow_proxy_material(
     bands: Handle<ShaderStorageBuffer>,
     glyphs: Handle<ShaderStorageBuffer>,
 ) -> SlugTextMaterial {
-    slug_text_spike::slug_text_shadow_proxy_material(slug_world_text_input(
+    slug::slug_text_shadow_proxy_material(slug_world_text_input(
         style,
         alpha_mode,
         render_mode,

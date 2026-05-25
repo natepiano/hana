@@ -16,8 +16,10 @@ mod font;
 mod font_loader;
 mod font_registry;
 mod measurer;
+pub(crate) mod slug;
 
 use bevy::asset::AssetLoadFailedEvent;
+use bevy::asset::embedded_asset;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 pub(crate) use constants::DEFAULT_FAMILY;
@@ -37,18 +39,15 @@ pub use measurer::DiegeticTextMeasurer;
 pub use measurer::create_parley_measurer;
 
 use self::font_loader::FontLoader;
-use crate::slug_text_spike::SlugBackend;
-use crate::slug_text_spike::SlugTextMaterial;
-use crate::slug_text_spike::register_slug_text_shader;
+use self::slug::SlugBackend;
+use self::slug::SlugTextMaterial;
 
 pub(crate) struct TextPlugin;
 
 impl Plugin for TextPlugin {
     fn build(&self, app: &mut App) {
-        // Slug text setup travels with the font infrastructure. The shader
-        // registration stays in the slug module until its files move under
-        // `text/slug/` (Phase 4 of the slug migration).
-        register_slug_text_shader(app);
+        // Slug glyph rendering travels with the font infrastructure.
+        embedded_asset!(app, "slug/shaders/slug_text.wgsl");
         app.init_resource::<SlugBackend>();
         app.add_plugins(MaterialPlugin::<SlugTextMaterial>::default());
 
