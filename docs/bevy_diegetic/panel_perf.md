@@ -326,6 +326,32 @@ frequently; lower priority if updates are rare.
   `ChildOf` is inserted, so `Resolved<TextAlpha>` is seeded before
   `build_panel_text_meshes` reads it. Verified safe; state it so a future change
   doesn't break it silently.
+- **M6 — `gating_eq` spans three components (sharpens R1).** The comparator
+  covers `WorldText` (`.text()`), `WorldTextStyle` (metric fields via `to_bits`,
+  excluding `unit`/`world_scale`), **and** `PanelTextLayout`'s `bounds`/`scale_x`/
+  `scale_y`/`anchor_x`/`anchor_y`/`clip_rect` (floats via `to_bits`).
+  `command_index` is part of the reuse key `(element_idx, command_index)`, so it
+  is constant within a reused slot and is *not* part of the comparator.
+- **M7 — Alpha-system gating mechanism + no inter-system ordering (corrects
+  cycle-1 wording; sharpens R3).** `Without<Changed<PanelText>>` is **not**
+  expressible — `Without<T>` takes a component, `Changed<T>` is a query filter.
+  `update_panel_text_alpha` instead queries `Changed<Resolved<TextAlpha>>` and
+  reads `Ref<PanelText>`, skipping the run when `panel_text.is_changed()`. With
+  that skip, the both-changed case is handled in *any* run order (the geometry
+  system rebuilds with correct alpha), so no explicit edge between the two
+  systems is required.
+- **M8 — Images need no reparenting (sharpens Edit 3).**
+  `reconcile_panel_image_children` already reuses children by `element_idx` and
+  despawns orphans synchronously (`reconcile.rs:252-258`), so per-element reuse
+  needs no reparent and no remove-observer. Image gating compares *inputs*
+  (`handle`/`tint`/`bounds`) — not the `StandardMaterial`, so the
+  `classify_material_change` caveat (`element.rs:464`) does not apply — and
+  compares `bounds` via `to_bits` for consistency with text gating.
+- **M9 — Shared text-material builder signature (sharpens R9).**
+  `build_text_material(base, alpha_mode, fill_color, render_mode, curves, bands,
+  glyphs) -> SlugTextMaterial`; callers set `depth_bias`/`sidedness` on `base`
+  first. Place it in the `text` module so both `panel_text` and `world_text`
+  import it without a new cross-module coupling.
 
 ### Proposed user decisions
 
@@ -453,3 +479,103 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
   appearance split to images; factor a shared material builder).
   Status: **accepted — folded into the plan** as Edit 3 (images) and the shared
   text-material builder; see §3 and §5.
+
+- **R10 — (new, review 2) The geometry system must handle `PanelText`
+  *removal*, not just `Changed`.** Severity: **important**. Dimension:
+  correctness. Class: design-improvement.
+  Problem: when a run's text goes empty, `shape_panel_text_children` calls
+  `clear_panel_text_output`, which **removes** `PanelText` (`shaping.rs:120-125`).
+  `Changed<PanelText>` does not fire on component removal, so a geometry system
+  gated only on `Changed<PanelText>` (R3) would leave the emptied run's mesh in
+  place — a stale glyph. The current monolithic `build_panel_text_meshes` avoids
+  this because it despawns all of a dirty panel's meshes and then respawns only
+  the children that still carry `PanelText`; the two-system split loses that
+  coverage.
+  Impact: stale mesh on a run whose text empties (regression vs. current code).
+  Recommendation: have `update_panel_text_geometry` also react to
+  `RemovedComponents<PanelText>` (despawn that run's mesh), or add an
+  `On<Remove, PanelText>` observer that despawns the run's `DiegeticTextMesh`
+  child. Either composes with R2's storage-cleanup observer.
+  Status: **accepted**.
+
+---
+
+## 9. Implementation phases (commit sequence)
+
+Each phase is one commit: dependency-ordered, independently buildable and
+testable. The §3 Edits and §8 decisions (R/M) each map to exactly one phase.
+Dependency spine: P1 → P3 (gating_eq before reconcile uses it); P2 before
+P5/P6 (shared builder before the systems that call it); P4 before P5 (reparent
+before the split locates meshes via `ChildOf`).
+
+### Phase 1 — `gating_eq` comparator (R1, M6)
+Pure addition, no behavior change (nothing calls it yet).
+- Add a bit-equality `gating_eq` spanning `WorldText.text()`, `WorldTextStyle`
+  metric fields (via `to_bits`, excluding `unit`/`world_scale`), and
+  `PanelTextLayout` `bounds`/`scale_x`/`scale_y`/`anchor_x`/`anchor_y`/`clip_rect`
+  (via `to_bits`). Not a derived/manual `PartialEq`.
+- Files: `layout/text_props.rs`, `render/panel_text/layout.rs`.
+- Tests: matches `layout_eq_excluding_visuals` on metric fields; `unit`/
+  `world_scale` changes don't flag; `-0.0`/`+0.0` treated correctly.
+
+### Phase 2 — shared text-material builder (R9 builder part, M9)
+Pure refactor, no behavior change.
+- Extract `build_text_material(base, alpha_mode, fill_color, render_mode,
+  curves, bands, glyphs) -> SlugTextMaterial` into the `text` module; callers
+  set `depth_bias`/`sidedness` on `base` first. Route `panel_text` and
+  `world_text` material construction through it.
+- Files: `text/mod.rs` (or `text/material.rs`), `render/panel_text/mesh_spawning.rs`,
+  `render/world_text/mesh_spawning.rs`.
+- Tests: existing render tests still pass (no behavior change).
+
+### Phase 3 — gate reconcile (Edit 1, R7)
+- `reconcile_panel_text_children` reads the existing `WorldText`/`WorldTextStyle`/
+  `PanelTextLayout` and writes only when `gating_eq` differs; same gate on the
+  `Override<TextAlpha>` branch. Note the `(element_idx, command_index)` reorder
+  limitation in a comment (R7).
+- Files: `render/panel_text/reconcile.rs`.
+- Tests: an unchanged run is not marked `Changed` across a rebuild.
+
+### Phase 4 — reparent text meshes + storage observer (R4, R2, M5)
+- Spawn each `DiegeticTextMesh` as a child of its `PanelChild` (not the panel);
+  drop the `Entity` source-tag, locate meshes via `ChildOf`. Remove the
+  panel-parent despawn loop. Add the `On<Remove, DiegeticTextMesh>` observer
+  that frees run storage. The monolithic build stays, adapted to the new
+  parentage. Document the `seed_panel_child_alpha` ordering (M5).
+- Files: `render/panel_text/mesh_spawning.rs`, `render/panel_text/mod.rs`.
+- Tests: removing a `PanelChild` frees its run storage; whole-panel despawn
+  cleans up; rendering unchanged.
+
+### Phase 5 — split into geometry + alpha systems (Edit 2, R3, R5, R10, M2, M7, R6)
+The core per-run change.
+- Replace the monolithic build with `update_panel_text_geometry`
+  (`Changed<PanelText>` **and** `RemovedComponents<PanelText>` [R10] → despawn +
+  respawn that run's mesh) and `update_panel_text_alpha`
+  (`Changed<Resolved<TextAlpha>>`, skip via `Ref<PanelText>::is_changed()` [M7],
+  value-guarded `material.base.alpha_mode` write [R5]). Register both in
+  `mod.rs`, `.before(TransformSystems::Propagate)`. Depth bias still from
+  `command_index` (M2).
+- Files: `render/panel_text/mesh_spawning.rs`, `render/panel_text/mod.rs`.
+- Tests: unchanged run's mesh preserved while only the changed run swaps;
+  alpha-only change preserves mesh + buffers and updates `base.alpha_mode`
+  in place; no-op alpha resolution doesn't trip `Changed<SlugTextMaterial>`;
+  an emptied run despawns its mesh; a newly-inserted run has a non-identity
+  `GlobalTransform` by the second frame (R6).
+
+### Phase 6 — world-text alpha short-circuit (Edit 2b)
+- Apply the geometry-vs-alpha distinction to `render_world_text`: an alpha-only
+  change mutates `material.base.alpha_mode` in place (value-guarded); other
+  changes rebuild. World text is single-run per entity, so no reparent needed.
+- Files: `render/world_text/mod.rs`, `render/world_text/mesh_spawning.rs`.
+- Tests: a world-text alpha-only change does not respawn the mesh.
+
+### Phase 7 — image per-run gating + tint split (Edit 3, R9 image part, M8)
+- Gate `reconcile_panel_image_children` on input equality (`handle`/`tint`/
+  `bounds`, bounds via `to_bits`); a tint-only change mutates `base_color` in
+  place (value-guarded), a bounds/handle change rebuilds the rectangle mesh +
+  material. No reparent and no storage observer for images (M8).
+- Files: `render/panel_text/reconcile.rs`.
+- Tests: a tint-only change updates `base_color` without rebuilding the mesh.
+
+**Doc-only (no commit of their own):** M1, M3, M4 are corrections to this
+document; fold M4's test list into the per-phase tests above.
