@@ -3,6 +3,7 @@ authors.workspace    = true
 categories           = ["game-development", "gui"]
 description          = "Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm"
 edition.workspace    = true
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_diegetic"
 keywords             = ["bevy", "diegetic", "layout", "ui"]
 license.workspace    = true
 name                 = "bevy_diegetic"
