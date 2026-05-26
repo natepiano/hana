@@ -36,7 +36,6 @@ type ChangedWorldTextQuery<'w, 's> = Query<
         Or<(
             Changed<WorldText>,
             Changed<WorldTextStyle>,
-            Changed<Resolved<TextAlpha>>,
             Changed<Resolved<FontUnit>>,
         )>,
     ),
@@ -192,7 +191,10 @@ impl<'a, 'mesh_world, 'mesh_state, 'mesh_data>
             readiness,
             GlyphReadiness::Ready | GlyphReadiness::Invisible | GlyphReadiness::Failed
         ) {
-            backend_services.backend.clear_run_storage();
+            // Despawning the run's mesh frees its storage through the
+            // `On<Remove, WorldTextMesh>` observer — the same per-run cleanup
+            // the panel-text path uses. No blunt `clear_run_storage()`, which
+            // would wipe every panel run's storage out of the shared cache.
             mesh_spawning::despawn_mesh_children(entity, self.old_meshes, commands);
         }
 

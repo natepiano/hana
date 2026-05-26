@@ -9,6 +9,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
 use mesh_spawning::WorldTextMesh;
+pub(super) use mesh_spawning::free_run_storage_on_world_mesh_removal;
+pub(super) use mesh_spawning::update_world_text_alpha;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
@@ -36,7 +38,6 @@ pub(super) fn render_world_text(
             Or<(
                 Changed<WorldText>,
                 Changed<WorldTextStyle>,
-                Changed<Resolved<TextAlpha>>,
                 Changed<Resolved<FontUnit>>,
             )>,
         ),

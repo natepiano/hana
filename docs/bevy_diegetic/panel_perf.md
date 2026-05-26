@@ -886,7 +886,7 @@ One confirmation finding (world text's `Without<PanelChild>` filtering and its
 distinct `WorldTextMesh` marker are unaffected by the Phase-4 reparent) needed no
 change.
 
-### Phase 6 — world-text alpha short-circuit (Edit 2b)
+### Phase 6 — world-text alpha short-circuit (Edit 2b) — Done
 Larger than a one-line guard: it mirrors Phase 5's two-signal split, because
 `render_world_text` (`world_text/rendering.rs:191-208`) has no per-entity
 alpha branch — it always re-runs text shaping for the run, then on
@@ -948,6 +948,16 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   own `mesh_ms`/`total_ms` accounting (`rendering.rs`). Mirror Phase 5's
   "geometry/respawn owns the timer": the alpha-only branch touches no mesh, so an
   alpha-only frame reports ~0 world-text mesh time.
+- **Invariant (Phase 6–7 review): keep the geometry trigger and the alpha skip
+  in sync.** `ChangedWorldTextQuery`'s `Or` (the trigger, duplicated in the
+  `mod.rs` wrapper query) and `update_world_text_alpha`'s skip
+  (`WorldText` / `WorldTextStyle` / `Resolved<FontUnit>` `is_changed()`) are
+  three hand-maintained copies of the same signal set. The both-changed
+  coordination — geometry owns the run, alpha no-ops — holds only while they
+  match; adding a fourth geometry trigger without adding it to the skip reopens
+  the despawn-vs-mutate race (the world-text twin of Phase 5's panel hazard).
+  The alpha system's inner `run_meshes` scan is O(changed × world meshes), the
+  same as the panel path — negligible while standalone world text is sparse.
 - Files: `render/world_text/mod.rs`, `render/world_text/rendering.rs`,
   `render/world_text/mesh_spawning.rs`.
 - Tests: a world-text alpha-only change mutates `base.alpha_mode` and does not
@@ -957,7 +967,7 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   own run's storage and leaves a co-existing panel run's storage intact (the
   shared-`GlyphCache` regression).
 
-### Phase 7 — image per-run gating + tint split (Edit 3, R9 image part, M8)
+### Phase 7 — image per-run gating + tint split (Edit 3, R9 image part, M8) — Done
 - Gate `reconcile_panel_image_children` on input equality (`handle`/`tint`/
   `bounds`, bounds via `to_bits`); a tint-only change mutates `base_color` in
   place (value-guarded), a bounds/handle change rebuilds the rectangle mesh +
@@ -1000,14 +1010,103 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   tint branch must be skipped entirely when the cached `tint` is unchanged — the
   R5 field-guard alone is insufficient. Gate at the comparison, not just at the
   write.
+- **Depth-bias-under-reorder is the same concern as text, solved by the opposite
+  mechanism (Phase 6–7 review).** Text keys reuse by `(element_idx,
+  command_index)`, so a slot shift is a cache miss → respawn → fresh bias
+  (M2/R7). Images key reuse by `element_idx` only, so the shift is instead caught
+  by gating `command_index` and rebuilding the material. Both keep layering
+  correct under reorder; the text path is not missing the image guard.
 - Files: `render/panel_text/reconcile.rs`.
 - Tests: a tint-only change updates `base_color` without rebuilding the mesh; an
   unchanged image is not re-touched (no `get_mut` call); inserting a sibling
   image above a reused one shifts its `cmd_index` and rebuilds its material so
   `depth_bias` stays correct (no z-fight on reorder).
 
-**Doc-only (no commit of their own):** M1, M3, M4 are corrections to this
-document; fold M4's test list into the per-phase tests above.
+**Doc-only (no commit of their own):** M1 is a §3 correction. M3 (add
+`render/panel_text/mod.rs` to "Files touched") is satisfied and broader than
+first scoped — `mod.rs` now registers two run-storage observers
+(`free_run_storage_on_mesh_removal` + `free_run_storage_on_world_mesh_removal`)
+and four `PostUpdate` systems (including `update_world_text_alpha`), not just the
+single R2 registration. M4's four tests all exist and pass (panel + world
+alpha-only no-respawn, storage-cleanup-on-despawn, R6 `GlobalTransform`), so M4
+is satisfied with no separate fold needed.
+
+**Follow-up (not in this plan):** the orphan `render/world_text/panel_child.rs`
+(uncompiled, absent from `mod.rs`) is a stale second definition of `PanelChild` —
+the live one lives in `world_text/mod.rs`. Delete it so a future edit cannot
+touch the wrong copy.
+
+#### Retrospective (Phases 6 & 7)
+
+**What worked:**
+- Phase 6 mirrored the Phase 4/5 split exactly: deleted the inline
+  `clear_run_storage()` and the now-dead `GlyphCache::clear_run_storage` method,
+  added `free_run_storage_on_world_mesh_removal` (`On<Remove, WorldTextMesh>`),
+  and split alpha into `update_world_text_alpha` after narrowing both copies of
+  the geometry trigger (`rendering.rs` `ChangedWorldTextQuery` alias + the
+  `mod.rs` wrapper) to drop `Changed<Resolved<TextAlpha>>`.
+- Phase 7 gated `reconcile_panel_image_children` on `handle`/`tint`/`bounds`/
+  `command_index`: a tint-only change mutates `base_color` in place, anything
+  else rebuilds mesh+material. Extracted `build_image_visuals` +
+  `reconcile_existing_image` helpers (orchestrator pattern) and a local
+  `bounds_bits` to bit-compare bounds.
+- The shared-`GlyphCache` regression test passes: a standalone world-text rebuild
+  with a co-existing panel run leaves the panel run's storage intact (was wiped
+  by `clear_run_storage()` before).
+
+**What deviated from the plan:**
+- The two new world-text systems (`free_run_storage_on_world_mesh_removal`,
+  `update_world_text_alpha`) are bare `pub` in the private `mesh_spawning`
+  module and re-exported `pub(super)` from `world_text/mod.rs`, because the
+  `TextRenderPlugin` that registers them lives in the sibling `panel_text`
+  module — the leaf-module-visibility pattern, matching `WorldTextMesh`.
+- The world-text alpha M7 skip needs three change-signals
+  (`Ref<WorldText>` + `Ref<WorldTextStyle>` + `Option<Ref<Resolved<FontUnit>>>`),
+  not one, because the geometry trigger is a three-way `Or`. Panel text only
+  needed `Ref<PanelText>`.
+
+**Surprises:**
+- `AssetEvent` is read with `MessageReader`, not `EventReader`, in this Bevy
+  (0.19.0-rc.2) — buffered events are messages. The "unchanged image not
+  re-touched" test uses a `MessageReader<AssetEvent<StandardMaterial>>` probe to
+  assert no `Modified` event fires for the skipped image's material.
+- `command_index` shift under reorder is testable purely through layout:
+  toggling an image element's own `background` prepends a rectangle command,
+  bumping the image's `command_index` from 0→1 while its `element_idx` stays
+  stable — so reconcile reuses the child by `element_idx` and rebuilds its
+  material for the new `depth_bias`.
+
+**Implications for remaining phases:**
+- No implementation phases remain. §10 (runtime settings ergonomics) is a
+  separate track; M1/M3/M4 are doc-only corrections already folded in.
+
+#### Phase 6–7 Review
+
+Architect re-review against the shipped Phase 6/7 code. Phases 6 & 7 were the
+last implementation phases, so the review weighted revealed gaps and new risks;
+no `significant` findings (nothing changes scope, ordering, or architecture).
+Minor edits applied:
+- **Phase 6** gained an invariant note: the geometry trigger (`ChangedWorldTextQuery`
+  `Or`, duplicated in the `mod.rs` wrapper) and `update_world_text_alpha`'s skip
+  are three hand-maintained copies of one signal set that must stay in sync, or
+  the despawn-vs-mutate race reopens; the alpha inner scan is O(changed × meshes)
+  like the panel path.
+- **Phase 7** gained a cross-reference: depth-bias-under-reorder is the same
+  concern as text, solved oppositely (text respawns on a `(element_idx,
+  command_index)` cache miss; images gate `command_index` and rebuild the
+  material) — the text path is not missing the image guard.
+- **Doc-only:** M3 marked satisfied-and-broader (`mod.rs` registers two observers
+  + four systems, not just R2); M4 marked satisfied (all four tests exist and
+  pass); added a follow-up to delete the orphan `world_text/panel_child.rs`
+  (stale second `PanelChild` definition, not in this plan).
+
+Confirmed clean (no change): deleting `clear_run_storage` left no orphaned
+caller — all three text-despawn paths route through `On<Remove>` observers, and
+the shared-`GlyphCache` regression test proves the cross-path leak is closed;
+the both-changed coordination is sound on both text paths (geometry owns the
+run, alpha `Option`-guards `get_mut`); §10 stays a correctly-scoped separate
+track, with its gap-3 footgun (spawn-only `WorldTextStyle.alpha_mode`/`.unit`)
+reinforced but unchanged by Phase 6.
 
 ---
 

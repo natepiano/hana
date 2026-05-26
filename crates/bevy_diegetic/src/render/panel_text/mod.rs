@@ -54,6 +54,7 @@ impl Plugin for TextRenderPlugin {
         app.add_observer(world_text::seed_world_text_overrides);
         app.add_observer(seed_panel_child_alpha);
         app.add_observer(free_run_storage_on_mesh_removal);
+        app.add_observer(world_text::free_run_storage_on_world_mesh_removal);
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
@@ -70,6 +71,7 @@ impl Plugin for TextRenderPlugin {
                     .after(shape_panel_text_children)
                     .before(TransformSystems::Propagate),
                 world_text::render_world_text.before(TransformSystems::Propagate),
+                world_text::update_world_text_alpha.before(TransformSystems::Propagate),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );

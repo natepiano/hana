@@ -168,9 +168,6 @@ impl GlyphCache {
         self.run_storage.remove(&key)
     }
 
-    /// Removes every backend-owned run storage handle.
-    pub fn clear_run_storage(&mut self) { self.run_storage.clear(); }
-
     /// Number of prepared runs that currently hold backend GPU storage.
     #[cfg(test)]
     pub fn run_storage_len(&self) -> usize { self.run_storage.len() }
