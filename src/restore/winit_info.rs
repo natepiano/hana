@@ -7,6 +7,7 @@ use bevy::winit::WINIT_WINDOWS;
 
 use super::target_position;
 use super::target_position::MonitorResolutionSource;
+use super::target_position::RestoreDiagnostics;
 use super::target_position::TargetPosition;
 use crate::Platform;
 use crate::WindowKey;
@@ -220,7 +221,15 @@ pub(crate) fn load_target_position(
 
     let entity = *window_entity;
     let is_fullscreen = state.saved_window_mode.is_fullscreen();
-    commands.entity(entity).insert(target_position);
+    let restore_diagnostics = RestoreDiagnostics {
+        starting_monitor_index,
+        starting_scale,
+        target_scale: target_position.target_scale,
+        monitor_scale_strategy: target_position.monitor_scale_strategy,
+    };
+    commands
+        .entity(entity)
+        .insert((target_position, restore_diagnostics));
 
     if is_fullscreen || !platform.needs_frame_compensation() {
         commands.entity(entity).insert(X11FrameCompensated);

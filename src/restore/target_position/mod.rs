@@ -14,5 +14,6 @@ pub(crate) use run_conditions::no_restoring_windows;
 pub(crate) use strategy::FullscreenRestoreState;
 pub(crate) use strategy::MonitorScaleStrategy;
 pub(crate) use strategy::WindowRestoreState;
+pub(crate) use target::RestoreDiagnostics;
 pub(crate) use target::TargetPosition;
 pub(crate) use target::compute_target_position;

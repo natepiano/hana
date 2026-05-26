@@ -94,6 +94,27 @@ impl TargetPosition {
     }
 }
 
+/// Durable record of a restore's launch context and chosen strategy.
+///
+/// Unlike [`TargetPosition`], this is **not** removed when the restore settles —
+/// it persists so a test can read, via BRP, which monitor the window actually
+/// launched on and which [`MonitorScaleStrategy`] ran. The launch monitor is
+/// environmental on macOS (the OS picks the spawn display), so a cross-DPI test
+/// can silently degrade into a same-scale restore; asserting these fields makes
+/// that degradation a failure instead of a hollow pass.
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[reflect(Component)]
+pub(crate) struct RestoreDiagnostics {
+    /// Monitor the window launched on, before any restore move.
+    pub(crate) starting_monitor_index: usize,
+    /// Scale factor of the launch monitor.
+    pub(crate) starting_scale:         f64,
+    /// Scale factor of the restore target monitor.
+    pub(crate) target_scale:           f64,
+    /// Strategy chosen from the launch-versus-target scale relationship.
+    pub(crate) monitor_scale_strategy: MonitorScaleStrategy,
+}
+
 /// Compute a `TargetPosition` from saved state and a resolved target monitor.
 #[must_use]
 pub(crate) fn compute_target_position(

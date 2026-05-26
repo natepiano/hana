@@ -63,6 +63,7 @@ COMP_WINDOW: Final = "bevy_window::window::Window"
 COMP_PRIMARY: Final = "bevy_window::window::PrimaryWindow"
 COMP_MANAGED: Final = "bevy_window_manager::managed::ManagedWindow"
 COMP_CURRENT_MONITOR: Final = "bevy_window_manager::monitors::CurrentMonitor"
+COMP_LAUNCH_INFO: Final = "bevy_window_manager::restore::target_position::target::RestoreDiagnostics"
 COMP_MONITORS: Final = "bevy_window_manager::monitors::Monitors"
 COMP_MONITOR: Final = "bevy_window::monitor::Monitor"
 COMP_PERSISTENCE: Final = "bevy_window_manager::managed::ManagedWindowPersistence"
@@ -285,7 +286,10 @@ class BrpClient:
 
     def query_primary(self) -> JsonDict:
         return self.call("world.query", {
-            "data": {"components": [COMP_WINDOW, COMP_CURRENT_MONITOR]},
+            "data": {
+                "components": [COMP_WINDOW, COMP_CURRENT_MONITOR],
+                "option": [COMP_LAUNCH_INFO],
+            },
             "filter": {"with": [COMP_PRIMARY]},
         })
 
@@ -789,6 +793,64 @@ def validate_window(
 
         elif field == "exit_code":
             pass  # handled separately
+
+
+def _strategy_name(raw: object) -> str:
+    """Variant name of a serialized MonitorScaleStrategy.
+
+    Unit variants serialize as a bare string ("ApplyUnchanged", "LowerToHigher");
+    data-carrying variants as a single-key object ({"HigherToLower": "NeedInitialMove"}).
+    """
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        keys = list(cast(JsonDict, raw).keys())
+        if keys:
+            return keys[0]
+    return "unknown"
+
+
+def validate_launch_monitor(test: TestEntry, entity: JsonDict) -> None:
+    """Verify the window launched on the test's launch_monitor and, for
+    different-scale tests, genuinely exercised a cross-DPI strategy.
+
+    The launch monitor is environmental on macOS (the OS picks the spawn
+    display), so a cross-DPI test can silently spawn on the target monitor —
+    a same-scale restore that passes position/size/monitor checks without ever
+    running the cross-DPI path. RestoreDiagnostics records the launch monitor
+    and chosen strategy durably so the precondition can be asserted instead of
+    assumed.
+    """
+    diagnostics = extract_from_entity(entity, COMP_LAUNCH_INFO)
+    if not isinstance(diagnostics, dict):
+        fail_line("primary", "launch_monitor", "RestoreDiagnostics missing (restore did not run?)")
+        return
+    diagnostics = cast(JsonDict, diagnostics)
+
+    expected_launch = test.get("launch_monitor", 0)
+    actual_launch = diagnostics.get("starting_monitor_index")
+    strategy = _strategy_name(diagnostics.get("monitor_scale_strategy"))
+    starting_scale = diagnostics.get("starting_scale")
+    target_scale = diagnostics.get("target_scale")
+    detail = f"strategy={strategy} starting_scale={starting_scale} target_scale={target_scale}"
+
+    if actual_launch != expected_launch:
+        reason = "launch precondition not met; re-run (macOS spawn monitor is environmental)"
+        fail_line(
+            "primary",
+            "launch_monitor",
+            f"expected={expected_launch} actual={actual_launch} ({detail}) — {reason}",
+        )
+        return
+    pass_line("primary", "launch_monitor", f"expected={expected_launch} actual={actual_launch} ({detail})")
+
+    requires = test.get("requires", {})
+    if requires.get("different_scales") and strategy == "ApplyUnchanged":
+        fail_line(
+            "primary",
+            "strategy",
+            f"cross-DPI test but strategy=ApplyUnchanged — cross-DPI path not exercised ({detail})",
+        )
 
 
 # =============================================================================
@@ -1538,6 +1600,13 @@ def run_test(
 
     # Initial validation
     validate_all_windows(windows, ron_values, prefix="", backend=resolved_backend, env_vars=env_vars)
+
+    # Launch-monitor precondition: confirm the window actually launched on the
+    # test's launch_monitor (and ran a cross-DPI strategy when one was intended),
+    # rather than spawning same-scale and passing the checks above hollowly.
+    primary_entity = resolve_primary_entity()
+    if primary_entity is not None:
+        validate_launch_monitor(test, primary_entity)
 
     # Persistence setup (set mode before shutdown)
     if has_persistence:
