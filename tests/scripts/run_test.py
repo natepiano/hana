@@ -201,6 +201,10 @@ def fail_line(key: str, field: str, details: str) -> None:
     fail_count += 1
 
 
+def skip_line(key: str, field: str, details: str) -> None:
+    print(f"SKIP {key} {field} {details}")
+
+
 def die(msg: str) -> NoReturn:
     print(f"ERROR {msg}", file=sys.stderr)
     sys.exit(2)
@@ -810,7 +814,7 @@ def _strategy_name(raw: object) -> str:
     return "unknown"
 
 
-def validate_launch_monitor(test: TestEntry, entity: JsonDict) -> None:
+def validate_launch_monitor(test: TestEntry, entity: JsonDict, backend: str) -> None:
     """Verify the window launched on the test's launch_monitor and, for
     different-scale tests, genuinely exercised a cross-DPI strategy.
 
@@ -820,7 +824,24 @@ def validate_launch_monitor(test: TestEntry, entity: JsonDict) -> None:
     running the cross-DPI path. RestoreDiagnostics records the launch monitor
     and chosen strategy durably so the precondition can be asserted instead of
     assumed.
+
+    On Wayland the launch monitor is undetectable: the window is created hidden
+    (never mapped to an output during init_winit_info) and Wayland has no
+    outer_position(), so starting_monitor_index always collapses to the monitor
+    at the origin. The precondition is also unnecessary there — Wayland tests
+    restore size + monitor_index only (no cross-DPI position path) — so skip it.
+
+    The launch monitor only matters for cross-DPI (different_scales) tests: there
+    it proves the cross-DPI path genuinely ran instead of a hollow same-scale
+    restore on the target monitor. Every other test validates the restore itself,
+    not where the window manager chose to open the app (KDE opens on the X11
+    primary regardless of terminal focus), so for those it is informational only
+    and never fails.
     """
+    if backend == "wayland":
+        skip_line("primary", "launch_monitor", "undetectable on Wayland (hidden surface, no outer_position)")
+        return
+
     diagnostics = extract_from_entity(entity, COMP_LAUNCH_INFO)
     if not isinstance(diagnostics, dict):
         fail_line("primary", "launch_monitor", "RestoreDiagnostics missing (restore did not run?)")
@@ -834,6 +855,18 @@ def validate_launch_monitor(test: TestEntry, entity: JsonDict) -> None:
     target_scale = diagnostics.get("target_scale")
     detail = f"strategy={strategy} starting_scale={starting_scale} target_scale={target_scale}"
 
+    requires = test.get("requires", {})
+    if not requires.get("different_scales"):
+        if actual_launch == expected_launch:
+            pass_line("primary", "launch_monitor", f"expected={expected_launch} actual={actual_launch} ({detail})")
+        else:
+            skip_line(
+                "primary",
+                "launch_monitor",
+                f"expected={expected_launch} actual={actual_launch} — WM-chosen spawn monitor, not asserted for non-cross-DPI test ({detail})",
+            )
+        return
+
     if actual_launch != expected_launch:
         reason = "launch precondition not met; re-run (macOS spawn monitor is environmental)"
         fail_line(
@@ -844,8 +877,7 @@ def validate_launch_monitor(test: TestEntry, entity: JsonDict) -> None:
         return
     pass_line("primary", "launch_monitor", f"expected={expected_launch} actual={actual_launch} ({detail})")
 
-    requires = test.get("requires", {})
-    if requires.get("different_scales") and strategy == "ApplyUnchanged":
+    if strategy == "ApplyUnchanged":
         fail_line(
             "primary",
             "strategy",
@@ -1548,6 +1580,24 @@ def run_test(
     global app_process
     test, resolved_backend, env_vars = setup_test(config, test_id, ron_dir, ron_path, env_file, backend)
 
+    # Cross-DPI tests need monitors with different scale factors, decided by the
+    # active backend's real scales. X11 exposes one global Xft.dpi to every
+    # monitor (uniform scale), so the cross-DPI scenario is unreachable there
+    # even when Wayland reports differing per-monitor scales. Skip
+    # deterministically rather than launching and failing the strategy
+    # precondition. (env_vars holds X11-swapped scales for the x11 backend.)
+    requires = test.get("requires", {})
+    if requires.get("different_scales"):
+        scale0 = env_vars.get("MONITOR_0_SCALE")
+        scale1 = env_vars.get("MONITOR_1_SCALE")
+        if scale0 is not None and scale1 is not None and scale0 == scale1:
+            skip_line(
+                "primary",
+                "different_scales",
+                f"backend={resolved_backend} reports uniform scale {scale0}; cross-DPI scenario unavailable",
+            )
+            sys.exit(0)
+
     # Parse expected values from written RON
     ron_content = Path(ron_path).read_text()
     ron_values = parse_ron_values(ron_content)
@@ -1606,7 +1656,7 @@ def run_test(
     # rather than spawning same-scale and passing the checks above hollowly.
     primary_entity = resolve_primary_entity()
     if primary_entity is not None:
-        validate_launch_monitor(test, primary_entity)
+        validate_launch_monitor(test, primary_entity, resolved_backend)
 
     # Persistence setup (set mode before shutdown)
     if has_persistence:
