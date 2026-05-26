@@ -508,6 +508,55 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             && *world_scale == other.world_scale
     }
 
+    /// Bit-equality over the fields a panel-text glyph mesh and material depend
+    /// on, used to gate per-run rebuilds.
+    ///
+    /// Compares the measurement fields (`font_id`, `size`, `weight`, `slant`,
+    /// `line_height`, letter/word spacing, `wrap`, `align`, `anchor`,
+    /// `font_features`) via `to_bits`, plus the render fields baked into the
+    /// mesh and material (`color`, `render_mode`, `shadow_mode`, `sidedness`).
+    /// Excludes `unit`/`world_scale` (measurement context, not mesh inputs) and
+    /// `alpha_mode` (gated separately through `Override<TextAlpha>`).
+    pub(crate) fn gating_eq(&self, other: &Self) -> bool {
+        let Self {
+            font_id,
+            size,
+            weight,
+            slant,
+            line_height,
+            letter_spacing,
+            word_spacing,
+            wrap,
+            align,
+            anchor,
+            font_features,
+            color,
+            render_mode,
+            shadow_mode,
+            sidedness,
+            unit: _,
+            world_scale: _,
+            alpha_mode: _,
+            context: _,
+        } = self;
+
+        *font_id == other.font_id
+            && size.to_bits() == other.size.to_bits()
+            && weight.0.to_bits() == other.weight.0.to_bits()
+            && *slant == other.slant
+            && line_height.to_bits() == other.line_height.to_bits()
+            && letter_spacing.to_bits() == other.letter_spacing.to_bits()
+            && word_spacing.to_bits() == other.word_spacing.to_bits()
+            && *wrap == other.wrap
+            && *align == other.align
+            && *anchor == other.anchor
+            && *font_features == other.font_features
+            && *color == other.color
+            && *render_mode == other.render_mode
+            && *shadow_mode == other.shadow_mode
+            && *sidedness == other.sidedness
+    }
+
     /// Extracts measurement-relevant fields as a [`TextMeasure`].
     ///
     /// Used by [`MeasureTextFn`](crate::layout::MeasureTextFn) — no generic
@@ -820,6 +869,7 @@ const _: () = assert!(GlyphRenderMode::PunchOut.discriminant() == 2);
 mod tests {
     use super::*;
     use crate::layout::BoundingBox;
+    use crate::layout::Pt;
 
     #[test]
     fn as_standalone_from_layout_preserves_size() {
@@ -850,6 +900,58 @@ mod tests {
         let layout = TextProps::<ForLayout>::new(12.0);
         let standalone = layout.as_standalone().with_anchor(Anchor::TopLeft);
         assert_eq!(standalone.anchor(), Anchor::TopLeft);
+    }
+
+    // ── TextProps::gating_eq ───────────────────────────────────────
+
+    #[test]
+    fn gating_eq_true_for_identical_style() {
+        let style = TextProps::<ForStandalone>::new(24.0).with_color(Color::WHITE);
+        assert!(style.gating_eq(&style.clone()));
+    }
+
+    #[test]
+    fn gating_eq_detects_size_change() {
+        let base = TextProps::<ForStandalone>::new(24.0);
+        let bigger = TextProps::<ForStandalone>::new(48.0);
+        assert!(!base.gating_eq(&bigger));
+    }
+
+    #[test]
+    fn gating_eq_detects_color_change() {
+        // color is render-only for measurement, so layout_eq_excluding_visuals
+        // ignores it — but the mesh material bakes it in, so gating_eq must not.
+        let base = TextProps::<ForStandalone>::new(24.0).with_color(Color::WHITE);
+        let recolored = base.clone().with_color(Color::BLACK);
+        assert!(base.layout_eq_excluding_visuals(&recolored));
+        assert!(!base.gating_eq(&recolored));
+    }
+
+    #[test]
+    fn gating_eq_ignores_unit() {
+        // Same value, differing only in unit (Points vs contextual default).
+        // layout_eq_excluding_visuals treats unit as layout-affecting; gating_eq
+        // excludes it because it is measurement context, not a mesh input.
+        let with_unit = TextProps::<ForStandalone>::new(Pt(24.0));
+        let without_unit = TextProps::<ForStandalone>::new(24.0);
+        assert!(!with_unit.layout_eq_excluding_visuals(&without_unit));
+        assert!(with_unit.gating_eq(&without_unit));
+    }
+
+    #[test]
+    fn gating_eq_ignores_world_scale() {
+        let base = TextProps::<ForStandalone>::new(24.0);
+        let scaled = base.clone().with_world_scale(0.01);
+        assert!(base.gating_eq(&scaled));
+    }
+
+    #[test]
+    fn gating_eq_distinguishes_signed_zero() {
+        // to_bits, not ==: +0.0 and -0.0 are distinct bit patterns, matching
+        // the layout layer's own comparison.
+        let positive = TextProps::<ForStandalone>::new(24.0).with_line_height(0.0);
+        let negative = TextProps::<ForStandalone>::new(24.0).with_line_height(-0.0);
+        assert!(!positive.gating_eq(&negative));
     }
 
     #[test]

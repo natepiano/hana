@@ -5,7 +5,7 @@
 | Item | State |
 | --- | --- |
 | Scheduler-ordering flash fix | **Done** (on `update/0.19.0-rc.2`) |
-| Per-run rebuild (this plan) | **Planned** |
+| Per-run rebuild (this plan) | **In progress** — Phase 1 done |
 | Font-load relayout | **Deferred** — not reachable through the current API |
 
 ---
@@ -142,7 +142,7 @@ them → no `Changed<PanelText>`.
     respawn that run's mesh; new buffers + material; `remove_run_storage` its
     old key. *Geometry rebuild.*
   - `Changed<Resolved<TextAlpha>>` only, no `PanelText` change → keep the mesh
-    entity and buffers; `materials.get_mut()` the run's `SlugTextMaterial` and
+    entity and buffers; `materials.get_mut()` the run's `TextMaterial` and
     update `alpha_mode` in place. *Appearance update — no mesh, no buffers.*
 
 ### Edit 2b — same alpha short-circuit on the world-text path
@@ -171,10 +171,10 @@ Apply the parallel treatment:
 - Split rebuild by kind: bounds/handle change → rebuild the rectangle mesh +
   material; tint-only change → mutate `base_color` on the existing material in
   place (guarded like R5).
-- Images carry no `SlugRunStorageKey`, so they need no run-storage cleanup; the
+- Images carry no `RunStorageKey`, so they need no run-storage cleanup; the
   R2 observer is text-only.
 
-Separately, factor the duplicated `slug_text_material(...)` setup shared by
+Separately, factor the duplicated `text_material(...)` setup shared by
 `panel_text/mesh_spawning.rs` and `world_text/mesh_spawning.rs` into one builder,
 so the two paths can't drift.
 
@@ -252,7 +252,7 @@ meshes.
 - geometry vs alpha: an unchanged run's mesh entity is preserved while only the
   changed run's mesh is swapped; an alpha-only change preserves the mesh and
   buffers and updates `base.alpha_mode` in place; a no-op alpha resolution does
-  not trip `Changed<SlugTextMaterial>`.
+  not trip `Changed<TextMaterial>`.
 - storage cleanup: removing a `PanelChild` frees its run storage (via the
   remove observer).
 - new row: a newly-inserted run has a non-identity `GlobalTransform` by the
@@ -349,7 +349,7 @@ frequently; lower priority if updates are rare.
   compares `bounds` via `to_bits` for consistency with text gating.
 - **M9 — Shared text-material builder signature (sharpens R9).**
   `build_text_material(base, alpha_mode, fill_color, render_mode, curves, bands,
-  glyphs) -> SlugTextMaterial`; callers set `depth_bias`/`sidedness` on `base`
+  glyphs) -> TextMaterial`; callers set `depth_bias`/`sidedness` on `base`
   first. Place it in the `text` module so both `panel_text` and `world_text`
   import it without a new cross-module coupling.
 
@@ -391,10 +391,10 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
   despawns the mesh.
   Impact: GPU storage-handle leak; the old loop silently no-ops.
   Recommendation: remove the loop. Add an observer
-  `trigger: On<Remove, DiegeticTextMesh>` that reads `&SlugRunStorageKey` from
+  `trigger: On<Remove, DiegeticTextMesh>` that reads `&RunStorageKey` from
   `trigger.entity` (`On<Remove>` fires before the component is dropped, so the
   key is readable) and calls `backend.remove_run_storage(key)` via
-  `ResMut<SlugBackend>`. **Sequence R4 then R2** — R4 (reparent) breaks the old
+  `ResMut<Backend>`. **Sequence R4 then R2** — R4 (reparent) breaks the old
   loop, so the observer must land in the same change. Status: **accepted**.
 
 - **R3 — Split build into two systems (`update_panel_text_geometry` /
@@ -412,7 +412,7 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
   - `update_panel_text_geometry`: `Changed<PanelText>` → despawn old mesh, spawn
     new (storage cleanup via R2's observer).
   - `update_panel_text_alpha`: `Changed<Resolved<TextAlpha>>` without
-    `Changed<PanelText>` → query the run's `MeshMaterial3d<SlugTextMaterial>` and
+    `Changed<PanelText>` → query the run's `MeshMaterial3d<TextMaterial>` and
     update alpha in place (R5).
   This also mirrors how the world-text path can be structured for Edit 2b.
   Status: **accepted**.
@@ -431,9 +431,9 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
   Severity: **important**. Dimension: implementation quality.
   Class: design-improvement. (Cycle 2: confirmed; field path + `AlphaMode:
   PartialEq` verified.)
-  Problem: `SlugTextMaterial = ExtendedMaterial<StandardMaterial, TextExtension>`;
+  Problem: `TextMaterial = ExtendedMaterial<StandardMaterial, TextExtension>`;
   alpha lives at `material.base.alpha_mode`. Writing it unconditionally trips
-  `Changed<SlugTextMaterial>` and re-prep even when the resolved alpha is
+  `Changed<TextMaterial>` and re-prep even when the resolved alpha is
   unchanged. `AlphaMode` implements `PartialEq`, so a guard is sound.
   Impact: partially defeats the short-circuit.
   Recommendation: `if material.base.alpha_mode != resolved { material.base.alpha_mode = resolved; }`
@@ -473,7 +473,7 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
   every image child's `Mesh` + `StandardMaterial` unconditionally on each panel
   rebuild and has no geometry-vs-appearance (tint) split — the same per-panel
   churn this plan removes for text. Separately, `panel_text/mesh_spawning.rs`
-  and `world_text/mesh_spawning.rs` duplicate the `slug_text_material(...)` setup.
+  and `world_text/mesh_spawning.rs` duplicate the `text_material(...)` setup.
   Impact: images remain a rebuild hot-spot; duplicated builders can drift.
   Recommendation: record as a follow-up (apply the same gating + per-run reuse +
   appearance split to images; factor a shared material builder).
@@ -504,11 +504,11 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
 
 Each phase is one commit: dependency-ordered, independently buildable and
 testable. The §3 Edits and §8 decisions (R/M) each map to exactly one phase.
-Dependency spine: P1 → P3 (gating_eq before reconcile uses it); P2 before
-P5/P6 (shared builder before the systems that call it); P4 before P5 (reparent
-before the split locates meshes via `ChildOf`).
+Dependency spine: P1 → P3 (gating_eq before reconcile uses it); P4 before P5
+(reparent before the split locates meshes via `ChildOf`). (Phase 2, the shared
+material builder, is already satisfied in this branch — see below.)
 
-### Phase 1 — `gating_eq` comparator (R1, M6)
+### Phase 1 — `gating_eq` comparator (R1, M6) — Done
 Pure addition, no behavior change (nothing calls it yet).
 - Add a bit-equality `gating_eq` spanning `WorldText.text()`, `WorldTextStyle`
   metric fields (via `to_bits`, excluding `unit`/`world_scale`), and
@@ -518,23 +518,102 @@ Pure addition, no behavior change (nothing calls it yet).
 - Tests: matches `layout_eq_excluding_visuals` on metric fields; `unit`/
   `world_scale` changes don't flag; `-0.0`/`+0.0` treated correctly.
 
-### Phase 2 — shared text-material builder (R9 builder part, M9)
-Pure refactor, no behavior change.
-- Extract `build_text_material(base, alpha_mode, fill_color, render_mode,
-  curves, bands, glyphs) -> SlugTextMaterial` into the `text` module; callers
-  set `depth_bias`/`sidedness` on `base` first. Route `panel_text` and
-  `world_text` material construction through it.
-- Files: `text/mod.rs` (or `text/material.rs`), `render/panel_text/mesh_spawning.rs`,
-  `render/world_text/mesh_spawning.rs`.
-- Tests: existing render tests still pass (no behavior change).
+#### Retrospective
+
+**What worked:**
+- Two inherent methods, no trait: `TextProps::<C>::gating_eq` (`text_props.rs`,
+  `pub(crate)`) and `PanelTextLayout::gating_eq` (`layout.rs`, `pub(super)`) +
+  a private `bbox_bits` helper. 11 tests green.
+- Tests prove the R1 keystones directly: `gating_eq_ignores_unit` asserts
+  `layout_eq_excluding_visuals` returns `false` while `gating_eq` returns `true`
+  for a unit-only difference; `gating_eq_distinguishes_signed_zero` proves
+  `to_bits` (not `==`); `gating_eq_detects_color_change` shows the render-field
+  inclusion diverging from `layout_eq_excluding_visuals`.
+
+**What deviated from the plan:**
+- `WorldText` got **no** `gating_eq` method — its `.text()` comparison is
+  trivial and stays inline in reconcile (Phase 3). This matches the planned
+  two-file scope (`text_props.rs`, `layout.rs`); the doc's M6 phrasing ("spans
+  three components") describes the *combined* reconcile gate, not three methods.
+- `TextProps::gating_eq` explicitly **excludes `alpha_mode`** (the R1 included-set
+  named only `color`/`render_mode`/`shadow_mode`/`sidedness`). Rationale: alpha
+  is gated separately through `Override<TextAlpha>` (Edit 2 / Phase 5). This puts
+  a hard requirement on Phase 3 — see Implications.
+
+**Surprises:**
+- `dead_code` warnings (3): both `gating_eq` methods and `bbox_bits` have no
+  non-test caller until Phase 3. `cargo build` warns; `cargo nextest` does not
+  (tests exercise them). Open decision: accept the transient warnings on this
+  commit vs. a reviewed `#[allow(dead_code, reason = …)]` removed in Phase 3 vs.
+  fold Phase 1 into Phase 3.
+
+**Implications for remaining phases:**
+- **Phase 3** clears the `dead_code` warnings by calling all three: `WorldText`
+  `.text()` (inline), `style.gating_eq`, `layout.gating_eq`.
+- **Phase 3** must gate the `Override<TextAlpha>` branch on its own
+  (alpha comparison), because `style.gating_eq` deliberately ignores
+  `alpha_mode`; otherwise an alpha-only style change would be skipped and never
+  reach the Phase 5 alpha short-circuit.
+
+#### Phase 1 Review
+
+Architect re-review of the remaining phases against the shipped Phase 1 code.
+Edits applied:
+- **Phase 2 — dropped** (user decision): the shared material builder already
+  exists in this branch (`text_material` / `text_material`) and both paths
+  call it; marked "Already satisfied," removed from the dependency spine.
+- **Phase 6 — expanded** (user decision): re-scoped from a one-line guard to
+  Phase 5's two-signal split + a query for the existing `WorldTextMesh` child's
+  material, since `render_world_text` has no per-entity alpha branch.
+- **Phase 3** — widen the `existing_children` query and split the single
+  unconditional component-tuple insert into per-component conditional writes;
+  the `Override<TextAlpha>` insert/remove (unconditional today) must also become
+  value-conditional, else the per-run alpha win is lost.
+- **Phase 4** — noted that labels *and* meshes are flat children of the panel
+  today (located via `child_of.parent() == panel_entity`), so the reparent must
+  also update `build_panel_text_meshes` / `collect_dirty_panels` parent-matching.
+- **Phase 5** — R10's emptied-run path must *despawn* the mesh (firing Phase 4's
+  `On<Remove, DiegeticTextMesh>` observer) to free run storage, not clear in
+  place.
+- **Phase 7** — `PanelImageChild` carries only `element_idx` today; gating on
+  inputs (M8) requires caching prior `handle`/`tint`/`bounds` and widening the
+  query to hold the material handle.
+
+No findings rejected. One confirmation finding (depth bias from `command_index`
+is safe under the `gating_eq` reuse-key exclusion) needed no change.
+
+### Phase 2 — shared text-material builder (R9 builder part, M9) — Already satisfied (no commit)
+The shared builder already exists in this branch and both paths route through
+it, so there is nothing to build. `text_material(TextMaterialInput { base,
+fill_color, render_mode, curves, bands, glyphs })` lives in
+`text/slug/render/material.rs` (re-exported as `text_material` /
+`TextMaterialInput`, `text/mod.rs:42-43`); `panel_text/mesh_spawning.rs:200`
+and `world_text/mesh_spawning.rs:116` both call it, with `alpha_mode` set on
+`base` by the caller — the M9 design, already in place. No Phase 2 commit.
+Phase numbers below are left stable to avoid churning the cross-references.
 
 ### Phase 3 — gate reconcile (Edit 1, R7)
 - `reconcile_panel_text_children` reads the existing `WorldText`/`WorldTextStyle`/
   `PanelTextLayout` and writes only when `gating_eq` differs; same gate on the
   `Override<TextAlpha>` branch. Note the `(element_idx, command_index)` reorder
   limitation in a comment (R7).
+- Widen the query: `existing_children` is today `Query<(Entity, &PanelTextLayout,
+  &ChildOf)>` (`reconcile.rs:25`) and the reused-child path re-inserts
+  `(WorldText, style, panel_text_child, PanelChild)` as **one unconditional
+  tuple** (`reconcile.rs:96-101`). Add `&WorldText`/`&WorldTextStyle` to the
+  query and split that tuple into conditional per-component writes: `WorldText`
+  by `.text()`, `WorldTextStyle` via `gating_eq`, `PanelTextLayout` via
+  `gating_eq`.
+- **Make the alpha write conditional (required, not optional).** The
+  `Override<TextAlpha>` insert/remove (`reconcile.rs:102-118`) runs
+  unconditionally on every reused child today. Because `gating_eq` excludes
+  `alpha_mode` (Phase 1), this insert/remove must compare incoming `label_alpha`
+  against the current `Override<TextAlpha>` and write only on change — otherwise
+  every run fires `Changed<Resolved<TextAlpha>>` on every rebuild and Phase 5's
+  alpha system processes all runs, silently losing the per-run win.
 - Files: `render/panel_text/reconcile.rs`.
-- Tests: an unchanged run is not marked `Changed` across a rebuild.
+- Tests: an unchanged run is not marked `Changed` across a rebuild; an
+  alpha-unchanged reused child does not re-touch `Override<TextAlpha>`.
 
 ### Phase 4 — reparent text meshes + storage observer (R4, R2, M5)
 - Spawn each `DiegeticTextMesh` as a child of its `PanelChild` (not the panel);
@@ -542,6 +621,13 @@ Pure refactor, no behavior change.
   panel-parent despawn loop. Add the `On<Remove, DiegeticTextMesh>` observer
   that frees run storage. The monolithic build stays, adapted to the new
   parentage. Document the `seed_panel_child_alpha` ordering (M5).
+- Current parentage to change: today both labels and meshes are **flat children
+  of the panel** — labels via `with_child` on `panel_entity` (`reconcile.rs`)
+  and meshes under `panel_entity` (`mesh_spawning.rs`), located via
+  `child_of.parent() == panel_entity`. Reparenting the mesh under its
+  `PanelChild` therefore also requires updating the mesh parent-matching in
+  `build_panel_text_meshes` / `collect_dirty_panels`, which currently key off
+  `panel_entity`.
 - Files: `render/panel_text/mesh_spawning.rs`, `render/panel_text/mod.rs`.
 - Tests: removing a `PanelChild` frees its run storage; whole-panel despawn
   cleans up; rendering unchanged.
@@ -558,22 +644,51 @@ The core per-run change.
 - Files: `render/panel_text/mesh_spawning.rs`, `render/panel_text/mod.rs`.
 - Tests: unchanged run's mesh preserved while only the changed run swaps;
   alpha-only change preserves mesh + buffers and updates `base.alpha_mode`
-  in place; no-op alpha resolution doesn't trip `Changed<SlugTextMaterial>`;
+  in place; no-op alpha resolution doesn't trip `Changed<TextMaterial>`;
   an emptied run despawns its mesh; a newly-inserted run has a non-identity
   `GlobalTransform` by the second frame (R6).
+- **R10 path must despawn, not clear-in-place.** When text empties,
+  `shape_panel_text_children` removes `PanelText` (`shaping.rs:120-125`). The
+  geometry system's `RemovedComponents<PanelText>` reaction must **despawn that
+  run's mesh entity** so Phase 4's `On<Remove, DiegeticTextMesh>` observer frees
+  its run storage; clearing geometry in place would leak storage. (Depends on
+  Phase 4's observer.)
 
 ### Phase 6 — world-text alpha short-circuit (Edit 2b)
-- Apply the geometry-vs-alpha distinction to `render_world_text`: an alpha-only
-  change mutates `material.base.alpha_mode` in place (value-guarded); other
-  changes rebuild. World text is single-run per entity, so no reparent needed.
-- Files: `render/world_text/mod.rs`, `render/world_text/mesh_spawning.rs`.
-- Tests: a world-text alpha-only change does not respawn the mesh.
+Larger than a one-line guard: it mirrors Phase 5's two-signal split, because
+`render_world_text` (`world_text/rendering.rs:191-208`) has no per-entity
+alpha branch — it always re-runs text shaping for the run, then on
+Ready/Invisible/Failed does `clear_run_storage()` + `despawn_mesh_children` +
+respawn, and its trigger already lumps alpha in with the rest
+(`Or<(Changed<WorldText>, Changed<WorldTextStyle>, Changed<Resolved<TextAlpha>>,
+Changed<Resolved<FontUnit>>)>`, `mod.rs`).
+- Split the alpha-only case from the rest — a second system, or a `Ref`-based
+  skip à la M7 that detects "only `Resolved<TextAlpha>` changed."
+- For the alpha-only case, query the existing `WorldTextMesh` child's
+  `MeshMaterial3d<TextMaterial>` and mutate `base.alpha_mode` in place,
+  value-guarded (R5) — no re-run of text shaping, no `clear_run_storage`, no
+  respawn.
+- Keep the full text-shaping re-run + clear + despawn + respawn for `WorldText`
+  / `WorldTextStyle` / `Resolved<FontUnit>` changes. World text is single-run per
+  entity, so no reparent needed. Depends on the Phase 5 pattern → stays after
+  Phase 5.
+- Files: `render/world_text/mod.rs`, `render/world_text/rendering.rs`,
+  `render/world_text/mesh_spawning.rs`.
+- Tests: a world-text alpha-only change mutates `base.alpha_mode` and does not
+  respawn the mesh or re-touch run storage; a `WorldText`/`WorldTextStyle`/
+  `FontUnit` change still rebuilds.
 
 ### Phase 7 — image per-run gating + tint split (Edit 3, R9 image part, M8)
 - Gate `reconcile_panel_image_children` on input equality (`handle`/`tint`/
   `bounds`, bounds via `to_bits`); a tint-only change mutates `base_color` in
   place (value-guarded), a bounds/handle change rebuilds the rectangle mesh +
   material. No reparent and no storage observer for images (M8).
+- Cache the gating inputs: `PanelImageChild` today carries only `element_idx`,
+  and the image reconcile query (`reconcile.rs:155`) reads only
+  `PanelImageChild` + `ChildOf`. Since M8 gates on *inputs* (`handle`/`tint`/
+  `bounds`), extend `PanelImageChild` to cache the prior inputs to compare
+  against, and widen the query to hold the `MeshMaterial3d<StandardMaterial>`
+  handle for the in-place `base_color` mutation.
 - Files: `render/panel_text/reconcile.rs`.
 - Tests: a tint-only change updates `base_color` without rebuilding the mesh.
 
