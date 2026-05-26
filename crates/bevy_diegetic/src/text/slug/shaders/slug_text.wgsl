@@ -239,9 +239,7 @@ fn horizontal_coverage_terms(
         if include_winding {
             terms.winding += curve_winding(curve, point);
         }
-        // solver.w == 1.0 means the curve also lives in the vertical band;
-        // skip the distance solve here to avoid computing it twice.
-        if curve.solver.w < 0.5 && curve_bounds_distance_sq(point, curve) <= edge_width_sq {
+        if curve_bounds_distance_sq(point, curve) <= edge_width_sq {
             terms.distance_sq = min(terms.distance_sq, curve_distance_sq(point, curve));
         }
     }
@@ -290,6 +288,31 @@ fn nearest_vertical_curve_distance_sq(
     return distance_sq;
 }
 
+// Non-zero winding number at `point`, using the point's horizontal band.
+// Returns 0 outside the glyph bounds.
+fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
+    if outside_glyph_bounds(point, glyph) {
+        return 0;
+    }
+    let band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+    var winding = 0;
+    for (var offset = 0u; offset < band.count; offset += 1u) {
+        winding += curve_winding(curves[band.start + offset], point);
+    }
+    return winding;
+}
+
+// Whether any neighbor one filter-width away is outside the fill. A true
+// outer silhouette has at least one outside neighbor; an interior seam of a
+// self-intersecting / overlapping glyph (e.g. the EB Garamond `g` neck) is
+// filled on both sides, so all neighbors stay inside.
+fn any_outside_neighbor(point: vec2<f32>, edge_width: f32, glyph: GlyphRecord) -> bool {
+    return winding_at(point + vec2<f32>(edge_width, 0.0), glyph) == 0
+        || winding_at(point - vec2<f32>(edge_width, 0.0), glyph) == 0
+        || winding_at(point + vec2<f32>(0.0, edge_width), glyph) == 0
+        || winding_at(point - vec2<f32>(0.0, edge_width), glyph) == 0;
+}
+
 fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: GlyphRecord) -> f32 {
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
     let edge_width_sq = edge_width * edge_width;
@@ -303,6 +326,14 @@ fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: GlyphRecord) -> 
     );
     if distance_sq > edge_width_sq {
         return select(0.0, 1.0, inside);
+    }
+
+    // An inside fragment within edge_width of a curve sits either near the true
+    // outer silhouette (apply the AA ramp) or near an interior seam where two
+    // filled regions overlap (keep solid). The seam case has no outside
+    // neighbor, so the down-ramp toward the submerged edge must be suppressed.
+    if inside && !any_outside_neighbor(point, edge_width, glyph) {
+        return 1.0;
     }
 
     let distance = sqrt(distance_sq);

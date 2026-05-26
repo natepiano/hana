@@ -9,7 +9,7 @@ use super::Glyph;
 use super::QuadraticSegment;
 
 /// Default number of horizontal bands packed per glyph.
-pub(crate) const DEFAULT_BAND_COUNT: usize = 48;
+pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
 const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;

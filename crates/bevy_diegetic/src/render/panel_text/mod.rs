@@ -62,8 +62,10 @@ impl Plugin for TextRenderPlugin {
                 reconcile_panel_text_children.after(panel_rtt::setup_panel_rtt),
                 reconcile_panel_image_children.after(panel_rtt::setup_panel_rtt),
                 shape_panel_text_children.after(reconcile_panel_text_children),
-                build_panel_text_meshes.after(shape_panel_text_children),
-                world_text::render_world_text,
+                build_panel_text_meshes
+                    .after(shape_panel_text_children)
+                    .before(TransformSystems::Propagate),
+                world_text::render_world_text.before(TransformSystems::Propagate),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );
