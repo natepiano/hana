@@ -33,6 +33,7 @@ use super::line::CalloutVisual;
 use crate::panel::SurfaceShadow;
 use crate::render;
 use crate::render::LAYER_DEPTH_BIAS;
+use crate::render::OIT_DEPTH_STEP;
 use crate::render::SDF_AA_PADDING;
 use crate::render::SdfPanelMaterial;
 use crate::render::SdfPanelMaterialInput;
@@ -250,17 +251,18 @@ fn spawn_segment(
     let material = render::sdf_panel_material(
         base,
         SdfPanelMaterialInput {
-            half_size:      Vec2::new(half_width, half_height),
-            mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
-            corner_radii:   [0.0; 4],
-            border_widths:  [0.0, 0.0, thickness, 0.0],
-            border_color:   Some(color),
-            clip_rect:      Vec4::new(
+            half_size:        Vec2::new(half_width, half_height),
+            mesh_half_size:   Vec2::new(mesh_half_width, mesh_half_height),
+            corner_radii:     [0.0; 4],
+            border_widths:    [0.0, 0.0, thickness, 0.0],
+            border_color:     Some(color),
+            clip_rect:        Vec4::new(
                 -mesh_half_width,
                 -mesh_half_height,
                 mesh_half_width,
                 mesh_half_height,
             ),
+            oit_depth_offset: order.to_f32() * OIT_DEPTH_STEP,
         },
     );
     let mesh = ctx.meshes.add(Rectangle::new(
@@ -341,6 +343,7 @@ fn spawn_cap_form(
                 mesh_half_width,
                 mesh_half_height,
             ),
+            oit_depth_offset:   order.to_f32() * OIT_DEPTH_STEP,
         },
     );
     let mesh = ctx.meshes.add(Rectangle::new(

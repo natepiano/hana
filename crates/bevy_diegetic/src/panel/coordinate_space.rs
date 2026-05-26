@@ -26,29 +26,11 @@ pub enum ScreenPosition {
     At(Vec2),
 }
 
-/// How the panel's visual content is rendered to the screen.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub enum RenderMode {
-    /// Render-to-texture: all content composited into an offscreen texture,
-    /// displayed as a single textured quad. Fixed resolution, one draw call.
-    ///
-    /// Text is rendered to the intermediate texture and resampled on
-    /// display, which causes visible softness compared to [`Geometry`] mode.
-    /// Use only when a single draw call is required or when the panel is
-    /// viewed at a distance where per-glyph slug meshes are unnecessary.
-    Texture,
-    /// Direct 3D geometry: backgrounds, borders, and text rendered as
-    /// separate meshes in the scene. Infinite resolution, multiple draw
-    /// calls. Layer ordering uses `depth_bias` on the transparent sort key.
-    #[default]
-    Geometry,
-}
-
 /// Whether the panel's surface geometry casts 3D shadows.
 ///
-/// "Surface" means backgrounds, borders, and the RTT display quad — the
-/// structural parts of the panel. Text shadow casting is controlled
-/// independently per text element via `GlyphShadowMode`.
+/// "Surface" means backgrounds and borders — the structural parts of the
+/// panel. Text shadow casting is controlled independently per text element
+/// via `GlyphShadowMode`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum SurfaceShadow {
     /// Surface geometry does not cast shadows (default).

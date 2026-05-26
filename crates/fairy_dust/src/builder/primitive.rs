@@ -215,4 +215,11 @@ impl PrimitiveBuilder<WithOrbitCam> {
     pub fn with_restore_camera_on_restart(self) -> SprinkleBuilder<WithOrbitCam> {
         self.finish().with_restore_camera_on_restart()
     }
+
+    /// Finalizes the current primitive and adds stable transparency to the
+    /// spawned `OrbitCam`.
+    #[must_use]
+    pub fn with_stable_transparency(self) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_stable_transparency()
+    }
 }

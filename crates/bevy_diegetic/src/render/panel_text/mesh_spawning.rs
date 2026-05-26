@@ -15,7 +15,6 @@ use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::GlyphShadowMode;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-use crate::panel::RenderMode as PanelRenderMode;
 use crate::render::constants;
 use crate::render::world_text::PanelChild;
 use crate::text;
@@ -68,8 +67,7 @@ pub(super) fn build_panel_text_meshes(
         }
 
         let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let is_geometry = panel.render_mode() == PanelRenderMode::Geometry;
-        let text_base = panel_base_material(panel, is_geometry);
+        let text_base = panel_base_material(panel);
 
         for (child_entity, panel_run, panel_text_child, child_of) in &panel_children {
             if child_of.parent() != panel_entity {
@@ -84,7 +82,6 @@ pub(super) fn build_panel_text_meshes(
                 panel_text_child,
                 text_base: &text_base,
                 resolved_alpha,
-                is_geometry,
                 content_layer: &scene_layer,
                 backend: &mut backend,
                 meshes: &mut meshes,
@@ -125,7 +122,6 @@ struct PanelTextSpawnRequest<'a, 'w, 's> {
     panel_text_child: &'a PanelTextLayout,
     text_base:        &'a StandardMaterial,
     resolved_alpha:   AlphaMode,
-    is_geometry:      bool,
     content_layer:    &'a RenderLayers,
     backend:          &'a mut SlugBackend,
     meshes:           &'a mut Assets<Mesh>,
@@ -141,7 +137,6 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
         panel_text_child,
         text_base,
         resolved_alpha,
-        is_geometry,
         content_layer,
         backend,
         meshes,
@@ -159,11 +154,7 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
     };
 
     let command_depth = panel_text_child.command_index.saturating_add(1).to_f32();
-    let text_depth_bias = if is_geometry {
-        command_depth * constants::LAYER_DEPTH_BIAS
-    } else {
-        0.0
-    };
+    let text_depth_bias = command_depth * constants::LAYER_DEPTH_BIAS;
 
     let material = materials.add(panel_material(
         text_base,
@@ -184,7 +175,7 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
     );
 }
 
-fn panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMaterial {
+fn panel_base_material(panel: &DiegeticPanel) -> StandardMaterial {
     let mut base = panel
         .text_material()
         .cloned()
@@ -192,9 +183,6 @@ fn panel_base_material(panel: &DiegeticPanel, is_geometry: bool) -> StandardMate
     base.alpha_mode = AlphaMode::Blend;
     base.double_sided = true;
     base.cull_mode = None;
-    if !is_geometry {
-        base.unlit = true;
-    }
     base
 }
 

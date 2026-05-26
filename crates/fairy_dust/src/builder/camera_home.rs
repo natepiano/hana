@@ -178,4 +178,11 @@ impl CameraHomeBuilder<WithOrbitCam> {
         restart_camera::install(&mut self.parent.app);
         self.finish()
     }
+
+    /// Finalizes the current home registration and adds stable transparency to the
+    /// spawned `OrbitCam`.
+    #[must_use]
+    pub fn with_stable_transparency(self) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_stable_transparency()
+    }
 }

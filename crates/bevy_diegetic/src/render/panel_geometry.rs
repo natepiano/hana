@@ -16,8 +16,6 @@ use bevy_kana::ToF32;
 use super::clip;
 use super::constants;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
-use super::panel_rtt;
-use super::panel_rtt::PanelRttRegistry;
 use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
 use super::sdf_material::SdfPanelMaterialInput;
@@ -27,7 +25,6 @@ use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
-use crate::panel::RenderMode;
 use crate::panel::SurfaceShadow;
 
 /// Marker for SDF panel mesh entities.
@@ -37,13 +34,6 @@ struct PanelSdfMesh;
 /// Marker for the invisible full-panel interaction mesh (Geometry mode only).
 #[derive(Component)]
 struct PanelInteractionMesh;
-
-/// Whether the panel renders as 3D geometry (lit by PBR) or as an unlit texture.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RenderStyle {
-    Geometry,
-    Texture,
-}
 
 /// Whether shadow casting is enabled or suppressed for panel meshes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,10 +54,7 @@ impl Plugin for PanelGeometryPlugin {
             Shader::from_wgsl
         );
         app.add_plugins(MaterialPlugin::<SdfPanelMaterial>::default());
-        app.add_systems(
-            PostUpdate,
-            build_panel_geometry.after(panel_rtt::setup_panel_rtt),
-        );
+        app.add_systems(PostUpdate, build_panel_geometry);
     }
 }
 
@@ -107,7 +94,6 @@ fn build_panel_geometry(
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     mut sdf_materials: ResMut<Assets<SdfPanelMaterial>>,
-    rtt_registry: Res<PanelRttRegistry>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, computed, panel_layers) in &changed_panels {
@@ -117,20 +103,12 @@ fn build_panel_geometry(
 
         let points_to_world = panel.points_to_world();
         let (anchor_x, anchor_y) = panel.anchor_offsets();
-        let render_style = if panel.render_mode() == RenderMode::Geometry {
-            RenderStyle::Geometry
-        } else {
-            RenderStyle::Texture
-        };
         let shadow_mode = if panel.surface_shadow() == SurfaceShadow::Off {
             ShadowMode::Suppressed
         } else {
             ShadowMode::Enabled
         };
-        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let layer = rtt_registry
-            .get_layer(panel_entity)
-            .map_or(scene_layer, RenderLayers::layer);
+        let layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
 
         // ── Despawn old geometry ────────────────────────────────────
         despawn_children_of(&old_sdf, panel_entity, &mut commands);
@@ -143,7 +121,6 @@ fn build_panel_geometry(
         {
             let mut spawn_context = SdfElementSpawnContext {
                 panel,
-                render_style,
                 shadow_mode,
                 points_to_world,
                 anchor_x,
@@ -173,8 +150,8 @@ fn build_panel_geometry(
             }
         }
 
-        // ── Interaction mesh (Geometry mode only) ───────────────────
-        if render_style == RenderStyle::Geometry {
+        // ── Interaction mesh ────────────────────────────────────────
+        {
             let world_width = panel.world_width();
             let world_height = panel.world_height();
             let center_x = world_width.mul_add(0.5, -anchor_x);
@@ -275,7 +252,6 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
 
 struct SdfElementSpawnContext<'a, 'w, 's> {
     panel:           &'a DiegeticPanel,
-    render_style:    RenderStyle,
     shadow_mode:     ShadowMode,
     points_to_world: f32,
     anchor_x:        f32,
@@ -301,11 +277,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
     });
     let mut base =
         constants::resolve_material(element_mat, context.panel.material(), effective_color);
-    if context.render_style == RenderStyle::Texture {
-        base.unlit = true;
-    } else {
-        base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
-    }
+    base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
 
     let world_width = surface.bounds.width * context.points_to_world;
     let world_height = surface.bounds.height * context.points_to_world;
@@ -383,6 +355,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
             border_widths: world_borders,
             border_color: surface.border_color,
             clip_rect,
+            oit_depth_offset: surface.command_index.to_f32() * constants::OIT_DEPTH_STEP,
         },
     );
 

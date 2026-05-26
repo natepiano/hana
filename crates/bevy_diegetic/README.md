@@ -38,6 +38,11 @@ Slug renders anti-aliased glyph edges from per-pixel coverage. It emits one
 mesh per text run and orders coplanar text with `depth_bias`, so blended text
 composites correctly as the camera moves with a default `Camera3d`.
 
+Coplanar `Blend` text that lies on a shared plane (a paragraph on the ground,
+labels on a wall) can still show a view-angle **color shift** at grazing angles,
+because `Blend` sorts view-dependently. If that matters, opt into
+[stable transparency (OIT)](#stable-transparency-oit) below.
+
 The `AlphaMode` you pick determines how that coverage is composited:
 
 | Mode | Coverage AA? | Notes |
@@ -79,6 +84,38 @@ let tint = LayoutTextStyle::new(Pt(14.0)).with_alpha_mode(AlphaMode::Multiply);
 
 See the `text_alpha` example for an interactive walkthrough.
 
+### Stable transparency (OIT)
+
+Add the `StableTransparency` marker to a `Camera3d` to route that camera through
+**order-independent transparency**. OIT composites `Blend` fragments by depth
+regardless of draw order, so the coplanar view-angle color shift goes away
+without coarsening slug's coverage AA the way `AlphaToCoverage` would.
+
+```rust
+commands.spawn((Camera3d::default(), StableTransparency));
+```
+
+It is **opt-in**: with no `StableTransparency` present, there is no OIT and MSAA
+stays on. Five things to know when you enable it:
+
+1. **OIT and MSAA are mutually exclusive** — both on one camera panics Bevy's
+   OIT plugin. `StableTransparency` forces `Msaa::Off` on the camera.
+2. **Every camera sharing a window must match MSAA.** A sibling camera left at
+   default MSAA stalls the macOS Metal swap chain (the window only repaints on
+   OS events). The marker's observers force `Msaa::Off` on every
+   screen-space overlay camera, in either spawn order.
+3. **The shader `oit_draw` blocks do the work.** The camera setting alone is
+   inert — slug and the SDF panel shaders route `Blend`/`Premultiplied`
+   fragments through `oit_draw` under the `OIT_ENABLED` shaderdef.
+4. **`depth_bias` does not reach OIT fragments**, so panels apply a manual
+   per-command `OIT_DEPTH_STEP` to `position.z` for coplanar layer ordering
+   inside the OIT buffer.
+5. **Text must be `Blend` or `Premultiplied`.** `Opaque`/`Mask` render in the
+   normal passes and bypass OIT entirely.
+
+For mesh-edge AA *with* OIT, use a post-process AA (FXAA/SMAA/TAA) — MSAA is the
+one AA incompatible with OIT.
+
 ### TAA is optional but recommended
 
 The SDF panel shader's `fwidth`-based edges and slug's analytic per-pixel
@@ -102,6 +139,13 @@ commands.spawn((
 | bevy_diegetic | Bevy  |
 |---------------|-------|
 | main          | 0.18  |
+
+## Examples
+
+The examples in `examples/` use `fairy_dust`, an internal shared helper library
+(not published) that wraps orbit-camera, window, and panel setup so each example
+stays focused. For your own app, use the public API directly (`DiegeticUiPlugin`,
+`DiegeticPanel`, `WorldText`, `StableTransparency`).
 
 ## License
 

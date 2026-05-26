@@ -10,11 +10,9 @@ use crate::cascade::TextAlpha;
 use crate::layout::RenderCommandKind;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
-use crate::panel::RenderMode;
 use crate::render::clip;
 use crate::render::constants;
 use crate::render::constants::TEXT_Z_OFFSET;
-use crate::render::panel_rtt::PanelRttRegistry;
 use crate::render::world_text::PanelChild;
 use crate::render::world_text::WorldText;
 
@@ -158,7 +156,6 @@ pub(super) fn reconcile_panel_image_children(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    rtt_registry: Res<PanelRttRegistry>,
 ) {
     for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
@@ -167,10 +164,7 @@ pub(super) fn reconcile_panel_image_children(
 
         let points_to_world = panel.points_to_world();
         let (anchor_x, anchor_y) = panel.anchor_offsets();
-        let layer = rtt_registry
-            .get_layer(panel_entity)
-            .map_or(RenderLayers::layer(0), RenderLayers::layer);
-        let is_geometry = panel.render_mode() == RenderMode::Geometry;
+        let layer = RenderLayers::layer(0);
 
         let clip_rects = clip::compute_clip_rects(&result.commands);
         let viewport = clip::panel_viewport(panel);
@@ -217,11 +211,7 @@ pub(super) fn reconcile_panel_image_children(
                 double_sided: true,
                 cull_mode: None,
                 alpha_mode: AlphaMode::Blend,
-                depth_bias: if is_geometry {
-                    cmd_index.to_f32() * constants::LAYER_DEPTH_BIAS
-                } else {
-                    0.0
-                },
+                depth_bias: cmd_index.to_f32() * constants::LAYER_DEPTH_BIAS,
                 ..default()
             });
 

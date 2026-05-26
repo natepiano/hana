@@ -1,21 +1,13 @@
-//! Panel debug gizmo rendering — layout and text-bounds overlays.
-
-use std::collections::HashMap;
+//! Panel debug gizmo rendering — text-bounds overlays.
 
 use bevy::prelude::*;
 
 use super::constants::DEBUG_TEXT_GIZMO_COLOR;
 use super::constants::DEBUG_TEXT_GIZMO_LINE_WIDTH;
-use super::constants::FALLBACK_PIXELS_PER_METER;
 use super::constants::GIZMO_LINE_JOINT_SEGMENTS;
-use super::constants::LAYOUT_GIZMO_LINE_WIDTH;
-use super::constants::MIN_BORDER_LINE_WIDTH_PIXELS;
-use super::coordinate_space::RenderMode;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
-use crate::layout::Border;
 use crate::layout::BoundingBox;
-use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 
 /// Gizmo group for diegetic panel debug wireframes.
@@ -39,10 +31,6 @@ pub enum ShowTextGizmos {
     Shown,
 }
 
-/// Marker on gizmo entities spawned by the layout gizmo renderer.
-#[derive(Component)]
-pub(super) struct PanelGizmoChild;
-
 /// Marker on gizmo entities spawned by the debug gizmo renderer.
 #[derive(Component)]
 pub(super) struct DebugGizmoChild;
@@ -53,27 +41,6 @@ pub(super) fn configure_panel_gizmos(mut config_store: ResMut<GizmoConfigStore>)
     config.line.perspective = true;
 }
 
-/// Approximate pixels-per-meter from the first camera's projection.
-fn pixels_per_meter(cameras: &Query<(&Camera, &Projection)>) -> f32 {
-    cameras
-        .iter()
-        .next()
-        .and_then(|(cam, proj)| {
-            let viewport_height = cam.logical_viewport_size()?.y;
-            match proj {
-                Projection::Perspective(p) => Some(viewport_height / (2.0 * (p.fov / 2.0).tan())),
-                Projection::Orthographic(o) => Some(viewport_height / o.scale),
-                Projection::Custom(_) => None,
-            }
-        })
-        .unwrap_or(FALLBACK_PIXELS_PER_METER)
-}
-
-enum GizmoChildMarker {
-    Layout,
-    Debug,
-}
-
 struct GizmoRect<'a> {
     bounds:          &'a BoundingBox,
     points_to_world: f32,
@@ -81,7 +48,6 @@ struct GizmoRect<'a> {
     anchor_y:        f32,
     color:           Color,
     line_width:      f32,
-    marker:          GizmoChildMarker,
 }
 
 fn spawn_rect_gizmo(
@@ -109,131 +75,9 @@ fn spawn_rect_gizmo(
         },
         ..default()
     };
-    match rect.marker {
-        GizmoChildMarker::Layout => {
-            commands
-                .entity(panel_entity)
-                .with_child((PanelGizmoChild, gizmo, Transform::IDENTITY));
-        },
-        GizmoChildMarker::Debug => {
-            commands
-                .entity(panel_entity)
-                .with_child((DebugGizmoChild, gizmo, Transform::IDENTITY));
-        },
-    }
-}
-
-/// Renders layout visuals (backgrounds, borders, between-children
-/// dividers) as retained gizmos. This is the production rendering
-/// path for panel layout geometry — always active.
-pub(super) fn render_layout_gizmos(
-    changed_panels: Query<
-        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
-        Changed<ComputedDiegeticPanel>,
-    >,
-    existing_gizmos: Query<(Entity, &ChildOf), With<PanelGizmoChild>>,
-    cameras: Query<(&Camera, &Projection)>,
-    mut gizmo_assets: ResMut<Assets<GizmoAsset>>,
-    mut commands: Commands,
-) {
-    if changed_panels.is_empty() {
-        return;
-    }
-
-    let screen_pixels_per_meter = pixels_per_meter(&cameras);
-
-    for (panel_entity, panel, computed) in &changed_panels {
-        let is_screen_space = panel.coordinate_space().is_screen();
-        if panel.render_mode() == RenderMode::Geometry {
-            continue;
-        }
-
-        let Some(result) = computed.result() else {
-            continue;
-        };
-
-        let points_to_world = panel.points_to_world();
-        despawn_gizmo_children(&mut commands, &existing_gizmos, panel_entity);
-        let (anchor_x, anchor_y) = panel.anchor_offsets();
-
-        let border_by_idx = collect_borders_by_index(&result.commands);
-
-        for cmd in &result.commands {
-            match &cmd.kind {
-                RenderCommandKind::Rectangle { color, .. } => {
-                    let border = border_by_idx.get(&cmd.element_idx);
-                    let (inset_left, inset_right, inset_top, inset_bottom) = border
-                        .map_or((0.0, 0.0, 0.0, 0.0), |b| {
-                            (b.left.value, b.right.value, b.top.value, b.bottom.value)
-                        });
-                    let inset_bounds = BoundingBox {
-                        x:      cmd.bounds.x + inset_left,
-                        y:      cmd.bounds.y + inset_top,
-                        width:  (cmd.bounds.width - inset_left - inset_right).max(0.0),
-                        height: (cmd.bounds.height - inset_top - inset_bottom).max(0.0),
-                    };
-                    spawn_rect_gizmo(
-                        &mut commands,
-                        panel_entity,
-                        &mut gizmo_assets,
-                        &GizmoRect {
-                            bounds: &inset_bounds,
-                            points_to_world,
-                            anchor_x,
-                            anchor_y,
-                            color: *color,
-                            line_width: LAYOUT_GIZMO_LINE_WIDTH,
-                            marker: GizmoChildMarker::Layout,
-                        },
-                    );
-                },
-                RenderCommandKind::Border { border } => {
-                    let half_left = border.left.value * 0.5;
-                    let half_right = border.right.value * 0.5;
-                    let half_top = border.top.value * 0.5;
-                    let half_bottom = border.bottom.value * 0.5;
-                    let has_sides = border.left.value > 0.0
-                        || border.right.value > 0.0
-                        || border.top.value > 0.0
-                        || border.bottom.value > 0.0;
-                    if has_sides {
-                        let inset_bounds = BoundingBox {
-                            x:      cmd.bounds.x + half_left,
-                            y:      cmd.bounds.y + half_top,
-                            width:  (cmd.bounds.width - half_left - half_right).max(0.0),
-                            height: (cmd.bounds.height - half_top - half_bottom).max(0.0),
-                        };
-                        let avg_border_pts = (border.left.value
-                            + border.right.value
-                            + border.top.value
-                            + border.bottom.value)
-                            / 4.0;
-                        let border_px = if is_screen_space {
-                            avg_border_pts.max(MIN_BORDER_LINE_WIDTH_PIXELS)
-                        } else {
-                            (avg_border_pts * points_to_world * screen_pixels_per_meter)
-                                .max(MIN_BORDER_LINE_WIDTH_PIXELS)
-                        };
-                        spawn_rect_gizmo(
-                            &mut commands,
-                            panel_entity,
-                            &mut gizmo_assets,
-                            &GizmoRect {
-                                bounds: &inset_bounds,
-                                points_to_world,
-                                anchor_x,
-                                anchor_y,
-                                color: border.color,
-                                line_width: border_px,
-                                marker: GizmoChildMarker::Layout,
-                            },
-                        );
-                    }
-                },
-                _ => {},
-            }
-        }
-    }
+    commands
+        .entity(panel_entity)
+        .with_child((DebugGizmoChild, gizmo, Transform::IDENTITY));
 }
 
 /// Renders debug overlays (text bounding boxes, element outlines) as
@@ -275,7 +119,6 @@ pub(super) fn render_debug_gizmos(
                         anchor_y,
                         color: DEBUG_TEXT_GIZMO_COLOR,
                         line_width: DEBUG_TEXT_GIZMO_LINE_WIDTH,
-                        marker: GizmoChildMarker::Debug,
                     },
                 );
             }
@@ -293,16 +136,6 @@ fn despawn_gizmo_children<T: Component>(
             commands.entity(entity).despawn();
         }
     }
-}
-
-fn collect_borders_by_index(commands: &[RenderCommand]) -> HashMap<usize, &Border> {
-    let mut border_by_index = HashMap::new();
-    for command in commands {
-        if let RenderCommandKind::Border { ref border } = command.kind {
-            border_by_index.insert(command.element_idx, border);
-        }
-    }
-    border_by_index
 }
 
 /// Adds a rectangle outline to a `GizmoAsset` in panel-local coordinates.

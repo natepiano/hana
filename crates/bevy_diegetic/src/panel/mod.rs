@@ -14,7 +14,6 @@ use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
 pub use coordinate_space::CoordinateSpace;
-pub use coordinate_space::RenderMode;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
 pub use diegetic_panel::ComputedDiegeticPanel;
@@ -60,8 +59,7 @@ pub enum PanelSystems {
     /// — shrinks world panels with `Fit` axes to their content bounds.
     ResolveWorldFit,
     /// Runs gizmo reconciliation
-    /// ([`render_layout_gizmos`](gizmos::render_layout_gizmos) +
-    /// [`render_debug_gizmos`](gizmos::render_debug_gizmos)).
+    /// ([`render_debug_gizmos`](gizmos::render_debug_gizmos)).
     RenderGizmos,
 }
 
@@ -119,10 +117,7 @@ impl Plugin for PanelPlugin {
             .add_systems(Startup, gizmos::configure_panel_gizmos)
             .add_systems(
                 Update,
-                (
-                    gizmos::render_layout_gizmos.in_set(PanelSystems::RenderGizmos),
-                    gizmos::render_debug_gizmos.in_set(PanelSystems::RenderGizmos),
-                ),
+                gizmos::render_debug_gizmos.in_set(PanelSystems::RenderGizmos),
             );
     }
 }

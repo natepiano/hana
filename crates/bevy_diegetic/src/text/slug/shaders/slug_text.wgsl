@@ -19,6 +19,14 @@
 }
 #endif
 
+#ifdef OIT_ENABLED
+#import bevy_core_pipeline::oit::oit_draw
+#import bevy_pbr::pbr_types::{
+    STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
+    STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE,
+}
+#endif
+
 const ROOT_EPSILON: f32 = 0.00001;
 const DEGENERATE_EPS: f32 = 0.00000001;
 const SQRT_3_OVER_2: f32 = 0.8660254037844386;
@@ -409,6 +417,14 @@ fn fragment(
         out.color = pbr_input.material.base_color;
     }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+
+#ifdef OIT_ENABLED
+    let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
+        oit_draw(in.position, out.color);
+        discard;
+    }
+#endif
 
     return out;
 }

@@ -7,7 +7,6 @@ use super::builder::NeedsSize;
 use super::builder::Screen;
 use super::builder::World;
 use super::coordinate_space::CoordinateSpace;
-use super::coordinate_space::RenderMode;
 use super::coordinate_space::SurfaceShadow;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
@@ -89,8 +88,6 @@ pub struct DiegeticPanel {
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
     pub(super) world_height:     Option<f32>,
-    /// How the panel renders its content. Defaults to [`RenderMode::Geometry`].
-    pub(super) render_mode:      RenderMode,
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via `GlyphShadowMode`.
     pub(super) surface_shadow:   SurfaceShadow,
@@ -125,7 +122,6 @@ impl Default for DiegeticPanel {
             anchor:           Anchor::TopLeft,
             world_width:      None,
             world_height:     None,
-            render_mode:      RenderMode::Geometry,
             surface_shadow:   SurfaceShadow::Off,
             material:         None,
             text_material:    None,
@@ -166,10 +162,6 @@ impl DiegeticPanel {
     /// The panel's anchor point.
     #[must_use]
     pub const fn anchor(&self) -> Anchor { self.anchor }
-
-    /// The rendering mode.
-    #[must_use]
-    pub const fn render_mode(&self) -> RenderMode { self.render_mode }
 
     /// Whether the panel surface casts shadows.
     #[must_use]

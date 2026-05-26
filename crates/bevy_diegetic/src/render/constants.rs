@@ -12,9 +12,13 @@ use bevy::prelude::*;
 /// order matches the painter's order. Also wins the depth test for
 /// coplanar fragments.
 pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
-/// Render layer offset — panel layers start here to avoid conflicts with
-/// user-defined layers.
-pub(super) const PANEL_LAYER_OFFSET: usize = 16;
+/// Per-command OIT depth offset for coplanar fragment ordering.
+///
+/// Added to `position.z` in the fragment shader before `oit_draw`
+/// stores the fragment. Pipeline `depth_bias` does NOT affect
+/// `in.position.z`, so we apply this offset manually.
+/// Reverse-Z: positive = closer to camera = composited in front.
+pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 
 // material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).
@@ -24,26 +28,6 @@ pub(super) const DEFAULT_METALLIC: f32 = 0.0;
 pub(super) const DEFAULT_REFLECTANCE: f32 = 0.02;
 /// Default roughness for panel surfaces. Matte paper-like appearance.
 pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
-
-// panel rtt
-/// Default texels per world-space meter for RTT resolution.
-/// ~200 DPI at arm's length.
-pub(super) const DEFAULT_TEXELS_PER_METER: f32 = 10000.0;
-/// Maximum texture dimension in pixels.
-pub(super) const MAX_TEXTURE_SIZE: u32 = 4096;
-/// Minimum texture dimension in pixels.
-pub(super) const MIN_TEXTURE_SIZE: u32 = 64;
-/// Far plane of the per-panel orthographic RTT camera.
-pub(super) const RTT_CAMERA_FAR: f32 = 10.0;
-/// Near plane of the per-panel orthographic RTT camera. Negative so panel
-/// content slightly behind the panel-local Z=0 plane stays visible.
-pub(super) const RTT_CAMERA_NEAR: f32 = -1.0;
-/// Z position of the per-panel RTT camera (and matching directional light)
-/// looking at the panel-local Z=0 plane.
-pub(super) const RTT_CAMERA_Z: f32 = 5.0;
-/// Illuminance of the directional light that lights panel text in the per-panel
-/// RTT pass.
-pub(super) const RTT_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 
 // sdf rendering
 /// World-space padding added to each SDF quad mesh beyond the SDF boundary.

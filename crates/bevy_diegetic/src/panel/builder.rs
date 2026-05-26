@@ -12,7 +12,6 @@ use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
 use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use super::constants::MIN_PANEL_WORLD_HEIGHT;
 use super::coordinate_space::CoordinateSpace;
-use super::coordinate_space::RenderMode;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::diegetic_panel::DiegeticPanel;
@@ -59,7 +58,6 @@ pub(super) struct BuilderData {
     anchor:           Option<Anchor>,
     world_width:      Option<f32>,
     world_height:     Option<f32>,
-    render_mode:      RenderMode,
     surface_shadow:   SurfaceShadow,
     material:         Option<StandardMaterial>,
     text_material:    Option<StandardMaterial>,
@@ -204,13 +202,6 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     #[must_use]
     pub const fn font_unit(mut self, unit: Unit) -> Self {
         self.data.font_unit = Some(unit);
-        self
-    }
-
-    /// Sets the rendering mode. Defaults to [`RenderMode::Geometry`].
-    #[must_use]
-    pub const fn render_mode(mut self, render_mode: RenderMode) -> Self {
-        self.data.render_mode = render_mode;
         self
     }
 
@@ -732,7 +723,6 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
         anchor:           data.anchor.unwrap_or(Anchor::TopLeft),
         world_width:      data.world_width,
         world_height:     data.world_height,
-        render_mode:      data.render_mode,
         surface_shadow:   data.surface_shadow,
         material:         data.material,
         text_material:    data.text_material,

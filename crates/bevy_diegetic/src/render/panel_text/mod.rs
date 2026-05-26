@@ -15,7 +15,6 @@ use self::mesh_spawning::build_panel_text_meshes;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
-use super::panel_rtt;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
@@ -58,9 +57,8 @@ impl Plugin for TextRenderPlugin {
         app.add_systems(
             PostUpdate,
             (
-                panel_rtt::setup_panel_rtt,
-                reconcile_panel_text_children.after(panel_rtt::setup_panel_rtt),
-                reconcile_panel_image_children.after(panel_rtt::setup_panel_rtt),
+                reconcile_panel_text_children,
+                reconcile_panel_image_children,
                 shape_panel_text_children.after(reconcile_panel_text_children),
                 build_panel_text_meshes
                     .after(shape_panel_text_children)

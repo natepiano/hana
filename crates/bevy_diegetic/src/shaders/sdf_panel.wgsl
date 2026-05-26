@@ -28,6 +28,14 @@
 }
 #endif
 
+#ifdef OIT_ENABLED
+#import bevy_core_pipeline::oit::oit_draw
+#import bevy_pbr::pbr_types::{
+    STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
+    STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE,
+}
+#endif
+
 #import bevy_diegetic::sdf_stroke::{
     centered_stroke_alpha,
     inflate_subpixel_half_size,
@@ -57,6 +65,8 @@ struct SdfPanelUniform {
     /// Clip rect in local quad space: [left, bottom, right, top].
     /// Fragments outside are discarded.
     clip_rect:         vec4<f32>,
+    /// Depth offset for OIT fragment ordering (reverse-Z: positive = closer).
+    oit_depth_offset:  f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> sdf: SdfPanelUniform;
@@ -406,6 +416,20 @@ fn fragment(
         out.color = pbr_input.material.base_color;
     }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+
+    // OIT support for transparent fragments.
+    // Offset position.z so coplanar layers get distinct depths in the
+    // OIT linked list. Pipeline depth_bias does NOT affect in.position.z,
+    // so we apply the offset here before oit_draw stores the fragment.
+#ifdef OIT_ENABLED
+    let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
+        var oit_pos = in.position;
+        oit_pos.z += sdf.oit_depth_offset;
+        oit_draw(oit_pos, out.color);
+        discard;
+    }
+#endif
 
     return out;
 }
