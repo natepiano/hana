@@ -5,6 +5,7 @@ use bevy::window::WindowMode;
 use bevy::window::WindowPosition;
 use bevy::window::WindowScaleFactorChanged;
 use bevy::winit::WINIT_WINDOWS;
+use bevy_kana::ToI32;
 use bevy_kana::ToU32;
 
 use super::strategy::FullscreenRestoreState;
@@ -47,14 +48,26 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
         return;
     };
 
-    // HigherToLower (macOS/X11 high→low) applies the saved position uncompensated:
-    // as of bevy 0.19, `set_outer_position` lands a high→low physical position
-    // correctly without the ×ratio compensation that low→high still needs. Its size
-    // here is a placeholder — the WaitingForScaleChange → ApplySize phase re-applies
-    // the full physical size after the scale change settles, so it falls through to
-    // the uncompensated default arm.
+    // HigherToLower (macOS/X11 high→low) compensates position by ×ratio
+    // (= starting_scale / target_scale, e.g. ×2 for 2x→1x): `set_outer_position` is
+    // applied at the starting monitor's scale, so crossing to the half-scale target
+    // halves the physical position unless pre-multiplied. Size stays a placeholder —
+    // the WaitingForScaleChange → ApplySize phase re-applies the full physical size
+    // after the scale change settles.
     let (physical_move_position, physical_move_size) = match target_position.monitor_scale_strategy
     {
+        MonitorScaleStrategy::HigherToLower(_) => {
+            let ratio = target_position.ratio();
+            let physical_compensated_x = (f64::from(physical_position.x) * ratio).to_i32();
+            let physical_compensated_y = (f64::from(physical_position.y) * ratio).to_i32();
+            debug!(
+                "[apply_initial_move] HigherToLower: compensating position {physical_position:?} -> ({physical_compensated_x}, {physical_compensated_y}) (ratio={ratio})",
+            );
+            (
+                IVec2::new(physical_compensated_x, physical_compensated_y),
+                target_position.physical_size,
+            )
+        },
         MonitorScaleStrategy::CompensateSizeOnly(_) => {
             let compensated_size = target_position.compensated_size();
             debug!(
