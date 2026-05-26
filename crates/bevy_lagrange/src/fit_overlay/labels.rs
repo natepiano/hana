@@ -136,7 +136,7 @@ pub(super) fn update_or_create_margin_label(
         commands.spawn((
             Text::new(parameters.text),
             TextFont {
-                font_size: LABEL_FONT_SIZE,
+                font_size: FontSize::Px(LABEL_FONT_SIZE),
                 ..default()
             },
             TextColor(parameters.color),
@@ -172,7 +172,7 @@ pub(super) fn update_or_create_bounds_label(
         commands.spawn((
             Text::new(BOUNDS_LABEL_TEXT),
             TextFont {
-                font_size: LABEL_FONT_SIZE,
+                font_size: FontSize::Px(LABEL_FONT_SIZE),
                 ..default()
             },
             TextColor(BOUNDS_LABEL_COLOR),

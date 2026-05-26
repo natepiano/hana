@@ -132,7 +132,7 @@ fn setup(
     // Light.
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             illuminance: 5000.0,
             ..default()
         },
@@ -140,7 +140,7 @@ fn setup(
     ));
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(-2.0, 6.0, -8.0).looking_at(Vec3::ZERO, Vec3::Y),

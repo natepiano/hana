@@ -103,11 +103,11 @@ pub(crate) fn toggle_second_window(
     commands.spawn((
         Text::new(SECOND_WINDOW_UI_LABEL),
         TextFont {
-            font_size: PAUSED_OVERLAY_FONT_SIZE,
+            font_size: FontSize::Px(PAUSED_OVERLAY_FONT_SIZE),
             ..default()
         },
         TextColor(OVERLAY_TEXT_COLOR),
-        TextLayout::new_with_justify(Justify::Center),
+        TextLayout::justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Percent(PAUSED_OVERLAY_TOP_PERCENT),

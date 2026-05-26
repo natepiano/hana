@@ -326,7 +326,7 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
     commands.spawn((
         SceneLight,
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             illuminance: SCENE_ILLUMINANCE,
             ..default()
         },

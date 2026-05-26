@@ -7,7 +7,7 @@ mod shaping;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::render::storage::ShaderStorageBuffer;
+use bevy::render::storage::ShaderBuffer;
 use mesh_spawning::WorldTextMesh;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
@@ -75,7 +75,7 @@ pub(super) fn render_world_text(
 pub(super) struct BackendRenderServices<'w> {
     backend:         ResMut<'w, SlugBackend>,
     materials:       ResMut<'w, Assets<SlugTextMaterial>>,
-    storage_buffers: ResMut<'w, Assets<ShaderStorageBuffer>>,
+    storage_buffers: ResMut<'w, Assets<ShaderBuffer>>,
 }
 
 /// Computed layout data for a [`WorldText`] entity, populated by the

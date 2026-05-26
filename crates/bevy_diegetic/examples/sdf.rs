@@ -279,7 +279,7 @@ fn spawn_lights(commands: &mut Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: KEY_LIGHT_LUX,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_translation(KEY_LIGHT_POS)
@@ -289,7 +289,7 @@ fn spawn_lights(commands: &mut Commands) {
     commands.spawn((
         SpotLight {
             intensity: REFLECTION_LIGHT_LEVEL,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             inner_angle: 0.22,
             outer_angle: 0.38,
             range: 12.0,

@@ -254,14 +254,14 @@ fn spawn_world_text_column(
 fn spawn_lighting_and_camera(commands: &mut Commands, total_height: f32) {
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),

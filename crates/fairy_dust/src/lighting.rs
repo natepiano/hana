@@ -57,7 +57,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
         FairyDustStudioLight,
         DirectionalLight {
             illuminance: KEY_LIGHT_ILLUMINANCE,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             shadow_depth_bias: KEY_SHADOW_DEPTH_BIAS,
             shadow_normal_bias: KEY_SHADOW_NORMAL_BIAS,
             ..default()
@@ -77,7 +77,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
         FairyDustStudioLight,
         DirectionalLight {
             illuminance: FILL_LIGHT_ILLUMINANCE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_translation(FILL_LIGHT_POS).looking_at(config.aim_at, Vec3::Y),
@@ -89,7 +89,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
             color: POINT_LIGHT_COLOR,
             intensity: POINT_LIGHT_INTENSITY,
             range: POINT_LIGHT_RANGE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_translation(POINT_LIGHT_POS),

@@ -55,7 +55,7 @@ fn setup(
     // Light
     commands.spawn((
         PointLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         rotate * Transform::from_translation(LIGHT_TRANSLATION),

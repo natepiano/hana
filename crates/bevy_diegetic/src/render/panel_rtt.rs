@@ -212,7 +212,7 @@ pub(super) fn setup_panel_rtt(
         // unaffected.
         commands.entity(panel_entity).with_child((
             DirectionalLight {
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 illuminance: RTT_LIGHT_ILLUMINANCE,
                 ..default()
             },

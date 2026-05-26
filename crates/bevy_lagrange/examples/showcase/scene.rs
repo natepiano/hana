@@ -48,7 +48,7 @@ pub(crate) fn spawn_scene_objects(
     commands.spawn((
         DirectionalLight {
             illuminance: SCENE_LIGHT_ILLUMINANCE,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(

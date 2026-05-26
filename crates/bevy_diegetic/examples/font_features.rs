@@ -164,14 +164,14 @@ fn setup(
 
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(1.5, 7.5, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(-1.5, 7.5, -6.0).looking_at(Vec3::ZERO, Vec3::Y),

@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::render_resource::Face;
-use bevy::render::storage::ShaderStorageBuffer;
+use bevy::render::storage::ShaderBuffer;
 
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::GlyphRenderMode;
@@ -54,7 +54,7 @@ const fn apply_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness)
 pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
     pub(super) meshes:          &'a mut Assets<Mesh>,
     pub(super) materials:       &'a mut Assets<SlugTextMaterial>,
-    pub(super) storage_buffers: &'a mut Assets<ShaderStorageBuffer>,
+    pub(super) storage_buffers: &'a mut Assets<ShaderBuffer>,
     pub(super) commands:        &'a mut Commands<'w, 's>,
 }
 
@@ -103,9 +103,9 @@ fn world_text_material(
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
     render_mode: SlugRenderMode,
-    curves: Handle<ShaderStorageBuffer>,
-    bands: Handle<ShaderStorageBuffer>,
-    glyphs: Handle<ShaderStorageBuffer>,
+    curves: Handle<ShaderBuffer>,
+    bands: Handle<ShaderBuffer>,
+    glyphs: Handle<ShaderBuffer>,
 ) -> SlugTextMaterial {
     let mut base = StandardMaterial {
         depth_bias: -constants::LAYER_DEPTH_BIAS,

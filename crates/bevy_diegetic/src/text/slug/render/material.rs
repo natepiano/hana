@@ -9,7 +9,7 @@ use bevy::prelude::Handle;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
-use bevy::render::storage::ShaderStorageBuffer;
+use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 
 use super::constants::SLUG_TEXT_SHADER_PATH;
@@ -49,13 +49,13 @@ pub struct TextExtension {
     pub uniforms: TextUniform,
     /// Band-packed quadratic curve records.
     #[storage(101, read_only)]
-    pub curves:   Handle<ShaderStorageBuffer>,
+    pub curves:   Handle<ShaderBuffer>,
     /// Horizontal band records.
     #[storage(102, read_only)]
-    pub bands:    Handle<ShaderStorageBuffer>,
+    pub bands:    Handle<ShaderBuffer>,
     /// Unique glyph records for this run.
     #[storage(103, read_only)]
-    pub glyphs:   Handle<ShaderStorageBuffer>,
+    pub glyphs:   Handle<ShaderBuffer>,
 }
 
 impl MaterialExtension for TextExtension {
@@ -73,11 +73,11 @@ pub(crate) struct TextMaterialInput {
     /// Visible render mode.
     pub render_mode: RenderMode,
     /// Band-packed quadratic curve records.
-    pub curves:      Handle<ShaderStorageBuffer>,
+    pub curves:      Handle<ShaderBuffer>,
     /// Horizontal band records.
-    pub bands:       Handle<ShaderStorageBuffer>,
+    pub bands:       Handle<ShaderBuffer>,
     /// Unique glyph records.
-    pub glyphs:      Handle<ShaderStorageBuffer>,
+    pub glyphs:      Handle<ShaderBuffer>,
 }
 
 /// Creates a `TextMaterial` from one run's color, render mode, and

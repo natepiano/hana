@@ -8,7 +8,7 @@ use bevy::prelude::Handle;
 use bevy::prelude::Mesh;
 use bevy::prelude::Resource;
 use bevy::prelude::Vec2;
-use bevy::render::storage::ShaderStorageBuffer;
+use bevy::render::storage::ShaderBuffer;
 use ttf_parser::Face;
 
 use super::BuiltTextRun;
@@ -52,11 +52,11 @@ pub(crate) struct RunStorage {
     /// One quad per glyph instance.
     pub mesh:   Handle<Mesh>,
     /// Band-packed quadratic curve records.
-    pub curves: Handle<ShaderStorageBuffer>,
+    pub curves: Handle<ShaderBuffer>,
     /// Horizontal band records.
-    pub bands:  Handle<ShaderStorageBuffer>,
+    pub bands:  Handle<ShaderBuffer>,
     /// Unique glyph records.
-    pub glyphs: Handle<ShaderStorageBuffer>,
+    pub glyphs: Handle<ShaderBuffer>,
 }
 
 /// Backend resource: owns the glyph cache and prepared-run GPU storage.
@@ -140,7 +140,7 @@ impl Backend {
         prepared: &PreparedTextRun,
         clip_rect: Option<[f32; 4]>,
         meshes: &mut Assets<Mesh>,
-        storage_buffers: &mut Assets<ShaderStorageBuffer>,
+        storage_buffers: &mut Assets<ShaderBuffer>,
     ) -> Result<RunStorage, RunRenderError> {
         if let Some(storage) = self.run_storage.get(&prepared.storage_key) {
             return Ok(storage.clone());
@@ -154,9 +154,9 @@ impl Backend {
         )?;
         let storage = RunStorage {
             mesh:   meshes.add(render_data.mesh),
-            curves: storage_buffers.add(ShaderStorageBuffer::from(render_data.curves)),
-            bands:  storage_buffers.add(ShaderStorageBuffer::from(render_data.bands)),
-            glyphs: storage_buffers.add(ShaderStorageBuffer::from(render_data.glyphs)),
+            curves: storage_buffers.add(ShaderBuffer::from(render_data.curves)),
+            bands:  storage_buffers.add(ShaderBuffer::from(render_data.bands)),
+            glyphs: storage_buffers.add(ShaderBuffer::from(render_data.glyphs)),
         };
         self.run_storage
             .insert(prepared.storage_key, storage.clone());
@@ -229,7 +229,7 @@ mod tests {
         let mut backend = Backend::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
-        let mut storage_buffers = Assets::<ShaderStorageBuffer>::default();
+        let mut storage_buffers = Assets::<ShaderBuffer>::default();
 
         let first = backend
             .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
@@ -249,7 +249,7 @@ mod tests {
         let mut backend = Backend::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
-        let mut storage_buffers = Assets::<ShaderStorageBuffer>::default();
+        let mut storage_buffers = Assets::<ShaderBuffer>::default();
 
         backend
             .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)

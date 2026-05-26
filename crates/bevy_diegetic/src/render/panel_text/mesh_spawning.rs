@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy::render::storage::ShaderStorageBuffer;
+use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToF32;
 
 use super::PanelText;
@@ -47,7 +47,7 @@ pub(super) fn build_panel_text_meshes(
     mut backend: ResMut<SlugBackend>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SlugTextMaterial>>,
-    mut storage_buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -130,7 +130,7 @@ struct PanelTextSpawnRequest<'a, 'w, 's> {
     backend:          &'a mut SlugBackend,
     meshes:           &'a mut Assets<Mesh>,
     materials:        &'a mut Assets<SlugTextMaterial>,
-    storage_buffers:  &'a mut Assets<ShaderStorageBuffer>,
+    storage_buffers:  &'a mut Assets<ShaderBuffer>,
     commands:         &'a mut Commands<'w, 's>,
 }
 

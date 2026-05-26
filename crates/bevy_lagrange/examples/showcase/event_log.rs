@@ -54,11 +54,11 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Text::new(LOG_TOGGLE_HINT_TEXT),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         TextColor(HINT_TEXT_COLOR),
-        TextLayout::new_with_justify(Justify::Left),
+        TextLayout::justify(Justify::Left),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(UI_SCREEN_PADDING_PIXELS),
@@ -75,11 +75,11 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Text::new(LOG_SCROLL_HINT_TEXT),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         TextColor(HINT_TEXT_COLOR),
-        TextLayout::new_with_justify(Justify::Left),
+        TextLayout::justify(Justify::Left),
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(EVENT_LOG_HINT_BOTTOM_PIXELS),
@@ -307,7 +307,7 @@ pub(crate) fn update_event_log_text(
         commands.entity(container).with_child((
             Text::new(entry.text),
             TextFont {
-                font_size: EVENT_LOG_FONT_SIZE,
+                font_size: FontSize::Px(EVENT_LOG_FONT_SIZE),
                 ..default()
             },
             TextColor(entry.color),

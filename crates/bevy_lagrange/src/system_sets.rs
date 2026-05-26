@@ -36,6 +36,7 @@ impl Plugin for LagrangeSystemSetsPlugin {
                     .after(InputSystems)
                     .before(EnhancedInputSystems::Update),
                 OrbitCamInputPhase::WriteManual
+                    .after(OrbitCamInputPhase::PreInput)
                     .after(EnhancedInputSystems::Apply)
                     .after(OrbitCamInputInternalSet::ActionResolution),
                 OrbitCamInputPhase::Finalize.after(OrbitCamInputPhase::WriteManual),

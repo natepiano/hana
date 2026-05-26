@@ -265,7 +265,7 @@ fn setup_screen_space_view(
         },
         DirectionalLight {
             illuminance: SCREEN_SPACE_LIGHT_ILLUMINANCE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(

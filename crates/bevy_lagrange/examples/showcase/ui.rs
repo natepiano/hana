@@ -14,7 +14,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Text::new(INSTRUCTIONS_TEXT),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         Node {
@@ -32,7 +32,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             CameraInputInterruptBehavior::Ignore,
         )),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         TextColor(HINT_TEXT_COLOR),
@@ -52,7 +52,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
             AnimationConflictPolicy::LastWins,
         )),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         TextColor(HINT_TEXT_COLOR),
@@ -72,11 +72,11 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Text::new(PAUSED_TEXT),
         TextFont {
-            font_size: PAUSED_OVERLAY_FONT_SIZE,
+            font_size: FontSize::Px(PAUSED_OVERLAY_FONT_SIZE),
             ..default()
         },
         TextColor(OVERLAY_TEXT_COLOR),
-        TextLayout::new_with_justify(Justify::Center),
+        TextLayout::justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Percent(PAUSED_OVERLAY_TOP_PERCENT),

@@ -161,7 +161,7 @@ fn setup(
     // Light
     commands.spawn((
         PointLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_translation(LIGHT_TRANSLATION),
@@ -173,7 +173,7 @@ fn setup(
     commands.spawn((
         Text::new(INSTRUCTIONS_TEXT),
         TextFont {
-            font_size: INSTRUCTIONS_FONT_SIZE,
+            font_size: FontSize::Px(INSTRUCTIONS_FONT_SIZE),
             ..default()
         },
     ));

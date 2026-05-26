@@ -138,7 +138,7 @@ fn setup(mut commands: Commands) {
     // ── Lighting ────────────────────────────────────────────────────
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             illuminance: 3137.0,
             ..default()
         },
