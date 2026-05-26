@@ -2,16 +2,16 @@ use std::time::Instant;
 
 use bevy::prelude::*;
 
-use super::BackendRenderServices;
-use super::ComputedWorldText;
-use super::PanelChild;
-use super::WorldText;
 use super::mesh_spawning;
 use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::readiness::AwaitingReady;
 use super::readiness::PendingGlyphs;
 use super::shaping;
+use super::BackendRenderServices;
+use super::ComputedWorldText;
+use super::PanelChild;
+use super::WorldText;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
@@ -24,7 +24,7 @@ use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::text::FontRegistry;
-use crate::text::SlugPreparedTextRun;
+use crate::text::PreparedTextRun;
 
 type ChangedWorldTextQuery<'w, 's> = Query<
     'w,
@@ -93,13 +93,13 @@ pub(super) fn render_world_text(
         // where a standalone is rendered before its spawn seed has flushed.
         let resolved_unit = resolved_units
             .get(entity)
-            .map_or(defaults.font_unit, |r| r.0.0);
+            .map_or(defaults.font_unit, |r| r.0 .0);
         let scale = style
             .world_scale()
             .unwrap_or_else(|| resolved_unit.meters_per_unit());
         let resolved_alpha = resolved_alphas
             .get(entity)
-            .map_or(defaults.text_alpha, |r| r.0.0);
+            .map_or(defaults.text_alpha, |r| r.0 .0);
 
         let mut shared_services = WorldTextRenderServices::new(
             &font_registry,
@@ -213,7 +213,7 @@ impl<'a, 'mesh_world, 'mesh_state, 'mesh_data>
 
     fn spawn_run(
         &mut self,
-        prepared: &SlugPreparedTextRun,
+        prepared: &PreparedTextRun,
         entity: Entity,
         style: &WorldTextStyle,
         alpha_mode: AlphaMode,

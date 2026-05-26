@@ -15,9 +15,9 @@ use crate::text::slug::glyph::BandRecord;
 use crate::text::slug::glyph::CurveRecord;
 use crate::text::slug::glyph::GlyphRecord;
 use crate::text::slug::runtime::BuiltTextRun;
-use crate::text::slug::runtime::GlyphCache;
 use crate::text::slug::runtime::GlyphInstance;
 use crate::text::slug::runtime::GlyphKey;
+use crate::text::slug::runtime::GlyphOutlineCache;
 
 const GLYPH_PADDING_DESIGN_UNITS: f32 = 16.0;
 
@@ -60,7 +60,7 @@ impl Error for RunRenderError {}
 /// Builds one run-level mesh and packed storage set clipped to a local rect.
 pub fn build_run_render_data_with_clip(
     preview: &BuiltTextRun,
-    glyph_cache: &GlyphCache,
+    glyph_outline_cache: &GlyphOutlineCache,
     scale: f32,
     clip_rect: Option<[f32; 4]>,
 ) -> Result<RunRenderData, RunRenderError> {
@@ -68,7 +68,7 @@ pub fn build_run_render_data_with_clip(
     let mut mesh_builder = RunMeshBuilder::new(preview.run.glyphs().len());
 
     for glyph in preview.run.glyphs() {
-        let record_index = packer.record_index(*glyph, glyph_cache)?;
+        let record_index = packer.record_index(*glyph, glyph_outline_cache)?;
         mesh_builder.push_glyph(*glyph, record_index, scale, clip_rect);
     }
 
@@ -92,7 +92,7 @@ impl RunPacker {
     fn record_index(
         &mut self,
         glyph: GlyphInstance,
-        glyph_cache: &GlyphCache,
+        glyph_cache: &GlyphOutlineCache,
     ) -> Result<u32, RunRenderError> {
         if let Some(index) = self.record_indices.get(&glyph.key()).copied() {
             return Ok(index);
@@ -282,7 +282,7 @@ mod tests {
     use bevy::mesh::VertexAttributeValues;
 
     use super::*;
-    use crate::text::slug::runtime::GlyphCache;
+    use crate::text::slug::runtime::GlyphOutlineCache;
     use crate::text::slug::support;
 
     const FONT_DATA: &[u8] = include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf");
@@ -342,7 +342,7 @@ mod tests {
     }
 
     /// X/Y extent of the unclipped fixture mesh: `(min_x, max_x, min_y, max_y)`.
-    fn mesh_extent(preview: &BuiltTextRun, cache: &GlyphCache) -> (f32, f32, f32, f32) {
+    fn mesh_extent(preview: &BuiltTextRun, cache: &GlyphOutlineCache) -> (f32, f32, f32, f32) {
         let render_data = build_run_render_data_with_clip(preview, cache, 1.0, None)
             .expect("fixture run should render");
         let positions = float32x3_attribute(&render_data.mesh, Mesh::ATTRIBUTE_POSITION);

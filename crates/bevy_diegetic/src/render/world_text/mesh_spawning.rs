@@ -12,12 +12,12 @@ use crate::layout::GlyphSidedness;
 use crate::layout::WorldTextStyle;
 use crate::render::constants;
 use crate::text;
-use crate::text::SlugBackend;
-use crate::text::SlugPreparedTextRun;
-use crate::text::SlugRenderMode;
-use crate::text::SlugRunStorageKey;
-use crate::text::SlugTextMaterial;
-use crate::text::SlugTextMaterialInput;
+use crate::text::GlyphCache;
+use crate::text::PreparedTextRun;
+use crate::text::RenderMode;
+use crate::text::RunStorageKey;
+use crate::text::TextMaterial;
+use crate::text::TextMaterialInput;
 
 /// Marker for mesh entities spawned by the world text renderer.
 #[derive(Component)]
@@ -53,7 +53,7 @@ const fn apply_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness)
 
 pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
     pub(super) meshes:          &'a mut Assets<Mesh>,
-    pub(super) materials:       &'a mut Assets<SlugTextMaterial>,
+    pub(super) materials:       &'a mut Assets<TextMaterial>,
     pub(super) storage_buffers: &'a mut Assets<ShaderBuffer>,
     pub(super) commands:        &'a mut Commands<'w, 's>,
 }
@@ -62,8 +62,8 @@ pub(super) struct MeshSpawnAssets<'a, 'w, 's> {
 /// own coverage-silhouette shadow unless the style's shadow mode is
 /// [`GlyphShadowMode::None`].
 pub(super) fn spawn_world_text_meshes(
-    prepared: &SlugPreparedTextRun,
-    backend: &mut SlugBackend,
+    prepared: &PreparedTextRun,
+    backend: &mut GlyphCache,
     entity: Entity,
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
@@ -102,18 +102,18 @@ pub(super) fn spawn_world_text_meshes(
 fn world_text_material(
     style: &WorldTextStyle,
     alpha_mode: AlphaMode,
-    render_mode: SlugRenderMode,
+    render_mode: RenderMode,
     curves: Handle<ShaderBuffer>,
     bands: Handle<ShaderBuffer>,
     glyphs: Handle<ShaderBuffer>,
-) -> SlugTextMaterial {
+) -> TextMaterial {
     let mut base = StandardMaterial {
         depth_bias: -constants::LAYER_DEPTH_BIAS,
         alpha_mode,
         ..Default::default()
     };
     apply_sidedness(&mut base, style.sidedness());
-    text::slug_text_material(SlugTextMaterialInput {
+    text::text_material(TextMaterialInput {
         base,
         fill_color: style.color(),
         render_mode,
@@ -126,8 +126,8 @@ fn world_text_material(
 fn spawn_visible_mesh(
     entity: Entity,
     mesh: Handle<Mesh>,
-    storage_key: SlugRunStorageKey,
-    material: Handle<SlugTextMaterial>,
+    storage_key: RunStorageKey,
+    material: Handle<TextMaterial>,
     shadow_mode: GlyphShadowMode,
     commands: &mut Commands,
 ) {
@@ -154,7 +154,7 @@ fn spawn_visible_mesh(
     }
 }
 
-impl From<GlyphRenderMode> for SlugRenderMode {
+impl From<GlyphRenderMode> for RenderMode {
     fn from(render_mode: GlyphRenderMode) -> Self {
         match render_mode {
             GlyphRenderMode::Text => Self::Text,

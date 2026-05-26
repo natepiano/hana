@@ -196,13 +196,13 @@ is less dependent on whether the window is focused.
 
 Prep cost is no longer tracked by a Criterion bench: the `glyph_rasterization`
 bench and the prep API it called (`build_slug_run_render_data` non-clip plus
-`SlugBackend::glyph_cache()`) were both removed during the slug migration. The
+`Backend::glyph_cache()`) were both removed during the slug migration. The
 last recorded figure is full printable ASCII ≈ 0.84 ms (after per-curve dedup
 and 48-band tuning) — below one frame and below frame-timing resolution, so
 there is no warm-up cost worth a per-variant column. Leave the table's
 `Prep time` row at that recorded figure unless a change is expected to move
 prep cost, in which case rebuild a micro-benchmark against
-`SlugBackend::prepare_positioned_run_with_scale` + `ensure_run_storage` and
+`Backend::prepare_positioned_run_with_scale` + `ensure_run_storage` and
 record the case name.
 
 ### 7. Populate The Table

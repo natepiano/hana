@@ -18,12 +18,12 @@ use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
 use crate::render::world_text::PanelChild;
 use crate::text;
-use crate::text::SlugBackend;
-use crate::text::SlugRenderMode;
-use crate::text::SlugRunStorage;
-use crate::text::SlugRunStorageKey;
-use crate::text::SlugTextMaterial;
-use crate::text::SlugTextMaterialInput;
+use crate::text::GlyphCache;
+use crate::text::RenderMode;
+use crate::text::RunStorage;
+use crate::text::RunStorageKey;
+use crate::text::TextMaterial;
+use crate::text::TextMaterialInput;
 
 /// Marker component for text mesh entities spawned by the renderer.
 #[derive(Component)]
@@ -39,13 +39,13 @@ pub(super) fn build_panel_text_meshes(
         ),
     >,
     panel_children: Query<(Entity, &PanelText, &PanelTextLayout, &ChildOf)>,
-    old_meshes: Query<(Entity, &ChildOf, Option<&SlugRunStorageKey>), With<DiegeticTextMesh>>,
+    old_meshes: Query<(Entity, &ChildOf, Option<&RunStorageKey>), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelChild>>,
     defaults: Res<CascadeDefaults>,
-    mut backend: ResMut<SlugBackend>,
+    mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<SlugTextMaterial>>,
+    mut materials: ResMut<Assets<TextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
@@ -75,7 +75,7 @@ pub(super) fn build_panel_text_meshes(
             }
             let resolved_alpha = resolved_alphas
                 .get(child_entity)
-                .map_or(defaults.text_alpha, |resolved| resolved.0.0);
+                .map_or(defaults.text_alpha, |resolved| resolved.0 .0);
             spawn_panel_text_run(PanelTextSpawnRequest {
                 panel_entity,
                 panel_run,
@@ -123,9 +123,9 @@ struct PanelTextSpawnRequest<'a, 'w, 's> {
     text_base:        &'a StandardMaterial,
     resolved_alpha:   AlphaMode,
     content_layer:    &'a RenderLayers,
-    backend:          &'a mut SlugBackend,
+    backend:          &'a mut GlyphCache,
     meshes:           &'a mut Assets<Mesh>,
-    materials:        &'a mut Assets<SlugTextMaterial>,
+    materials:        &'a mut Assets<TextMaterial>,
     storage_buffers:  &'a mut Assets<ShaderBuffer>,
     commands:         &'a mut Commands<'w, 's>,
 }
@@ -191,13 +191,13 @@ fn panel_material(
     depth_bias: f32,
     alpha_mode: AlphaMode,
     fill_color: Color,
-    render_mode: SlugRenderMode,
-    storage: &SlugRunStorage,
-) -> SlugTextMaterial {
+    render_mode: RenderMode,
+    storage: &RunStorage,
+) -> TextMaterial {
     let mut base = base.clone();
     base.depth_bias = depth_bias;
     base.alpha_mode = alpha_mode;
-    text::slug_text_material(SlugTextMaterialInput {
+    text::text_material(TextMaterialInput {
         base,
         fill_color,
         render_mode,
@@ -210,8 +210,8 @@ fn panel_material(
 fn spawn_visible_mesh(
     panel_entity: Entity,
     mesh_handle: Handle<Mesh>,
-    storage_key: SlugRunStorageKey,
-    material_handle: Handle<SlugTextMaterial>,
+    storage_key: RunStorageKey,
+    material_handle: Handle<TextMaterial>,
     shadow_mode: GlyphShadowMode,
     content_layer: &RenderLayers,
     commands: &mut Commands,

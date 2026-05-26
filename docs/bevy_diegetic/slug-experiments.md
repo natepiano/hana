@@ -15,7 +15,7 @@ Current shader-performance experiments use three checks:
   the prep API it called were removed during the slug migration; the last
   recorded figure is full printable ASCII ≈ 0.84 ms (2026-05-24, after
   per-curve dedup + 48-band tuning, JetBrains Mono at 128 px). Rebuild a
-  micro-bench against `SlugBackend::prepare_positioned_run_with_scale` +
+  micro-bench against `Backend::prepare_positioned_run_with_scale` +
   `ensure_run_storage` only if a change is expected to move prep cost.
 
 ### Canonical Benchmark Format
@@ -641,8 +641,8 @@ Change:
   renderer in the private Slug path.
 - Build a tessellated solid fill mesh from glyph contours.
 - Build a stroked contour mesh for the analytic Slug edge pass.
-- Spawn fill with `SlugRenderMode::SolidQuad` and the edge mesh with
-  `SlugRenderMode::Text`.
+- Spawn fill with `RenderMode::SolidQuad` and the edge mesh with
+  `RenderMode::Text`.
 
 Result:
 

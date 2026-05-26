@@ -109,13 +109,13 @@ impl GlyphRecord {
 
 /// One glyph's packed curve and band data for the text shader.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PackedGlyph {
+pub struct GlyphOutline {
     glyph:  Glyph,
     curves: Vec<CurveRecord>,
     bands:  Vec<BandRecord>,
 }
 
-impl PackedGlyph {
+impl GlyphOutline {
     /// Glyph bounds in font design-space units.
     #[must_use]
     pub const fn bounds(&self) -> Bounds { self.glyph.bounds }
@@ -131,7 +131,7 @@ impl PackedGlyph {
 
 /// Builds horizontal band data for one quadratic glyph.
 #[must_use]
-pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> PackedGlyph {
+pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> GlyphOutline {
     let band_count = band_count.max(1);
     let mut curves = Vec::new();
     let mut bands = Vec::with_capacity(band_count * 2);
@@ -166,7 +166,7 @@ pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> PackedGlyph {
         &mut bands,
     );
 
-    PackedGlyph {
+    GlyphOutline {
         glyph,
         curves,
         bands,

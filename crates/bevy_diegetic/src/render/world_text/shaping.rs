@@ -13,15 +13,15 @@ use crate::render::text_shaping;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::text::FontRegistry;
-use crate::text::SLUG_DEFAULT_BAND_COUNT;
-use crate::text::SlugBackend;
-use crate::text::SlugPositionedGlyph;
-use crate::text::SlugPreparedTextRun;
+use crate::text::GlyphCache;
+use crate::text::PositionedGlyph;
+use crate::text::PreparedTextRun;
+use crate::text::DEFAULT_BAND_COUNT;
 
 /// Result of building text run data for a [`WorldText`](super::WorldText) entity.
 pub(super) struct ShapedWorldTextRun {
     /// Prepared text run.
-    pub(super) prepared: Option<SlugPreparedTextRun>,
+    pub(super) prepared: Option<PreparedTextRun>,
     /// `Anchor` offset Y in layout units.
     pub(super) anchor_y: f32,
     /// Per-glyph ink bounding boxes `[x, y, width, height]` in world units.
@@ -48,7 +48,7 @@ pub(super) fn build_world_text_run(
     text: &str,
     style: &WorldTextStyle,
     font_registry: &FontRegistry,
-    backend: &mut SlugBackend,
+    backend: &mut GlyphCache,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
     scale: f32,
@@ -93,7 +93,7 @@ pub(super) fn build_world_text_run(
         Vec2::new(anchor_x, anchor_y),
         boosted_size,
         world_scale,
-        SLUG_DEFAULT_BAND_COUNT,
+        DEFAULT_BAND_COUNT,
     ) {
         Ok(prepared) => prepared,
         Err(err) => {
@@ -128,7 +128,7 @@ pub(super) fn build_world_text_run(
 
 fn measure_anchor_offset(
     layout_run: &ShapedTextRun,
-    positioned_glyphs: &[SlugPositionedGlyph<'_>],
+    positioned_glyphs: &[PositionedGlyph<'_>],
     style: &WorldTextStyle,
     font_size: f32,
 ) -> (f32, f32) {
@@ -159,7 +159,7 @@ fn measure_anchor_offset(
     style.anchor().offset(max_x, max_y)
 }
 
-fn native_ink_right(positioned_glyph: &SlugPositionedGlyph<'_>, font_size: f32) -> Option<f32> {
+fn native_ink_right(positioned_glyph: &PositionedGlyph<'_>, font_size: f32) -> Option<f32> {
     let face = ttf_parser::Face::parse(
         positioned_glyph.font.data(),
         positioned_glyph.collection_index,
@@ -172,7 +172,7 @@ fn native_ink_right(positioned_glyph: &SlugPositionedGlyph<'_>, font_size: f32) 
 
 #[cfg(feature = "typography_overlay")]
 fn overlay_glyph_metrics(
-    positioned_glyphs: &[SlugPositionedGlyph<'_>],
+    positioned_glyphs: &[PositionedGlyph<'_>],
     font_size: f32,
     anchor: Vec2,
     scale: f32,

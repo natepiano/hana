@@ -22,8 +22,8 @@ use crate::render::world_text::PanelChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
 use crate::text::FontRegistry;
-use crate::text::SLUG_DEFAULT_BAND_COUNT;
-use crate::text::SlugBackend;
+use crate::text::GlyphCache;
+use crate::text::DEFAULT_BAND_COUNT;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
 pub(super) fn shape_panel_text_children(
@@ -44,7 +44,7 @@ pub(super) fn shape_panel_text_children(
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
-    mut backend: ResMut<SlugBackend>,
+    mut backend: ResMut<GlyphCache>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -128,7 +128,7 @@ fn build_panel_text(
     text: &str,
     config: &LayoutTextStyle,
     placement: &QuadPlacement,
-    backend: &mut SlugBackend,
+    backend: &mut GlyphCache,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
@@ -155,7 +155,7 @@ fn build_panel_text(
         anchor,
         config.size(),
         placement.scale,
-        SLUG_DEFAULT_BAND_COUNT,
+        DEFAULT_BAND_COUNT,
     ) {
         Ok(prepared) => prepared,
         Err(err) => {

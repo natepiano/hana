@@ -31,16 +31,16 @@ pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
 pub use font::create_parley_measurer;
-pub(crate) use slug::Backend as SlugBackend;
-pub(crate) use slug::DEFAULT_BAND_COUNT as SLUG_DEFAULT_BAND_COUNT;
-pub(crate) use slug::PositionedGlyph as SlugPositionedGlyph;
-pub(crate) use slug::PreparedTextRun as SlugPreparedTextRun;
-pub(crate) use slug::RenderMode as SlugRenderMode;
-pub(crate) use slug::RunStorage as SlugRunStorage;
-pub(crate) use slug::RunStorageKey as SlugRunStorageKey;
-pub(crate) use slug::TextMaterial as SlugTextMaterial;
-pub(crate) use slug::TextMaterialInput as SlugTextMaterialInput;
-pub(crate) use slug::text_material as slug_text_material;
+pub(crate) use slug::GlyphCache;
+pub(crate) use slug::DEFAULT_BAND_COUNT;
+pub(crate) use slug::PositionedGlyph;
+pub(crate) use slug::PreparedTextRun;
+pub(crate) use slug::RenderMode;
+pub(crate) use slug::RunStorage;
+pub(crate) use slug::RunStorageKey;
+pub(crate) use slug::TextMaterial;
+pub(crate) use slug::TextMaterialInput;
+pub(crate) use slug::text_material;
 
 use self::slug::SlugPlugin;
 

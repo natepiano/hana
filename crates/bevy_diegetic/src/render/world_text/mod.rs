@@ -9,10 +9,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
 use mesh_spawning::WorldTextMesh;
+pub(super) use readiness::emit_world_text_ready;
 pub(super) use readiness::AwaitingReady;
 pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
-pub(super) use readiness::emit_world_text_ready;
 
 use super::text_shaping::TextShapingContext;
 use crate::cascade::CascadeAttr;
@@ -24,8 +24,8 @@ use crate::cascade::TextAlpha;
 use crate::layout::ShapedTextCache;
 use crate::layout::WorldTextStyle;
 use crate::text::FontRegistry;
-use crate::text::SlugBackend;
-use crate::text::SlugTextMaterial;
+use crate::text::GlyphCache;
+use crate::text::TextMaterial;
 
 pub(super) fn render_world_text(
     changed_texts: Query<
@@ -73,8 +73,8 @@ pub(super) fn render_world_text(
 
 #[derive(SystemParam)]
 pub(super) struct BackendRenderServices<'w> {
-    backend:         ResMut<'w, SlugBackend>,
-    materials:       ResMut<'w, Assets<SlugTextMaterial>>,
+    backend:         ResMut<'w, GlyphCache>,
+    materials:       ResMut<'w, Assets<TextMaterial>>,
     storage_buffers: ResMut<'w, Assets<ShaderBuffer>>,
 }
 
@@ -210,9 +210,9 @@ pub(super) fn seed_world_text_overrides(
 )]
 mod tests {
     use super::*;
-    use crate::Pt;
     use crate::cascade::CascadePlugin;
     use crate::layout::Unit;
+    use crate::Pt;
 
     fn standalone_app() -> App {
         let mut app = App::new();
@@ -229,7 +229,7 @@ mod tests {
             .get::<Resolved<TextAlpha>>(entity)
             .expect("standalone should carry Resolved<TextAlpha>")
             .0
-            .0
+             .0
     }
 
     fn resolved_unit(app: &App, entity: Entity) -> Unit {
@@ -237,7 +237,7 @@ mod tests {
             .get::<Resolved<FontUnit>>(entity)
             .expect("standalone should carry Resolved<FontUnit>")
             .0
-            .0
+             .0
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
             .world()
             .get::<Override<FontUnit>>(entity)
             .expect("explicit-unit standalone should carry Override<FontUnit>");
-        assert_eq!(node_override.0.0, Unit::Points);
+        assert_eq!(node_override.0 .0, Unit::Points);
     }
 
     #[test]
@@ -288,7 +288,7 @@ mod tests {
             .world()
             .get::<Override<TextAlpha>>(entity)
             .expect("explicit-alpha standalone should carry Override<TextAlpha>");
-        assert_eq!(node_override.0.0, AlphaMode::Add);
+        assert_eq!(node_override.0 .0, AlphaMode::Add);
     }
 
     #[test]

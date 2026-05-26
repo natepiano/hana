@@ -1,12 +1,12 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 
 use bevy::math::Vec2;
 
 use crate::text::slug::glyph;
 use crate::text::slug::glyph::Bounds;
+use crate::text::slug::glyph::GlyphOutline;
 use crate::text::slug::glyph::OutlineError;
-use crate::text::slug::glyph::PackedGlyph;
 
 /// Stable identity for the resolved font face used by shaping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -126,14 +126,14 @@ impl TextRun {
 
 /// Cache of reusable packed glyph data.
 #[derive(Clone, Debug, Default)]
-pub struct GlyphCache {
-    glyphs: HashMap<GlyphKey, PackedGlyph>,
+pub struct GlyphOutlineCache {
+    glyphs: HashMap<GlyphKey, GlyphOutline>,
 }
 
-impl GlyphCache {
+impl GlyphOutlineCache {
     /// Returns the cached packed glyph for `key`, if it exists.
     #[must_use]
-    pub fn get(&self, key: GlyphKey) -> Option<&PackedGlyph> { self.glyphs.get(&key) }
+    pub fn get(&self, key: GlyphKey) -> Option<&GlyphOutline> { self.glyphs.get(&key) }
 
     /// Loads, packs, and caches one glyph from a specific collection face.
     pub fn get_or_insert_packed_from_face(
@@ -143,7 +143,7 @@ impl GlyphCache {
         face_index: u32,
         character: char,
         band_count: usize,
-    ) -> Result<&PackedGlyph, OutlineError> {
+    ) -> Result<&GlyphOutline, OutlineError> {
         match self.glyphs.entry(key) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {

@@ -6,9 +6,6 @@ use std::sync::PoisonError;
 
 use bevy::prelude::*;
 use bevy_kana::ToU16;
-use parley::Layout;
-use parley::LayoutContext;
-use parley::RangedBuilder;
 use parley::layout::GlyphRun;
 use parley::layout::PositionedLayoutItem;
 use parley::style::FontFeatures;
@@ -16,6 +13,9 @@ use parley::style::FontStyle;
 use parley::style::FontWeight;
 use parley::style::LineHeight;
 use parley::style::StyleProperty;
+use parley::Layout;
+use parley::LayoutContext;
+use parley::RangedBuilder;
 
 use crate::layout::FontSlant;
 use crate::layout::LayoutTextStyle;
@@ -25,10 +25,10 @@ use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
 use crate::layout::TextDimensions;
-use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
-use crate::text::SlugPositionedGlyph;
+use crate::text::PositionedGlyph;
+use crate::text::DEFAULT_FAMILY;
 
 /// Reusable parley shaping buffers.
 ///
@@ -108,14 +108,14 @@ pub(super) fn positioned_glyphs<'a>(
     glyphs: &'a [ShapedGlyph],
     font_registry: &'a FontRegistry,
     stats: &mut TextBuildStats,
-) -> Vec<SlugPositionedGlyph<'a>> {
+) -> Vec<PositionedGlyph<'a>> {
     let mut positioned_glyphs = Vec::with_capacity(glyphs.len());
     for glyph in glyphs {
         let Some((font, collection_index)) = font_registry.font_for_face(glyph.font_face) else {
             stats.failed_glyphs += 1;
             continue;
         };
-        positioned_glyphs.push(SlugPositionedGlyph {
+        positioned_glyphs.push(PositionedGlyph {
             glyph,
             font,
             collection_index,

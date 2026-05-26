@@ -13,15 +13,15 @@ use ttf_parser::Face;
 
 use super::BuiltTextRun;
 use super::FontKey;
-use super::GlyphCache;
 use super::GlyphInstance;
 use super::GlyphKey;
+use super::GlyphOutlineCache;
 use super::PositionedGlyph;
 use super::TextRun;
-use crate::text::slug::RunRenderError;
 use crate::text::slug::glyph;
 use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::render;
+use crate::text::slug::RunRenderError;
 
 /// Result of preparing one text run.
 #[derive(Clone, Debug)]
@@ -59,16 +59,16 @@ pub(crate) struct RunStorage {
     pub glyphs: Handle<ShaderBuffer>,
 }
 
-/// Backend resource: owns the glyph cache and prepared-run GPU storage.
+/// GlyphCache resource: owns the glyph cache and prepared-run GPU storage.
 #[derive(Debug, Default, Resource)]
-pub(crate) struct Backend {
-    glyph_cache:        GlyphCache,
+pub(crate) struct GlyphCache {
+    glyph_cache:        GlyphOutlineCache,
     run_storage:        HashMap<RunStorageKey, RunStorage>,
     next_storage_key:   u64,
     preprocess_version: u32,
 }
 
-impl Backend {
+impl GlyphCache {
     /// Prepares one run from already-positioned production glyphs.
     pub fn prepare_positioned_run(
         &mut self,
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn prepared_runs_receive_distinct_storage_keys() {
-        let mut backend = Backend::default();
+        let mut backend = GlyphCache::default();
         let first = prepare(&mut backend, "Typography");
         let second = prepare(&mut backend, "Typography");
 
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn ensure_run_storage_reuses_existing_handles() {
-        let mut backend = Backend::default();
+        let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn run_storage_can_be_removed_after_mesh_despawn() {
-        let mut backend = Backend::default();
+        let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn text_runs_skip_invisible_space_glyphs() {
-        let mut backend = Backend::default();
+        let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "A A");
 
         assert_eq!(prepared.glyph_count(), 2);
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn space_only_text_run_is_invisible_not_failed() {
-        let mut backend = Backend::default();
+        let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, " ");
 
         assert_eq!(prepared.glyph_count(), 0);
@@ -286,20 +286,20 @@ mod tests {
         ];
 
         for (font_data, font_key) in latin_fonts {
-            let mut backend = Backend::default();
+            let mut backend = GlyphCache::default();
             let prepared =
                 support::prepare_fixture_run(&mut backend, font_data, font_key, "Typography")
                     .expect("Latin font fixture should prepare");
             assert_eq!(prepared.glyph_count(), 10);
         }
 
-        let mut backend = Backend::default();
+        let mut backend = GlyphCache::default();
         let prepared = support::prepare_fixture_run(&mut backend, NOTO_CJK_DATA, 106, "漢")
             .expect("CFF cubic font fixture should prepare through quadratic conversion");
         assert_eq!(prepared.glyph_count(), 1);
     }
 
-    fn prepare(backend: &mut Backend, text: &str) -> PreparedTextRun {
+    fn prepare(backend: &mut GlyphCache, text: &str) -> PreparedTextRun {
         support::prepare_fixture_run(backend, FONT_DATA, 11, text)
             .expect("fixture text should prepare")
     }

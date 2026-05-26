@@ -11,18 +11,18 @@ use ttf_parser::GlyphId;
 
 use crate::layout::ResolvedFontFace;
 use crate::layout::ShapedGlyph;
-use crate::text::Font;
-use crate::text::slug::glyph::DEFAULT_BAND_COUNT;
 use crate::text::slug::glyph::OutlineError;
-use crate::text::slug::runtime::Backend;
+use crate::text::slug::glyph::DEFAULT_BAND_COUNT;
 use crate::text::slug::runtime::BuiltTextRun;
 use crate::text::slug::runtime::FontKey;
 use crate::text::slug::runtime::GlyphCache;
 use crate::text::slug::runtime::GlyphInstance;
 use crate::text::slug::runtime::GlyphKey;
+use crate::text::slug::runtime::GlyphOutlineCache;
 use crate::text::slug::runtime::PositionedGlyph;
 use crate::text::slug::runtime::PreparedTextRun;
 use crate::text::slug::runtime::TextRun;
+use crate::text::Font;
 
 /// Replacement character used as the diagnostic glyph label when packing
 /// fixture glyphs by id.
@@ -38,7 +38,7 @@ pub(super) const FIXTURE_SCALE: f32 = 0.001;
 /// IDs and advances come straight from the font face, mirroring what parley
 /// shaping feeds [`Backend::prepare_positioned_run_with_scale`].
 pub fn prepare_fixture_run(
-    backend: &mut Backend,
+    backend: &mut GlyphCache,
     font_data: &[u8],
     font_key: u64,
     text: &str,
@@ -68,10 +68,10 @@ pub fn fixture_run_with_cache(
     font_data: &[u8],
     font_key: u64,
     text: &str,
-) -> (BuiltTextRun, GlyphCache) {
+) -> (BuiltTextRun, GlyphOutlineCache) {
     let face = Face::parse(font_data, 0).expect("fixture font should parse");
     let key_seed = FontKey::new(font_key);
-    let mut cache = GlyphCache::default();
+    let mut cache = GlyphOutlineCache::default();
     let mut instances = Vec::new();
     let mut origin_x = 0.0_f32;
     for character in text.chars() {

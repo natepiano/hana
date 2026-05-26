@@ -23,13 +23,13 @@ use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
-use crate::text::SlugPreparedTextRun;
+use crate::text::PreparedTextRun;
 
 /// Stores a prepared text run for a panel [`WorldText`](crate::WorldText) child.
 #[derive(Component)]
 pub(super) struct PanelText {
     /// Prepared text run.
-    pub prepared:    SlugPreparedTextRun,
+    pub prepared:    PreparedTextRun,
     /// Glyph render mode for this text element.
     pub render_mode: GlyphRenderMode,
     /// Glyph shadow mode for this text element.
