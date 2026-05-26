@@ -4,8 +4,6 @@
 mod animation;
 mod components;
 mod constants;
-#[cfg(feature = "bevy_egui")]
-mod egui;
 mod enhanced_input;
 mod events;
 mod fit;
@@ -26,21 +24,11 @@ use bevy::input::gestures::PinchGesture;
 use bevy::input::touch::Touches;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
-#[cfg(feature = "bevy_egui")]
-use bevy_egui::EguiPreUpdateSet;
 pub use components::AnimationConflictPolicy;
 pub use components::CameraInputInterruptBehavior;
 pub use components::CurrentFitTarget;
 #[cfg(feature = "fit_overlay")]
 pub use components::FitOverlay;
-#[cfg(feature = "bevy_egui")]
-pub use egui::BlockOnEguiFocus;
-#[cfg(feature = "bevy_egui")]
-pub use egui::EguiFocusIncludesHover;
-#[cfg(feature = "bevy_egui")]
-pub use egui::EguiWantsFocus;
-#[cfg(feature = "bevy_egui")]
-pub use egui::FocusFrame;
 use enhanced_input::LagrangeEnhancedInputPlugin;
 pub use events::AnimateToFit;
 pub use events::AnimationBegin;
@@ -201,18 +189,6 @@ impl Plugin for LagrangePlugin {
                     .before(TransformSystems::Propagate)
                     .before(CameraUpdateSystems),
             );
-
-        #[cfg(feature = "bevy_egui")]
-        {
-            app.init_resource::<EguiWantsFocus>()
-                .init_resource::<EguiFocusIncludesHover>()
-                .add_systems(
-                    PostUpdate,
-                    egui::check_egui_wants_focus
-                        .after(EguiPreUpdateSet::InitContexts)
-                        .before(OrbitCamSystemSet),
-                );
-        }
 
         app.add_plugins(ObserverPlugin)
             .add_systems(Update, animation::process_camera_move_list);

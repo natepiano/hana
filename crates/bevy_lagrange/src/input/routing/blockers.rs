@@ -5,7 +5,7 @@
 //!   not receive input this frame. Computed once per frame from a
 //!   [`CameraRoutingSnapshot`](super::snapshot::CameraRoutingSnapshot).
 //! - [`OrbitCamInputBlockerBits`] — internal bitflag set of blocker reasons
-//!   (`DISABLED`/`INACTIVE_CAMERA`/`EGUI_FOCUS`/`ANIMATION_IGNORE`/`UNAVAILABLE_OWNER`).
+//!   (`DISABLED`/`INACTIVE_CAMERA`/`ANIMATION_IGNORE`/`UNAVAILABLE_OWNER`).
 //! - [`OrbitCamInputContextGated`] — component flipping each camera's interaction context between
 //!   allowed and blocked, derived from `OrbitCamInputBlockers::is_blocked`.
 //! - [`ContextGate`] — `Allowed`/`Blocked` enum that `OrbitCamInputContextGated` wraps.
@@ -20,9 +20,8 @@ bitflags::bitflags! {
     pub(crate) struct OrbitCamInputBlockerBits: u8 {
         const DISABLED = 1 << 0;
         const INACTIVE_CAMERA = 1 << 1;
-        const EGUI_FOCUS = 1 << 2;
-        const ANIMATION_IGNORE = 1 << 3;
-        const UNAVAILABLE_OWNER = 1 << 4;
+        const ANIMATION_IGNORE = 1 << 2;
+        const UNAVAILABLE_OWNER = 1 << 3;
     }
 }
 
@@ -46,9 +45,6 @@ impl OrbitCamInputBlockers {
             && routed_camera != Some(snapshot.entity)
         {
             bits.insert(OrbitCamInputBlockerBits::INACTIVE_CAMERA);
-        }
-        if snapshot.has(CameraRoutingSnapshotFlags::EGUI_BLOCKED) {
-            bits.insert(OrbitCamInputBlockerBits::EGUI_FOCUS);
         }
         if snapshot.has(CameraRoutingSnapshotFlags::ANIMATION_IGNORE) {
             bits.insert(OrbitCamInputBlockerBits::ANIMATION_IGNORE);

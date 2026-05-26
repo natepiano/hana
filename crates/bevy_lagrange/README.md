@@ -19,7 +19,7 @@ A camera controller for [Bevy](https://bevyengine.org) that combines smooth orbi
 - Event-driven control with full lifecycle events for sequencing
 - Orthographic and perspective projection, multi-viewport, render-to-texture
 - Preset, custom, and manual input modes with source-attributed interaction events
-- Touch, trackpad, keyboard, gamepad, and `bevy_egui` support
+- Touch, trackpad, keyboard, and gamepad support
 - Debug overlay for fit targets (optional `fit_overlay` feature)
 
 ## Quick Start
@@ -156,7 +156,8 @@ All operations support instant (`Duration::ZERO`) and animated paths with full l
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `fit_overlay` | no | Zoom-to-fit, camera animations, event-driven control, and debug overlay |
-| `bevy_egui` | no | Prevents camera movement when interacting with egui windows |
+
+For `egui` integration — preventing camera input while egui has focus — see [`docs/egui.md`](docs/egui.md).
 
 ## Version Compatibility
 

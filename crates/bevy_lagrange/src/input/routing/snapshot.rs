@@ -4,10 +4,8 @@
 //! - [`WindowSnapshot`] — captured window size and cursor position.
 //! - [`CameraRoutingSnapshot`] — captured per-camera routing inputs (entity, draw order, surface
 //!   metrics, and the bit flags below).
-//! - [`CameraRoutingSnapshotFlags`] — `ACTIVE`/`MANUAL`/`DISABLED`/`EGUI_BLOCKED`/
-//!   `ANIMATION_IGNORE`/`CURSOR_HIT` bitset.
-//! - [`EguiBlockState`] — present-frame egui focus status (only meaningful under the `bevy_egui`
-//!   feature; always `Open` otherwise).
+//! - [`CameraRoutingSnapshotFlags`] — `ACTIVE`/`MANUAL`/`DISABLED`/`ANIMATION_IGNORE`/`CURSOR_HIT`
+//!   bitset.
 //!
 //! [`collect_window_snapshots`] and [`collect_camera_snapshots`] are the entry points the
 //! parent `resolve_camera_input_routing` system calls each frame.
@@ -22,12 +20,6 @@ use bevy::window::WindowRef;
 use crate::CameraInputInterruptBehavior;
 use crate::CameraMoveList;
 use crate::OrbitCam;
-#[cfg(feature = "bevy_egui")]
-use crate::egui::BlockOnEguiFocus;
-#[cfg(feature = "bevy_egui")]
-use crate::egui::EguiWantsFocus;
-#[cfg(feature = "bevy_egui")]
-use crate::egui::FocusFrame;
 use crate::input::CameraInputDisabled;
 use crate::input::CameraInputSurfaceMetrics;
 use crate::input::OrbitCamManual;
@@ -44,9 +36,8 @@ bitflags::bitflags! {
         const ACTIVE = 1 << 0;
         const MANUAL = 1 << 1;
         const DISABLED = 1 << 2;
-        const EGUI_BLOCKED = 1 << 3;
-        const ANIMATION_IGNORE = 1 << 4;
-        const CURSOR_HIT = 1 << 5;
+        const ANIMATION_IGNORE = 1 << 3;
+        const CURSOR_HIT = 1 << 4;
     }
 }
 
@@ -61,16 +52,6 @@ impl CameraRoutingSnapshot {
     pub(super) const fn has(&self, flag: CameraRoutingSnapshotFlags) -> bool {
         self.flags.contains(flag)
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EguiBlockState {
-    Blocked,
-    Open,
-}
-
-impl From<bool> for EguiBlockState {
-    fn from(blocked: bool) -> Self { if blocked { Self::Blocked } else { Self::Open } }
 }
 
 struct CameraSnapshotInputs<'a> {
@@ -118,14 +99,6 @@ pub(super) fn collect_camera_snapshots(
     world: &mut World,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> Vec<CameraRoutingSnapshot> {
-    collect_camera_snapshots_impl(world, windows)
-}
-
-#[cfg(not(feature = "bevy_egui"))]
-fn collect_camera_snapshots_impl(
-    world: &mut World,
-    windows: &HashMap<Option<Entity>, WindowSnapshot>,
-) -> Vec<CameraRoutingSnapshot> {
     let mut query = world.query_filtered::<(
         Entity,
         &Camera,
@@ -152,60 +125,6 @@ fn collect_camera_snapshots_impl(
                         interrupt,
                         explicit_metrics,
                     },
-                    EguiBlockState::Open,
-                    windows,
-                )
-            },
-        )
-        .collect()
-}
-
-#[cfg(feature = "bevy_egui")]
-fn collect_camera_snapshots_impl(
-    world: &mut World,
-    windows: &HashMap<Option<Entity>, WindowSnapshot>,
-) -> Vec<CameraRoutingSnapshot> {
-    let egui_blocks_all = world.get_resource::<EguiWantsFocus>().is_some_and(|focus| {
-        matches!(focus.previous, FocusFrame::Wants) || matches!(focus.current, FocusFrame::Wants)
-    });
-    let mut query = world.query_filtered::<(
-        Entity,
-        &Camera,
-        &RenderTarget,
-        Option<&OrbitCamManual>,
-        Option<&CameraInputDisabled>,
-        Option<&CameraMoveList>,
-        Option<&CameraInputInterruptBehavior>,
-        Option<&CameraInputSurfaceMetrics>,
-        Option<&BlockOnEguiFocus>,
-    ), With<OrbitCam>>();
-
-    query
-        .iter(world)
-        .map(
-            |(
-                entity,
-                camera,
-                target,
-                manual,
-                disabled,
-                move_list,
-                interrupt,
-                explicit_metrics,
-                block_on_egui,
-            )| {
-                camera_snapshot(
-                    CameraSnapshotInputs {
-                        entity,
-                        camera,
-                        target,
-                        manual,
-                        disabled,
-                        move_list,
-                        interrupt,
-                        explicit_metrics,
-                    },
-                    EguiBlockState::from(egui_blocks_all && block_on_egui.is_some()),
                     windows,
                 )
             },
@@ -215,7 +134,6 @@ fn collect_camera_snapshots_impl(
 
 fn camera_snapshot(
     camera_snapshot_inputs: CameraSnapshotInputs<'_>,
-    egui_block_state: EguiBlockState,
     windows: &HashMap<Option<Entity>, WindowSnapshot>,
 ) -> CameraRoutingSnapshot {
     let CameraSnapshotInputs {
@@ -239,10 +157,6 @@ fn camera_snapshot(
     flags.set(CameraRoutingSnapshotFlags::ACTIVE, camera.is_active);
     flags.set(CameraRoutingSnapshotFlags::MANUAL, manual.is_some());
     flags.set(CameraRoutingSnapshotFlags::DISABLED, disabled.is_some());
-    flags.set(
-        CameraRoutingSnapshotFlags::EGUI_BLOCKED,
-        matches!(egui_block_state, EguiBlockState::Blocked),
-    );
     flags.set(CameraRoutingSnapshotFlags::ANIMATION_IGNORE, animation);
     flags.set(CameraRoutingSnapshotFlags::CURSOR_HIT, cursor_hit);
 
