@@ -11,7 +11,9 @@ use bevy::prelude::*;
 
 use self::alpha::seed_panel_child_alpha;
 pub use self::layout::PanelTextLayout;
-use self::mesh_spawning::build_panel_text_meshes;
+use self::mesh_spawning::free_run_storage_on_mesh_removal;
+use self::mesh_spawning::update_panel_text_alpha;
+use self::mesh_spawning::update_panel_text_geometry;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
@@ -51,6 +53,7 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(CascadePlugin::<TextAlpha>::default());
         app.add_observer(world_text::seed_world_text_overrides);
         app.add_observer(seed_panel_child_alpha);
+        app.add_observer(free_run_storage_on_mesh_removal);
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
@@ -60,7 +63,10 @@ impl Plugin for TextRenderPlugin {
                 reconcile_panel_text_children,
                 reconcile_panel_image_children,
                 shape_panel_text_children.after(reconcile_panel_text_children),
-                build_panel_text_meshes
+                update_panel_text_geometry
+                    .after(shape_panel_text_children)
+                    .before(TransformSystems::Propagate),
+                update_panel_text_alpha
                     .after(shape_panel_text_children)
                     .before(TransformSystems::Propagate),
                 world_text::render_world_text.before(TransformSystems::Propagate),

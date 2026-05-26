@@ -40,7 +40,7 @@ pub struct DiegeticPerfStats {
 ///
 /// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`]
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
-/// 3. `build_panel_text_meshes` → [`Self::mesh_build_ms`] (glyphs → meshes)
+/// 3. `update_panel_text_geometry` → [`Self::mesh_build_ms`] (glyphs → meshes)
 ///
 /// Render-pass time is not measured here — it lives in Bevy's own diagnostics
 /// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
@@ -55,10 +55,12 @@ pub struct PanelTextPerfStats {
     ///
     /// Written twice per frame: first by `shape_panel_text_children` using
     /// the *previous* frame's `mesh_build_ms`, then overwritten by
-    /// `build_panel_text_meshes` using the current frame's values. The
-    /// final value is only correct because mesh build is scheduled
+    /// `update_panel_text_geometry` using the current frame's values. The
+    /// final value is only correct because the geometry build is scheduled
     /// `.after(shape_panel_text_children)`; reordering those systems would
-    /// leave `total_ms` stale by one frame.
+    /// leave `total_ms` stale by one frame. `update_panel_text_alpha` touches
+    /// no mesh and adds nothing to `mesh_build_ms`, so an alpha-only frame
+    /// reports ~0 mesh-build time.
     pub total_ms:      f32,
     /// Stage 2 — wall time of `shape_panel_text_children` this frame.
     /// Covers turning strings into positioned glyphs for every panel-text
@@ -68,7 +70,7 @@ pub struct PanelTextPerfStats {
     /// summed across entities. If this dominates, the cost is content-side
     /// (many strings, complex scripts, heavy font features).
     pub parley_ms:     f32,
-    /// Stage 3 — wall time of `build_panel_text_meshes` this frame.
+    /// Stage 3 — wall time of `update_panel_text_geometry` this frame.
     /// Covers building glyph meshes and despawning stale meshes.
     pub mesh_build_ms: f32,
     /// Number of panels whose text shaping ran this frame.

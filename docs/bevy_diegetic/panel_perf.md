@@ -5,7 +5,7 @@
 | Item | State |
 | --- | --- |
 | Scheduler-ordering flash fix | **Done** (on `update/0.19.0-rc.2`) |
-| Per-run rebuild (this plan) | **In progress** — Phase 3 done (P2 already satisfied) |
+| Per-run rebuild (this plan) | **In progress** — Phases 3–5 done (P2 already satisfied); Phases 6–7 remain |
 | Font-load relayout | **Deferred** — not reachable through the current API |
 
 ---
@@ -693,7 +693,7 @@ parentage" premise is intact) needed no change. Runtime settings ergonomics was
 raised as a gap and split to its own track (§10) at the user's direction — not
 folded into any perf phase.
 
-### Phase 4 — reparent text meshes + storage observer (R4, R2, M5)
+### Phase 4 — reparent text meshes + storage observer (R4, R2, M5) — Done
 - Spawn each `DiegeticTextMesh` as a child of its `PanelChild` (not the panel);
   drop the `Entity` source-tag, locate meshes via `ChildOf`. Remove the
   panel-parent despawn loop. Add the `On<Remove, DiegeticTextMesh>` observer
@@ -726,7 +726,44 @@ folded into any perf phase.
 - Tests: removing a `PanelChild` frees its run storage; whole-panel despawn
   cleans up; rendering unchanged.
 
-### Phase 5 — split into geometry + alpha systems (Edit 2, R3, R5, R10, M2, M7, R6)
+#### Retrospective
+
+**What worked:**
+- Reparent by renaming `PanelTextSpawnRequest.panel_entity` → `mesh_parent` and
+  spawning the mesh with `commands.entity(label).with_child(...)`. The
+  `On<Remove, DiegeticTextMesh>` observer `free_run_storage_on_mesh_removal`
+  reads `&RunStorageKey` off the triggering entity (`On<Remove>` fires before
+  the drop) and is the sole storage freer — the inline `remove_run_storage` and
+  the `Option<&RunStorageKey>` on the `old_meshes` query are both gone.
+- A `despawn_label_mesh(label, &old_meshes, commands)` helper locates a run's
+  mesh by `ChildOf` (`Query<(Entity, &ChildOf), With<DiegeticTextMesh>>`) — the
+  same lookup Phase 5 reuses.
+
+**What deviated from the plan:**
+- The plan kept the "monolithic build, adapted to new parentage" for Phase 4.
+  The adaptation was larger than a parent swap: the old despawn loop matched
+  meshes by `child_of.parent() == panel_entity`, which matches *nothing* once
+  meshes sit under labels. The loop moved *inside* the per-label loop
+  (despawn this label's mesh, then respawn), so the panel-level mesh sweep is
+  gone even before Phase 5.
+
+**Surprises:**
+- Screen-space layer propagation (`propagate_layers_recursive`) now inserts a
+  `RenderLayers` on the intervening `PanelChild` label (previously a leaf) and
+  still recurses to the mesh, which keeps its explicit content layer
+  (`existing_layers.get(child).is_err()` is false for the mesh). Benign — labels
+  carry no mesh — and confirmed in test.
+- `render/world_text/panel_child.rs` is an orphan file (no `mod panel_child;`
+  declaration) duplicating the `PanelChild` definition that actually lives in
+  `world_text/mod.rs:160`. Not compiled; left untouched.
+
+**Implications for remaining phases:**
+- **Phase 5** reaches a run's material two hops down (label → mesh child) via the
+  `despawn_label_mesh` lookup, and frees storage only through the observer.
+- **Phase 6/7** are unaffected by the reparent (world text is single-run; images
+  keep flat per-element reuse).
+
+### Phase 5 — split into geometry + alpha systems (Edit 2, R3, R5, R10, M2, M7, R6) — Done
 The core per-run change.
 - Replace the monolithic build with `update_panel_text_geometry`
   (`Changed<PanelText>` **and** `RemovedComponents<PanelText>` [R10] → despawn +
@@ -781,6 +818,74 @@ The core per-run change.
   parent is already gone (filter on a still-present parent, or no-op a missing
   mesh) rather than assume the signal only arrives on the clear-in-place path.
 
+#### Retrospective
+
+**What worked:**
+- `update_panel_text_geometry` (`Changed<PanelText>` + `RemovedComponents<PanelText>`)
+  and `update_panel_text_alpha` (`Changed<Resolved<TextAlpha>>`, `Ref<PanelText>`
+  skip, value-guarded `material.base.alpha_mode`) replace the monolithic build;
+  `collect_dirty_panels` is deleted. The geometry system owns the perf timer; an
+  alpha-only frame reports ~0 `mesh_build_ms`.
+- Idempotent R10: both the emptied-run path and a recursively despawned label
+  route through `despawn_label_mesh`, which finds nothing when the mesh is
+  already gone — no double-despawn.
+- Eight integration tests over a real-font headless pipeline
+  (`MinimalPlugins` + `AssetPlugin` + `TransformPlugin` + `FontRegistry::new()`,
+  manual asset/resource init, no `MaterialPlugin`): per-run rebuild isolation,
+  alpha-in-place, storage cleanup (label + whole panel), R10 emptied-run, R6
+  propagated `GlobalTransform`, idle-frame no-op. A `#[cfg(test)]`
+  `GlyphCache::run_storage_len` exposes the storage count.
+
+**What deviated from the plan:**
+- `Assets::get_mut` binds by value in this Bevy (`let Some(mut material) = …`),
+  not as a `&mut`; the R5 value-guard still wraps the write. Calling `get_mut`
+  marks the asset modified regardless, so the "no-op alpha doesn't trip
+  `Changed<TextMaterial>`" guarantee actually comes from the upstream cascade
+  guard (`propagate_cascade` only inserts `Resolved` on a real change, so this
+  system never runs on a no-op), not from the in-system field guard.
+
+**Surprises:**
+- A recolor is a *geometry* rebuild, not an alpha update: `fill_color` rides in
+  `PanelText`/the material, so `Changed<PanelText>` fires. Genuine alpha-only
+  changes arrive only as `Changed<Resolved<TextAlpha>>` (global default or panel
+  override) — exactly the narrow standalone story Phase 6 is scoped to. The
+  alpha-only test drives it through `CascadeDefaults::text_alpha`.
+- Slug shaping is synchronous, so glyphs are `Ready` in a headless test with no
+  render device — the full pipeline produces meshes without `MaterialPlugin`.
+
+**Implications for remaining phases:**
+- **Phase 6** mirrors this two-system split for world text (single-run, no
+  reparent); its alpha-only signal is likewise only `Changed<Resolved<TextAlpha>>`
+  from the global default (§10 records the missing per-entity runtime path).
+- **Phase 7** (images) is independent of this split — no `PanelText`, no run
+  storage, no reparent; it gates on cached inputs and mutates `base_color`.
+
+#### Phase 4–5 Review
+
+Architect re-review of Phases 6–7 against the shipped Phase 4/5 code. Edits
+applied:
+- **Phase 6 — scope expanded (user-approved):** delete the inline
+  `clear_run_storage()` (it wipes the *shared* `GlyphCache.run_storage`, evicting
+  panel runs) and add a `free_run_storage_on_world_mesh_removal`
+  (`On<Remove, WorldTextMesh>`) observer, making the Phase-4 storage-cleanup
+  invariant uniform across both text paths. Added a regression test.
+- **Phase 7 — gating inputs widened (user-approved):** cache and compare
+  `command_index`, treating a draw-slot shift as a material rebuild, so
+  overlapping images keep correct `depth_bias` under reorder (text's M2 parity).
+- **Phase 6 — minor notes folded in:** the in-place alpha write inherits Phase
+  5's `get_mut`-marks-modified caveat (the cascade is the real no-op suppressor);
+  the alpha branch no-ops when the entity has no `WorldTextMesh` child
+  (empty/pending); the `Update`→`PostUpdate` change-tick survives without a
+  run-order edge; world-text perf accounting mirrors "geometry owns the timer."
+- **Phase 7 — minor notes folded in:** the image material is on the *same*
+  entity (no two-hop `ChildOf` lookup like panel text); the reconcile-level input
+  comparison is the real tint guard (no cascade for image tint), so the whole
+  tint branch must be skipped on an unchanged input, not just the field write.
+
+One confirmation finding (world text's `Without<PanelChild>` filtering and its
+distinct `WorldTextMesh` marker are unaffected by the Phase-4 reparent) needed no
+change.
+
 ### Phase 6 — world-text alpha short-circuit (Edit 2b)
 Larger than a one-line guard: it mirrors Phase 5's two-signal split, because
 `render_world_text` (`world_text/rendering.rs:191-208`) has no per-entity
@@ -798,6 +903,20 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   this path. The short-circuit is correct but low-yield for standalone text; the
   broader "set a standalone's blend mode at runtime" gap is recorded in §10, not
   here.
+- **Scope expansion — fix the shared-`GlyphCache` wipe + add a remove-observer
+  (Phase-4/5 review, user-approved).** `render_world_text`
+  (`world_text/rendering.rs:195`) calls `backend.clear_run_storage()`, which
+  `backend.rs:172` implements as `self.run_storage.clear()` — it empties the
+  *entire* shared `GlyphCache.run_storage` map, not just this entity's run.
+  Phase 4 made the panel-text path depend on that same map staying keyed per-run
+  and freed only by `free_run_storage_on_mesh_removal`. So any world-text rebuild
+  evicts every panel run's storage (masked today only because the live app rarely
+  mixes standalone world text with panels). Phase 6 must add
+  `free_run_storage_on_world_mesh_removal` (`On<Remove, WorldTextMesh>`) mirroring
+  the panel observer, and **delete the inline `clear_run_storage()`** so
+  `despawn_mesh_children` frees storage per-run — making the storage-cleanup
+  invariant (Phase 4) uniform across both text paths. (`clear_run_storage` may
+  then be removable entirely if no caller remains.)
 - Split the alpha-only case from the rest — a second system, or a `Ref`-based
   skip à la M7 that detects "only `Resolved<TextAlpha>` changed."
 - For the alpha-only case, query the existing `WorldTextMesh` child's
@@ -808,11 +927,35 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   / `WorldTextStyle` / `Resolved<FontUnit>` changes. World text is single-run per
   entity, so no reparent needed. Depends on the Phase 5 pattern → stays after
   Phase 5.
+- **The value-guard is belt-and-suspenders; the cascade is the real no-op
+  suppressor (Phase-5 finding F3).** `materials.get_mut()` marks the
+  `TextMaterial` asset modified on *access*, regardless of the `!=` guard. So the
+  "alpha-only change doesn't needlessly re-prep" guarantee comes from
+  `propagate_cascade` (`cascade/plugin.rs:92`) value-guarding the `Resolved`
+  write so `Changed<Resolved<TextAlpha>>` never fires on a no-op — the alpha
+  branch then never runs. The in-place field guard is a second line, not the
+  primary one, exactly as Phase 5 found for panel text.
+- **The alpha-only branch must no-op when the `WorldText` entity has no
+  `WorldTextMesh` child (F4)** — empty text, or `PendingGlyphs` before the first
+  ready build. Like Phase 5's panel alpha system (its inner `ChildOf` loop simply
+  finds nothing), an absent mesh child is a no-op, not an error.
+- **The `Update`→`PostUpdate` tick survives (F5).** `propagate_cascade` writes
+  `Resolved<TextAlpha>` in `Update`/`CascadeSet::Propagate`; `render_world_text`
+  reads `Changed<Resolved<TextAlpha>>` in `PostUpdate`. No run-order edge is
+  needed — `PostUpdate` is strictly after `Update` in the same frame, so the
+  change tick is visible (the same property Phase 5 relies on for panel text).
+- **Perf-stat ownership across the split (F9).** `render_world_text` keeps its
+  own `mesh_ms`/`total_ms` accounting (`rendering.rs`). Mirror Phase 5's
+  "geometry/respawn owns the timer": the alpha-only branch touches no mesh, so an
+  alpha-only frame reports ~0 world-text mesh time.
 - Files: `render/world_text/mod.rs`, `render/world_text/rendering.rs`,
   `render/world_text/mesh_spawning.rs`.
 - Tests: a world-text alpha-only change mutates `base.alpha_mode` and does not
   respawn the mesh or re-touch run storage; a `WorldText`/`WorldTextStyle`/
-  `FontUnit` change still rebuilds.
+  `FontUnit` change still rebuilds; an alpha change on an entity with no mesh
+  child (empty/pending) is a no-op; a world-text geometry rebuild frees only its
+  own run's storage and leaves a co-existing panel run's storage intact (the
+  shared-`GlyphCache` regression).
 
 ### Phase 7 — image per-run gating + tint split (Edit 3, R9 image part, M8)
 - Gate `reconcile_panel_image_children` on input equality (`handle`/`tint`/
@@ -830,8 +973,38 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   `bounds`), extend `PanelImageChild` to cache the prior inputs to compare
   against, and widen the query to hold the `MeshMaterial3d<StandardMaterial>`
   handle for the in-place `base_color` mutation.
+- **Cache and compare `command_index` too — depth bias depends on it
+  (Phase-4/5 review, user-approved).** Image `depth_bias` derives from `cmd_index`
+  (`reconcile.rs:279`), but reuse is keyed by `element_idx` only
+  (`reconcile.rs:255`). When a sibling image is inserted/removed, a reused image's
+  draw-slot (`cmd_index`) shifts while its `handle`/`tint`/`bounds` do not — so a
+  gate that ignores `cmd_index` keeps a stale `depth_bias` and overlapping images
+  z-fight. Add `command_index` to `PanelImageChild`'s cached inputs and treat a
+  `cmd_index` change as a **material rebuild** (the bias lives on the material).
+  This gives images the layering-under-reorder correctness text gets from its
+  `(element_idx, command_index)` reuse key (M2) — stronger than text's R7, which
+  only loses a perf guarantee on reorder, because for images the stale bias is a
+  visible artifact.
+- **No two-hop lookup — the image material is on the same entity (Phase-5
+  finding F6).** Unlike panel text, where Phase 4 pushed the material two hops
+  down (`PanelChild` → `DiegeticTextMesh` child), `reconcile_panel_image_children`
+  puts `Mesh3d` + `MeshMaterial3d<StandardMaterial>` directly on the
+  `PanelImageChild` entity (`reconcile.rs:289-303`). Phase 7 reads the material
+  handle off the same entity it iterates — do **not** copy panel text's `ChildOf`
+  hop.
+- **The reconcile-level input comparison is the real tint guard — there is no
+  cascade here (F8).** Alpha is value-guarded upstream by `propagate_cascade`;
+  image tint has no cascade, so the gating comparison in
+  `reconcile_panel_image_children` itself is the *only* no-op suppressor. Because
+  `materials.get_mut()` marks the `StandardMaterial` modified on access, the
+  tint branch must be skipped entirely when the cached `tint` is unchanged — the
+  R5 field-guard alone is insufficient. Gate at the comparison, not just at the
+  write.
 - Files: `render/panel_text/reconcile.rs`.
-- Tests: a tint-only change updates `base_color` without rebuilding the mesh.
+- Tests: a tint-only change updates `base_color` without rebuilding the mesh; an
+  unchanged image is not re-touched (no `get_mut` call); inserting a sibling
+  image above a reused one shifts its `cmd_index` and rebuilds its material so
+  `depth_bias` stays correct (no z-fight on reorder).
 
 **Doc-only (no commit of their own):** M1, M3, M4 are corrections to this
 document; fold M4's test list into the per-phase tests above.

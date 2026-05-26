@@ -12,7 +12,8 @@ use crate::render::world_text::PanelChild;
 /// A panel label (`PanelChild` + `WorldText`) is depth-2 under its panel. This
 /// observer fires when a label first gains [`PanelChild`] and seeds its
 /// [`Resolved<TextAlpha>`] via [`resolve_walk`](cascade::resolve_walk), which
-/// `build_panel_text_meshes` reads for the glyph material. The walk honors the
+/// `update_panel_text_geometry` reads for the glyph material (and
+/// `update_panel_text_alpha` reads on a later alpha-only change). The walk honors the
 /// label's own `Override<TextAlpha>` first — `reconcile_panel_text_children`
 /// inserts one when the label authored its alpha
 /// (`LayoutTextStyle::with_alpha_mode`), in the same bundle as [`PanelChild`]
@@ -92,7 +93,7 @@ mod tests {
             .with_child((WorldText::new("label"), PanelChild));
     }
 
-    /// Stand-in for `build_panel_text_meshes`'s alpha read: the cached
+    /// Stand-in for `update_panel_text_geometry`'s alpha read: the cached
     /// `Resolved<TextAlpha>` else the global-default fallback. Records the
     /// first observation so the assertion sees the spawn frame, not a later
     /// settled one.
