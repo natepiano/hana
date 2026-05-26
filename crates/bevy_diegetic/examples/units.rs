@@ -12,6 +12,7 @@
 
 use std::time::Duration;
 
+use bevy::anti_alias::smaa::Smaa;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
@@ -44,6 +45,9 @@ use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+
+/// Title-bar control label for the SMAA toggle.
+const SMAA_CONTROL: &str = "S SMAA";
 use fairy_dust::TitleBar;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
@@ -237,6 +241,51 @@ enum CameraProjection {
     Orthographic,
 }
 
+/// Source of truth for the post-process SMAA toggle.
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum SmaaState {
+    /// SMAA on: post-process AA smooths the mesh edges that `Msaa::Off` (forced
+    /// by OIT) leaves jagged.
+    #[default]
+    On,
+    /// SMAA off.
+    Off,
+}
+
+/// Seed SMAA on the orbit camera when it spawns so the example opens with edge
+/// anti-aliasing on (matching [`SmaaState`]'s default).
+fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
+    commands.entity(trigger.entity).insert(Smaa::default());
+}
+
+/// On `S`, toggle [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
+/// SMAA runs on the composited image after the OIT pass, so it anti-aliases
+/// mesh edges without disturbing the OIT text composite.
+fn toggle_smaa(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<SmaaState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyS) {
+        return;
+    }
+    *state = match *state {
+        SmaaState::On => SmaaState::Off,
+        SmaaState::Off => SmaaState::On,
+    };
+    for camera in &cameras {
+        match *state {
+            SmaaState::On => {
+                commands.entity(camera).insert(Smaa::default());
+            },
+            SmaaState::Off => {
+                commands.entity(camera).remove::<Smaa>();
+            },
+        }
+    }
+}
+
 fn build_panel_or_log(
     panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
     label: &str,
@@ -276,7 +325,8 @@ fn main() {
                 .control("R Rulers")
                 .control("P Perspective")
                 .control("O Orthographic")
-                .control("Click to Zoom"),
+                .control("Click to Zoom")
+                .control(SMAA_CONTROL),
         )
         .wire_chip_to_state::<DebugOutlines, _>("D Outlines", |state| match state {
             DebugOutlines::On => ControlActivation::Active,
@@ -299,6 +349,10 @@ fn main() {
             |event| event.source == AnimationSource::ZoomToFit,
             |event| event.source == AnimationSource::ZoomToFit,
         )
+        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
+            SmaaState::On => ControlActivation::Active,
+            SmaaState::Off => ControlActivation::Inactive,
+        })
         .with_camera_control_panel()
         .with_camera_control_panel_background_color(
             DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA),
@@ -306,10 +360,13 @@ fn main() {
         .init_resource::<DebugOutlines>()
         .init_resource::<Rulers>()
         .init_resource::<CameraProjection>()
+        .init_resource::<SmaaState>()
+        .add_observer(seed_smaa)
         .add_systems(Startup, setup)
         .add_systems(Update, toggle_debug_outlines)
         .add_systems(Update, toggle_rulers)
         .add_systems(Update, toggle_projection)
+        .add_systems(Update, toggle_smaa)
         .run();
 }
 

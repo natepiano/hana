@@ -30,6 +30,23 @@ pub use world_text::PendingGlyphs;
 pub use world_text::WorldText;
 pub use world_text::WorldTextReady;
 
+/// `PostUpdate` phase that spawns and despawns a panel's child entities —
+/// text runs, images, glyph meshes, and SDF geometry.
+///
+/// Any system that reads a panel's [`Children`](bevy::prelude::Children) to act
+/// on the child set — notably screen-space
+/// [`RenderLayers`](bevy::camera::visibility::RenderLayers) propagation — must
+/// be ordered `.after` this set. Reading the hierarchy mid-phase observes a
+/// child that a reconcile system is despawning the same frame, which then
+/// queues a command against an already-despawned entity and panics. Ordering
+/// after the set inserts the sync point that applies those despawns (and the
+/// `ChildOf` hooks that prune `Children`) first.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum PanelChildSystems {
+    /// Reconcile and mesh-build of every panel child entity.
+    Build,
+}
+
 /// Umbrella render plugin — registers the render-side sub-plugins
 /// (slug text, SDF panel geometry).
 pub(crate) struct RenderPlugin;

@@ -7,6 +7,7 @@
 //! [`GlyphRenderMode::PunchOut`] row shows the inverted-coverage fill: each
 //! glyph quad is filled everywhere except the letter.
 
+use bevy::anti_alias::smaa::Smaa;
 use bevy::prelude::*;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontRegistered;
@@ -14,8 +15,11 @@ use bevy_diegetic::FontRegistry;
 use bevy_diegetic::GlyphRenderMode;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::ControlActivation;
+use fairy_dust::TitleBar;
 
 const HEADLINE_TEXT: &str = "Typography";
 const HEADLINE_SIZE: f32 = 0.48;
@@ -46,9 +50,55 @@ const HOME_YAW: f32 = 0.0;
 const LIGHT_AIM: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
 const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
 
+/// Title-bar control label for the SMAA toggle.
+const SMAA_CONTROL: &str = "S SMAA";
+
 /// Keeps the runtime-loaded CJK font handle alive so it stays registered.
 #[derive(Resource, Default)]
 struct FontHandles(Vec<Handle<Font>>);
+
+/// Source of truth for the post-process SMAA toggle.
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum SmaaState {
+    /// SMAA on: post-process AA smooths the mesh edges that `Msaa::Off` (forced
+    /// by OIT) leaves jagged.
+    #[default]
+    On,
+    /// SMAA off.
+    Off,
+}
+
+/// Seed SMAA on the orbit camera when it spawns so the example opens with edge
+/// anti-aliasing on (matching [`SmaaState`]'s default).
+fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
+    commands.entity(trigger.entity).insert(Smaa::default());
+}
+
+/// On `S`, toggle [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
+fn toggle_smaa(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<SmaaState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyS) {
+        return;
+    }
+    *state = match *state {
+        SmaaState::On => SmaaState::Off,
+        SmaaState::Off => SmaaState::On,
+    };
+    for camera in &cameras {
+        match *state {
+            SmaaState::On => {
+                commands.entity(camera).insert(Smaa::default());
+            },
+            SmaaState::Off => {
+                commands.entity(camera).remove::<Smaa>();
+            },
+        }
+    }
+}
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
@@ -79,10 +129,18 @@ fn main() {
         )
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
+        .with_title_bar(TitleBar::new().control(SMAA_CONTROL))
+        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
+            SmaaState::On => ControlActivation::Active,
+            SmaaState::Off => ControlActivation::Inactive,
+        })
         .with_camera_control_panel()
         .init_resource::<FontHandles>()
+        .init_resource::<SmaaState>()
         .add_systems(Startup, setup)
         .add_observer(on_font_registered)
+        .add_observer(seed_smaa)
+        .add_systems(Update, toggle_smaa)
         .run();
 }
 

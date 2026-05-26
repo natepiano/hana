@@ -189,6 +189,9 @@ fn world_text_material(
         base,
         fill_color: style.color(),
         render_mode,
+        // World text positions in 3D with real transform offsets, so it needs no
+        // coplanar OIT layer offset.
+        oit_depth_offset: 0.0,
         curves,
         bands,
         glyphs,

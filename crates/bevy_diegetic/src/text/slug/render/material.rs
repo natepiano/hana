@@ -36,9 +36,12 @@ pub(crate) type TextMaterial = ExtendedMaterial<StandardMaterial, TextExtension>
 #[derive(Clone, Debug, ShaderType)]
 pub struct TextUniform {
     /// Linear fill color.
-    pub fill_color:  Vec4,
+    pub fill_color:       Vec4,
     /// Visible render mode for this pass.
-    pub render_mode: u32,
+    pub render_mode:      u32,
+    /// Per-layer depth offset applied to the OIT fragment position for coplanar
+    /// layer ordering.
+    pub oit_depth_offset: f32,
 }
 
 /// Text material extension over `StandardMaterial`.
@@ -67,17 +70,19 @@ impl MaterialExtension for TextExtension {
 /// Inputs for one text material instance.
 pub(crate) struct TextMaterialInput {
     /// Base material settings.
-    pub base:        StandardMaterial,
+    pub base:             StandardMaterial,
     /// Fill color.
-    pub fill_color:  Color,
+    pub fill_color:       Color,
     /// Visible render mode.
-    pub render_mode: RenderMode,
+    pub render_mode:      RenderMode,
+    /// Per-layer depth offset for coplanar OIT layer ordering.
+    pub oit_depth_offset: f32,
     /// Band-packed quadratic curve records.
-    pub curves:      Handle<ShaderBuffer>,
+    pub curves:           Handle<ShaderBuffer>,
     /// Horizontal band records.
-    pub bands:       Handle<ShaderBuffer>,
+    pub bands:            Handle<ShaderBuffer>,
     /// Unique glyph records.
-    pub glyphs:      Handle<ShaderBuffer>,
+    pub glyphs:           Handle<ShaderBuffer>,
 }
 
 /// Creates a `TextMaterial` from one run's color, render mode, and
@@ -88,6 +93,7 @@ pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
         base,
         fill_color,
         render_mode,
+        oit_depth_offset,
         curves,
         bands,
         glyphs,
@@ -97,8 +103,9 @@ pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
         base,
         extension: TextExtension {
             uniforms: TextUniform {
-                fill_color:  Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
+                fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
                 render_mode: u32::from(render_mode),
+                oit_depth_offset,
             },
             curves,
             bands,

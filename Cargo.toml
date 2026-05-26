@@ -60,3 +60,7 @@ wildcard_imports       = "allow"
 
 [workspace.lints.rust]
 missing_docs = "deny"
+
+# Optimize dependencies even in dev builds; keeps own-crate incremental compiles fast.
+[profile.dev.package."*"]
+opt-level = 3

@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use bevy::anti_alias::smaa::Smaa;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
@@ -68,6 +69,9 @@ const HOME_PITCH: f32 = 0.055;
 
 const LIGHT_AIM: Vec3 = Vec3::new(0.0, DISPLAY_Y, DISPLAY_Z);
 const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
+
+/// Title-bar control label for the SMAA toggle.
+const SMAA_CONTROL: &str = "S SMAA";
 
 const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.80);
 const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
@@ -224,6 +228,10 @@ fn main() {
             CycleState::Cycling { .. } => ControlActivation::Active,
             CycleState::Idle => ControlActivation::Inactive,
         })
+        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
+            SmaaState::On => ControlActivation::Active,
+            SmaaState::Off => ControlActivation::Inactive,
+        })
         .with_camera_control_panel()
         .insert_resource(WordCycle {
             index: 0,
@@ -233,13 +241,21 @@ fn main() {
         .init_resource::<FontHandles>()
         .init_resource::<OverlayState>()
         .init_resource::<CycleState>()
+        .init_resource::<SmaaState>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (toggle_overlay, switch_font, cycle_word, tick_cycle_state),
+            (
+                toggle_overlay,
+                switch_font,
+                cycle_word,
+                tick_cycle_state,
+                toggle_smaa,
+            ),
         )
         .add_observer(on_font_registered)
         .add_observer(on_typography_overlay_ready)
+        .add_observer(seed_smaa)
         .run();
 }
 
@@ -247,6 +263,50 @@ fn title_bar() -> TitleBar {
     TitleBar::new()
         .control("T Overlay")
         .control("←/→ Cycle Word")
+        .control(SMAA_CONTROL)
+}
+
+/// Source of truth for the post-process SMAA toggle.
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum SmaaState {
+    /// SMAA on: post-process AA smooths the mesh edges that `Msaa::Off` (forced
+    /// by OIT) leaves jagged.
+    #[default]
+    On,
+    /// SMAA off.
+    Off,
+}
+
+/// Seed SMAA on the orbit camera when it spawns so the example opens with edge
+/// anti-aliasing on (matching [`SmaaState`]'s default).
+fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
+    commands.entity(trigger.entity).insert(Smaa::default());
+}
+
+/// On `S`, toggle [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
+fn toggle_smaa(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<SmaaState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyS) {
+        return;
+    }
+    *state = match *state {
+        SmaaState::On => SmaaState::Off,
+        SmaaState::Off => SmaaState::On,
+    };
+    for camera in &cameras {
+        match *state {
+            SmaaState::On => {
+                commands.entity(camera).insert(Smaa::default());
+            },
+            SmaaState::Off => {
+                commands.entity(camera).remove::<Smaa>();
+            },
+        }
+    }
 }
 
 fn setup(

@@ -5,14 +5,24 @@
 //! an anchor demo panel. Press `X`/`Y`/`Z` to rotate the anchor panel and the
 //! labeled cube around the matching local axis; press `H` to return to the
 //! home camera pose.
+//!
+//! This example runs OIT (`.with_stable_transparency()`), which forces
+//! `Msaa::Off`, so the cube's silhouette edges would alias. MSAA can't coexist
+//! with OIT, but post-process anti-aliasing can: SMAA is on by default to
+//! recover the edge AA. Press `S` to toggle it off and watch the cube
+//! silhouette alias — that is the AA cost OIT alone would impose. SMAA runs on
+//! the composited image after the OIT pass, so the two are compatible.
 
+use bevy::anti_alias::smaa::Smaa;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::ControlActivation;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 
@@ -24,6 +34,7 @@ const HOME_PITCH: f32 = 0.5;
 const X_ROTATE_CONTROL: &str = "X Rotate";
 const Y_ROTATE_CONTROL: &str = "Y Rotate";
 const Z_ROTATE_CONTROL: &str = "Z Rotate";
+const SMAA_CONTROL: &str = "S SMAA";
 
 const ROTATION_SPEED: f32 = 1.5;
 
@@ -71,6 +82,17 @@ struct AnchorRotation {
 #[derive(Component)]
 struct DemoCube;
 
+/// Source of truth for the post-process SMAA toggle. Drives both the camera
+/// component and the title-bar chip highlight.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+enum SmaaState {
+    /// No post-process AA: under OIT (`Msaa::Off`) the cube edges alias.
+    #[default]
+    Off,
+    /// SMAA on: mesh edges resolve while the OIT text stays stable.
+    On,
+}
+
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -108,7 +130,8 @@ fn main() {
                 .with_anchor(Anchor::TopLeft)
                 .control(X_ROTATE_CONTROL)
                 .control(Y_ROTATE_CONTROL)
-                .control(Z_ROTATE_CONTROL),
+                .control(Z_ROTATE_CONTROL)
+                .control(SMAA_CONTROL),
         )
         .wire_chip_to_events_filtered::<RotationBegin, RotationEnd, _, _>(
             X_ROTATE_CONTROL,
@@ -125,10 +148,15 @@ fn main() {
             |e| e.axis == Vec3::Z,
             |e| e.axis == Vec3::Z,
         )
+        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
+            SmaaState::On => ControlActivation::Active,
+            SmaaState::Off => ControlActivation::Inactive,
+        })
         .with_camera_control_panel()
         .init_resource::<AnchorRotation>()
+        .init_resource::<SmaaState>()
         .add_systems(Startup, setup)
-        .add_systems(Update, rotate_anchor_demo)
+        .add_systems(Update, (rotate_anchor_demo, toggle_smaa))
         .run();
 }
 
@@ -315,5 +343,34 @@ fn rotate_anchor_demo(
 
     if let (Ok(mut cube_t), Some(base)) = (cube.single_mut(), *cube_base_rotation) {
         cube_t.rotation = base * rot;
+    }
+}
+
+/// On `S`, flip [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
+/// SMAA is a post-process pass that runs on the composited image after OIT
+/// resolves, so it anti-aliases the mesh edges that `Msaa::Off` leaves jagged
+/// without disturbing the OIT text composite.
+fn toggle_smaa(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<SmaaState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyS) {
+        return;
+    }
+    *state = match *state {
+        SmaaState::Off => SmaaState::On,
+        SmaaState::On => SmaaState::Off,
+    };
+    for camera in &cameras {
+        match *state {
+            SmaaState::On => {
+                commands.entity(camera).insert(Smaa::default());
+            },
+            SmaaState::Off => {
+                commands.entity(camera).remove::<Smaa>();
+            },
+        }
     }
 }

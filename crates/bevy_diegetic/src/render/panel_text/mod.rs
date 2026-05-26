@@ -17,6 +17,7 @@ use self::mesh_spawning::update_panel_text_geometry;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::shaping::shape_panel_text_children;
+use super::PanelChildSystems;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
@@ -61,15 +62,16 @@ impl Plugin for TextRenderPlugin {
         app.add_systems(
             PostUpdate,
             (
-                reconcile_panel_text_children,
-                reconcile_panel_image_children,
+                reconcile_panel_text_children.in_set(PanelChildSystems::Build),
+                reconcile_panel_image_children.in_set(PanelChildSystems::Build),
                 shape_panel_text_children.after(reconcile_panel_text_children),
                 update_panel_text_geometry
                     .after(shape_panel_text_children)
                     .before(TransformSystems::Propagate),
                 update_panel_text_alpha
                     .after(shape_panel_text_children)
-                    .before(TransformSystems::Propagate),
+                    .before(TransformSystems::Propagate)
+                    .in_set(PanelChildSystems::Build),
                 world_text::render_world_text.before(TransformSystems::Propagate),
                 world_text::update_world_text_alpha.before(TransformSystems::Propagate),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),

@@ -3,28 +3,23 @@
 //!
 //! Slug renders glyph coverage as per-pixel alpha; this example shows how each
 //! `AlphaMode` composites that coverage. The scene launches in the library
-//! default (`AlphaMode::Blend` + `Msaa::Sample4`). Coplanar text such as the
+//! default (`AlphaMode::Blend` with MSAA on). Coplanar text such as the
 //! floating "GROUND" label stays stable as the camera moves because slug emits
-//! one mesh per run and orders it with `depth_bias`.
+//! one mesh per run and orders it with `depth_bias`. To see the view-angle
+//! color shift that order-independent transparency fixes, and the MSAA trade
+//! it makes, run the `oit_msaa` example.
 //!
 //! Hotkeys:
 //! - `H` — home the camera.
 //! - `1..7` — select the active `AlphaMode`: 1 Blend (default) · 2 Premultiplied · 3 Coverage · 4
 //!   Add · 5 Multiply · 6 Mask · 7 Opaque.
 
-use std::time::Duration;
-
 use bevy::prelude::*;
-use bevy::render::view::Msaa;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CascadeDefaults;
-use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphSidedness;
@@ -36,17 +31,13 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::CameraMove;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::PlayAnimation;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, 0.3, 0.6);
 const HOME_RADIUS: f32 = 3.8;
 const HOME_YAW: f32 = 0.3;
 const HOME_PITCH: f32 = 0.80;
-const HOME_MS: u64 = 600;
 
 const HUD_HEIGHT: Px = Px(44.0);
 const HUD_PADDING: Px = Px(10.0);
@@ -58,15 +49,6 @@ const INFO_HEADER_SIZE: Pt = Pt(14.0);
 const INFO_BODY_SIZE: Pt = Pt(10.0);
 const INFO_TITLE_SIZE: Pt = Pt(16.0);
 
-const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
-const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
-const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
-const CAM_HELP_RADIUS: Px = Px(15.0);
-const CAM_HELP_FRAME_PAD: Px = Px(2.0);
-const CAM_HELP_BORDER: Px = Px(2.0);
-const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
-const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
-
 const HUD_TITLE_SIZE: Pt = Pt(14.0);
 const HUD_HINT_SIZE: Pt = Pt(11.0);
 const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
@@ -77,9 +59,6 @@ const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
 const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
 const HUD_INACTIVE_COLOR: Color = Color::srgba(0.55, 0.60, 0.75, 0.85);
 const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
-
-#[derive(Component)]
-struct SceneCamera;
 
 #[derive(Component)]
 struct HudPanel;
@@ -172,14 +151,22 @@ const fn alpha_mode_description(mode: AlphaMode) -> &'static str {
 }
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            DiegeticUiPlugin,
-            LagrangePlugin,
-            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-            WindowManagerPlugin,
-        ))
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example`. The orbit camera keeps the default
+    // `Msaa::Sample4`, so the `Coverage` (`AlphaToCoverage`) mode works.
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_orbit_cam(
+            |_| {},
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        )
+        .with_camera_home(
+            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),
+        )
+        .yaw(HOME_YAW)
+        .pitch(HOME_PITCH)
+        .with_camera_control_panel()
         .init_resource::<ControlsState>()
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_hotkeys, apply_state_and_rebuild_hud))
@@ -246,61 +233,11 @@ fn setup(
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Scene camera.
-    commands.spawn((orbit_cam_home(), Msaa::Sample4, SceneCamera));
-
-    // Bottom-right camera-help legend (static). Shrinks to its content on
-    // both axes via `Fit`. Pinned to Blend so the panel text stays legible
-    // regardless of the current alpha-mode default.
-    let camera_help_panel = DiegeticPanel::screen()
-        .size(bevy_diegetic::Fit, bevy_diegetic::Fit)
-        .anchor(Anchor::BottomRight)
-        .text_alpha_mode(AlphaMode::Blend)
-        .layout(build_camera_help)
-        .build();
-    let Ok(camera_help_panel) = camera_help_panel else {
-        error!("failed to build camera help panel");
-        return;
-    };
-
-    commands.spawn((camera_help_panel, Transform::default()));
-
     // HUD and info panels are spawned by `apply_state_and_rebuild_hud` on
     // the first frame (via `Res::is_changed()` on initial resource insert).
 }
 
-fn orbit_cam_home() -> OrbitCam {
-    OrbitCam {
-        focus: HOME_FOCUS,
-        radius: Some(HOME_RADIUS),
-        yaw: Some(HOME_YAW),
-        pitch: Some(HOME_PITCH),
-        ..default()
-    }
-}
-
-fn handle_hotkeys(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<ControlsState>,
-    mut commands: Commands,
-    cam: Query<Entity, With<SceneCamera>>,
-) {
-    if keyboard.just_pressed(KeyCode::KeyH)
-        && let Ok(cam) = cam.single()
-    {
-        commands.trigger(PlayAnimation::new(
-            cam,
-            [CameraMove::ToOrbit {
-                focus:    HOME_FOCUS,
-                yaw:      HOME_YAW,
-                pitch:    HOME_PITCH,
-                radius:   HOME_RADIUS,
-                duration: Duration::from_millis(HOME_MS),
-                easing:   bevy::math::curve::easing::EaseFunction::CubicOut,
-            }],
-        ));
-    }
-
+fn handle_hotkeys(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<ControlsState>) {
     // Digit1..Digit7 → ALPHA_MODES[0..7].
     let digits = [
         KeyCode::Digit1,
@@ -485,89 +422,6 @@ fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
                     b.with(El::new().width(Sizing::GROW), |b| {
                         b.text(alpha_mode_description(active), body);
                     });
-                },
-            );
-        },
-    );
-}
-
-fn build_camera_help(b: &mut LayoutBuilder) {
-    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
-    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE).with_color(HUD_INACTIVE_COLOR);
-
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(CAM_HELP_FRAME_PAD))
-            .corner_radius(CornerRadius::new(
-                CAM_HELP_RADIUS,
-                Px(0.0),
-                CAM_HELP_RADIUS,
-                Px(0.0),
-            ))
-            .background(HUD_FRAME_BACKGROUND)
-            .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(6.0))
-                    .corner_radius(CornerRadius::new(
-                        CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
-                        CAM_HELP_INNER_RADIUS,
-                        Px(0.0),
-                    ))
-                    .background(HUD_BACKGROUND)
-                    .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
-                |b| {
-                    b.text("CAMERA", title);
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(Px(12.0)),
-                        |b| {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Mouse", header.clone());
-                                    b.text("MMB drag \u{2192} Orbit", label.clone());
-                                    b.text("Shift+MMB \u{2192} Pan", label.clone());
-                                    b.text("Scroll \u{2192} Zoom", label.clone());
-                                },
-                            );
-                            b.with(
-                                El::new()
-                                    .width(Sizing::fixed(Px(1.0)))
-                                    .height(Sizing::GROW)
-                                    .background(HUD_DIVIDER_COLOR),
-                                |_| {},
-                            );
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Trackpad", header.clone());
-                                    b.text("Scroll \u{2192} Orbit", label.clone());
-                                    b.text("Shift+Scroll \u{2192} Pan", label.clone());
-                                    b.text("Ctrl+Scroll \u{2192} Zoom", label.clone());
-                                    b.text("Pinch \u{2192} Zoom", label);
-                                },
-                            );
-                        },
-                    );
                 },
             );
         },

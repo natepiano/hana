@@ -208,10 +208,12 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
 
     let command_depth = panel_text_child.command_index.saturating_add(1).to_f32();
     let text_depth_bias = command_depth * constants::LAYER_DEPTH_BIAS;
+    let text_oit_depth_offset = command_depth * constants::OIT_DEPTH_STEP;
 
     let material = materials.add(panel_material(
         text_base,
         text_depth_bias,
+        text_oit_depth_offset,
         resolved_alpha,
         panel_run.fill_color,
         panel_run.render_mode.into(),
@@ -242,6 +244,7 @@ fn panel_base_material(panel: &DiegeticPanel) -> StandardMaterial {
 fn panel_material(
     base: &StandardMaterial,
     depth_bias: f32,
+    oit_depth_offset: f32,
     alpha_mode: AlphaMode,
     fill_color: Color,
     render_mode: RenderMode,
@@ -254,6 +257,7 @@ fn panel_material(
         base,
         fill_color,
         render_mode,
+        oit_depth_offset,
         curves: storage.curves.clone(),
         bands: storage.bands.clone(),
         glyphs: storage.glyphs.clone(),

@@ -24,6 +24,7 @@ use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelSystems;
 use crate::panel::ScreenPosition;
+use crate::render::PanelChildSystems;
 
 /// Marker on overlay cameras spawned by the screen-space system. Carries the
 /// `(camera_order, render_layers, window)` triple so observers can match
@@ -52,7 +53,10 @@ impl Plugin for ScreenSpacePlugin {
                 Update,
                 position_screen_space_panels.after(PanelSystems::ResolveWorldFit),
             )
-            .add_systems(PostUpdate, propagate_screen_space_render_layers);
+            .add_systems(
+                PostUpdate,
+                propagate_screen_space_render_layers.after(PanelChildSystems::Build),
+            );
     }
 }
 
@@ -281,8 +285,13 @@ fn setup_screen_space_view(
 /// Propagates [`RenderLayers`] from screen-space panel parents to their
 /// children that are missing the component.
 ///
-/// Runs after text/image/gizmo reconciliation so that newly spawned
-/// children are picked up.
+/// Ordered `.after(PanelChildSystems::Build)` so it runs once the panel-child
+/// reconcile/build phase has applied its spawns and despawns. Without that
+/// ordering it would read a panel's `Children` mid-phase and queue an insert
+/// against a child that a reconcile system is despawning the same frame —
+/// inserting on a despawned entity panics. The ordering also means children
+/// spawned this frame are present, so they pick up the layer without a frame
+/// of delay.
 fn propagate_screen_space_render_layers(
     panels_with_layers: Query<(Entity, &RenderLayers, &DiegeticPanel)>,
     children_query: Query<&Children>,

@@ -13,6 +13,7 @@ use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 
+use super::PanelChildSystems;
 use super::clip;
 use super::constants;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
@@ -54,7 +55,10 @@ impl Plugin for PanelGeometryPlugin {
             Shader::from_wgsl
         );
         app.add_plugins(MaterialPlugin::<SdfPanelMaterial>::default());
-        app.add_systems(PostUpdate, build_panel_geometry);
+        app.add_systems(
+            PostUpdate,
+            build_panel_geometry.in_set(PanelChildSystems::Build),
+        );
     }
 }
 

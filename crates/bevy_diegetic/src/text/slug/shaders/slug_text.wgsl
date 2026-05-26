@@ -38,6 +38,7 @@ const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 struct TextUniform {
     fill_color: vec4<f32>,
     render_mode: u32,
+    oit_depth_offset: f32,
 }
 
 struct CurveRecord {
@@ -421,7 +422,11 @@ fn fragment(
 #ifdef OIT_ENABLED
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
-        oit_draw(in.position, out.color);
+        // Offset position.z so coplanar layers get distinct depths in the OIT
+        // linked list; pipeline depth_bias does not affect in.position.z.
+        var oit_pos = in.position;
+        oit_pos.z += uniforms.oit_depth_offset;
+        oit_draw(oit_pos, out.color);
         discard;
     }
 #endif
