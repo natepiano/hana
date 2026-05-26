@@ -133,6 +133,7 @@ Legacy state files (unversioned and v1) are still accepted on read and migrated 
 
 | bevy_window_manager | Bevy |
 |---------------------|------|
+| 0.21                | 0.19 |
 | 0.20                | 0.18 |
 | 0.19                | 0.18 |
 | 0.18                | 0.18 |
@@ -183,7 +184,7 @@ In your `Cargo.toml`, you can selectively enable features:
 
 ```toml
 [dependencies]
-bevy_window_manager = { version = "0.20", default-features = false, features = ["workaround-winit-4341"] }
+bevy_window_manager = { version = "0.21", default-features = false, features = ["workaround-winit-4341"] }
 ```
 
 ## License
