@@ -31,8 +31,8 @@ pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
 pub use font::create_parley_measurer;
-pub(crate) use slug::GlyphCache;
 pub(crate) use slug::DEFAULT_BAND_COUNT;
+pub(crate) use slug::GlyphCache;
 pub(crate) use slug::PositionedGlyph;
 pub(crate) use slug::PreparedTextRun;
 pub(crate) use slug::RenderMode;

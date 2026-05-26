@@ -75,7 +75,7 @@ pub(super) fn build_panel_text_meshes(
             }
             let resolved_alpha = resolved_alphas
                 .get(child_entity)
-                .map_or(defaults.text_alpha, |resolved| resolved.0 .0);
+                .map_or(defaults.text_alpha, |resolved| resolved.0.0);
             spawn_panel_text_run(PanelTextSpawnRequest {
                 panel_entity,
                 panel_run,

@@ -6,6 +6,9 @@ use std::sync::PoisonError;
 
 use bevy::prelude::*;
 use bevy_kana::ToU16;
+use parley::Layout;
+use parley::LayoutContext;
+use parley::RangedBuilder;
 use parley::layout::GlyphRun;
 use parley::layout::PositionedLayoutItem;
 use parley::style::FontFeatures;
@@ -13,9 +16,6 @@ use parley::style::FontStyle;
 use parley::style::FontWeight;
 use parley::style::LineHeight;
 use parley::style::StyleProperty;
-use parley::Layout;
-use parley::LayoutContext;
-use parley::RangedBuilder;
 
 use crate::layout::FontSlant;
 use crate::layout::LayoutTextStyle;
@@ -25,10 +25,10 @@ use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
 use crate::layout::TextDimensions;
+use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
 use crate::text::PositionedGlyph;
-use crate::text::DEFAULT_FAMILY;
 
 /// Reusable parley shaping buffers.
 ///

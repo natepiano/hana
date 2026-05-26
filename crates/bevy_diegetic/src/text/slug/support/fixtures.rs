@@ -11,8 +11,9 @@ use ttf_parser::GlyphId;
 
 use crate::layout::ResolvedFontFace;
 use crate::layout::ShapedGlyph;
-use crate::text::slug::glyph::OutlineError;
+use crate::text::Font;
 use crate::text::slug::glyph::DEFAULT_BAND_COUNT;
+use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::runtime::BuiltTextRun;
 use crate::text::slug::runtime::FontKey;
 use crate::text::slug::runtime::GlyphCache;
@@ -22,7 +23,6 @@ use crate::text::slug::runtime::GlyphOutlineCache;
 use crate::text::slug::runtime::PositionedGlyph;
 use crate::text::slug::runtime::PreparedTextRun;
 use crate::text::slug::runtime::TextRun;
-use crate::text::Font;
 
 /// Replacement character used as the diagnostic glyph label when packing
 /// fixture glyphs by id.

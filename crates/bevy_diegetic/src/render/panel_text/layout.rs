@@ -57,7 +57,7 @@ impl PanelTextLayout {
 }
 
 /// Returns a [`BoundingBox`]'s four floats as raw bits for exact comparison.
-fn bbox_bits(bounds: &BoundingBox) -> [u32; 4] {
+const fn bbox_bits(bounds: &BoundingBox) -> [u32; 4] {
     [
         bounds.x.to_bits(),
         bounds.y.to_bits(),

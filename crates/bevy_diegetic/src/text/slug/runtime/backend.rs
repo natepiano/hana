@@ -18,10 +18,10 @@ use super::GlyphKey;
 use super::GlyphOutlineCache;
 use super::PositionedGlyph;
 use super::TextRun;
+use crate::text::slug::RunRenderError;
 use crate::text::slug::glyph;
 use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::render;
-use crate::text::slug::RunRenderError;
 
 /// Result of preparing one text run.
 #[derive(Clone, Debug)]
@@ -59,10 +59,10 @@ pub(crate) struct RunStorage {
     pub glyphs: Handle<ShaderBuffer>,
 }
 
-/// GlyphCache resource: owns the glyph cache and prepared-run GPU storage.
+/// `GlyphCache` resource: owns the glyph cache and prepared-run GPU storage.
 #[derive(Debug, Default, Resource)]
 pub(crate) struct GlyphCache {
-    glyph_cache:        GlyphOutlineCache,
+    outline_cache:      GlyphOutlineCache,
     run_storage:        HashMap<RunStorageKey, RunStorage>,
     next_storage_key:   u64,
     preprocess_version: u32,
@@ -110,7 +110,7 @@ impl GlyphCache {
                 FontKey::new(positioned.glyph.font_face.blob_id),
                 positioned.glyph.id,
             );
-            let packed_glyph = self.glyph_cache.get_or_insert_packed_from_face(
+            let packed_glyph = self.outline_cache.get_or_insert_packed_from_face(
                 key,
                 positioned.font.data(),
                 positioned.collection_index,
@@ -148,7 +148,7 @@ impl GlyphCache {
 
         let render_data = render::build_run_render_data_with_clip(
             &prepared.run,
-            &self.glyph_cache,
+            &self.outline_cache,
             1.0,
             clip_rect,
         )?;

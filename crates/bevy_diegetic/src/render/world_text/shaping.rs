@@ -12,11 +12,11 @@ use crate::render::constants;
 use crate::render::text_shaping;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
+use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
 use crate::text::GlyphCache;
 use crate::text::PositionedGlyph;
 use crate::text::PreparedTextRun;
-use crate::text::DEFAULT_BAND_COUNT;
 
 /// Result of building text run data for a [`WorldText`](super::WorldText) entity.
 pub(super) struct ShapedWorldTextRun {

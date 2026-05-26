@@ -21,9 +21,9 @@ use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelChild;
 use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
+use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
 use crate::text::GlyphCache;
-use crate::text::DEFAULT_BAND_COUNT;
 
 /// Shapes text for panel [`WorldText`] children that are changed or pending.
 pub(super) fn shape_panel_text_children(
