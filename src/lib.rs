@@ -230,7 +230,15 @@ impl Plugin for WindowManagerPluginCustomPath {
         #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
         app.add_systems(
             Update,
-            x11_position_fix::compensate_target_position
+            (
+                x11_position_fix::compensate_target_position,
+                // Re-apply the compensated position once the window is mapped: bevy 0.19
+                // lets the X11 WM pin a fresh window's position during the initial restore,
+                // but a mapped window round-trips cleanly through `set_outer_position`.
+                x11_position_fix::reapply_compensated_position
+                    .after(restore::restore_windows)
+                    .before(restore::check_restore_settling),
+            )
                 .run_if(has_restoring_windows)
                 .run_if(|p: Res<Platform>| p.is_x11()),
         );

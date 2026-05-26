@@ -24,6 +24,7 @@ mod state;
 
 use std::env::var;
 
+use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_window_manager::WindowManagerPlugin;
@@ -38,13 +39,24 @@ use state::WindowCounter;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: PRIMARY_WINDOW_TITLE.into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: PRIMARY_WINDOW_TITLE.into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                // This window manager renders only flat UI, so GPU mesh preprocessing and its
+                // frustum-culling compute pass are pure overhead. Disabling them also avoids a
+                // startup crash on GPUs whose `max_storage_buffers_per_shader_stage` is below the
+                // 8 that the frustum-culling bind group requires (e.g. Asahi/Mesa, limit 6).
+                .set(PbrPlugin {
+                    use_gpu_instance_buffer_builder: false,
+                    ..default()
+                }),
+        )
         .add_plugins(WindowManagerPlugin)
         .add_plugins(BrpExtrasPlugin::default())
         .add_observer(setup::on_spawn_managed_window)

@@ -10,6 +10,7 @@
 
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
+use bevy::window::WindowPosition;
 use bevy::winit::WINIT_WINDOWS;
 use bevy_kana::ToI32;
 use bevy_kana::ToU32;
@@ -23,6 +24,7 @@ use x11rb::xcb_ffi::XCBConnection;
 use crate::constants::FRAME_EXTENT_COUNT;
 use crate::constants::FRAME_EXTENT_TOP_INDEX;
 use crate::constants::FRAME_EXTENTS_ATOM_NAME;
+use crate::restore::MonitorScaleStrategy;
 use crate::restore::TargetPosition;
 use crate::restore::X11FrameCompensated;
 
@@ -54,7 +56,60 @@ pub(crate) fn compensate_target_position(
             "[W6] Compensating position: {physical_position:?} -> {physical_compensated:?} (physical_frame_top={physical_frame_top})"
         );
         target.physical_position = Some(physical_compensated);
-        commands.entity(entity).insert(X11FrameCompensated);
+        commands
+            .entity(entity)
+            .insert((X11FrameCompensated, X11FrameTop(physical_frame_top)));
+    }
+}
+
+/// The `_NET_FRAME_EXTENTS` top (physical pixels) queried during W6 compensation.
+///
+/// Recorded so [`reapply_compensated_position`] knows the expected mapped-window
+/// readback (`compensated_position + frame_top`) without re-opening an X11 connection
+/// every frame. Present only on windows whose position was compensated.
+#[derive(Component)]
+pub(crate) struct X11FrameTop(i32);
+
+/// Re-issue the W6-compensated position once the window is mapped.
+///
+/// During the initial restore the X11 WM can pin a freshly-mapped window's `y` to its
+/// own placement, ignoring the requested position (winit #4445 territory) — observed
+/// under bevy 0.19 where the same requested `y` lands at a fixed value regardless. Once
+/// the window is mapped, `set_outer_position` round-trips cleanly: the readback equals
+/// the requested position plus a stable `frame_top`. This system watches the settling
+/// window and, while the readback hasn't reached `compensated + frame_top`, re-issues the
+/// compensated position so the mapped window converges on the saved position.
+///
+/// Same-scale (`ApplyUnchanged`) windowed restores only — cross-DPI strategies drive
+/// position through their own multi-phase move and tolerate the W6 offset.
+pub(crate) fn reapply_compensated_position(
+    mut windows: Query<(&TargetPosition, &X11FrameTop, &mut Window)>,
+) {
+    for (target_position, frame_top, mut window) in &mut windows {
+        if target_position.settle_state.is_none() {
+            continue;
+        }
+        if !matches!(
+            target_position.monitor_scale_strategy,
+            MonitorScaleStrategy::ApplyUnchanged
+        ) {
+            continue;
+        }
+        let Some(physical_compensated) = target_position.physical_position else {
+            continue;
+        };
+        let WindowPosition::At(physical_actual) = window.position else {
+            continue;
+        };
+        let physical_expected =
+            IVec2::new(physical_compensated.x, physical_compensated.y + frame_top.0);
+        if physical_actual != physical_expected {
+            debug!(
+                "[W6] Re-applying compensated position {physical_compensated:?}: \
+                 actual {physical_actual:?} != expected {physical_expected:?} (mapped window)"
+            );
+            window.position = WindowPosition::At(physical_compensated);
+        }
     }
 }
 
