@@ -15,6 +15,7 @@ use super::ImeCommitRequested;
 use super::ImeEditableFieldSpec;
 use super::ImeInputBlocker;
 use super::ImeRejectCommit;
+use super::ImeSessionAnchor;
 use super::ImeSessionId;
 use super::ImeStarted;
 use super::ImeTarget;
@@ -37,6 +38,8 @@ pub struct ImeOpenSession {
     pub initial_text: String,
     /// Editable field contract for the session.
     pub field_spec:   ImeEditableFieldSpec,
+    /// Optional screen-space anchor for app-owned sessions.
+    pub anchor:       Option<ImeSessionAnchor>,
 }
 
 /// Request event that asks the active session to commit.
@@ -63,6 +66,7 @@ struct ImeSession {
     target:     ImeTarget,
     window:     Entity,
     field_spec: ImeEditableFieldSpec,
+    anchor:     Option<ImeSessionAnchor>,
     buffer:     ImeEditBuffer,
     state:      ImeSessionState,
 }
@@ -102,6 +106,56 @@ pub(crate) struct ActiveImeSession {
     next_attempt: u64,
 }
 
+/// Current commit attempt guard for app-owned apply responses.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ImeCommitAuthority {
+    current: Option<ImeCommitAuthorityToken>,
+}
+
+impl ImeCommitAuthority {
+    /// Returns `true` when `session_id` and `attempt_id` still name the active
+    /// pending commit.
+    #[must_use]
+    pub fn is_current(&self, session_id: ImeSessionId, attempt_id: ImeCommitAttemptId) -> bool {
+        self.current
+            .as_ref()
+            .is_some_and(|token| token.session_id == session_id && token.attempt_id == attempt_id)
+    }
+
+    /// Returns the current pending commit token.
+    #[must_use]
+    pub const fn current(&self) -> Option<&ImeCommitAuthorityToken> { self.current.as_ref() }
+
+    fn set(&mut self, session: &ImeSession, attempt_id: ImeCommitAttemptId) {
+        self.current = Some(ImeCommitAuthorityToken {
+            session_id: session.session_id,
+            attempt_id,
+            target: session.target.clone(),
+        });
+    }
+
+    fn clear_session(&mut self, session_id: ImeSessionId) {
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|token| token.session_id == session_id)
+        {
+            self.current = None;
+        }
+    }
+}
+
+/// Public token proving which commit attempt is still current.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImeCommitAuthorityToken {
+    /// Id of the active session.
+    pub session_id: ImeSessionId,
+    /// Id of the active commit attempt.
+    pub attempt_id: ImeCommitAttemptId,
+    /// Semantic target being committed.
+    pub target:     ImeTarget,
+}
+
 impl Default for ActiveImeSession {
     fn default() -> Self {
         Self {
@@ -131,6 +185,14 @@ impl ActiveImeSession {
 
     pub(super) fn active_window(&self) -> Option<Entity> {
         self.active.as_ref().map(|session| session.window)
+    }
+
+    pub(super) fn active_anchor(&self) -> Option<ImeSessionAnchor> {
+        self.active.as_ref().and_then(|session| session.anchor)
+    }
+
+    pub(super) fn active_target(&self) -> Option<&ImeTarget> {
+        self.active.as_ref().map(|session| &session.target)
     }
 
     pub(super) fn is_composing(&self) -> bool {
@@ -283,12 +345,14 @@ pub(super) fn open_session(
     request: On<ImeOpenSession>,
     mut active_session: ResMut<ActiveImeSession>,
     mut input_blocker: ResMut<ImeInputBlocker>,
+    mut authority: ResMut<ImeCommitAuthority>,
     frame_count: Option<Res<FrameCount>>,
     mut commands: Commands,
 ) {
     let request = request.event();
     if let Some(previous) = active_session.active.take() {
         input_blocker.clear_session(previous.session_id);
+        authority.clear_session(previous.session_id);
         commands.trigger(ImeCanceled {
             session_id: previous.session_id,
             target:     previous.target,
@@ -302,6 +366,7 @@ pub(super) fn open_session(
         target: request.target.clone(),
         window: request.window,
         field_spec: request.field_spec.clone(),
+        anchor: request.anchor,
         buffer: ImeEditBuffer::new(request.initial_text.clone()),
         state: ImeSessionState::Editing,
     };
@@ -319,11 +384,13 @@ pub(super) fn open_session(
 pub(super) fn request_commit(
     request: On<ImeRequestCommit>,
     mut active_session: ResMut<ActiveImeSession>,
+    mut authority: ResMut<ImeCommitAuthority>,
     mut commands: Commands,
 ) {
     let request = request.event();
     commit_matching_session(
         &mut active_session,
+        &mut authority,
         request.session_id,
         request.cause,
         &mut commands,
@@ -334,6 +401,7 @@ pub(super) fn request_cancel(
     request: On<ImeRequestCancel>,
     mut active_session: ResMut<ActiveImeSession>,
     mut input_blocker: ResMut<ImeInputBlocker>,
+    mut authority: ResMut<ImeCommitAuthority>,
     mut commands: Commands,
 ) {
     let request = request.event();
@@ -344,6 +412,7 @@ pub(super) fn request_cancel(
         &mut commands,
     ) {
         input_blocker.clear_session(request.session_id);
+        authority.clear_session(request.session_id);
     }
 }
 
@@ -351,6 +420,7 @@ pub(super) fn accept_commit(
     response: On<ImeAcceptCommit>,
     mut active_session: ResMut<ActiveImeSession>,
     mut input_blocker: ResMut<ImeInputBlocker>,
+    mut authority: ResMut<ImeCommitAuthority>,
     mut commands: Commands,
 ) {
     let response = response.event();
@@ -365,6 +435,7 @@ pub(super) fn accept_commit(
     }
 
     input_blocker.clear_session(response.session_id);
+    authority.clear_session(response.session_id);
     commands.trigger(super::ImeApplied {
         session_id: response.session_id,
         attempt_id: response.attempt_id,
@@ -376,6 +447,7 @@ pub(super) fn accept_commit(
 pub(super) fn reject_commit(
     response: On<ImeRejectCommit>,
     mut active_session: ResMut<ActiveImeSession>,
+    mut authority: ResMut<ImeCommitAuthority>,
     mut commands: Commands,
 ) {
     let response = response.event();
@@ -389,6 +461,7 @@ pub(super) fn reject_commit(
     }
 
     session.state = ImeSessionState::Editing;
+    authority.clear_session(response.session_id);
     commands.trigger(ImeValidationRejected {
         session_id: response.session_id,
         attempt_id: response.attempt_id,
@@ -404,6 +477,7 @@ pub(super) fn cleanup_stale_sessions(
     mut closed_events: MessageReader<WindowClosed>,
     mut active_session: ResMut<ActiveImeSession>,
     mut input_blocker: ResMut<ImeInputBlocker>,
+    mut authority: ResMut<ImeCommitAuthority>,
     mut commands: Commands,
 ) {
     let Some(session) = active_session.active.as_ref() else {
@@ -435,6 +509,7 @@ pub(super) fn cleanup_stale_sessions(
         let session_id = session.session_id;
         if cancel_matching_session(&mut active_session, session_id, cause, &mut commands) {
             input_blocker.clear_session(session_id);
+            authority.clear_session(session_id);
         }
     }
 }
@@ -451,6 +526,7 @@ fn target_exists(target: &ImeTarget, entities: &Query<(), ()>) -> bool {
 
 fn commit_matching_session(
     active_session: &mut ActiveImeSession,
+    authority: &mut ImeCommitAuthority,
     session_id: ImeSessionId,
     cause: ImeCommitCause,
     commands: &mut Commands,
@@ -467,6 +543,7 @@ fn commit_matching_session(
         return;
     };
     active.state = ImeSessionState::PendingCommit(attempt_id);
+    authority.set(active, attempt_id);
 
     commands.trigger(ImeCommitRequested {
         session_id,

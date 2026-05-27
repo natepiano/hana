@@ -10,6 +10,8 @@ use super::ImeCancelCause;
 use super::ImeCommitCause;
 use super::ImeInputBlocker;
 use super::ImeRequestCancel;
+use super::ImeSessionId;
+use super::ImeTarget;
 use super::buffer::ImeEditCommand;
 use super::buffer::ImeMovementDirection;
 use super::buffer::ImeMovementUnit;
@@ -26,6 +28,63 @@ pub(super) struct ImeInputFrame {
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub(super) struct ImeWindowState {
     active_window: Option<Entity>,
+}
+
+/// Synchronous app-owned keyboard routing hook.
+#[derive(Resource, Default)]
+pub struct ImeAppInputDispositionHook {
+    handler: Option<Box<ImeAppInputHandler>>,
+}
+
+impl ImeAppInputDispositionHook {
+    /// Installs the app-owned input hook.
+    pub fn set(
+        &mut self,
+        handler: impl for<'a> FnMut(ImeAppInputContext<'a>) -> ImeAppInputDisposition
+        + Send
+        + Sync
+        + 'static,
+    ) {
+        self.handler = Some(Box::new(handler));
+    }
+
+    /// Clears the app-owned input hook.
+    pub fn clear(&mut self) { self.handler = None; }
+
+    fn disposition(&mut self, context: ImeAppInputContext<'_>) -> ImeAppInputDisposition {
+        let Some(handler) = self.handler.as_mut() else {
+            return ImeAppInputDisposition::Edit;
+        };
+        handler(context)
+    }
+}
+
+type ImeAppInputHandler =
+    dyn for<'a> FnMut(ImeAppInputContext<'a>) -> ImeAppInputDisposition + Send + Sync + 'static;
+
+/// Keyboard input context passed to the app-owned input hook.
+pub struct ImeAppInputContext<'a> {
+    /// Id of the active session.
+    pub session_id: ImeSessionId,
+    /// App-owned semantic target.
+    pub target:     &'a ImeTarget,
+    /// Current key button state.
+    pub keys:       &'a ButtonInput<KeyCode>,
+    /// Keyboard events observed this frame.
+    pub events:     &'a [KeyboardInput],
+}
+
+/// App-owned input decision for a keyboard frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImeAppInputDisposition {
+    /// Let the built-in editor consume the input.
+    Edit,
+    /// The app surface consumed the input; built-in editing should not run.
+    Surface,
+    /// Request commit for the app-owned session.
+    Commit,
+    /// Request cancellation for the app-owned session.
+    Cancel,
 }
 
 pub(super) fn clear_frame_input(mut frame: ResMut<ImeInputFrame>) {
@@ -87,6 +146,7 @@ pub(super) fn handle_keyboard(
     mut key_events: MessageReader<KeyboardInput>,
     mut active_session: ResMut<ActiveImeSession>,
     input_blocker: Res<ImeInputBlocker>,
+    mut app_hook: ResMut<ImeAppInputDispositionHook>,
     frame: Res<ImeInputFrame>,
     mut commands: Commands,
 ) {
@@ -104,9 +164,16 @@ pub(super) fn handle_keyboard(
         return;
     }
 
+    let events: Vec<KeyboardInput> = key_events.read().cloned().collect();
+    if let Some(disposition) =
+        app_disposition(&mut app_hook, &active_session, &keys, events.as_slice())
+        && apply_app_disposition(disposition, &active_session, &mut commands)
+    {
+        return;
+    }
+
     if let Some(request) = request_from_keys(&keys, &active_session) {
         trigger_session_request(request, &mut commands);
-        key_events.clear();
         return;
     }
 
@@ -120,7 +187,7 @@ pub(super) fn handle_keyboard(
         return;
     }
 
-    for event in key_events.read() {
+    for event in &events {
         if event.state != ButtonState::Pressed || command_modifier_pressed(&keys) {
             continue;
         }
@@ -129,6 +196,53 @@ pub(super) fn handle_keyboard(
         };
         let changed = active_session.apply_keyboard_text(event.window, text, &input_blocker);
         trigger_text_changed(changed, &mut commands);
+    }
+}
+
+fn app_disposition(
+    app_hook: &mut ImeAppInputDispositionHook,
+    active_session: &ActiveImeSession,
+    keys: &ButtonInput<KeyCode>,
+    events: &[KeyboardInput],
+) -> Option<ImeAppInputDisposition> {
+    let session_id = active_session.active_session_id()?;
+    let target = active_session.active_target()?;
+    if !matches!(target, ImeTarget::AppOwned { .. }) {
+        return None;
+    }
+    Some(app_hook.disposition(ImeAppInputContext {
+        session_id,
+        target,
+        keys,
+        events,
+    }))
+}
+
+fn apply_app_disposition(
+    disposition: ImeAppInputDisposition,
+    active_session: &ActiveImeSession,
+    commands: &mut Commands,
+) -> bool {
+    let Some(session_id) = active_session.active_session_id() else {
+        return true;
+    };
+    match disposition {
+        ImeAppInputDisposition::Edit => false,
+        ImeAppInputDisposition::Surface => true,
+        ImeAppInputDisposition::Commit => {
+            commands.trigger(super::ImeRequestCommit {
+                session_id,
+                cause: ImeCommitCause::Request,
+            });
+            true
+        },
+        ImeAppInputDisposition::Cancel => {
+            commands.trigger(ImeRequestCancel {
+                session_id,
+                cause: ImeCancelCause::Request,
+            });
+            true
+        },
     }
 }
 
@@ -263,5 +377,60 @@ fn trigger_session_request(request: ImeSessionRequest, commands: &mut Commands) 
     match request {
         ImeSessionRequest::Commit(request) => commands.trigger(request),
         ImeSessionRequest::Cancel(request) => commands.trigger(request),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::ButtonInput;
+    use bevy::prelude::KeyCode;
+
+    use super::command_from_keys;
+    use crate::ime::buffer::ImeEditCommand;
+    use crate::ime::buffer::ImeMovementDirection;
+    use crate::ime::buffer::ImeMovementUnit;
+    use crate::ime::buffer::ImeSelectionMode;
+
+    fn keys(pressed: &[KeyCode]) -> ButtonInput<KeyCode> {
+        let mut keys = ButtonInput::default();
+        for key in pressed {
+            keys.press(*key);
+        }
+        keys
+    }
+
+    #[test]
+    fn primary_a_maps_to_select_all() {
+        let keys = keys(&[KeyCode::SuperLeft, KeyCode::KeyA]);
+
+        assert_eq!(command_from_keys(&keys), Some(ImeEditCommand::SelectAll));
+    }
+
+    #[test]
+    fn alt_arrow_left_maps_to_word_movement() {
+        let keys = keys(&[KeyCode::AltLeft, KeyCode::ArrowLeft]);
+
+        assert_eq!(
+            command_from_keys(&keys),
+            Some(ImeEditCommand::Move {
+                direction: ImeMovementDirection::Backward,
+                unit:      ImeMovementUnit::Word,
+                selection: ImeSelectionMode::Move,
+            })
+        );
+    }
+
+    #[test]
+    fn shift_end_extends_to_line_end() {
+        let keys = keys(&[KeyCode::ShiftLeft, KeyCode::End]);
+
+        assert_eq!(
+            command_from_keys(&keys),
+            Some(ImeEditCommand::Move {
+                direction: ImeMovementDirection::Forward,
+                unit:      ImeMovementUnit::Line,
+                selection: ImeSelectionMode::Extend,
+            })
+        );
     }
 }

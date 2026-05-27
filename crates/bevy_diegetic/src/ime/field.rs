@@ -1,5 +1,6 @@
 //! Editable field specifications and applied value summaries.
 
+use super::ImeValueRevision;
 use super::PanelFieldId;
 
 /// Editable field contract stored on a layout field or app-owned session.
@@ -60,7 +61,18 @@ pub enum ImeBuiltInFieldKind {
 
 /// Built-in value written by `bevy_diegetic`.
 #[derive(Clone, Debug, PartialEq)]
-pub enum ImeBuiltInApplied {
+pub struct ImeBuiltInApplied {
+    /// Parsed value written to the panel tree.
+    pub value:          ImeBuiltInValue,
+    /// Display text written back to the panel.
+    pub display_text:   String,
+    /// Panel value revision after the write.
+    pub value_revision: ImeValueRevision,
+}
+
+/// Parsed built-in value written by `bevy_diegetic`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ImeBuiltInValue {
     /// Applied text value.
     Text(String),
     /// Applied floating-point value.

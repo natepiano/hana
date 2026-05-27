@@ -1,6 +1,8 @@
 //! Semantic IME session targets.
 
 use bevy::prelude::Entity;
+use bevy::prelude::Rect;
+use bevy::prelude::Vec2;
 
 use super::PanelFieldId;
 
@@ -28,4 +30,23 @@ pub enum ImeTarget {
         /// Owner-local semantic field id.
         field_id: PanelFieldId,
     },
+}
+
+/// Screen-space placement supplied by caller-owned IME sessions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImeSessionAnchor {
+    /// Anchor to a screen-space rectangle in logical pixels.
+    ScreenRect(Rect),
+    /// Anchor to a screen-space point in logical pixels.
+    ScreenPoint(Vec2),
+}
+
+impl ImeSessionAnchor {
+    /// Creates an anchor from a screen-space rectangle.
+    #[must_use]
+    pub const fn screen_rect(rect: Rect) -> Self { Self::ScreenRect(rect) }
+
+    /// Creates an anchor from a screen-space point.
+    #[must_use]
+    pub const fn screen_point(point: Vec2) -> Self { Self::ScreenPoint(point) }
 }

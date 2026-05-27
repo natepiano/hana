@@ -752,7 +752,7 @@ anchor/caret freshness policy is bounded and tested.
 - Phase 6 now narrows duplicate field-id work to diagnostics and example
   coverage because duplicate-id non-activation is already implemented.
 
-### Phase 5 — Commit integration
+### Phase 5 — Commit integration (complete)
 
 Connect committed text back to real panel values:
 
@@ -778,7 +778,31 @@ panel display after commit; invalid input preserves focus, buffer text, and
 cursor/selection; stale responses are ignored; cancel leaves the backing value
 unchanged.
 
-### Phase 6 — App-owned sessions and example coverage
+#### Retrospective
+
+**What worked:**
+- `ime/apply.rs` keeps built-in parser/writeback separate from app-owned
+  authority and response handling.
+- `ImeCommitAuthority` gives app code a current-attempt check before mutation,
+  while session accept/reject observers still ignore stale responses.
+
+**What deviated from the plan:**
+- Built-in backing is the authored panel tree text descendant plus
+  `tree_revision`, not a separate model-binding registry.
+- Outside blur currently commits when focus leaves the editor/source scope;
+  blur cancellation remains covered by explicit cancel and stale-target cleanup.
+
+**Surprises:**
+- `LayoutTree::set_field_display_text` could stay internal and still satisfy
+  built-in writeback through `DiegeticPanelCommands::set_tree`.
+
+**Implications for remaining phases:**
+- Phase 6 examples should show app-owned code checking `ImeCommitAuthority`
+  before mutating caller state.
+- Later model-binding work can replace the panel-tree text sink without
+  changing the session or attempt lifecycle.
+
+### Phase 6 — App-owned sessions and example coverage (complete)
 
 Finish the caller-owned surface and prove the contract:
 
@@ -795,13 +819,58 @@ Finish the caller-owned surface and prove the contract:
   "ambiguous fields do not activate" behavior,
 - one-frame anchor freshness coverage for the Phase 4 internal `screen_space`
   panel positioning path,
-- CJK, accent/dead-key, multi-byte, emoji, variable-width caret positioning,
+- canonical example coverage plus focused unit coverage for CJK,
+  accent/dead-key, multi-byte, emoji, variable-width caret positioning,
   selection/preedit caret placement, invalid numeric, rejection-retry, outside
-  blur, activation-capture, and app-popup example cases.
+  blur, activation-capture, and app-popup cases.
 
-Acceptance: the canonical IME example covers the acceptance matrix and shows
-world-panel editing plus app-owned screen-space text entry using the same core
-session, buffer, IME lease, and lifecycle events.
+Acceptance: the canonical IME example shows world-panel editing plus app-owned
+screen-space text entry using the same core session, buffer, IME lease, and
+lifecycle events; focused unit tests cover the detailed parser, shortcut,
+UTF-8, duplicate-field, preedit, selection, and caret cases.
+
+#### Retrospective
+
+**What worked:**
+- `ImeSessionAnchor` removes the app-owned cursor fallback path for callers
+  that can provide screen geometry.
+- `ImeAppInputDispositionHook` lets app-owned sessions consume surface input
+  before built-in command mapping while preserving the shared editor buffer.
+
+**What deviated from the plan:**
+- Coverage is split between the canonical `examples/ime.rs` and focused unit
+  tests for parser bounds, duplicate field updates, shortcut routing, UTF-8
+  boundaries, preedit, selection, and caret placement.
+- Duplicate field-id behavior remains diagnostic plus non-activation coverage;
+  no separate duplicate-field demo was added to the example.
+
+**Surprises:**
+- Example-owned apply logic can stay small because `ImeCommitRequested`
+  already carries target, attempt id, field spec, and text.
+
+**Implications for remaining phases:**
+- There are no numbered phases left; later work should decide whether built-in
+  fields need a model-binding registry beyond panel-tree text writeback.
+
+#### Phase 5 and 6 Review
+
+- Later work now records that there are no remaining numbered phases; any
+  unsatisfied items are explicit later-work gaps.
+- Later work now names the model-binding decision created by Phase 5's
+  panel-tree text sink and `tree_revision` value reporting.
+- Later work now narrows `ScreenPanelFollowAnchor` to general screen-space
+  cleanup because Phase 6 added `ImeSessionAnchor` for app-owned geometry.
+- R0-R7 now mark the portions satisfied or partially satisfied by Phases 1-6
+  instead of remaining as proposed backlog.
+- R11 now documents that the Phase 4 internal editor-panel path superseded the
+  earlier follow-anchor requirement.
+- Later work now records the narrower Phase 6 app-owned popup hook: keyboard
+  disposition is implemented; pointer actions, row focus, semantic action
+  tokens, and forwarding remain later work.
+- Later work now records that external value conflict detection still needs
+  original-value snapshots, field epochs, and conflict policy.
+- Phase 6 acceptance now states that the canonical example and focused unit
+  tests share the acceptance matrix.
 
 ## Later work
 
@@ -812,7 +881,24 @@ candidate popup.
 
 A general `ScreenPanelFollowAnchor` abstraction remains later work. Phase 4
 uses an internal screen-space editor panel plus `DiegeticPanel::set_screen_position`;
-keep that path unless app-owned anchoring needs a reusable public anchor type.
+Phase 6 app-owned sessions use `ImeSessionAnchor`, so this is now a general
+screen-space architecture cleanup rather than an app-owned IME blocker.
+
+Built-in field writeback currently updates the authored panel tree text
+descendant and reports `tree_revision` as `ImeValueRevision`. Keep that sink
+until a caller needs external backing-value conflict semantics; only then add a
+model-binding registry with original value snapshots, revisions, and conflict
+policy.
+
+App-owned popup routing currently exposes a keyboard-frame
+`ImeAppInputDispositionHook` with edit, surface, commit, and cancel decisions.
+Pointer-scoped popup actions, result-row focus scope, semantic action tokens,
+and post-commit action forwarding remain later work.
+
+External value conflict detection remains later work. Active sessions do not
+yet store original text, starting tree revision, computed field epoch, or a
+value snapshot, so concurrent external changes are not compared against a
+field-level conflict policy.
 
 ## Team review follow-ups
 
@@ -948,7 +1034,7 @@ not a built-in fuzzy-search feature.
 
 ### R0 — Namespace and public/private boundary
 
-Status: proposed
+Status: satisfied by Phases 1, 3, and 4
 
 Public IME names use the crate-root `Ime...` prefix, for example
 `ImeSessionId` and `ImeCommitRequested`. Do not add a public `ime` module.
@@ -970,7 +1056,7 @@ external integration needs it.
 
 ### R1 — Split core sessions from field adapters
 
-Status: proposed
+Status: partially satisfied by Phases 1, 4, and 6
 
 The core IME surface should be a shared single-line session API, not a
 world-field-only abstraction. Model the target as a closed enum such as
@@ -993,7 +1079,7 @@ fields.
 
 ### R2 — Make editable identity explicit in the layout API
 
-Status: proposed
+Status: satisfied by Phase 2
 
 Stable field identity should be authored in the layout tree, not inferred by the
 resolver. Add an `EditableFieldId`/`PanelFieldId` newtype and an authoring path
@@ -1010,7 +1096,7 @@ uniqueness where the authoring API can catch it.
 
 ### R3 — Use session IDs and typed lifecycle events
 
-Status: proposed
+Status: satisfied by Phases 1, 3, and 5
 
 Every start, text-change, commit-request, validation-rejected, applied, and
 canceled event should carry a `SessionId` plus a typed target.
@@ -1033,7 +1119,7 @@ command-palette implementation.
 
 ### R4 — Specify IME lease, input blocker, and cleanup ownership
 
-Status: proposed
+Status: satisfied by Phases 2 and 3
 
 Represent IME ownership with a typed lease token, not only a window entity.
 Acquire the lease before editing, release idempotently only if the owner still
@@ -1056,7 +1142,7 @@ keyboard, pointer, wheel, and camera input.
 
 ### R5 — Define composition, blur, and validation policy
 
-Status: proposed
+Status: partially satisfied by Phases 3, 5, and 6
 
 Field-level Enter/Escape/navigation should not fire while IME composition is
 active. During preedit, keyboard events belong to the IME/editor layer. Model
@@ -1099,7 +1185,7 @@ close on outside blur if the app requests that behavior.
 
 ### R6 — Define editor scheduling, anchor mutation, and caret IME position
 
-Status: proposed
+Status: partially satisfied by Phases 4 and 6
 
 Add explicit IME system sets and ordering. Re-resolve target layout after
 panel layout, project from current transform/camera data, mutate the
@@ -1130,7 +1216,7 @@ during implementation.
 
 ### R7 — Example acceptance matrix
 
-Status: proposed
+Status: split between `examples/ime.rs` and focused unit tests
 
 The IME example should prove the contract, not only render a text box:
 
@@ -1260,7 +1346,7 @@ Bevy picking details.
 
 ### R11 — Keep follow-anchor ownership in `screen_space`
 
-Status: accepted
+Status: superseded by the Phase 4 internal editor-panel path; later-work only
 
 Severity: important
 
@@ -1268,11 +1354,13 @@ Source dimension: architecture and risk
 
 Class: design-improvement
 
-The transient editor should not mutate screen-space panel transforms or sizing
-ad hoc. Add a generic crate-private follow-anchor path in `screen_space`, such
-as `ScreenPanelFollowAnchor`, consumed by the existing screen-space owner. The
-IME anchor system publishes an anchor snapshot; `screen_space` applies it and
-reports the final rect that caret layout and IME positioning use.
+The accepted implementation uses a session-owned screen-space editor panel and
+mutates it through `DiegeticPanel::set_screen_position`. A generic
+crate-private follow-anchor path in `screen_space`, such as
+`ScreenPanelFollowAnchor`, is no longer required for app-owned IME anchoring;
+revisit it only as a general screen-space ownership cleanup. If added later,
+the IME anchor system should publish an anchor snapshot and `screen_space`
+should report the final rect that caret layout and IME positioning use.
 
 Make coordinate domains explicit in the anchor snapshot. Carry the concrete
 window entity, viewport-local rect, window-logical rect, camera viewport

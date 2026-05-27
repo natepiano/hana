@@ -142,7 +142,7 @@ impl DiegeticPanel {
 
     /// Revision of the current layout tree.
     #[must_use]
-    pub(super) const fn tree_revision(&self) -> u64 { self.tree_revision }
+    pub(crate) const fn tree_revision(&self) -> u64 { self.tree_revision }
 
     /// Panel width in layout units.
     #[must_use]

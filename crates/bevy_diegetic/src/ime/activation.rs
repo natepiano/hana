@@ -67,6 +67,7 @@ fn open_from_panel_click(
         target,
         initial_text: record.display_text.clone(),
         field_spec: record.field_spec.clone(),
+        anchor: None,
     });
 
     if let Some(frame_count) = frame_count {

@@ -4,6 +4,7 @@
 //! root with `Ime...` names so callers do not need a public module namespace.
 
 mod activation;
+mod apply;
 mod buffer;
 mod editor;
 mod events;
@@ -41,19 +42,26 @@ pub use field::ImeAppOwnedFieldSpec;
 pub use field::ImeBuiltInApplied;
 pub use field::ImeBuiltInFieldKind;
 pub use field::ImeBuiltInFieldSpec;
+pub use field::ImeBuiltInValue;
 pub use field::ImeEditableFieldSpec;
 pub use field::ImePanelField;
 pub use ids::ImeCommitAttemptId;
 pub use ids::ImeSessionId;
 pub use ids::ImeValueRevision;
 pub use ids::PanelFieldId;
+pub use input::ImeAppInputContext;
+pub use input::ImeAppInputDisposition;
+pub use input::ImeAppInputDispositionHook;
 use input::ImeInputFrame;
 use input::ImeWindowState;
 pub use lease::ImeInputBlocker;
 use session::ActiveImeSession;
+pub use session::ImeCommitAuthority;
+pub use session::ImeCommitAuthorityToken;
 pub use session::ImeOpenSession;
 pub use session::ImeRequestCancel;
 pub use session::ImeRequestCommit;
+pub use target::ImeSessionAnchor;
 pub use target::ImeTarget;
 
 use crate::PanelSystems;
@@ -81,8 +89,10 @@ pub enum ImeSystemSet {
 impl Plugin for ImePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveImeSession>()
+            .init_resource::<ImeCommitAuthority>()
             .init_resource::<ImeInputBlocker>()
             .init_resource::<ImeInputFrame>()
+            .init_resource::<ImeAppInputDispositionHook>()
             .init_resource::<ImeWindowState>()
             .init_resource::<PendingImePanelAnchor>()
             .init_resource::<ImeEditorState>()
@@ -106,6 +116,7 @@ impl Plugin for ImePlugin {
             .add_observer(session::request_cancel)
             .add_observer(session::accept_commit)
             .add_observer(session::reject_commit)
+            .add_observer(apply::apply_builtin_commit)
             .add_observer(editor::update_editor_from_text_changed)
             .add_observer(editor::update_editor_validation)
             .add_observer(editor::close_editor_on_cancel)
@@ -120,7 +131,11 @@ impl Plugin for ImePlugin {
             )
             .add_systems(
                 Update,
-                (input::handle_window_ime, input::handle_keyboard)
+                (
+                    editor::handle_blur_intent,
+                    input::handle_window_ime,
+                    input::handle_keyboard,
+                )
                     .chain()
                     .in_set(ImeSystemSet::Input),
             )

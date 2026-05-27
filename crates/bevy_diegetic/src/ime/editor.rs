@@ -10,11 +10,14 @@ use super::ImeApplied;
 use super::ImeBufferSnapshot;
 use super::ImeCancelCause;
 use super::ImeCanceled;
+use super::ImeCommitCause;
 use super::ImeCursorState;
 use super::ImePreedit;
 use super::ImePreeditBoundary;
 use super::ImeRequestCancel;
+use super::ImeRequestCommit;
 use super::ImeSelectionSnapshot;
+use super::ImeSessionAnchor;
 use super::ImeSessionId;
 use super::ImeTarget;
 use super::ImeTextChanged;
@@ -151,6 +154,7 @@ struct ImeEditor {
     validation: Option<String>,
     panel:      Entity,
     source:     Option<ImePanelAnchorSource>,
+    app_anchor: Option<ImeSessionAnchor>,
     anchor:     Option<ImeEditorAnchor>,
 }
 
@@ -169,10 +173,11 @@ pub(super) struct ImeBlurIntent {
 }
 
 impl ImeBlurIntent {
-    const fn set(&mut self, session_id: ImeSessionId, clicked_panel: Entity) {
+    const fn set(&mut self, session_id: ImeSessionId, clicked_panel: Entity, target: &ImeTarget) {
         self.latest = Some(ImeBlurClassification {
             session_id,
             clicked_panel,
+            source_panel: source_panel(target),
         });
     }
 
@@ -191,6 +196,7 @@ impl ImeBlurIntent {
 struct ImeBlurClassification {
     session_id:    ImeSessionId,
     clicked_panel: Entity,
+    source_panel:  Option<Entity>,
 }
 
 /// Marker on the transient editor panel.
@@ -216,6 +222,7 @@ pub(super) fn update_editor_from_text_changed(
         return;
     };
     let source = pending_anchor.take_for(&event.target, window);
+    let app_anchor = active_session.active_anchor();
 
     let needs_spawn = editor_state
         .active()
@@ -233,6 +240,7 @@ pub(super) fn update_editor_from_text_changed(
             validation: None,
             panel,
             source,
+            app_anchor,
             anchor: None,
         });
     } else if let Some(editor) = editor_state.active_mut() {
@@ -242,6 +250,7 @@ pub(super) fn update_editor_from_text_changed(
         editor.target = event.target.clone();
         editor.window = window;
         editor.snapshot = event.snapshot.clone();
+        editor.app_anchor = app_anchor;
         editor.validation = None;
     }
 
@@ -365,6 +374,34 @@ pub(super) fn update_window_ime_position(
     window.ime_position = anchor.caret_pos;
 }
 
+pub(super) fn handle_blur_intent(
+    mut blur_intent: ResMut<ImeBlurIntent>,
+    active_session: Res<ActiveImeSession>,
+    mut commands: Commands,
+) {
+    let Some(intent) = blur_intent.latest.take() else {
+        return;
+    };
+    if active_session.active_session_id() != Some(intent.session_id) {
+        return;
+    }
+    if active_session.is_pending_commit() {
+        return;
+    }
+
+    let Some(target) = active_session.active_target() else {
+        return;
+    };
+    if intent.is_inside_focus_scope(target) {
+        return;
+    }
+
+    commands.trigger(ImeRequestCommit {
+        session_id: intent.session_id,
+        cause:      ImeCommitCause::Blur,
+    });
+}
+
 fn classify_panel_click(
     mut click: On<Pointer<Click>>,
     editor_state: Res<ImeEditorState>,
@@ -382,7 +419,10 @@ fn classify_panel_click(
         return;
     }
 
-    blur_intent.set(session_id, clicked_panel);
+    let Some(editor) = editor_state.active() else {
+        return;
+    };
+    blur_intent.set(session_id, clicked_panel, &editor.target);
     click.propagate(false);
 }
 
@@ -439,7 +479,24 @@ fn target_screen_rect(
             let (camera, camera_transform) = cameras.get(source.camera).ok()?;
             project_field_record(record, panel, panel_transform, camera, camera_transform)
         },
-        ImeTarget::AppOwned { .. } => Some(fallback_screen_rect(window)),
+        ImeTarget::AppOwned { .. } => Some(app_anchor_rect(editor.app_anchor, window)),
+    }
+}
+
+const fn source_panel(target: &ImeTarget) -> Option<Entity> {
+    match *target {
+        ImeTarget::WorldPanelField { panel, .. } | ImeTarget::ScreenPanelField { panel, .. } => {
+            Some(panel)
+        },
+        ImeTarget::AppOwned { .. } => None,
+    }
+}
+
+impl ImeBlurClassification {
+    fn is_inside_focus_scope(&self, target: &ImeTarget) -> bool {
+        self.source_panel
+            .is_some_and(|panel| panel == self.clicked_panel)
+            || matches!(target, ImeTarget::AppOwned { owner, .. } if *owner == self.clicked_panel)
     }
 }
 
@@ -507,6 +564,17 @@ fn fallback_screen_rect(window: &Window) -> Rect {
     Rect {
         min: origin,
         max: origin + Vec2::new(DEFAULT_EDITOR_WIDTH, DEFAULT_EDITOR_HEIGHT),
+    }
+}
+
+fn app_anchor_rect(anchor: Option<ImeSessionAnchor>, window: &Window) -> Rect {
+    match anchor {
+        Some(ImeSessionAnchor::ScreenRect(rect)) => rect,
+        Some(ImeSessionAnchor::ScreenPoint(point)) => Rect {
+            min: point,
+            max: point + Vec2::new(DEFAULT_EDITOR_WIDTH, DEFAULT_EDITOR_HEIGHT),
+        },
+        None => fallback_screen_rect(window),
     }
 }
 

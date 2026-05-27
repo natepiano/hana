@@ -51,6 +51,7 @@ mod units;
 
 pub use builder::El;
 pub use builder::LayoutBuilder;
+pub(crate) use element::FieldDisplayTextUpdate;
 pub use element::LayoutTree;
 pub use element::LayoutTreeChange;
 pub use engine::LayoutEngine;
