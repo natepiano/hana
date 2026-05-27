@@ -78,6 +78,7 @@ pub use text_props::FontSlant;
 pub use text_props::FontWeight;
 pub use text_props::ForLayout;
 pub use text_props::ForStandalone;
+pub use text_props::GlyphLighting;
 pub use text_props::GlyphRenderMode;
 pub use text_props::GlyphShadowMode;
 pub use text_props::GlyphSidedness;

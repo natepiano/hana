@@ -146,6 +146,16 @@ pub enum GlyphSidedness {
     OneSided,
 }
 
+/// Whether glyph materials respond to scene lighting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+pub enum GlyphLighting {
+    /// Use normal PBR lighting.
+    #[default]
+    Lit,
+    /// Bypass PBR lighting and render with the authored material color.
+    Unlit,
+}
+
 // ── Typestate markers ────────────────────────────────────────────────────────
 
 /// Context marker: text properties for the layout engine.
@@ -203,6 +213,7 @@ pub struct TextProps<C: Send + Sync + 'static> {
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
     sidedness:      GlyphSidedness,
+    lighting:       GlyphLighting,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from global config.
     /// On [`ForStandalone`] this is layout-measurement input only — the cascade
@@ -237,6 +248,7 @@ impl<C: Send + Sync + 'static> PartialEq for TextProps<C> {
             && self.render_mode == other.render_mode
             && self.shadow_mode == other.shadow_mode
             && self.sidedness == other.sidedness
+            && self.lighting == other.lighting
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.world_scale == other.world_scale
@@ -375,6 +387,10 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn sidedness(&self) -> GlyphSidedness { self.sidedness }
 
+    /// Returns whether the glyph material responds to scene lighting.
+    #[must_use]
+    pub const fn lighting(&self) -> GlyphLighting { self.lighting }
+
     /// Returns the per-style alpha-mode override, if any.
     ///
     /// This is the authoring input the cascade bridges read to insert
@@ -446,6 +462,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             render_mode: _,
             shadow_mode: _,
             sidedness: _,
+            lighting: _,
             // Standalone-only — not relevant for layout shaping cache.
             unit: _,
             world_scale: _,
@@ -489,6 +506,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             render_mode: _,
             shadow_mode: _,
             sidedness: _,
+            lighting: _,
             alpha_mode: _,
             context: _,
         } = self;
@@ -514,7 +532,8 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     /// Compares the measurement fields (`font_id`, `size`, `weight`, `slant`,
     /// `line_height`, letter/word spacing, `wrap`, `align`, `anchor`,
     /// `font_features`) via `to_bits`, plus the render fields baked into the
-    /// mesh and material (`color`, `render_mode`, `shadow_mode`, `sidedness`).
+    /// mesh and material (`color`, `render_mode`, `shadow_mode`, `sidedness`,
+    /// `lighting`).
     /// Excludes `unit`/`world_scale` (measurement context, not mesh inputs) and
     /// `alpha_mode` (gated separately through `Override<TextAlpha>`).
     pub(crate) fn gating_eq(&self, other: &Self) -> bool {
@@ -534,6 +553,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             render_mode,
             shadow_mode,
             sidedness,
+            lighting,
             unit: _,
             world_scale: _,
             alpha_mode: _,
@@ -555,6 +575,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
             && *render_mode == other.render_mode
             && *shadow_mode == other.shadow_mode
             && *sidedness == other.sidedness
+            && *lighting == other.lighting
     }
 
     /// Extracts measurement-relevant fields as a [`TextMeasure`].
@@ -604,6 +625,7 @@ impl TextProps<ForLayout> {
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Cast,
             sidedness:      GlyphSidedness::DoubleSided,
+            lighting:       GlyphLighting::Lit,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
@@ -667,6 +689,7 @@ impl TextProps<ForLayout> {
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
+            lighting:       self.lighting,
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    None,
@@ -708,6 +731,7 @@ impl TextProps<ForStandalone> {
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Cast,
             sidedness:      GlyphSidedness::DoubleSided,
+            lighting:       GlyphLighting::Lit,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             world_scale:    None,
@@ -742,6 +766,20 @@ impl TextProps<ForStandalone> {
     #[must_use]
     pub const fn with_sidedness(mut self, sidedness: GlyphSidedness) -> Self {
         self.sidedness = sidedness;
+        self
+    }
+
+    /// Sets whether the glyph material responds to scene lighting.
+    #[must_use]
+    pub const fn with_lighting(mut self, lighting: GlyphLighting) -> Self {
+        self.lighting = lighting;
+        self
+    }
+
+    /// Sets the glyph material to render unlit, bypassing PBR lighting.
+    #[must_use]
+    pub const fn with_unlit(mut self) -> Self {
+        self.lighting = GlyphLighting::Unlit;
         self
     }
 
@@ -788,6 +826,7 @@ impl TextProps<ForStandalone> {
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
+            lighting:       self.lighting,
             font_features:  self.font_features,
             unit:           self.unit,
             world_scale:    self.world_scale,

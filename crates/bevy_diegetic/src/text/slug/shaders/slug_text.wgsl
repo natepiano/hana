@@ -39,6 +39,7 @@ struct TextUniform {
     fill_color: vec4<f32>,
     render_mode: u32,
     oit_depth_offset: f32,
+    supersample: u32,
 }
 
 struct CurveRecord {
@@ -350,18 +351,32 @@ fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: GlyphRecord) -> 
     return smoothstep(-edge_width, edge_width, signed_distance);
 }
 
-fn glyph_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
+fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
+    // Derivatives stay at the top, in uniform control flow: the supersample
+    // branch below switches on a uniform value but must not gate fwidth/dpdx.
     let point = design_position(uv, glyph);
     let pixel = max(abs(fwidth(point)), vec2<f32>(ROOT_EPSILON));
-    return distance_coverage(point, pixel, glyph);
-}
+    let dx = dpdx(point);
+    let dy = dpdy(point);
 
-fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
-    let coverage = glyph_coverage(uv, glyph);
+    var coverage: f32;
+    if uniforms.supersample != 0u {
+        // Four rotated-grid sub-pixel offsets spanning the pixel footprint. At
+        // grazing angles dx/dy stretch along the foreshortened axis, so the
+        // samples integrate the coverage strip a single sample cannot capture.
+        var sum = 0.0;
+        sum += distance_coverage(point + 0.375 * dx + 0.125 * dy, pixel, glyph);
+        sum += distance_coverage(point - 0.125 * dx + 0.375 * dy, pixel, glyph);
+        sum += distance_coverage(point - 0.375 * dx - 0.125 * dy, pixel, glyph);
+        sum += distance_coverage(point + 0.125 * dx - 0.375 * dy, pixel, glyph);
+        coverage = sum * 0.25;
+    } else {
+        coverage = distance_coverage(point, pixel, glyph);
+    }
+
     if uniforms.render_mode == RENDER_MODE_PUNCH_OUT {
         return 1.0 - coverage;
     }
-
     return coverage;
 }
 

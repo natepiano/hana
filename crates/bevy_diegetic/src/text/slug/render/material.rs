@@ -42,6 +42,9 @@ pub struct TextUniform {
     /// Per-layer depth offset applied to the OIT fragment position for coplanar
     /// layer ordering.
     pub oit_depth_offset: f32,
+    /// Non-zero enables sub-pixel supersampling of glyph coverage (anti-aliases
+    /// grazing-angle edges without MSAA).
+    pub supersample:      u32,
 }
 
 /// Text material extension over `StandardMaterial`.
@@ -106,6 +109,7 @@ pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
                 fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
                 render_mode: u32::from(render_mode),
                 oit_depth_offset,
+                supersample: 1,
             },
             curves,
             bands,

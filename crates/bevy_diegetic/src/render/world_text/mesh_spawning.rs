@@ -11,6 +11,7 @@ use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::layout::GlyphLighting;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
@@ -185,6 +186,7 @@ fn world_text_material(
         ..Default::default()
     };
     apply_sidedness(&mut base, style.sidedness());
+    base.unlit = matches!(style.lighting(), GlyphLighting::Unlit);
     text::text_material(TextMaterialInput {
         base,
         fill_color: style.color(),
