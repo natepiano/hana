@@ -194,7 +194,9 @@ fn cursor_hit_camera(snapshots: &[CameraRoutingSnapshot]) -> Option<Entity> {
 #[cfg(test)]
 mod tests {
     use bevy::camera::RenderTarget;
+    use bevy::camera::RenderTargetInfo;
     use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
     use bevy::window::WindowRef;
 
     use super::blockers::OrbitCamInputBlockerBits;
@@ -235,6 +237,29 @@ mod tests {
                 RenderTarget::Window(WindowRef::Primary),
             ))
             .id()
+    }
+
+    fn test_window(focused: bool) -> Window {
+        let mut window = Window {
+            focused,
+            ..default()
+        };
+        window.set_cursor_position(Some(Vec2::new(100.0, 100.0)));
+        window
+    }
+
+    fn test_camera(target: RenderTarget) -> (OrbitCam, Camera, RenderTarget, OrbitCamInputMode) {
+        let mut camera = Camera::default();
+        camera.computed.target_info = Some(RenderTargetInfo {
+            physical_size: UVec2::new(1280, 720),
+            scale_factor:  1.0,
+        });
+        (
+            OrbitCam::default(),
+            camera,
+            target,
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        )
     }
 
     #[test]
@@ -311,6 +336,51 @@ mod tests {
                 .resource::<ResolvedOrbitCamInputRoute>()
                 .routed_camera,
             Some(camera)
+        );
+    }
+
+    #[test]
+    fn focused_window_cursor_selects_camera_when_window_cursors_overlap() {
+        let mut app = test_app();
+        let primary_window = app
+            .world_mut()
+            .spawn((test_window(true), PrimaryWindow))
+            .id();
+        let second_window = app.world_mut().spawn(test_window(false)).id();
+        let primary_camera = app
+            .world_mut()
+            .spawn(test_camera(RenderTarget::Window(WindowRef::Primary)))
+            .id();
+        let second_camera = app
+            .world_mut()
+            .spawn(test_camera(RenderTarget::Window(WindowRef::Entity(
+                second_window,
+            ))))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<ResolvedOrbitCamInputRoute>()
+                .routed_camera,
+            Some(primary_camera)
+        );
+
+        if let Some(mut window) = app.world_mut().get_mut::<Window>(primary_window) {
+            window.focused = false;
+        }
+        if let Some(mut window) = app.world_mut().get_mut::<Window>(second_window) {
+            window.focused = true;
+        }
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<ResolvedOrbitCamInputRoute>()
+                .routed_camera,
+            Some(second_camera)
         );
     }
 

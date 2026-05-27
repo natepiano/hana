@@ -1,7 +1,8 @@
 //! Per-frame snapshots of windows and cameras used by the routing system.
 //!
 //! Types (all submodule-internal):
-//! - [`WindowSnapshot`] — captured window size and cursor position.
+//! - [`WindowSnapshots`] — captured window sizes plus the single focused cursor surface.
+//! - [`WindowSnapshot`] — captured window size.
 //! - [`CameraRoutingSnapshot`] — captured per-camera routing inputs (entity, draw order, surface
 //!   metrics, and the bit flags below).
 //! - [`CameraRoutingSnapshotFlags`] — `ACTIVE`/`MANUAL`/`DISABLED`/`ANIMATION_IGNORE`/`CURSOR_HIT`
@@ -26,8 +27,78 @@ use crate::input::OrbitCamManual;
 
 #[derive(Clone, Copy)]
 pub(super) struct WindowSnapshot {
-    size:   Vec2,
-    cursor: Option<Vec2>,
+    size: Vec2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum WindowKey {
+    Primary,
+    Entity(Entity),
+}
+
+#[derive(Clone, Copy)]
+enum ActiveWindowCursor {
+    None,
+    Window { window: WindowKey, cursor: Vec2 },
+    Ambiguous,
+}
+
+impl ActiveWindowCursor {
+    const fn add(self, window: WindowKey, cursor: Vec2) -> Self {
+        match self {
+            Self::None => Self::Window { window, cursor },
+            Self::Window { .. } | Self::Ambiguous => Self::Ambiguous,
+        }
+    }
+
+    const fn cursor_for(self, window: WindowKey) -> Option<Vec2> {
+        match self {
+            Self::Window {
+                window: active_window,
+                cursor,
+            } if window_key_eq(active_window, window) => Some(cursor),
+            Self::None | Self::Window { .. } | Self::Ambiguous => None,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct WindowSnapshots {
+    windows: HashMap<WindowKey, WindowSnapshot>,
+    cursor:  ActiveWindowCursor,
+}
+
+impl Default for WindowSnapshots {
+    fn default() -> Self {
+        Self {
+            windows: HashMap::new(),
+            cursor:  ActiveWindowCursor::None,
+        }
+    }
+}
+
+impl WindowSnapshots {
+    fn insert(&mut self, key: WindowKey, window: &Window) {
+        self.windows.insert(
+            key,
+            WindowSnapshot {
+                size: Vec2::new(window.width(), window.height()),
+            },
+        );
+        if window.focused
+            && let Some(cursor) = window.cursor_position()
+        {
+            self.cursor = self.cursor.add(key, cursor);
+        }
+    }
+
+    fn snapshot_for(&self, target: &RenderTarget) -> Option<&WindowSnapshot> {
+        window_key(target).and_then(|key| self.windows.get(&key))
+    }
+
+    fn cursor_for(&self, target: &RenderTarget) -> Option<Vec2> {
+        window_key(target).and_then(|key| self.cursor.cursor_for(key))
+    }
 }
 
 bitflags::bitflags! {
@@ -65,39 +136,25 @@ struct CameraSnapshotInputs<'a> {
     explicit_metrics: Option<&'a CameraInputSurfaceMetrics>,
 }
 
-pub(super) fn collect_window_snapshots(
-    world: &mut World,
-) -> HashMap<Option<Entity>, WindowSnapshot> {
-    let mut windows = HashMap::new();
+pub(super) fn collect_window_snapshots(world: &mut World) -> WindowSnapshots {
+    let mut snapshots = WindowSnapshots::default();
 
     let mut primary_query = world.query_filtered::<&Window, With<PrimaryWindow>>();
     if let Ok(window) = primary_query.single(world) {
-        windows.insert(
-            None,
-            WindowSnapshot {
-                size:   Vec2::new(window.width(), window.height()),
-                cursor: window.cursor_position(),
-            },
-        );
+        snapshots.insert(WindowKey::Primary, window);
     }
 
     let mut other_query = world.query_filtered::<(Entity, &Window), Without<PrimaryWindow>>();
     for (entity, window) in other_query.iter(world) {
-        windows.insert(
-            Some(entity),
-            WindowSnapshot {
-                size:   Vec2::new(window.width(), window.height()),
-                cursor: window.cursor_position(),
-            },
-        );
+        snapshots.insert(WindowKey::Entity(entity), window);
     }
 
-    windows
+    snapshots
 }
 
 pub(super) fn collect_camera_snapshots(
     world: &mut World,
-    windows: &HashMap<Option<Entity>, WindowSnapshot>,
+    windows: &WindowSnapshots,
 ) -> Vec<CameraRoutingSnapshot> {
     let mut query = world.query_filtered::<(
         Entity,
@@ -134,7 +191,7 @@ pub(super) fn collect_camera_snapshots(
 
 fn camera_snapshot(
     camera_snapshot_inputs: CameraSnapshotInputs<'_>,
-    windows: &HashMap<Option<Entity>, WindowSnapshot>,
+    windows: &WindowSnapshots,
 ) -> CameraRoutingSnapshot {
     let CameraSnapshotInputs {
         entity,
@@ -146,10 +203,10 @@ fn camera_snapshot(
         interrupt,
         explicit_metrics,
     } = camera_snapshot_inputs;
-    let window = window_snapshot(target, windows);
+    let window = windows.snapshot_for(target);
     let metrics = camera_input_surface_metrics(camera, window, explicit_metrics.copied());
-    let cursor_hit = window
-        .and_then(|window| window.cursor)
+    let cursor_hit = windows
+        .cursor_for(target)
         .is_some_and(|cursor| cursor_hits_camera(cursor, camera));
     let animation = move_list.is_some()
         && interrupt.copied().unwrap_or_default() == CameraInputInterruptBehavior::Ignore;
@@ -192,17 +249,24 @@ fn camera_input_surface_metrics(
     metrics
 }
 
-fn window_snapshot<'a>(
-    target: &RenderTarget,
-    windows: &'a HashMap<Option<Entity>, WindowSnapshot>,
-) -> Option<&'a WindowSnapshot> {
+const fn window_key(target: &RenderTarget) -> Option<WindowKey> {
     let RenderTarget::Window(window_ref) = target else {
         return None;
     };
 
-    match window_ref {
-        WindowRef::Primary => windows.get(&None),
-        WindowRef::Entity(entity) => windows.get(&Some(*entity)),
+    Some(match window_ref {
+        WindowRef::Primary => WindowKey::Primary,
+        WindowRef::Entity(entity) => WindowKey::Entity(*entity),
+    })
+}
+
+const fn window_key_eq(left: WindowKey, right: WindowKey) -> bool {
+    match (left, right) {
+        (WindowKey::Primary, WindowKey::Primary) => true,
+        (WindowKey::Entity(left), WindowKey::Entity(right)) => left.to_bits() == right.to_bits(),
+        (WindowKey::Primary, WindowKey::Entity(_)) | (WindowKey::Entity(_), WindowKey::Primary) => {
+            false
+        },
     }
 }
 
