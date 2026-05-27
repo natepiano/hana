@@ -46,6 +46,7 @@ mod cascade;
 mod constants;
 #[cfg(feature = "typography_overlay")]
 mod debug;
+mod ime;
 mod layout;
 mod panel;
 mod render;
@@ -82,6 +83,33 @@ pub use debug::TypographyOverlay;
 use debug::TypographyOverlayPlugin;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlayReady;
+pub use ime::ImeAcceptCommit;
+pub use ime::ImeAppOwnedFieldSpec;
+pub use ime::ImeApplied;
+pub use ime::ImeAppliedResult;
+pub use ime::ImeBuiltInApplied;
+pub use ime::ImeBuiltInFieldKind;
+pub use ime::ImeBuiltInFieldSpec;
+pub use ime::ImeCancelCause;
+pub use ime::ImeCanceled;
+pub use ime::ImeCommitAttemptId;
+pub use ime::ImeCommitCause;
+pub use ime::ImeCommitRequested;
+pub use ime::ImeEditableFieldSpec;
+pub use ime::ImeInputBlocker;
+pub use ime::ImeOpenSession;
+pub use ime::ImePanelField;
+use ime::ImePlugin;
+pub use ime::ImeRejectCommit;
+pub use ime::ImeRejection;
+pub use ime::ImeRequestCancel;
+pub use ime::ImeRequestCommit;
+pub use ime::ImeSessionId;
+pub use ime::ImeStarted;
+pub use ime::ImeTarget;
+pub use ime::ImeValidationRejected;
+pub use ime::ImeValueRevision;
+pub use ime::PanelFieldId;
 pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Anchor;
@@ -150,6 +178,7 @@ pub use panel::GrowRange;
 pub use panel::HeadlessLayoutPlugin;
 pub use panel::Inches;
 pub use panel::Millimeters;
+pub use panel::PanelFieldRecord;
 use panel::PanelPlugin;
 pub use panel::PanelSizing;
 pub use panel::PanelSystems;
@@ -204,6 +233,7 @@ impl Plugin for DiegeticUiPlugin {
         app.add_plugins((
             TextPlugin,
             PanelPlugin,
+            ImePlugin,
             ScreenSpacePlugin,
             RenderPlugin,
             CalloutPlugin,

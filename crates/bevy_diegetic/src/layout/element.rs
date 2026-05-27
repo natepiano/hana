@@ -29,6 +29,7 @@ use super::Padding;
 use super::Sizing;
 use super::Unit;
 use super::constants::INLINE_CHILDREN;
+use crate::ImePanelField;
 
 /// Whether overflowing children are clipped to the parent's content box.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -70,6 +71,8 @@ pub(super) struct Element {
     /// When present, the rendering system uses this instead of the panel-level default.
     /// `base_color` is overridden by the layout color if both are set.
     pub(super) material:      Option<Box<StandardMaterial>>,
+    /// Optional editable field contract.
+    pub(super) editable:      Option<ImePanelField>,
     /// Content of this element.
     pub(super) content:       ElementContent,
 }
@@ -131,6 +134,7 @@ impl Default for Element {
             corner_radius: CornerRadius::ZERO,
             overflow:      ChildOverflow::Visible,
             material:      None,
+            editable:      None,
             content:       ElementContent::Empty,
         }
     }
@@ -328,6 +332,38 @@ impl LayoutTree {
             .map_or(CornerRadius::ZERO, |e| e.corner_radius)
     }
 
+    /// Returns editable field metadata for the element at `index`, if any.
+    #[must_use]
+    pub(crate) fn editable_field(&self, index: usize) -> Option<&ImePanelField> {
+        self.elements.get(index).and_then(|e| e.editable.as_ref())
+    }
+
+    /// Returns text content for the element at `index`, if any.
+    #[must_use]
+    pub(crate) fn element_text(&self, index: usize) -> Option<&str> {
+        self.elements
+            .get(index)
+            .and_then(|element| match &element.content {
+                ElementContent::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+    }
+
+    /// Returns the first text string owned by `index` or one of its descendants.
+    #[must_use]
+    pub(crate) fn field_display_text(&self, index: usize) -> Option<&str> {
+        let mut stack = vec![index];
+        while let Some(current) = stack.pop() {
+            if let Some(text) = self.element_text(current) {
+                return Some(text);
+            }
+            for &child in self.children_of(current).iter().rev() {
+                stack.push(child);
+            }
+        }
+        None
+    }
+
     /// Returns a copy of this tree with all dimensions converted to points.
     ///
     /// `layout_scale` multiplies spatial values (padding, gaps, borders, fixed sizes).
@@ -376,6 +412,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         corner_radius,
         overflow,
         material,
+        editable,
         content,
     } = element;
     let Element {
@@ -391,6 +428,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         corner_radius: n_corner_radius,
         overflow: n_overflow,
         material: n_material,
+        editable: n_editable,
         content: n_content,
     } = next;
 
@@ -403,6 +441,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         || child_align_y != n_child_align_y
         || overflow != n_overflow
     {
+        return LayoutTreeChange::LayoutAffecting;
+    }
+
+    if editable != n_editable {
         return LayoutTreeChange::LayoutAffecting;
     }
 
