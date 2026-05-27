@@ -11,7 +11,7 @@ use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::readiness::AwaitingReady;
 use super::shaping;
-use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeDefault;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
@@ -56,7 +56,8 @@ pub(super) fn render_world_text(
     mut cache: ResMut<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut backend_services: BackendRenderServices,
-    defaults: Res<CascadeDefaults>,
+    font_default: Res<CascadeDefault<FontUnit>>,
+    alpha_default: Res<CascadeDefault<TextAlpha>>,
     mut commands: Commands,
 ) {
     let to_process: Vec<Entity> = changed_texts.iter().collect();
@@ -85,13 +86,13 @@ pub(super) fn render_world_text(
         // where a standalone is rendered before its spawn seed has flushed.
         let resolved_unit = resolved_units
             .get(entity)
-            .map_or(defaults.font_unit, |r| r.0.0);
+            .map_or(font_default.0.0, |r| r.0.0);
         let scale = style
             .world_scale()
             .unwrap_or_else(|| resolved_unit.meters_per_unit());
         let resolved_alpha = resolved_alphas
             .get(entity)
-            .map_or(defaults.text_alpha, |r| r.0.0);
+            .map_or(alpha_default.0.0, |r| r.0.0);
 
         let mut shared_services = WorldTextRenderServices::new(
             &font_registry,

@@ -79,7 +79,7 @@ use crate::screen_space::ScreenSpaceCamera;
 /// the default Blend path. Pair with `AlphaMode::Blend` or
 /// `AlphaMode::Premultiplied` on text (the cascade default; `Opaque`/`Mask`
 /// bypass OIT), configured via
-/// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults), per-panel
+/// `CascadeDefault<TextAlpha>`, per-panel
 /// override ([`DiegeticPanel`](crate::DiegeticPanel)), or per-style
 /// override ([`WorldTextStyle`](crate::WorldTextStyle) /
 /// [`LayoutTextStyle`](crate::LayoutTextStyle)).

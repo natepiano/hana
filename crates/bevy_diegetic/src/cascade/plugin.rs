@@ -14,8 +14,7 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use super::cascade_set::CascadeSet;
-use super::defaults;
-use super::defaults::CascadeDefaults;
+use super::defaults::CascadeDefault;
 use super::resolved;
 use super::resolved::CascadeAttr;
 use super::resolved::Override;
@@ -30,11 +29,16 @@ impl<A: CascadeAttr> Default for CascadePlugin<A> {
     fn default() -> Self { Self(PhantomData) }
 }
 
-impl<A: CascadeAttr> Plugin for CascadePlugin<A> {
+impl<A: CascadeAttr> Plugin for CascadePlugin<A>
+where
+    CascadeDefault<A>: Default,
+{
     fn build(&self, app: &mut App) {
         app.register_type::<A>()
             .register_type::<Override<A>>()
             .register_type::<Resolved<A>>()
+            .register_type::<CascadeDefault<A>>()
+            .init_resource::<CascadeDefault<A>>()
             .add_systems(Update, propagate_cascade::<A>.in_set(CascadeSet::Propagate));
     }
 }
@@ -51,8 +55,7 @@ impl<A: CascadeAttr> Plugin for CascadePlugin<A> {
 /// inequality-guarded, so downstream `Changed<Resolved<A>>` readers wake only
 /// on real transitions.
 fn propagate_cascade<A: CascadeAttr>(
-    defaults: Res<CascadeDefaults>,
-    mut last_seen_default: Local<Option<A>>,
+    default: Res<CascadeDefault<A>>,
     overrides: Query<&Override<A>>,
     parents: Query<&ChildOf>,
     children: Query<&Children>,
@@ -65,12 +68,9 @@ fn propagate_cascade<A: CascadeAttr>(
     // Drain removals every frame, even when the default-change path supersedes
     // them, so they are never cleared unread.
     let removed: Vec<Entity> = removed_overrides.read().collect();
-    let current_default = A::global_default(&defaults);
-    let default_changed =
-        defaults::should_propagate_defaults(current_default, &mut last_seen_default);
 
     let mut dirty: HashSet<Entity> = HashSet::new();
-    if default_changed {
+    if default.is_changed() {
         for (entity, _) in &resolved {
             dirty.insert(entity);
         }
@@ -88,7 +88,7 @@ fn propagate_cascade<A: CascadeAttr>(
         let Ok((_, current)) = resolved.get(entity) else {
             continue;
         };
-        let new = resolved::resolve_walk::<A>(entity, &overrides, &parents, &defaults);
+        let new = resolved::resolve_walk::<A>(entity, &overrides, &parents, default.0);
         if current.0 != new {
             commands.entity(entity).insert(Resolved(new));
         }
@@ -120,17 +120,9 @@ fn collect_subtree(root: Entity, children: &Query<&Children>, dirty: &mut HashSe
 mod tests {
     use super::*;
     use crate::cascade::constants::CASCADE_DEPTH_CAP;
+    use crate::cascade::defaults::CascadeDefaults;
+    use crate::cascade::resolved::TestUnit;
     use crate::layout::Unit;
-
-    // A throwaway attribute projected onto `CascadeDefaults.layout_unit` —
-    // picked because no real cascade uses `layout_unit` as its global, so the
-    // test stays hermetic even in an app wired with the real cascades.
-    #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-    struct TestUnit(Unit);
-
-    impl CascadeAttr for TestUnit {
-        fn global_default(defaults: &CascadeDefaults) -> Self { Self(defaults.layout_unit) }
-    }
 
     /// Marker for a cascade-participating test node.
     #[derive(Component)]
@@ -142,11 +134,11 @@ mod tests {
         trigger: On<Add, TestNode>,
         overrides: Query<&Override<TestUnit>>,
         parents: Query<&ChildOf>,
-        defaults: Res<CascadeDefaults>,
+        default: Res<CascadeDefault<TestUnit>>,
         mut commands: Commands,
     ) {
         let entity = trigger.event_target();
-        let resolved = resolved::resolve_walk::<TestUnit>(entity, &overrides, &parents, &defaults);
+        let resolved = resolved::resolve_walk::<TestUnit>(entity, &overrides, &parents, default.0);
         commands.entity(entity).insert(Resolved(resolved));
     }
 
@@ -199,6 +191,22 @@ mod tests {
     }
 
     #[test]
+    fn world_resolve_helper_inherits_parent_override() {
+        let mut app = test_app();
+        let parent = app
+            .world_mut()
+            .spawn((TestNode, Override(TestUnit(Unit::Inches))))
+            .id();
+        let child = app.world_mut().spawn((TestNode, ChildOf(parent))).id();
+        app.update();
+
+        assert_eq!(
+            resolved::resolve::<TestUnit>(app.world(), child, TestUnit(Unit::Meters)).0,
+            Unit::Inches
+        );
+    }
+
+    #[test]
     fn child_override_wins_over_parent() {
         let mut app = test_app();
         let parent = app
@@ -244,9 +252,7 @@ mod tests {
         app.update();
         assert_eq!(read(&app, entity), Unit::Meters);
 
-        app.world_mut()
-            .resource_mut::<CascadeDefaults>()
-            .layout_unit = Unit::Inches;
+        app.world_mut().resource_mut::<CascadeDefault<TestUnit>>().0 = TestUnit(Unit::Inches);
         app.update();
         assert_eq!(read(&app, entity), Unit::Inches);
     }
@@ -260,9 +266,7 @@ mod tests {
             .id();
         app.update();
 
-        app.world_mut()
-            .resource_mut::<CascadeDefaults>()
-            .layout_unit = Unit::Inches;
+        app.world_mut().resource_mut::<CascadeDefault<TestUnit>>().0 = TestUnit(Unit::Inches);
         app.update();
         assert_eq!(read(&app, entity), Unit::Millimeters);
     }
@@ -369,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_default_field_does_not_fire_propagation() {
+    fn non_cascade_default_resource_does_not_fire_propagation() {
         let mut app = test_app();
         let entity = app.world_mut().spawn(TestNode).id();
         app.update();
@@ -380,8 +384,10 @@ mod tests {
             .expect("CascadeDefaults should exist")
             .last_changed();
 
-        // Mutate a field the TestUnit cascade does not project onto.
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Opaque;
+        // Mutate a separate non-cascade default resource.
+        app.world_mut()
+            .resource_mut::<CascadeDefaults>()
+            .layout_unit = Unit::Inches;
         app.update();
 
         assert_eq!(read(&app, entity), Unit::Meters);

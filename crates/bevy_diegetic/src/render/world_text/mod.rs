@@ -16,8 +16,7 @@ pub use readiness::WorldTextReady;
 pub(super) use readiness::emit_world_text_ready;
 
 use super::text_shaping::TextShapingContext;
-use crate::cascade::CascadeAttr;
-use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeDefault;
 use crate::cascade::FontUnit;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
@@ -50,7 +49,8 @@ pub(super) fn render_world_text(
     cache: ResMut<ShapedTextCache>,
     meshes: ResMut<Assets<Mesh>>,
     backend_services: BackendRenderServices,
-    defaults: Res<CascadeDefaults>,
+    font_default: Res<CascadeDefault<FontUnit>>,
+    alpha_default: Res<CascadeDefault<TextAlpha>>,
     commands: Commands,
 ) {
     rendering::render_world_text(
@@ -64,7 +64,8 @@ pub(super) fn render_world_text(
         cache,
         meshes,
         backend_services,
-        defaults,
+        font_default,
+        alpha_default,
         commands,
     );
 }
@@ -178,19 +179,16 @@ pub(crate) struct PanelChild;
 pub(super) fn seed_world_text_overrides(
     trigger: On<Add, WorldTextStyle>,
     styles: Query<&WorldTextStyle, Without<PanelChild>>,
-    defaults: Res<CascadeDefaults>,
+    font_default: Res<CascadeDefault<FontUnit>>,
+    alpha_default: Res<CascadeDefault<TextAlpha>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(style) = styles.get(entity) else {
         return;
     };
-    let resolved_unit = style
-        .unit()
-        .map_or_else(|| FontUnit::global_default(&defaults), FontUnit);
-    let resolved_alpha = style
-        .alpha_mode()
-        .map_or_else(|| TextAlpha::global_default(&defaults), TextAlpha);
+    let resolved_unit = style.unit().map_or(font_default.0, FontUnit);
+    let resolved_alpha = style.alpha_mode().map_or(alpha_default.0, TextAlpha);
     let mut entity_commands = commands.entity(entity);
     entity_commands.insert((Resolved(resolved_unit), Resolved(resolved_alpha)));
     if let Some(unit) = style.unit() {
@@ -209,6 +207,8 @@ pub(super) fn seed_world_text_overrides(
 mod tests {
     use super::*;
     use crate::Pt;
+    use crate::cascade::CascadeDefault;
+    use crate::cascade::CascadeDefaults;
     use crate::cascade::CascadePlugin;
     use crate::layout::Unit;
 
@@ -300,7 +300,9 @@ mod tests {
         app.update();
         assert_eq!(resolved_alpha(&app, entity), AlphaMode::Blend);
 
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Add;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Add);
         app.update();
         assert_eq!(resolved_alpha(&app, entity), AlphaMode::Add);
     }

@@ -12,7 +12,7 @@ pub enum CascadeSet {
     /// [`Resolved`](crate::cascade::Resolved) values current. One propagation
     /// system per cascade attribute re-resolves a node when its own
     /// `Override<A>` changes or is removed, its `ChildOf` changes, or
-    /// [`CascadeDefaults`](super::CascadeDefaults) changes — fanning ancestor
+    /// `CascadeDefault<A>` changes — fanning ancestor
     /// changes down through `Children`. After this set runs in [`Update`],
     /// every `Resolved` on an affected entity reflects current sources.
     Propagate,

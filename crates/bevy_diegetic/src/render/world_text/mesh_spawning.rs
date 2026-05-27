@@ -257,6 +257,7 @@ mod tests {
     use super::free_run_storage_on_world_mesh_removal;
     use super::update_world_text_alpha;
     use crate::Mm;
+    use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeDefaults;
     use crate::cascade::CascadePlugin;
     use crate::cascade::FontUnit;
@@ -384,7 +385,9 @@ mod tests {
     #[test]
     fn alpha_only_change_updates_material_without_respawning_mesh() {
         let mut app = world_app();
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Blend;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Blend);
         let entity = app
             .world_mut()
             .spawn((WorldText::new("Hi"), WorldTextStyle::new(Mm(6.0))))
@@ -397,7 +400,9 @@ mod tests {
 
         // The standalone authors no alpha override, so a global-default change
         // moves its Resolved<TextAlpha> — an alpha-only update.
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Add;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Add);
         settle(&mut app);
 
         let mesh_after =
@@ -453,7 +458,9 @@ mod tests {
     #[test]
     fn alpha_change_with_no_mesh_child_is_a_no_op() {
         let mut app = world_app();
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Blend;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Blend);
         // Empty text never spawns a mesh.
         let entity = app
             .world_mut()
@@ -467,7 +474,9 @@ mod tests {
         assert_eq!(run_storage_len(&app), 0);
 
         // The alpha-only branch finds no WorldTextMesh child — a no-op, not a panic.
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Add;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Add);
         settle(&mut app);
 
         assert!(

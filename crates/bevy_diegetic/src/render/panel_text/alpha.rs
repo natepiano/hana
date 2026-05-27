@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::cascade;
-use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeDefault;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
@@ -26,11 +26,11 @@ pub(super) fn seed_panel_child_alpha(
     trigger: On<Add, PanelChild>,
     overrides: Query<&Override<TextAlpha>>,
     parents: Query<&ChildOf>,
-    defaults: Res<CascadeDefaults>,
+    default: Res<CascadeDefault<TextAlpha>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let resolved = cascade::resolve_walk::<TextAlpha>(entity, &overrides, &parents, &defaults);
+    let resolved = cascade::resolve_walk::<TextAlpha>(entity, &overrides, &parents, default.0);
     commands.entity(entity).insert(Resolved(resolved));
 }
 
@@ -100,7 +100,7 @@ mod tests {
     fn read_label_alpha(
         resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelChild>>,
         labels: Query<Entity, With<PanelChild>>,
-        defaults: Res<CascadeDefaults>,
+        default: Res<CascadeDefault<TextAlpha>>,
         mut seen: ResMut<SeenLabelAlpha>,
     ) {
         if seen.0.is_some() {
@@ -110,7 +110,7 @@ mod tests {
             seen.0 = Some(
                 resolved_alphas
                     .get(entity)
-                    .map_or(defaults.text_alpha, |resolved| resolved.0.0),
+                    .map_or(default.0.0, |resolved| resolved.0.0),
             );
         }
     }
@@ -162,10 +162,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(measurer())
             // Set the global default before `HeadlessLayoutPlugin` init-defaults it.
-            .insert_resource(CascadeDefaults {
-                text_alpha: AlphaMode::Multiply,
-                ..default()
-            })
+            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Multiply)))
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(CascadePlugin::<TextAlpha>::default())
             .add_observer(seed_panel_child_alpha);

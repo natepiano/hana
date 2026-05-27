@@ -1520,8 +1520,8 @@ fn build_two_column_article(
                     );
                     debug_text(
                         b,
-                        "The global CascadeDefaults resource sets defaults for \
-                         every panel: layout in meters, fonts in points. \
+                        "CascadeDefaults sets panel construction defaults: \
+                         layout in meters, fonts in points. \
                          Override per-panel with layout_unit and font_unit, or \
                          per-element with types like Mm(10.0) and Pt(24.0) \
                          inline. The system converts at layout time so the \

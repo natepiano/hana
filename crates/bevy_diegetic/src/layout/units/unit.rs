@@ -7,8 +7,8 @@ use crate::layout::constants::POINTS_PER_INCH;
 
 /// Physical unit for interpreting numeric dimensions.
 ///
-/// Used by [`CascadeDefaults`](crate::CascadeDefaults) to define what "1.0"
-/// means for layout dimensions and font sizes, and by
+/// Used by `CascadeDefault<FontUnit>` and panel construction defaults to define
+/// what "1.0" means for layout dimensions and font sizes, and by
 /// [`WorldTextStyle::with_unit`](crate::layout::TextProps::with_unit) to set
 /// per-entity size units.
 ///

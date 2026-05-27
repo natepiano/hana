@@ -104,7 +104,7 @@ pub struct DiegeticPanel {
     pub(super) text_material:    Option<StandardMaterial>,
     /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
     /// falls through to the per-style setting and then to
-    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
+    /// `CascadeDefault<TextAlpha>`.
     pub(super) text_alpha_mode:  Option<AlphaMode>,
     /// Whether the panel is world-space or screen-space.
     pub(super) coordinate_space: CoordinateSpace,
@@ -432,7 +432,7 @@ fn set_tree_command(
 /// no panel ever reads the `FontUnit` global, and a runtime `font_unit` change
 /// does not reach existing panels. `text_alpha_mode` is the panel's optional
 /// override for the alpha its labels inherit; absent → labels resolve to
-/// [`CascadeDefaults::text_alpha`] through the parent-walk. The panel needs no
+/// `CascadeDefault<TextAlpha>` through the parent-walk. The panel needs no
 /// `Resolved<TextAlpha>` of its own — only its labels render text, and they
 /// walk up to this `Override<TextAlpha>` directly. The panel twin of the
 /// standalone `WorldTextStyle` authoring bridge.

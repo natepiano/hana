@@ -397,7 +397,7 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     /// `Override<TextAlpha>`: the standalone bridge for [`ForStandalone`], the
     /// panel-text reconciler for a [`ForLayout`] label. `None` means "inherit" —
     /// resolution falls through to the panel-level override, then to
-    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
+    /// `CascadeDefault<TextAlpha>`.
     #[must_use]
     pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
 
@@ -710,7 +710,7 @@ impl TextProps<ForStandalone> {
     ///
     /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
     /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
-    /// global [`CascadeDefaults::font_unit`](crate::CascadeDefaults).
+    /// global `CascadeDefault<FontUnit>`.
     ///
     /// Defaults to centered anchor, white color, normal weight.
     #[must_use]

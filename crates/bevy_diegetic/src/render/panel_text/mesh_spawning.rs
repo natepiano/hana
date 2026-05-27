@@ -8,7 +8,7 @@ use bevy_kana::ToF32;
 
 use super::PanelText;
 use super::PanelTextLayout;
-use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -64,7 +64,7 @@ pub(super) fn update_panel_text_geometry(
     old_meshes: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelChild>>,
-    defaults: Res<CascadeDefaults>,
+    alpha_default: Res<CascadeDefault<TextAlpha>>,
     mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -83,7 +83,7 @@ pub(super) fn update_panel_text_geometry(
         let text_base = panel_base_material(panel);
         let resolved_alpha = resolved_alphas
             .get(label_entity)
-            .map_or(defaults.text_alpha, |resolved| resolved.0.0);
+            .map_or(alpha_default.0.0, |resolved| resolved.0.0);
         spawn_panel_text_run(PanelTextSpawnRequest {
             mesh_parent: label_entity,
             panel_run,
@@ -313,7 +313,7 @@ mod tests {
 
     use super::*;
     use crate::Mm;
-    use crate::cascade::CascadeDefaults;
+    use crate::cascade::CascadeDefault;
     use crate::cascade::CascadePlugin;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
@@ -550,7 +550,9 @@ mod tests {
     #[test]
     fn alpha_only_change_updates_material_without_respawning_mesh() {
         let mut app = pipeline_app();
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Blend;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Blend);
         spawn_panel(&mut app, single_text_tree());
         settle(&mut app);
 
@@ -561,7 +563,9 @@ mod tests {
         // Change only the global default alpha: the label has no override, so
         // its Resolved<TextAlpha> changes while PanelText does not — an
         // alpha-only update.
-        app.world_mut().resource_mut::<CascadeDefaults>().text_alpha = AlphaMode::Add;
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Add);
         settle(&mut app);
 
         let mesh_after = mesh_of_label(&mut app, label).expect("Hi mesh should still exist");

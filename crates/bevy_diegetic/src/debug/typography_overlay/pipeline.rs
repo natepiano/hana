@@ -6,8 +6,7 @@ use super::OverlayContainer;
 use super::TypographyOverlay;
 use super::glyph;
 use super::metric_lines;
-use crate::cascade::CascadeAttr;
-use crate::cascade::CascadeDefaults;
+use crate::cascade::CascadeDefault;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::layout::LineMetricsSnapshot;
@@ -87,7 +86,7 @@ pub fn build_typography_overlay(
     resolved_units: Query<&Resolved<FontUnit>>,
     font_registry: Res<FontRegistry>,
     mut cache: ResMut<ShapedTextCache>,
-    defaults: Res<CascadeDefaults>,
+    font_default: Res<CascadeDefault<FontUnit>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -129,14 +128,11 @@ pub fn build_typography_overlay(
 
         // `world_scale` is a raw meters-per-unit override that bypasses the
         // cascade. Otherwise read the per-entity `Resolved<FontUnit>`, falling
-        // back to `CascadeDefaults.font_unit`.
+        // back to `CascadeDefault<FontUnit>`.
         let unit_scale = style.world_scale().unwrap_or_else(|| {
             resolved_units
                 .get(entity)
-                .map_or_else(
-                    |_| FontUnit::global_default(&defaults),
-                    |resolved| resolved.0,
-                )
+                .map_or(font_default.0, |resolved| resolved.0)
                 .0
                 .meters_per_unit()
         });

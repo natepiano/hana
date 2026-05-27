@@ -29,8 +29,8 @@
 //!
 //! # Configuration
 //!
-//! Insert [`CascadeDefaults`] as a resource before adding
-//! [`DiegeticUiPlugin`] to override defaults:
+//! Insert default resources before adding [`DiegeticUiPlugin`] to override
+//! construction-time defaults or cascade defaults:
 //!
 //! ```ignore
 //! App::new()
@@ -38,6 +38,7 @@
 //!         panel_font_unit: Unit::Millimeters,
 //!         ..default()
 //!     })
+//!     .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Add)))
 //!     .add_plugins(DiegeticUiPlugin);
 //! ```
 
@@ -71,8 +72,12 @@ pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
 pub use callouts::CalloutLine;
 use callouts::CalloutPlugin;
+pub use cascade::CascadeDefault;
 pub use cascade::CascadeDefaults;
+pub use cascade::CascadeProperty;
 pub use cascade::CascadeSet;
+pub use cascade::FontUnit;
+pub use cascade::TextAlpha;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
@@ -185,9 +190,9 @@ use text::TextPlugin;
 /// Bevy plugin that adds diegetic UI panel support.
 ///
 /// Composes layout, rendering, text, callouts, and screen-space overlay
-/// support into a single plugin. Insert the [`CascadeDefaults`] resource
-/// before adding this plugin — it takes effect through the child plugins
-/// at build time.
+/// support into a single plugin. Insert [`CascadeDefaults`] or
+/// [`CascadeDefault<A>`](CascadeDefault) resources before adding this plugin;
+/// they take effect through the child plugins at build time.
 ///
 /// # Quick start
 ///

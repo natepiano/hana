@@ -391,7 +391,7 @@ fn build_commentary() -> bevy_diegetic::LayoutTree {
             b.text(
                 "Bare 18.0 uses the contextual default: panel text \
                  inherits font_unit from the panel (Points by default). \
-                 WorldText resolves font_unit from CascadeDefaults \
+                 WorldText resolves font_unit from CascadeDefault<FontUnit> \
                  (Meters by default).",
                 note_style.clone(),
             );

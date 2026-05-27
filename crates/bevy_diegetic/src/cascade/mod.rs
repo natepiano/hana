@@ -9,16 +9,17 @@
 //!
 //! # The mechanism is attribute-agnostic
 //!
-//! [`CascadeAttr`], [`Override<A>`], [`Resolved<A>`], the parent-walk
-//! ([`resolve_walk`]), and the propagation pass are all generic over the
-//! attribute. Any value that should resolve *my override, else my parent's,
-//! else a global default* plugs in as a new [`CascadeAttr`] impl plus a field
-//! on [`CascadeDefaults`] — no new plugin, trait, or topology.
+//! [`CascadeProperty`], the internal [`CascadeAttr`] reflection contract,
+//! [`Override<A>`], [`Resolved<A>`], the parent-walk ([`resolve_walk`]), and
+//! the propagation pass are all generic over the attribute. Any value that
+//! should resolve *my override, else my parent's, else a global default* plugs
+//! in as a `cascade_attr!` declaration plus one
+//! [`CascadeDefault<A>`](CascadeDefault) resource and one plugin line.
 //!
 //! | Attribute   | Global default                | Override source |
 //! | ---         | ---                           | --- |
-//! | [`TextAlpha`] | [`CascadeDefaults::text_alpha`] | `DiegeticPanel.text_alpha_mode` (panel labels inherit) |
-//! | [`FontUnit`]  | [`CascadeDefaults::font_unit`]  | `WorldTextStyle.unit` (standalone); every panel carries a seeded `Override` (from `panel_font_unit`) its labels inherit |
+//! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `DiegeticPanel.text_alpha_mode` (panel labels inherit) |
+//! | [`FontUnit`]  | `CascadeDefault<FontUnit>`  | `WorldTextStyle.unit` (standalone); every panel carries a seeded `Override` (from `panel_font_unit`) its labels inherit |
 //!
 //! # Membership is a property of the tree, not of a shared component
 //!
@@ -38,7 +39,7 @@
 //!   them; each calls [`resolve_walk`].
 //! - **Change.** [`CascadePlugin`]'s propagation system, in [`CascadeSet::Propagate`], re-resolves
 //!   a node when its own `Override<A>` changes or is removed, its `ChildOf` changes, or
-//!   [`CascadeDefaults`] changes — fanning ancestor changes down through `Children`. It runs every
+//!   `CascadeDefault<A>` changes — fanning ancestor changes down through `Children`. It runs every
 //!   frame so a frame's `RemovedComponents<Override<A>>` is never cleared unread, and is the single
 //!   writer of each `Resolved<A>`.
 //!
@@ -46,18 +47,20 @@
 //! they never resolve inline. Users who need their systems to observe
 //! freshly-propagated values schedule against [`CascadeSet::Propagate`].
 
+mod attributes;
 mod cascade_set;
 mod constants;
 mod defaults;
 mod plugin;
 mod resolved;
 
+pub use attributes::FontUnit;
+pub use attributes::TextAlpha;
 pub use cascade_set::CascadeSet;
+pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;
 pub(crate) use plugin::CascadePlugin;
-pub(crate) use resolved::CascadeAttr;
-pub(crate) use resolved::FontUnit;
+pub use resolved::CascadeProperty;
 pub(crate) use resolved::Override;
 pub(crate) use resolved::Resolved;
-pub(crate) use resolved::TextAlpha;
 pub(crate) use resolved::resolve_walk;

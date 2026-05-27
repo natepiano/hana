@@ -76,7 +76,7 @@ published proc-macro crate — the generator is an in-crate `macro_rules!`.
 
 ---
 
-## Phase 1 — Cascade foundation and generator
+## Phase 1 — Cascade foundation and generator (Complete)
 
 Rebuild the cascade core so a new attribute is a `cascade_attr!` line plus a few
 one-line wrappers, and the public surface never leaks reflection types.
@@ -133,6 +133,29 @@ behavior change yet. Add a test that declares a throwaway attribute through
 `cascade_attr!` and asserts inheritance + default resolution, proving the
 generator path.
 
+### Retrospective
+
+**What worked:**
+
+- `CascadeDefault<A>` replaced cascade fields cleanly in `defaults.rs` and removed the `Local<Option<A>>` default sentinel from `plugin.rs`.
+- `cascade/resolved.rs` now owns the sealed `cascade_attr!` generator plus `TextAlpha` and `FontUnit`; `cascade/attributes.rs` is the public facade.
+
+**What deviated from the plan:**
+
+- The public surface did change: `CascadeDefault`, `TextAlpha`, and `FontUnit` are re-exported so examples can set global cascade defaults directly.
+- `propagate_cascade` still uses the query-based `resolve_walk` helper; the new `resolve(world, entity, default)` exists for Phase 2 command self-heal but is not the propagation hot path.
+- The macro emits the attribute type, trait impls, and `CascadeDefault<A>` `Default`; generic reflection registration remains in `CascadePlugin<A>`.
+
+**Surprises:**
+
+- `cargo nextest run -p bevy_diegetic cascade` rebuilt a large Bevy test graph before reaching crate tests.
+- `text_alpha.rs` was the only compiling example that needed a real API update for `CascadeDefault<TextAlpha>`.
+
+**Implications for remaining phases:**
+
+- Phase 2 should avoid exposing `TextAlpha`/`FontUnit` at call sites where a typed verb can hide them.
+- Phase 3 docs should remove the remaining planning references that describe cascade defaults as fields on `CascadeDefaults`.
+
 ---
 
 ## Phase 2 — Public cascade verbs
@@ -143,9 +166,11 @@ attributes, built on Phase 1.
 **Work:**
 
 - **Internal insert helper.** `apply_cascade_override<A>(entity, value)` is the
-  one place that inserts `Override<A>`; both the runtime command and the
-  panel-reconcile spawn path (`reconcile.rs`, the label-alpha read) call it so
-  they cannot drift.
+  one place that inserts `Override<A>`; the runtime command, standalone seed,
+  panel seed, and panel-reconcile spawn path (`reconcile.rs`, the label-alpha
+  read) call it so production insert paths cannot drift. Remove paths should go
+  through the typed `inherit_x` wrappers or the matching helper, not ad hoc
+  `remove::<Override<A>>()` calls outside tests.
 - **Named `EntityCommand`s + extension trait.** `override_x` (insert
   `Override<A>`) and `inherit_x` (remove it) as `EntityCommands` methods. Reachable
   from systems, exclusive systems, and `&mut World` tests via `world.commands()`.
@@ -162,10 +187,17 @@ attributes, built on Phase 1.
   -> bool` reader (authored-vs-inherited) is intentionally deferred until a caller
   needs it — a trivial add when one appears.
 - **Timing contract.** Document on the verbs: a `set` is observed same-frame when
-  scheduled `.after(CascadeSet::Propagate)`, else next frame. `propagate_cascade`
-  runs in `Update`; the render systems already run after it in `PostUpdate`.
-- **Centralize.** All verb wrappers live alongside their `cascade_attr!`
-  declaration in `cascade/attributes.rs`.
+  scheduled before `CascadeSet::Propagate` and read after it, else next frame.
+  Direct-entity self-heal makes the overridden entity readable immediately when
+  `Resolved<A>` was absent, but descendants still re-resolve only through
+  `propagate_cascade`'s subtree walk. `propagate_cascade` runs in `Update`; the
+  render systems already run after it in `PostUpdate`.
+- **Centralize.** Public verb wrappers live in `cascade/attributes.rs`, beside
+  the attribute facade re-exports. The internal `cascade_attr!` generator stays
+  in `cascade/resolved.rs` so it can implement the sealed cascade traits.
+  Global defaults remain explicitly attribute-typed as
+  `CascadeDefault<TextAlpha>` / `CascadeDefault<FontUnit>` for now; the typed
+  entity verbs hide those newtypes at normal mutation call sites.
 
 **Key files:** `cascade/attributes.rs`, `cascade/mod.rs` (public re-exports),
 `cascade/plugin.rs` (observer/command registration).
@@ -174,10 +206,11 @@ attributes, built on Phase 1.
 spawn frame (spawn + `override_x` same frame resolves to the override, no
 one-frame default); a parent `override_x` same frame re-resolves an existing
 child through the propagation pass; same-frame observation after
-`CascadeSet::Propagate`; an alpha-only `override_text_alpha` mutates the material
-without respawning the run's mesh (composes with the existing per-run rebuild
-work). `Override`/`Resolved` stay `pub(crate)` — confirm no public signature
-names them.
+`CascadeSet::Propagate` when the write was scheduled before it; a parent
+override scheduled after `CascadeSet::Propagate` updates existing descendants on
+the next frame; an alpha-only `override_text_alpha` mutates the material without
+respawning the run's mesh (composes with the existing per-run rebuild work).
+`Override`/`Resolved` stay `pub(crate)` — confirm no public signature names them.
 
 ---
 
@@ -226,7 +259,11 @@ example/README migration.
   `units.rs`, `world_text.rs`) and the README to author standalone alpha via
   `override_text_alpha` after spawn instead of `with_alpha_mode`. `cascade.rs`
   has three standalone `with_alpha_mode` call sites; the README documents the
-  standalone-authoring flow in four places.
+  standalone-authoring flow in four places. Also search all examples for
+  standalone `WorldTextStyle::new(Pt(..))`, `Mm(..)`, `In(..)`, and
+  `.with_unit(...)`: once standalone unit authoring is removed, each must either
+  become a bare size governed by `CascadeDefault<FontUnit>` or an explicit
+  `override_font_unit` call.
 - **Document the cascade.** Rewrite the cascade module's `//!` doc to
   match the post-Phase-1 architecture: per-attribute `CascadeDefault<A>` (no
   monolithic `CascadeDefaults`), the `CascadeProperty` / `CascadeAttr` split,
@@ -274,7 +311,22 @@ only the changed run; panel labels still resolve their authored alpha correctly
 TextAlpha>` and rendered alpha on the first frame); calling a removed standalone
 accessor fails to compile; examples and README build and run; the
 `cascade/mod.rs` module doc renders on docs.rs with no stale reference to
-`CascadeDefaults` or `with_alpha_mode` and a worked example of each public verb.
+`CascadeDefaults` as the owner of cascade fields (valid `panel_font_unit` /
+`layout_unit` construction-default references may remain), no stale standalone
+`with_alpha_mode` guidance, and a worked example of each public verb.
+
+### Phase 1 Review
+
+- Phase 2 timing was amended to distinguish direct-entity self-heal from
+  descendant propagation through `CascadeSet::Propagate`.
+- Phase 2 helper scope now covers standalone seed, panel seed, and panel
+  reconcile override insert paths, not just runtime commands.
+- Phase 2 notes that global default resources still expose attribute newtypes;
+  typed verbs hide them at normal entity mutation call sites.
+- Phase 3 migration now includes unit-bearing standalone constructor call sites
+  across all examples.
+- Phase 3 docs acceptance now preserves valid `CascadeDefaults` references for
+  non-cascade construction defaults.
 
 ## Cross-references
 

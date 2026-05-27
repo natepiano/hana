@@ -186,7 +186,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
 
     /// Sets a panel-wide [`AlphaMode`] default for every text chunk in this
     /// panel. Per-style overrides still win; this in turn overrides
-    /// [`CascadeDefaults::text_alpha`](crate::CascadeDefaults).
+    /// `CascadeDefault<TextAlpha>`.
     ///
     /// The default is [`AlphaMode::Blend`], ordered by per-command
     /// `depth_bias`; [`AlphaMode::AlphaToCoverage`] with MSAA is an

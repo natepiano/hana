@@ -72,7 +72,7 @@ pub enum PanelSystems {
 /// only need [`DiegeticPanel`] → [`ComputedDiegeticPanel`] computation.
 /// The plugin initializes [`CascadeDefaults`] itself (idempotent); callers
 /// insert their own [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer)
-/// and optionally override [`CascadeDefaults`] before adding this plugin.
+/// and optionally override construction defaults before adding this plugin.
 pub struct HeadlessLayoutPlugin;
 
 impl Plugin for HeadlessLayoutPlugin {

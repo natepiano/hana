@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
-use bevy_diegetic::CascadeDefaults;
+use bevy_diegetic::CascadeDefault;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -29,6 +29,7 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextAlpha;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCamInputMode;
@@ -73,7 +74,7 @@ struct ControlsState {
 
 impl Default for ControlsState {
     fn default() -> Self {
-        // Matches `CascadeDefaults::default().text_alpha`.
+        // Matches `CascadeDefault<TextAlpha>::default()`.
         Self {
             alpha_mode: AlphaMode::Blend,
         }
@@ -259,7 +260,7 @@ fn handle_hotkeys(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<Control
 fn apply_state_and_rebuild_hud(
     state: Res<ControlsState>,
     mut commands: Commands,
-    mut defaults: ResMut<CascadeDefaults>,
+    mut alpha_default: ResMut<CascadeDefault<TextAlpha>>,
     hud_panels: Query<Entity, With<HudPanel>>,
     info_panels: Query<Entity, With<InfoPanel>>,
 ) {
@@ -267,7 +268,7 @@ fn apply_state_and_rebuild_hud(
         return;
     }
 
-    defaults.text_alpha = state.alpha_mode;
+    alpha_default.0 = TextAlpha(state.alpha_mode);
 
     for e in &hud_panels {
         commands.entity(e).despawn();
