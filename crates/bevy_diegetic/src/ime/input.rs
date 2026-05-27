@@ -49,7 +49,6 @@ pub(super) fn update_window_ime(
         && let Ok(mut window) = windows.get_mut(entity)
     {
         window.ime_enabled = true;
-        window.ime_position = window.cursor_position().unwrap_or(Vec2::ZERO);
     }
 
     window_state.active_window = active_window;

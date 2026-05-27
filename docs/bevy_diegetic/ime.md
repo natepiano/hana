@@ -659,7 +659,7 @@ clears composition.
 - Phase 6 now treats platform shortcut work as coverage of the Phase 3 command
   router and places app-owned input disposition before built-in command mapping.
 
-### Phase 4 — Screen-space rendering and anchoring
+### Phase 4 — Screen-space rendering and anchoring (complete)
 
 Render the transient editor:
 
@@ -688,23 +688,90 @@ Acceptance: the editor tracks a moving camera/panel, remains readable off-angle,
 the OS candidate popup appears near the editor/caret, and the documented
 anchor/caret freshness policy is bounded and tested.
 
+#### Retrospective
+
+**What worked:**
+
+- `ime/editor.rs` now renders the transient editor from `ImeTextChanged` /
+  `ImeBufferSnapshot`, including insertion caret, selection highlight,
+  preedit text, validation text, viewport clamping, and final caret-based
+  `Window::ime_position`.
+- Activation now captures the picked camera in `PendingImePanelAnchor`, so
+  field-authored sessions project `PanelFieldRecord::bounds` through the same
+  camera path that produced the click.
+
+**What deviated from the plan:**
+
+- Phase 4 derives a private anchor snapshot instead of extending
+  `PanelFieldRecord`; the computed panel record remains focused on panel-local
+  field identity, bounds, spec, and display text.
+- The active target is visually marked by the overlaid screen-space editor,
+  not by mutating the source panel's authored tree.
+- Outside pointer blur is classified and captured in `ImeBlurIntent`, but
+  Phase 5 still owns the commit/cancel policy.
+
+**Surprises:**
+
+- The editor panel can reuse the existing `screen_space` panel path with a
+  small internal `DiegeticPanel::set_screen_position` mutator rather than a
+  separate renderer.
+- Short non-empty buffers needed caret math separate from the empty-buffer
+  fallback so candidate popup placement does not drift toward the left edge.
+
+**Implications for remaining phases:**
+
+- Phase 5 should consume `ImeBlurIntent` or replace it with the final blur
+  policy, then emit `ImeCommitCause::Blur` / `ImeCancelCause::Blur`.
+- Phase 5 can populate the existing validation slot by returning
+  `ImeRejectCommit`; `ime/editor.rs` already keeps the editor open and redraws
+  the rejection text.
+- Phase 6 should add example coverage for the one-frame anchor freshness
+  policy and app-owned fallback anchoring, since Phase 4 only gives app-owned
+  sessions a cursor-position fallback.
+
+#### Phase 4 Review
+
+- Phase 5 now treats session/attempt stale-response checks and
+  `ImeCommitRequested::field_spec` / `text` as already-built plumbing, keeping
+  the remaining work focused on built-in apply, commit authority, and blur
+  policy.
+- Phase 5 now scopes parsing to built-in field specs; app-owned parsing and
+  mutation stay app-side behind the current-attempt authority contract.
+- Phase 5 now sequences backing binding/display/revision work before parser
+  and writeback behavior.
+- Phase 5 now extends or replaces `ImeBlurIntent` with semantic blur intent
+  and focus-scope data before implementing blur commit/cancel.
+- Phase 6 now includes app-owned anchoring/open-session API work before
+  app-owned examples, because Phase 4 only provides cursor-position fallback
+  anchoring for `ImeTarget::AppOwned`.
+- Remaining screen-space editor work now accepts the Phase 4 internal
+  `screen_space` panel positioning path; a general follow-anchor abstraction
+  is later work unless app-owned anchors require it.
+- Phase 6 now strengthens candidate-popup coverage around variable-width text,
+  accented/CJK/emoji text, selections, and preedit cursor placement.
+- Phase 6 now narrows duplicate field-id work to diagnostics and example
+  coverage because duplicate-id non-activation is already implemented.
+
 ### Phase 5 — Commit integration
 
 Connect committed text back to real panel values:
 
 - add a backing binding or built-in apply-sink contract for fields whose values
-  are parsed and written by `bevy_diegetic`,
-- parse text by built-in or app-owned field mode,
+  are parsed and written by `bevy_diegetic`, including display formatting and
+  value-revision or field-epoch data before parser/writeback work,
+- parse text by built-in field mode; app-owned parsing stays app-side and
+  responds through the current-attempt authority contract,
 - keep invalid commits open and populate the Phase 4 validation-feedback
   channel,
 - write valid built-in values to backing data,
 - add a public commit-authority token or equivalent current-attempt guard for
   app-owned apply responses before app code mutates backing state,
 - validate app-owned accept/reject responses without mutating app state again,
-- implement outside-blur commit/cancel policy using `ImeCommitCause::Blur` and
-  `ImeCancelCause::Blur`,
+- extend or replace `ImeBlurIntent` with semantic pointer/focus-scope data,
+  then implement outside-blur commit/cancel policy using
+  `ImeCommitCause::Blur` and `ImeCancelCause::Blur`,
 - refresh the diegetic panel,
-- ignore stale responses by session and attempt id.
+- rely on the Phase 3 session/attempt guards to ignore stale responses.
 
 Acceptance: editing a numeric panel value changes the backing value and the
 panel display after commit; invalid input preserves focus, buffer text, and
@@ -717,14 +784,19 @@ Finish the caller-owned surface and prove the contract:
 
 - app-authored focus, routing, and popup behavior on top of the existing
   `ImeOpenSession` / `ImeTarget::AppOwned` core,
+- app-owned anchor/open-session data so app-owned sessions no longer depend on
+  the Phase 4 cursor-position fallback,
 - synchronous app-surface input disposition hook that runs before built-in
   command mapping for app-owned sessions,
 - popup focus-scope behavior,
 - platform shortcut matrix coverage for the Phase 3 command router rather than
   a second shortcut implementation,
-- duplicate field-id diagnostics and the "ambiguous fields do not activate"
-  behavior,
-- CJK, accent/dead-key, multi-byte, invalid numeric, rejection-retry, outside
+- duplicate field-id diagnostics and example coverage for the already-built
+  "ambiguous fields do not activate" behavior,
+- one-frame anchor freshness coverage for the Phase 4 internal `screen_space`
+  panel positioning path,
+- CJK, accent/dead-key, multi-byte, emoji, variable-width caret positioning,
+  selection/preedit caret placement, invalid numeric, rejection-retry, outside
   blur, activation-capture, and app-popup example cases.
 
 Acceptance: the canonical IME example covers the acceptance matrix and shows
@@ -737,6 +809,10 @@ A later world-space editor can reuse most of the session and parsing model. The
 main difference would be rendering caret, selection, and preedit directly on the
 panel while still projecting the caret to `Window::ime_position` for the OS IME
 candidate popup.
+
+A general `ScreenPanelFollowAnchor` abstraction remains later work. Phase 4
+uses an internal screen-space editor panel plus `DiegeticPanel::set_screen_position`;
+keep that path unless app-owned anchoring needs a reusable public anchor type.
 
 ## Team review follow-ups
 

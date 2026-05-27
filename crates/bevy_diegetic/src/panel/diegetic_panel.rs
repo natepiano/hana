@@ -7,6 +7,7 @@ use super::builder::NeedsSize;
 use super::builder::Screen;
 use super::builder::World;
 use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::field::PanelFieldRecord;
 use crate::cascade::CascadeDefaults;
@@ -635,6 +636,16 @@ impl ComputedDiegeticPanel {
     pub const fn set_content_size(&mut self, width: f32, height: f32) {
         self.content_width = width;
         self.content_height = height;
+    }
+}
+
+impl DiegeticPanel {
+    pub(crate) const fn set_screen_position(&mut self, screen_position: Vec2) -> bool {
+        let CoordinateSpace::Screen { position, .. } = &mut self.coordinate_space else {
+            return false;
+        };
+        *position = ScreenPosition::At(screen_position);
+        true
     }
 }
 

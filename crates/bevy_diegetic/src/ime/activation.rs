@@ -8,6 +8,7 @@ use bevy::prelude::*;
 
 use super::ImeOpenSession;
 use super::ImeTarget;
+use super::editor::PendingImePanelAnchor;
 use crate::ComputedDiegeticPanel;
 use crate::DiegeticPanel;
 
@@ -21,6 +22,7 @@ fn open_from_panel_click(
     mut click: On<Pointer<Click>>,
     panels: Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
     frame_count: Option<Res<FrameCount>>,
+    mut pending_anchor: ResMut<PendingImePanelAnchor>,
     mut commands: Commands,
 ) {
     if click.button != PointerButton::Primary || click.count < 2 {
@@ -42,6 +44,12 @@ fn open_from_panel_click(
     };
 
     click.propagate(false);
+    pending_anchor.store(
+        panel_entity,
+        record.field_id.clone(),
+        click.hit.camera,
+        window,
+    );
     let target = if panel.coordinate_space().is_screen() {
         ImeTarget::ScreenPanelField {
             panel:    panel_entity,
