@@ -4,39 +4,41 @@
 //! slug renders glyph edges as analytic alpha coverage, sampled once per pixel.
 //! At grazing angles that single sample can't represent the foreshortened pixel
 //! footprint, so edges stair-step. There are two fundamentally different places
-//! to fix it.
+//! to fix it — the two columns of the bottom-left panel.
 //!
-//! **In the coverage shader (`A` + `E`).** slug anti-aliases glyph edges inside
-//! the fragment shader — no extra pass, and it survives OIT (which forces
-//! `Msaa::Off`). Two orthogonal controls ([`TextAntiAlias`]), both on by default:
-//! - **Supersample** (`A`) — evaluates coverage at four sub-pixel sample points and averages,
-//!   fixing the stepping along a shallow edge that a single sample can't resolve.
-//! - **Anisotropic band** (`E`) — sizes the edge ramp from the distance gradient so it holds ~1px
-//!   per screen axis, fixing the convex-corner balloon at grazing angles that the scalar band
+//! **In the coverage shader — [`TextAntiAlias`] (keys `1`–`4`).** slug
+//! anti-aliases glyph edges inside the fragment shader: no extra pass, and it
+//! survives OIT (which forces `Msaa::Off`). The setting combines two orthogonal
+//! mechanisms:
+//! - **Anisotropic band** — sizes the edge ramp from the distance gradient so it holds ~1px per
+//!   screen axis, fixing the convex-corner balloon at grazing angles that the scalar band
 //!   over-widens into a wing.
+//! - **Supersampling** — evaluates coverage at four sub-pixel sample points and averages, fixing
+//!   the stepping along a shallow edge that a single sample can't resolve.
 //!
-//! They fix different artifacts, so the best result is both on. They are toggles
-//! for performance: the band is nearly free, but supersampling evaluates coverage
-//! four (or five, combined) times per fragment, so a text-dense frame can reclaim
-//! fill-rate by dropping to the band alone or turning both off.
+//! The four modes are the points on that grid: `Off` (neither), `Aniso` (band
+//! only), `Super` (samples only), `Both` (default, and the best result). The
+//! cheaper modes exist for performance — the band is nearly free, but
+//! supersampling evaluates coverage four (or five, combined) times per fragment,
+//! so a text-dense frame can reclaim fill-rate by stepping down.
 //!
-//! **As a post-process pass over the resolved frame.** Three modes, mutually
-//! exclusive (selecting one drops the others):
-//! - **SMAA** (`S`) — luma-edge detection in image space; keeps MSAA on.
-//! - **FXAA** (`F`) — cheaper, blurrier luma-edge pass; keeps MSAA on.
-//! - **TAA** (`T`) — temporal blend across frames; requires `Msaa::Off` plus the depth/motion
-//!   prepasses. Included for completeness — note it ghosts on alpha-blended glyphs (the
-//!   transparency the renderer exists to draw), so it is the weakest fit here even though it AA's
-//!   the most.
+//! **As a post-process pass over the resolved frame — keys `N` `S` `F` `T`.**
+//! Mutually exclusive, with `None` the off state:
+//! - **SMAA** — luma-edge detection in image space; keeps MSAA on.
+//! - **FXAA** — cheaper, blurrier luma-edge pass; keeps MSAA on.
+//! - **TAA** — temporal blend across frames; requires `Msaa::Off` plus the depth/motion prepasses.
+//!   Included for completeness — note it ghosts on alpha-blended glyphs (the transparency the
+//!   renderer exists to draw), so it is the weakest fit here even though it AA's the most.
 //!
 //! The text is unlit, so its color never varies as you orbit. Orbit to a grazing
-//! angle (MMB) to see the artifacts, then toggle each path.
+//! angle (MMB) to see the artifacts, then select each mode.
 //!
 //! Hotkeys:
-//! - `A` — toggle supersampling (4 samples vs 1).
-//! - `E` — toggle the anisotropic edge band (vs the scalar band).
-//! - `S` / `F` / `T` — select SMAA / FXAA / TAA on the camera (press again for none).
+//! - `1` `2` `3` `4` — select the in-shader mode: Off / Aniso / Super / Both.
+//! - `N` `S` `F` `T` — select the post-process pass: None / SMAA / FXAA / TAA.
 //! - `H` — home the camera.
+
+use std::time::Duration;
 
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::anti_alias::smaa::Smaa;
@@ -44,16 +46,34 @@ use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
+use bevy_diegetic::Anchor;
+use bevy_diegetic::Border;
+use bevy_diegetic::CornerRadius;
+use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Px;
+use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
-use fairy_dust::ControlActivation;
+use fairy_dust::CameraHomeTarget;
+use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::LABEL_SIZE;
 use fairy_dust::TitleBar;
 
+const EXAMPLE_TITLE: &str = "Anti-aliasing";
 const HEADLINE_TEXT: &str = "Anti-aliasing";
 const HEADLINE_SIZE: f32 = 0.40;
 const HEADLINE_Y: f32 = 0.18;
@@ -63,24 +83,53 @@ const SMALL_Y: f32 = -0.06;
 const DISPLAY_Z: f32 = 0.0;
 const TEXT_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 
-const HOME_FOCUS: Vec3 = Vec3::new(0.0, 0.08, DISPLAY_Z);
-const HOME_FRAME: f32 = 4.0;
+/// Fallback home region for the cube `fairy_dust` frames before a
+/// [`CameraHomeTarget`] entity exists. The headline carries the marker, so the
+/// camera frames the headline (and its glyph children) directly once its meshes
+/// load; this region is only the pre-load placeholder.
+const HOME_CENTER: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
 const HOME_PITCH: f32 = 0.0;
 const HOME_YAW: f32 = 0.0;
+const HOME_FIT_MARGIN: f32 = 0.15;
+const HOME_FIT_DURATION_MS: u64 = 900;
 
-/// Title-bar control labels.
-const SMAA_CONTROL: &str = "S SMAA";
-const FXAA_CONTROL: &str = "F FXAA";
-const TAA_CONTROL: &str = "T TAA";
-const SUPERSAMPLE_CONTROL: &str = "A SSAA";
-const EDGE_BAND_CONTROL: &str = "E BAND";
+/// Bottom-left control panel — column headers, geometry, and chip colors.
+const TEXT_COLUMN_HEADER: &str = "TEXT (shader)";
+const POST_COLUMN_HEADER: &str = "POST (Bevy)";
+const PANEL_PADDING: Px = Px(10.0);
+const PANEL_RADIUS: Px = Px(10.0);
+const PANEL_BORDER_WIDTH: Px = Px(1.0);
+const COLUMN_GAP: Px = Px(28.0);
+const ROW_GAP: Px = Px(4.0);
+const HEADER_COLOR: Color = Color::srgb(0.55, 0.78, 0.95);
+const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
+const INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
+const PANEL_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.4);
 
-/// Which post-process anti-aliasing pass is active on the camera. The three
-/// passes are mutually exclusive — selecting one removes the others. Orthogonal
+/// The in-shader [`TextAntiAlias`] modes, in cost order. One source of truth for
+/// both the key that selects each and the chip label shown for it.
+const TEXT_MODES: [(KeyCode, &str, TextAntiAlias); 4] = [
+    (KeyCode::Digit1, "1 Off", TextAntiAlias::Off),
+    (KeyCode::Digit2, "2 Aniso", TextAntiAlias::Anisotropic),
+    (KeyCode::Digit3, "3 Super", TextAntiAlias::Supersample),
+    (KeyCode::Digit4, "4 Both", TextAntiAlias::Both),
+];
+
+/// The post-process passes, with `None` as the explicit off state. One source of
+/// truth for the selecting key and the chip label.
+const POST_MODES: [(KeyCode, &str, PostAa); 4] = [
+    (KeyCode::KeyN, "N None", PostAa::None),
+    (KeyCode::KeyS, "S SMAA", PostAa::Smaa),
+    (KeyCode::KeyF, "F FXAA", PostAa::Fxaa),
+    (KeyCode::KeyT, "T TAA", PostAa::Taa),
+];
+
+/// Which post-process anti-aliasing pass is active on the camera. The four
+/// states are mutually exclusive — selecting one removes the others. Orthogonal
 /// to [`TextAntiAlias`], which runs in the coverage shader regardless.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
 enum PostAa {
-    /// No post-process pass; rely on MSAA + supersampling alone.
+    /// No post-process pass; rely on MSAA + the in-shader AA alone.
     #[default]
     None,
     /// SMAA: image-space luma-edge pass, MSAA stays on.
@@ -91,10 +140,22 @@ enum PostAa {
     Taa,
 }
 
+/// Marker for the bottom-left two-column AA control panel.
+#[derive(Component)]
+struct AaPanel;
+
+/// The three text styles a control column draws with: its header, an active
+/// (highlighted) chip, and an inactive chip.
+struct ColumnStyles {
+    header:   LayoutTextStyle,
+    active:   LayoutTextStyle,
+    inactive: LayoutTextStyle,
+}
+
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`. It registers `TextAntiAlias`, so this
-    // example only toggles it.
+    // example only selects it.
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
@@ -102,49 +163,23 @@ fn main() {
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME)),
-        )
+        .with_camera_home(Transform::from_translation(HOME_CENTER))
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
-        .with_title_bar(
-            TitleBar::new()
-                .control(SMAA_CONTROL)
-                .control(FXAA_CONTROL)
-                .control(TAA_CONTROL)
-                .control(SUPERSAMPLE_CONTROL)
-                .control(EDGE_BAND_CONTROL),
-        )
-        .wire_chip_to_state::<PostAa, _>(SMAA_CONTROL, |mode| activation(*mode == PostAa::Smaa))
-        .wire_chip_to_state::<PostAa, _>(FXAA_CONTROL, |mode| activation(*mode == PostAa::Fxaa))
-        .wire_chip_to_state::<PostAa, _>(TAA_CONTROL, |mode| activation(*mode == PostAa::Taa))
-        .wire_chip_to_state::<TextAntiAlias, _>(SUPERSAMPLE_CONTROL, |aa| {
-            activation(aa.supersamples())
-        })
-        .wire_chip_to_state::<TextAntiAlias, _>(EDGE_BAND_CONTROL, |aa| {
-            activation(aa.anisotropic())
-        })
+        .margin(HOME_FIT_MARGIN)
+        .duration(Duration::from_millis(HOME_FIT_DURATION_MS))
+        .with_title_bar(TitleBar::new().with_title(EXAMPLE_TITLE))
+        .with_camera_control_panel()
         .init_resource::<PostAa>()
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (select_post_aa, toggle_supersample, toggle_edge_band),
-        )
+        .add_systems(Startup, (setup, spawn_aa_panel))
+        .add_systems(Update, (select_text_aa, select_post_aa, refresh_aa_panel))
         .run();
-}
-
-/// Maps a bool to a title-bar chip activation.
-const fn activation(active: bool) -> ControlActivation {
-    if active {
-        ControlActivation::Active
-    } else {
-        ControlActivation::Inactive
-    }
 }
 
 fn setup(mut commands: Commands) {
     commands.spawn((
         Name::new("Headline"),
+        CameraHomeTarget,
         WorldText::new(HEADLINE_TEXT),
         WorldTextStyle::new(HEADLINE_SIZE)
             .with_color(TEXT_COLOR)
@@ -163,32 +198,76 @@ fn setup(mut commands: Commands) {
     ));
 }
 
-/// On `S`/`F`/`T`, select that post-process mode (or turn it off if it is
-/// already active) and reconcile the camera's components.
+/// Marker for the headline text whose rendered bounds define the home frame.
+/// Spawns the bottom-left panel with the initial state of both AA settings.
+fn spawn_aa_panel(mut commands: Commands, aa: Res<TextAntiAlias>, post: Res<PostAa>) {
+    let unlit = StandardMaterial {
+        unlit: true,
+        ..default_panel_material()
+    };
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_aa_tree(*aa, *post))
+        .build();
+
+    match panel {
+        Ok(panel) => {
+            commands.spawn((AaPanel, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("aa_text: failed to build AA panel: {error}");
+        },
+    }
+}
+
+/// Repaints the panel whenever either AA setting changes so the active chip in
+/// each column tracks the live state.
+fn refresh_aa_panel(
+    aa: Res<TextAntiAlias>,
+    post: Res<PostAa>,
+    panel: Single<Entity, With<AaPanel>>,
+    mut commands: Commands,
+) {
+    if !aa.is_changed() && !post.is_changed() {
+        return;
+    }
+    commands.set_tree(*panel, build_aa_tree(*aa, *post));
+}
+
+/// On `1`–`4`, select the matching [`TextAntiAlias`] mode.
+fn select_text_aa(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
+    for (key, _, mode) in TEXT_MODES {
+        if keyboard.just_pressed(key) {
+            if *aa != mode {
+                *aa = mode;
+            }
+            return;
+        }
+    }
+}
+
+/// On `N`/`S`/`F`/`T`, select that post-process mode and reconcile the camera's
+/// components.
 fn select_post_aa(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<PostAa>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    let pressed = if keyboard.just_pressed(KeyCode::KeyS) {
-        PostAa::Smaa
-    } else if keyboard.just_pressed(KeyCode::KeyF) {
-        PostAa::Fxaa
-    } else if keyboard.just_pressed(KeyCode::KeyT) {
-        PostAa::Taa
-    } else {
+    for (key, _, selected) in POST_MODES {
+        if !keyboard.just_pressed(key) {
+            continue;
+        }
+        if *mode != selected {
+            *mode = selected;
+            for camera in &cameras {
+                apply_post_aa(&mut commands, camera, selected);
+            }
+        }
         return;
-    };
-    // Pressing the active mode's key turns it off.
-    let next = if *mode == pressed {
-        PostAa::None
-    } else {
-        pressed
-    };
-    *mode = next;
-    for camera in &cameras {
-        apply_post_aa(&mut commands, camera, next);
     }
 }
 
@@ -220,30 +299,81 @@ fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
     }
 }
 
-/// On `A`, flip the supersampling axis of [`TextAntiAlias`] (the band axis is
-/// left as-is, so this composes with `E`).
-fn toggle_supersample(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
-    if !keyboard.just_pressed(KeyCode::KeyA) {
-        return;
-    }
-    *aa = match *aa {
-        TextAntiAlias::Off => TextAntiAlias::Supersample,
-        TextAntiAlias::Supersample => TextAntiAlias::Off,
-        TextAntiAlias::Anisotropic => TextAntiAlias::Both,
-        TextAntiAlias::Both => TextAntiAlias::Anisotropic,
-    };
+/// Builds the bottom-left panel tree: two columns, each chip highlighted when it
+/// matches the live setting.
+fn build_aa_tree(aa: TextAntiAlias, post: PostAa) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    build_aa_layout(&mut builder, aa, post);
+    builder.build()
 }
 
-/// On `E`, flip the anisotropic-band axis of [`TextAntiAlias`] (the supersample
-/// axis is left as-is, so this composes with `A`).
-fn toggle_edge_band(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
-    if !keyboard.just_pressed(KeyCode::KeyE) {
-        return;
-    }
-    *aa = match *aa {
-        TextAntiAlias::Off => TextAntiAlias::Anisotropic,
-        TextAntiAlias::Anisotropic => TextAntiAlias::Off,
-        TextAntiAlias::Supersample => TextAntiAlias::Both,
-        TextAntiAlias::Both => TextAntiAlias::Supersample,
+fn build_aa_layout(builder: &mut LayoutBuilder, aa: TextAntiAlias, post: PostAa) {
+    let styles = ColumnStyles {
+        header:   LayoutTextStyle::new(LABEL_SIZE)
+            .with_color(HEADER_COLOR)
+            .no_wrap(),
+        active:   LayoutTextStyle::new(LABEL_SIZE)
+            .with_color(ACTIVE_COLOR)
+            .no_wrap(),
+        inactive: LayoutTextStyle::new(LABEL_SIZE)
+            .with_color(INACTIVE_COLOR)
+            .no_wrap(),
     };
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight)
+            .child_gap(COLUMN_GAP)
+            .padding(Padding::all(PANEL_PADDING))
+            .corner_radius(CornerRadius::all(PANEL_RADIUS))
+            .background(DEFAULT_PANEL_BACKGROUND)
+            .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
+        |builder| {
+            build_column(
+                builder,
+                TEXT_COLUMN_HEADER,
+                TEXT_MODES
+                    .into_iter()
+                    .map(|(_, label, mode)| (label, mode == aa)),
+                &styles,
+            );
+            build_column(
+                builder,
+                POST_COLUMN_HEADER,
+                POST_MODES
+                    .into_iter()
+                    .map(|(_, label, mode)| (label, mode == post)),
+                &styles,
+            );
+        },
+    );
+}
+
+/// Draws one labeled column: a header followed by one chip per row, each chip
+/// using the active style when its `bool` is set.
+fn build_column<'a>(
+    builder: &mut LayoutBuilder,
+    header: &str,
+    rows: impl IntoIterator<Item = (&'a str, bool)>,
+    styles: &ColumnStyles,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_gap(ROW_GAP),
+        |builder| {
+            builder.text(header, styles.header.clone());
+            for (label, active) in rows {
+                let style = if active {
+                    &styles.active
+                } else {
+                    &styles.inactive
+                };
+                builder.text(label, style.clone());
+            }
+        },
+    );
 }

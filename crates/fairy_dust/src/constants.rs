@@ -13,7 +13,6 @@ pub(crate) const HOME_CONTROL: &str = "H Home";
 pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
 pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
 pub(crate) const HOME_KEY: KeyCode = KeyCode::KeyH;
-pub(crate) const HOME_MIN_EXTENT: f32 = 0.001;
 
 // camera restart
 pub(crate) const RESTART_CAMERA_RESTORE_DURATION: Duration = Duration::from_secs(2);

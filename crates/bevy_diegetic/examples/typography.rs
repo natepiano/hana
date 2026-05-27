@@ -34,14 +34,11 @@ use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::ControlActivation;
-use fairy_dust::RestartCameraRestore;
-use fairy_dust::RestoreWindowAnimation;
-use fairy_dust::SetCameraHomeFromEntity;
+use fairy_dust::SetCameraHome;
 use fairy_dust::TitleBar;
 
 const DISPLAY_SIZE: f32 = 0.48;
@@ -319,7 +316,9 @@ fn setup(
 
     let (initial_word, initial_comment) = DISPLAY_WORDS[0];
 
-    // Display word with typography overlay.
+    // Display word with typography overlay. The camera home tracks the overlay's
+    // bounds entity, not this one — see `on_typography_overlay_ready`, which
+    // fires `SetCameraHome` once the overlay reports the bounds entity ready.
     commands.spawn((
         DisplayText,
         WorldText::new(initial_word),
@@ -384,10 +383,7 @@ fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
 
 fn on_typography_overlay_ready(
     trigger: On<TypographyOverlayReady>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut initialized: Local<bool>,
     mut cycle_state: ResMut<CycleState>,
-    restore: Option<Res<RestartCameraRestore>>,
     mut commands: Commands,
 ) {
     let target = trigger.event_target();
@@ -402,28 +398,10 @@ fn on_typography_overlay_ready(
             overlay_ready: true,
         };
     }
-    commands.trigger(SetCameraHomeFromEntity { source: target });
-    if *initialized {
-        return;
-    }
-    *initialized = true;
-    if restore
-        .as_deref()
-        .is_some_and(RestartCameraRestore::has_restart_camera_pose)
-    {
-        commands.trigger(RestoreWindowAnimation);
-        return;
-    }
-    for camera in &cameras {
-        commands.trigger(
-            AnimateToFit::new(camera, target)
-                .yaw(HOME_YAW)
-                .pitch(HOME_PITCH)
-                .margin(ZOOM_TO_FIT_MARGIN)
-                .duration(Duration::from_millis(ZOOM_DURATION_MS))
-                .easing(bevy::math::curve::easing::EaseFunction::CubicOut),
-        );
-    }
+    // Bridge the overlay's domain readiness to the camera home. `target` is the
+    // overlay bounds entity — rebuilt on every word/font change — so re-firing
+    // re-points the home each cycle.
+    commands.trigger(SetCameraHome { target });
 }
 
 fn tick_cycle_state(time: Res<Time>, mut cycle_state: ResMut<CycleState>) {
