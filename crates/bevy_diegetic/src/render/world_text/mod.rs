@@ -16,7 +16,6 @@ pub use readiness::WorldTextReady;
 pub(super) use readiness::emit_world_text_ready;
 
 use super::text_shaping::TextShapingContext;
-use crate::cascade;
 use crate::cascade::CascadeDefault;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
@@ -158,19 +157,13 @@ impl WorldText {
 #[derive(Component, Clone, Copy, Debug)]
 pub(crate) struct PanelChild;
 
-/// Spawn-time authoring bridge for standalone world-text cascade values.
+/// Spawn-time bridge for standalone world-text cascade values.
 ///
-/// Reads a newly-added [`WorldTextStyle`]'s `unit` / `alpha_mode` authoring
-/// fields and seeds the standalone's cascade state: it inserts the matching
-/// `Override<A>` when a field is set (an absent field leaves the override
-/// absent — the cascade's "inherit" signal) and always seeds
-/// [`Resolved<FontUnit>`] and [`Resolved<TextAlpha>`], which
-/// [`render_world_text`] reads. A standalone is depth-1 with no cascade
-/// ancestor, so each resolved value is its own authored override else the
-/// global default — no parent-walk needed at spawn. `WorldTextStyle` is no
-/// longer a cascade source; these fields are authoring inputs the bridge
-/// consumes once. The standalone twin of the panel's `seed_panel_overrides`
-/// bridge.
+/// A newly-added [`WorldTextStyle`] is no longer a cascade authoring source, so
+/// the bridge only seeds [`Resolved<FontUnit>`] and [`Resolved<TextAlpha>`] to
+/// their global defaults. Non-default per-entity values come from the typed
+/// cascade commands (`override_font_unit`, `override_text_alpha`), which insert
+/// overrides and self-heal the directly targeted entity on command flush.
 ///
 /// Filters `Without<PanelChild>`: panel labels share the [`WorldTextStyle`]
 /// component but their alpha is seeded by the panel-label path (and they never
@@ -178,25 +171,18 @@ pub(crate) struct PanelChild;
 /// Labels are seeded by `seed_panel_child_alpha` instead.
 pub(super) fn seed_world_text_overrides(
     trigger: On<Add, WorldTextStyle>,
-    styles: Query<&WorldTextStyle, Without<PanelChild>>,
+    styles: Query<(), (With<WorldTextStyle>, Without<PanelChild>)>,
     font_default: Res<CascadeDefault<FontUnit>>,
     alpha_default: Res<CascadeDefault<TextAlpha>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let Ok(style) = styles.get(entity) else {
+    if styles.get(entity).is_err() {
         return;
-    };
-    let resolved_unit = style.unit().map_or(font_default.0, FontUnit);
-    let resolved_alpha = style.alpha_mode().map_or(alpha_default.0, TextAlpha);
-    let mut entity_commands = commands.entity(entity);
-    entity_commands.insert((Resolved(resolved_unit), Resolved(resolved_alpha)));
-    if let Some(unit) = style.unit() {
-        cascade::apply_cascade_override(&mut entity_commands, FontUnit(unit));
     }
-    if let Some(alpha_mode) = style.alpha_mode() {
-        cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
-    }
+    commands
+        .entity(entity)
+        .insert((Resolved(font_default.0), Resolved(alpha_default.0)));
 }
 
 #[cfg(test)]
@@ -206,7 +192,6 @@ pub(super) fn seed_world_text_overrides(
 )]
 mod tests {
     use super::*;
-    use crate::Pt;
     use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeDefaults;
     use crate::cascade::CascadeEntityCommandsExt;
@@ -281,39 +266,40 @@ mod tests {
     }
 
     #[test]
-    fn explicit_unit_standalone_seeds_override_and_resolved() {
+    fn font_unit_override_command_updates_standalone() {
         let mut app = standalone_app();
         let entity = app
             .world_mut()
-            .spawn((WorldText::new("hi"), WorldTextStyle::new(Pt(11.0))))
+            .commands()
+            .spawn((WorldText::new("hi"), WorldTextStyle::new(11.0)))
+            .override_font_unit(Unit::Points)
             .id();
-        app.update();
+        app.world_mut().flush();
 
         assert_eq!(resolved_unit(&app, entity), Unit::Points);
         let node_override = app
             .world()
             .get::<Override<FontUnit>>(entity)
-            .expect("explicit-unit standalone should carry Override<FontUnit>");
+            .expect("explicit unit override should carry Override<FontUnit>");
         assert_eq!(node_override.0.0, Unit::Points);
     }
 
     #[test]
-    fn explicit_alpha_standalone_seeds_override_and_resolved() {
+    fn text_alpha_override_command_updates_standalone() {
         let mut app = standalone_app();
         let entity = app
             .world_mut()
-            .spawn((
-                WorldText::new("hi"),
-                WorldTextStyle::new(0.22).with_alpha_mode(AlphaMode::Add),
-            ))
+            .commands()
+            .spawn((WorldText::new("hi"), WorldTextStyle::new(0.22)))
+            .override_text_alpha(AlphaMode::Add)
             .id();
-        app.update();
+        app.world_mut().flush();
 
         assert_eq!(resolved_alpha(&app, entity), AlphaMode::Add);
         let node_override = app
             .world()
             .get::<Override<TextAlpha>>(entity)
-            .expect("explicit-alpha standalone should carry Override<TextAlpha>");
+            .expect("explicit alpha override should carry Override<TextAlpha>");
         assert_eq!(node_override.0.0, AlphaMode::Add);
     }
 

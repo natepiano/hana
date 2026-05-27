@@ -105,12 +105,12 @@ pub(super) fn reconcile_panel_text_children(
 
         let mut visited_keys: Vec<(usize, usize)> = Vec::new();
         for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
-            let style = config.as_standalone();
             // A label's own alpha override (`LayoutTextStyle::with_alpha_mode`)
-            // travels through `as_standalone` and becomes an `Override<TextAlpha>`
-            // on the label, which the cascade resolves ahead of the panel's
-            // inherited alpha. Absent → the label inherits.
-            let label_alpha = style.alpha_mode();
+            // is captured before `as_standalone()`, then inserted as
+            // `Override<TextAlpha>` on the label. Absent means the label
+            // inherits the panel alpha.
+            let label_alpha = config.alpha_mode();
+            let style = config.as_standalone();
             let panel_text_child = PanelTextLayout {
                 element_idx: *element_idx,
                 command_index: *cmd_index,

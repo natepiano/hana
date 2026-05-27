@@ -215,18 +215,17 @@ pub struct TextProps<C: Send + Sync + 'static> {
     sidedness:      GlyphSidedness,
     lighting:       GlyphLighting,
     font_features:  FontFeatures,
-    /// What unit `size` is expressed in. `None` = inherit from global config.
-    /// On [`ForStandalone`] this is layout-measurement input only — the cascade
-    /// override role moved to `Override<FontUnit>`, seeded at spawn by the
-    /// `WorldTextStyle` bridge; render-time unit comes from `Resolved<FontUnit>`.
+    /// What unit `size` is expressed in. `None` = inherit from contextual config.
+    /// Only [`ForLayout`] exposes this as authoring input; standalone font unit
+    /// authoring lives in the cascade.
     unit:           Option<Unit>,
     /// Explicit meters-per-design-unit override. `None` = derive from `unit`.
     /// Only meaningful for [`ForStandalone`] — a post-cascade bypass applied by
     /// the renderer, independent of `Resolved<FontUnit>`.
     world_scale:    Option<f32>,
-    /// Per-style alpha-mode override. `None` = inherit. On [`ForStandalone`] the
-    /// cascade override role moved to `Override<TextAlpha>`, seeded at spawn by
-    /// the `WorldTextStyle` bridge; this field is authoring input only.
+    /// Per-style alpha-mode override. `None` = inherit.
+    /// Only [`ForLayout`] exposes this as authoring input; standalone alpha
+    /// authoring lives in the cascade.
     alpha_mode:     Option<AlphaMode>,
     #[reflect(ignore)]
     context:        PhantomData<C>,
@@ -286,10 +285,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     /// Returns the word spacing in layout units.
     #[must_use]
     pub const fn word_spacing(&self) -> f32 { self.word_spacing }
-
-    /// Returns the per-entity unit override, if set.
-    #[must_use]
-    pub const fn unit(&self) -> Option<Unit> { self.unit }
 
     /// Sets the font identifier.
     #[must_use]
@@ -351,9 +346,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
 
-    /// Sets the text color (mutable reference variant).
-    pub const fn set_color(&mut self, color: Color) { self.color = color; }
-
     /// Sets the text color.
     #[must_use]
     pub const fn with_color(mut self, color: Color) -> Self {
@@ -390,29 +382,6 @@ impl<C: Send + Sync + 'static> TextProps<C> {
     /// Returns whether the glyph material responds to scene lighting.
     #[must_use]
     pub const fn lighting(&self) -> GlyphLighting { self.lighting }
-
-    /// Returns the per-style alpha-mode override, if any.
-    ///
-    /// This is the authoring input the cascade bridges read to insert
-    /// `Override<TextAlpha>`: the standalone bridge for [`ForStandalone`], the
-    /// panel-text reconciler for a [`ForLayout`] label. `None` means "inherit" —
-    /// resolution falls through to the panel-level override, then to
-    /// `CascadeDefault<TextAlpha>`.
-    #[must_use]
-    pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
-
-    /// Sets the per-style text [`AlphaMode`] override.
-    ///
-    /// The matching cascade bridge inserts an `Override<TextAlpha>` from this
-    /// value, so the node composites with `alpha_mode` instead of inheriting
-    /// the panel-level override or the global default. On a panel label this is
-    /// the node's own override; on standalone [`WorldText`](crate::WorldText)
-    /// it is the standalone's own alpha.
-    #[must_use]
-    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
-        self.alpha_mode = Some(alpha_mode);
-        self
-    }
 
     /// Returns the font feature overrides.
     #[must_use]
@@ -634,6 +603,27 @@ impl TextProps<ForLayout> {
         }
     }
 
+    /// Returns the per-label unit override, if set.
+    #[must_use]
+    pub const fn unit(&self) -> Option<Unit> { self.unit }
+
+    /// Returns the per-label alpha-mode override, if any.
+    ///
+    /// This is authoring input for the panel-text reconciler. `None` means the
+    /// label inherits the panel-level override, then `CascadeDefault<TextAlpha>`.
+    #[must_use]
+    pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
+
+    /// Sets the per-label text [`AlphaMode`] override.
+    ///
+    /// The panel-text reconciler captures this value before converting to
+    /// [`WorldTextStyle`] and inserts `Override<TextAlpha>` on the label.
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
+        self.alpha_mode = Some(alpha_mode);
+        self
+    }
+
     /// Returns the text wrapping mode.
     #[must_use]
     pub const fn wrap_mode(&self) -> TextWrap { self.wrap }
@@ -669,9 +659,11 @@ impl TextProps<ForLayout> {
 
     /// Converts to a `TextStyle` for use with standalone [`WorldText`] entities.
     ///
-    /// Copies all shared fields. The standalone-specific `anchor` defaults to
-    /// [`Anchor::TopLeft`] since panel text is positioned by the layout
-    /// engine rather than by an anchor offset.
+    /// Copies shared render and measurement fields. The standalone-specific
+    /// `anchor` defaults to [`Anchor::Center`] since panel text is positioned by
+    /// the layout engine rather than by an anchor offset. Unit and alpha
+    /// authoring stay on the layout style and are routed separately through the
+    /// cascade.
     #[must_use]
     pub const fn as_standalone(&self) -> TextProps<ForStandalone> {
         TextProps::<ForStandalone> {
@@ -691,9 +683,9 @@ impl TextProps<ForLayout> {
             sidedness:      self.sidedness,
             lighting:       self.lighting,
             font_features:  self.font_features,
-            unit:           self.unit,
+            unit:           None,
             world_scale:    None,
-            alpha_mode:     self.alpha_mode,
+            alpha_mode:     None,
             context:        PhantomData,
         }
     }
@@ -708,37 +700,61 @@ impl Default for TextProps<ForLayout> {
 impl TextProps<ForStandalone> {
     /// Creates a new style with the given font size.
     ///
-    /// Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm), [`In`](crate::In),
-    /// or bare `f32`. Newtypes carry their unit — bare `f32` uses the
-    /// global `CascadeDefault<FontUnit>`.
+    /// The size is interpreted in the entity's resolved [`FontUnit`](crate::FontUnit).
+    /// Use `override_font_unit` on the entity or `CascadeDefault<FontUnit>` for
+    /// unit choice; standalone construction does not accept unit-bearing
+    /// newtypes.
     ///
     /// Defaults to centered anchor, white color, normal weight.
     #[must_use]
-    pub fn new(size: impl Into<Dimension>) -> Self {
-        let font_size = size.into();
+    pub const fn new(size: f32) -> Self {
         Self {
-            font_id:        0,
-            size:           font_size.value,
-            weight:         FontWeight::NORMAL,
-            slant:          FontSlant::Normal,
-            line_height:    0.0,
+            font_id: 0,
+            size,
+            weight: FontWeight::NORMAL,
+            slant: FontSlant::Normal,
+            line_height: 0.0,
             letter_spacing: 0.0,
-            word_spacing:   0.0,
-            wrap:           TextWrap::None,
-            color:          Color::WHITE,
-            align:          TextAlign::Left,
-            anchor:         Anchor::Center,
-            render_mode:    GlyphRenderMode::Text,
-            shadow_mode:    GlyphShadowMode::Cast,
-            sidedness:      GlyphSidedness::DoubleSided,
-            lighting:       GlyphLighting::Lit,
-            font_features:  FontFeatures::NONE,
-            unit:           font_size.unit,
-            world_scale:    None,
-            alpha_mode:     None,
-            context:        PhantomData,
+            word_spacing: 0.0,
+            wrap: TextWrap::None,
+            color: Color::WHITE,
+            align: TextAlign::Left,
+            anchor: Anchor::Center,
+            render_mode: GlyphRenderMode::Text,
+            shadow_mode: GlyphShadowMode::Cast,
+            sidedness: GlyphSidedness::DoubleSided,
+            lighting: GlyphLighting::Lit,
+            font_features: FontFeatures::NONE,
+            unit: None,
+            world_scale: None,
+            alpha_mode: None,
+            context: PhantomData,
         }
     }
+
+    /// Sets the font identifier.
+    pub const fn set_font_id(&mut self, font_id: u16) { self.font_id = font_id; }
+
+    /// Sets the font size.
+    pub const fn set_size(&mut self, size: f32) { self.size = size; }
+
+    /// Sets the font weight.
+    pub const fn set_weight(&mut self, weight: FontWeight) { self.weight = weight; }
+
+    /// Sets the font slant.
+    pub const fn set_slant(&mut self, slant: FontSlant) { self.slant = slant; }
+
+    /// Sets the line height in layout units. `0.0` = use `size`.
+    pub const fn set_line_height(&mut self, line_height: f32) { self.line_height = line_height; }
+
+    /// Sets extra spacing between characters in layout units.
+    pub const fn set_letter_spacing(&mut self, spacing: f32) { self.letter_spacing = spacing; }
+
+    /// Sets extra spacing between words in layout units.
+    pub const fn set_word_spacing(&mut self, spacing: f32) { self.word_spacing = spacing; }
+
+    /// Sets the text color.
+    pub const fn set_color(&mut self, color: Color) { self.color = color; }
 
     /// Returns the text alignment.
     #[must_use]
@@ -755,12 +771,24 @@ impl TextProps<ForStandalone> {
         self
     }
 
+    /// Sets horizontal text alignment within bounds.
+    pub const fn set_align(&mut self, align: TextAlign) { self.align = align; }
+
     /// Sets the anchor point within the text block's bounding box.
     #[must_use]
     pub const fn with_anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
         self
     }
+
+    /// Sets the anchor point within the text block's bounding box.
+    pub const fn set_anchor(&mut self, anchor: Anchor) { self.anchor = anchor; }
+
+    /// Sets the glyph render mode.
+    pub const fn set_render_mode(&mut self, mode: GlyphRenderMode) { self.render_mode = mode; }
+
+    /// Sets the glyph shadow mode.
+    pub const fn set_shadow_mode(&mut self, mode: GlyphShadowMode) { self.shadow_mode = mode; }
 
     /// Sets whether glyph meshes render one or both faces.
     #[must_use]
@@ -769,12 +797,18 @@ impl TextProps<ForStandalone> {
         self
     }
 
+    /// Sets whether glyph meshes render one or both faces.
+    pub const fn set_sidedness(&mut self, sidedness: GlyphSidedness) { self.sidedness = sidedness; }
+
     /// Sets whether the glyph material responds to scene lighting.
     #[must_use]
     pub const fn with_lighting(mut self, lighting: GlyphLighting) -> Self {
         self.lighting = lighting;
         self
     }
+
+    /// Sets whether the glyph material responds to scene lighting.
+    pub const fn set_lighting(&mut self, lighting: GlyphLighting) { self.lighting = lighting; }
 
     /// Sets the glyph material to render unlit, bypassing PBR lighting.
     #[must_use]
@@ -794,9 +828,19 @@ impl TextProps<ForStandalone> {
         self
     }
 
+    /// Sets or clears the explicit meters-per-design-unit override.
+    pub const fn set_world_scale(&mut self, meters_per_unit: Option<f32>) {
+        self.world_scale = meters_per_unit;
+    }
+
     /// Returns the per-entity world scale override, if set.
     #[must_use]
     pub const fn world_scale(&self) -> Option<f32> { self.world_scale }
+
+    /// Sets font feature overrides.
+    pub const fn set_font_features(&mut self, features: FontFeatures) {
+        self.font_features = features;
+    }
 }
 
 impl Default for TextProps<ForStandalone> {
@@ -806,9 +850,10 @@ impl Default for TextProps<ForStandalone> {
 impl TextProps<ForStandalone> {
     /// Converts to a `TextConfig` for use with the shaping/rendering pipeline.
     ///
-    /// Copies all shared measurement fields and color. The layout-specific
-    /// `wrap` field is set to [`TextWrap::None`] since standalone text does
-    /// not word-wrap by default.
+    /// Copies shared measurement and render fields into a layout config for
+    /// shaping. The layout-specific `wrap` field is set to [`TextWrap::None`].
+    /// Unit and alpha default to inherit because standalone authoring for those
+    /// properties lives in the cascade.
     #[must_use]
     pub const fn as_layout_config(&self) -> TextProps<ForLayout> {
         TextProps::<ForLayout> {
@@ -828,9 +873,9 @@ impl TextProps<ForStandalone> {
             sidedness:      self.sidedness,
             lighting:       self.lighting,
             font_features:  self.font_features,
-            unit:           self.unit,
-            world_scale:    self.world_scale,
-            alpha_mode:     self.alpha_mode,
+            unit:           None,
+            world_scale:    None,
+            alpha_mode:     None,
             context:        PhantomData,
         }
     }
@@ -908,7 +953,6 @@ const _: () = assert!(GlyphRenderMode::PunchOut.discriminant() == 2);
 mod tests {
     use super::*;
     use crate::layout::BoundingBox;
-    use crate::layout::Pt;
 
     #[test]
     fn as_standalone_from_layout_preserves_size() {
@@ -967,14 +1011,19 @@ mod tests {
     }
 
     #[test]
-    fn gating_eq_ignores_unit() {
-        // Same value, differing only in unit (Points vs contextual default).
-        // layout_eq_excluding_visuals treats unit as layout-affecting; gating_eq
-        // excludes it because it is measurement context, not a mesh input.
-        let with_unit = TextProps::<ForStandalone>::new(Pt(24.0));
-        let without_unit = TextProps::<ForStandalone>::new(24.0);
-        assert!(!with_unit.layout_eq_excluding_visuals(&without_unit));
-        assert!(with_unit.gating_eq(&without_unit));
+    fn as_standalone_drops_layout_unit_and_alpha_authoring() {
+        let standalone = TextProps::<ForLayout>::new(crate::Pt(24.0))
+            .with_alpha_mode(AlphaMode::Add)
+            .as_standalone();
+
+        assert_eq!(
+            standalone.unit, None,
+            "unit authoring stays on LayoutTextStyle and routes through FontUnit"
+        );
+        assert_eq!(
+            standalone.alpha_mode, None,
+            "alpha authoring stays on LayoutTextStyle and routes through TextAlpha"
+        );
     }
 
     #[test]

@@ -56,9 +56,10 @@ The `AlphaMode` you pick determines how that coverage is composited:
 | `Mask(t)` | ❌ | Thresholds coverage to 0/1 — jagged edges |
 | `Opaque` | ❌ | Ignores coverage — glyph rectangles |
 
-Set the app-wide default via `CascadeDefaults::text_alpha`, per-panel via
-`DiegeticPanel::text_alpha_mode`, or per-style via
-`WorldTextStyle`/`LayoutTextStyle::with_alpha_mode`.
+Set the app-wide default via `CascadeDefault<TextAlpha>`, per-panel via
+`DiegeticPanel::text_alpha_mode`, per-label via
+`LayoutTextStyle::with_alpha_mode`, or per-standalone entity via
+`override_text_alpha`.
 
 ### Quick recipes
 
@@ -69,15 +70,12 @@ commands.spawn(Camera3d::default());
 
 ```rust
 // MSAA scene — switch the app-wide default to AlphaToCoverage:
-commands.insert_resource(CascadeDefaults {
-    text_alpha: AlphaMode::AlphaToCoverage,
-    ..default()
-});
+commands.insert_resource(CascadeDefault(TextAlpha(AlphaMode::AlphaToCoverage)));
 commands.spawn((Camera3d::default(), Msaa::Sample4));
 ```
 
 ```rust
-// Mix modes per-style for creative effects:
+// Mix panel-label modes for creative effects:
 let neon = LayoutTextStyle::new(Pt(24.0)).with_alpha_mode(AlphaMode::Add);
 let tint = LayoutTextStyle::new(Pt(14.0)).with_alpha_mode(AlphaMode::Multiply);
 ```

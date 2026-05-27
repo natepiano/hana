@@ -64,7 +64,9 @@
 //!
 //! - **Spawn.** The node-kind authoring bridges seed each participant's initial `Resolved<A>`
 //!   during command flush. Standalone text and panels seed their own participating attributes;
-//!   panel labels seed text alpha. Each bridge uses the same override helper as the public verbs.
+//!   panel labels seed text alpha. Bridges that author a per-node override use the same helper as
+//!   the public verbs; standalone text only seeds global defaults and relies on explicit
+//!   `override_*` commands for non-default entity values.
 //! - **Change.** [`CascadePlugin`]'s propagation system, in [`CascadeSet::Propagate`], re-resolves
 //!   a node when its own `Override<A>` changes or is removed, its `ChildOf` changes, or
 //!   `CascadeDefault<A>` changes — fanning ancestor changes down through `Children`. It runs every
@@ -73,6 +75,29 @@
 //! Internal render systems query `&Resolved<A>` directly and filter on
 //! `Changed<Resolved<A>>`; public callers should use the typed `resolved_*`
 //! readers when they need the computed value.
+//!
+//! # Adding a cascade attribute
+//!
+//! For a new attribute with no existing plain-field history, add one
+//! `cascade_attr!(Name(Ty), default = value)` declaration in `cascade/resolved.rs`,
+//! three typed wrappers in `cascade/attributes.rs`
+//! (`override_name`, `inherit_name`, `resolved_name`), one
+//! `.add_plugins(CascadePlugin::<Name>::default())` line, and a render read site
+//! that uses `Resolved<Name>` or `resolved_name`. The value type only needs to be
+//! `Copy + PartialEq`.
+//!
+//! Promoting an existing plain field is a migration, not just a declaration.
+//! Add the attribute, then inventory every consumer before editing: standalone
+//! render reads, panel-label shaping/render reads, spawn-seed bridges, label
+//! authoring capture before `as_standalone()`, examples, README/docs, and the
+//! first-frame tests that prove `Resolved<A>` and rendered materials agree. Each
+//! promoted attribute may participate in a different subset of consumers: text
+//! alpha affects standalone text and panel labels, while font unit is seeded for
+//! standalone text and panels but panel labels inherit it from the panel. Decide
+//! whether the old plain accessors are deleted or kept as typed-verb sugar, and
+//! migrate callers. Text alpha is the worked example: standalone entities use
+//! `override_text_alpha`, while panel labels capture
+//! `LayoutTextStyle::with_alpha_mode` and insert `Override<TextAlpha>`.
 
 mod attributes;
 mod cascade_set;

@@ -262,7 +262,7 @@ respawning the run's mesh (composes with the existing per-run rebuild work).
 
 ---
 
-## Phase 3 — `WorldTextStyle` runtime surface
+## Phase 3 — `WorldTextStyle` runtime surface (Complete)
 
 Make the standalone component fully runtime-mutable, and remove the spawn-only
 authoring fields that the cascade now owns. This is the breaking change and the
@@ -372,6 +372,41 @@ compile-fail harness; examples and README build and run; the
 `layout_unit` construction-default references may remain), no stale standalone
 `with_alpha_mode` guidance, and a worked example of each public verb.
 
+### Retrospective
+
+**What worked:**
+
+- Gating `unit` and `alpha_mode` to `LayoutTextStyle` made the intended
+  ownership explicit: standalone values now come from `Resolved<FontUnit>` and
+  `Resolved<TextAlpha>`.
+- The existing Phase 2 command helpers made the example migration mechanical;
+  standalone examples now use `override_font_unit` / `override_text_alpha`
+  rather than unit-bearing constructors or standalone alpha builders.
+
+**What deviated from the plan:**
+
+- `WorldTextStyle` still stores private `unit` and `alpha_mode` fields because
+  `TextProps<C>` remains one generic struct; the public standalone API and
+  conversions force them to `None`.
+- README and `panel_perf.md` needed stale cascade-default and standalone-alpha
+  cleanup in addition to the examples named in the phase.
+
+**Surprises:**
+
+- The sizes/dimensions/units examples used standalone unit-bearing constructors
+  in several shared-style helpers, so migration required attaching
+  `override_font_unit` at spawn sites instead of only changing constructors.
+- The panel-label alpha path already had enough render-pipeline coverage to add
+  a focused first-material assertion without building new harness machinery.
+
+**Implications for remaining phases:**
+
+- Later phases should assume standalone cascade authoring is command-only; do
+  not add new `WorldTextStyle` sugar for cascade-owned fields unless it forwards
+  to typed cascade verbs.
+- Any future promotion from a plain field to a cascade attribute must include
+  example migration and stale-doc search, not just render read rewiring.
+
 ### Phase 1 Review
 
 - Phase 2 timing was amended to distinguish direct-entity self-heal from
@@ -385,13 +420,25 @@ compile-fail harness; examples and README build and run; the
 - Phase 3 docs acceptance now preserves valid `CascadeDefaults` references for
   non-cascade construction defaults.
 
+### Phase 3 Review
+
+- The plan has no remaining implementation phases after Phase 3, so the review
+  treats this document as complete rather than adding follow-up phase targets.
+- The command-only rule for cascade-owned standalone values is now explicit in
+  the retrospective and the local cascade style guide.
+- `docs/bevy_diegetic/style/use-cascade-for-propagated-attributes.md` was
+  updated from the old `CascadeDefaults` model to per-attribute
+  `CascadeDefault<A>` resources.
+- `cascade/mod.rs` promotion guidance now requires a consumer-specific
+  seed/read/test inventory before promoting an existing plain field.
+
 ## Cross-references
 
 - `panel_perf.md` — the per-run rebuild work that makes a single-property change
   cheap (an `override_text_alpha` is a material mutation, a `set_size` is one
   run's rebuild).
 - `crates/bevy_diegetic/src/cascade/` — `Override`/`Resolved`/`propagate_cascade`/
-  `CascadeDefaults`.
+  `CascadeDefault<A>`.
 - `crates/bevy_diegetic/src/layout/text_props.rs` — `TextProps<C>`, the markers,
   the `with_*`/`set_*` builders, the conversions.
 - `crates/bevy_diegetic/src/layout/builder.rs` — `builder.text(text, config)`.

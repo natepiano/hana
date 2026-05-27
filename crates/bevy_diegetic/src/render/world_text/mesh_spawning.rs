@@ -269,6 +269,7 @@ mod tests {
     use crate::layout::ShapedTextCache;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::layout::Unit;
     use crate::layout::WorldTextStyle;
     use crate::panel::DiegeticPanel;
     use crate::panel::HeadlessLayoutPlugin;
@@ -383,16 +384,24 @@ mod tests {
         app.world().resource::<GlyphCache>().run_storage_len()
     }
 
+    fn spawn_world_text_mm(app: &mut App, text: &str, size_mm: f32) -> Entity {
+        let entity = app
+            .world_mut()
+            .commands()
+            .spawn((WorldText::new(text), WorldTextStyle::new(size_mm)))
+            .override_font_unit(Unit::Millimeters)
+            .id();
+        app.world_mut().flush();
+        entity
+    }
+
     #[test]
     fn alpha_only_change_updates_material_without_respawning_mesh() {
         let mut app = world_app();
         app.world_mut()
             .resource_mut::<CascadeDefault<TextAlpha>>()
             .0 = TextAlpha(AlphaMode::Blend);
-        let entity = app
-            .world_mut()
-            .spawn((WorldText::new("Hi"), WorldTextStyle::new(Mm(6.0))))
-            .id();
+        let entity = spawn_world_text_mm(&mut app, "Hi", 6.0);
         settle(&mut app);
 
         let mesh_before = world_mesh_of(&mut app, entity).expect("world text mesh should exist");
@@ -427,10 +436,7 @@ mod tests {
     #[test]
     fn alpha_override_updates_material_without_respawning_mesh() {
         let mut app = world_app();
-        let entity = app
-            .world_mut()
-            .spawn((WorldText::new("Hi"), WorldTextStyle::new(Mm(6.0))))
-            .id();
+        let entity = spawn_world_text_mm(&mut app, "Hi", 6.0);
         settle(&mut app);
 
         let mesh_before = world_mesh_of(&mut app, entity).expect("world text mesh should exist");
@@ -464,10 +470,7 @@ mod tests {
     #[test]
     fn content_change_rebuilds_the_runs_mesh() {
         let mut app = world_app();
-        let entity = app
-            .world_mut()
-            .spawn((WorldText::new("Hi"), WorldTextStyle::new(Mm(6.0))))
-            .id();
+        let entity = spawn_world_text_mm(&mut app, "Hi", 6.0);
         settle(&mut app);
         let mesh_before = world_mesh_of(&mut app, entity).expect("world text mesh should exist");
         assert_eq!(run_storage_len(&app), 1);
@@ -494,16 +497,46 @@ mod tests {
     }
 
     #[test]
+    fn set_size_rebuilds_only_changed_world_text_run() {
+        let mut app = world_app();
+        let changed = spawn_world_text_mm(&mut app, "Hi", 6.0);
+        let unchanged = spawn_world_text_mm(&mut app, "Bye", 6.0);
+        settle(&mut app);
+        let changed_mesh_before =
+            world_mesh_of(&mut app, changed).expect("changed text mesh should exist");
+        let unchanged_mesh_before =
+            world_mesh_of(&mut app, unchanged).expect("unchanged text mesh should exist");
+        assert_eq!(run_storage_len(&app), 2);
+
+        app.world_mut()
+            .get_mut::<WorldTextStyle>(changed)
+            .expect("entity carries WorldTextStyle")
+            .set_size(8.0);
+        settle(&mut app);
+
+        let changed_mesh_after =
+            world_mesh_of(&mut app, changed).expect("changed text mesh should still exist");
+        let unchanged_mesh_after =
+            world_mesh_of(&mut app, unchanged).expect("unchanged text mesh should still exist");
+        assert_ne!(
+            changed_mesh_before, changed_mesh_after,
+            "set_size should rebuild the changed run's mesh"
+        );
+        assert_eq!(
+            unchanged_mesh_before, unchanged_mesh_after,
+            "set_size on one entity must not respawn an unrelated run"
+        );
+        assert_eq!(run_storage_len(&app), 2);
+    }
+
+    #[test]
     fn alpha_change_with_no_mesh_child_is_a_no_op() {
         let mut app = world_app();
         app.world_mut()
             .resource_mut::<CascadeDefault<TextAlpha>>()
             .0 = TextAlpha(AlphaMode::Blend);
         // Empty text never spawns a mesh.
-        let entity = app
-            .world_mut()
-            .spawn((WorldText::new(""), WorldTextStyle::new(Mm(6.0))))
-            .id();
+        let entity = spawn_world_text_mm(&mut app, "", 6.0);
         settle(&mut app);
         assert!(
             world_mesh_of(&mut app, entity).is_none(),
@@ -550,10 +583,7 @@ mod tests {
                 .build()
                 .expect("panel should build"),
         );
-        let standalone = app
-            .world_mut()
-            .spawn((WorldText::new("World"), WorldTextStyle::new(Mm(6.0))))
-            .id();
+        let standalone = spawn_world_text_mm(&mut app, "World", 6.0);
         settle(&mut app);
         assert_eq!(
             run_storage_len(&app),

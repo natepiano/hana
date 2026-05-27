@@ -16,6 +16,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -138,20 +139,24 @@ fn spawn_backdrop(
 }
 
 fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f32) {
-    let header_style = WorldTextStyle::new(Pt(9.0))
+    let header_style = WorldTextStyle::new(9.0)
         .with_color(HEADER_COLOR)
         .with_anchor(Anchor::TopLeft);
 
-    commands.spawn((
-        WorldText::new("Dimension in layout properties"),
-        header_style.clone(),
-        Transform::from_xyz(left_x, header_y, 0.0),
-    ));
-    commands.spawn((
-        WorldText::new("How it works"),
-        header_style,
-        Transform::from_xyz(note_x, header_y, 0.0),
-    ));
+    commands
+        .spawn((
+            WorldText::new("Dimension in layout properties"),
+            header_style.clone(),
+            Transform::from_xyz(left_x, header_y, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
+    commands
+        .spawn((
+            WorldText::new("How it works"),
+            header_style,
+            Transform::from_xyz(note_x, header_y, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
 }
 
 fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: f32) {

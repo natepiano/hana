@@ -18,6 +18,7 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::Direction;
@@ -32,6 +33,7 @@ use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
@@ -461,19 +463,23 @@ fn spawn_a4_with_titles(
         ))
         .observe(on_panel_clicked);
 
-    let title_style = WorldTextStyle::new(Pt(18.0))
+    let title_style = WorldTextStyle::new(18.0)
         .with_color(Color::WHITE)
         .with_anchor(Anchor::BottomCenter);
-    commands.spawn((
-        WorldText::new("A4 Paper — 210 × 297 mm"),
-        title_style.clone(),
-        Transform::from_xyz(a4_page_x, a4_page_top + title_gap, 0.0),
-    ));
-    commands.spawn((
-        WorldText::new("US Business Card — 3½ × 2 in"),
-        title_style,
-        Transform::from_xyz(card_x, a4_page_top + title_gap, 0.0),
-    ));
+    commands
+        .spawn((
+            WorldText::new("A4 Paper — 210 × 297 mm"),
+            title_style.clone(),
+            Transform::from_xyz(a4_page_x, a4_page_top + title_gap, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
+    commands
+        .spawn((
+            WorldText::new("US Business Card — 3½ × 2 in"),
+            title_style,
+            Transform::from_xyz(card_x, a4_page_top + title_gap, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
 }
 
 fn spawn_card_panel(commands: &mut Commands, card_x: f32, card_y: f32) {
@@ -524,13 +530,15 @@ fn spawn_photo_panel_with_title(
             Transform::from_xyz(index_x, index_y, 0.0),
         ))
         .observe(on_panel_clicked);
-    commands.spawn((
-        WorldText::new("Photo — 5 × 7 in"),
-        WorldTextStyle::new(Pt(18.0))
-            .with_color(Color::WHITE)
-            .with_anchor(Anchor::BottomCenter),
-        Transform::from_xyz(index_x, index_y + index_height_m / 2.0 + title_gap, 0.0),
-    ));
+    commands
+        .spawn((
+            WorldText::new("Photo — 5 × 7 in"),
+            WorldTextStyle::new(18.0)
+                .with_color(Color::WHITE)
+                .with_anchor(Anchor::BottomCenter),
+            Transform::from_xyz(index_x, index_y + index_height_m / 2.0 + title_gap, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
 }
 
 fn spawn_index_card_rulers(

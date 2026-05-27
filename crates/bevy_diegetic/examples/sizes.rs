@@ -16,6 +16,7 @@ use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -111,7 +112,7 @@ fn setup(
     let note_x = right_x + world_text_column_width + COLUMN_GAP;
 
     // All three headers top-align at this Y. Content sits below.
-    let header_style = WorldTextStyle::new(Pt(9.0))
+    let header_style = WorldTextStyle::new(9.0)
         .with_color(HEADER_COLOR)
         .with_anchor(Anchor::TopLeft);
     let max_content_height = panel_height.max(note_height);
@@ -167,16 +168,20 @@ fn spawn_headers(
     note_x: f32,
     header_y: f32,
 ) {
-    commands.spawn((
-        WorldText::new("DiegeticPanel"),
-        header_style.clone(),
-        Transform::from_xyz(left_x, header_y, 0.0),
-    ));
-    commands.spawn((
-        WorldText::new("How font sizes work"),
-        header_style.clone(),
-        Transform::from_xyz(note_x, header_y, 0.0),
-    ));
+    commands
+        .spawn((
+            WorldText::new("DiegeticPanel"),
+            header_style.clone(),
+            Transform::from_xyz(left_x, header_y, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
+    commands
+        .spawn((
+            WorldText::new("How font sizes work"),
+            header_style.clone(),
+            Transform::from_xyz(note_x, header_y, 0.0),
+        ))
+        .override_font_unit(Unit::Points);
 }
 
 fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: f32) {
@@ -218,36 +223,58 @@ fn spawn_world_text_column(
             header_style,
             Transform::from_xyz(right_x, header_y, 0.0),
         ))
+        .override_font_unit(Unit::Points)
         .id();
 
-    let label_style = WorldTextStyle::new(Pt(8.0))
+    let label_style = WorldTextStyle::new(8.0)
         .with_color(LABEL_COLOR)
         .with_anchor(Anchor::TopLeft);
 
-    let world_styles: &[WorldTextStyle] = &[
-        WorldTextStyle::new(Pt(SIZE_PT)).with_color(SAMPLE_COLOR),
-        WorldTextStyle::new(Mm(SIZE_MM)).with_color(SAMPLE_COLOR),
-        WorldTextStyle::new(In(SIZE_IN)).with_color(SAMPLE_COLOR),
-        WorldTextStyle::new(SIZE_BARE_WORLD).with_color(SAMPLE_COLOR),
+    let world_styles: &[(WorldTextStyle, Option<Unit>)] = &[
+        (
+            WorldTextStyle::new(SIZE_PT).with_color(SAMPLE_COLOR),
+            Some(Unit::Points),
+        ),
+        (
+            WorldTextStyle::new(SIZE_MM).with_color(SAMPLE_COLOR),
+            Some(Unit::Millimeters),
+        ),
+        (
+            WorldTextStyle::new(SIZE_IN).with_color(SAMPLE_COLOR),
+            Some(Unit::Inches),
+        ),
+        (
+            WorldTextStyle::new(SIZE_BARE_WORLD).with_color(SAMPLE_COLOR),
+            None,
+        ),
     ];
 
     let first_row_dy = -(PANEL_PAD + BORDER_WIDTH).mul_add(MILLIMETERS_PER_METER, HEADER_GAP);
     let sample_dx = LABEL_COL * MILLIMETERS_PER_METER;
     let row_step = (SIZE_MM + ROW_SPACING + 2.0) * MILLIMETERS_PER_METER;
 
-    for (i, (label, style)) in WORLD_LABELS.iter().zip(world_styles.iter()).enumerate() {
+    for (i, (label, (style, unit))) in WORLD_LABELS.iter().zip(world_styles.iter()).enumerate() {
         let dy = first_row_dy - row_step * i.to_f32();
 
-        commands.entity(wt_title).with_child((
-            WorldText::new(*label),
-            label_style.clone(),
-            Transform::from_xyz(0.0, dy, 0.0),
-        ));
-        commands.entity(wt_title).with_child((
-            WorldText::new("Hello"),
-            style.clone().with_anchor(Anchor::TopLeft),
-            Transform::from_xyz(sample_dx, dy, 0.0),
-        ));
+        commands.entity(wt_title).with_children(|parent| {
+            parent
+                .spawn((
+                    WorldText::new(*label),
+                    label_style.clone(),
+                    Transform::from_xyz(0.0, dy, 0.0),
+                ))
+                .override_font_unit(Unit::Points);
+        });
+        commands.entity(wt_title).with_children(|parent| {
+            let mut sample = parent.spawn((
+                WorldText::new("Hello"),
+                style.clone().with_anchor(Anchor::TopLeft),
+                Transform::from_xyz(sample_dx, dy, 0.0),
+            ));
+            if let Some(unit) = *unit {
+                sample.override_font_unit(unit);
+            }
+        });
     }
 }
 

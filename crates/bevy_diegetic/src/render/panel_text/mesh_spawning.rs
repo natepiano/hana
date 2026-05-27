@@ -399,6 +399,12 @@ mod tests {
         builder.build()
     }
 
+    fn single_alpha_text_tree(alpha: AlphaMode) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text("Hi", LayoutTextStyle::new(10.0).with_alpha_mode(alpha));
+        builder.build()
+    }
+
     fn spawn_panel(app: &mut App, tree: LayoutTree) -> Entity {
         app.world_mut()
             .spawn(
@@ -582,6 +588,29 @@ mod tests {
             run_storage_len(&app),
             1,
             "no run storage churn on an alpha-only change"
+        );
+    }
+
+    #[test]
+    fn label_authored_alpha_seeds_resolved_and_first_material() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, single_alpha_text_tree(AlphaMode::Add));
+        settle(&mut app);
+
+        let label = labels_by_text(&mut app)["Hi"];
+        assert_eq!(
+            app.world()
+                .get::<Resolved<TextAlpha>>(label)
+                .expect("label should carry resolved text alpha")
+                .0
+                .0,
+            AlphaMode::Add
+        );
+        let mesh = mesh_of_label(&mut app, label).expect("Hi mesh should exist");
+        assert_eq!(
+            material_alpha(&app, mesh),
+            AlphaMode::Add,
+            "the first material should use the label-authored alpha"
         );
     }
 

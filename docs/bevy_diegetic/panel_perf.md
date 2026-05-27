@@ -849,7 +849,7 @@ The core per-run change.
   `PanelText`/the material, so `Changed<PanelText>` fires. Genuine alpha-only
   changes arrive only as `Changed<Resolved<TextAlpha>>` (global default or panel
   override) — exactly the narrow standalone story Phase 6 is scoped to. The
-  alpha-only test drives it through `CascadeDefaults::text_alpha`.
+  alpha-only test drives it through `CascadeDefault<TextAlpha>`.
 - Slug shaping is synchronous, so glyphs are `Ready` in a headless test with no
   render device — the full pipeline produces meshes without `MaterialPlugin`.
 
@@ -896,13 +896,11 @@ respawn, and its trigger already lumps alpha in with the rest
 Changed<Resolved<FontUnit>>)>`, `mod.rs`).
 - **Scope kept narrow (Phase-3 review, user decision).** For standalone world
   text the *only* runtime alpha signal this short-circuit can fire on is a
-  global `CascadeDefaults::text_alpha` change arriving as
-  `Changed<Resolved<TextAlpha>>`. `WorldTextStyle.alpha_mode` is consumed once
-  by the `On<Add>` seed (no per-entity runtime path), and opacity rides with
+  global `CascadeDefault<TextAlpha>` change arriving as
+  `Changed<Resolved<TextAlpha>>`; standalone entity overrides now use
+  `override_text_alpha` and hit the same alpha-only branch. Opacity rides with
   `color` through the normal `Changed<WorldTextStyle>` rebuild — not through
-  this path. The short-circuit is correct but low-yield for standalone text; the
-  broader "set a standalone's blend mode at runtime" gap is recorded in §10, not
-  here.
+  this path.
 - **Scope expansion — fix the shared-`GlyphCache` wipe + add a remove-observer
   (Phase-4/5 review, user-approved).** `render_world_text`
   (`world_text/rendering.rs:195`) calls `backend.clear_run_storage()`, which
@@ -1124,9 +1122,9 @@ later effort can design one uniform API.
 | Setting | Lives in | Per-entity runtime path | Notes |
 | --- | --- | --- | --- |
 | color (incl. opacity / the alpha channel) | `WorldTextStyle.color` | **yes** — `set_color` (standalone) or `set_tree` (panel label) → `Changed<WorldTextStyle>` rebuild | the renderer reads `style.color()` into the shader fill on each rebuild (`world_text/mesh_spawning.rs:118` → `material.rs:100`) |
-| size / weight / slant / line-height / letter+word spacing / wrap / align / anchor / font_features / render_mode / shadow_mode / sidedness | `WorldTextStyle` | **partial** — replace the whole component (no `set_*` setter except `set_color`) | re-read on the `Changed<WorldTextStyle>` rebuild |
-| blend mode (`AlphaMode`) | cascade `TextAlpha` | standalone: **none per-entity** (spawn-only via `with_alpha_mode`; runtime only globally via `CascadeDefaults::text_alpha`). panel: `DiegeticPanel.text_alpha_mode`, labels inherit | `Override`/`Resolved`/`TextAlpha` are `pub(crate)`; the standalone seed is `On<Add>` only |
-| font unit | cascade `FontUnit` | same as blend mode — panel/global, no per-entity standalone runtime path | seeded once at spawn |
+| size / weight / slant / line-height / letter+word spacing / align / anchor / font_features / render_mode / shadow_mode / sidedness / lighting / world_scale | `WorldTextStyle` | **yes** — direct `set_*` setter on standalone or `set_tree` for panel labels | re-read on the `Changed<WorldTextStyle>` rebuild |
+| blend mode (`AlphaMode`) | cascade `TextAlpha` | standalone: `override_text_alpha` / `inherit_text_alpha`; panel: `DiegeticPanel.text_alpha_mode`; labels can use `LayoutTextStyle::with_alpha_mode` | `Override`/`Resolved` stay crate-internal; public callers use typed verbs/readers |
+| font unit | cascade `FontUnit` | standalone: `override_font_unit` / `inherit_font_unit`; panel labels inherit the panel font unit | standalone spawn seeds the global default, then typed overrides self-heal the target entity |
 | text content / layout (panel) | `DiegeticPanel` tree | `set_tree` → reconcile (Phase 3 gated) | coarse: rebuilds the tree; reconcile reuses unchanged runs |
 
 ### The ergonomic gaps
