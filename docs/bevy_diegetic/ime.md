@@ -11,6 +11,32 @@ This supports DAW-style interactions such as double-clicking a floating-point
 value on a panel, editing it in place, and committing the parsed value back to
 the panel when the user presses Enter or clicks away.
 
+## Important decisions from review
+
+The team review produced no premise challenges. These are the high-signal
+decisions to carry into implementation:
+
+- IME ownership is window-scoped and has one writer for `Window::ime_enabled`
+  and `Window::ime_position`.
+- `bevy_diegetic` publishes its own input blocker; apps bridge it into
+  Lagrange or other camera/input systems instead of making IME depend on them.
+- Activation-frame capture is required: the double-click that starts editing
+  must not also drive the camera or another app action.
+- Field identity is panel-local and semantic; computed field records live at
+  the panel boundary and are not recovered from render commands.
+- The transient editor follows anchors through `screen_space`; IME code does
+  not write screen-panel transforms directly.
+- App-owned apply responses mean the app already applied the change; the IME
+  core must not carry a universal app output value or mutate app state again.
+- Numeric editing uses permissive text while typing and strict parsing only at
+  commit.
+- Invalid commit recovery preserves focus, buffer text, and cursor/selection,
+  then retries with a fresh commit attempt.
+- App-owned popups use a synchronous input-disposition hook before text-buffer
+  commands or app fallthrough.
+- The first implementation accepts a bounded one-frame anchor/caret freshness
+  policy unless a same-frame path proves cheap during implementation.
+
 ## Design model
 
 The IME is fundamentally window/screen-space. Bevy exposes it through
@@ -122,6 +148,22 @@ responses cannot affect a newer edit attempt in the same field.
 ```rust
 pub struct SessionId(u64);
 pub struct CommitAttemptId(u64);
+pub struct CommitAuthorityToken(u64);
+pub struct ValueRevision(u64);
+
+pub enum AppliedResult {
+    BuiltIn(BuiltInApplied),
+    AppOwned {
+        display_text: Option<String>,
+        value_revision: Option<ValueRevision>,
+    },
+}
+
+pub enum BuiltInApplied {
+    Text(String),
+    Float(f32),
+    Integer(i64),
+}
 
 /// Semantic target of the session, not the rendered surface or anchor provider.
 pub enum Target {
@@ -150,6 +192,11 @@ pub struct BufferRange {
     pub end: BufferBoundary,
 }
 
+pub struct SelectionSnapshot {
+    pub anchor: BufferBoundary,
+    pub focus: BufferBoundary,
+}
+
 pub struct Preedit {
     pub text: String,
     pub replacement: BufferRange,
@@ -165,7 +212,7 @@ pub struct BufferSnapshot {
 
 pub enum CursorState {
     Insertion(BufferBoundary),
-    Selection(BufferRange),
+    Selection(SelectionSnapshot),
 }
 
 pub struct Started {
@@ -198,7 +245,7 @@ pub struct Applied {
     pub session_id: SessionId,
     pub attempt_id: CommitAttemptId,
     pub target: Target,
-    pub output: Output,
+    pub result: AppliedResult,
 }
 
 pub struct Canceled {
@@ -210,7 +257,9 @@ pub struct Canceled {
 pub struct AcceptCommit {
     pub session_id: SessionId,
     pub attempt_id: CommitAttemptId,
-    pub output: Output,
+    pub token: CommitAuthorityToken,
+    pub display_text: Option<String>,
+    pub value_revision: Option<ValueRevision>,
 }
 
 pub struct RejectCommit {
@@ -231,21 +280,26 @@ the active preedit would replace for display, layout, and eventual commit.
 fires for committed-buffer changes and preedit-only changes; consumers choose
 whether to preview `preedit` or use only `committed_text`. It is not a field
 commit. `Applied` is reserved for the point where backing ECS/model state
-actually changed.
+actually changed. It should not contain a universal app-owned output value:
+built-in fields may expose typed built-in applied data, while app-owned sessions
+report only opaque display/revision metadata supplied by the app.
 
 Direction matters:
 
 - outbound events from the editor: `Started`, `TextChanged`,
   `CommitRequested`, and `Canceled`;
 - inbound app/apply-sink responses: `AcceptCommit` and `RejectCommit`, matched
-  by both `SessionId` and `CommitAttemptId`;
+  by both `SessionId` and `CommitAttemptId`; app-owned acceptance also carries
+  a current commit-authority token;
 - outbound confirmation from the transition system after a response:
   `ValidationRejected` or `Applied`.
 
 For crate-owned built-in fields, the apply sink can validate and mutate backing
 state internally before emitting `Applied`. For app-owned state, app code
-handles `CommitRequested`, mutates its model if valid, then sends `AcceptCommit`
-or `RejectCommit`.
+handles `CommitRequested`, verifies the attempt is still current, mutates its
+model if valid, then sends `AcceptCommit` or `RejectCommit`. `AcceptCommit`
+means the app has already applied the change; the IME core validates ids and
+token, emits `Applied`, and cleans up without mutating app state again.
 
 `Target` answers "what backing thing is being edited?" It is semantic identity
 only. Anchor providers, focus scopes, validation/apply sinks, and edit surfaces
@@ -730,7 +784,8 @@ Initial transition sketch:
 | `Composing` | Enter/Escape/navigation | consume or map to composition behavior; no field commit/cancel |
 | `Editing` | Enter / commit blur / app-requested commit | `PendingValidation`, emit `CommitRequested` |
 | `PendingValidation` | `RejectCommit` | `Editing`, emit `ValidationRejected` and keep focus |
-| `PendingValidation` | `AcceptCommit` | terminal apply path, mutate backing state, emit `Applied`, clean up |
+| `PendingValidation` | built-in accept | mutate through the built-in apply sink, emit `Applied`, clean up |
+| `PendingValidation` | app-owned `AcceptCommit` | validate ids/token, emit `Applied`, clean up without mutating app state |
 | `Editing` or `Composing` | soft cancel | terminal cancel path, emit `Canceled`, clean up |
 | any active state | window close / lease loss / target destruction | terminal cancel path, emit `Canceled`, clean up |
 
@@ -769,9 +824,9 @@ Caret geometry is a first-class output of the editor surface. A
 `SingleLineEditLayout` or `CaretGeometry` result derived from the edit buffer and
 text shaping drives both caret/preedit rendering and `Window::ime_position`.
 Do not derive IME candidate position from field bounds, glyph mesh entities, or
-render-command bounds. Choose and document whether the first implementation
-accepts a one-frame projection snapshot or implements a stricter same-frame
-freshness path.
+render-command bounds. The first implementation accepts a documented one-frame
+projection/caret freshness policy unless a stricter same-frame path proves cheap
+during implementation.
 
 ### R7 — Example acceptance matrix
 
@@ -800,12 +855,13 @@ The IME example should prove the contract, not only render a text box:
 
 ## Third team review refinements
 
-The third team review produced no premise challenges. Cycle 1 added the
-following proposed implementation decisions.
+The third team review produced no premise challenges. The two review cycles
+converged on the following implementation constraints; none require a separate
+user decision before implementation.
 
 ### R8 — Make IME lease and input blocking authoritative
 
-Status: proposed
+Status: accepted
 
 Severity: critical
 
@@ -836,7 +892,7 @@ triggering another app action in the same frame.
 
 ### R9 — Split public scheduling from internal IME sequencing
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -865,7 +921,7 @@ surface, not raw field bounds.
 
 ### R10 — Put field records at the panel boundary
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -904,7 +960,7 @@ Bevy picking details.
 
 ### R11 — Keep follow-anchor ownership in `screen_space`
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -931,7 +987,7 @@ invalid rather than best-effort.
 
 ### R12 — Split built-in apply from app-owned apply
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -966,7 +1022,7 @@ the attempt.
 
 ### R13 — Make field specs encode parse and apply contracts
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -994,7 +1050,7 @@ post-commit formatting.
 
 ### R14 — Keep edit-buffer invariants behind operations
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -1022,7 +1078,7 @@ before claiming platform shortcut coverage.
 
 ### R15 — Specify stale-target and external-value policy
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -1055,7 +1111,7 @@ overlay root if still alive, clear blockers, and drop pending attempts.
 
 ### R16 — Define validation feedback and blur ordering
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
@@ -1089,7 +1145,7 @@ invalidation, stale async rejection, and correction after rejection.
 
 ### R17 — Name the app-owned popup input hook
 
-Status: proposed
+Status: accepted
 
 Severity: important
 
