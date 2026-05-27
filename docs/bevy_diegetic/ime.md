@@ -584,7 +584,7 @@ ownership has one writer, and terminal causes clean up the session idempotently.
 - Phase 6 now includes duplicate field-id diagnostics and ambiguous-field
   non-activation coverage.
 
-### Phase 3 — IME and keyboard input
+### Phase 3 — IME and keyboard input (complete)
 
 Wire the active session to Bevy window IME:
 
@@ -610,10 +610,62 @@ without requesting field commit, field commit is requested only by a field-level
 cause, selection and word shortcuts update the buffer snapshot, and cancel
 clears composition.
 
+#### Retrospective
+
+**What worked:**
+
+- `ime/buffer.rs` now owns UTF-8-safe single-line editing, selection, word
+  movement/deletion, preedit snapshots, and `ImeTextChanged`.
+- `ime/input.rs` now routes Bevy `Ime` and `KeyboardInput` through
+  `ImeInputBlocker`, with `ImeSystemSet` ordering for external input systems.
+
+**What deviated from the plan:**
+
+- Terminal teardown remains represented by removing `ActiveImeSession.active`
+  after emitting `ImeCanceled`/`ImeApplied`, not by retaining a stored terminal
+  enum variant.
+- `Window::ime_position` is still cursor-position/zero fallback only; real
+  caret geometry stays in Phase 4.
+
+**Surprises:**
+
+- Bevy 0.19 exposes text through both `bevy_window::Ime` messages and
+  `KeyboardInput::text`, so Phase 3 needed a per-frame guard to avoid duplicate
+  text insertion when platform IME events arrive.
+- Opening a session needs an initial `ImeTextChanged` so Phase 4 can render the
+  editor from a snapshot without reconstructing buffer state.
+
+**Implications for remaining phases:**
+
+- Phase 4 should consume `ImeBufferSnapshot`/`ImeTextChanged` directly for
+  editor text, selection, caret, and preedit rendering.
+- Phase 4 should replace the coarse `Window::ime_position` writer in
+  `ime/input.rs` once caret layout exists.
+- Phase 5 can rely on pending-commit state blocking further edits until an
+  accept/reject response returns.
+
+#### Phase 3 Review
+
+- Phase 4 now explicitly renders from `ImeTextChanged`/`ImeBufferSnapshot`
+  instead of reading `ActiveImeSession`.
+- Phase 4 now adds a later caret/IME-position system set and makes it the final
+  `Window::ime_position` writer after editor layout.
+- Phase 4 now builds only the validation-feedback slot; Phase 5 populates it
+  from invalid commit/rejection results.
+- Phase 4 and Phase 5 now name outside-blur classification and policy as
+  implementation work before Phase 6 example coverage.
+- Phase 5 now calls out the public current-attempt authority guard before
+  app-owned backing-state mutation.
+- Phase 6 now treats platform shortcut work as coverage of the Phase 3 command
+  router and places app-owned input disposition before built-in command mapping.
+
 ### Phase 4 — Screen-space rendering and anchoring
 
 Render the transient editor:
 
+- consume `ImeBufferSnapshot` from `ImeTextChanged` as the editor source of
+  truth for text, selection, caret, and preedit, without reading
+  `ActiveImeSession`,
 - capture camera and viewport provenance for field-authored sessions before
   projecting panel fields,
 - extend `PanelFieldRecord` or derive an anchor snapshot with effective clip,
@@ -621,9 +673,15 @@ Render the transient editor:
   editor,
 - project target bounds each frame,
 - anchor through the supported `screen_space` follow-anchor path,
-- draw the editor, caret, selection, validation state, and composing text,
+- draw the editor, caret, selection, a validation-feedback slot, and composing
+  text,
 - apply basic viewport clamping,
-- update `Window::ime_position` from laid-out caret geometry,
+- add a later caret/IME-position system set after editor layout and move the
+  final `Window::ime_position` write there, replacing the Phase 3 coarse
+  cursor-position fallback,
+- classify inside-editor and outside-editor pointer hits so outside blur can
+  request commit/cancel policy instead of falling through as ordinary panel
+  input,
 - visually mark the target field as active.
 
 Acceptance: the editor tracks a moving camera/panel, remains readable off-angle,
@@ -637,11 +695,14 @@ Connect committed text back to real panel values:
 - add a backing binding or built-in apply-sink contract for fields whose values
   are parsed and written by `bevy_diegetic`,
 - parse text by built-in or app-owned field mode,
-- keep invalid commits open with visible rejection feedback,
+- keep invalid commits open and populate the Phase 4 validation-feedback
+  channel,
 - write valid built-in values to backing data,
-- add a commit-authority token or equivalent current-attempt guard for
-  app-owned apply responses,
+- add a public commit-authority token or equivalent current-attempt guard for
+  app-owned apply responses before app code mutates backing state,
 - validate app-owned accept/reject responses without mutating app state again,
+- implement outside-blur commit/cancel policy using `ImeCommitCause::Blur` and
+  `ImeCancelCause::Blur`,
 - refresh the diegetic panel,
 - ignore stale responses by session and attempt id.
 
@@ -656,9 +717,11 @@ Finish the caller-owned surface and prove the contract:
 
 - app-authored focus, routing, and popup behavior on top of the existing
   `ImeOpenSession` / `ImeTarget::AppOwned` core,
-- synchronous app-surface input disposition hook,
+- synchronous app-surface input disposition hook that runs before built-in
+  command mapping for app-owned sessions,
 - popup focus-scope behavior,
-- platform shortcut matrix,
+- platform shortcut matrix coverage for the Phase 3 command router rather than
+  a second shortcut implementation,
 - duplicate field-id diagnostics and the "ambiguous fields do not activate"
   behavior,
 - CJK, accent/dead-key, multi-byte, invalid numeric, rejection-retry, outside

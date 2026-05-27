@@ -2,6 +2,7 @@
 
 use bevy::prelude::Event;
 
+use super::ImeBufferSnapshot;
 use super::ImeBuiltInApplied;
 use super::ImeCommitAttemptId;
 use super::ImeEditableFieldSpec;
@@ -16,6 +17,17 @@ pub struct ImeStarted {
     pub session_id: ImeSessionId,
     /// Semantic backing target for the session.
     pub target:     ImeTarget,
+}
+
+/// Fired when the active edit buffer, selection, or preedit state changes.
+#[derive(Event, Clone, Debug)]
+pub struct ImeTextChanged {
+    /// Id of the active session.
+    pub session_id: ImeSessionId,
+    /// Semantic backing target for the session.
+    pub target:     ImeTarget,
+    /// Current single-line buffer snapshot.
+    pub snapshot:   ImeBufferSnapshot,
 }
 
 /// Why a field-level commit was requested.

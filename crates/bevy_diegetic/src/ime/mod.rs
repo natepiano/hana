@@ -4,14 +4,23 @@
 //! root with `Ime...` names so callers do not need a public module namespace.
 
 mod activation;
+mod buffer;
 mod events;
 mod field;
 mod ids;
+mod input;
 mod lease;
 mod session;
 mod target;
 
 use bevy::prelude::*;
+pub use buffer::ImeBufferBoundary;
+pub use buffer::ImeBufferRange;
+pub use buffer::ImeBufferSnapshot;
+pub use buffer::ImeCursorState;
+pub use buffer::ImePreedit;
+pub use buffer::ImePreeditBoundary;
+pub use buffer::ImeSelectionSnapshot;
 pub use events::ImeAcceptCommit;
 pub use events::ImeApplied;
 pub use events::ImeAppliedResult;
@@ -22,6 +31,7 @@ pub use events::ImeCommitRequested;
 pub use events::ImeRejectCommit;
 pub use events::ImeRejection;
 pub use events::ImeStarted;
+pub use events::ImeTextChanged;
 pub use events::ImeValidationRejected;
 pub use field::ImeAppOwnedFieldSpec;
 pub use field::ImeBuiltInApplied;
@@ -33,6 +43,8 @@ pub use ids::ImeCommitAttemptId;
 pub use ids::ImeSessionId;
 pub use ids::ImeValueRevision;
 pub use ids::PanelFieldId;
+use input::ImeInputFrame;
+use input::ImeWindowState;
 pub use lease::ImeInputBlocker;
 use session::ActiveImeSession;
 pub use session::ImeOpenSession;
@@ -43,10 +55,35 @@ pub use target::ImeTarget;
 /// Installs the single-line IME session lifecycle.
 pub(crate) struct ImePlugin;
 
+/// Named scheduling points for IME focus, window state, input, and cleanup.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ImeSystemSet {
+    /// Point where input blockers are ready for same-frame input consumers.
+    PublishInputBlockers,
+    /// Point where `Window::ime_enabled` and coarse `Window::ime_position` are updated.
+    UpdateWindowIme,
+    /// Point where platform IME and keyboard edits are consumed.
+    Input,
+    /// Point where stale sessions are canceled.
+    Cleanup,
+}
+
 impl Plugin for ImePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveImeSession>()
             .init_resource::<ImeInputBlocker>()
+            .init_resource::<ImeInputFrame>()
+            .init_resource::<ImeWindowState>()
+            .configure_sets(
+                Update,
+                (
+                    ImeSystemSet::PublishInputBlockers,
+                    ImeSystemSet::UpdateWindowIme,
+                    ImeSystemSet::Input,
+                    ImeSystemSet::Cleanup,
+                )
+                    .chain(),
+            )
             .add_observer(activation::observe_panel_clicks)
             .add_observer(session::open_session)
             .add_observer(session::request_commit)
@@ -55,10 +92,21 @@ impl Plugin for ImePlugin {
             .add_observer(session::reject_commit)
             .add_systems(
                 Update,
-                (
-                    session::lease_scoped_commands,
-                    session::cleanup_stale_sessions,
-                ),
+                input::clear_frame_input.in_set(ImeSystemSet::PublishInputBlockers),
+            )
+            .add_systems(
+                Update,
+                input::update_window_ime.in_set(ImeSystemSet::UpdateWindowIme),
+            )
+            .add_systems(
+                Update,
+                (input::handle_window_ime, input::handle_keyboard)
+                    .chain()
+                    .in_set(ImeSystemSet::Input),
+            )
+            .add_systems(
+                Update,
+                session::cleanup_stale_sessions.in_set(ImeSystemSet::Cleanup),
             );
     }
 }

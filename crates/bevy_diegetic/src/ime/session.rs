@@ -6,6 +6,7 @@ use bevy::window::WindowClosed;
 use bevy::window::WindowFocused;
 
 use super::ImeAcceptCommit;
+use super::ImeBufferSnapshot;
 use super::ImeCancelCause;
 use super::ImeCanceled;
 use super::ImeCommitAttemptId;
@@ -17,7 +18,13 @@ use super::ImeRejectCommit;
 use super::ImeSessionId;
 use super::ImeStarted;
 use super::ImeTarget;
+use super::ImeTextChanged;
 use super::ImeValidationRejected;
+use super::buffer;
+use super::buffer::ImeBufferEdit;
+use super::buffer::ImeEditBuffer;
+use super::buffer::ImeEditCommand;
+use super::buffer::ImePreedit;
 
 /// Request event that opens an IME session for an already-resolved target.
 #[derive(Event, Clone, Debug)]
@@ -52,12 +59,39 @@ pub struct ImeRequestCancel {
 
 #[derive(Clone, Debug)]
 struct ImeSession {
-    session_id:      ImeSessionId,
-    target:          ImeTarget,
-    window:          Entity,
-    field_spec:      ImeEditableFieldSpec,
-    text:            String,
-    pending_attempt: Option<ImeCommitAttemptId>,
+    session_id: ImeSessionId,
+    target:     ImeTarget,
+    window:     Entity,
+    field_spec: ImeEditableFieldSpec,
+    buffer:     ImeEditBuffer,
+    state:      ImeSessionState,
+}
+
+#[derive(Clone, Debug)]
+enum ImeSessionState {
+    Editing,
+    Composing(ImePreedit),
+    PendingCommit(ImeCommitAttemptId),
+}
+
+impl ImeSessionState {
+    const fn preedit(&self) -> Option<&ImePreedit> {
+        match self {
+            Self::Composing(preedit) => Some(preedit),
+            Self::Editing | Self::PendingCommit(_) => None,
+        }
+    }
+
+    const fn pending_attempt(&self) -> Option<ImeCommitAttemptId> {
+        match *self {
+            Self::PendingCommit(attempt_id) => Some(attempt_id),
+            Self::Editing | Self::Composing(_) => None,
+        }
+    }
+
+    const fn is_composing(&self) -> bool { matches!(self, Self::Composing(_)) }
+
+    const fn is_pending_commit(&self) -> bool { matches!(self, Self::PendingCommit(_)) }
 }
 
 /// Resource holding the single active IME session.
@@ -90,6 +124,159 @@ impl ActiveImeSession {
         self.next_attempt = self.next_attempt.wrapping_add(1).max(1);
         attempt_id
     }
+
+    pub(super) fn active_session_id(&self) -> Option<ImeSessionId> {
+        self.active.as_ref().map(|session| session.session_id)
+    }
+
+    pub(super) fn active_window(&self) -> Option<Entity> {
+        self.active.as_ref().map(|session| session.window)
+    }
+
+    pub(super) fn is_composing(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|session| session.state.is_composing())
+    }
+
+    pub(super) fn is_pending_commit(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|session| session.state.is_pending_commit())
+    }
+
+    pub(super) fn is_leased(&self, input_blocker: &ImeInputBlocker) -> bool {
+        self.active.as_ref().is_some_and(|session| {
+            input_blocker.matches_session_window(session.session_id, session.window)
+        })
+    }
+
+    pub(super) fn apply_keyboard_text(
+        &mut self,
+        window: Entity,
+        text: &str,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        self.apply_edit(
+            window,
+            ImeEditCommand::InsertText(text.to_owned()),
+            input_blocker,
+        )
+    }
+
+    pub(super) fn apply_edit_command(
+        &mut self,
+        command: ImeEditCommand,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        let window = self.active_window()?;
+        self.apply_edit(window, command, input_blocker)
+    }
+
+    pub(super) fn apply_preedit(
+        &mut self,
+        window: Entity,
+        text: &str,
+        cursor: Option<(usize, usize)>,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        let session = self.editable_session(window, input_blocker)?;
+        if text.is_empty() {
+            return session.clear_preedit();
+        }
+
+        let preedit = ImePreedit {
+            text:        text.to_owned(),
+            replacement: session.buffer.replacement_range(),
+            cursor:      buffer::preedit_cursor_boundary(text, cursor),
+        };
+        session.state = ImeSessionState::Composing(preedit);
+        Some(session.text_changed_event())
+    }
+
+    pub(super) fn apply_ime_commit(
+        &mut self,
+        window: Entity,
+        text: &str,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        let session = self.editable_session(window, input_blocker)?;
+        let was_composing = session.state.is_composing();
+        session.state = ImeSessionState::Editing;
+        match session
+            .buffer
+            .apply(ImeEditCommand::InsertText(text.to_owned()))
+        {
+            ImeBufferEdit::Changed => Some(session.text_changed_event()),
+            ImeBufferEdit::Unchanged if was_composing => Some(session.text_changed_event()),
+            ImeBufferEdit::Unchanged => None,
+        }
+    }
+
+    pub(super) fn clear_preedit(
+        &mut self,
+        window: Entity,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        let session = self.editable_session(window, input_blocker)?;
+        session.clear_preedit()
+    }
+
+    pub(super) fn clear_active_preedit(
+        &mut self,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        let window = self.active_window()?;
+        self.clear_preedit(window, input_blocker)
+    }
+
+    fn apply_edit(
+        &mut self,
+        window: Entity,
+        command: ImeEditCommand,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<ImeTextChanged> {
+        let session = self.editable_session(window, input_blocker)?;
+        match session.buffer.apply(command) {
+            ImeBufferEdit::Changed => Some(session.text_changed_event()),
+            ImeBufferEdit::Unchanged => None,
+        }
+    }
+
+    fn editable_session(
+        &mut self,
+        window: Entity,
+        input_blocker: &ImeInputBlocker,
+    ) -> Option<&mut ImeSession> {
+        let session = self.active.as_mut()?;
+        if session.window != window
+            || session.state.is_pending_commit()
+            || !input_blocker.matches_session_window(session.session_id, session.window)
+        {
+            return None;
+        }
+        Some(session)
+    }
+}
+
+impl ImeSession {
+    fn snapshot(&self) -> ImeBufferSnapshot { self.buffer.snapshot(self.state.preedit().cloned()) }
+
+    fn text_changed_event(&self) -> ImeTextChanged {
+        ImeTextChanged {
+            session_id: self.session_id,
+            target:     self.target.clone(),
+            snapshot:   self.snapshot(),
+        }
+    }
+
+    fn clear_preedit(&mut self) -> Option<ImeTextChanged> {
+        if !self.state.is_composing() {
+            return None;
+        }
+        self.state = ImeSessionState::Editing;
+        Some(self.text_changed_event())
+    }
 }
 
 pub(super) fn open_session(
@@ -115,9 +302,10 @@ pub(super) fn open_session(
         target: request.target.clone(),
         window: request.window,
         field_spec: request.field_spec.clone(),
-        text: request.initial_text.clone(),
-        pending_attempt: None,
+        buffer: ImeEditBuffer::new(request.initial_text.clone()),
+        state: ImeSessionState::Editing,
     };
+    let changed = session.text_changed_event();
     active_session.active = Some(session);
     input_blocker.begin_session(session_id, request.window, frame_count.map(|count| count.0));
 
@@ -125,6 +313,7 @@ pub(super) fn open_session(
         session_id,
         target: request.target.clone(),
     });
+    commands.trigger(changed);
 }
 
 pub(super) fn request_commit(
@@ -169,7 +358,7 @@ pub(super) fn accept_commit(
         return;
     };
     if session.session_id != response.session_id
-        || session.pending_attempt != Some(response.attempt_id)
+        || session.state.pending_attempt() != Some(response.attempt_id)
     {
         active_session.active = Some(session);
         return;
@@ -194,51 +383,18 @@ pub(super) fn reject_commit(
         return;
     };
     if session.session_id != response.session_id
-        || session.pending_attempt != Some(response.attempt_id)
+        || session.state.pending_attempt() != Some(response.attempt_id)
     {
         return;
     }
 
-    session.pending_attempt = None;
+    session.state = ImeSessionState::Editing;
     commands.trigger(ImeValidationRejected {
         session_id: response.session_id,
         attempt_id: response.attempt_id,
         target:     session.target.clone(),
         reason:     response.reason.clone(),
     });
-}
-
-pub(super) fn lease_scoped_commands(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut active_session: ResMut<ActiveImeSession>,
-    mut input_blocker: ResMut<ImeInputBlocker>,
-    mut commands: Commands,
-) {
-    let Some(session) = active_session.active.as_ref() else {
-        return;
-    };
-    let session_id = session.session_id;
-    if !input_blocker.matches_session_window(session_id, session.window) {
-        return;
-    }
-
-    if keys.just_pressed(KeyCode::Enter) {
-        commit_matching_session(
-            &mut active_session,
-            session_id,
-            ImeCommitCause::Enter,
-            &mut commands,
-        );
-    } else if keys.just_pressed(KeyCode::Escape)
-        && cancel_matching_session(
-            &mut active_session,
-            session_id,
-            ImeCancelCause::Escape,
-            &mut commands,
-        )
-    {
-        input_blocker.clear_session(session_id);
-    }
 }
 
 pub(super) fn cleanup_stale_sessions(
@@ -302,7 +458,7 @@ fn commit_matching_session(
     let Some(active) = active_session.active.as_ref() else {
         return;
     };
-    if active.session_id != session_id || active.pending_attempt.is_some() {
+    if active.session_id != session_id || !matches!(active.state, ImeSessionState::Editing) {
         return;
     }
 
@@ -310,7 +466,7 @@ fn commit_matching_session(
     let Some(active) = active_session.active.as_mut() else {
         return;
     };
-    active.pending_attempt = Some(attempt_id);
+    active.state = ImeSessionState::PendingCommit(attempt_id);
 
     commands.trigger(ImeCommitRequested {
         session_id,
@@ -318,7 +474,7 @@ fn commit_matching_session(
         target: active.target.clone(),
         cause,
         field_spec: active.field_spec.clone(),
-        text: active.text.clone(),
+        text: active.buffer.committed_text().to_owned(),
     });
 }
 
