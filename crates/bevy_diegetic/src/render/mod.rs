@@ -53,11 +53,12 @@ pub(crate) enum PanelChildSystems {
 /// Two orthogonal mechanisms back this, both running inside the coverage shader
 /// (no extra pass, and they survive OIT, which forces `Msaa::Off`):
 /// - a **screen-space band** sizes the edge ramp from the distance gradient so it stays ~1px per
-///   screen axis — this fixes the convex-corner balloon at grazing angles, where the scalar
-///   design-space band over-widens into a wing.
-/// - **supersampling** evaluates glyph coverage at four sub-pixel sample points and averages them —
-///   this fixes the stepping along a shallow edge, where one sample can't represent the coverage
-///   across the foreshortened footprint.
+///   screen axis — this keeps glyph edges crisp at grazing angles, where the scalar design-space
+///   band otherwise widens the ramp into a blur.
+/// - **anisotropic supersampling** strides several coverage samples along the foreshortened
+///   footprint axis (one head-on, more as the angle steepens). Its one visible job is erasing the
+///   wing a single band sample leaves off a sharp convex corner — and that wing only appears on
+///   sharp convex corners at the most extreme viewing angles. Everywhere else it is a no-op.
 ///
 /// The variants are the useful points on that quality/cost ladder.
 ///
@@ -65,28 +66,32 @@ pub(crate) enum PanelChildSystems {
 ///
 /// Cost is per text fragment and scales with how many pixels text covers.
 /// [`Anisotropic`](Self::Anisotropic) is nearly free — one extra `fwidth` over the
-/// baseline single sample. [`Supersample`](Self::Supersample) evaluates coverage
-/// four times and [`Both`](Self::Both) five (four samples plus the center sample
-/// that sizes the band), so a frame dense with large text is where dropping to
-/// [`Anisotropic`](Self::Anisotropic) — or [`Off`](Self::Off) — reclaims fill-rate.
+/// baseline single sample. [`Supersample`](Self::Supersample) evaluates coverage at
+/// four fixed sub-pixel points; [`Both`](Self::Both) instead strides one sample per
+/// unit of footprint anisotropy (one head-on, up to 16 at the steepest grazing
+/// angles), so it pays the cost only where the footprint is foreshortened. A frame
+/// dense with large grazing text is where dropping to [`Anisotropic`](Self::Anisotropic)
+/// — or [`Off`](Self::Off) — reclaims fill-rate.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TextAntiAlias {
-    /// Scalar band, one sample. No anti-aliasing past the baseline edge ramp —
-    /// corner balloon and shallow-edge stepping both show. Mainly a reference.
+    /// Scalar band, one sample. Edges blur at grazing angles and the sharp-corner
+    /// wing shows. Mainly a reference.
     Off,
-    /// Screen-space band, one sample. Fixes the corner balloon at almost no cost;
-    /// shallow-edge stepping remains.
+    /// Screen-space band, one sample. Crisp edges at every angle for almost no cost;
+    /// the sharp-corner wing at the most extreme viewing angles remains.
     Anisotropic,
-    /// Scalar band, four samples. Fixes shallow-edge stepping; corner balloon
-    /// remains.
+    /// Scalar band, four samples. Integrates the footprint, but without the
+    /// screen-space band edges still blur at grazing — mainly a reference point.
     Supersample,
-    /// Screen-space band plus four samples. Fixes both, at the highest cost.
+    /// Screen-space band plus anisotropic supersampling. Crisp edges at every angle
+    /// AND erases the sharp-corner wing that the band alone leaves at the most
+    /// extreme viewing angles. Highest cost.
     #[default]
     Both,
 }
 
 impl TextAntiAlias {
-    /// Whether this mode supersamples the footprint (four samples vs. one).
+    /// Whether this mode supersamples the footprint (multiple samples vs. one).
     #[must_use]
     pub const fn supersamples(self) -> bool { matches!(self, Self::Supersample | Self::Both) }
 

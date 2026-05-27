@@ -263,26 +263,14 @@ const fn segment_orientation(segment: &QuadraticSegment) -> CurveOrientation {
 }
 
 fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis: Axis) -> bool {
-    if ignored_axis_line(segment, axis) {
-        return false;
-    }
-
+    // Axis-parallel edges (a horizontal line in a horizontal band, etc.) are kept:
+    // they add 0 to winding (`curve_winding` returns 0 when the scanline is parallel)
+    // but DO carry distance, which the signed-distance field needs. Dropping them
+    // left the field blind to those edges, so it saturated to ±edge_width near them
+    // and the screen-space AA band ballooned at grazing angles.
     let segment_min = segment_axis_min(segment, axis);
     let segment_max = segment_axis_max(segment, axis);
     segment_min <= band_max && segment_max >= band_min
-}
-
-fn ignored_axis_line(segment: &QuadraticSegment, axis: Axis) -> bool {
-    match axis {
-        Axis::Horizontal => {
-            (segment.start.y - segment.control.y).abs() <= f32::EPSILON
-                && (segment.control.y - segment.end.y).abs() <= f32::EPSILON
-        },
-        Axis::Vertical => {
-            (segment.start.x - segment.control.x).abs() <= f32::EPSILON
-                && (segment.control.x - segment.end.x).abs() <= f32::EPSILON
-        },
-    }
 }
 
 const fn segment_axis_min(segment: &QuadraticSegment, axis: Axis) -> f32 {

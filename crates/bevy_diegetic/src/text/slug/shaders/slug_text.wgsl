@@ -32,6 +32,7 @@ const DEGENERATE_EPS: f32 = 0.00000001;
 const SQRT_3_OVER_2: f32 = 0.8660254037844386;
 const DISCARD_ALPHA: f32 = 0.02;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
+const MAX_ANISO_SAMPLES: f32 = 16.0;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 
@@ -382,6 +383,50 @@ fn band_coverage(sd: f32, band: f32) -> f32 {
     return clamp(0.5 - sd / band, 0.0, 1.0);
 }
 
+// Anisotropic supersample of the band coverage. A single band sample models the
+// silhouette as a straight edge through the nearest point; at a convex corner the
+// fill is a thin wedge, so under a foreshortened footprint the straight-edge model
+// over-covers (the grazing-angle ghost wing). Stride N ~= the footprint anisotropy
+// samples along the longer footprint axis to integrate across the corner; the
+// well-resolved short axis stays a single sample.
+//
+// The per-sample ramp width is rebuilt from directional differences of the signed
+// distance along the two footprint axes: the major contribution shrinks with N
+// (the sub-sample spacing), the minor contribution stays full so edges whose
+// normal is the well-resolved axis keep a ~1px ramp. signed_distance is
+// 1-Lipschitz, so each difference is clamped to its step length; that rejects the
+// spike when a finite-difference sample lands in a band where an axis-parallel
+// edge isn't visible. Head-on the footprint is isotropic, N collapses to 1.
+fn aniso_band_coverage(
+    point: vec2<f32>,
+    dx: vec2<f32>,
+    dy: vec2<f32>,
+    edge_width_sq: f32,
+    glyph: GlyphRecord,
+) -> f32 {
+    let sd_center = signed_distance(point, edge_width_sq, glyph);
+    let len_dx = length(dx);
+    let len_dy = length(dy);
+    let major = select(dy, dx, len_dx >= len_dy);
+    let minor = select(dx, dy, len_dx >= len_dy);
+    let major_len = max(len_dx, len_dy);
+    let minor_len = max(min(len_dx, len_dy), ROOT_EPSILON);
+    let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES);
+    let inv_count = 1.0 / sample_count;
+
+    let d_major = min(abs(signed_distance(point + major, edge_width_sq, glyph) - sd_center), major_len);
+    let d_minor = min(abs(signed_distance(point + minor, edge_width_sq, glyph) - sd_center), minor_len);
+    let per_band = max(d_minor + d_major * inv_count, ROOT_EPSILON);
+
+    let count = u32(sample_count);
+    var sum = 0.0;
+    for (var index = 0u; index < count; index += 1u) {
+        let stride = (f32(index) + 0.5) * inv_count - 0.5;
+        sum += band_coverage(signed_distance(point + stride * major, edge_width_sq, glyph), per_band);
+    }
+    return sum * inv_count;
+}
+
 fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
     // Derivatives stay at the top, in uniform control flow: every branch below
     // switches on a uniform value, so the fwidth/dpdx calls are never gated by a
@@ -394,25 +439,20 @@ fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
     // The two AA axes are independent. aa_band picks the edge-ramp width (scalar
     // design-space `edge_width` vs. a screen-space band that holds ~1px per axis,
     // so the convex-corner apron can't balloon at grazing). supersample picks 1
-    // vs. 4 footprint samples, which integrate the along-footprint coverage a
-    // single sample can't capture (the shallow-edge stepping). All four
-    // combinations are valid; the combined mode fixes both artifacts at once.
+    // sample vs. an anisotropic stride along the foreshortened axis, which
+    // integrates the along-footprint coverage a single sample can't capture (the
+    // grazing-angle corner wing). All four combinations are valid; the combined
+    // mode fixes both artifacts at once.
     var coverage: f32;
     if uniforms.aa_band != 0u {
         let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
         let edge_width_sq = edge_width * edge_width;
-        // One band width for the whole fragment, from the center sample's
-        // screen-space distance gradient. Locally the edge is straight, so the
-        // same band applies to every footprint sample.
-        let band = max(fwidth(signed_distance(point, edge_width_sq, glyph)), ROOT_EPSILON);
         if uniforms.supersample != 0u {
-            var sum = 0.0;
-            sum += band_coverage(signed_distance(point + 0.375 * dx + 0.125 * dy, edge_width_sq, glyph), band);
-            sum += band_coverage(signed_distance(point - 0.125 * dx + 0.375 * dy, edge_width_sq, glyph), band);
-            sum += band_coverage(signed_distance(point - 0.375 * dx - 0.125 * dy, edge_width_sq, glyph), band);
-            sum += band_coverage(signed_distance(point + 0.125 * dx - 0.375 * dy, edge_width_sq, glyph), band);
-            coverage = sum * 0.25;
+            coverage = aniso_band_coverage(point, dx, dy, edge_width_sq, glyph);
         } else {
+            // Single sample: one full-footprint band from the center sample's
+            // screen-space distance gradient.
+            let band = max(fwidth(signed_distance(point, edge_width_sq, glyph)), ROOT_EPSILON);
             coverage = band_coverage(signed_distance(point, edge_width_sq, glyph), band);
         }
     } else if uniforms.supersample != 0u {

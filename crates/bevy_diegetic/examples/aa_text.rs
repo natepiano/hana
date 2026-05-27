@@ -1,41 +1,55 @@
-//! `aa_text` — compare every anti-aliasing path the text renderer can use, over
-//! plain unlit text with nothing else in the scene.
+//! `aa_text` — compare every anti-aliasing path the text renderer can use, on
+//! lit text standing on a ground plane under studio lighting.
 //!
 //! slug renders glyph edges as analytic alpha coverage, sampled once per pixel.
 //! At grazing angles that single sample can't represent the foreshortened pixel
-//! footprint, so edges stair-step. There are two fundamentally different places
-//! to fix it — the two columns of the bottom-left panel.
+//! footprint. There are two fundamentally different places to fix it — the two
+//! columns of the bottom-left panel.
 //!
 //! **In the coverage shader — [`TextAntiAlias`] (keys `1`–`4`).** slug
 //! anti-aliases glyph edges inside the fragment shader: no extra pass, and it
 //! survives OIT (which forces `Msaa::Off`). The setting combines two orthogonal
 //! mechanisms:
 //! - **Anisotropic band** — sizes the edge ramp from the distance gradient so it holds ~1px per
-//!   screen axis, fixing the convex-corner balloon at grazing angles that the scalar band
-//!   over-widens into a wing.
-//! - **Supersampling** — evaluates coverage at four sub-pixel sample points and averages, fixing
-//!   the stepping along a shallow edge that a single sample can't resolve.
+//!   screen axis, keeping glyph edges crisp at grazing angles where the scalar band otherwise
+//!   widens the ramp into a blur.
+//! - **Supersampling** — strides coverage samples along the foreshortened footprint axis (one
+//!   head-on, more as the angle steepens). It erases the wing a single band sample leaves off a
+//!   sharp convex corner — visible only on sharp convex corners at the most extreme viewing angles,
+//!   a no-op everywhere else.
 //!
-//! The four modes are the points on that grid: `Off` (neither), `Aniso` (band
-//! only), `Super` (samples only), `Both` (default, and the best result). The
-//! cheaper modes exist for performance — the band is nearly free, but
-//! supersampling evaluates coverage four (or five, combined) times per fragment,
-//! so a text-dense frame can reclaim fill-rate by stepping down.
+//! The four modes are the points on that grid: `Off` (neither), `Anisotropic`
+//! (band only), `SuperSample` (samples only), `Both` (default, and the best
+//! result). The cheaper modes exist for performance — the band is nearly free,
+//! while `Both` strides up to 16 samples per fragment at the steepest grazing
+//! angles, so a text-dense frame can reclaim fill-rate by stepping down. To see
+//! supersampling's effect, press `B` for the sharp-corner view and flip
+//! `Anisotropic` ↔ `Both`.
 //!
 //! **As a post-process pass over the resolved frame — keys `N` `S` `F` `T`.**
-//! Mutually exclusive, with `None` the off state:
-//! - **SMAA** — luma-edge detection in image space; keeps MSAA on.
-//! - **FXAA** — cheaper, blurrier luma-edge pass; keeps MSAA on.
-//! - **TAA** — temporal blend across frames; requires `Msaa::Off` plus the depth/motion prepasses.
-//!   Included for completeness — note it ghosts on alpha-blended glyphs (the transparency the
-//!   renderer exists to draw), so it is the weakest fit here even though it AA's the most.
+//! Mutually exclusive, with `None` the off state. While OIT is on (the default)
+//! the camera runs `Msaa::Off`, so these passes — not MSAA — anti-alias geometry
+//! edges; toggle OIT off with `O` and MSAA returns (but TAA, which needs
+//! `Msaa::Off`, then can't run):
+//! - **SMAA** — luma-edge detection in image space.
+//! - **FXAA** — cheaper, blurrier luma-edge pass.
+//! - **TAA** — temporal blend across frames; adds the depth/motion prepasses. Included for
+//!   completeness — note it ghosts on alpha-blended glyphs (the transparency the renderer exists to
+//!   draw), so it is the weakest fit here even though it AA's the most.
 //!
-//! The text is unlit, so its color never varies as you orbit. Orbit to a grazing
-//! angle (MMB) to see the artifacts, then select each mode.
+//! The text is lit by a studio key/fill rig and stands on a ground plane,
+//! casting shadows — the now-fixed AA shown in a real scene rather than in
+//! isolation. A slowly tumbling cube to the right of the word is opaque geometry
+//! with no in-shader AA, so it shows what the POST passes (or MSAA, when OIT is
+//! toggled off with `O`) do to hard edges. Orbit to a grazing angle (MMB), or
+//! press `A` / `B`, to reach the text artifacts, then select each mode.
 //!
 //! Hotkeys:
-//! - `1` `2` `3` `4` — select the in-shader mode: Off / Aniso / Super / Both.
+//! - `1` `2` `3` `4` — select the in-shader mode: `Off` / `Anisotropic` / `SuperSample` / `Both`.
 //! - `N` `S` `F` `T` — select the post-process pass: None / SMAA / FXAA / TAA.
+//! - `A` — animate to a steep grazing angle (Off vs Anisotropic: edge blur vs crisp).
+//! - `B` — animate to a sharp glyph corner (Anisotropic vs Both: the wing comparison).
+//! - `O` — toggle OIT; off shows the coplanar sorting break and hands MSAA back to geometry.
 //! - `H` — home the camera.
 
 use std::time::Duration;
@@ -43,6 +57,7 @@ use std::time::Duration;
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::anti_alias::smaa::Smaa;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
@@ -54,26 +69,30 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
-use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
+use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::PlayAnimation;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 
-const EXAMPLE_TITLE: &str = "Anti-aliasing";
+const EXAMPLE_TITLE: &str = "Anti-Aliasing";
 const HEADLINE_TEXT: &str = "Anti-aliasing";
 const HEADLINE_SIZE: f32 = 0.40;
 const HEADLINE_Y: f32 = 0.18;
@@ -90,8 +109,123 @@ const TEXT_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 const HOME_CENTER: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
 const HOME_PITCH: f32 = 0.0;
 const HOME_YAW: f32 = 0.0;
-const HOME_FIT_MARGIN: f32 = 0.15;
+const HOME_FIT_MARGIN: f32 = 0.5;
 const HOME_FIT_DURATION_MS: u64 = 900;
+
+/// Ground plane sized to frame the word, the way `typography.rs` does it: a
+/// plane proportional to the headline (not the canonical 8-unit default, which
+/// dwarfs it), squashed in depth and pushed back so the word sits near the
+/// *front* edge and the rest recedes behind it. Dropped just below the text so
+/// the lit glyphs stand over it and cast shadows, leaving the text positions —
+/// and the baked `A` / `B` views — untouched.
+const GROUND_SIZE: f32 = 5.4;
+const GROUND_DEPTH_SCALE: f32 = 0.7;
+/// Floor front edge sits this far in front (+z) of the text plane.
+const GROUND_FRONT_MARGIN: f32 = 0.5;
+const GROUND_CENTER_Z: f32 =
+    DISPLAY_Z + GROUND_FRONT_MARGIN - GROUND_SIZE * GROUND_DEPTH_SCALE * 0.5;
+const GROUND_Y: f32 = -0.15;
+
+/// A slowly tumbling opaque cube to the right of the word (clear of the left-side
+/// `A` / `B` closeups). Opaque geometry gets no in-shader AA, so its hard edges
+/// show what the POST passes — or MSAA, when OIT is toggled off — do, and what
+/// they leave jagged otherwise.
+const CUBE_SIZE: f32 = 0.34;
+const CUBE_X: f32 = 2.05;
+const CUBE_COLOR: Color = Color::srgb(0.62, 0.64, 0.70);
+const CUBE_SPIN_SPEED: f32 = 0.35;
+
+/// Title-bar chip that toggles OIT (stable transparency), sitting beside `H Home`.
+const OIT_CONTROL: &str = "O OIT";
+
+/// Shared width for the three upper-right boxes — equal width, and a fixed value
+/// so the info box's paragraphs wrap.
+const PANEL_BOX_WIDTH: Px = Px(240.0);
+
+/// Third upper-right box: a title, a divider, then the fundamental why. Wrapped
+/// paragraphs rather than the demo boxes' fixed rows.
+const INFO_TITLE: &str = "WHY MSAA IS OFF";
+const INFO_PARAGRAPHS: [&str; 3] = [
+    "MSAA is off because it is incompatible with Order Independent Transparency (OIT).",
+    "Without OIT (press O) the shader does not sort the floor and text correctly.",
+    "With OIT on, geometry edges like the cube and the plane rely on POST AA.",
+];
+
+/// A camera viewpoint `A` / `B` can fly to, paired with the instruction box that
+/// names the comparison to run once you arrive. The two boxes stack in the
+/// upper-right corner, `A` (the simpler edge-blur point) above `B` (the
+/// sharp-corner wing, which also needs `SuperSample`).
+struct DemoView {
+    /// Key that flies the camera to this view.
+    key:    KeyCode,
+    /// Heading of this view's instruction box.
+    title:  &'static str,
+    /// Target orbit focus point (world units).
+    focus:  Vec3,
+    /// Target yaw and pitch (radians) and orbital radius (world units).
+    yaw:    f32,
+    pitch:  f32,
+    radius: f32,
+    /// Instruction rows: a leading keycap and its description.
+    rows:   &'static [(&'static str, &'static str)],
+}
+
+impl DemoView {
+    /// The single eased orbital glide the key plays to reach this view.
+    const fn camera_move(&self) -> CameraMove {
+        CameraMove::ToOrbit {
+            focus:    self.focus,
+            yaw:      self.yaw,
+            pitch:    self.pitch,
+            radius:   self.radius,
+            duration: Duration::from_millis(DEMO_MOVE_DURATION_MS),
+            easing:   EaseFunction::CubicInOut,
+        }
+    }
+}
+
+const DEMO_MOVE_DURATION_MS: u64 = 1200;
+
+/// `A` — at a steep grazing angle the scalar band widens the edge ramp into a
+/// blur while the anisotropic band holds it crisp. Off vs Anisotropic makes the
+/// point on its own. Orbit taken from the live view this was authored against.
+const STEEP_VIEW_ROWS: [(&str, &str); 3] = [
+    ("A", "go to this view"),
+    ("1", "off: edges blur"),
+    ("2", "Anisotropic: crisp"),
+];
+
+/// `B` — a sharper, closer grazing view onto the apex of the headline's leading
+/// `A`, the convex corner where a single coverage sample leaves a "wing".
+/// Anisotropic crisps the edge but the wing survives until `Both` supersamples.
+const WING_VIEW_ROWS: [(&str, &str); 4] = [
+    ("B", "go to this view"),
+    ("1", "both off: wing shows"),
+    ("2", "Anisotropic: most gone"),
+    ("4", "Both: fully cancelled"),
+];
+
+/// The two stacked instruction boxes, top to bottom.
+const DEMO_VIEWS: [DemoView; 2] = [
+    DemoView {
+        key:    KeyCode::KeyA,
+        title:  "STEEP GRAZING ANGLE",
+        focus:  Vec3::new(-0.965, 0.051, -0.026),
+        yaw:    1.069,
+        pitch:  -0.042,
+        radius: 0.193,
+        rows:   &STEEP_VIEW_ROWS,
+    },
+    DemoView {
+        key:    KeyCode::KeyB,
+        title:  "SHARP-CORNER WINGS",
+        focus:  Vec3::new(-1.413, 0.039, 0.007),
+        yaw:    1.651,
+        pitch:  -0.018,
+        radius: 0.096,
+        rows:   &WING_VIEW_ROWS,
+    },
+];
 
 /// Bottom-left control panel — column headers, geometry, and chip colors.
 const TEXT_COLUMN_HEADER: &str = "TEXT (shader)";
@@ -99,19 +233,26 @@ const POST_COLUMN_HEADER: &str = "POST (Bevy)";
 const PANEL_PADDING: Px = Px(10.0);
 const PANEL_RADIUS: Px = Px(10.0);
 const PANEL_BORDER_WIDTH: Px = Px(1.0);
-const COLUMN_GAP: Px = Px(28.0);
+const COLUMN_GAP: Px = Px(16.0);
 const ROW_GAP: Px = Px(4.0);
 const HEADER_COLOR: Color = Color::srgb(0.55, 0.78, 0.95);
 const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 const INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 const PANEL_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.4);
 
+/// Upper-right instruction boxes — drawn at the shared [`TITLE_SIZE`] /
+/// [`LABEL_SIZE`] like the other panels. Gap between a row's keycap and its
+/// description.
+const KEY_GAP: Px = Px(8.0);
+/// Vertical gap between the two stacked instruction boxes.
+const PANEL_STACK_GAP: Px = Px(8.0);
+
 /// The in-shader [`TextAntiAlias`] modes, in cost order. One source of truth for
 /// both the key that selects each and the chip label shown for it.
 const TEXT_MODES: [(KeyCode, &str, TextAntiAlias); 4] = [
     (KeyCode::Digit1, "1 Off", TextAntiAlias::Off),
-    (KeyCode::Digit2, "2 Aniso", TextAntiAlias::Anisotropic),
-    (KeyCode::Digit3, "3 Super", TextAntiAlias::Supersample),
+    (KeyCode::Digit2, "2 Anisotropic", TextAntiAlias::Anisotropic),
+    (KeyCode::Digit3, "3 SuperSample", TextAntiAlias::Supersample),
     (KeyCode::Digit4, "4 Both", TextAntiAlias::Both),
 ];
 
@@ -129,20 +270,37 @@ const POST_MODES: [(KeyCode, &str, PostAa); 4] = [
 /// to [`TextAntiAlias`], which runs in the coverage shader regardless.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
 enum PostAa {
-    /// No post-process pass; rely on MSAA + the in-shader AA alone.
+    /// No post-process pass; the in-shader text AA carries the frame alone.
     #[default]
     None,
-    /// SMAA: image-space luma-edge pass, MSAA stays on.
+    /// SMAA: image-space luma-edge pass.
     Smaa,
-    /// FXAA: cheaper image-space luma-edge pass, MSAA stays on.
+    /// FXAA: cheaper image-space luma-edge pass.
     Fxaa,
-    /// TAA: temporal blend; forces `Msaa::Off` and adds the prepasses.
+    /// TAA: temporal blend across frames; adds the depth/motion prepasses.
     Taa,
 }
+
+/// Source of truth for the OIT toggle, mirrored into the `O OIT` title-bar chip.
+/// Starts on — the scene opens with stable transparency.
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
+struct OitState(bool);
+
+impl Default for OitState {
+    fn default() -> Self { Self(true) }
+}
+
+/// Marker for the slowly tumbling cube left of the word.
+#[derive(Component)]
+struct SpinningCube;
 
 /// Marker for the bottom-left two-column AA control panel.
 #[derive(Component)]
 struct AaPanel;
+
+/// Marker for the upper-right instruction panel that stacks both demo boxes.
+#[derive(Component)]
+struct DemoPanel;
 
 /// The three text styles a control column draws with: its header, an active
 /// (highlighted) chip, and an inactive chip.
@@ -159,43 +317,125 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .size(GROUND_SIZE)
+        .transform(
+            Transform::from_xyz(0.0, GROUND_Y, GROUND_CENTER_Z).with_scale(Vec3::new(
+                1.0,
+                1.0,
+                GROUND_DEPTH_SCALE,
+            )),
+        )
         .with_orbit_cam(
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
+        // OIT keeps the coplanar blended geometry (the ground plane and the text)
+        // sorted stably as the camera orbits. It also forces `Msaa::Off` on the
+        // main and screen-space cameras alike, which is what lets TAA (which
+        // requires `Msaa::Off`) toggle without the macOS MSAA-switch stall — see
+        // `apply_post_aa`.
+        .with_stable_transparency()
         .with_camera_home(Transform::from_translation(HOME_CENTER))
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .margin(HOME_FIT_MARGIN)
         .duration(Duration::from_millis(HOME_FIT_DURATION_MS))
-        .with_title_bar(TitleBar::new().with_title(EXAMPLE_TITLE))
+        .with_title_bar(
+            TitleBar::new()
+                .with_title(EXAMPLE_TITLE)
+                .active_control(OIT_CONTROL),
+        )
+        .wire_chip_to_state::<OitState, _>(OIT_CONTROL, |state| {
+            if state.0 {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
         .with_camera_control_panel()
         .init_resource::<PostAa>()
-        .add_systems(Startup, (setup, spawn_aa_panel))
-        .add_systems(Update, (select_text_aa, select_post_aa, refresh_aa_panel))
+        .init_resource::<OitState>()
+        .add_systems(Startup, (setup, spawn_aa_panel, spawn_demo_panel))
+        .add_systems(
+            Update,
+            (
+                select_text_aa,
+                select_post_aa,
+                select_demo_view,
+                toggle_oit,
+                rotate_cube,
+                refresh_aa_panel,
+            ),
+        )
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     commands.spawn((
         Name::new("Headline"),
         CameraHomeTarget,
         WorldText::new(HEADLINE_TEXT),
-        WorldTextStyle::new(HEADLINE_SIZE)
-            .with_color(TEXT_COLOR)
-            .with_unlit()
-            .with_shadow_mode(GlyphShadowMode::None),
+        WorldTextStyle::new(HEADLINE_SIZE).with_color(TEXT_COLOR),
         Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z),
     ));
     commands.spawn((
         Name::new("Small line"),
         WorldText::new(SMALL_TEXT),
-        WorldTextStyle::new(SMALL_SIZE)
-            .with_color(TEXT_COLOR)
-            .with_unlit()
-            .with_shadow_mode(GlyphShadowMode::None),
+        WorldTextStyle::new(SMALL_SIZE).with_color(TEXT_COLOR),
         Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z),
     ));
+    // Opaque cube to the right, floating with its center on the word's vertical
+    // center so a corner never dips into the ground plane as it tumbles.
+    commands.spawn((
+        Name::new("Spinning cube"),
+        SpinningCube,
+        Mesh3d(meshes.add(Cuboid::from_length(CUBE_SIZE))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: CUBE_COLOR,
+            ..default()
+        })),
+        Transform::from_xyz(CUBE_X, HEADLINE_Y, DISPLAY_Z),
+    ));
+}
+
+/// Tumbles the cube slowly about a tilted axis so its edges sweep through a
+/// range of angles, giving the POST passes (and MSAA) varied hard edges to work.
+fn rotate_cube(time: Res<Time>, mut cubes: Query<&mut Transform, With<SpinningCube>>) {
+    let angle = CUBE_SPIN_SPEED * time.delta_secs();
+    let axis = Vec3::new(0.3, 1.0, 0.0).normalize();
+    for mut transform in &mut cubes {
+        transform.rotate(Quat::from_axis_angle(axis, angle));
+    }
+}
+
+/// On `O`, toggle OIT on the scene camera. Inserting [`StableTransparency`]
+/// turns OIT on (and forces `Msaa::Off`); removing it restores `Msaa::default()`
+/// — both via the `bevy_diegetic` observers, on the main and screen-space cameras
+/// alike. With OIT off the coplanar ground plane and text sort view-dependently,
+/// which is the point: it shows why the scene defaults to OIT.
+fn toggle_oit(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<OitState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyO) {
+        return;
+    }
+    state.0 = !state.0;
+    for camera in &cameras {
+        if state.0 {
+            commands.entity(camera).insert(StableTransparency);
+        } else {
+            commands.entity(camera).remove::<StableTransparency>();
+        }
+    }
 }
 
 /// Marker for the headline text whose rendered bounds define the home frame.
@@ -219,6 +459,32 @@ fn spawn_aa_panel(mut commands: Commands, aa: Res<TextAntiAlias>, post: Res<Post
         },
         Err(error) => {
             error!("aa_text: failed to build AA panel: {error}");
+        },
+    }
+}
+
+/// Spawns the upper-right instruction panel — the two demo boxes stacked. It is
+/// static — the rows never change — so unlike the AA panel it needs no refresh
+/// system.
+fn spawn_demo_panel(mut commands: Commands) {
+    let unlit = StandardMaterial {
+        unlit: true,
+        ..default_panel_material()
+    };
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::TopRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_demo_panel_tree())
+        .build();
+
+    match panel {
+        Ok(panel) => {
+            commands.spawn((DemoPanel, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("aa_text: failed to build demo panel: {error}");
         },
     }
 }
@@ -249,6 +515,24 @@ fn select_text_aa(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAl
     }
 }
 
+/// On `A` / `B`, animate every orbit camera to that demo's viewpoint so the
+/// in-shader modes have a visible artifact to compare against.
+fn select_demo_view(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    for demo in &DEMO_VIEWS {
+        if !keyboard.just_pressed(demo.key) {
+            continue;
+        }
+        for camera in &cameras {
+            commands.trigger(PlayAnimation::new(camera, [demo.camera_move()]));
+        }
+        return;
+    }
+}
+
 /// On `N`/`S`/`F`/`T`, select that post-process mode and reconcile the camera's
 /// components.
 fn select_post_aa(
@@ -272,9 +556,14 @@ fn select_post_aa(
 }
 
 /// Strips every post-process pass off `camera`, then installs the one `mode`
-/// selects. TAA is the only mode that touches MSAA — it requires `Msaa::Off`;
-/// all others keep `Msaa::default()`. The frozen [`TemporalJitter`]/[`MipBias`]
-/// TAA leaves behind are removed so the off-state renders unshifted.
+/// selects. MSAA is never touched here — OIT owns it: `Msaa::Off` while OIT is
+/// on, flipped (on the main and screen-space cameras together) by the `O`
+/// toggle. Keeping the post-pass selection MSAA-free is the point: a *per-camera*
+/// MSAA mismatch is what stalls the macOS Metal surface, and changing both
+/// cameras at once never leaves one. SMAA and FXAA run over the frame as-is; TAA
+/// needs `Msaa::Off`, so it only anti-aliases while OIT is on. The frozen
+/// [`TemporalJitter`]/[`MipBias`] TAA leaves behind are removed so the off-state
+/// renders unshifted.
 fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
     let mut entity = commands.entity(camera);
     entity
@@ -284,17 +573,15 @@ fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
         .remove::<TemporalJitter>()
         .remove::<MipBias>();
     match mode {
-        PostAa::None => {
-            entity.insert(Msaa::default());
-        },
+        PostAa::None => {},
         PostAa::Smaa => {
-            entity.insert((Msaa::default(), Smaa::default()));
+            entity.insert(Smaa::default());
         },
         PostAa::Fxaa => {
-            entity.insert((Msaa::default(), Fxaa::default()));
+            entity.insert(Fxaa::default());
         },
         PostAa::Taa => {
-            entity.insert((Msaa::Off, TemporalAntiAliasing::default()));
+            entity.insert(TemporalAntiAliasing::default());
         },
     }
 }
@@ -338,6 +625,7 @@ fn build_aa_layout(builder: &mut LayoutBuilder, aa: TextAntiAlias, post: PostAa)
                     .map(|(_, label, mode)| (label, mode == aa)),
                 &styles,
             );
+            panel_divider_vertical(builder);
             build_column(
                 builder,
                 POST_COLUMN_HEADER,
@@ -366,6 +654,7 @@ fn build_column<'a>(
             .child_gap(ROW_GAP),
         |builder| {
             builder.text(header, styles.header.clone());
+            panel_divider(builder);
             for (label, active) in rows {
                 let style = if active {
                     &styles.active
@@ -375,5 +664,127 @@ fn build_column<'a>(
                 builder.text(label, style.clone());
             }
         },
+    );
+}
+
+/// Builds the upper-right instruction panel tree: a transparent, right-aligned
+/// column stacking one bordered box per [`DemoView`].
+fn build_demo_panel_tree() -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    build_demo_panel_layout(&mut builder);
+    builder.build()
+}
+
+fn build_demo_panel_layout(builder: &mut LayoutBuilder) {
+    let title = LayoutTextStyle::new(TITLE_SIZE)
+        .with_color(HEADER_COLOR)
+        .no_wrap();
+    let key = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(ACTIVE_COLOR)
+        .no_wrap();
+    let body = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(INACTIVE_COLOR)
+        .no_wrap();
+    // Fixed-width container + GROW boxes: the three line up on both edges, and
+    // the fixed width gives the info box's paragraphs something to wrap against.
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(PANEL_BOX_WIDTH))
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_gap(PANEL_STACK_GAP),
+        |builder| {
+            for demo in &DEMO_VIEWS {
+                build_demo_box(builder, demo, &title, &key, &body);
+            }
+            build_info_box(builder, &title);
+        },
+    );
+}
+
+/// Draws one demo's bordered box: its title over one row per key, each row
+/// pairing a highlighted keycap with its description.
+fn build_demo_box(
+    builder: &mut LayoutBuilder,
+    demo: &DemoView,
+    title: &LayoutTextStyle,
+    key: &LayoutTextStyle,
+    body: &LayoutTextStyle,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_gap(ROW_GAP)
+            .padding(Padding::all(PANEL_PADDING))
+            .corner_radius(CornerRadius::all(PANEL_RADIUS))
+            .background(DEFAULT_PANEL_BACKGROUND)
+            .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
+        |builder| {
+            builder.text(demo.title, title.clone());
+            panel_divider(builder);
+            for &(keycap, description) in demo.rows {
+                builder.with(
+                    El::new()
+                        .width(Sizing::FIT)
+                        .height(Sizing::FIT)
+                        .direction(Direction::LeftToRight)
+                        .child_gap(KEY_GAP),
+                    |builder| {
+                        builder.text(keycap, key.clone());
+                        builder.text(description, body.clone());
+                    },
+                );
+            }
+        },
+    );
+}
+
+/// Draws the static caption box: a title, a divider rule, then the
+/// [`INFO_PARAGRAPHS`] explainer, wrapped to the box width.
+fn build_info_box(builder: &mut LayoutBuilder, title: &LayoutTextStyle) {
+    // Wrapped (no `no_wrap`) so each paragraph flows to the fixed box width.
+    let body = LayoutTextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_gap(ROW_GAP)
+            .padding(Padding::all(PANEL_PADDING))
+            .corner_radius(CornerRadius::all(PANEL_RADIUS))
+            .background(DEFAULT_PANEL_BACKGROUND)
+            .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
+        |builder| {
+            builder.text(INFO_TITLE, title.clone());
+            panel_divider(builder);
+            for paragraph in INFO_PARAGRAPHS {
+                builder.text(paragraph, body.clone());
+            }
+        },
+    );
+}
+
+/// A horizontal hairline rule spanning the panel width, drawn under titles and
+/// column headers.
+fn panel_divider(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(Px(1.0)))
+            .background(PANEL_BORDER_COLOR),
+        |_| {},
+    );
+}
+
+/// A vertical hairline rule spanning the panel height, drawn between columns.
+fn panel_divider_vertical(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(Px(1.0)))
+            .height(Sizing::GROW)
+            .background(PANEL_BORDER_COLOR),
+        |_| {},
     );
 }

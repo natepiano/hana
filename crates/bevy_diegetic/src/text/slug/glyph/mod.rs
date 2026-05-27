@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod coverage_probe;
 mod outline;
 mod packing;
 
