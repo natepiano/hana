@@ -10,7 +10,6 @@ use super::mesh_spawning;
 use super::mesh_spawning::MeshSpawnAssets;
 use super::mesh_spawning::WorldTextMesh;
 use super::readiness::AwaitingReady;
-use super::readiness::PendingGlyphs;
 use super::shaping;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
@@ -40,19 +39,14 @@ type ChangedWorldTextQuery<'w, 's> = Query<
         )>,
     ),
 >;
-type PendingWorldTextQuery<'w, 's> =
-    Query<'w, 's, Entity, (With<WorldText>, With<PendingGlyphs>, Without<PanelChild>)>;
 /// Renders [`WorldText`] entities as slug glyph meshes.
 ///
-/// Processes entities in two cases:
-/// - **Changed**: `WorldText` or `TextStyle` was modified — re-shape and check glyphs.
-/// - **Pending**: entity has [`PendingGlyphs`] — re-check glyph readiness each frame.
-///
-/// When all glyphs are ready, builds meshes and fires [`WorldTextReady`](super::WorldTextReady).
-/// When glyphs are still missing, adds/keeps [`PendingGlyphs`].
+/// Processes entities whose `WorldText`, `WorldTextStyle`, or resolved font unit
+/// changed — runs text shaping, builds their glyph meshes, and fires
+/// [`WorldTextReady`](super::WorldTextReady). Glyph geometry is built
+/// synchronously, so a changed entity is ready within the same pass.
 pub(super) fn render_world_text(
     changed_texts: ChangedWorldTextQuery<'_, '_>,
-    pending_texts: PendingWorldTextQuery<'_, '_>,
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelChild>>,
     resolved_alphas: Query<&Resolved<TextAlpha>, Without<PanelChild>>,
     resolved_units: Query<&Resolved<FontUnit>, Without<PanelChild>>,
@@ -65,7 +59,7 @@ pub(super) fn render_world_text(
     defaults: Res<CascadeDefaults>,
     mut commands: Commands,
 ) {
-    let to_process = collect_entities_to_process(&changed_texts, &pending_texts);
+    let to_process: Vec<Entity> = changed_texts.iter().collect();
     if to_process.is_empty() {
         return;
     }
@@ -83,7 +77,6 @@ pub(super) fn render_world_text(
 
         if world_text.text().is_empty() {
             mesh_spawning::despawn_mesh_children(entity, &old_meshes, &mut commands);
-            commands.entity(entity).remove::<PendingGlyphs>();
             continue;
         }
 
@@ -240,51 +233,26 @@ impl<'a, 'mesh_world, 'mesh_state, 'mesh_data>
 }
 
 fn apply_readiness_markers(entity: Entity, readiness: GlyphReadiness, commands: &mut Commands) {
-    match readiness {
-        GlyphReadiness::Pending => {
-            commands.entity(entity).insert_if_new(PendingGlyphs);
-        },
-        GlyphReadiness::Ready | GlyphReadiness::Invisible => {
-            commands.entity(entity).remove::<PendingGlyphs>();
-            commands.entity(entity).insert(AwaitingReady);
-        },
-        GlyphReadiness::Failed | GlyphReadiness::Idle => {
-            commands.entity(entity).remove::<PendingGlyphs>();
-        },
+    // Glyph geometry is built synchronously, so a rendered run is ready at once;
+    // mark it for the post-`CalculateBounds` `WorldTextReady`. `Failed`/`Idle`
+    // produce no meshes and need no signal.
+    if matches!(readiness, GlyphReadiness::Ready | GlyphReadiness::Invisible) {
+        commands.entity(entity).insert(AwaitingReady);
     }
 }
 
 fn log_render_stats(total_ms: f32, text_count: usize, stats: &TextBuildStats, mesh_ms_total: f32) {
-    if total_ms <= constants::WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS
-        && stats.queued_glyphs == 0
-        && stats.pending_glyphs == 0
-        && stats.failed_glyphs == 0
-    {
+    if total_ms <= constants::WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS && stats.failed_glyphs == 0 {
         return;
     }
     bevy::log::debug!(
-        "render_world_text: total={total_ms:.1}ms texts={text_count} text_shaping={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} invisible={} queued={} pending={} failed={} quads={}",
+        "render_world_text: total={total_ms:.1}ms texts={text_count} text_shaping={:.1}ms atlas={:.1}ms mesh={mesh_ms_total:.1}ms glyphs={} ready={} invisible={} failed={} quads={}",
         stats.shape_ms,
         stats.atlas_ms,
         stats.glyphs,
         stats.ready_glyphs,
         stats.invisible_glyphs,
-        stats.queued_glyphs,
-        stats.pending_glyphs,
         stats.failed_glyphs,
         stats.emitted_quads,
     );
-}
-
-fn collect_entities_to_process(
-    changed_texts: &ChangedWorldTextQuery<'_, '_>,
-    pending_texts: &PendingWorldTextQuery<'_, '_>,
-) -> Vec<Entity> {
-    let mut to_process: Vec<Entity> = changed_texts.iter().collect();
-    for entity in pending_texts.iter() {
-        if !to_process.contains(&entity) {
-            to_process.push(entity);
-        }
-    }
-    to_process
 }

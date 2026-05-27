@@ -4,7 +4,6 @@ use super::AwaitingOverlayReady;
 use super::OverlayContainer;
 use super::TypographyOverlay;
 use super::TypographyOverlayReady;
-use crate::render::PendingGlyphs;
 
 /// Observer: spawns an [`OverlayContainer`] child when
 /// [`TypographyOverlay`] is added to an entity.
@@ -31,21 +30,18 @@ pub fn on_overlay_removed(
     }
 }
 
-/// Checks overlay label readiness and fires [`TypographyOverlayReady`]
-/// once all descendant text labels have no [`PendingGlyphs`].
+/// Fires [`TypographyOverlayReady`] for each entity awaiting it, naming the
+/// overlay bounds entity (`AwaitingOverlayReady::target`) as the fit target.
+///
+/// The overlay's geometry — bounds rectangle, metric lines, labels — is built
+/// synchronously by the same `build_typography_overlay` pass that inserts
+/// [`AwaitingOverlayReady`], so the bounds entity is measurable as soon as this
+/// marker appears; no per-label readiness gate is needed.
 pub fn emit_typography_overlay_ready(
     awaiting: Query<(Entity, &AwaitingOverlayReady)>,
-    pending: Query<(), With<PendingGlyphs>>,
-    children_query: Query<&Children>,
     mut commands: Commands,
 ) {
     for (entity, awaiting) in &awaiting {
-        let any_pending = children_query
-            .iter_descendants(entity)
-            .any(|d| pending.get(d).is_ok());
-        if any_pending {
-            continue;
-        }
         commands.entity(entity).remove::<AwaitingOverlayReady>();
         let target = awaiting.target;
         commands.entity(target).trigger(|e| TypographyOverlayReady {

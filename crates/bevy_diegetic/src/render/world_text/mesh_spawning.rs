@@ -71,8 +71,8 @@ pub fn free_run_storage_on_world_mesh_removal(
 /// both-changed run, and the skip keeps this system off a material handle the
 /// geometry pass may have just despawned. The write is value-guarded (R5) so a
 /// no-op resolution does not trip `Changed<TextMaterial>`. An entity with no
-/// `WorldTextMesh` child — empty text, or `PendingGlyphs` before the first ready
-/// build — is a no-op: the inner loop finds nothing (F4).
+/// `WorldTextMesh` child — empty text, or one not yet built — is a no-op: the
+/// inner loop finds nothing (F4).
 pub fn update_world_text_alpha(
     changed_alphas: Query<
         (

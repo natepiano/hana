@@ -12,7 +12,6 @@ use mesh_spawning::WorldTextMesh;
 pub(super) use mesh_spawning::free_run_storage_on_world_mesh_removal;
 pub(super) use mesh_spawning::update_world_text_alpha;
 pub(super) use readiness::AwaitingReady;
-pub use readiness::PendingGlyphs;
 pub use readiness::WorldTextReady;
 pub(super) use readiness::emit_world_text_ready;
 
@@ -42,7 +41,6 @@ pub(super) fn render_world_text(
             )>,
         ),
     >,
-    pending_texts: Query<Entity, (With<WorldText>, With<PendingGlyphs>, Without<PanelChild>)>,
     texts: Query<(&WorldText, &WorldTextStyle), Without<PanelChild>>,
     resolved_alphas: Query<&Resolved<TextAlpha>, Without<PanelChild>>,
     resolved_units: Query<&Resolved<FontUnit>, Without<PanelChild>>,
@@ -57,7 +55,6 @@ pub(super) fn render_world_text(
 ) {
     rendering::render_world_text(
         changed_texts,
-        pending_texts,
         texts,
         resolved_alphas,
         resolved_units,

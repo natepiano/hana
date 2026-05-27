@@ -16,7 +16,6 @@ use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
 use crate::render::ComputedWorldText;
-use crate::render::PendingGlyphs;
 use crate::render::WorldText;
 use crate::text;
 use crate::text::FontId;
@@ -75,7 +74,6 @@ pub fn build_typography_overlay(
         Entity,
         (
             With<TypographyOverlay>,
-            Without<PendingGlyphs>,
             Or<(
                 Added<TypographyOverlay>,
                 Changed<TypographyOverlay>,

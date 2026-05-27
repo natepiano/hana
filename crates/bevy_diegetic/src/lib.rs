@@ -161,7 +161,6 @@ pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
 pub use render::PanelTextLayout;
-pub use render::PendingGlyphs;
 use render::RenderPlugin;
 pub use render::StableTransparency;
 pub use render::TextAntiAlias;

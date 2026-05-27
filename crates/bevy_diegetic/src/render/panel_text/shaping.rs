@@ -19,7 +19,6 @@ use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelChild;
-use crate::render::world_text::PendingGlyphs;
 use crate::render::world_text::WorldText;
 use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
@@ -39,7 +38,6 @@ pub(super) fn shape_panel_text_children(
             )>,
         ),
     >,
-    pending_texts: Query<Entity, (With<PanelChild>, With<WorldText>, With<PendingGlyphs>)>,
     texts: Query<(&WorldText, &WorldTextStyle, &PanelTextLayout, &ChildOf)>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
@@ -52,15 +50,7 @@ pub(super) fn shape_panel_text_children(
     let mut aggregate = TextBuildStats::default();
     let mut shaped_panels: HashSet<Entity> = HashSet::new();
 
-    let mut to_process = Vec::new();
-    for entity in &changed_texts {
-        to_process.push(entity);
-    }
-    for entity in &pending_texts {
-        if !to_process.contains(&entity) {
-            to_process.push(entity);
-        }
-    }
+    let to_process: Vec<Entity> = changed_texts.iter().collect();
 
     if to_process.is_empty() {
         perf.panel_text.shape_ms = 0.0;
@@ -118,10 +108,7 @@ struct QuadPlacement {
 }
 
 fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
-    commands
-        .entity(entity)
-        .remove::<PendingGlyphs>()
-        .remove::<PanelText>();
+    commands.entity(entity).remove::<PanelText>();
 }
 
 fn build_panel_text(
@@ -230,23 +217,15 @@ fn apply_panel_result(
     match readiness {
         GlyphReadiness::Ready | GlyphReadiness::Invisible => {
             let Some(panel_text) = panel_text else {
-                commands.entity(entity).remove::<PendingGlyphs>();
                 return;
             };
             commands
                 .entity(entity)
                 .insert(panel_text)
-                .remove::<PendingGlyphs>()
                 .insert(AwaitingReady);
         },
-        GlyphReadiness::Pending => {
-            commands.entity(entity).insert_if_new(PendingGlyphs);
-        },
         GlyphReadiness::Failed => {
-            commands
-                .entity(entity)
-                .remove::<PendingGlyphs>()
-                .remove::<PanelText>();
+            commands.entity(entity).remove::<PanelText>();
         },
         GlyphReadiness::Idle => {},
     }

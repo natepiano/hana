@@ -49,15 +49,13 @@ impl Default for TextShapingContext {
     }
 }
 
-/// Timing and queue diagnostics gathered while building text quads.
+/// Timing diagnostics gathered while building text quads.
 #[derive(Clone, Debug, Default)]
 pub(super) struct TextBuildStats {
     pub texts:            usize,
     pub glyphs:           usize,
     pub ready_glyphs:     usize,
     pub invisible_glyphs: usize,
-    pub queued_glyphs:    usize,
-    pub pending_glyphs:   usize,
     pub failed_glyphs:    usize,
     pub emitted_quads:    usize,
     pub shape_ms:         f32,
@@ -67,7 +65,6 @@ pub(super) struct TextBuildStats {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum GlyphReadiness {
     Idle,
-    Pending,
     Ready,
     Invisible,
     Failed,
@@ -77,8 +74,6 @@ impl From<&TextBuildStats> for GlyphReadiness {
     fn from(stats: &TextBuildStats) -> Self {
         if stats.failed_glyphs > 0 {
             Self::Failed
-        } else if stats.pending_glyphs > 0 || stats.queued_glyphs > 0 {
-            Self::Pending
         } else if stats.glyphs > 0 && stats.invisible_glyphs == stats.glyphs {
             Self::Invisible
         } else if stats.glyphs > 0 && stats.ready_glyphs + stats.invisible_glyphs == stats.glyphs {
@@ -95,8 +90,6 @@ impl TextBuildStats {
         self.glyphs += other.glyphs;
         self.ready_glyphs += other.ready_glyphs;
         self.invisible_glyphs += other.invisible_glyphs;
-        self.queued_glyphs += other.queued_glyphs;
-        self.pending_glyphs += other.pending_glyphs;
         self.failed_glyphs += other.failed_glyphs;
         self.emitted_quads += other.emitted_quads;
         self.shape_ms += other.shape_ms;
@@ -297,11 +290,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn readiness_reports_failed_before_pending() {
+    fn readiness_reports_failed_takes_priority() {
         let stats = TextBuildStats {
-            glyphs: 1,
+            glyphs: 2,
+            ready_glyphs: 1,
             failed_glyphs: 1,
-            pending_glyphs: 1,
             ..Default::default()
         };
 

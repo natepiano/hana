@@ -1,10 +1,5 @@
 use bevy::prelude::*;
 
-/// Marker on a [`WorldText`](super::WorldText) entity whose glyphs are not yet
-/// ready. Removed automatically when all glyphs become ready.
-#[derive(Component)]
-pub struct PendingGlyphs;
-
 /// Internal marker: glyphs are ready and meshes are spawned, but we
 /// wait for Bevy's transform propagation before firing [`WorldTextReady`].
 #[derive(Component)]
