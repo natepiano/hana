@@ -164,7 +164,7 @@ pub use render::PanelTextLayout;
 pub use render::PendingGlyphs;
 use render::RenderPlugin;
 pub use render::StableTransparency;
-pub use render::TextSupersample;
+pub use render::TextAntiAlias;
 pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;

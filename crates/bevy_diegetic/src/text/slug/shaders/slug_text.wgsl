@@ -40,6 +40,7 @@ struct TextUniform {
     render_mode: u32,
     oit_depth_offset: f32,
     supersample: u32,
+    aa_band: u32,
 }
 
 struct CurveRecord {
@@ -351,17 +352,71 @@ fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: GlyphRecord) -> 
     return smoothstep(-edge_width, edge_width, signed_distance);
 }
 
+// Signed design-space distance to the glyph silhouette: negative inside,
+// positive outside, saturated to ±edge_width beyond the scan range. Interior
+// overlaps are forced solidly negative (same case any_outside_neighbor guards in
+// distance_coverage). Feeds the screen-space AA band used by aa_band mode.
+fn signed_distance(point: vec2<f32>, edge_width_sq: f32, glyph: GlyphRecord) -> f32 {
+    let edge_width = sqrt(edge_width_sq);
+    let terms = horizontal_coverage_terms(point, edge_width_sq, glyph);
+    let inside = terms.winding != 0;
+    let distance_sq = nearest_vertical_curve_distance_sq(
+        point,
+        edge_width_sq,
+        glyph,
+        terms.distance_sq,
+    );
+    if distance_sq > edge_width_sq {
+        return select(edge_width, -edge_width, inside);
+    }
+    if inside && !any_outside_neighbor(point, edge_width, glyph) {
+        return -edge_width;
+    }
+    let distance = sqrt(distance_sq);
+    return select(distance, -distance, inside);
+}
+
+// Coverage from a signed distance and a screen-space band width: a 1px box ramp
+// centered on the silhouette (sd 0). Negative sd (inside) → 1, positive → 0.
+fn band_coverage(sd: f32, band: f32) -> f32 {
+    return clamp(0.5 - sd / band, 0.0, 1.0);
+}
+
 fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
-    // Derivatives stay at the top, in uniform control flow: the supersample
-    // branch below switches on a uniform value but must not gate fwidth/dpdx.
+    // Derivatives stay at the top, in uniform control flow: every branch below
+    // switches on a uniform value, so the fwidth/dpdx calls are never gated by a
+    // per-fragment condition.
     let point = design_position(uv, glyph);
     let pixel = max(abs(fwidth(point)), vec2<f32>(ROOT_EPSILON));
     let dx = dpdx(point);
     let dy = dpdy(point);
 
+    // The two AA axes are independent. aa_band picks the edge-ramp width (scalar
+    // design-space `edge_width` vs. a screen-space band that holds ~1px per axis,
+    // so the convex-corner apron can't balloon at grazing). supersample picks 1
+    // vs. 4 footprint samples, which integrate the along-footprint coverage a
+    // single sample can't capture (the shallow-edge stepping). All four
+    // combinations are valid; the combined mode fixes both artifacts at once.
     var coverage: f32;
-    if uniforms.supersample != 0u {
-        // Four rotated-grid sub-pixel offsets spanning the pixel footprint. At
+    if uniforms.aa_band != 0u {
+        let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
+        let edge_width_sq = edge_width * edge_width;
+        // One band width for the whole fragment, from the center sample's
+        // screen-space distance gradient. Locally the edge is straight, so the
+        // same band applies to every footprint sample.
+        let band = max(fwidth(signed_distance(point, edge_width_sq, glyph)), ROOT_EPSILON);
+        if uniforms.supersample != 0u {
+            var sum = 0.0;
+            sum += band_coverage(signed_distance(point + 0.375 * dx + 0.125 * dy, edge_width_sq, glyph), band);
+            sum += band_coverage(signed_distance(point - 0.125 * dx + 0.375 * dy, edge_width_sq, glyph), band);
+            sum += band_coverage(signed_distance(point - 0.375 * dx - 0.125 * dy, edge_width_sq, glyph), band);
+            sum += band_coverage(signed_distance(point + 0.125 * dx - 0.375 * dy, edge_width_sq, glyph), band);
+            coverage = sum * 0.25;
+        } else {
+            coverage = band_coverage(signed_distance(point, edge_width_sq, glyph), band);
+        }
+    } else if uniforms.supersample != 0u {
+        // Scalar band, four rotated-grid footprint samples (the original path). At
         // grazing angles dx/dy stretch along the foreshortened axis, so the
         // samples integrate the coverage strip a single sample cannot capture.
         var sum = 0.0;

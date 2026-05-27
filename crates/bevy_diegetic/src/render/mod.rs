@@ -49,67 +49,64 @@ pub(crate) enum PanelChildSystems {
     Build,
 }
 
-/// Toggles sub-pixel supersampling of slug glyph coverage across all text
-/// materials. On by default.
+/// Anti-aliasing applied to slug glyph edges, across all text materials.
 ///
-/// Supersampling evaluates each glyph's analytic coverage at four sub-pixel
-/// offsets spanning the pixel footprint and averages them, anti-aliasing the
-/// edge inside the fragment shader that already runs.
+/// Two orthogonal mechanisms back this, both running inside the coverage shader
+/// (no extra pass, and they survive OIT, which forces `Msaa::Off`):
+/// - a **screen-space band** sizes the edge ramp from the distance gradient so it stays ~1px per
+///   screen axis — this fixes the convex-corner balloon at grazing angles, where the scalar
+///   design-space band over-widens into a wing.
+/// - **supersampling** evaluates glyph coverage at four sub-pixel sample points and averages them —
+///   this fixes the stepping along a shallow edge, where one sample can't represent the coverage
+///   across the foreshortened footprint.
 ///
-/// # Why it is the default
+/// The variants are the useful points on that quality/cost ladder.
 ///
-/// - **No extra pass.** SMAA, FXAA, and TAA each add a full-screen pass over the resolved frame,
-///   with their own render-graph node and (for TAA) a history texture and depth/motion prepasses.
-///   Supersampling adds none of that — it is extra work inside the coverage shader, nothing more.
-/// - **Survives OIT.** Order-independent transparency forces `Msaa::Off`, which removes the only
-///   hardware AA. Supersampling is independent of MSAA, so coplanar transparent text stays
-///   anti-aliased at grazing angles, where a single coverage sample can't represent the
-///   foreshortened pixel footprint and stair-steps.
-/// - **Composes harmlessly.** If a post-process AA pass is present for other geometry,
-///   supersampling does no harm — the two operate at different stages (coverage shader vs. resolved
-///   frame) and don't interfere.
+/// # Performance
 ///
-/// # Why it is a toggle
-///
-/// Each text fragment evaluates coverage four times instead of once, so the cost
-/// scales with the number of pixels text covers. A frame dense with large text
-/// is where that 4× is most visible; switching to [`Disabled`](Self::Disabled)
-/// there trades grazing-angle edge quality for fill-rate. Distant or small text
-/// covers few pixels, so it costs little regardless.
+/// Cost is per text fragment and scales with how many pixels text covers.
+/// [`Anisotropic`](Self::Anisotropic) is nearly free — one extra `fwidth` over the
+/// baseline single sample. [`Supersample`](Self::Supersample) evaluates coverage
+/// four times and [`Both`](Self::Both) five (four samples plus the center sample
+/// that sizes the band), so a frame dense with large text is where dropping to
+/// [`Anisotropic`](Self::Anisotropic) — or [`Off`](Self::Off) — reclaims fill-rate.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
-pub enum TextSupersample {
-    /// Evaluate coverage once per fragment.
-    Disabled,
-    /// Evaluate four sub-pixel coverage samples per fragment.
+pub enum TextAntiAlias {
+    /// Scalar band, one sample. No anti-aliasing past the baseline edge ramp —
+    /// corner balloon and shallow-edge stepping both show. Mainly a reference.
+    Off,
+    /// Screen-space band, one sample. Fixes the corner balloon at almost no cost;
+    /// shallow-edge stepping remains.
+    Anisotropic,
+    /// Scalar band, four samples. Fixes shallow-edge stepping; corner balloon
+    /// remains.
+    Supersample,
+    /// Screen-space band plus four samples. Fixes both, at the highest cost.
     #[default]
-    Enabled,
+    Both,
 }
 
-impl TextSupersample {
-    /// Flips between enabled and disabled supersampling.
-    pub const fn toggle(&mut self) {
-        *self = match self {
-            Self::Disabled => Self::Enabled,
-            Self::Enabled => Self::Disabled,
-        };
-    }
+impl TextAntiAlias {
+    /// Whether this mode supersamples the footprint (four samples vs. one).
+    #[must_use]
+    pub const fn supersamples(self) -> bool { matches!(self, Self::Supersample | Self::Both) }
+
+    /// Whether this mode uses the screen-space anisotropic band (vs. scalar).
+    #[must_use]
+    pub const fn anisotropic(self) -> bool { matches!(self, Self::Anisotropic | Self::Both) }
 }
 
-/// Mirrors [`TextSupersample`] into every text material's `supersample` uniform
-/// whenever the setting changes.
-fn sync_text_supersample(
-    setting: Res<TextSupersample>,
-    mut materials: ResMut<Assets<TextMaterial>>,
-) {
+/// Mirrors [`TextAntiAlias`] into every text material's `supersample` and
+/// `aa_band` uniforms whenever the setting changes.
+fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Assets<TextMaterial>>) {
     if !setting.is_changed() {
         return;
     }
-    let value = match *setting {
-        TextSupersample::Disabled => 0,
-        TextSupersample::Enabled => 1,
-    };
+    let supersample = u32::from(setting.supersamples());
+    let aa_band = u32::from(setting.anisotropic());
     for (_, material) in materials.iter_mut() {
-        material.extension.uniforms.supersample = value;
+        material.extension.uniforms.supersample = supersample;
+        material.extension.uniforms.aa_band = aa_band;
     }
 }
 
@@ -120,8 +117,8 @@ pub(crate) struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((TextRenderPlugin, PanelGeometryPlugin))
-            .init_resource::<TextSupersample>()
-            .add_systems(Update, sync_text_supersample)
+            .init_resource::<TextAntiAlias>()
+            .add_systems(Update, sync_text_anti_alias)
             .add_observer(transparency::on_stable_transparency_added)
             .add_observer(transparency::on_stable_transparency_removed)
             .add_observer(transparency::on_screen_space_camera_added);

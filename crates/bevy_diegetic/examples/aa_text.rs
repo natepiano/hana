@@ -6,16 +6,19 @@
 //! footprint, so edges stair-step. There are two fundamentally different places
 //! to fix it.
 //!
-//! **In the coverage shader (`A`).** Supersampling evaluates the glyph coverage
-//! at four sub-pixel offsets spanning the pixel footprint and averages —
-//! anti-aliasing the edge analytically, MSAA-style, but only for the glyph. This
-//! is the one that matters for us: it runs *inside* the fragment shader, so it
-//! needs no extra render pass (unlike the three below) and survives OIT, which
-//! forces `Msaa::Off`. It does no harm if a post-process pass is also present
-//! for other geometry — the two operate at different stages and don't fight. On
-//! by default ([`TextSupersample`]); it is a toggle only because the 4×-per-text-
-//! fragment cost scales with how many pixels text covers, so a frame dense with
-//! large text can reclaim fill-rate by turning it off.
+//! **In the coverage shader (`A` + `E`).** slug anti-aliases glyph edges inside
+//! the fragment shader — no extra pass, and it survives OIT (which forces
+//! `Msaa::Off`). Two orthogonal controls ([`TextAntiAlias`]), both on by default:
+//! - **Supersample** (`A`) — evaluates coverage at four sub-pixel sample points and averages,
+//!   fixing the stepping along a shallow edge that a single sample can't resolve.
+//! - **Anisotropic band** (`E`) — sizes the edge ramp from the distance gradient so it holds ~1px
+//!   per screen axis, fixing the convex-corner balloon at grazing angles that the scalar band
+//!   over-widens into a wing.
+//!
+//! They fix different artifacts, so the best result is both on. They are toggles
+//! for performance: the band is nearly free, but supersampling evaluates coverage
+//! four (or five, combined) times per fragment, so a text-dense frame can reclaim
+//! fill-rate by dropping to the band alone or turning both off.
 //!
 //! **As a post-process pass over the resolved frame.** Three modes, mutually
 //! exclusive (selecting one drops the others):
@@ -27,10 +30,11 @@
 //!   the most.
 //!
 //! The text is unlit, so its color never varies as you orbit. Orbit to a grazing
-//! angle (MMB) to see the stair-stepping, then toggle each path.
+//! angle (MMB) to see the artifacts, then toggle each path.
 //!
 //! Hotkeys:
-//! - `A` — toggle analytic supersampling on the text (default on).
+//! - `A` — toggle supersampling (4 samples vs 1).
+//! - `E` — toggle the anisotropic edge band (vs the scalar band).
 //! - `S` / `F` / `T` — select SMAA / FXAA / TAA on the camera (press again for none).
 //! - `H` — home the camera.
 
@@ -41,7 +45,7 @@ use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::TextSupersample;
+use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
@@ -69,10 +73,11 @@ const SMAA_CONTROL: &str = "S SMAA";
 const FXAA_CONTROL: &str = "F FXAA";
 const TAA_CONTROL: &str = "T TAA";
 const SUPERSAMPLE_CONTROL: &str = "A SSAA";
+const EDGE_BAND_CONTROL: &str = "E BAND";
 
 /// Which post-process anti-aliasing pass is active on the camera. The three
 /// passes are mutually exclusive — selecting one removes the others. Orthogonal
-/// to [`TextSupersample`], which runs in the coverage shader regardless.
+/// to [`TextAntiAlias`], which runs in the coverage shader regardless.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
 enum PostAa {
     /// No post-process pass; rely on MSAA + supersampling alone.
@@ -88,7 +93,7 @@ enum PostAa {
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
-    // `fairy_dust::sprinkle_example`. It registers `TextSupersample`, so this
+    // `fairy_dust::sprinkle_example`. It registers `TextAntiAlias`, so this
     // example only toggles it.
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -107,18 +112,24 @@ fn main() {
                 .control(SMAA_CONTROL)
                 .control(FXAA_CONTROL)
                 .control(TAA_CONTROL)
-                .control(SUPERSAMPLE_CONTROL),
+                .control(SUPERSAMPLE_CONTROL)
+                .control(EDGE_BAND_CONTROL),
         )
         .wire_chip_to_state::<PostAa, _>(SMAA_CONTROL, |mode| activation(*mode == PostAa::Smaa))
         .wire_chip_to_state::<PostAa, _>(FXAA_CONTROL, |mode| activation(*mode == PostAa::Fxaa))
         .wire_chip_to_state::<PostAa, _>(TAA_CONTROL, |mode| activation(*mode == PostAa::Taa))
-        .wire_chip_to_state::<TextSupersample, _>(SUPERSAMPLE_CONTROL, |setting| match *setting {
-            TextSupersample::Enabled => ControlActivation::Active,
-            TextSupersample::Disabled => ControlActivation::Inactive,
+        .wire_chip_to_state::<TextAntiAlias, _>(SUPERSAMPLE_CONTROL, |aa| {
+            activation(aa.supersamples())
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(EDGE_BAND_CONTROL, |aa| {
+            activation(aa.anisotropic())
         })
         .init_resource::<PostAa>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (select_post_aa, toggle_supersample))
+        .add_systems(
+            Update,
+            (select_post_aa, toggle_supersample, toggle_edge_band),
+        )
         .run();
 }
 
@@ -209,10 +220,30 @@ fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
     }
 }
 
-/// On `A`, flip [`TextSupersample`]; the `bevy_diegetic` sync system mirrors it
-/// into every text material's `supersample` uniform.
-fn toggle_supersample(keyboard: Res<ButtonInput<KeyCode>>, mut setting: ResMut<TextSupersample>) {
-    if keyboard.just_pressed(KeyCode::KeyA) {
-        setting.toggle();
+/// On `A`, flip the supersampling axis of [`TextAntiAlias`] (the band axis is
+/// left as-is, so this composes with `E`).
+fn toggle_supersample(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
+    if !keyboard.just_pressed(KeyCode::KeyA) {
+        return;
     }
+    *aa = match *aa {
+        TextAntiAlias::Off => TextAntiAlias::Supersample,
+        TextAntiAlias::Supersample => TextAntiAlias::Off,
+        TextAntiAlias::Anisotropic => TextAntiAlias::Both,
+        TextAntiAlias::Both => TextAntiAlias::Anisotropic,
+    };
+}
+
+/// On `E`, flip the anisotropic-band axis of [`TextAntiAlias`] (the supersample
+/// axis is left as-is, so this composes with `A`).
+fn toggle_edge_band(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
+    if !keyboard.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+    *aa = match *aa {
+        TextAntiAlias::Off => TextAntiAlias::Anisotropic,
+        TextAntiAlias::Anisotropic => TextAntiAlias::Off,
+        TextAntiAlias::Supersample => TextAntiAlias::Both,
+        TextAntiAlias::Both => TextAntiAlias::Supersample,
+    };
 }

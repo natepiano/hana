@@ -45,6 +45,10 @@ pub struct TextUniform {
     /// Non-zero enables sub-pixel supersampling of glyph coverage (anti-aliases
     /// grazing-angle edges without MSAA).
     pub supersample:      u32,
+    /// Non-zero switches the edge AA band from the scalar design-space
+    /// `edge_width` to a screen-space band derived from the distance gradient,
+    /// which fixes the convex-corner flare at grazing angles.
+    pub aa_band:          u32,
 }
 
 /// Text material extension over `StandardMaterial`.
@@ -110,6 +114,7 @@ pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
                 render_mode: u32::from(render_mode),
                 oit_depth_offset,
                 supersample: 1,
+                aa_band: 1,
             },
             curves,
             bands,
