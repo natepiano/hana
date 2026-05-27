@@ -263,162 +263,68 @@ main difference would be rendering caret, selection, and preedit directly on the
 panel while still projecting the caret to `Window::ime_position` for the OS IME
 candidate popup.
 
-## Proposed user decisions
+## Team review follow-ups
 
-### D1 — Add stable editable field identity
+The team review produced no premise challenges. Its findings collapse into four
+implementation decisions to carry into the plan:
 
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: correctness, architecture, type-system
+### D1 — Stable field identity and hit testing
 
-Problem: the current plan identifies the active target as a target entity or
-model key, but panel layout/rendering uses frame-local indices such as layout
-element index and render command index. Those are useful for reuse and geometry,
-but they are not stable semantic identities across tree replacement, row
-reorder, wrapping, repeated text, or sibling insertion.
+Status: accepted
 
-Recommendation: add a stable `EditableFieldId` or `PanelFieldId` supplied by
-the authoring API. Carry it through editable layout elements, render commands or
-layout-result metadata, hit testing, edit sessions, and commit/cancel events.
-Treat element indices and command indices as frame-local geometry lookup keys
-only.
+Editable values need a stable `EditableFieldId` or `PanelFieldId` supplied by
+the authoring API. Frame-local layout element indices and render command indices
+can still be used for geometry lookup, but they must not be the semantic target
+for picking, anchoring, or commit.
 
-### D2 — Define field-level hit testing
+Field activation should be a dedicated resolver: convert the pointer hit into
+panel-local layout coordinates, filter editable fields from the latest computed
+layout while respecting clip rects and draw order, then emit a typed start
+request such as `DiegeticEditStartRequested { panel, field_id, window, camera }`.
+Use Bevy picking for the activation path; the extra work is the diegetic
+field-resolution layer after the panel hit is known.
 
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: correctness, architecture
+### D2 — Window-scoped IME and input ownership
 
-Problem: "use the existing picking path" is too vague for the current panel
-architecture. Picking can resolve a panel hit, but editable values are layout
-fields, not stable generated text entities. Without a resolver, double-click
-activation may only know that the panel was clicked, not which value was
-clicked.
+Status: accepted
 
-Recommendation: define a field hit-test system that converts a pointer hit into
-panel-local layout coordinates, filters editable field bounds from the latest
-computed layout while respecting clip rects and draw order, and emits a typed
-start request such as `DiegeticEditStartRequested { panel, field_id, window,
-camera }`.
-
-### D3 — Make IME ownership window-scoped from the first pass
-
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: risk, architecture, type-system
-
-Problem: the doc mentions the active window and warns against blindly toggling
-`Window::ime_enabled`, but it leaves ownership underspecified. Bevy IME events
-are tagged by window, and this crate has multi-window examples. A session must
-not consume IME from the wrong window or disable IME that another system owns.
-
-Recommendation: store the activation window and camera in the edit session, add
-an internal per-window IME lease or owner token, filter IME and keyboard input by
+An edit session should store the activation window and camera. IME handling
+should use a per-window lease or owner token, filter IME and keyboard input by
 that window, and release IME only if the diegetic editor still owns the lease.
 
-### D4 — Gate other input while editing
+While editing, editor keyboard and pointer events should be consumed or marked
+handled. Camera/app systems need an integration point, such as
+`CameraInputDisabled` or a dedicated input blocker, so Enter, Escape, arrows,
+wheel, activation clicks, and blur clicks do not also drive the scene.
+Use this as the default until implementation exposes a concrete conflict.
+
+### D3 — Explicit single-line editor state and buffer
+
+Status: accepted
+
+The editor should not be a mutable bag of raw strings. Use a closed editor state
+model for idle, editing, composing, commit rejected, committed, and canceled
+transitions. Emit lifecycle events from those transitions.
+
+Use an internal `SingleLineEditBuffer` with committed text, preedit text,
+validated cursor/range types, and UTF-8-safe editing operations. Split commit
+into request, validation, rejection, and applied commit so invalid numeric input
+does not emit a misleading committed event.
+Prefer typestate or closed transition APIs where practical so invalid editor
+states are not representable and systems do not grow scattered conditional
+guards around every operation.
+
+### D4 — Target invalidation, projection ordering, and rendering path
 
 Status: proposed
-Class: design-improvement
-Severity: critical
-Source: risk, correctness
 
-Problem: the plan does not define how active edit focus blocks other input
-consumers. Arrow keys, Escape, Enter, wheel, activation clicks, and blur clicks
-can otherwise affect both the editor and camera/app systems in the same frame.
+The session should store panel entity, field id, activation window, activation
+camera, starting tree revision, and original value. Each frame, re-resolve the
+field from the current computed layout, project after transform and camera data
+are current, and apply a deterministic stale-target policy for missing
+panel/field/window/camera, tree revision changes, and external value changes.
 
-Recommendation: define an input ownership rule for active edit sessions. Editor
-keyboard and pointer events should be consumed or marked handled, activation
-clicks should not immediately become blur clicks, and camera systems should have
-an integration path such as `CameraInputDisabled` or a dedicated input blocker
-while editing.
-
-### D5 — Use a dedicated single-line edit buffer
-
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: correctness, type-system
-
-Problem: the plan names a current edit buffer and composing string, but does not
-define cursor and text mutation semantics. Raw `String` plus ad hoc offsets can
-split UTF-8, mishandle grapheme clusters, or accidentally persist preedit text.
-
-Recommendation: introduce an internal `SingleLineEditBuffer` with committed
-text, preedit text, validated cursor/range types, and UTF-8-safe editing
-operations. Rendering derives display text from committed text plus preedit
-state; backing values derive only from validated committed text.
-
-### D6 — Model edit lifecycle as explicit state transitions
-
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: type-system, risk
-
-Problem: a mutable `DiegeticEditSession` bag can represent impossible states:
-committed and canceled in the same frame, invalid commit closing the editor,
-preedit surviving cancel, or a new activation racing an old blur.
-
-Recommendation: model editor state as a closed enum, such as `Idle`,
-`Editing(EditSession)`, `Composing(EditSession, PreeditText)`, and
-`CommitRejected(EditSession, EditValidationError)`. Expose transition methods
-for start, IME preedit, IME commit, commit request, commit rejection, commit
-success, and cancel. Emit lifecycle events from terminal transitions.
-
-### D7 — Separate commit request, validation, rejection, and applied commit
-
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: architecture, risk, type-system
-
-Problem: `DiegeticEditCommitted { target, text }` does not say whether parsing
-succeeded, what typed value changed, or whether app code has already applied the
-backing model update. Invalid blur commits can otherwise emit misleading events
-or trap focus without a clear recovery policy.
-
-Recommendation: split commit into explicit stages: request, validation,
-rejection, and applied commit. Built-in numeric modes should produce a typed
-validated value before emitting a committed/applied event. Invalid input should
-emit a rejection or hold an error state while keeping the editor open according
-to a documented blur policy.
-
-### D8 — Specify target invalidation and projection ordering policy
-
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: risk, correctness
-
-Problem: the plan says the editor follows projected field bounds each frame, but
-does not define what happens when the panel despawns, field id disappears, tree
-revision changes, backing state changes externally, camera changes, window
-resizes, or projection is temporarily invalid.
-
-Recommendation: store panel entity, field id, activation window, activation
-camera, starting tree revision, and original value in the session. Re-resolve
-the field each frame from the current computed layout, project after transform
-and camera data are current, and apply a documented stale-target policy:
-deterministically cancel on missing panel/field/window/camera, and require a
-clear policy for revision changes and external value changes.
-
-### D9 — Keep the transient editor inside the existing screen-space pipeline
-
-Status: proposed
-Class: design-improvement
-Severity: important
-Source: architecture
-
-Problem: the plan says the editor is a transient screen-space entity, but does
-not say whether it reuses the existing screen-space panel/camera/layer machinery
-or creates a parallel overlay renderer. A separate path can drift in window
-selection, camera order, render layers, text styling, and cleanup.
-
-Recommendation: implement the transient editor as an internal screen-space
-editor/panel module that depends on the existing screen-space systems and text
-style conversion. Keep cursor and preedit visuals editor-specific, but avoid a
-parallel rendering stack for the first pass.
+The transient editor should live inside the existing screen-space pipeline
+rather than a separate overlay renderer. Cursor and preedit visuals can be
+editor-specific, but window selection, camera/layer behavior, text styling, and
+cleanup should reuse the existing screen-space systems where practical.

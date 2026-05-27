@@ -13,14 +13,18 @@ use super::guidance::CameraGuidance;
 use super::guidance::CameraGuidanceContent;
 use super::guidance::CameraGuidanceRow;
 use super::guidance::SourceVisibility;
+use super::preset_switch::PRESET_SWITCH_HINT;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(super) struct CameraGuidanceSnapshot {
-    pub(super) camera_label:      String,
-    pub(super) mode_label:        String,
-    pub(super) mode_value:        String,
-    pub(super) rows:              Vec<CameraGuidanceRow>,
-    pub(super) source_visibility: SourceVisibility,
+    pub(super) camera_label:       String,
+    pub(super) mode_label:         String,
+    pub(super) mode_value:         String,
+    pub(super) rows:               Vec<CameraGuidanceRow>,
+    pub(super) source_visibility:  SourceVisibility,
+    /// Hint row shown under the source line when the camera is in `Preset`
+    /// mode, naming the key that cycles presets.
+    pub(super) preset_switch_hint: Option<String>,
 }
 
 pub(super) fn resolve_guidance_snapshot(
@@ -46,6 +50,7 @@ pub(super) fn resolve_guidance_snapshot(
             mode_value: guidance.mode_value.clone().unwrap_or(mode_value),
             rows,
             source_visibility,
+            preset_switch_hint: preset_switch_hint(mode),
         };
     }
 
@@ -59,6 +64,16 @@ pub(super) fn resolve_guidance_snapshot(
         mode_value: summary.mode_value,
         rows: summary.rows.into_iter().map(Into::into).collect(),
         source_visibility,
+        preset_switch_hint: preset_switch_hint(mode),
+    }
+}
+
+/// The preset switcher only acts on `Preset` cameras, so the hint is shown for
+/// `Preset` mode (and the default, which is a preset) and hidden otherwise.
+fn preset_switch_hint(mode: Option<&OrbitCamInputMode>) -> Option<String> {
+    match mode {
+        None | Some(OrbitCamInputMode::Preset(_)) => Some(PRESET_SWITCH_HINT.to_string()),
+        _ => None,
     }
 }
 

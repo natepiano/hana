@@ -69,6 +69,7 @@ pub use constants::DEFAULT_PANEL_BACKGROUND;
 pub use constants::LABEL_SIZE;
 pub use constants::LOG_FILTER;
 pub use constants::TITLE_SIZE;
+pub use orbit_cam::FairyDustOrbitCam;
 pub use primitive::Face;
 pub use primitive::cube_face_text;
 pub use restart_camera::RestartCameraRestore;

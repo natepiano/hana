@@ -42,6 +42,7 @@ bitflags = { workspace = true }
 [dev-dependencies]
 bevy                = { workspace = true, features = ["3d"] }
 bevy_brp_extras     = { workspace = true }
+bevy_diegetic       = { path = "../bevy_diegetic" }
 bevy_window_manager = { workspace = true }
 fairy_dust          = { path = "../fairy_dust" }
 float-cmp           = { workspace = true }

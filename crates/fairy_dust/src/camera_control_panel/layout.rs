@@ -21,6 +21,7 @@ use super::constants::ACTIVE_COLOR;
 use super::constants::GUIDANCE_CHILD_GAP;
 use super::constants::HEADER_COLOR;
 use super::constants::LABEL_COLOR;
+use super::constants::PRESET_HINT_SIZE;
 use super::constants::SOURCE_COLOR;
 use super::constants::TABLE_ACTION_ARROW;
 use super::constants::TABLE_COLUMN_GAP;
@@ -81,6 +82,9 @@ fn build_guidance_layout(
     let source = LayoutTextStyle::new(LABEL_SIZE)
         .with_color(SOURCE_COLOR)
         .no_wrap();
+    let hint_style = LayoutTextStyle::new(PRESET_HINT_SIZE)
+        .with_color(LABEL_COLOR)
+        .no_wrap();
 
     builder.with(
         El::new()
@@ -115,6 +119,17 @@ fn build_guidance_layout(
                                 .child_align_x(AlignX::Center),
                             |builder| {
                                 builder.text(snapshot::source_label(display.all_sources()), source);
+                            },
+                        );
+                    }
+                    if let Some(hint) = &snapshot.preset_switch_hint {
+                        builder.with(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::FIT)
+                                .child_align_x(AlignX::Center),
+                            |builder| {
+                                builder.text(hint, hint_style.clone());
                             },
                         );
                     }

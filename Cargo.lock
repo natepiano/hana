@@ -1134,6 +1134,7 @@ version = "0.0.3-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
+ "bevy_diegetic",
  "bevy_enhanced_input",
  "bevy_kana",
  "bevy_window_manager",

@@ -11,6 +11,7 @@ mod constants;
 mod display;
 mod guidance;
 mod layout;
+mod preset_switch;
 mod snapshot;
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
@@ -61,6 +62,7 @@ impl Default for CameraControlPanelBackground {
 
 pub(crate) fn install(app: &mut App) {
     ensure_panel_plugins(app);
+    preset_switch::install(app);
     app.init_resource::<CameraControlPanelBackground>();
     app.add_systems(Startup, spawn_panel);
     app.add_systems(
