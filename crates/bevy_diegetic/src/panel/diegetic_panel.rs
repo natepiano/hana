@@ -8,9 +8,9 @@ use super::builder::Screen;
 use super::builder::World;
 use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::SurfaceShadow;
+use crate::cascade;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
-use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::layout::Anchor;
@@ -448,9 +448,10 @@ pub(super) fn seed_panel_overrides(
     };
     let font_unit = panel.font_unit().unwrap_or(defaults.panel_font_unit);
     let mut entity_commands = commands.entity(entity);
-    entity_commands.insert((Override(FontUnit(font_unit)), Resolved(FontUnit(font_unit))));
+    entity_commands.insert(Resolved(FontUnit(font_unit)));
+    cascade::apply_cascade_override(&mut entity_commands, FontUnit(font_unit));
     if let Some(alpha_mode) = panel.text_alpha_mode() {
-        entity_commands.insert(Override(TextAlpha(alpha_mode)));
+        cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
     }
 }
 

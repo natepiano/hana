@@ -16,6 +16,7 @@
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -82,15 +83,14 @@ fn setup(mut commands: Commands) {
     ));
 
     // Tier 3 — a standalone authoring its own alpha (`Add`) beats the global
-    // `Blend`. The same `WorldTextStyle::with_alpha_mode` powers the panel
-    // labels below.
-    commands.spawn((
-        WorldText::new("tier 3 - standalone's own alpha = Add"),
-        WorldTextStyle::new(STANDALONE_SIZE_METERS)
-            .with_color(TIER3_COLOR)
-            .with_alpha_mode(AlphaMode::Add),
-        Transform::from_xyz(-1.7, 0.55, 0.0),
-    ));
+    // `Blend`.
+    commands
+        .spawn((
+            WorldText::new("tier 3 - standalone's own alpha = Add"),
+            WorldTextStyle::new(STANDALONE_SIZE_METERS).with_color(TIER3_COLOR),
+            Transform::from_xyz(-1.7, 0.55, 0.0),
+        ))
+        .override_text_alpha(AlphaMode::Add);
 
     // Tier 2 + tier 3 live inside this panel. The panel sets `Add` for the text
     // under it and seeds `Points` as the font unit its labels inherit.

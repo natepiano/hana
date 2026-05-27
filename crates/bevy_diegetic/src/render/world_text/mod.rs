@@ -16,9 +16,9 @@ pub use readiness::WorldTextReady;
 pub(super) use readiness::emit_world_text_ready;
 
 use super::text_shaping::TextShapingContext;
+use crate::cascade;
 use crate::cascade::CascadeDefault;
 use crate::cascade::FontUnit;
-use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::layout::ShapedTextCache;
@@ -192,10 +192,10 @@ pub(super) fn seed_world_text_overrides(
     let mut entity_commands = commands.entity(entity);
     entity_commands.insert((Resolved(resolved_unit), Resolved(resolved_alpha)));
     if let Some(unit) = style.unit() {
-        entity_commands.insert(Override(FontUnit(unit)));
+        cascade::apply_cascade_override(&mut entity_commands, FontUnit(unit));
     }
     if let Some(alpha_mode) = style.alpha_mode() {
-        entity_commands.insert(Override(TextAlpha(alpha_mode)));
+        cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
     }
 }
 
@@ -209,8 +209,12 @@ mod tests {
     use crate::Pt;
     use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeDefaults;
+    use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
+    use crate::cascade::CascadeSet;
+    use crate::cascade::Override;
     use crate::layout::Unit;
+    use crate::resolved_text_alpha;
 
     fn standalone_app() -> App {
         let mut app = App::new();
@@ -236,6 +240,30 @@ mod tests {
             .expect("standalone should carry Resolved<FontUnit>")
             .0
             .0
+    }
+
+    #[derive(Resource)]
+    struct Target(Entity);
+
+    #[derive(Resource, Default)]
+    struct SeenAlpha(Option<AlphaMode>);
+
+    fn override_target_before_propagate(target: Res<Target>, mut commands: Commands) {
+        commands
+            .entity(target.0)
+            .override_text_alpha(AlphaMode::Add);
+    }
+
+    fn override_target_after_propagate(target: Res<Target>, mut commands: Commands) {
+        commands
+            .entity(target.0)
+            .override_text_alpha(AlphaMode::Add);
+    }
+
+    fn read_target_alpha_after_propagate(world: &mut World) {
+        let entity = world.resource::<Target>().0;
+        let alpha = resolved_text_alpha(world, entity);
+        world.resource_mut::<SeenAlpha>().0 = Some(alpha);
     }
 
     #[test]
@@ -305,5 +333,90 @@ mod tests {
             .0 = TextAlpha(AlphaMode::Add);
         app.update();
         assert_eq!(resolved_alpha(&app, entity), AlphaMode::Add);
+    }
+
+    #[test]
+    fn override_and_inherit_text_alpha_commands_update_standalone() {
+        let mut app = standalone_app();
+        let entity = app.world_mut().spawn(WorldText::new("hi")).id();
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), entity), AlphaMode::Blend);
+
+        app.world_mut()
+            .commands()
+            .entity(entity)
+            .override_text_alpha(AlphaMode::Add);
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), entity), AlphaMode::Add);
+
+        app.world_mut()
+            .commands()
+            .entity(entity)
+            .inherit_text_alpha();
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), entity), AlphaMode::Blend);
+    }
+
+    #[test]
+    fn spawn_frame_override_self_heals_resolved_alpha() {
+        let mut app = standalone_app();
+        let entity = app
+            .world_mut()
+            .commands()
+            .spawn(WorldText::new("hi"))
+            .override_text_alpha(AlphaMode::Add)
+            .id();
+        app.world_mut().flush();
+
+        assert_eq!(resolved_text_alpha(app.world(), entity), AlphaMode::Add);
+    }
+
+    #[test]
+    fn parent_override_before_propagate_updates_existing_child_same_frame() {
+        let mut app = standalone_app();
+        let parent = app.world_mut().spawn_empty().id();
+        let child = app
+            .world_mut()
+            .spawn((WorldText::new("hi"), ChildOf(parent)))
+            .id();
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), child), AlphaMode::Blend);
+
+        app.insert_resource(Target(parent));
+        app.init_resource::<SeenAlpha>();
+        app.add_systems(
+            Update,
+            (
+                override_target_before_propagate.before(CascadeSet::Propagate),
+                read_target_alpha_after_propagate.after(CascadeSet::Propagate),
+            ),
+        );
+        app.update();
+
+        assert_eq!(resolved_text_alpha(app.world(), child), AlphaMode::Add);
+        assert_eq!(app.world().resource::<SeenAlpha>().0, Some(AlphaMode::Add));
+    }
+
+    #[test]
+    fn parent_override_after_propagate_updates_existing_child_next_frame() {
+        let mut app = standalone_app();
+        let parent = app.world_mut().spawn_empty().id();
+        let child = app
+            .world_mut()
+            .spawn((WorldText::new("hi"), ChildOf(parent)))
+            .id();
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), child), AlphaMode::Blend);
+
+        app.insert_resource(Target(parent));
+        app.add_systems(
+            Update,
+            override_target_after_propagate.after(CascadeSet::Propagate),
+        );
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), child), AlphaMode::Blend);
+
+        app.update();
+        assert_eq!(resolved_text_alpha(app.world(), child), AlphaMode::Add);
     }
 }

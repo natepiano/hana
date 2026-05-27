@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::PanelTextLayout;
+use crate::cascade;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
 use crate::layout::BoundingBox;
@@ -133,24 +134,18 @@ pub(super) fn reconcile_panel_text_children(
                     panel_text_child,
                     label_alpha,
                 );
-            } else if let Some(alpha_mode) = label_alpha {
-                // `Override<TextAlpha>` rides in the spawn bundle so it is
-                // present when `seed_panel_child_alpha` fires on `PanelChild`,
-                // seeding the label's own alpha with no settle frame.
-                commands.entity(panel_entity).with_child((
-                    WorldText::new(text.clone()),
-                    style,
-                    panel_text_child,
-                    PanelChild,
-                    Override(TextAlpha(alpha_mode)),
-                ));
             } else {
-                commands.entity(panel_entity).with_child((
-                    WorldText::new(text.clone()),
-                    style,
-                    panel_text_child,
-                    PanelChild,
-                ));
+                commands.entity(panel_entity).with_children(|children| {
+                    let mut child = children.spawn((
+                        WorldText::new(text.clone()),
+                        style,
+                        panel_text_child,
+                        PanelChild,
+                    ));
+                    if let Some(alpha_mode) = label_alpha {
+                        cascade::apply_cascade_override(&mut child, TextAlpha(alpha_mode));
+                    }
+                });
             }
         }
 
@@ -194,12 +189,12 @@ fn update_reused_panel_text_child(
         Some(alpha_mode) => {
             let incoming = TextAlpha(alpha_mode);
             if reusable.alpha.map(|node_override| node_override.0) != Some(incoming) {
-                child.insert(Override(incoming));
+                cascade::apply_cascade_override(&mut child, incoming);
             }
         },
         None => {
             if reusable.alpha.is_some() {
-                child.remove::<Override<TextAlpha>>();
+                cascade::remove_cascade_override::<TextAlpha>(&mut child);
             }
         },
     }

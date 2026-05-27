@@ -259,6 +259,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeDefaults;
+    use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
     use crate::cascade::FontUnit;
     use crate::cascade::Resolved;
@@ -420,6 +421,43 @@ mod tests {
             run_storage_len(&app),
             1,
             "no run storage churn on an alpha-only change"
+        );
+    }
+
+    #[test]
+    fn alpha_override_updates_material_without_respawning_mesh() {
+        let mut app = world_app();
+        let entity = app
+            .world_mut()
+            .spawn((WorldText::new("Hi"), WorldTextStyle::new(Mm(6.0))))
+            .id();
+        settle(&mut app);
+
+        let mesh_before = world_mesh_of(&mut app, entity).expect("world text mesh should exist");
+        assert_eq!(material_alpha(&app, mesh_before), AlphaMode::Blend);
+        assert_eq!(run_storage_len(&app), 1);
+
+        app.world_mut()
+            .commands()
+            .entity(entity)
+            .override_text_alpha(AlphaMode::Add);
+        settle(&mut app);
+
+        let mesh_after =
+            world_mesh_of(&mut app, entity).expect("world text mesh should still exist");
+        assert_eq!(
+            mesh_before, mesh_after,
+            "an alpha-only override must not respawn the mesh"
+        );
+        assert_eq!(
+            material_alpha(&app, mesh_after),
+            AlphaMode::Add,
+            "the alpha system should mutate base.alpha_mode in place"
+        );
+        assert_eq!(
+            run_storage_len(&app),
+            1,
+            "no run storage churn on an alpha-only override"
         );
     }
 

@@ -158,7 +158,7 @@ generator path.
 
 ---
 
-## Phase 2 — Public cascade verbs
+## Phase 2 — Public cascade verbs (Complete)
 
 The user-facing `override_` / `inherit_` / `resolved_` surface for cascade
 attributes, built on Phase 1.
@@ -212,6 +212,54 @@ the next frame; an alpha-only `override_text_alpha` mutates the material without
 respawning the run's mesh (composes with the existing per-run rebuild work).
 `Override`/`Resolved` stay `pub(crate)` — confirm no public signature names them.
 
+### Retrospective
+
+**What worked:**
+
+- `cascade/attributes.rs` now owns the public `CascadeEntityCommandsExt` verbs,
+  `resolved_text_alpha`, `resolved_font_unit`, and the internal
+  `apply_cascade_override` / remove helpers.
+- Standalone, panel seed, and panel-label reconcile paths now share the helper;
+  full `cargo nextest run -p bevy_diegetic` passes.
+
+**What deviated from the plan:**
+
+- Self-heal updates `Resolved<A>` on real value changes, not only when it was
+  absent, so direct reads after command flush are stronger than the original
+  minimum contract.
+- The helper falls back to `CascadeDefault<A>::default()` when a narrow test app
+  did not install the cascade plugin; production apps still use the resource.
+
+**Surprises:**
+
+- Reconcile-only tests exercise label alpha without `CascadePlugin<TextAlpha>`,
+  so command helpers cannot assume the default resource always exists.
+- `cascade.rs` already had an example-facing standalone alpha call site worth
+  migrating immediately to `override_text_alpha`.
+
+**Implications for remaining phases:**
+
+- Phase 3 can delete standalone alpha/unit authoring with less adapter code:
+  examples already have the command trait and helper path available.
+- Phase 3 docs should state that direct entity reads are self-healed at command
+  flush, while descendant inheritance still depends on `CascadeSet::Propagate`.
+
+### Phase 2 Review
+
+- Phase 3 cascade docs were narrowed to stale-reference cleanup, timing nuance,
+  and the missing "Adding a cascade attribute" section because Phase 2 already
+  added the main typed-verb module docs.
+- Phase 3 now explicitly changes `WorldTextStyle::new` to value-only standalone
+  construction so `Pt(..)` / `Mm(..)` / `In(..)` cannot be silently ignored.
+- Phase 3 runtime setters now enumerate every plain standalone field, including
+  `font_id`, `lighting`, and `world_scale`, while keeping `unit` and
+  `alpha_mode` cascade-owned.
+- Phase 3 keeps the label-alpha capture-before-conversion task and now calls out
+  the required `reconcile.rs` comment cleanup.
+- Phase 3 compile-fail acceptance now uses source search plus
+  `cargo check -p bevy_diegetic --examples` instead of adding a new trybuild
+  harness.
+
 ---
 
 ## Phase 3 — `WorldTextStyle` runtime surface
@@ -232,6 +280,12 @@ example/README migration.
   `reconcile.rs` converts to `Override<TextAlpha>`. Update the `alpha_mode()` and
   unit accessor doc comments at the same time: they currently describe the
   standalone bridge reading them, which is no longer true.
+- **Make standalone construction value-only.** Change `WorldTextStyle::new` so
+  it no longer accepts `impl Into<Dimension>`; use a bare scalar size instead.
+  Unit-bearing constructors (`Pt(..)`, `Mm(..)`, `In(..)`) remain valid for
+  `LayoutTextStyle::new`, but standalone unit choice must be
+  `override_font_unit` or `CascadeDefault<FontUnit>`. Do not silently discard a
+  unit-bearing newtype in standalone code.
 - **Rework `seed_world_text_overrides`.** It no longer reads removed fields; it
   seeds `Resolved<A>` to the global default at spawn (so `Resolved` always
   exists). Non-default values come from explicit `override_x` calls.
@@ -244,39 +298,39 @@ example/README migration.
   through Phase-2's `apply_cascade_override` — do not stub the read to `None`,
   which compiles but silently drops every label's authored alpha. The regression
   test below is what distinguishes the correct fix from the silent-drop one.
+  Update the nearby `reconcile.rs` comments at the same time: label alpha comes
+  from `LayoutTextStyle`, not through standalone style.
 - **Asymmetric conversions.** `as_standalone()` no longer carries `unit`/
   `alpha_mode` into `ForStandalone`; `as_layout_config()` produces a layout config
   whose `unit`/`alpha_mode` default to "inherit". Document each direction.
-- **Plain-field runtime setters.** Add a `set_*` per plain `ForStandalone` field
-  (size, weight, slant, line-height, letter/word spacing, align, anchor,
-  sidedness, font_features, render_mode, shadow_mode — `set_color` already
-  exists), gated to `impl TextProps<ForStandalone>` so a meaningless setter on a
+- **Plain-field runtime setters.** Add a `set_*` per plain `ForStandalone` field:
+  `font_id`, `size`, `weight`, `slant`, `line_height`, `letter_spacing`,
+  `word_spacing`, `color` (already exists), `align`, `anchor`, `render_mode`,
+  `shadow_mode`, `sidedness`, `lighting`, `font_features`, and `world_scale`.
+  Gate them to `impl TextProps<ForStandalone>` so a meaningless setter on a
   layout style is a compile error. Each is a direct `&mut` write that fires
   `Changed<WorldTextStyle>` and feeds the existing gated reconcile. `wrap` is
   excluded: `ForStandalone` hard-codes it to `TextWrap::None` and never reads it
   (wrapping is a layout-engine property), so `set_wrap` stays `ForLayout`-only.
+  `unit` and `alpha_mode` are cascade-owned and deliberately have no standalone
+  plain-field setter.
 - **Migrate callers.** Update examples (`cascade.rs`, `text_alpha.rs`,
   `units.rs`, `world_text.rs`) and the README to author standalone alpha via
   `override_text_alpha` after spawn instead of `with_alpha_mode`. `cascade.rs`
-  has three standalone `with_alpha_mode` call sites; the README documents the
-  standalone-authoring flow in four places. Also search all examples for
+  already had its standalone alpha call site moved during Phase 2; still search
+  all examples and README text for stale standalone alpha authoring guidance.
+  Also search all examples for
   standalone `WorldTextStyle::new(Pt(..))`, `Mm(..)`, `In(..)`, and
   `.with_unit(...)`: once standalone unit authoring is removed, each must either
   become a bare size governed by `CascadeDefault<FontUnit>` or an explicit
   `override_font_unit` call.
-- **Document the cascade.** Rewrite the cascade module's `//!` doc to
-  match the post-Phase-1 architecture: per-attribute `CascadeDefault<A>` (no
-  monolithic `CascadeDefaults`), the `CascadeProperty` / `CascadeAttr` split,
-  and the `cascade_attr!` recipe. Add a "Using the cascade" section covering the
-  public verbs (`override_x` / `inherit_x` / `resolved_x`), stating that the verbs
-  are `EntityCommands` methods (not `TextProps` setters) and that the same
-  `override_x` verb is used at spawn and at runtime. Document the
-  `CascadeSet::Propagate` timing contract precisely: a reader sees a
-  freshly-written value same-frame only if scheduled
-  `.after(CascadeSet::Propagate)`; a reader before it sees the prior frame's
-  value; spawn-time seeding is synchronous (the first `Update` after spawn already
-  sees the seeded value), and panel labels are reconciled in `PostUpdate`. Drop
-  the stale `WorldTextStyle.unit` / `with_alpha_mode` override-source references.
+- **Document the cascade deltas.** Phase 2 already added the main cascade module
+  `//!` docs for typed verbs, per-attribute defaults, write paths, and timing.
+  Phase 3 should narrow doc work to removing stale `WorldTextStyle.unit` /
+  `with_alpha_mode` override-source references, documenting that direct entity
+  reads are self-healed at command flush while descendants update through
+  `CascadeSet::Propagate`, and adding the missing "Adding a cascade attribute"
+  section below.
 - **Document extending the cascade — two cases.** In the same module `//!` doc,
   add an "Adding a cascade attribute" section that distinguishes the two ways a
   property becomes cascading, because the cost differs sharply:
@@ -308,8 +362,11 @@ examples, README.
 `override_text_alpha` after spawn takes effect (self-heal); a `set_size` rebuilds
 only the changed run; panel labels still resolve their authored alpha correctly
 (regression test: author a label via the panel builder, assert its `Resolved<
-TextAlpha>` and rendered alpha on the first frame); calling a removed standalone
-accessor fails to compile; examples and README build and run; the
+TextAlpha>` and rendered alpha on the first frame); no production or example
+call site can call removed standalone cascade-owned accessors or unit-bearing
+`WorldTextStyle::new(Pt(..))`/`Mm(..)`/`In(..)` constructors, verified by
+`cargo check -p bevy_diegetic --examples` and source search rather than adding a
+compile-fail harness; examples and README build and run; the
 `cascade/mod.rs` module doc renders on docs.rs with no stale reference to
 `CascadeDefaults` as the owner of cascade fields (valid `panel_font_unit` /
 `layout_unit` construction-default references may remain), no stale standalone

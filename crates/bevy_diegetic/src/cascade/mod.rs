@@ -1,11 +1,40 @@
 //! One parent-walking cascade with per-entity `Resolved<A>` caches.
 //!
-//! Several attributes in this crate honor an override cascade before a final
-//! value is rendered — text alpha mode and font unit, on standalone world
-//! text, panels, and panel labels. The rule is one sentence, applied by
-//! following `ChildOf`: *my own override, else my parent's, else the global
-//! default at the root.* A standalone text is depth-1 off the root, a panel is
-//! depth-1, a panel label is depth-2; deeper nesting needs no new type.
+//! Some text attributes inherit through the entity tree: text alpha mode and
+//! font unit today. The rule is one sentence, applied by following `ChildOf`:
+//! *my own override, else my parent's, else the global default at the root.*
+//! A standalone text is depth-1 off the root, a panel is depth-1, and a panel
+//! label is depth-2; deeper nesting needs no new type.
+//!
+//! # Using the cascade
+//!
+//! Entity-local authoring goes through typed
+//! [`EntityCommands`](bevy::ecs::system::EntityCommands) extension methods from
+//! [`CascadeEntityCommandsExt`]:
+//!
+//! ```ignore
+//! commands
+//!     .spawn(WorldText::new("hi"))
+//!     .override_text_alpha(AlphaMode::Add)
+//!     .override_font_unit(Unit::Millimeters);
+//!
+//! commands.entity(text).inherit_text_alpha();
+//! let alpha = resolved_text_alpha(world, text);
+//! ```
+//!
+//! `override_*` and `inherit_*` are command methods, not `TextProps` setters.
+//! Use the same `override_*` verb at spawn and at runtime. A write scheduled
+//! before [`CascadeSet::Propagate`] is visible to readers scheduled after that
+//! set in the same `Update`; readers before it see the prior frame. If a write
+//! runs after [`CascadeSet::Propagate`], descendants update on the next frame.
+//! The directly overridden entity is self-healed when the command flushes so a
+//! same-frame spawn override has the authored value available immediately.
+//!
+//! Global cascade defaults are per attribute:
+//!
+//! ```ignore
+//! app.insert_resource(CascadeDefault(TextAlpha(AlphaMode::Add)));
+//! ```
 //!
 //! # The mechanism is attribute-agnostic
 //!
@@ -14,12 +43,13 @@
 //! the propagation pass are all generic over the attribute. Any value that
 //! should resolve *my override, else my parent's, else a global default* plugs
 //! in as a `cascade_attr!` declaration plus one
-//! [`CascadeDefault<A>`](CascadeDefault) resource and one plugin line.
+//! [`CascadeDefault<A>`](CascadeDefault) resource, one plugin line, and typed
+//! `override_*` / `inherit_*` / `resolved_*` wrappers.
 //!
-//! | Attribute   | Global default                | Override source |
-//! | ---         | ---                           | --- |
-//! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `DiegeticPanel.text_alpha_mode` (panel labels inherit) |
-//! | [`FontUnit`]  | `CascadeDefault<FontUnit>`  | `WorldTextStyle.unit` (standalone); every panel carries a seeded `Override` (from `panel_font_unit`) its labels inherit |
+//! | Attribute | Global default | Public verbs |
+//! | --- | --- | --- |
+//! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `override_text_alpha`, `inherit_text_alpha`, [`resolved_text_alpha`] |
+//! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
 //!
 //! # Membership is a property of the tree, not of a shared component
 //!
@@ -33,19 +63,16 @@
 //! # Write paths
 //!
 //! - **Spawn.** The node-kind authoring bridges seed each participant's initial `Resolved<A>`
-//!   synchronously during command flush — the `WorldTextStyle` and `DiegeticPanel` bridges for
-//!   standalones and panels, the panel-child alpha seed for labels. They are the only code that
-//!   knows which entities participate and which `Resolved<A>` each one reads, so seeding lives with
-//!   them; each calls [`resolve_walk`].
+//!   during command flush. Standalone text and panels seed their own participating attributes;
+//!   panel labels seed text alpha. Each bridge uses the same override helper as the public verbs.
 //! - **Change.** [`CascadePlugin`]'s propagation system, in [`CascadeSet::Propagate`], re-resolves
 //!   a node when its own `Override<A>` changes or is removed, its `ChildOf` changes, or
 //!   `CascadeDefault<A>` changes — fanning ancestor changes down through `Children`. It runs every
-//!   frame so a frame's `RemovedComponents<Override<A>>` is never cleared unread, and is the single
-//!   writer of each `Resolved<A>`.
+//!   frame so a frame's `RemovedComponents<Override<A>>` is never cleared unread.
 //!
-//! Readers query `&Resolved<A>` directly and filter on `Changed<Resolved<A>>`;
-//! they never resolve inline. Users who need their systems to observe
-//! freshly-propagated values schedule against [`CascadeSet::Propagate`].
+//! Internal render systems query `&Resolved<A>` directly and filter on
+//! `Changed<Resolved<A>>`; public callers should use the typed `resolved_*`
+//! readers when they need the computed value.
 
 mod attributes;
 mod cascade_set;
@@ -54,8 +81,13 @@ mod defaults;
 mod plugin;
 mod resolved;
 
+pub use attributes::CascadeEntityCommandsExt;
 pub use attributes::FontUnit;
 pub use attributes::TextAlpha;
+pub(crate) use attributes::apply_cascade_override;
+pub(crate) use attributes::remove_cascade_override;
+pub use attributes::resolved_font_unit;
+pub use attributes::resolved_text_alpha;
 pub use cascade_set::CascadeSet;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;

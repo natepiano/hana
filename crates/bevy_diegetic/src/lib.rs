@@ -74,10 +74,13 @@ pub use callouts::CalloutLine;
 use callouts::CalloutPlugin;
 pub use cascade::CascadeDefault;
 pub use cascade::CascadeDefaults;
+pub use cascade::CascadeEntityCommandsExt;
 pub use cascade::CascadeProperty;
 pub use cascade::CascadeSet;
 pub use cascade::FontUnit;
 pub use cascade::TextAlpha;
+pub use cascade::resolved_font_unit;
+pub use cascade::resolved_text_alpha;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
