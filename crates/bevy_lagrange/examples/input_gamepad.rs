@@ -113,7 +113,7 @@ fn main() {
         .run();
 }
 
-fn configure_camera(camera: &mut OrbitCam) {
+const fn configure_camera(camera: &mut OrbitCam) {
     camera.focus = CAMERA_FOCUS;
     camera.yaw = Some(CAMERA_YAW);
     camera.pitch = Some(CAMERA_PITCH);
