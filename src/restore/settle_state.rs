@@ -214,7 +214,7 @@ fn resolve_window_key(
 ///
 /// - **Stability timer** (200ms): resets whenever any compared value changes. If values stay stable
 ///   for 200ms, fires `WindowRestored`.
-/// - **Total timeout** (1s): hard deadline. Fires `WindowRestoreMismatch` if stability is never
+/// - **Total timeout** (2s): hard deadline. Fires `WindowRestoreMismatch` if stability is never
 ///   reached.
 ///
 /// Runs while `TargetPosition` entities exist (same gate as `restore_windows`).
@@ -381,7 +381,7 @@ fn emit_settle_success(
     total_elapsed_ms: f32,
     stability_elapsed_ms: f32,
 ) {
-    info!(
+    debug!(
         "[check_restore_settling] [{window_key}] Settled after {total_elapsed_ms:.0}ms \
          (stable for {stability_elapsed_ms:.0}ms)"
     );

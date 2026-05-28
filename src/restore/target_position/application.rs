@@ -244,8 +244,8 @@ pub(crate) fn restore_windows(
             RestoreStatus::Complete
         ) && target_position.settle_state.is_none()
         {
-            info!(
-                "[restore_windows] Restore applied, starting settle (200ms stability / 1s timeout)"
+            debug!(
+                "[restore_windows] Restore applied, starting settle (200ms stability / 2s timeout)"
             );
             target_position.settle_state = Some(SettleState::new());
         }

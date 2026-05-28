@@ -40,7 +40,7 @@ pub(crate) const SCALE_FACTOR_EPSILON: f64 = 0.01;
 /// Duration (in seconds) that all values must remain stable before declaring success.
 pub(crate) const SETTLE_STABILITY_SECS: f32 = 0.2;
 /// Maximum total duration (in seconds) to wait for values to stabilize.
-pub(crate) const SETTLE_TIMEOUT_SECS: f32 = 1.0;
+pub(crate) const SETTLE_TIMEOUT_SECS: f32 = 2.0;
 
 // state format
 /// Header comment prepended to the RON file to document the coordinate contract.

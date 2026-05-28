@@ -52,7 +52,7 @@ pub(crate) struct TargetPosition {
     /// Uses a two-timer approach:
     /// - **Stability timer** (200ms): resets whenever any compared value changes between frames.
     ///   Fires `WindowRestored` when all values have been stable for 200ms.
-    /// - **Total timeout** (1s): hard deadline. If values never stabilize for 200ms continuously,
+    /// - **Total timeout** (2s): hard deadline. If values never stabilize for 200ms continuously,
     ///   fires `WindowRestoreMismatch` with whatever state exists at timeout.
     ///
     /// This handles compositor artifacts like Wayland `wl_surface.enter`/`leave` bounces
