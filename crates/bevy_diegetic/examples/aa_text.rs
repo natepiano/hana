@@ -19,7 +19,6 @@ use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
 use bevy::render::view::Msaa;
-use bevy_diegetic::default_panel_material;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -44,6 +43,7 @@ use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
+use bevy_diegetic::default_panel_material;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
@@ -51,10 +51,10 @@ use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
-use fairy_dust::TitleBar;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_SIZE;
+use fairy_dust::TitleBar;
 
 // =============================================================================
 // CONSTANTS -- static scene data, controls, copy, and panel geometry.
@@ -974,11 +974,7 @@ const fn msaa_label(msaa: Msaa) -> &'static str {
 }
 
 const fn oit_label(oit_enabled: bool) -> &'static str {
-    if oit_enabled {
-        "OIT On"
-    } else {
-        "OIT Off"
-    }
+    if oit_enabled { "OIT On" } else { "OIT Off" }
 }
 
 const fn post_label(post: PostAa) -> &'static str {
