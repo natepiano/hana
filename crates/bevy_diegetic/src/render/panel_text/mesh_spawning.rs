@@ -208,7 +208,12 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
 
     let command_depth = panel_text_child.command_index.saturating_add(1).to_f32();
     let text_depth_bias = command_depth * constants::LAYER_DEPTH_BIAS;
-    let text_oit_depth_offset = command_depth * constants::OIT_DEPTH_STEP;
+    // Keep panel text at its real clip-space depth in OIT. A positive manual
+    // offset here can pull glyph fragments in front of opaque occluders, making
+    // text show through solid geometry. Normal/non-OIT layering still comes
+    // from `depth_bias`; panel-local OIT text ordering should be solved without
+    // moving the fragment depth.
+    let text_oit_depth_offset = 0.0;
 
     let material = materials.add(panel_material(
         text_base,
