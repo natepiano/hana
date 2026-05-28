@@ -357,52 +357,41 @@ fn setup(
         ))
         .id();
     commands.entity(cube).with_children(|cube| {
-        spawn_cube_msaa_label(cube, CUBE_MSAA_LABEL_Z, Quat::IDENTITY);
-        spawn_cube_msaa_label(
-            cube,
-            -CUBE_MSAA_LABEL_Z,
-            Quat::from_rotation_y(std::f32::consts::PI),
-        );
-        spawn_cube_compatibility_panel(
-            cube,
-            CubeCompatibilityPanel::Oit,
-            oit.0,
-            *post,
-            Transform::from_xyz(CUBE_COMPAT_PANEL_X, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-        );
-        spawn_cube_compatibility_panel(
-            cube,
-            CubeCompatibilityPanel::Taa,
-            oit.0,
-            *post,
-            Transform::from_xyz(-CUBE_COMPAT_PANEL_X, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
-        );
+        spawn_cube_msaa_labels(cube);
+        spawn_cube_compatibility_panels(cube, oit.0, *post);
     });
 }
 
-fn spawn_cube_msaa_label(cube: &mut ChildSpawnerCommands, local_z: f32, rotation: Quat) {
+fn spawn_cube_msaa_labels(cube: &mut ChildSpawnerCommands) {
+    let label_text = WorldText::new(msaa_label(Msaa::Off));
+    let label_style = WorldTextStyle::new(CUBE_MSAA_LABEL_SIZE)
+        .with_color(Color::WHITE)
+        .with_align(TextAlign::Center)
+        .with_anchor(Anchor::Center)
+        .with_shadow_mode(GlyphShadowMode::None)
+        .with_unlit();
+
     cube.spawn((
         Name::new("Cube MSAA label"),
         CubeMsaaLabel,
-        WorldText::new(msaa_label(Msaa::Off)),
-        WorldTextStyle::new(CUBE_MSAA_LABEL_SIZE)
-            .with_color(Color::WHITE)
-            .with_align(TextAlign::Center)
-            .with_anchor(Anchor::Center)
-            .with_shadow_mode(GlyphShadowMode::None)
-            .with_unlit(),
-        Transform::from_xyz(0.0, 0.0, local_z).with_rotation(rotation),
+        label_text.clone(),
+        label_style.clone(),
+        Transform::from_xyz(0.0, 0.0, CUBE_MSAA_LABEL_Z),
+    ));
+    cube.spawn((
+        Name::new("Cube MSAA label"),
+        CubeMsaaLabel,
+        label_text,
+        label_style,
+        Transform::from_xyz(0.0, 0.0, -CUBE_MSAA_LABEL_Z)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
     ));
 }
 
-fn spawn_cube_compatibility_panel(
+fn spawn_cube_compatibility_panels(
     cube: &mut ChildSpawnerCommands,
-    panel_kind: CubeCompatibilityPanel,
     oit_enabled: bool,
     post: PostAa,
-    transform: Transform,
 ) {
     let transparent = StandardMaterial {
         base_color: Color::NONE,
@@ -424,7 +413,23 @@ fn spawn_cube_compatibility_panel(
 
     match panel {
         Ok(panel) => {
-            cube.spawn((Name::new(panel_kind.name()), panel_kind, panel, transform));
+            let right_transform = Transform::from_xyz(CUBE_COMPAT_PANEL_X, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
+            let left_transform = Transform::from_xyz(-CUBE_COMPAT_PANEL_X, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2));
+
+            cube.spawn((
+                Name::new("Cube compatibility panel"),
+                CubeCompatibilityPanel,
+                panel.clone(),
+                right_transform,
+            ));
+            cube.spawn((
+                Name::new("Cube compatibility panel"),
+                CubeCompatibilityPanel,
+                panel,
+                left_transform,
+            ));
         },
         Err(error) => {
             error!("aa_text: failed to build cube compatibility panel: {error}");
@@ -926,19 +931,7 @@ struct CubeMsaaLabel;
 
 /// Marker for a cube-side compatibility message panel.
 #[derive(Component, Clone, Copy)]
-enum CubeCompatibilityPanel {
-    Oit,
-    Taa,
-}
-
-impl CubeCompatibilityPanel {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Oit => "Cube OIT compatibility panel",
-            Self::Taa => "Cube TAA compatibility panel",
-        }
-    }
-}
+struct CubeCompatibilityPanel;
 
 const fn cube_compatibility_message(oit_enabled: bool, post: PostAa) -> Option<&'static str> {
     match (oit_enabled, post) {

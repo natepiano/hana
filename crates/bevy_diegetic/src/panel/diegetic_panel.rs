@@ -50,7 +50,7 @@ use crate::layout::Unit;
 /// storing results in [`ComputedDiegeticPanel`].
 ///
 /// Requires a [`Transform`] for world-space positioning.
-#[derive(Component, Reflect)]
+#[derive(Clone, Component, Reflect)]
 #[reflect(Component)]
 #[require(
     ComputedDiegeticPanel,

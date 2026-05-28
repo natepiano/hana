@@ -30,6 +30,7 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::default_panel_material;
+use bevy_kana::ToU8;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
@@ -240,7 +241,7 @@ fn panel_rendering_title_bar(lux: f32) -> TitleBar {
         .active_control(TAA_CONTROL)
 }
 
-fn light_readout_control(lux: f32) -> String { format!("{LIGHT_READOUT_LABEL} {:.0}", lux) }
+fn light_readout_control(lux: f32) -> String { format!("{LIGHT_READOUT_LABEL} {lux:.0}") }
 
 /// Cycles through lighting presets with keys 1-4.
 fn cycle_lighting_preset(
@@ -603,7 +604,7 @@ fn build_preset_panel_layout(builder: &mut LayoutBuilder, preset: LightingPreset
             build_preset_row(builder, "", "Material", "Lights", &header, &header, &header);
             panel_divider(builder);
             for (index, (key, material, lights)) in LIGHTING_PRESET_ROWS.into_iter().enumerate() {
-                let active = preset.index == index as u8;
+                let active = preset.index == index.to_u8();
                 let key_style = if active { &key_active } else { &key_inactive };
                 let body_style = if active { &body_active } else { &body_inactive };
                 build_preset_row(
