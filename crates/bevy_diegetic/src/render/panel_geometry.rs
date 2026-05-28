@@ -359,7 +359,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
             border_widths: world_borders,
             border_color: surface.border_color,
             clip_rect,
-            oit_depth_offset: surface.command_index.to_f32() * constants::OIT_DEPTH_STEP,
+            oit_depth_offset: constants::panel_backing_oit_depth_offset(surface.command_index),
         },
     );
 

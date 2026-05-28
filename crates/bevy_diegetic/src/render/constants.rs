@@ -3,6 +3,7 @@
 use bevy::asset::uuid_handle;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
+use bevy_kana::ToF32;
 
 // layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
@@ -19,6 +20,16 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// `in.position.z`, so we apply this offset manually.
 /// Reverse-Z: positive = closer to camera = composited in front.
 pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
+
+/// OIT depth offset for non-text panel layers.
+///
+/// Panel text stays at `0.0` so unrelated opaque geometry keeps real depth
+/// authority. Backgrounds, borders, and other SDF backing layers move backward
+/// from zero, using command order only as a coplanar tie-breaker.
+#[must_use]
+pub(crate) fn panel_backing_oit_depth_offset(command_index: usize) -> f32 {
+    -(command_index.to_f32() + 1.0) * OIT_DEPTH_STEP
+}
 
 // material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).

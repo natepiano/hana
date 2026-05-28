@@ -19,6 +19,7 @@ use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
 use bevy::render::view::Msaa;
+use bevy_diegetic::default_panel_material;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -30,6 +31,7 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
@@ -42,7 +44,6 @@ use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_diegetic::default_panel_material;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
@@ -50,10 +51,10 @@ use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
+use fairy_dust::TitleBar;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_SIZE;
-use fairy_dust::TitleBar;
 
 // =============================================================================
 // CONSTANTS -- static scene data, controls, copy, and panel geometry.
@@ -207,6 +208,7 @@ const GROUND_Y: f32 = -0.15;
 /// Frontal key/fill rig matching `typography.rs`: aim at the word and place the
 /// key light high and far in front (`+z`) so shadows trail behind the glyphs.
 const LIGHT_AIM: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
+const KEY_LIGHT_ILLUMINANCE: f32 = 6_000.0;
 const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
 
 /// A slowly tumbling transparent cube to the right of the word. The cube gets
@@ -215,16 +217,16 @@ const CUBE_SIZE: f32 = 0.34;
 const CUBE_X: f32 = 2.05;
 const CUBE_COLOR: Color = Color::srgba(1.0, 0.08, 0.04, 1.0);
 const CUBE_SPIN_SPEED: f32 = 0.35;
-const CUBE_MSAA_LABEL_SIZE: f32 = 0.055;
 const CUBE_FACE_TEXT_OFFSET: f32 = 0.003;
-const CUBE_MSAA_LABEL_Z: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
+const CUBE_FACE_PANEL_OFFSET: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
 const CUBE_COMPAT_PANEL_SIZE: f32 = CUBE_SIZE;
 const CUBE_COMPAT_PANEL_FONT_SIZE: f32 = 38.0;
 const CUBE_COMPAT_PANEL_PADDING: f32 = 0.01;
-const CUBE_COMPAT_PANEL_X: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
-const OIT_COMPAT_MESSAGE: &str = "Incompatible with OIT";
-const TAA_COMPAT_MESSAGE: &str = "Incompatible with TAA";
-const OIT_TAA_COMPAT_MESSAGE: &str = "Incompatible with OIT and TAA";
+const CUBE_STATUS_PANEL_FONT_SIZE: f32 = 42.0;
+const CUBE_STATUS_PANEL_ROW_GAP: f32 = 0.008;
+const OIT_COMPAT_MESSAGE: &str = "MSAA is incompatible with OIT";
+const TAA_COMPAT_MESSAGE: &str = "MSAA is incompatible with TAA";
+const OIT_TAA_COMPAT_MESSAGE: &str = "MSAA is incompatible with OIT and TAA";
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
@@ -236,6 +238,7 @@ fn main() {
         .with_studio_lighting()
         .aim_at(LIGHT_AIM)
         .key_light_pos(KEY_LIGHT_POS)
+        .key_light_illuminance(KEY_LIGHT_ILLUMINANCE)
         .with_ground_plane()
         .size(GROUND_SIZE)
         .transform(
@@ -284,7 +287,7 @@ fn main() {
                 rotate_cube,
                 refresh_aa_panel,
                 refresh_demo_panel,
-                refresh_cube_msaa_text,
+                refresh_cube_status_panels,
                 refresh_cube_compatibility_panels,
             ),
         )
@@ -357,35 +360,42 @@ fn setup(
         ))
         .id();
     commands.entity(cube).with_children(|cube| {
-        spawn_cube_msaa_labels(cube);
+        spawn_cube_status_panels(cube, CubeStatusSnapshot::new(Msaa::Off, oit.0, *post));
         spawn_cube_compatibility_panels(cube, oit.0, *post);
     });
 }
 
-fn spawn_cube_msaa_labels(cube: &mut ChildSpawnerCommands) {
-    let label_text = WorldText::new(msaa_label(Msaa::Off));
-    let label_style = WorldTextStyle::new(CUBE_MSAA_LABEL_SIZE)
-        .with_color(Color::WHITE)
-        .with_align(TextAlign::Center)
-        .with_anchor(Anchor::Center)
-        .with_shadow_mode(GlyphShadowMode::None)
-        .with_unlit();
+fn spawn_cube_status_panels(cube: &mut ChildSpawnerCommands, snapshot: CubeStatusSnapshot) {
+    let panel = cube_status_panel(snapshot);
 
-    cube.spawn((
-        Name::new("Cube MSAA label"),
-        CubeMsaaLabel,
-        label_text.clone(),
-        label_style.clone(),
-        Transform::from_xyz(0.0, 0.0, CUBE_MSAA_LABEL_Z),
-    ));
-    cube.spawn((
-        Name::new("Cube MSAA label"),
-        CubeMsaaLabel,
-        label_text,
-        label_style,
-        Transform::from_xyz(0.0, 0.0, -CUBE_MSAA_LABEL_Z)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
-    ));
+    match panel {
+        Ok(panel) => {
+            let front_transform = Transform::from_xyz(0.0, 0.0, CUBE_FACE_PANEL_OFFSET);
+            let back_transform = Transform::from_xyz(0.0, 0.0, -CUBE_FACE_PANEL_OFFSET)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
+            let top_transform = Transform::from_xyz(0.0, CUBE_FACE_PANEL_OFFSET, 0.0)
+                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2));
+            let bottom_transform = Transform::from_xyz(0.0, -CUBE_FACE_PANEL_OFFSET, 0.0)
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
+
+            for transform in [
+                front_transform,
+                back_transform,
+                top_transform,
+                bottom_transform,
+            ] {
+                cube.spawn((
+                    Name::new("Cube render status panel"),
+                    CubeStatusPanel,
+                    panel.clone(),
+                    transform,
+                ));
+            }
+        },
+        Err(error) => {
+            error!("aa_text: failed to build cube status panel: {error}");
+        },
+    }
 }
 
 fn spawn_cube_compatibility_panels(
@@ -393,12 +403,7 @@ fn spawn_cube_compatibility_panels(
     oit_enabled: bool,
     post: PostAa,
 ) {
-    let transparent = StandardMaterial {
-        base_color: Color::NONE,
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default_panel_material()
-    };
+    let transparent = cube_panel_material();
     let panel = DiegeticPanel::world()
         .size(CUBE_COMPAT_PANEL_SIZE, CUBE_COMPAT_PANEL_SIZE)
         .font_unit(Unit::Millimeters)
@@ -413,9 +418,9 @@ fn spawn_cube_compatibility_panels(
 
     match panel {
         Ok(panel) => {
-            let right_transform = Transform::from_xyz(CUBE_COMPAT_PANEL_X, 0.0, 0.0)
+            let right_transform = Transform::from_xyz(CUBE_FACE_PANEL_OFFSET, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
-            let left_transform = Transform::from_xyz(-CUBE_COMPAT_PANEL_X, 0.0, 0.0)
+            let left_transform = Transform::from_xyz(-CUBE_FACE_PANEL_OFFSET, 0.0, 0.0)
                 .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2));
 
             cube.spawn((
@@ -925,13 +930,30 @@ fn panel_divider_vertical(builder: &mut LayoutBuilder) {
 #[derive(Component)]
 struct SpinningCube;
 
-/// Marker for the label centered on the cube face.
+/// Marker for the render-status panel cloned onto four cube faces.
 #[derive(Component)]
-struct CubeMsaaLabel;
+struct CubeStatusPanel;
 
 /// Marker for a cube-side compatibility message panel.
 #[derive(Component, Clone, Copy)]
 struct CubeCompatibilityPanel;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CubeStatusSnapshot {
+    msaa:        Msaa,
+    oit_enabled: bool,
+    post:        PostAa,
+}
+
+impl CubeStatusSnapshot {
+    const fn new(msaa: Msaa, oit_enabled: bool, post: PostAa) -> Self {
+        Self {
+            msaa,
+            oit_enabled,
+            post,
+        }
+    }
+}
 
 const fn cube_compatibility_message(oit_enabled: bool, post: PostAa) -> Option<&'static str> {
     match (oit_enabled, post) {
@@ -949,6 +971,69 @@ const fn msaa_label(msaa: Msaa) -> &'static str {
         Msaa::Sample4 => "MSAA 4x",
         Msaa::Sample8 => "MSAA 8x",
     }
+}
+
+const fn oit_label(oit_enabled: bool) -> &'static str {
+    if oit_enabled {
+        "OIT On"
+    } else {
+        "OIT Off"
+    }
+}
+
+const fn post_label(post: PostAa) -> &'static str {
+    match post {
+        PostAa::None => "Post None",
+        PostAa::Smaa => "Post SMAA",
+        PostAa::Fxaa => "Post FXAA",
+        PostAa::Taa => "Post TAA",
+    }
+}
+
+fn cube_panel_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default_panel_material()
+    }
+}
+
+fn cube_status_panel(snapshot: CubeStatusSnapshot) -> Result<DiegeticPanel, InvalidSize> {
+    let transparent = cube_panel_material();
+    DiegeticPanel::world()
+        .size(CUBE_COMPAT_PANEL_SIZE, CUBE_COMPAT_PANEL_SIZE)
+        .font_unit(Unit::Millimeters)
+        .anchor(Anchor::Center)
+        .material(transparent.clone())
+        .text_material(transparent)
+        .with_tree(build_cube_status_tree(snapshot))
+        .build()
+}
+
+fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
+            .height(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
+            .direction(Direction::TopToBottom)
+            .child_alignment(AlignX::Center, AlignY::Center)
+            .child_gap(CUBE_STATUS_PANEL_ROW_GAP)
+            .padding(Padding::all(CUBE_COMPAT_PANEL_PADDING))
+            .clip(),
+    );
+    let style = LayoutTextStyle::new(CUBE_STATUS_PANEL_FONT_SIZE)
+        .with_color(Color::WHITE)
+        .with_align(TextAlign::Center)
+        .with_shadow_mode(GlyphShadowMode::None);
+    for label in [
+        msaa_label(snapshot.msaa),
+        oit_label(snapshot.oit_enabled),
+        post_label(snapshot.post),
+    ] {
+        builder.text(label, style.clone());
+    }
+    builder.build()
 }
 
 fn build_cube_compatibility_tree(message: Option<&str>) -> LayoutTree {
@@ -973,20 +1058,34 @@ fn build_cube_compatibility_tree(message: Option<&str>) -> LayoutTree {
     builder.build()
 }
 
-/// Updates the cube-face label from the actual `Msaa` component on the main
-/// orbit camera.
-fn refresh_cube_msaa_text(
+/// Updates the cube-face status panels from the actual `Msaa` component on the
+/// main orbit camera plus the user-selected OIT and post-process modes.
+fn refresh_cube_status_panels(
     cameras: Query<Option<&Msaa>, (With<OrbitCam>, With<Camera>)>,
-    mut labels: Query<&mut WorldText, With<CubeMsaaLabel>>,
+    oit: Res<OitState>,
+    post: Res<PostAa>,
+    panels: Query<Entity, With<CubeStatusPanel>>,
+    mut last_snapshot: Local<Option<CubeStatusSnapshot>>,
+    mut commands: Commands,
 ) {
-    let Some(msaa) = cameras.iter().next().flatten().copied() else {
-        return;
+    let fallback_msaa = if oit.0 || *post == PostAa::Taa {
+        Msaa::Off
+    } else {
+        Msaa::default()
     };
-    let label = msaa_label(msaa);
-    for mut text in &mut labels {
-        if text.text() != label {
-            text.set_text(label);
-        }
+    let msaa = cameras
+        .iter()
+        .next()
+        .flatten()
+        .copied()
+        .unwrap_or(fallback_msaa);
+    let snapshot = CubeStatusSnapshot::new(msaa, oit.0, *post);
+    if last_snapshot.is_some_and(|previous| previous == snapshot) {
+        return;
+    }
+    *last_snapshot = Some(snapshot);
+    for entity in &panels {
+        commands.set_tree(entity, build_cube_status_tree(snapshot));
     }
 }
 

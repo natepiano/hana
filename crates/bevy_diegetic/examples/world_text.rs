@@ -12,6 +12,14 @@
 //! recover the edge AA. Press `S` to toggle it off and watch the cube
 //! silhouette alias — that is the AA cost OIT alone would impose. SMAA runs on
 //! the composited image after the OIT pass, so the two are compatible.
+//!
+//! # Code layout
+//!
+//! Read top-to-bottom for the demonstrated API:
+//!   - `main()` wires the app (cube + face text, stable-transparency OIT, title-bar chips).
+//!   - **WORLD TEXT** section spawns the anchor demo and the ground label.
+//!   - **SMAA TOGGLE** section adds/removes [`Smaa`] on the camera.
+//!   - **ROTATION ANIMATION** at the end is decorative scaffolding.
 
 use bevy::anti_alias::smaa::Smaa;
 use bevy::light::NotShadowCaster;
@@ -27,16 +35,20 @@ use fairy_dust::ControlActivation;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 
+// Camera home pose.
 const HOME_YAW: f32 = 0.015;
 const HOME_PITCH: f32 = 0.5;
 
+// Title-bar control labels (also the keys for chip wiring).
 const X_ROTATE_CONTROL: &str = "X Rotate";
 const Y_ROTATE_CONTROL: &str = "Y Rotate";
 const Z_ROTATE_CONTROL: &str = "Z Rotate";
 const SMAA_CONTROL: &str = "S SMAA";
 
+// Rotation animation.
 const ROTATION_SPEED: f32 = 1.5;
 
+// Cube + per-face label styling.
 const CUBE_SIZE: f32 = 1.0;
 const CUBE_TRANSLATION: Vec3 = Vec3::new(-2.5, 1.0, 2.5);
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
@@ -44,53 +56,10 @@ const CUBE_YAW: f32 = 20.0;
 const FACE_LABEL_SIZE: f32 = 0.20;
 const FACE_LABEL_COLOR: Color = Color::srgb(0.9, 0.3, 0.1);
 
+// Translucent backdrop behind the anchor demo labels.
 const ANCHOR_FRAME_COLOR: Color = Color::srgba(0.08, 0.08, 0.08, 0.18);
 const ANCHOR_FRAME_SIZE: Vec3 = Vec3::new(3.6, 2.0, 0.02);
 const ANCHOR_FRAME_LOCAL_OFFSET: Vec3 = Vec3::new(0.0, -0.2, -0.1);
-
-/// Fired when an axis rotation of the anchor demo begins.
-#[derive(Event)]
-struct RotationBegin {
-    axis: Vec3,
-}
-
-/// Fired when an axis rotation of the anchor demo completes a full revolution.
-#[derive(Event)]
-struct RotationEnd {
-    axis: Vec3,
-}
-
-/// Marker for anchor demo text entities that can be rotated with 'R'.
-#[derive(Component)]
-struct AnchorDemoText {
-    /// The world-space position of the anchor point (stays fixed during rotation).
-    position:      Vec3,
-    /// The base rotation of the demo panel.
-    base_rotation: Quat,
-}
-
-#[derive(Resource, Default)]
-struct AnchorRotation {
-    /// Current rotation angle in radians (0..TAU). `None` = not rotating.
-    angle: Option<f32>,
-    /// Which local axis to rotate around.
-    axis:  Vec3,
-}
-
-/// Marker for the cube entity so the rotation system can find it.
-#[derive(Component)]
-struct DemoCube;
-
-/// Source of truth for the post-process SMAA toggle. Drives both the camera
-/// component and the title-bar chip highlight.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
-enum SmaaState {
-    /// No post-process AA: under OIT (`Msaa::Off`) the cube edges alias.
-    #[default]
-    Off,
-    /// SMAA on: mesh edges resolve while the OIT text stays stable.
-    On,
-}
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
@@ -124,6 +93,7 @@ fn main() {
         .pitch(HOME_PITCH)
         .with_title_bar(
             TitleBar::new()
+                .with_title("World Text")
                 .with_anchor(Anchor::TopLeft)
                 .control(X_ROTATE_CONTROL)
                 .control(Y_ROTATE_CONTROL)
@@ -156,6 +126,12 @@ fn main() {
         .add_systems(Update, (rotate_anchor_demo, toggle_smaa))
         .run();
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WORLD TEXT — spawning [`WorldText`] entities with [`WorldTextStyle`] and the
+// nine [`Anchor`] variants. This is the primary API the example demonstrates;
+// the labels on the cube faces are added in `main()` via `face_text`.
+// ═════════════════════════════════════════════════════════════════════════════
 
 fn setup(
     mut commands: Commands,
@@ -278,6 +254,93 @@ fn spawn_ground_text(commands: &mut Commands) {
     ));
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SMAA TOGGLE — demonstrates that post-process SMAA composes with OIT. OIT
+// forces `Msaa::Off`, so without SMAA the cube silhouette aliases; toggling
+// SMAA on the camera entity recovers edge AA without disturbing the OIT pass.
+// This is the second primary API the example demonstrates.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Source of truth for the post-process SMAA toggle. Drives both the camera
+/// component and the title-bar chip highlight.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+enum SmaaState {
+    /// No post-process AA: under OIT (`Msaa::Off`) the cube edges alias.
+    #[default]
+    Off,
+    /// SMAA on: mesh edges resolve while the OIT text stays stable.
+    On,
+}
+
+/// On `S`, flip [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
+/// SMAA is a post-process pass that runs on the composited image after OIT
+/// resolves, so it anti-aliases the mesh edges that `Msaa::Off` leaves jagged
+/// without disturbing the OIT text composite.
+fn toggle_smaa(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<SmaaState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyS) {
+        return;
+    }
+    *state = match *state {
+        SmaaState::Off => SmaaState::On,
+        SmaaState::On => SmaaState::Off,
+    };
+    for camera in &cameras {
+        match *state {
+            SmaaState::On => {
+                commands.entity(camera).insert(Smaa::default());
+            },
+            SmaaState::Off => {
+                commands.entity(camera).remove::<Smaa>();
+            },
+        }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ROTATION ANIMATION — supporting (decorative). Driving the anchor demo and
+// the labeled cube around X/Y/Z so the viewer can see anchor points stay
+// fixed while the text rotates. Not part of the demonstrated `WorldText` or
+// SMAA APIs; safe to skim.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Fired when an axis rotation of the anchor demo begins.
+#[derive(Event)]
+struct RotationBegin {
+    axis: Vec3,
+}
+
+/// Fired when an axis rotation of the anchor demo completes a full revolution.
+#[derive(Event)]
+struct RotationEnd {
+    axis: Vec3,
+}
+
+/// Marker for anchor demo text entities that can be rotated with 'R'.
+#[derive(Component)]
+struct AnchorDemoText {
+    /// The world-space position of the anchor point (stays fixed during rotation).
+    position:      Vec3,
+    /// The base rotation of the demo panel.
+    base_rotation: Quat,
+}
+
+#[derive(Resource, Default)]
+struct AnchorRotation {
+    /// Current rotation angle in radians (0..TAU). `None` = not rotating.
+    angle: Option<f32>,
+    /// Which local axis to rotate around.
+    axis:  Vec3,
+}
+
+/// Marker for the cube entity so the rotation system can find it.
+#[derive(Component)]
+struct DemoCube;
+
 /// Press X, Y, or Z to start a full rotation around that local axis.
 /// `Anchor` demo texts rotate around their anchor point (red dot stays fixed).
 /// The cube rotates around its own center on the same axis simultaneously.
@@ -342,34 +405,5 @@ fn rotate_anchor_demo(
 
     if let (Ok(mut cube_t), Some(base)) = (cube.single_mut(), *cube_base_rotation) {
         cube_t.rotation = base * rot;
-    }
-}
-
-/// On `S`, flip [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
-/// SMAA is a post-process pass that runs on the composited image after OIT
-/// resolves, so it anti-aliases the mesh edges that `Msaa::Off` leaves jagged
-/// without disturbing the OIT text composite.
-fn toggle_smaa(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<SmaaState>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyS) {
-        return;
-    }
-    *state = match *state {
-        SmaaState::Off => SmaaState::On,
-        SmaaState::On => SmaaState::Off,
-    };
-    for camera in &cameras {
-        match *state {
-            SmaaState::On => {
-                commands.entity(camera).insert(Smaa::default());
-            },
-            SmaaState::Off => {
-                commands.entity(camera).remove::<Smaa>();
-            },
-        }
     }
 }
