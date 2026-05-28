@@ -30,15 +30,17 @@ struct FairyDustStudioLight;
 /// [`crate::builder::StudioLightingBuilder`] override individual fields.
 #[derive(Resource, Clone, Copy)]
 pub(crate) struct StudioLightingConfig {
-    pub(crate) key_light_pos: Vec3,
-    pub(crate) aim_at:        Vec3,
+    pub(crate) key_light_pos:         Vec3,
+    pub(crate) aim_at:                Vec3,
+    pub(crate) key_light_illuminance: f32,
 }
 
 impl Default for StudioLightingConfig {
     fn default() -> Self {
         Self {
-            key_light_pos: KEY_LIGHT_POS,
-            aim_at:        TARGET,
+            key_light_pos:         KEY_LIGHT_POS,
+            aim_at:                TARGET,
+            key_light_illuminance: KEY_LIGHT_ILLUMINANCE,
         }
     }
 }
@@ -56,7 +58,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
     commands.spawn((
         FairyDustStudioLight,
         DirectionalLight {
-            illuminance: KEY_LIGHT_ILLUMINANCE,
+            illuminance: config.key_light_illuminance,
             shadow_maps_enabled: true,
             shadow_depth_bias: KEY_SHADOW_DEPTH_BIAS,
             shadow_normal_bias: KEY_SHADOW_NORMAL_BIAS,

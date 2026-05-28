@@ -6,19 +6,20 @@
 
 use std::time::Duration;
 
+use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::camera::visibility::RenderLayers;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
-use bevy_diegetic::AlignY;
+use bevy::render::camera::MipBias;
+use bevy::render::camera::TemporalJitter;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
@@ -27,12 +28,18 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::StableTransparency;
 use bevy_diegetic::default_panel_material;
-use bevy_lagrange::AnimateToFit;
-use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::SetFitTarget;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
+use fairy_dust::CameraHomeTarget;
+use fairy_dust::ControlActivation;
+use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::LABEL_SIZE;
+use fairy_dust::TITLE_SIZE;
+use fairy_dust::TitleBar;
 
 // ── Colors ──────────────────────────────────────────────────────────
 const DARK_BG: Color = Color::srgba(0.3, 0.3, 0.35, 1.0);
@@ -52,9 +59,12 @@ const CARD_HEIGHT: f32 = 60.0; // mm
 const CARD_PAD: f32 = 4.0; // mm
 const CHILD_GAP: f32 = 2.0; // mm
 const CARD_GAP: f32 = 6.0; // mm — gap between the three cards
-const PANEL_WIDTH: f32 = CARD_WIDTH * 3.0 + CARD_GAP * 2.0; // total
-const PANEL_HEIGHT: f32 = CARD_HEIGHT; // same height
+const MM_TO_WORLD: f32 = 0.001;
+const CARD_X_STEP: f32 = (CARD_WIDTH + CARD_GAP) * MM_TO_WORLD;
 const ZOOM_MARGIN: f32 = 0.02;
+const HOME_MARGIN: f32 = 0.10;
+const LIGHT_AIM: Vec3 = Vec3::ZERO;
+const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 1.2, 3.0);
 const ZOOM_DURATION_MS: u64 = 600;
 /// Illuminance calibrated so a Lambertian surface facing the light
 /// produces output ≈ albedo at the default Bevy exposure (EV100 = 9.7).
@@ -63,41 +73,37 @@ const SCENE_ILLUMINANCE: f32 = 3137.0;
 
 /// How much illuminance changes per frame while +/- is held.
 const ILLUMINANCE_STEP: f32 = 50.0;
-
-// ── HUD ────────────────────────────────────────────────────────────
-const HUD_WIDTH: f32 = 1100.0;
-const HUD_HEIGHT: f32 = 58.0;
-const HUD_PADDING: f32 = 14.0;
-const HUD_GAP: f32 = 16.0;
-const HUD_TITLE_SIZE: f32 = 20.0;
-const HUD_BODY_SIZE: f32 = 18.0;
-const HUD_HINT_SIZE: f32 = 15.0;
-
-const HUD_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
-const HUD_FRAME_BACKGROUND: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
-const HUD_BORDER_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
-const HUD_BORDER_DIM: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
-const HUD_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
-const HUD_LABEL_COLOR: Color = Color::srgba(0.5, 0.55, 0.7, 0.8);
-const HUD_VALUE_COLOR: Color = Color::srgb(0.3, 0.9, 1.0);
-const HUD_ACTIVE_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
-const HUD_INACTIVE_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
-const HUD_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
-const HUD_HINT_COLOR: Color = Color::srgba(0.55, 0.6, 0.75, 0.8);
+const TAA_CONTROL: &str = "T TAA";
+const OIT_CONTROL: &str = "O OIT";
+const LIGHT_CONTROL: &str = "+/- Light";
+const RESET_CONTROL: &str = "R Reset";
+const LIGHT_READOUT_LABEL: &str = "Lux";
+const PRESET_PANEL_TITLE: &str = "Panel Material";
+const PRESET_PANEL_PADDING: Px = Px(10.0);
+const PRESET_PANEL_RADIUS: Px = Px(10.0);
+const PRESET_PANEL_BORDER_WIDTH: Px = Px(1.0);
+const PRESET_ROW_GAP: Px = Px(4.0);
+const PRESET_KEY_GAP: Px = Px(8.0);
+const PRESET_KEY_COLUMN_WIDTH: f32 = 16.0;
+const PRESET_MATERIAL_COLUMN_WIDTH: f32 = 74.0;
+const PRESET_LIGHTS_COLUMN_WIDTH: f32 = 56.0;
+const PRESET_TITLE_COLOR: Color = Color::WHITE;
+const PRESET_HEADER_COLOR: Color = Color::srgb(0.55, 0.78, 0.95);
+const PRESET_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
+const PRESET_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
+const PRESET_PANEL_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.4);
+const LIGHTING_PRESET_ROWS: [(&str, &str, &str); 4] = [
+    ("1", "Lit", "On"),
+    ("2", "Lit", "Off"),
+    ("3", "Unlit", "On"),
+    ("4", "Unlit", "Off"),
+];
 
 // ── Home camera position ────────────────────────────────────────────
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, -0.02, 0.0);
 const HOME_RADIUS: f32 = 0.35;
 const HOME_YAW: f32 = 0.0;
 const HOME_PITCH: f32 = 0.0;
-
-/// Marker for the scene's directional light.
-#[derive(Component)]
-struct SceneLight;
-
-/// Marker for the screen-space HUD panel.
-#[derive(Component)]
-struct HudPanel;
 
 /// Current lighting/material preset and saved illuminance.
 #[derive(Resource, Clone, Copy)]
@@ -116,85 +122,133 @@ impl Default for LightingPreset {
     }
 }
 
+/// Marker for the three world panels under test.
+#[derive(Component)]
+struct RenderPanel;
+
+/// Marker for the bottom-left lighting preset explanation panel.
+#[derive(Component)]
+struct PresetPanel;
+
+/// Studio directional light captured with its base illuminance.
+#[derive(Component)]
+struct SceneLight {
+    base_illuminance: f32,
+}
+
+/// Studio point light captured with its base intensity.
+#[derive(Component)]
+struct ScenePointLight {
+    base_intensity: f32,
+}
+
 impl LightingPreset {
     const fn is_unlit(self) -> bool { self.index == 2 || self.index == 3 }
     const fn lights_on(self) -> bool { self.index == 0 || self.index == 2 }
-
-    const fn description(self) -> &'static str {
-        match self.index {
-            0 => "Lit + On",
-            1 => "Lit + Off",
-            2 => "Unlit + On",
-            _ => "Unlit + Off",
-        }
-    }
 }
 
 fn main() {
-    let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins,
-        LagrangePlugin,
-        BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-        MeshPickingPlugin,
-        DiegeticUiPlugin,
-    ))
-    .init_resource::<LightingPreset>()
-    .init_resource::<TaaEnabled>()
-    .insert_resource(bevy::light::GlobalAmbientLight {
-        color:                      Color::BLACK,
-        brightness:                 0.0,
-        affects_lightmapped_meshes: false,
-    })
-    .add_systems(Startup, setup)
-    .add_systems(
-        Update,
-        (
-            zoom_to_panel,
-            cycle_lighting_preset,
-            adjust_illuminance,
-            home_camera,
-            toggle_taa,
-            update_hud,
-        ),
-    );
-    app.run();
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example`.
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .add_plugins(MeshPickingPlugin)
+        .with_studio_lighting()
+        .aim_at(LIGHT_AIM)
+        .key_light_pos(KEY_LIGHT_POS)
+        .key_light_illuminance(SCENE_ILLUMINANCE)
+        .with_ground_plane()
+        .size(0.35)
+        .transform(Transform::from_xyz(0.0, -0.04, 0.0))
+        .with_orbit_cam(
+            |cam| {
+                cam.focus = HOME_FOCUS;
+                cam.radius = Some(HOME_RADIUS);
+                cam.yaw = Some(HOME_YAW);
+                cam.pitch = Some(HOME_PITCH);
+                cam.zoom_sensitivity = 1.0;
+                cam.zoom_lower_limit = 0.000_000_1;
+            },
+            (
+                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+                Projection::Perspective(PerspectiveProjection {
+                    near: 0.001,
+                    near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
+                    ..default()
+                }),
+                bevy::camera::Exposure::default(),
+                Msaa::Off,
+                TemporalAntiAliasing::default(),
+            ),
+        )
+        .with_camera_home()
+        .yaw(HOME_YAW)
+        .pitch(HOME_PITCH)
+        .margin(HOME_MARGIN)
+        .duration(Duration::from_millis(ZOOM_DURATION_MS))
+        .with_title_bar(panel_rendering_title_bar(SCENE_ILLUMINANCE))
+        .wire_chip_to_state::<OitEnabled, _>(OIT_CONTROL, |oit| {
+            if oit.0 {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
+        .wire_chip_to_state::<TaaEnabled, _>(TAA_CONTROL, |taa| {
+            if taa.0 {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
+        .with_camera_control_panel()
+        .init_resource::<LightingPreset>()
+        .init_resource::<OitEnabled>()
+        .init_resource::<TaaEnabled>()
+        .insert_resource(bevy::light::GlobalAmbientLight {
+            color:                      Color::BLACK,
+            brightness:                 0.0,
+            affects_lightmapped_meshes: false,
+        })
+        .add_systems(Startup, (setup, spawn_preset_panel))
+        .add_systems(PostStartup, capture_scene_lights)
+        .add_systems(
+            Update,
+            (
+                cycle_lighting_preset,
+                adjust_illuminance,
+                toggle_oit,
+                toggle_taa,
+                refresh_preset_panel,
+                refresh_title_bar_light_readout,
+            ),
+        )
+        .add_systems(PostUpdate, sync_taa_msaa)
+        .run();
 }
 
-fn zoom_to_panel(
-    children: Query<(Entity, &ChildOf), With<Mesh3d>>,
-    panels: Query<Entity, (With<DiegeticPanel>, Without<HudPanel>)>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut done: Local<bool>,
-    mut commands: Commands,
-) {
-    if *done {
-        return;
-    }
-    let Ok(panel) = panels.single() else { return };
-    let Ok(camera) = cameras.single() else { return };
-
-    // Wait for the display quad (a Mesh3d child of the panel) to exist.
-    let has_mesh_child = children.iter().any(|(_, c)| c.parent() == panel);
-    if !has_mesh_child {
-        return;
-    }
-
-    *done = true;
-    commands.trigger(SetFitTarget::new(camera, panel));
-    commands.trigger(
-        ZoomToFit::new(camera, panel)
-            .margin(ZOOM_MARGIN)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-    );
+fn panel_rendering_title_bar(lux: f32) -> TitleBar {
+    TitleBar::new()
+        .with_title("Panel Rendering")
+        .controls([
+            LIGHT_CONTROL.to_string(),
+            light_readout_control(lux),
+            RESET_CONTROL.to_string(),
+        ])
+        .control(OIT_CONTROL)
+        .active_control(TAA_CONTROL)
 }
+
+fn light_readout_control(lux: f32) -> String { format!("{LIGHT_READOUT_LABEL} {:.0}", lux) }
 
 /// Cycles through lighting presets with keys 1-4.
 fn cycle_lighting_preset(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut preset: ResMut<LightingPreset>,
-    mut panels: Query<&mut DiegeticPanel, Without<HudPanel>>,
-    mut lights: Query<&mut DirectionalLight, With<SceneLight>>,
+    mut panels: Query<&mut DiegeticPanel, With<RenderPanel>>,
+    mut lights: Query<(&mut DirectionalLight, &SceneLight)>,
+    mut point_lights: Query<(&mut PointLight, &ScenePointLight)>,
 ) {
     let new = if keyboard.just_pressed(KeyCode::Digit1) {
         Some(0)
@@ -211,10 +265,8 @@ fn cycle_lighting_preset(
     let Some(idx) = new else { return };
 
     // Save current illuminance before switching away from lights-on.
-    if preset.lights_on()
-        && let Some(light) = lights.iter().next()
-    {
-        preset.saved_illuminance = light.illuminance;
+    if preset.lights_on() {
+        preset.saved_illuminance = current_key_illuminance_mut(&lights);
     }
 
     preset.index = idx;
@@ -234,12 +286,40 @@ fn cycle_lighting_preset(
     }
 
     // Restore saved illuminance for lights-on, zero for lights-off.
-    for mut light in &mut lights {
-        light.illuminance = if lights_visible {
-            preset.saved_illuminance
-        } else {
-            0.0
-        };
+    let key_illuminance = if lights_visible {
+        preset.saved_illuminance
+    } else {
+        0.0
+    };
+    apply_key_illuminance(&mut lights, &mut point_lights, key_illuminance);
+}
+
+fn current_key_illuminance_mut(lights: &Query<(&mut DirectionalLight, &SceneLight)>) -> f32 {
+    lights
+        .iter()
+        .map(|(light, _)| light.illuminance)
+        .fold(0.0, f32::max)
+}
+
+fn apply_key_illuminance(
+    lights: &mut Query<(&mut DirectionalLight, &SceneLight)>,
+    point_lights: &mut Query<(&mut PointLight, &ScenePointLight)>,
+    key_illuminance: f32,
+) {
+    let base_key = lights
+        .iter()
+        .map(|(_, scene_light)| scene_light.base_illuminance)
+        .fold(0.0, f32::max);
+    if base_key <= f32::EPSILON {
+        return;
+    }
+
+    let scale = key_illuminance / base_key;
+    for (mut light, scene_light) in lights {
+        light.illuminance = scene_light.base_illuminance * scale;
+    }
+    for (mut light, scene_light) in point_lights {
+        light.intensity = scene_light.base_intensity * scale;
     }
 }
 
@@ -248,7 +328,8 @@ fn cycle_lighting_preset(
 /// [R] resets to the calibrated default.
 fn adjust_illuminance(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut lights: Query<&mut DirectionalLight, With<SceneLight>>,
+    mut lights: Query<(&mut DirectionalLight, &SceneLight)>,
+    mut point_lights: Query<(&mut PointLight, &ScenePointLight)>,
 ) {
     let up = keyboard.pressed(KeyCode::Equal) || keyboard.pressed(KeyCode::NumpadAdd);
     let down = keyboard.pressed(KeyCode::Minus) || keyboard.pressed(KeyCode::NumpadSubtract);
@@ -258,35 +339,15 @@ fn adjust_illuminance(
         return;
     }
 
-    for mut light in &mut lights {
-        if reset {
-            light.illuminance = SCENE_ILLUMINANCE;
-        } else if up {
-            light.illuminance += ILLUMINANCE_STEP;
-        } else if down {
-            light.illuminance = (light.illuminance - ILLUMINANCE_STEP).max(0.0);
-        }
-    }
-}
-
-fn home_camera(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    panels: Query<Entity, (With<DiegeticPanel>, Without<HudPanel>)>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyH) {
-        return;
-    }
-    let Ok(panel) = panels.single() else { return };
-    let Ok(camera) = cameras.single() else { return };
-    commands.trigger(
-        AnimateToFit::new(camera, panel)
-            .yaw(HOME_YAW)
-            .pitch(HOME_PITCH)
-            .margin(ZOOM_MARGIN)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS)),
-    );
+    let current = current_key_illuminance_mut(&lights);
+    let target = if reset {
+        SCENE_ILLUMINANCE
+    } else if up {
+        current + ILLUMINANCE_STEP
+    } else {
+        (current - ILLUMINANCE_STEP).max(0.0)
+    };
+    apply_key_illuminance(&mut lights, &mut point_lights, target);
 }
 
 fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
@@ -302,12 +363,49 @@ fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     );
 }
 
-fn setup(mut commands: Commands, windows: Query<&Window>) {
-    // ── Single panel containing three cards ──────────────────────────
-    let tree = build_unified_panel();
+fn setup(mut commands: Commands) {
+    spawn_panel_card(
+        &mut commands,
+        "Backgrounds panel",
+        -CARD_X_STEP,
+        build_backgrounds_panel(),
+    );
+    spawn_panel_card(&mut commands, "Borders panel", 0.0, build_borders_panel());
+    spawn_panel_card(
+        &mut commands,
+        "Combined panel",
+        CARD_X_STEP,
+        build_combined_panel(),
+    );
+}
+
+fn capture_scene_lights(
+    mut commands: Commands,
+    directional_lights: Query<
+        (Entity, &DirectionalLight, Option<&RenderLayers>),
+        Without<SceneLight>,
+    >,
+    point_lights: Query<(Entity, &PointLight), Without<ScenePointLight>>,
+) {
+    for (entity, light, layers) in &directional_lights {
+        if layers.is_some() {
+            continue;
+        }
+        commands.entity(entity).insert(SceneLight {
+            base_illuminance: light.illuminance,
+        });
+    }
+    for (entity, light) in &point_lights {
+        commands.entity(entity).insert(ScenePointLight {
+            base_intensity: light.intensity,
+        });
+    }
+}
+
+fn spawn_panel_card(commands: &mut Commands, name: &'static str, x: f32, tree: LayoutTree) {
     let panel = DiegeticPanel::world()
-        .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
-        .anchor(Anchor::TopCenter)
+        .size(Mm(CARD_WIDTH), Mm(CARD_HEIGHT))
+        .anchor(Anchor::Center)
         .with_tree(tree)
         .build();
     let Ok(panel) = panel else {
@@ -316,73 +414,95 @@ fn setup(mut commands: Commands, windows: Query<&Window>) {
     };
 
     commands
-        .spawn((panel, Transform::from_xyz(0.0, 0.0, 0.0)))
+        .spawn((
+            Name::new(name),
+            RenderPanel,
+            CameraHomeTarget,
+            panel,
+            Transform::from_xyz(x, 0.0, 0.0),
+        ))
         .observe(on_panel_clicked);
+}
 
-    // ── Lighting ────────────────────────────────────────────────────
-    // Illuminance calibrated so PBR output ≈ albedo for a Lambertian
-    // surface facing the light (N·L=1). Higher values cause the
-    // tonemapper to compress and desaturate colors.
-    commands.spawn((
-        SceneLight,
-        DirectionalLight {
-            shadow_maps_enabled: true,
-            illuminance: SCENE_ILLUMINANCE,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 0.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    // ── HUD ─────────────────────────────────────────────────────────
-    let unlit_material = StandardMaterial {
+fn spawn_preset_panel(mut commands: Commands, preset: Res<LightingPreset>) {
+    let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
     };
-    let hud_width = windows.iter().next().map_or(HUD_WIDTH, Window::width);
-    let hud_panel = DiegeticPanel::screen()
-        .size(Sizing::fixed(Px(hud_width)), Sizing::fixed(Px(HUD_HEIGHT)))
-        .anchor(Anchor::TopLeft)
-        .material(unlit_material.clone())
-        .text_material(unlit_material)
-        .with_tree(build_hud_tree(
-            LightingPreset::default(),
-            SCENE_ILLUMINANCE,
-            hud_width,
-            true,
-        ))
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_preset_panel_tree(*preset))
         .build();
-    let Ok(hud_panel) = hud_panel else {
-        error!("failed to build HUD dimensions");
-        return;
-    };
-    commands.spawn((HudPanel, hud_panel, Transform::default()));
 
-    // ── Camera ──────────────────────────────────────────────────────
-    commands.spawn((
-        OrbitCam {
-            focus: HOME_FOCUS,
-            radius: Some(HOME_RADIUS),
-            yaw: Some(HOME_YAW),
-            pitch: Some(HOME_PITCH),
-            zoom_sensitivity: 1.0,
-            zoom_lower_limit: 0.000_000_1,
-            ..default()
+    match panel {
+        Ok(panel) => {
+            commands.spawn((PresetPanel, panel, Transform::default()));
         },
-        Projection::Perspective(PerspectiveProjection {
-            near: 0.001,
-            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
-            ..default()
-        }),
-        bevy::camera::Exposure::default(),
-        Msaa::Off,
-        bevy::anti_alias::taa::TemporalAntiAliasing::default(),
-    ));
+        Err(error) => {
+            error!("panel_rendering: failed to build preset panel: {error}");
+        },
+    }
+}
+
+fn refresh_preset_panel(
+    preset: Res<LightingPreset>,
+    panel: Single<Entity, With<PresetPanel>>,
+    mut commands: Commands,
+) {
+    if !preset.is_changed() {
+        return;
+    }
+    commands.set_tree(*panel, build_preset_panel_tree(*preset));
+}
+
+fn refresh_title_bar_light_readout(
+    lights: Query<&DirectionalLight, With<SceneLight>>,
+    mut title_bar: Single<&mut TitleBar>,
+    mut previous_lux: Local<u32>,
+) {
+    let lux = current_light_intensity(&lights);
+    let rounded = lux.round().to_bits();
+    if *previous_lux == rounded {
+        return;
+    }
+    *previous_lux = rounded;
+    **title_bar = panel_rendering_title_bar(lux);
+}
+
+fn current_light_intensity(lights: &Query<&DirectionalLight, With<SceneLight>>) -> f32 {
+    lights
+        .iter()
+        .map(|light| light.illuminance)
+        .fold(0.0, f32::max)
+}
+
+/// Toggles OIT on/off with the `O` key.
+fn toggle_oit(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut oit_enabled: ResMut<OitEnabled>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyO) {
+        return;
+    }
+    oit_enabled.0 = !oit_enabled.0;
+    for camera in &cameras {
+        if oit_enabled.0 {
+            commands.entity(camera).insert(StableTransparency);
+        } else {
+            commands.entity(camera).remove::<StableTransparency>();
+        }
+    }
 }
 
 /// Toggles TAA on/off with the `T` key.
 fn toggle_taa(
     keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<(Entity, Has<bevy::anti_alias::taa::TemporalAntiAliasing>), With<OrbitCam>>,
+    cameras: Query<(Entity, Has<TemporalAntiAliasing>), With<OrbitCam>>,
     mut taa_enabled: ResMut<TaaEnabled>,
     mut commands: Commands,
 ) {
@@ -393,16 +513,40 @@ fn toggle_taa(
         if has_taa {
             commands
                 .entity(entity)
-                .remove::<bevy::anti_alias::taa::TemporalAntiAliasing>();
+                .remove::<TemporalAntiAliasing>()
+                .remove::<TemporalJitter>()
+                .remove::<MipBias>();
             taa_enabled.0 = false;
         } else {
             commands
                 .entity(entity)
-                .insert(bevy::anti_alias::taa::TemporalAntiAliasing::default());
+                .insert(TemporalAntiAliasing::default());
             taa_enabled.0 = true;
         }
     }
 }
+
+fn sync_taa_msaa(
+    taa: Res<TaaEnabled>,
+    oit: Res<OitEnabled>,
+    cameras: Query<(Entity, Option<&Msaa>), With<Camera>>,
+    mut commands: Commands,
+) {
+    if oit.0 {
+        return;
+    }
+
+    let desired = if taa.0 { Msaa::Off } else { Msaa::default() };
+    for (camera, msaa) in &cameras {
+        if msaa != Some(&desired) {
+            commands.entity(camera).insert(desired);
+        }
+    }
+}
+
+/// Whether OIT is currently enabled on the scene camera.
+#[derive(Resource, Default)]
+struct OitEnabled(bool);
 
 /// Whether TAA is currently enabled on the scene camera.
 #[derive(Resource)]
@@ -414,26 +558,140 @@ impl Default for TaaEnabled {
 
 // ── Panel builders ──────────────────────────────────────────────────
 
-/// Single panel with three cards laid out side by side.
-/// No panel-level background — the cards' own backgrounds make them
-/// appear as three separate panels within one RTT texture.
-fn build_unified_panel() -> bevy_diegetic::LayoutTree {
+fn build_preset_panel_tree(preset: LightingPreset) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    build_preset_panel_layout(&mut builder, preset);
+    builder.build()
+}
+
+fn build_preset_panel_layout(builder: &mut LayoutBuilder, preset: LightingPreset) {
+    let title = LayoutTextStyle::new(TITLE_SIZE)
+        .with_color(PRESET_TITLE_COLOR)
+        .no_wrap();
+    let header = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(PRESET_HEADER_COLOR)
+        .no_wrap();
+    let key_active = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(PRESET_ACTIVE_COLOR)
+        .no_wrap();
+    let key_inactive = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(PRESET_INACTIVE_COLOR)
+        .no_wrap();
+    let body_active = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(PRESET_ACTIVE_COLOR)
+        .no_wrap();
+    let body_inactive = LayoutTextStyle::new(LABEL_SIZE)
+        .with_color(PRESET_INACTIVE_COLOR)
+        .no_wrap();
+
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::TopToBottom)
+            .child_gap(PRESET_ROW_GAP)
+            .padding(Padding::all(PRESET_PANEL_PADDING))
+            .corner_radius(CornerRadius::all(PRESET_PANEL_RADIUS))
+            .background(DEFAULT_PANEL_BACKGROUND)
+            .border(Border::all(
+                PRESET_PANEL_BORDER_WIDTH,
+                PRESET_PANEL_BORDER_COLOR,
+            )),
+        |builder| {
+            builder.text(PRESET_PANEL_TITLE, title);
+            panel_divider(builder);
+            build_preset_row(builder, "", "Material", "Lights", &header, &header, &header);
+            panel_divider(builder);
+            for (index, (key, material, lights)) in LIGHTING_PRESET_ROWS.into_iter().enumerate() {
+                let active = preset.index == index as u8;
+                let key_style = if active { &key_active } else { &key_inactive };
+                let body_style = if active { &body_active } else { &body_inactive };
+                build_preset_row(
+                    builder, key, material, lights, key_style, body_style, body_style,
+                );
+            }
+        },
+    );
+}
+
+fn build_preset_row(
+    builder: &mut LayoutBuilder,
+    key: &str,
+    material: &str,
+    lights: &str,
+    key_style: &LayoutTextStyle,
+    material_style: &LayoutTextStyle,
+    lights_style: &LayoutTextStyle,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight)
+            .child_gap(PRESET_KEY_GAP),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(PRESET_KEY_COLUMN_WIDTH))
+                    .height(Sizing::FIT),
+                |builder| {
+                    builder.text(key, key_style.clone());
+                },
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(PRESET_MATERIAL_COLUMN_WIDTH))
+                    .height(Sizing::FIT),
+                |builder| {
+                    builder.text(material, material_style.clone());
+                },
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(PRESET_LIGHTS_COLUMN_WIDTH))
+                    .height(Sizing::FIT),
+                |builder| {
+                    builder.text(lights, lights_style.clone());
+                },
+            );
+        },
+    );
+}
+
+fn panel_divider(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(Px(1.0)))
+            .background(PRESET_PANEL_BORDER_COLOR),
+        |_| {},
+    );
+}
+
+fn build_backgrounds_panel() -> LayoutTree {
     let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
     let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
 
-    let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
-    builder.with(
-        El::new()
-            .direction(Direction::LeftToRight)
-            .child_gap(CARD_GAP)
-            .width(Sizing::grow_min(0.0))
-            .height(Sizing::grow_min(0.0)),
-        |b| {
-            build_card_backgrounds(b, &title_style, &body_style);
-            build_card_borders(b, &title_style, &body_style);
-            build_card_combined(b, &title_style, &body_style);
-        },
-    );
+    let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
+    build_card_backgrounds(&mut builder, &title_style, &body_style);
+    builder.build()
+}
+
+fn build_borders_panel() -> LayoutTree {
+    let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
+    let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
+
+    let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
+    build_card_borders(&mut builder, &title_style, &body_style);
+    builder.build()
+}
+
+fn build_combined_panel() -> LayoutTree {
+    let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
+    let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
+
+    let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
+    build_card_combined(&mut builder, &title_style, &body_style);
     builder.build()
 }
 
@@ -656,130 +914,4 @@ fn build_card_combined(
             );
         },
     );
-}
-
-// ── HUD builders ───────────────────────────────────────────────────
-
-fn build_hud_tree(preset: LightingPreset, lux: f32, width: f32, taa: bool) -> LayoutTree {
-    let mut builder = LayoutBuilder::new(width, HUD_HEIGHT);
-    build_hud_content(&mut builder, preset, lux, taa);
-    builder.build()
-}
-
-fn build_hud_content(b: &mut LayoutBuilder, preset: LightingPreset, lux: f32, taa: bool) {
-    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-    let label = LayoutTextStyle::new(HUD_BODY_SIZE).with_color(HUD_LABEL_COLOR);
-    let value = LayoutTextStyle::new(HUD_BODY_SIZE).with_color(HUD_VALUE_COLOR);
-    let hint = LayoutTextStyle::new(HUD_HINT_SIZE).with_color(HUD_HINT_COLOR);
-
-    // Outer frame — dark surround with bright accent border.
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(2.0))
-            .background(HUD_FRAME_BACKGROUND)
-            .border(Border::all(2.0, HUD_BORDER_ACCENT)),
-        |b| {
-            // Inner frame — single horizontal row.
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .padding(Padding::new(8.0, HUD_PADDING, 8.0, HUD_PADDING))
-                    .child_gap(HUD_GAP)
-                    .child_align_y(AlignY::Center)
-                    .clip()
-                    .background(HUD_BACKGROUND)
-                    .border(Border::all(1.0, HUD_BORDER_DIM)),
-                |b| {
-                    b.text("CONTROL", title);
-                    hud_separator(b);
-
-                    b.text("PRESET", label.clone());
-                    b.text(preset.description(), value.clone());
-                    hud_separator(b);
-
-                    b.text("LUX", label);
-                    b.text(format!("{lux:.0}"), value);
-                    hud_separator(b);
-
-                    // Preset list.
-                    for i in 0u8..4 {
-                        let active = preset.index == i;
-                        let marker = if active { "\u{25b8}" } else { " " };
-                        let color = if active {
-                            HUD_ACTIVE_COLOR
-                        } else {
-                            HUD_INACTIVE_COLOR
-                        };
-                        b.text(
-                            format!("{marker}{}", i + 1),
-                            LayoutTextStyle::new(HUD_BODY_SIZE).with_color(color),
-                        );
-                    }
-                    hud_separator(b);
-
-                    b.text("H Home   R Reset   \u{00b1} Light   T TAA", hint);
-                    hud_separator(b);
-
-                    let taa_label = if taa { "TAA On" } else { "TAA Off" };
-                    let taa_color = if taa {
-                        HUD_ACTIVE_COLOR
-                    } else {
-                        HUD_INACTIVE_COLOR
-                    };
-                    b.text(
-                        taa_label,
-                        LayoutTextStyle::new(HUD_BODY_SIZE).with_color(taa_color),
-                    );
-                },
-            );
-        },
-    );
-}
-
-fn hud_separator(b: &mut LayoutBuilder) {
-    b.with(
-        El::new()
-            .width(Sizing::fixed(1.0))
-            .height(Sizing::GROW)
-            .background(HUD_DIVIDER_COLOR),
-        |_| {},
-    );
-}
-
-fn update_hud(
-    preset: Res<LightingPreset>,
-    taa: Res<TaaEnabled>,
-    lights: Query<&DirectionalLight, With<SceneLight>>,
-    windows: Query<&Window>,
-    mut huds: Query<(Entity, &mut Transform, &mut DiegeticPanel), With<HudPanel>>,
-    mut commands: Commands,
-    mut previous_state: Local<(u8, u32, u32, bool)>,
-) {
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let lux = lights.iter().next().map_or(0.0, |l| l.illuminance);
-    let win_width = window.width();
-    let half_width = win_width / 2.0;
-    let half_height = window.height() / 2.0;
-    let state = (preset.index, lux.to_bits(), win_width.to_bits(), taa.0);
-
-    for (entity, mut transform, mut panel) in &mut huds {
-        transform.translation.x = -half_width;
-        transform.translation.y = half_height;
-
-        let width_changed = (panel.width() - win_width).abs() > 1.0;
-        if width_changed {
-            panel.set_width(win_width);
-        }
-        if *previous_state != state || width_changed {
-            let panel_width = panel.width();
-            commands.set_tree(entity, build_hud_tree(*preset, lux, panel_width, taa.0));
-        }
-    }
-    *previous_state = state;
 }

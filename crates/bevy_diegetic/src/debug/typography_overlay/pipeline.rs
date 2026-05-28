@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-use super::AwaitingOverlayReady;
 use super::GlyphMetricVisibility;
 use super::OverlayContainer;
 use super::TypographyOverlay;
@@ -173,7 +172,7 @@ pub fn build_typography_overlay(
         };
 
         if overlay.font_metrics == GlyphMetricVisibility::Shown {
-            let bounds_target = metric_lines::spawn_font_metric_gizmos(
+            metric_lines::spawn_font_metric_gizmos(
                 &mut ctx,
                 font.name(),
                 &font_context,
@@ -181,22 +180,10 @@ pub fn build_typography_overlay(
                 &mut text_services,
                 &mut assets,
             );
-
-            // Mark for deferred readiness check — label glyphs may still
-            // need glyph readiness and transform propagation.
-            ctx.commands.entity(entity).insert(AwaitingOverlayReady {
-                target: bounds_target,
-            });
         }
 
         if overlay.glyph_metrics == GlyphMetricVisibility::Shown {
             glyph::spawn_glyph_metric_gizmos(&mut ctx, &font_context, computed, &mut assets);
-        }
-
-        if overlay.font_metrics != GlyphMetricVisibility::Shown {
-            ctx.commands.entity(entity).insert(AwaitingOverlayReady {
-                target: container_entity,
-            });
         }
     }
 }

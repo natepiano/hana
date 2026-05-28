@@ -50,7 +50,7 @@ pub(super) fn spawn_font_metric_gizmos(
     computed: &ComputedWorldText,
     text_services: &mut TextServices<'_>,
     assets: &mut OverlayAssets<'_>,
-) -> Entity {
+) {
     let first_glyph = computed.glyphs.first();
     let last_glyph = computed.glyphs.last();
     let extents = GlyphExtents {
@@ -83,7 +83,7 @@ pub(super) fn spawn_font_metric_gizmos(
         &extents,
         text_services,
         assets,
-    )
+    );
 }
 
 /// Spawns horizontal font metric lines as a single transparent world panel.

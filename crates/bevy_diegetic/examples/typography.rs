@@ -25,13 +25,13 @@ use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::OverlayBoundingBox;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TypographyOverlay;
-use bevy_diegetic::TypographyOverlayReady;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
@@ -251,7 +251,7 @@ fn main() {
             ),
         )
         .add_observer(on_font_registered)
-        .add_observer(on_typography_overlay_ready)
+        .add_observer(on_overlay_bounds_added)
         .add_observer(seed_smaa)
         .run();
 }
@@ -316,9 +316,8 @@ fn setup(
 
     let (initial_word, initial_comment) = DISPLAY_WORDS[0];
 
-    // Display word with typography overlay. The camera home tracks the overlay's
-    // bounds entity, not this one — see `on_typography_overlay_ready`, which
-    // marks the bounds entity once the overlay reports it ready.
+    // Display word with typography overlay. The camera home tracks the hidden
+    // overlay bounds entity that is spawned for the rebuilt overlay.
     commands.spawn((
         DisplayText,
         WorldText::new(initial_word),
@@ -381,15 +380,15 @@ fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
     }
 }
 
-fn on_typography_overlay_ready(
-    trigger: On<TypographyOverlayReady>,
+fn on_overlay_bounds_added(
+    trigger: On<Add, OverlayBoundingBox>,
     mut cycle_state: ResMut<CycleState>,
     mut home_target: ResMut<HomeOverlayTarget>,
     marked_home_targets: Query<(), With<CameraHomeTarget>>,
     mut commands: Commands,
 ) {
-    let target = trigger.event_target();
-    info!("TypographyOverlayReady: {target:?}");
+    let target = trigger.entity;
+    info!("OverlayBoundingBox added: {target:?}");
     if let CycleState::Cycling {
         started_at,
         overlay_ready: false,
@@ -400,9 +399,8 @@ fn on_typography_overlay_ready(
             overlay_ready: true,
         };
     }
-    // Bridge the overlay's domain readiness to the camera home. `target` is the
-    // overlay bounds entity — rebuilt on every word/font change — so move the
-    // marker to the newest bounds entity each cycle.
+    // The bounds entity is rebuilt on every word/font change, so move the home
+    // marker to the newest one each cycle.
     if let Some(previous) = home_target.0.replace(target)
         && previous != target
         && marked_home_targets.contains(previous)

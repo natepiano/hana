@@ -89,8 +89,6 @@ pub use debug::OverlayBoundingBox;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
 use debug::TypographyOverlayPlugin;
-#[cfg(feature = "typography_overlay")]
-pub use debug::TypographyOverlayReady;
 pub use ime::ImeAcceptCommit;
 pub use ime::ImeAppInputContext;
 pub use ime::ImeAppInputDisposition;

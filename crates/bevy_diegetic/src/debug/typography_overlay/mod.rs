@@ -22,7 +22,6 @@ use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 use constants::DEFAULT_OVERLAY_EXTEND;
 use constants::DEFAULT_OVERLAY_LABEL_SIZE;
-pub(super) use lifecycle::emit_typography_overlay_ready;
 pub(super) use lifecycle::on_overlay_added;
 pub(super) use lifecycle::on_overlay_removed;
 pub(super) use pipeline::build_typography_overlay;
@@ -119,22 +118,3 @@ pub struct OverlayContainer;
 /// operations.
 #[derive(Component)]
 pub struct OverlayBoundingBox;
-
-/// Fired on the [`WorldText`](crate::WorldText) entity when its
-/// [`TypographyOverlay`] and all descendant label text are fully rendered
-/// and interactable.
-#[derive(EntityEvent)]
-pub struct TypographyOverlayReady {
-    /// The hidden overlay-bounds entity that is ready to use as a fit target.
-    #[event_target]
-    pub entity: Entity,
-    /// The [`WorldText`](crate::WorldText) entity that owns the overlay.
-    pub owner:  Entity,
-}
-
-/// Internal marker: overlay labels have been spawned, waiting for their
-/// glyphs to finish and transforms to propagate.
-#[derive(Component)]
-pub(super) struct AwaitingOverlayReady {
-    target: Entity,
-}
