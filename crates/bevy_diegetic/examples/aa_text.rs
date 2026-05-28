@@ -1,56 +1,13 @@
-//! `aa_text` — compare every anti-aliasing path the text renderer can use, on
+//! `aa_text` compares every anti-aliasing path the text renderer can use on
 //! lit text standing on a ground plane under studio lighting.
 //!
-//! slug renders glyph edges as analytic alpha coverage, sampled once per pixel.
-//! At grazing angles that single sample can't represent the foreshortened pixel
-//! footprint. There are two fundamentally different places to fix it — the two
-//! columns of the bottom-left panel.
+//! Use `1` `2` `3` `4` for the in-shader [`TextAntiAlias`] modes, `N` `S` `F`
+//! `T` for Bevy post-process AA, `O` for OIT, `A` / `B` for authored camera
+//! views, and `H` to return home.
 //!
-//! **In the coverage shader — [`TextAntiAlias`] (keys `1`–`4`).** slug
-//! anti-aliases glyph edges inside the fragment shader: no extra pass, and it
-//! survives OIT (which forces `Msaa::Off`). The setting combines two orthogonal
-//! mechanisms:
-//! - **Anisotropic band** — sizes the edge ramp from the distance gradient so it holds ~1px per
-//!   screen axis, keeping glyph edges crisp at grazing angles where the scalar band otherwise
-//!   widens the ramp into a blur.
-//! - **Supersampling** — strides coverage samples along the foreshortened footprint axis (one
-//!   head-on, more as the angle steepens). It erases the wing a single band sample leaves off a
-//!   sharp convex corner — visible only on sharp convex corners at the most extreme viewing angles,
-//!   a no-op everywhere else.
-//!
-//! The four modes are the points on that grid: `Off` (neither), `Anisotropic`
-//! (band only), `SuperSample` (samples only), `Both` (default, and the best
-//! result). The cheaper modes exist for performance — the band is nearly free,
-//! while `Both` strides up to 16 samples per fragment at the steepest grazing
-//! angles, so a text-dense frame can reclaim fill-rate by stepping down. To see
-//! supersampling's effect, press `B` for the sharp-corner view and flip
-//! `Anisotropic` ↔ `Both`.
-//!
-//! **As a post-process pass over the resolved frame — keys `N` `S` `F` `T`.**
-//! Mutually exclusive, with `None` the off state. While OIT is on (the default)
-//! the camera runs `Msaa::Off`, so these passes — not MSAA — anti-alias geometry
-//! edges; toggle OIT off with `O` and MSAA returns (but TAA, which needs
-//! `Msaa::Off`, then can't run):
-//! - **SMAA** — luma-edge detection in image space.
-//! - **FXAA** — cheaper, blurrier luma-edge pass.
-//! - **TAA** — temporal blend across frames; adds the depth/motion prepasses. Included for
-//!   completeness — note it ghosts on alpha-blended glyphs (the transparency the renderer exists to
-//!   draw), so it is the weakest fit here even though it AA's the most.
-//!
-//! The text is lit by a studio key/fill rig and stands on a ground plane,
-//! casting shadows — the now-fixed AA shown in a real scene rather than in
-//! isolation. A slowly tumbling cube to the right of the word is opaque geometry
-//! with no in-shader AA, so it shows what the POST passes (or MSAA, when OIT is
-//! toggled off with `O`) do to hard edges. Orbit to a grazing angle (MMB), or
-//! press `A` / `B`, to reach the text artifacts, then select each mode.
-//!
-//! Hotkeys:
-//! - `1` `2` `3` `4` — select the in-shader mode: `Off` / `Anisotropic` / `SuperSample` / `Both`.
-//! - `N` `S` `F` `T` — select the post-process pass: None / SMAA / FXAA / TAA.
-//! - `A` — animate to a steep grazing angle (Off vs Anisotropic: edge blur vs crisp).
-//! - `B` — animate to a sharp glyph corner (Anisotropic vs Both: the wing comparison).
-//! - `O` — toggle OIT; off shows the coplanar sorting break and hands MSAA back to geometry.
-//! - `H` — home the camera.
+//! Code layout: start with `main()`, then read the `TEXT AND AA` section for
+//! the text setup and AA mode switching. The later sections only support the
+//! demo: camera viewpoints, explanatory panels, and scene decoration.
 
 use std::time::Duration;
 
@@ -61,6 +18,9 @@ use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
+use bevy::render::view::Msaa;
+use bevy_diegetic::AlignX;
+use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
@@ -69,6 +29,7 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
+use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
@@ -76,7 +37,9 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
+use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextAntiAlias;
+use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
@@ -92,6 +55,12 @@ use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 
+// =============================================================================
+// CONSTANTS -- static scene data, controls, copy, and panel geometry.
+// =============================================================================
+
+// Text and AA.
+
 const EXAMPLE_TITLE: &str = "Anti-Aliasing";
 const HEADLINE_TEXT: &str = "Anti-Aliasing";
 const HEADLINE_SIZE: f32 = 0.40;
@@ -102,119 +71,50 @@ const SMALL_Y: f32 = -0.06;
 const DISPLAY_Z: f32 = 0.0;
 const TEXT_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 
-/// Opens looking down ~14° (`asin(Δy / radius)` of the framed pose) so the
-/// ground plane tilts toward the camera and more of the cast shadow is visible.
-/// Positive pitch puts the camera above the focus — see `orbital_math`.
+/// Horizontal shift applied to the headline, small line, and cube together so
+/// their combined AABB straddles `x = 0`.
+const SCENE_X_OFFSET: f32 = -0.4;
+
+/// Title-bar chip that toggles OIT (stable transparency), sitting beside
+/// `H Home`.
+const OIT_CONTROL: &str = "O OIT";
+
+/// The in-shader [`TextAntiAlias`] modes, in cost order. One source of truth for
+/// both the key that selects each and the chip label shown for it.
+const TEXT_MODES: [(KeyCode, &str, TextAntiAlias); 4] = [
+    (KeyCode::Digit1, "1 Off", TextAntiAlias::Off),
+    (KeyCode::Digit2, "2 Anisotropic", TextAntiAlias::Anisotropic),
+    (KeyCode::Digit3, "3 SuperSample", TextAntiAlias::Supersample),
+    (KeyCode::Digit4, "4 Both", TextAntiAlias::Both),
+];
+
+/// The post-process passes, with `None` as the explicit off state. One source of
+/// truth for the selecting key and the chip label.
+const POST_MODES: [(KeyCode, &str, PostAa); 4] = [
+    (KeyCode::KeyN, "N None", PostAa::None),
+    (KeyCode::KeyS, "S SMAA", PostAa::Smaa),
+    (KeyCode::KeyF, "F FXAA", PostAa::Fxaa),
+    (KeyCode::KeyT, "T TAA", PostAa::Taa),
+];
+
+// Camera views.
+
+/// Opens looking down ~14 degrees so the ground plane tilts toward the camera
+/// and more of the cast shadow is visible.
 const HOME_PITCH: f32 = 0.24;
 const HOME_YAW: f32 = 0.0;
 const HOME_FIT_MARGIN: f32 = 0.1;
 const HOME_FIT_DURATION_MS: u64 = 900;
-
-/// Ground plane sized to frame the word, the way `typography.rs` does it: a
-/// plane proportional to the headline (not the canonical 8-unit default, which
-/// dwarfs it), squashed in depth and pushed back so the word sits near the
-/// *front* edge and the rest recedes behind it. Dropped just below the text so
-/// the lit glyphs stand over it and cast shadows, leaving the text positions —
-/// and the baked `A` / `B` views — untouched.
-/// Horizontal shift applied to the headline, small line, and cube together
-/// so their combined AABB straddles `x = 0` instead of leaning right. Picked
-/// to center the actual measured combined extent — headline AABB
-/// `-1.528..+1.548`, cube worst-case (after `sqrt(3) × half`) reaching
-/// `+2.344` — whose midpoint is `+0.408`. The A/B demo-view focuses inherit
-/// the same shift so they still point at the same letters.
-const SCENE_X_OFFSET: f32 = -0.4;
-
-const GROUND_SIZE: f32 = 4.2;
-const GROUND_DEPTH_SCALE: f32 = 0.5;
-/// Floor front edge sits this far in front (+z) of the text plane. Kept
-/// small so most of the ground sits *behind* the text (in `-z`), catching
-/// the headline + cube shadows the key light throws backward — without this
-/// the headline's projection past the floor's back edge clips.
-const GROUND_FRONT_MARGIN: f32 = 0.2;
-const GROUND_CENTER_Z: f32 =
-    DISPLAY_Z + GROUND_FRONT_MARGIN - GROUND_SIZE * GROUND_DEPTH_SCALE * 0.5;
-const GROUND_Y: f32 = -0.15;
-
-/// Frontal key/fill rig matching `typography.rs`: aim at the word and place the
-/// key light high and far in front (+z) so the shadow direction
-/// `(aim - key_light_pos)` trails straight back behind the glyphs, the way
-/// typography casts them — rather than the default rig's off-axis light, which
-/// throws shadows to the side.
-const LIGHT_AIM: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
-const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
-
-/// A slowly tumbling opaque cube to the right of the word (clear of the left-side
-/// `A` / `B` closeups). Opaque geometry gets no in-shader AA, so its hard edges
-/// show what the POST passes — or MSAA, when OIT is toggled off — do, and what
-/// they leave jagged otherwise.
-const CUBE_SIZE: f32 = 0.34;
-const CUBE_X: f32 = 2.05;
-const CUBE_COLOR: Color = Color::srgb(0.62, 0.64, 0.70);
-const CUBE_SPIN_SPEED: f32 = 0.35;
-
-/// Title-bar chip that toggles OIT (stable transparency), sitting beside `H Home`.
-const OIT_CONTROL: &str = "O OIT";
-
-/// Shared width for the three upper-right boxes — equal width, and a fixed value
-/// so the info box's paragraphs wrap.
-const PANEL_BOX_WIDTH: Px = Px(240.0);
-
-/// Third upper-right box: a title, a divider, then the fundamental why. Wrapped
-/// paragraphs rather than the demo boxes' fixed rows.
-const INFO_TITLE: &str = "WHY MSAA IS OFF";
-const INFO_PARAGRAPHS: [&str; 3] = [
-    "MSAA is off because it is incompatible with Order Independent Transparency (OIT).",
-    "Without OIT (press O) the shader does not sort the floor and text correctly.",
-    "With OIT on, geometry edges like the cube and the plane rely on POST AA.",
-];
-
-/// A camera viewpoint `A` / `B` can fly to, paired with the instruction box that
-/// names the comparison to run once you arrive. The two boxes stack in the
-/// upper-right corner, `A` (the simpler edge-blur point) above `B` (the
-/// sharp-corner wing, which also needs `SuperSample`).
-struct DemoView {
-    /// Key that flies the camera to this view.
-    key:    KeyCode,
-    /// Heading of this view's instruction box.
-    title:  &'static str,
-    /// Target orbit focus point (world units).
-    focus:  Vec3,
-    /// Target yaw and pitch (radians) and orbital radius (world units).
-    yaw:    f32,
-    pitch:  f32,
-    radius: f32,
-    /// Instruction rows: a leading keycap and its description.
-    rows:   &'static [(&'static str, &'static str)],
-}
-
-impl DemoView {
-    /// The single eased orbital glide the key plays to reach this view.
-    const fn camera_move(&self) -> CameraMove {
-        CameraMove::ToOrbit {
-            focus:    self.focus,
-            yaw:      self.yaw,
-            pitch:    self.pitch,
-            radius:   self.radius,
-            duration: Duration::from_millis(DEMO_MOVE_DURATION_MS),
-            easing:   EaseFunction::CubicInOut,
-        }
-    }
-}
-
 const DEMO_MOVE_DURATION_MS: u64 = 1200;
 
-/// `A` — at a steep grazing angle the scalar band widens the edge ramp into a
-/// blur while the anisotropic band holds it crisp. Off vs Anisotropic makes the
-/// point on its own. Orbit taken from the live view this was authored against.
+/// `A` -- Off vs Anisotropic shows edge blur versus a crisp grazing edge.
 const STEEP_VIEW_ROWS: [(&str, &str); 3] = [
     ("A", "go to this view"),
     ("1", "off: edges blur"),
     ("2", "Anisotropic: crisp"),
 ];
 
-/// `B` — a sharper, closer grazing view onto the apex of the headline's leading
-/// `A`, the convex corner where a single coverage sample leaves a "wing".
-/// Anisotropic crisps the edge but the wing survives until `Both` supersamples.
+/// `B` -- Anisotropic crisps the edge, then Both removes the convex-corner wing.
 const WING_VIEW_ROWS: [(&str, &str); 4] = [
     ("B", "go to this view"),
     ("1", "both off: wing shows"),
@@ -244,7 +144,37 @@ const DEMO_VIEWS: [DemoView; 2] = [
     },
 ];
 
-/// Bottom-left control panel — column headers, geometry, and chip colors.
+// Panels.
+
+/// Shared width for the three upper-right boxes -- equal width, and a fixed
+/// value so the info box's paragraphs wrap.
+const PANEL_BOX_WIDTH: Px = Px(240.0);
+
+const OIT_ON_INFO_TITLE: &str = "WHY MSAA IS OFF";
+const OIT_ON_INFO_PARAGRAPHS: [&str; 3] = [
+    "OIT fixes transparency ordering for the ground plane and blended text.",
+    "OIT requires MSAA to be off, so geometry edges no longer get multisampling.",
+    "With POST AA set to None, those geometry edges can still alias.",
+];
+const OIT_ON_POST_INFO_TITLE: &str = "BEST TRADEOFF";
+const OIT_ON_POST_INFO_PARAGRAPHS: [&str; 3] = [
+    "OIT fixes transparency ordering for the ground plane and blended text.",
+    "OIT requires MSAA to be off, so geometry edges no longer get multisampling.",
+    "POST AA compensates for that by smoothing geometry edges after the frame is rendered.",
+];
+const OIT_OFF_INFO_TITLE: &str = "TRANSPARENCY ISSUES";
+const OIT_OFF_INFO_PARAGRAPHS: [&str; 3] = [
+    "With OIT off, transparent surfaces use depth-sorted blending.",
+    "Our text renders best with AlphaMode::Blend, but then it can sort incorrectly against the ground plane. Turning OIT on solves this but MSAA is not compatible with OIT and has to be turned off.",
+    "To compensate, the best solution is OIT to fix transparency ordering and POST AA to fix geometry edges.",
+];
+const OIT_OFF_NO_POST_INFO_PARAGRAPHS: [&str; 3] = [
+    "With OIT off, transparent surfaces use depth-sorted blending.",
+    "Our text renders best with AlphaMode::Blend, but then it can sort incorrectly against the ground plane. Turning OIT on solves this but MSAA is not compatible with OIT and has to be turned off.",
+    "With OIT off, our code restores MSAA, which is why most geometry edges still look good. It still cannot fix transparency ordering.",
+];
+
+/// Bottom-left control panel -- column headers, geometry, and chip colors.
 const TEXT_COLUMN_HEADER: &str = "TEXT (shader)";
 const POST_COLUMN_HEADER: &str = "POST (Bevy)";
 const PANEL_PADDING: Px = Px(10.0);
@@ -257,75 +187,43 @@ const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 const INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 const PANEL_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.4);
 
-/// Upper-right instruction boxes — drawn at the shared [`TITLE_SIZE`] /
-/// [`LABEL_SIZE`] like the other panels. Gap between a row's keycap and its
-/// description.
+/// Gap between a row's keycap and its description.
 const KEY_GAP: Px = Px(8.0);
-/// Vertical gap between the two stacked instruction boxes.
+/// Vertical gap between the stacked upper-right instruction boxes.
 const PANEL_STACK_GAP: Px = Px(8.0);
 
-/// The in-shader [`TextAntiAlias`] modes, in cost order. One source of truth for
-/// both the key that selects each and the chip label shown for it.
-const TEXT_MODES: [(KeyCode, &str, TextAntiAlias); 4] = [
-    (KeyCode::Digit1, "1 Off", TextAntiAlias::Off),
-    (KeyCode::Digit2, "2 Anisotropic", TextAntiAlias::Anisotropic),
-    (KeyCode::Digit3, "3 SuperSample", TextAntiAlias::Supersample),
-    (KeyCode::Digit4, "4 Both", TextAntiAlias::Both),
-];
+// Scene support.
 
-/// The post-process passes, with `None` as the explicit off state. One source of
-/// truth for the selecting key and the chip label.
-const POST_MODES: [(KeyCode, &str, PostAa); 4] = [
-    (KeyCode::KeyN, "N None", PostAa::None),
-    (KeyCode::KeyS, "S SMAA", PostAa::Smaa),
-    (KeyCode::KeyF, "F FXAA", PostAa::Fxaa),
-    (KeyCode::KeyT, "T TAA", PostAa::Taa),
-];
+/// Ground plane sized to frame the word, squashed in depth and pushed back so
+/// the word sits near the front edge while the rest recedes behind it.
+const GROUND_SIZE: f32 = 4.2;
+const GROUND_DEPTH_SCALE: f32 = 0.5;
+/// Floor front edge sits this far in front (`+z`) of the text plane.
+const GROUND_FRONT_MARGIN: f32 = 0.2;
+const GROUND_CENTER_Z: f32 =
+    DISPLAY_Z + GROUND_FRONT_MARGIN - GROUND_SIZE * GROUND_DEPTH_SCALE * 0.5;
+const GROUND_Y: f32 = -0.15;
 
-/// Which post-process anti-aliasing pass is active on the camera. The four
-/// states are mutually exclusive — selecting one removes the others. Orthogonal
-/// to [`TextAntiAlias`], which runs in the coverage shader regardless.
-#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
-enum PostAa {
-    /// No post-process pass; the in-shader text AA carries the frame alone.
-    #[default]
-    None,
-    /// SMAA: image-space luma-edge pass.
-    Smaa,
-    /// FXAA: cheaper image-space luma-edge pass.
-    Fxaa,
-    /// TAA: temporal blend across frames; adds the depth/motion prepasses.
-    Taa,
-}
+/// Frontal key/fill rig matching `typography.rs`: aim at the word and place the
+/// key light high and far in front (`+z`) so shadows trail behind the glyphs.
+const LIGHT_AIM: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
+const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
 
-/// Source of truth for the OIT toggle, mirrored into the `O OIT` title-bar chip.
-/// Starts on — the scene opens with stable transparency.
-#[derive(Resource, Clone, Copy, PartialEq, Eq)]
-struct OitState(bool);
-
-impl Default for OitState {
-    fn default() -> Self { Self(true) }
-}
-
-/// Marker for the slowly tumbling cube left of the word.
-#[derive(Component)]
-struct SpinningCube;
-
-/// Marker for the bottom-left two-column AA control panel.
-#[derive(Component)]
-struct AaPanel;
-
-/// Marker for the upper-right instruction panel that stacks both demo boxes.
-#[derive(Component)]
-struct DemoPanel;
-
-/// The three text styles a control column draws with: its header, an active
-/// (highlighted) chip, and an inactive chip.
-struct ColumnStyles {
-    header:   LayoutTextStyle,
-    active:   LayoutTextStyle,
-    inactive: LayoutTextStyle,
-}
+/// A slowly tumbling transparent cube to the right of the word. The cube gets
+/// no in-shader AA, so its hard edges show what POST AA or MSAA do.
+const CUBE_SIZE: f32 = 0.34;
+const CUBE_X: f32 = 2.05;
+const CUBE_COLOR: Color = Color::srgba(1.0, 0.08, 0.04, 1.0);
+const CUBE_SPIN_SPEED: f32 = 0.35;
+const CUBE_MSAA_LABEL_SIZE: f32 = 0.055;
+const CUBE_FACE_TEXT_OFFSET: f32 = 0.003;
+const CUBE_MSAA_LABEL_Z: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
+const CUBE_COMPAT_PANEL_SIZE: f32 = CUBE_SIZE;
+const CUBE_COMPAT_PANEL_FONT_SIZE: f32 = 38.0;
+const CUBE_COMPAT_PANEL_PADDING: f32 = 0.01;
+const CUBE_COMPAT_PANEL_X: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
+const OIT_COMPAT_MESSAGE: &str = "Incompatible with OIT";
+const TAA_COMPAT_MESSAGE: &str = "Incompatible with TAA";
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
@@ -351,11 +249,8 @@ fn main() {
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        // OIT keeps the coplanar blended geometry (the ground plane and the text)
-        // sorted stably as the camera orbits. It also forces `Msaa::Off` on the
-        // main and screen-space cameras alike, which is what lets TAA (which
-        // requires `Msaa::Off`) toggle without the macOS MSAA-switch stall — see
-        // `apply_post_aa`.
+        // OIT keeps the coplanar blended geometry sorted stably as the camera
+        // orbits, and forces `Msaa::Off` on the cameras it manages.
         .with_stable_transparency()
         .with_camera_home()
         .pitch(HOME_PITCH)
@@ -387,15 +282,49 @@ fn main() {
                 toggle_oit,
                 rotate_cube,
                 refresh_aa_panel,
+                refresh_demo_panel,
+                refresh_cube_msaa_text,
+                refresh_cube_compatibility_panels,
             ),
         )
+        .add_systems(PostUpdate, sync_taa_msaa)
         .run();
+}
+
+// =============================================================================
+// TEXT AND AA -- the text scene plus the controls that switch AA behavior.
+// Read this section to see how the example selects renderer and camera AA modes.
+// =============================================================================
+
+/// Which post-process anti-aliasing pass is active on the camera. The four
+/// states are mutually exclusive -- selecting one removes the others.
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+enum PostAa {
+    /// No post-process pass; the in-shader text AA carries the frame alone.
+    #[default]
+    None,
+    /// SMAA: image-space luma-edge pass.
+    Smaa,
+    /// FXAA: cheaper image-space luma-edge pass.
+    Fxaa,
+    /// TAA: temporal blend across frames; adds the depth/motion prepasses.
+    Taa,
+}
+
+/// Source of truth for the OIT toggle, mirrored into the `O OIT` title-bar chip.
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
+struct OitState(bool);
+
+impl Default for OitState {
+    fn default() -> Self { Self(true) }
 }
 
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    oit: Res<OitState>,
+    post: Res<PostAa>,
 ) {
     commands.spawn((
         Name::new("Headline"),
@@ -411,120 +340,97 @@ fn setup(
         WorldTextStyle::new(SMALL_SIZE).with_color(TEXT_COLOR),
         Transform::from_xyz(SCENE_X_OFFSET, SMALL_Y, DISPLAY_Z),
     ));
-    // Opaque cube to the right, floating with its center on the word's vertical
-    // center so a corner never dips into the ground plane as it tumbles.
-    commands.spawn((
-        Name::new("Spinning cube"),
-        SpinningCube,
-        Mesh3d(meshes.add(Cuboid::from_length(CUBE_SIZE))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: CUBE_COLOR,
-            ..default()
-        })),
-        Transform::from_xyz(CUBE_X + SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z),
+    // Transparent hard-edged geometry gives the post-process passes and MSAA a
+    // visible target that is independent from the text shader's coverage AA.
+    let cube = commands
+        .spawn((
+            Name::new("Spinning cube"),
+            SpinningCube,
+            Mesh3d(meshes.add(Cuboid::from_length(CUBE_SIZE))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: CUBE_COLOR,
+                alpha_mode: AlphaMode::Opaque,
+                ..default()
+            })),
+            Transform::from_xyz(CUBE_X + SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z),
+        ))
+        .id();
+    commands.entity(cube).with_children(|cube| {
+        spawn_cube_msaa_label(cube, CUBE_MSAA_LABEL_Z, Quat::IDENTITY);
+        spawn_cube_msaa_label(
+            cube,
+            -CUBE_MSAA_LABEL_Z,
+            Quat::from_rotation_y(std::f32::consts::PI),
+        );
+        spawn_cube_compatibility_panel(
+            cube,
+            CubeCompatibilityPanel::Oit,
+            oit.0,
+            *post,
+            Transform::from_xyz(CUBE_COMPAT_PANEL_X, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        );
+        spawn_cube_compatibility_panel(
+            cube,
+            CubeCompatibilityPanel::Taa,
+            oit.0,
+            *post,
+            Transform::from_xyz(-CUBE_COMPAT_PANEL_X, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        );
+    });
+}
+
+fn spawn_cube_msaa_label(cube: &mut ChildSpawnerCommands, local_z: f32, rotation: Quat) {
+    cube.spawn((
+        Name::new("Cube MSAA label"),
+        CubeMsaaLabel,
+        WorldText::new(msaa_label(Msaa::Off)),
+        WorldTextStyle::new(CUBE_MSAA_LABEL_SIZE)
+            .with_color(Color::WHITE)
+            .with_align(TextAlign::Center)
+            .with_anchor(Anchor::Center)
+            .with_shadow_mode(GlyphShadowMode::None)
+            .with_unlit(),
+        Transform::from_xyz(0.0, 0.0, local_z).with_rotation(rotation),
     ));
 }
 
-/// Tumbles the cube slowly about a tilted axis so its edges sweep through a
-/// range of angles, giving the POST passes (and MSAA) varied hard edges to work.
-fn rotate_cube(time: Res<Time>, mut cubes: Query<&mut Transform, With<SpinningCube>>) {
-    let angle = CUBE_SPIN_SPEED * time.delta_secs();
-    let axis = Vec3::new(0.3, 1.0, 0.0).normalize();
-    for mut transform in &mut cubes {
-        transform.rotate(Quat::from_axis_angle(axis, angle));
-    }
-}
-
-/// On `O`, toggle OIT on the scene camera. Inserting [`StableTransparency`]
-/// turns OIT on (and forces `Msaa::Off`); removing it restores `Msaa::default()`
-/// — both via the `bevy_diegetic` observers, on the main and screen-space cameras
-/// alike. With OIT off the coplanar ground plane and text sort view-dependently,
-/// which is the point: it shows why the scene defaults to OIT.
-fn toggle_oit(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<OitState>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
+fn spawn_cube_compatibility_panel(
+    cube: &mut ChildSpawnerCommands,
+    panel_kind: CubeCompatibilityPanel,
+    oit_enabled: bool,
+    post: PostAa,
+    transform: Transform,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyO) {
-        return;
-    }
-    state.0 = !state.0;
-    for camera in &cameras {
-        if state.0 {
-            commands.entity(camera).insert(StableTransparency);
-        } else {
-            commands.entity(camera).remove::<StableTransparency>();
-        }
-    }
-}
-
-/// Marker for the headline text whose rendered bounds define the home frame.
-/// Spawns the bottom-left panel with the initial state of both AA settings.
-fn spawn_aa_panel(mut commands: Commands, aa: Res<TextAntiAlias>, post: Res<PostAa>) {
-    let unlit = StandardMaterial {
+    let transparent = StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
         unlit: true,
         ..default_panel_material()
     };
-    let panel = DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(Anchor::BottomLeft)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(build_aa_tree(*aa, *post))
+    let panel = DiegeticPanel::world()
+        .size(CUBE_COMPAT_PANEL_SIZE, CUBE_COMPAT_PANEL_SIZE)
+        .font_unit(Unit::Millimeters)
+        .anchor(Anchor::Center)
+        .material(transparent.clone())
+        .text_material(transparent)
+        .with_tree(build_cube_compatibility_tree(
+            panel_kind.message(oit_enabled, post),
+        ))
         .build();
 
     match panel {
         Ok(panel) => {
-            commands.spawn((AaPanel, panel, Transform::default()));
+            cube.spawn((Name::new(panel_kind.name()), panel_kind, panel, transform));
         },
         Err(error) => {
-            error!("aa_text: failed to build AA panel: {error}");
+            error!("aa_text: failed to build cube compatibility panel: {error}");
         },
     }
 }
 
-/// Spawns the upper-right instruction panel — the two demo boxes stacked. It is
-/// static — the rows never change — so unlike the AA panel it needs no refresh
-/// system.
-fn spawn_demo_panel(mut commands: Commands) {
-    let unlit = StandardMaterial {
-        unlit: true,
-        ..default_panel_material()
-    };
-    let panel = DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(Anchor::TopRight)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(build_demo_panel_tree())
-        .build();
-
-    match panel {
-        Ok(panel) => {
-            commands.spawn((DemoPanel, panel, Transform::default()));
-        },
-        Err(error) => {
-            error!("aa_text: failed to build demo panel: {error}");
-        },
-    }
-}
-
-/// Repaints the panel whenever either AA setting changes so the active chip in
-/// each column tracks the live state.
-fn refresh_aa_panel(
-    aa: Res<TextAntiAlias>,
-    post: Res<PostAa>,
-    panel: Single<Entity, With<AaPanel>>,
-    mut commands: Commands,
-) {
-    if !aa.is_changed() && !post.is_changed() {
-        return;
-    }
-    commands.set_tree(*panel, build_aa_tree(*aa, *post));
-}
-
-/// On `1`–`4`, select the matching [`TextAntiAlias`] mode.
+/// On `1`-`4`, select the matching [`TextAntiAlias`] mode.
 fn select_text_aa(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
     for (key, _, mode) in TEXT_MODES {
         if keyboard.just_pressed(key) {
@@ -533,31 +439,6 @@ fn select_text_aa(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAl
             }
             return;
         }
-    }
-}
-
-/// On `A` / `B`, animate every orbit camera to that demo's viewpoint so the
-/// in-shader modes have a visible artifact to compare against. Skipped while
-/// Ctrl+Shift are both held so the gizmo chord (Ctrl+Shift+A) doesn't also
-/// trigger the `A` demo.
-fn select_demo_view(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    if keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
-        && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
-    {
-        return;
-    }
-    for demo in &DEMO_VIEWS {
-        if !keyboard.just_pressed(demo.key) {
-            continue;
-        }
-        for camera in &cameras {
-            commands.trigger(PlayAnimation::new(camera, [demo.camera_move()]));
-        }
-        return;
     }
 }
 
@@ -584,14 +465,8 @@ fn select_post_aa(
 }
 
 /// Strips every post-process pass off `camera`, then installs the one `mode`
-/// selects. MSAA is never touched here — OIT owns it: `Msaa::Off` while OIT is
-/// on, flipped (on the main and screen-space cameras together) by the `O`
-/// toggle. Keeping the post-pass selection MSAA-free is the point: a *per-camera*
-/// MSAA mismatch is what stalls the macOS Metal surface, and changing both
-/// cameras at once never leaves one. SMAA and FXAA run over the frame as-is; TAA
-/// needs `Msaa::Off`, so it only anti-aliases while OIT is on. The frozen
-/// [`TemporalJitter`]/[`MipBias`] TAA leaves behind are removed so the off-state
-/// renders unshifted.
+/// selects. The frozen [`TemporalJitter`]/[`MipBias`] TAA leaves behind are
+/// removed so the off-state renders unshifted.
 fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
     let mut entity = commands.entity(camera);
     entity
@@ -614,6 +489,208 @@ fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
     }
 }
 
+/// On `O`, toggle OIT on the scene camera. Inserting [`StableTransparency`]
+/// turns OIT on; removing it lets the observer restore default MSAA.
+fn toggle_oit(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<OitState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyO) {
+        return;
+    }
+    state.0 = !state.0;
+    for camera in &cameras {
+        if state.0 {
+            commands.entity(camera).insert(StableTransparency);
+        } else {
+            commands.entity(camera).remove::<StableTransparency>();
+        }
+    }
+}
+
+/// Keeps TAA's `Msaa::Off` requirement true when OIT is disabled. Leaving TAA
+/// while OIT is still off restores normal MSAA on every camera.
+fn sync_taa_msaa(
+    mode: Res<PostAa>,
+    oit: Res<OitState>,
+    cameras: Query<(Entity, Option<&Msaa>), With<Camera>>,
+    mut commands: Commands,
+) {
+    if oit.0 {
+        return;
+    }
+
+    let desired = if *mode == PostAa::Taa {
+        Msaa::Off
+    } else {
+        Msaa::default()
+    };
+    for (camera, msaa) in &cameras {
+        if msaa != Some(&desired) {
+            commands.entity(camera).insert(desired);
+        }
+    }
+}
+
+// =============================================================================
+// CAMERA VIEWS -- authored comparison angles for the text AA artifacts.
+// This supports the demo; it is not required to use `TextAntiAlias`.
+// =============================================================================
+
+/// A camera viewpoint `A` / `B` can fly to, paired with the instruction box that
+/// names the comparison to run once you arrive.
+struct DemoView {
+    /// Key that flies the camera to this view.
+    key:    KeyCode,
+    /// Heading of this view's instruction box.
+    title:  &'static str,
+    /// Target orbit focus point (world units).
+    focus:  Vec3,
+    /// Target yaw and pitch (radians) and orbital radius (world units).
+    yaw:    f32,
+    pitch:  f32,
+    radius: f32,
+    /// Instruction rows: a leading keycap and its description.
+    rows:   &'static [(&'static str, &'static str)],
+}
+
+impl DemoView {
+    /// The single eased orbital glide the key plays to reach this view.
+    const fn camera_move(&self) -> CameraMove {
+        CameraMove::ToOrbit {
+            focus:    self.focus,
+            yaw:      self.yaw,
+            pitch:    self.pitch,
+            radius:   self.radius,
+            duration: Duration::from_millis(DEMO_MOVE_DURATION_MS),
+            easing:   EaseFunction::CubicInOut,
+        }
+    }
+}
+
+/// On `A` / `B`, animate every orbit camera to that demo's viewpoint. Skipped
+/// while Ctrl+Shift are both held so the gizmo chord does not also trigger `A`.
+fn select_demo_view(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    if keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+        && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+    {
+        return;
+    }
+    for demo in &DEMO_VIEWS {
+        if !keyboard.just_pressed(demo.key) {
+            continue;
+        }
+        for camera in &cameras {
+            commands.trigger(PlayAnimation::new(camera, [demo.camera_move()]));
+        }
+        return;
+    }
+}
+
+// =============================================================================
+// PANELS -- explanatory controls and state readouts for the example.
+// This supports the demo; it is not required to use the renderer APIs.
+// =============================================================================
+
+/// Marker for the bottom-left two-column AA control panel.
+#[derive(Component)]
+struct AaPanel;
+
+/// Marker for the upper-right instruction panel that stacks both demo boxes.
+#[derive(Component)]
+struct DemoPanel;
+
+/// The three text styles a control column draws with: its header, an active
+/// chip, and an inactive chip.
+struct ColumnStyles {
+    header:   LayoutTextStyle,
+    active:   LayoutTextStyle,
+    inactive: LayoutTextStyle,
+}
+
+/// Spawns the bottom-left panel with the initial state of both AA settings.
+fn spawn_aa_panel(mut commands: Commands, aa: Res<TextAntiAlias>, post: Res<PostAa>) {
+    let unlit = StandardMaterial {
+        unlit: true,
+        ..default_panel_material()
+    };
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_aa_tree(*aa, *post))
+        .build();
+
+    match panel {
+        Ok(panel) => {
+            commands.spawn((AaPanel, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("aa_text: failed to build AA panel: {error}");
+        },
+    }
+}
+
+/// Spawns the upper-right instruction panel -- the two demo boxes stacked above
+/// an info box whose copy follows the OIT toggle.
+fn spawn_demo_panel(mut commands: Commands, oit: Res<OitState>, post: Res<PostAa>) {
+    let unlit = StandardMaterial {
+        unlit: true,
+        ..default_panel_material()
+    };
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::TopRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_demo_panel_tree(oit.0, *post))
+        .build();
+
+    match panel {
+        Ok(panel) => {
+            commands.spawn((DemoPanel, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("aa_text: failed to build demo panel: {error}");
+        },
+    }
+}
+
+/// Repaints the panel whenever either AA setting changes so the active chip in
+/// each column tracks the live state.
+fn refresh_aa_panel(
+    aa: Res<TextAntiAlias>,
+    post: Res<PostAa>,
+    panel: Single<Entity, With<AaPanel>>,
+    mut commands: Commands,
+) {
+    if !aa.is_changed() && !post.is_changed() {
+        return;
+    }
+    commands.set_tree(*panel, build_aa_tree(*aa, *post));
+}
+
+/// Swaps the upper-right info copy when OIT or POST changes, so the panel
+/// describes the current rendering tradeoff.
+fn refresh_demo_panel(
+    oit: Res<OitState>,
+    post: Res<PostAa>,
+    panel: Single<Entity, With<DemoPanel>>,
+    mut commands: Commands,
+) {
+    if !oit.is_changed() && !post.is_changed() {
+        return;
+    }
+    commands.set_tree(*panel, build_demo_panel_tree(oit.0, *post));
+}
+
 /// Builds the bottom-left panel tree: two columns, each chip highlighted when it
 /// matches the live setting.
 fn build_aa_tree(aa: TextAntiAlias, post: PostAa) -> LayoutTree {
@@ -624,7 +701,7 @@ fn build_aa_tree(aa: TextAntiAlias, post: PostAa) -> LayoutTree {
 
 fn build_aa_layout(builder: &mut LayoutBuilder, aa: TextAntiAlias, post: PostAa) {
     let styles = ColumnStyles {
-        header:   LayoutTextStyle::new(LABEL_SIZE)
+        header:   LayoutTextStyle::new(TITLE_SIZE)
             .with_color(HEADER_COLOR)
             .no_wrap(),
         active:   LayoutTextStyle::new(LABEL_SIZE)
@@ -697,13 +774,13 @@ fn build_column<'a>(
 
 /// Builds the upper-right instruction panel tree: a transparent, right-aligned
 /// column stacking one bordered box per [`DemoView`].
-fn build_demo_panel_tree() -> LayoutTree {
+fn build_demo_panel_tree(oit_enabled: bool, post: PostAa) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    build_demo_panel_layout(&mut builder);
+    build_demo_panel_layout(&mut builder, oit_enabled, post);
     builder.build()
 }
 
-fn build_demo_panel_layout(builder: &mut LayoutBuilder) {
+fn build_demo_panel_layout(builder: &mut LayoutBuilder, oit_enabled: bool, post: PostAa) {
     let title = LayoutTextStyle::new(TITLE_SIZE)
         .with_color(HEADER_COLOR)
         .no_wrap();
@@ -713,8 +790,8 @@ fn build_demo_panel_layout(builder: &mut LayoutBuilder) {
     let body = LayoutTextStyle::new(LABEL_SIZE)
         .with_color(INACTIVE_COLOR)
         .no_wrap();
-    // Fixed-width container + GROW boxes: the three line up on both edges, and
-    // the fixed width gives the info box's paragraphs something to wrap against.
+    // Fixed-width container plus GROW boxes line the three boxes up on both
+    // edges and give the info box's paragraphs a stable wrap width.
     builder.with(
         El::new()
             .width(Sizing::fixed(PANEL_BOX_WIDTH))
@@ -725,7 +802,7 @@ fn build_demo_panel_layout(builder: &mut LayoutBuilder) {
             for demo in &DEMO_VIEWS {
                 build_demo_box(builder, demo, &title, &key, &body);
             }
-            build_info_box(builder, &title);
+            build_info_box(builder, &title, oit_enabled, post);
         },
     );
 }
@@ -769,11 +846,17 @@ fn build_demo_box(
     );
 }
 
-/// Draws the static caption box: a title, a divider rule, then the
-/// [`INFO_PARAGRAPHS`] explainer, wrapped to the box width.
-fn build_info_box(builder: &mut LayoutBuilder, title: &LayoutTextStyle) {
-    // Wrapped (no `no_wrap`) so each paragraph flows to the fixed box width.
+/// Draws the caption box: a title, a divider rule, then the OIT-state explainer,
+/// wrapped to the box width.
+fn build_info_box(
+    builder: &mut LayoutBuilder,
+    title: &LayoutTextStyle,
+    oit_enabled: bool,
+    post: PostAa,
+) {
+    // Wrapped text lets each paragraph flow to the fixed box width.
     let body = LayoutTextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR);
+    let (info_title, paragraphs) = info_copy(oit_enabled, post);
     builder.with(
         El::new()
             .width(Sizing::GROW)
@@ -785,13 +868,22 @@ fn build_info_box(builder: &mut LayoutBuilder, title: &LayoutTextStyle) {
             .background(DEFAULT_PANEL_BACKGROUND)
             .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
         |builder| {
-            builder.text(INFO_TITLE, title.clone());
+            builder.text(info_title, title.clone());
             panel_divider(builder);
-            for paragraph in INFO_PARAGRAPHS {
-                builder.text(paragraph, body.clone());
+            for paragraph in paragraphs {
+                builder.text(*paragraph, body.clone());
             }
         },
     );
+}
+
+const fn info_copy(oit_enabled: bool, post: PostAa) -> (&'static str, &'static [&'static str]) {
+    match (oit_enabled, post) {
+        (true, PostAa::None) => (OIT_ON_INFO_TITLE, &OIT_ON_INFO_PARAGRAPHS),
+        (true, _) => (OIT_ON_POST_INFO_TITLE, &OIT_ON_POST_INFO_PARAGRAPHS),
+        (false, PostAa::None) => (OIT_OFF_INFO_TITLE, &OIT_OFF_NO_POST_INFO_PARAGRAPHS),
+        (false, _) => (OIT_OFF_INFO_TITLE, &OIT_OFF_INFO_PARAGRAPHS),
+    }
 }
 
 /// A horizontal hairline rule spanning the panel width, drawn under titles and
@@ -815,4 +907,118 @@ fn panel_divider_vertical(builder: &mut LayoutBuilder) {
             .background(PANEL_BORDER_COLOR),
         |_| {},
     );
+}
+
+// =============================================================================
+// SCENE SUPPORT -- lighting, ground placement, and decorative hard-edge motion.
+// This gives the AA modes realistic geometry and transparency to work against.
+// =============================================================================
+
+/// Marker for the slowly tumbling cube right of the word.
+#[derive(Component)]
+struct SpinningCube;
+
+/// Marker for the label centered on the cube face.
+#[derive(Component)]
+struct CubeMsaaLabel;
+
+/// Marker for a cube-side compatibility message panel.
+#[derive(Component, Clone, Copy)]
+enum CubeCompatibilityPanel {
+    Oit,
+    Taa,
+}
+
+impl CubeCompatibilityPanel {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Oit => "Cube OIT compatibility panel",
+            Self::Taa => "Cube TAA compatibility panel",
+        }
+    }
+
+    const fn message(self, oit_enabled: bool, post: PostAa) -> Option<&'static str> {
+        match (self, oit_enabled, post) {
+            (Self::Oit, true, _) => Some(OIT_COMPAT_MESSAGE),
+            (Self::Taa, _, PostAa::Taa) => Some(TAA_COMPAT_MESSAGE),
+            _ => None,
+        }
+    }
+}
+
+const fn msaa_label(msaa: Msaa) -> &'static str {
+    match msaa {
+        Msaa::Off => "MSAA Off",
+        Msaa::Sample2 => "MSAA 2x",
+        Msaa::Sample4 => "MSAA 4x",
+        Msaa::Sample8 => "MSAA 8x",
+    }
+}
+
+fn build_cube_compatibility_tree(message: Option<&str>) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
+            .height(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
+            .direction(Direction::TopToBottom)
+            .child_alignment(AlignX::Center, AlignY::Center)
+            .padding(Padding::all(CUBE_COMPAT_PANEL_PADDING))
+            .clip(),
+    );
+    if let Some(message) = message {
+        builder.text(
+            message,
+            LayoutTextStyle::new(CUBE_COMPAT_PANEL_FONT_SIZE)
+                .with_color(Color::WHITE)
+                .with_align(TextAlign::Center)
+                .with_shadow_mode(GlyphShadowMode::None),
+        );
+    }
+    builder.build()
+}
+
+/// Updates the cube-face label from the actual `Msaa` component on the main
+/// orbit camera.
+fn refresh_cube_msaa_text(
+    cameras: Query<Option<&Msaa>, (With<OrbitCam>, With<Camera>)>,
+    mut labels: Query<&mut WorldText, With<CubeMsaaLabel>>,
+) {
+    let Some(msaa) = cameras.iter().next().flatten().copied() else {
+        return;
+    };
+    let label = msaa_label(msaa);
+    for mut text in &mut labels {
+        if text.text() != label {
+            text.set_text(label);
+        }
+    }
+}
+
+/// Rebuilds the invisible cube-side panels when their compatibility state
+/// changes.
+fn refresh_cube_compatibility_panels(
+    oit: Res<OitState>,
+    post: Res<PostAa>,
+    panels: Query<(Entity, &CubeCompatibilityPanel)>,
+    mut commands: Commands,
+) {
+    if !oit.is_changed() && !post.is_changed() {
+        return;
+    }
+    for (entity, panel_kind) in &panels {
+        commands.set_tree(
+            entity,
+            build_cube_compatibility_tree(panel_kind.message(oit.0, *post)),
+        );
+    }
+}
+
+/// Tumbles the cube slowly about a tilted axis so its edges sweep through a
+/// range of angles.
+fn rotate_cube(time: Res<Time>, mut cubes: Query<&mut Transform, With<SpinningCube>>) {
+    let angle = CUBE_SPIN_SPEED * time.delta_secs();
+    let axis = Vec3::new(0.3, 1.0, 0.0).normalize();
+    for mut transform in &mut cubes {
+        transform.rotate(Quat::from_axis_angle(axis, angle));
+    }
 }

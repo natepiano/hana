@@ -302,7 +302,7 @@ fn binary_search_for_fit(
             &test_projection,
             parameters.aspect_ratio,
         ) else {
-            warn!(
+            debug!(
                 "Iteration {iteration}: Points behind camera at radius {test_radius:.1}, searching higher"
             );
             min_radius = test_radius;

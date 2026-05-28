@@ -10,6 +10,7 @@ use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::Direction;
 use crate::layout::LayoutTextStyle;
+use crate::layout::TextAlign;
 use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
@@ -134,9 +135,10 @@ fn emit_text_commands(
         // Wrapped text: emit one command per line.
         for (line_idx, line) in wrap_result.lines.iter().enumerate() {
             let line_y = wrap_result.line_height.mul_add(line_idx.to_f32(), bounds.y);
+            let line_x = line_x_for_alignment(config.text_align(), bounds, line.width);
             commands.push(RenderCommand {
                 bounds:      BoundingBox {
-                    x:      bounds.x,
+                    x:      line_x,
                     y:      line_y,
                     width:  line.width,
                     height: wrap_result.line_height,
@@ -158,6 +160,14 @@ fn emit_text_commands(
             },
             element_idx: index,
         });
+    }
+}
+
+fn line_x_for_alignment(align: TextAlign, bounds: BoundingBox, line_width: f32) -> f32 {
+    match align {
+        TextAlign::Left => bounds.x,
+        TextAlign::Center => (bounds.width - line_width).mul_add(0.5, bounds.x),
+        TextAlign::Right => bounds.x + bounds.width - line_width,
     }
 }
 

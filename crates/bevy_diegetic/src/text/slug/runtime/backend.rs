@@ -152,6 +152,12 @@ impl GlyphCache {
             1.0,
             clip_rect,
         )?;
+        // Bevy's mesh allocator skips allocation for zero-vertex meshes, but
+        // the extracted mesh asset can still be processed for upload. Fully
+        // clipped text runs should therefore not create mesh/storage assets.
+        if render_data.mesh.count_vertices() == 0 {
+            return Err(RunRenderError::NoVisibleGlyphs);
+        }
         let storage = RunStorage {
             mesh:   meshes.add(render_data.mesh),
             curves: storage_buffers.add(ShaderBuffer::from(render_data.curves)),
@@ -258,6 +264,28 @@ mod tests {
 
         assert!(backend.remove_run_storage(prepared.storage_key()).is_some());
         assert!(backend.remove_run_storage(prepared.storage_key()).is_none());
+    }
+
+    #[test]
+    fn fully_clipped_run_does_not_allocate_zero_vertex_mesh() {
+        let mut backend = GlyphCache::default();
+        let prepared = prepare(&mut backend, "Typography");
+        let mut meshes = Assets::<Mesh>::default();
+        let mut storage_buffers = Assets::<ShaderBuffer>::default();
+
+        let err = backend
+            .ensure_run_storage(
+                &prepared,
+                Some([f32::MAX - 2.0, 0.0, f32::MAX - 1.0, 1.0]),
+                &mut meshes,
+                &mut storage_buffers,
+            )
+            .expect_err("fully clipped text should not allocate render storage");
+
+        assert_eq!(err, RunRenderError::NoVisibleGlyphs);
+        assert_eq!(backend.run_storage_len(), 0);
+        assert_eq!(meshes.len(), 0);
+        assert_eq!(storage_buffers.len(), 0);
     }
 
     #[test]

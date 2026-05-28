@@ -39,6 +39,8 @@ pub struct RunRenderData {
 pub(crate) enum RunRenderError {
     /// The shaped run referenced a glyph missing from its packed glyph cache.
     MissingPackedGlyph(GlyphKey),
+    /// Clipping removed every quad from the prepared run.
+    NoVisibleGlyphs,
 }
 
 impl Display for RunRenderError {
@@ -51,6 +53,7 @@ impl Display for RunRenderError {
                 key.glyph_id(),
                 key.preprocess_version()
             ),
+            Self::NoVisibleGlyphs => write!(f, "text run has no visible glyph quads"),
         }
     }
 }

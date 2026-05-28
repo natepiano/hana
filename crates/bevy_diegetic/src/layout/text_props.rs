@@ -74,7 +74,9 @@ pub enum FontSlant {
 
 /// Horizontal text alignment within bounds.
 ///
-/// Used by [`TextProps<ForStandalone>`] for standalone text rendering.
+/// For layout text, this positions each measured or wrapped line within the
+/// text element's bounds. For standalone [`WorldTextStyle`], this is stored as
+/// part of the text style and participates in shaping/render cache keys.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum TextAlign {
     /// Align to the left edge.
@@ -161,7 +163,8 @@ pub enum GlyphLighting {
 /// Context marker: text properties for the layout engine.
 ///
 /// [`TextProps<ForLayout>`] (aliased as `TextConfig`) exposes wrapping
-/// controls but not color, alignment, or anchor.
+/// controls, color, and alignment. It does not expose standalone anchor
+/// controls.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Reflect)]
 pub struct ForLayout;
 
@@ -191,8 +194,11 @@ pub type WorldTextStyle = TextProps<ForStandalone>;
 /// fields are accessible on both via the `impl<C>` block.
 ///
 /// ```ignore
-/// // Layout (aliased as `TextConfig`):
-/// TextConfig::new(14.0).with_font(FontId::MONOSPACE.0).bold().no_wrap()
+/// // Layout (aliased as `TextConfig`): wraps by default.
+/// TextConfig::new(14.0)
+///     .with_font(FontId::MONOSPACE.0)
+///     .bold()
+///     .with_align(TextAlign::Center)
 ///
 /// // Standalone (aliased as `TextStyle`):
 /// TextStyle::new(24.0).with_font(FontId::MONOSPACE.0).bold().with_color(Color::RED)
@@ -627,6 +633,20 @@ impl TextProps<ForLayout> {
     /// Returns the text wrapping mode.
     #[must_use]
     pub const fn wrap_mode(&self) -> TextWrap { self.wrap }
+
+    /// Returns the text alignment.
+    #[must_use]
+    pub const fn text_align(&self) -> TextAlign { self.align }
+
+    /// Sets horizontal text alignment within bounds.
+    #[must_use]
+    pub const fn with_align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Sets horizontal text alignment within bounds.
+    pub const fn set_align(&mut self, align: TextAlign) { self.align = align; }
 
     /// Sets the text wrapping mode.
     #[must_use]
