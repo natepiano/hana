@@ -42,6 +42,7 @@ mod restart;
 mod restart_camera;
 mod save_window_position;
 mod screen_panels;
+mod screen_space_lights;
 mod transparency;
 
 use std::marker::PhantomData;
@@ -98,6 +99,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     ensure_plugin(&mut app, DiegeticUiPlugin);
     ensure_plugin(&mut app, LagrangePlugin);
     restart::install(&mut app);
+    screen_space_lights::install(&mut app);
     SprinkleBuilder {
         app,
         state_marker: PhantomData,

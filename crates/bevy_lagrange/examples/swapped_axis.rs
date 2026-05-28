@@ -53,6 +53,7 @@ use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
 use bevy_lagrange::UpsideDownPolicy;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::LABEL_SIZE;
@@ -73,9 +74,14 @@ fn main() {
         .insert(GroundPlane)
         .with_title_bar(
             TitleBar::new()
-                .with_anchor(Anchor::TopLeft)
-                .control("H Home"),
+                .with_title("Swapped Axis")
+                .with_anchor(Anchor::TopLeft),
         )
+        .with_camera_home()
+        .yaw(HOME_YAW_Y_UP)
+        .pitch(HOME_PITCH_Y_UP)
+        .margin(HOME_FIT_MARGIN)
+        .duration(Duration::from_millis(FLY_TO_HOME_MS))
         .with_camera_control_panel()
         .init_resource::<Engine>()
         .init_resource::<PendingEngine>()
@@ -90,6 +96,7 @@ fn main() {
                 // Chained so the gizmo draws and billboards against the camera
                 // pose this frame's input produced.
                 (
+                    reset_home_state,
                     select_engine,
                     drive_gizmo_motion,
                     orient_ground,
@@ -116,24 +123,21 @@ const SWAPPED_AXIS: [Vec3; 3] = [Vec3::X, Vec3::Z, Vec3::NEG_Y];
 // Distance the camera orbits the origin-centered gizmo at — frames the arms and
 // labels with a little margin.
 const HOME_RADIUS: f32 = 6.5;
+const HOME_FIT_MARGIN: f32 = 0.1;
 // Resets the whole scene to the default engine's startup home view.
 const HOME_KEY: KeyCode = KeyCode::KeyH;
-
-// Home `(yaw, pitch)` for the Z-up engines (Blender, Unreal) on `SWAPPED_AXIS` —
-// opens looking back along -Y with Z standing vertical.
-const HOME_PITCH: f32 = -1.283;
-const HOME_YAW: f32 = -3.507;
 
 // Home `(yaw, pitch)` for the Y-up engines (Bevy, Unity) on the `[X, Y, Z]` orbit
 // basis — a 3/4 view with world Y standing vertical, framed to present the ground
 // identically to the Z-up engines so every engine reads the same.
-//
-// `yaw` matches the camera's horizontal heading across the floor to the Z-up view
-// (`π - HOME_YAW`, normalized), which lands world X horizontal on screen like the
-// Z-up floor. `pitch` matches the elevation above the floor: on the Y-up basis the
-// elevation is the pitch directly, and on the Z-up basis it is `π/2 + HOME_PITCH`.
 const HOME_YAW_Y_UP: f32 = 0.365;
-const HOME_PITCH_Y_UP: f32 = PI / 2.0 + HOME_PITCH;
+const HOME_PITCH_Y_UP: f32 = 0.288;
+
+// Home `(yaw, pitch)` for the Z-up engines (Blender, Unreal) on `SWAPPED_AXIS`.
+// This is the Y-up home view rotated with the floor onto Blender's Z-up plane,
+// preserving the camera's screen-space relationship to the ground.
+const HOME_YAW: f32 = HOME_YAW_Y_UP;
+const HOME_PITCH: f32 = HOME_PITCH_Y_UP - PI / 2.0;
 
 // Camera fly on engine switch — swing to the shared front pose (where the orbit
 // basis swap is invisible), then out to the new engine's home view.
@@ -208,11 +212,16 @@ impl Engine {
     }
 }
 
-/// The engine a switch is flying toward, held only while the camera swings to
-/// the shared front pose. Once there, [`advance_engine_fly`] swaps the orbit
-/// basis (invisible at front) and flies out to the engine's home view.
+/// The engine switch in progress, held while the camera swings through the
+/// shared front pose.
 #[derive(Resource, Default)]
-struct PendingEngine(Option<Engine>);
+struct PendingEngine(Option<EngineSwitch>);
+
+/// Source and target engines for one in-flight switch.
+struct EngineSwitch {
+    from: Engine,
+    to:   Engine,
+}
 
 /// Spawns the one `OrbitCam` for the scene, already at the default engine's home.
 fn spawn_camera(mut commands: Commands) {
@@ -253,10 +262,45 @@ const fn engine_camera_axis(engine: Engine) -> [Vec3; 3] {
     }
 }
 
-/// Reads the engine keys and starts the camera moving. `H` resets to the default
-/// engine; `1`–`4` pick theirs. Re-pressing the current engine re-homes it
-/// directly; switching to a new one routes through the shared front pose so the
-/// orbit-axis swap stays invisible.
+/// Resets the example-owned state when Fairy Dust handles `H Home`.
+fn reset_home_state(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut current: ResMut<Engine>,
+    mut pending: ResMut<PendingEngine>,
+    mut camera: Query<&mut OrbitCam, With<FairyDustOrbitCam>>,
+    mut gizmo: Query<&mut GizmoMotion, With<GizmoRoot>>,
+    mut ground: Query<&mut Transform, With<GroundPlane>>,
+) {
+    if !keys.just_pressed(HOME_KEY) {
+        return;
+    }
+
+    let engine = Engine::default();
+    *current = engine;
+    pending.0 = None;
+
+    if let Ok(mut orbit) = camera.single_mut() {
+        orbit.axis = engine_camera_axis(engine);
+    }
+
+    if let Ok(mut ground) = ground.single_mut() {
+        ground.rotation = Quat::from_rotation_arc(Vec3::Y, engine_up_world(engine));
+    }
+
+    let Ok(mut motion) = gizmo.single_mut() else {
+        return;
+    };
+    let targets = engine_axis_dirs(engine);
+    let up = engine_up_world(engine);
+    let motion = &mut *motion;
+    for ((tween, &dir), &target) in motion.tweens.iter_mut().zip(&motion.dirs).zip(&targets) {
+        *tween = Some(axis_tween(dir, target, up, Vec3::X));
+    }
+}
+
+/// Reads the engine number keys and starts the camera moving. Re-pressing the
+/// current engine re-homes it directly; switching to a new one routes through
+/// the shared front pose so the orbit-axis swap stays invisible.
 fn select_engine(
     keys: Res<ButtonInput<KeyCode>>,
     mut current: ResMut<Engine>,
@@ -265,17 +309,11 @@ fn select_engine(
     mut gizmo: Query<&mut GizmoMotion, With<GizmoRoot>>,
     mut commands: Commands,
 ) {
-    // H resets the whole scene to the default engine's startup home; otherwise a
-    // number key picks its engine.
-    let requested = if keys.just_pressed(HOME_KEY) {
-        Some(Engine::default())
-    } else {
-        ENGINES
-            .iter()
-            .copied()
-            .find(|(key, ..)| keys.just_pressed(*key))
-            .map(|(_, engine, ..)| engine)
-    };
+    let requested = ENGINES
+        .iter()
+        .copied()
+        .find(|(key, ..)| keys.just_pressed(*key))
+        .map(|(_, engine, ..)| engine);
     let Some(requested) = requested else {
         return;
     };
@@ -305,8 +343,11 @@ fn select_engine(
     let Ok(mut motion) = gizmo.single_mut() else {
         return;
     };
+    pending.0 = Some(EngineSwitch {
+        from: *current,
+        to:   requested,
+    });
     *current = requested;
-    pending.0 = Some(requested);
 
     // Orbit each labeled axis to its new world direction. A handedness swap flips
     // one axis 180°; `axis_tween` arcs it about the up axis (or X if it is itself
@@ -350,18 +391,20 @@ fn advance_engine_fly(
     if !matches!(event.reason, AnimationReason::Completed) {
         return;
     }
-    let Some(engine) = pending.0.take() else {
+    let Some(engine_switch) = pending.0.take() else {
         return;
     };
     let Ok((entity, mut orbit)) = camera.single_mut() else {
         return;
     };
+    let engine = engine_switch.to;
+    let focus = rotate_focus_between_engines(orbit.focus, engine_switch.from, engine);
     orbit.axis = engine_camera_axis(engine);
     let (yaw, pitch) = engine.home_angles();
     commands.trigger(PlayAnimation::new(
         entity,
         [CameraMove::ToOrbit {
-            focus: orbit.focus,
+            focus,
             yaw,
             pitch,
             radius: orbit.radius.unwrap_or(HOME_RADIUS),
@@ -369,6 +412,12 @@ fn advance_engine_fly(
             easing: EaseFunction::SmoothStep,
         }],
     ));
+}
+
+/// Rotates the camera fit focus with the floor when switching between Y-up and
+/// Z-up engines so the ground plane keeps the same screen-space footprint.
+fn rotate_focus_between_engines(focus: Vec3, from: Engine, to: Engine) -> Vec3 {
+    Quat::from_rotation_arc(engine_up_world(from), engine_up_world(to)) * focus
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -594,6 +643,8 @@ const LABEL_OCCLUSION_THRESHOLD: f32 = 0.6;
 // Max screen-vertical nudge once a label is fully occluded (down for the one in
 // front, up for the one behind).
 const LABEL_DEPTH_LIFT: f32 = 0.15;
+const HOME_TARGET_HALF_EXTENT: f32 = AXIS_GIZMO_LENGTH + AXIS_LABEL_OFFSET + AXIS_LABEL_SIZE * 0.5;
+const HOME_TARGET_SIZE: f32 = HOME_TARGET_HALF_EXTENT * 2.0;
 
 // Transition — each axis line orbits to its target over this long.
 const STEP_DURATION: f32 = 0.6;
@@ -641,9 +692,16 @@ impl AxisTween {
     }
 }
 
-fn spawn_gizmo(mut commands: Commands, engine: Res<Engine>) {
+fn spawn_gizmo(mut commands: Commands, engine: Res<Engine>, mut meshes: ResMut<Assets<Mesh>>) {
     // Open in the default engine's world-axis layout.
     let dirs = engine_axis_dirs(*engine);
+    commands.spawn((
+        Name::new("Swapped axis home bounds"),
+        CameraHomeTarget,
+        Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(HOME_TARGET_SIZE)))),
+        Transform::default(),
+        Visibility::Hidden,
+    ));
     commands
         .spawn((
             GizmoRoot,

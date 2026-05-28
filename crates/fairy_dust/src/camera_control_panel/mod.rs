@@ -46,7 +46,7 @@ use crate::ensure_plugin;
 /// which `OrbitCam` the panel is currently showing — updated each frame from
 /// `ResolvedOrbitCamInputRoute`.
 #[derive(Component)]
-struct CameraGuidancePanel {
+pub(crate) struct CameraGuidancePanel {
     bound_camera: Option<Entity>,
 }
 

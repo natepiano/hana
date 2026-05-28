@@ -41,7 +41,7 @@ enum InitialAnimateState {
 }
 
 #[derive(Component)]
-struct CameraHomeMarker;
+pub(crate) struct CameraHomeMarker;
 
 /// Frames this entity and its descendants as the camera home.
 ///

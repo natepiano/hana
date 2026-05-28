@@ -2,19 +2,23 @@
 //!
 //! Wires the keybinding through `bevy_enhanced_input` using the `bevy_kana`
 //! macros (`action!`, `event!`, `bind_action_system!`). The bound system
-//! spawns `cargo run --example <name>` from the workspace root, then exits
-//! the current process directly with `std::process::exit(0)`.
+//! relaunches the example as `cargo run --example <name>` from the workspace
+//! root.
 //!
-//! Bypassing `AppExit` is deliberate: on macOS the winit run loop can fail
-//! to honor `AppExit::Success` cleanly, leaving the old window stuck. A
-//! direct exit always works and lets cargo handle the incremental rebuild
-//! and re-launch.
+//! Bypassing `AppExit` is deliberate: on macOS the winit run loop can fail to
+//! honor `AppExit::Success` cleanly, leaving the old window stuck. Unix builds
+//! use `exec`, so the current Bevy process is replaced by cargo without running
+//! Bevy shutdown. Windows keeps a spawn-and-exit path.
 //!
 //! The example name and workspace root are derived from `current_exe()`:
 //! cargo writes example binaries to `<workspace>/target/<profile>/examples/<name>`.
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process;
+use std::process::Command;
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
@@ -62,22 +66,45 @@ fn request_restart(
     cameras: Query<&OrbitCam, With<FairyDustOrbitCam>>,
     restore_state: Option<Res<RestartCameraRestore>>,
 ) {
-    info!("fairy_dust restart: Ctrl+Shift+R pressed, invoking cargo and exiting");
+    info!("fairy_dust restart: Ctrl+Shift+R pressed, invoking cargo");
     let encoded_pose = restart_camera::encode_child_pose(&cameras, restore_state.as_deref());
     do_restart(encoded_pose);
 }
 
-/// No-op now that restart exits the process directly from the input handler.
+/// No-op now that restart leaves the current app from the input handler.
 /// Retained so [`crate::SprinkleBuilder::run`] doesn't need a cfg branch.
 pub(crate) const fn perform_restart_if_requested() {}
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 fn do_restart(encoded_pose: Option<String>) {
+    let mut command = restart_command(encoded_pose);
+    let err = command.exec();
+    eprintln!("fairy_dust: failed to exec `cargo run`: {err}");
+    process::exit(1);
+}
+
+#[cfg(windows)]
+fn do_restart(encoded_pose: Option<String>) {
+    let mut command = restart_command(encoded_pose);
+    match command.spawn() {
+        Ok(child) => {
+            info!("fairy_dust restart: cargo spawned as pid {}", child.id());
+            process::exit(0);
+        },
+        Err(err) => {
+            eprintln!("fairy_dust: failed to spawn `cargo run`: {err}");
+            process::exit(1);
+        },
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn restart_command(encoded_pose: Option<String>) -> Command {
     let exe = match std::env::current_exe() {
         Ok(path) => path,
         Err(err) => {
             eprintln!("fairy_dust: current_exe failed: {err}");
-            std::process::exit(1);
+            process::exit(1);
         },
     };
     let Some((example_name, workspace_root)) = derive_cargo_args(&exe) else {
@@ -87,28 +114,19 @@ fn do_restart(encoded_pose: Option<String>) {
              <workspace>/target/<profile>/examples/<name>",
             exe.display(),
         );
-        std::process::exit(1);
+        process::exit(1);
     };
     info!(
-        "fairy_dust restart: spawning `cargo run --example {}` in {}",
+        "fairy_dust restart: launching `cargo run --example {}` in {}",
         example_name,
         workspace_root.display(),
     );
-    let mut command = std::process::Command::new(CARGO_BIN);
+    let mut command = Command::new(CARGO_BIN);
     command
         .args([CARGO_RUN_SUBCOMMAND, CARGO_EXAMPLE_FLAG, &example_name])
         .current_dir(&workspace_root);
     restart_camera::apply_child_env(&mut command, encoded_pose);
-    match command.spawn() {
-        Ok(child) => {
-            info!("fairy_dust restart: cargo spawned as pid {}", child.id());
-            std::process::exit(0);
-        },
-        Err(err) => {
-            eprintln!("fairy_dust: failed to spawn `cargo run`: {err}");
-            std::process::exit(1);
-        },
-    }
+    command
 }
 
 #[cfg(not(any(unix, windows)))]

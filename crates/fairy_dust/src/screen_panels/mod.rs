@@ -2,6 +2,7 @@
 
 mod constants;
 mod description;
+mod help_overlay;
 mod title_bar;
 
 use bevy::prelude::*;
@@ -39,6 +40,7 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
 
 pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     ensure_plugin(app, DiegeticUiPlugin);
+    app.add_systems(Update, help_overlay::toggle_keyboard_shortcut_help);
     app.add_systems(PostUpdate, title_bar::refresh_changed_title_bar);
     app.add_systems(
         Startup,

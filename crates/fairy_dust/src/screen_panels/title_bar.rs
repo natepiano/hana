@@ -28,6 +28,8 @@ use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
+const HELP_CONTROL: &str = "?";
+
 /// A compact top-left title bar for example-level controls.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct TitleBar {
@@ -244,6 +246,8 @@ fn build_title_bar_layout(
                     };
                     builder.text(control_label, control);
                 }
+                title_separator(builder);
+                builder.text(HELP_CONTROL, inactive_control);
             },
         );
     });

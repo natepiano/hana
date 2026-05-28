@@ -32,7 +32,7 @@ use fairy_dust::cube_face_text;
 
 const FIT_DURATION: Duration = Duration::from_millis(800);
 const FIT_MARGIN: f32 = 0.15;
-const HOME_MARGIN: f32 = 0.15;
+const HOME_MARGIN: f32 = 0.7;
 const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
 
 const HOME_PITCH: f32 = 0.46;

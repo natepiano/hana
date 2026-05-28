@@ -30,16 +30,16 @@ use crate::render::PanelChildSystems;
 /// `(camera_order, render_layers, window)` triple so observers can match
 /// panels against existing cameras without a side registry.
 #[derive(Component)]
-pub(crate) struct ScreenSpaceCamera {
-    pub render_layers: RenderLayers,
-    pub order:         isize,
-    pub window:        Entity,
+pub struct ScreenSpaceCamera {
+    render_layers: RenderLayers,
+    order:         isize,
+    window:        Entity,
 }
 
 /// Marker on directional lights spawned alongside overlay cameras.
 #[derive(Component)]
-pub(crate) struct ScreenSpaceLight {
-    pub render_layers: RenderLayers,
+pub struct ScreenSpaceLight {
+    render_layers: RenderLayers,
 }
 
 pub(crate) struct ScreenSpacePlugin;

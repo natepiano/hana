@@ -220,6 +220,8 @@ pub use render::TextAntiAlias;
 pub use render::WorldText;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
+pub use screen_space::ScreenSpaceCamera;
+pub use screen_space::ScreenSpaceLight;
 use screen_space::ScreenSpacePlugin;
 pub use text::DiegeticTextMeasurer;
 pub use text::Font;

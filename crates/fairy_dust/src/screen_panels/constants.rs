@@ -1,6 +1,7 @@
 //! Constants for the `screen_panels` module.
 
 use bevy::prelude::Color;
+use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 
 // body
@@ -16,6 +17,15 @@ pub(super) const DESCRIPTION_WIDTH: Px = Px(330.0);
 
 // divider
 pub(super) const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
+
+// help overlay
+pub(super) const HELP_CLOSE_HINT_COLUMN_WIDTH: Px = Px(120.0);
+pub(super) const HELP_CLOSE_HINT_SIZE: Pt = Pt(9.0);
+pub(super) const HELP_KEY_COLUMN_WIDTH: Px = Px(120.0);
+pub(super) const HELP_PANEL_CHILD_GAP: Px = Px(10.0);
+pub(super) const HELP_ROW_GAP: Px = Px(6.0);
+pub(super) const HELP_SEPARATOR_HEIGHT: Px = Px(1.0);
+pub(super) const HELP_TABLE_COLUMN_GAP: Px = Px(18.0);
 
 // title bar
 pub(super) const SEPARATOR_HEIGHT: Px = Px(18.0);
