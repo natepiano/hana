@@ -45,6 +45,7 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 
@@ -126,59 +127,9 @@ const PANEL_RULER_IN_LABEL_GAP: In = In(0.0315);
 // ── Home / zoom ─────────────────────────────────────────────────────
 const HOME_PITCH: f32 = 0.1;
 const HOME_YAW: f32 = 0.0;
-const HOME_DEPTH: f32 = 0.01;
 const HOME_MARGIN: f32 = 0.25;
 const ZOOM_DURATION_MS: u64 = 1000;
 const ZOOM_MARGIN: f32 = 0.08;
-
-/// Union AABB of the three world-space panels (A4 + business card + photo
-/// card). Mirrors the placement math in `setup`. The home cube sits at the
-/// AABB center with a scale equal to its dimensions; `with_camera_home`'s
-/// `.margin(HOME_MARGIN)` adds the breathing room.
-fn compute_home_transform() -> Transform {
-    let a4_w = f32::from(A4_WIDTH);
-    let a4_h = f32::from(A4_HEIGHT);
-    let card_w = f32::from(CARD_WIDTH);
-    let card_h = f32::from(CARD_HEIGHT);
-    let index_w = f32::from(INDEX_WIDTH);
-    let index_h = f32::from(INDEX_HEIGHT);
-    let gap = f32::from(GAP);
-    let lift = f32::from(LIFT);
-
-    let total_width = a4_w + gap + card_w;
-    let group_left = -total_width / 2.0;
-
-    let a4_x = group_left + a4_w / 2.0;
-    let a4_y = lift + a4_h / 2.0;
-
-    let card_x = group_left + a4_w + gap + card_w / 2.0;
-    let card_y = (a4_y + a4_h / 2.0) - card_h / 2.0;
-
-    let card_left = group_left + a4_w + gap;
-    let index_x = card_left + index_w / 2.0;
-    let index_y = lift + index_h / 2.0;
-
-    let aabb =
-        |cx: f32, cy: f32, w: f32, h: f32| (cx - w / 2.0, cx + w / 2.0, cy - h / 2.0, cy + h / 2.0);
-    let (a4l, a4r, a4b, a4t) = aabb(a4_x, a4_y, a4_w, a4_h);
-    let (cl, cr, cb, ct) = aabb(card_x, card_y, card_w, card_h);
-    let (il, ir, ib, it) = aabb(index_x, index_y, index_w, index_h);
-
-    let min_x = a4l.min(cl).min(il);
-    let max_x = a4r.max(cr).max(ir);
-    let min_y = a4b.min(cb).min(ib);
-    let max_y = a4t.max(ct).max(it);
-
-    Transform {
-        translation: Vec3::new(
-            f32::midpoint(min_x, max_x),
-            f32::midpoint(min_y, max_y),
-            0.0,
-        ),
-        scale: Vec3::new(max_x - min_x, max_y - min_y, HOME_DEPTH),
-        ..default()
-    }
-}
 
 // ── Colors ───────────────────────────────────────────────────────────
 const A4_DIM_COLOR: Color = Color::srgba(0.0, 0.0, 0.1, 1.0);
@@ -315,7 +266,7 @@ fn main() {
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
         .with_stable_transparency()
-        .with_camera_home(compute_home_transform())
+        .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
         .duration(Duration::from_millis(ZOOM_DURATION_MS))
@@ -458,6 +409,7 @@ fn spawn_a4_with_titles(
     commands
         .spawn((
             A4Panel,
+            CameraHomeTarget,
             a4_panel,
             Transform::from_xyz(a4_page_x, a4_page_y, 0.0),
         ))
@@ -498,6 +450,7 @@ fn spawn_card_panel(commands: &mut Commands, card_x: f32, card_y: f32) {
     commands
         .spawn((
             CardPanel,
+            CameraHomeTarget,
             card_panel,
             Transform::from_xyz(card_x, card_y, 0.0),
         ))
@@ -526,6 +479,7 @@ fn spawn_photo_panel_with_title(
     commands
         .spawn((
             IndexPanel,
+            CameraHomeTarget,
             index_panel,
             Transform::from_xyz(index_x, index_y, 0.0),
         ))

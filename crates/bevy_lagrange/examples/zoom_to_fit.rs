@@ -25,12 +25,14 @@ use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::Anchor;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_text;
 
 const FIT_DURATION: Duration = Duration::from_millis(800);
 const FIT_MARGIN: f32 = 0.15;
+const HOME_MARGIN: f32 = 0.15;
 const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
 
 const HOME_PITCH: f32 = 0.46;
@@ -38,8 +40,6 @@ const HOME_PITCH: f32 = 0.46;
 const CUBE_SIZE: f32 = 1.0;
 const CUBE_Y: f32 = CUBE_SIZE / 2.0 + 0.05;
 const CUBE_X_OFFSET: f32 = 8.0 / 6.0;
-
-const HOME_FRAME_SIZE: f32 = CUBE_SIZE * 3.5;
 
 const REFERENCE_CUBE_COLOR: Color = Color::srgb(0.5, 0.5, 0.5);
 const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(-CUBE_X_OFFSET, CUBE_Y, 0.0);
@@ -73,15 +73,14 @@ fn main() {
         .color(REFERENCE_CUBE_COLOR)
         .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
         .face_text(Face::Front, REFERENCE_LABEL, LABEL_SIZE, LABEL_COLOR)
+        .insert(CameraHomeTarget)
         .with_orbit_cam(
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        .with_camera_home(
-            Transform::from_translation(REFERENCE_CUBE_TRANSLATION)
-                .with_scale(Vec3::splat(HOME_FRAME_SIZE)),
-        )
+        .with_camera_home()
         .pitch(HOME_PITCH)
+        .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
                 .with_anchor(Anchor::TopLeft)

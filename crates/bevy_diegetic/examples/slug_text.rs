@@ -18,6 +18,7 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
 
@@ -43,8 +44,6 @@ const GROUND_SIZE: f32 = 5.4;
 const GROUND_DEPTH_SCALE: f32 = 0.7;
 const GROUND_CENTER_Z: f32 = GROUND_SIZE * 0.5 * (1.0 - GROUND_DEPTH_SCALE);
 const GROUND_COLOR: Color = Color::srgb(0.08, 0.08, 0.08);
-const HOME_FOCUS: Vec3 = Vec3::new(-0.001, 0.461, 2.002);
-const HOME_FRAME_SIZE: f32 = 1.5;
 const HOME_PITCH: f32 = 0.055;
 const HOME_YAW: f32 = 0.0;
 const LIGHT_AIM: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
@@ -124,9 +123,7 @@ fn main() {
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
         .with_stable_transparency()
-        .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
-        )
+        .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .with_title_bar(TitleBar::new().control(SMAA_CONTROL))
@@ -155,12 +152,14 @@ fn setup(
 
     commands.spawn((
         Name::new("Headline"),
+        CameraHomeTarget,
         WorldText::new(HEADLINE_TEXT),
         WorldTextStyle::new(HEADLINE_SIZE).with_color(LATIN_COLOR),
         Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z),
     ));
     commands.spawn((
         Name::new("Small line"),
+        CameraHomeTarget,
         WorldText::new(SMALL_TEXT),
         WorldTextStyle::new(SMALL_SIZE).with_color(LATIN_COLOR),
         Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z),
@@ -169,6 +168,7 @@ fn setup(
     // so the word reads as solid blocks with the letters knocked out.
     commands.spawn((
         Name::new("PunchOut row"),
+        CameraHomeTarget,
         WorldText::new(PUNCH_OUT_TEXT),
         WorldTextStyle::new(PUNCH_OUT_SIZE)
             .with_color(PUNCH_OUT_COLOR)
@@ -192,6 +192,7 @@ fn on_font_registered(
     };
     commands.spawn((
         Name::new("CJK row"),
+        CameraHomeTarget,
         WorldText::new(CJK_TEXT),
         WorldTextStyle::new(CJK_SIZE)
             .with_font(font_id.0)

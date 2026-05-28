@@ -30,10 +30,9 @@ fairy_dust::sprinkle_example()
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .face_text(Face::Front, "Label", LABEL_SIZE, LABEL_COLOR)
+        .insert(CameraHomeTarget)
     .with_orbit_cam(|cam| { /* per-example camera tweaks */ }, OrbitCamPreset::BlenderLike)
-    .with_camera_home(
-        Transform::from_translation(HOME_CENTER).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
-    )
+    .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
     .with_title_bar(
@@ -64,7 +63,7 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 - `.with_ground_plane()` — default 8×8 translucent ground. Override `.size()`
   or `.color()` per example, but do not hand-roll a plane. Do **not** wire a
   click-on-ground observer to re-home the camera — `H Home` (auto-added by
-  `.with_camera_home(...)`) is the standard homing affordance. Click-to-home
+  `.with_camera_home()`) is the standard homing affordance. Click-to-home
   on the ground tends to fire on stray clicks and interferes with picking
   the actual demo entities.
 - `.with_camera_control_panel()` — bottom-right camera controls HUD.
@@ -73,7 +72,7 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
   with `.with_title("DEBUG")` if a specific example needs a different
   label. Title and chip strings render literally (no auto-uppercasing) —
   pass the case you want displayed (canonical convention: ALL CAPS).
-  `H Home` is auto-prepended when `.with_camera_home(...)` is used.
+  `H Home` is auto-prepended when `.with_camera_home()` is used.
 - `Ctrl+Shift+R` hot-restart — wired up unconditionally inside
   `sprinkle_example()`; no builder call needed.
 
@@ -97,21 +96,23 @@ home pose drives the starting view.
 
 ### Camera home — define the framed region
 
-Always use `.with_camera_home(...)` instead of a hand-rolled
-`KeyCode::KeyH` listener. The home pose is defined by:
+Always use `.with_camera_home()` instead of a hand-rolled `KeyCode::KeyH`
+listener. The home pose is defined by:
 
-- `Transform.translation` — center of the framed region (world-space).
-- `Transform.scale` — extents of the framed region.
+- `CameraHomeTarget` — mark every entity whose AABB should contribute to the
+  framed home region. Multiple marked entities are unioned.
 - `.yaw(...)` / `.pitch(...)` — orbit orientation the camera animates to.
 - `.duration(...)` / `.margin(...)` — overrides for the H-key animation.
 
 The startup framing is always instant; the `H` key animates back over
 `HOME_DEFAULT_DURATION` (currently 800ms).
 
-Translate the framed region away from the origin if you want the camera
-focused off-center at start. Scale it larger than the visible cube(s) to
-push the camera further back — `AnimateToFit` resolves the radius so the
-framed cube fits the viewport given the margin.
+Mark the visible scene entity or entities directly. For builder-spawned
+primitives, call `.insert(CameraHomeTarget)` on the primitive builder. For
+manual spawns, include `CameraHomeTarget` in the spawned bundle. If no target
+exists, Fairy Dust logs a warning once and the home camera waits for a target.
+`AnimateToFit` resolves the focus and radius so the target union fits the
+viewport given the margin.
 
 ### Stable transparency
 
@@ -147,7 +148,8 @@ Only spawn entities manually when fairy_dust cannot reach the use case:
 
 Even in these cases:
 - Lighting and ground plane still come from fairy_dust.
-- The camera home still comes from `.with_camera_home(...)`.
+- The camera home still comes from `.with_camera_home()` plus
+  `CameraHomeTarget`.
 - The HUD still uses `TitleBar`.
 
 ## HUD chip conventions
@@ -156,7 +158,7 @@ Even in these cases:
   `H Home`. Single-letter key first, action word(s) after, space-separated.
 - Multi-key modifiers use the literal characters (e.g. `^⇧R`) — but the
   hot-restart chip is intentionally hidden.
-- `H Home` is auto-prepended when `.with_camera_home(...)` is used; do not
+- `H Home` is auto-prepended when `.with_camera_home()` is used; do not
   add it manually.
 
 ## Observer/event highlighting
@@ -175,7 +177,7 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
 - Manual ground plane spawn → delete, use `.with_ground_plane()`.
 - Manual `Camera3d`/`OrbitCam` spawn → delete, use `.with_orbit_cam(...)`.
 - Custom `home_camera` keyboard system + `PlayAnimation::new(... ToOrbit ...)` →
-  delete, use `.with_camera_home(...)`.
+  delete, use `.with_camera_home()` plus `CameraHomeTarget`.
 - Click-on-ground observer that triggers `ZoomToFit` / `AnimateToFit` back to
   the scene bounds → delete. The `SceneBounds` resource and the ground
   observer go with it. `H Home` is the standard homing affordance.
@@ -188,7 +190,7 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
 
 ## Open questions / future work
 
-- Should `.with_camera_home(...)` optionally accept face-label config so
+- Should `.with_camera_home()` optionally accept face-label config so
   the invisible home cube can carry visible text without needing a
   separate visible cube?
 - Should the example HUD support per-chip mouse-click activation (turn

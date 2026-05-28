@@ -22,12 +22,11 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 
-const HOME_FOCUS: Vec3 = Vec3::ZERO;
-const HOME_FRAME_SIZE: f32 = 4.5;
 const HOME_YAW: f32 = 0.015;
 const HOME_PITCH: f32 = 0.5;
 
@@ -108,7 +107,7 @@ fn main() {
             Transform::from_translation(CUBE_TRANSLATION)
                 .with_rotation(Quat::from_rotation_y(CUBE_YAW.to_radians())),
         )
-        .insert(DemoCube)
+        .insert((CameraHomeTarget, DemoCube))
         .face_text(Face::Front, "FRONT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
         .face_text(Face::Back, "BACK", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
         .face_text(Face::Top, "TOP", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
@@ -120,9 +119,7 @@ fn main() {
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
         .with_stable_transparency()
-        .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_FRAME_SIZE)),
-        )
+        .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
         .with_title_bar(
@@ -183,6 +180,7 @@ fn spawn_anchor_demo(
     // Backdrop frame plane — sits behind the anchor labels in the demo's
     // local Z, slightly transparent, ground-plane color.
     commands.spawn((
+        CameraHomeTarget,
         Mesh3d(meshes.add(Cuboid::new(
             ANCHOR_FRAME_SIZE.x,
             ANCHOR_FRAME_SIZE.y,
@@ -272,6 +270,7 @@ fn spawn_anchor_demo(
 /// Spawns the "GROUND PLANE" label flat on and centered on the ground plane.
 fn spawn_ground_text(commands: &mut Commands) {
     commands.spawn((
+        CameraHomeTarget,
         WorldText::new("GROUND PLANE"),
         WorldTextStyle::new(0.48).with_color(Color::srgb(0.9, 0.9, 0.1)),
         Transform::from_xyz(0.0, 0.001, 0.0)

@@ -37,8 +37,8 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
-use fairy_dust::SetCameraHome;
 use fairy_dust::TitleBar;
 
 const DISPLAY_SIZE: f32 = 0.48;
@@ -59,8 +59,6 @@ const GROUND_DEPTH_SCALE: f32 = 0.7;
 const GROUND_CENTER_Z: f32 = GROUND_SIZE * 0.5 * (1.0 - GROUND_DEPTH_SCALE);
 const GROUND_COLOR: Color = Color::srgb(0.08, 0.08, 0.08);
 
-const HOME_FOCUS: Vec3 = Vec3::new(-0.001, 0.461, 2.002);
-const HOME_RADIUS: f32 = 2.84;
 const HOME_YAW: f32 = 0.0;
 const HOME_PITCH: f32 = 0.055;
 
@@ -184,6 +182,9 @@ struct FontHandles(Vec<Handle<Font>>);
 #[derive(Resource)]
 struct SelectedFont(usize);
 
+#[derive(Resource, Default)]
+struct HomeOverlayTarget(Option<Entity>);
+
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -208,9 +209,7 @@ fn main() {
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
         .with_stable_transparency()
-        .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),
-        )
+        .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
         .duration(Duration::from_millis(ZOOM_DURATION_MS))
@@ -236,6 +235,7 @@ fn main() {
         })
         .insert_resource(SelectedFont(0))
         .init_resource::<FontHandles>()
+        .init_resource::<HomeOverlayTarget>()
         .init_resource::<OverlayState>()
         .init_resource::<CycleState>()
         .init_resource::<SmaaState>()
@@ -318,7 +318,7 @@ fn setup(
 
     // Display word with typography overlay. The camera home tracks the overlay's
     // bounds entity, not this one — see `on_typography_overlay_ready`, which
-    // fires `SetCameraHome` once the overlay reports the bounds entity ready.
+    // marks the bounds entity once the overlay reports it ready.
     commands.spawn((
         DisplayText,
         WorldText::new(initial_word),
@@ -384,6 +384,8 @@ fn load_fonts(asset_server: &AssetServer, font_handles: &mut FontHandles) {
 fn on_typography_overlay_ready(
     trigger: On<TypographyOverlayReady>,
     mut cycle_state: ResMut<CycleState>,
+    mut home_target: ResMut<HomeOverlayTarget>,
+    marked_home_targets: Query<(), With<CameraHomeTarget>>,
     mut commands: Commands,
 ) {
     let target = trigger.event_target();
@@ -399,9 +401,15 @@ fn on_typography_overlay_ready(
         };
     }
     // Bridge the overlay's domain readiness to the camera home. `target` is the
-    // overlay bounds entity — rebuilt on every word/font change — so re-firing
-    // re-points the home each cycle.
-    commands.trigger(SetCameraHome { target });
+    // overlay bounds entity — rebuilt on every word/font change — so move the
+    // marker to the newest bounds entity each cycle.
+    if let Some(previous) = home_target.0.replace(target)
+        && previous != target
+        && marked_home_targets.contains(previous)
+    {
+        commands.entity(previous).remove::<CameraHomeTarget>();
+    }
+    commands.entity(target).insert(CameraHomeTarget);
 }
 
 fn tick_cycle_state(time: Res<Time>, mut cycle_state: ResMut<CycleState>) {

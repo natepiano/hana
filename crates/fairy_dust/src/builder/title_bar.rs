@@ -168,9 +168,7 @@ impl<S> TitleBarBuilder<S> {
 
     /// Finalizes the title bar and starts configuring a camera home pose.
     #[must_use]
-    pub fn with_camera_home(self, transform: Transform) -> CameraHomeBuilder<S> {
-        self.finish().with_camera_home(transform)
-    }
+    pub fn with_camera_home(self) -> CameraHomeBuilder<S> { self.finish().with_camera_home() }
 
     /// Finalizes the title bar and mirrors [`App::add_plugins`].
     #[must_use]

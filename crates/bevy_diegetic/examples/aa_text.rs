@@ -102,13 +102,6 @@ const SMALL_Y: f32 = -0.06;
 const DISPLAY_Z: f32 = 0.0;
 const TEXT_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 
-/// Fallback home region for the cube `fairy_dust` frames before any
-/// [`CameraHomeTarget`] entity has loaded its meshes. The headline, the small
-/// line, and the ground plane all carry the marker, so once their meshes
-/// land the camera frames the union of their AABBs (a box around all three —
-/// dominated by the ground plane, so the framed view shows the floor with
-/// the text centered over it), not this placeholder.
-const HOME_CENTER: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
 /// Opens looking down ~14° (`asin(Δy / radius)` of the framed pose) so the
 /// ground plane tilts toward the camera and more of the cast shadow is visible.
 /// Positive pitch puts the camera above the focus — see `orbital_math`.
@@ -364,7 +357,7 @@ fn main() {
         // requires `Msaa::Off`) toggle without the macOS MSAA-switch stall — see
         // `apply_post_aa`.
         .with_stable_transparency()
-        .with_camera_home(Transform::from_translation(HOME_CENTER))
+        .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .margin(HOME_FIT_MARGIN)

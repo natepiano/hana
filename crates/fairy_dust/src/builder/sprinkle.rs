@@ -125,21 +125,19 @@ impl<S> SprinkleBuilder<S> {
 
     /// Begin configuring a generalized camera "home" pose.
     ///
-    /// Spawns an invisible cube at the given [`Transform`] (its `scale` defines
-    /// the framed volume) and wires `H` to an [`bevy_lagrange::AnimateToFit`]
-    /// of that region using the configured `yaw`/`pitch`. If a title bar is
-    /// installed, the `H Home` chip is prepended automatically and highlights
-    /// for the duration of the home animation.
+    /// Wires `H` to an [`bevy_lagrange::AnimateToFit`] of the union of every
+    /// [`crate::CameraHomeTarget`] entity using the configured `yaw`/`pitch`. If
+    /// a title bar is installed, the `H Home` chip is prepended automatically
+    /// and highlights for the duration of the home animation.
     #[must_use]
-    pub const fn with_camera_home(self, transform: Transform) -> CameraHomeBuilder<S> {
+    pub const fn with_camera_home(self) -> CameraHomeBuilder<S> {
         CameraHomeBuilder {
             parent: self,
             config: CameraHomeConfig {
-                transform,
-                yaw: 0.0,
-                pitch: 0.0,
+                yaw:      0.0,
+                pitch:    0.0,
                 duration: crate::constants::HOME_DEFAULT_DURATION,
-                margin: crate::constants::HOME_DEFAULT_MARGIN,
+                margin:   crate::constants::HOME_DEFAULT_MARGIN,
             },
         }
     }

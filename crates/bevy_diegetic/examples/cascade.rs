@@ -65,7 +65,6 @@ const PANEL_UNIT_PREFIX: &str = "panel unit";
 const SCENE_Z: f32 = 2.35;
 const SCENE_FRAME_Y: f32 = 0.62;
 const SCENE_FRAME_Z_OFFSET: f32 = -0.01;
-const HOME_FALLBACK_SIZE: f32 = 2.1;
 const HOME_PITCH: f32 = 0.055;
 const HOME_YAW: f32 = 0.0;
 const HOME_MARGIN: f32 = 0.08;
@@ -156,10 +155,7 @@ fn main() {
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        .with_camera_home(
-            Transform::from_xyz(0.0, SCENE_FRAME_Y, SCENE_Z)
-                .with_scale(Vec3::splat(HOME_FALLBACK_SIZE)),
-        )
+        .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .margin(HOME_MARGIN)

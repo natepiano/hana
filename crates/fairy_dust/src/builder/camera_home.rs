@@ -55,9 +55,7 @@ impl<S> CameraHomeBuilder<S> {
 
     /// Finalizes the current home registration and starts configuring another.
     #[must_use]
-    pub fn with_camera_home(self, transform: Transform) -> Self {
-        self.finish().with_camera_home(transform)
-    }
+    pub fn with_camera_home(self) -> Self { self.finish().with_camera_home() }
 
     /// Finalizes the current home registration and starts configuring a ground plane.
     #[must_use]

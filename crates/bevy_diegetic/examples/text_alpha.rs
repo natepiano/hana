@@ -34,9 +34,8 @@ use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::CameraHomeTarget;
 
-const HOME_FOCUS: Vec3 = Vec3::new(0.0, 0.3, 0.6);
-const HOME_RADIUS: f32 = 3.8;
 const HOME_YAW: f32 = 0.3;
 const HOME_PITCH: f32 = 0.80;
 
@@ -162,9 +161,7 @@ fn main() {
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         )
-        .with_camera_home(
-            Transform::from_translation(HOME_FOCUS).with_scale(Vec3::splat(HOME_RADIUS * 2.0)),
-        )
+        .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
         .with_camera_control_panel()
@@ -181,6 +178,7 @@ fn setup(
 ) {
     // Ground: translucent plane.
     commands.spawn((
+        CameraHomeTarget,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(3.5, 3.5))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgba(0.10, 0.10, 0.12, 0.55),
@@ -194,6 +192,7 @@ fn setup(
     // Cube with WorldText on its front face.
     commands
         .spawn((
+            CameraHomeTarget,
             Mesh3d(meshes.add(Cuboid::default())),
             MeshMaterial3d(materials.add(StandardMaterial {
                 base_color: Color::srgb(0.8, 0.7, 0.6),
@@ -214,6 +213,7 @@ fn setup(
 
     // WorldText floating on the ground (coplanar reproducer).
     commands.spawn((
+        CameraHomeTarget,
         WorldText::new("GROUND"),
         WorldTextStyle::new(0.45).with_color(Color::srgb(1.0, 0.85, 0.1)),
         Transform::from_xyz(0.0, 0.001, 1.125)

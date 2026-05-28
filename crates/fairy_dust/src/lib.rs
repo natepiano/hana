@@ -64,7 +64,6 @@ pub use camera_control_panel::CameraGuidanceRow;
 pub use camera_control_panel::SourceVisibility;
 pub use camera_home::CameraHomeEntity;
 pub use camera_home::CameraHomeTarget;
-pub use camera_home::SetCameraHome;
 pub use constants::DEFAULT_PANEL_BACKGROUND;
 pub use constants::LABEL_SIZE;
 pub use constants::LOG_FILTER;
