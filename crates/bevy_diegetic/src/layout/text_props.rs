@@ -590,7 +590,7 @@ impl TextProps<ForLayout> {
             wrap:           TextWrap::Words,
             color:          Color::WHITE,
             align:          TextAlign::Left,
-            anchor:         Anchor::Center,
+            anchor:         Anchor::TopLeft,
             render_mode:    GlyphRenderMode::Text,
             shadow_mode:    GlyphShadowMode::Cast,
             sidedness:      GlyphSidedness::DoubleSided,
@@ -677,7 +677,7 @@ impl TextProps<ForLayout> {
             wrap:           TextWrap::None,
             color:          self.color,
             align:          TextAlign::Left,
-            anchor:         Anchor::Center,
+            anchor:         Anchor::TopLeft,
             render_mode:    self.render_mode,
             shadow_mode:    self.shadow_mode,
             sidedness:      self.sidedness,
@@ -965,16 +965,15 @@ mod tests {
     }
 
     #[test]
-    fn as_standalone_from_layout_defaults_to_center_anchor() {
-        // Regression guard: `as_standalone()` on a `ForLayout` config has no
-        // anchor to copy, so it defaults to `Center`. Callers that need a
-        // specific anchor must chain `.with_anchor()` after conversion.
+    fn as_standalone_from_layout_defaults_to_top_left_anchor() {
+        // Panel text is positioned by layout coordinates, so the converted
+        // standalone text must start at the command origin.
         let layout = TextProps::<ForLayout>::new(12.0);
         let standalone = layout.as_standalone();
         assert_eq!(
             standalone.anchor(),
-            Anchor::Center,
-            "as_standalone() should default to Center (callers must override)"
+            Anchor::TopLeft,
+            "as_standalone() should default to TopLeft for layout-positioned text"
         );
     }
 

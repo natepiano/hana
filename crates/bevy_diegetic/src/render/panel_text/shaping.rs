@@ -108,7 +108,9 @@ struct QuadPlacement {
 }
 
 fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
-    commands.entity(entity).remove::<PanelText>();
+    commands
+        .entity(entity)
+        .remove::<(PanelText, AwaitingReady)>();
 }
 
 fn build_panel_text(
@@ -153,8 +155,11 @@ fn build_panel_text(
         },
     };
 
-    stats.ready_glyphs = positioned_glyphs.len();
-    stats.emitted_quads = prepared.glyph_count();
+    text_shaping::record_prepared_glyphs(
+        &mut stats,
+        positioned_glyphs.len(),
+        prepared.glyph_count(),
+    );
     stats.atlas_ms = run_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
 
     let clip_rect = placement.clip_rect.map(|clip_rect| {
@@ -215,7 +220,7 @@ fn apply_panel_result(
     commands: &mut Commands,
 ) {
     match readiness {
-        GlyphReadiness::Ready | GlyphReadiness::Invisible => {
+        GlyphReadiness::Ready => {
             let Some(panel_text) = panel_text else {
                 return;
             };
@@ -224,8 +229,8 @@ fn apply_panel_result(
                 .insert(panel_text)
                 .insert(AwaitingReady);
         },
-        GlyphReadiness::Failed => {
-            commands.entity(entity).remove::<PanelText>();
+        GlyphReadiness::Invisible | GlyphReadiness::Failed => {
+            clear_panel_text_output(entity, commands);
         },
         GlyphReadiness::Idle => {},
     }

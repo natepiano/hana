@@ -137,9 +137,8 @@ module should translate those low-level window events into session-scoped
 events. App code should listen to these events, not raw `Ime`, unless it is
 implementing another text-entry system.
 
-Public IME types live under `bevy_diegetic::ime`. The short names are
-intentional inside that module; avoid re-exporting the full event set at the
-crate root.
+Public IME types are curated crate-root exports with `Ime...` names. The
+implementation module stays private; do not introduce a public `ime` module.
 
 Every IME session event carries a `SessionId`. Events that are part of a
 commit attempt also carry a `CommitAttemptId`, so delayed validation or apply
@@ -446,33 +445,164 @@ remains the source of truth.
 - Editing arbitrary `LayoutBuilder::text` nodes without an explicit backing
   value or field identity.
 
-## Phases
+## Development Phases
 
-### Phase 1 — Core edit session
+### Phase 1 — Core session and public surface (complete)
 
 Implement the data model and lifecycle:
 
+- private `ime` module and `ImePlugin`,
+- narrow crate-root exports for the approved public IME surface,
+- session, attempt, target, and field-id types,
+- typed lifecycle, request, validation, apply, and cancel events,
 - IME `Session` resource,
-- editable value marker/component,
-- start/commit/cancel events,
-- double-click activation,
+- editable field spec and panel-field metadata authoring,
+- request-opened activation entry point for already-resolved targets,
 - single active session,
 - Enter/Escape/blur handling.
 
-Acceptance: double-clicking an editable value starts a session, Enter emits a
-commit event, Escape emits cancel, and only one session can be active.
+Acceptance: opening an already-resolved editable target starts a session, Enter
+emits a commit request, Escape emits cancel, public events carry stable session
+and target identity, and only one session can be active.
 
-### Phase 2 — IME and keyboard input
+#### Retrospective
+
+**What worked:**
+
+- `crates/bevy_diegetic/src/ime/` now owns the session ids, targets, field
+  specs, lifecycle events, and active-session resource.
+- Bevy observers fit the request/response lifecycle: `ImeOpenSession`,
+  `ImeRequestCommit`, `ImeRequestCancel`, `ImeAcceptCommit`, and
+  `ImeRejectCommit` all route through typed events.
+
+**What deviated from the plan:**
+
+- The previously planned public IME module was not implemented because the
+  style guide disallows `pub mod`; public IME API is exposed through curated
+  crate-root `Ime...` re-exports.
+- Double-click activation moved out of Phase 1 because it depends on field hit
+  resolution and panel-field records owned by Phase 2.
+
+**Surprises:**
+
+- Editable field metadata has to participate in layout-tree change
+  classification immediately, otherwise later field-record caches could miss a
+  changed field contract.
+
+**Implications for remaining phases:**
+
+- Phase 2 must bridge pointer/picking activation into `ImeOpenSession` instead
+  of creating a separate session path.
+- Phase 2 should keep the private-module plus crate-root re-export pattern and
+  avoid introducing a public `ime` module.
+- Phase 3 can replace the temporary Enter/Escape keyboard shortcut handling
+  with the full IME-aware input transition table without changing the public
+  lifecycle events.
+
+#### Phase 1 Review
+
+- Phase 2 now explicitly adds authored `PanelFieldId` metadata, double-click
+  activation, and replacement of the temporary global Enter/Escape shortcut
+  path with lease-scoped command routing.
+- Phase 3 now treats `Window::ime_position` as temporary/coarse until Phase 4
+  supplies laid-out caret geometry.
+- Phase 5 now names the missing app-owned commit-authority token or equivalent
+  current-attempt guard.
+- Phase 6 now builds app-owned popup behavior on top of the Phase 1
+  `ImeOpenSession` / `ImeTarget::AppOwned` core instead of creating a second
+  session path.
+- Later plan text now follows the private `ime` module plus curated crate-root
+  `Ime...` re-export pattern.
+
+### Phase 2 — Field records, picking, and focus ownership (complete)
+
+Add the panel boundary and ownership pieces that make session start reliable:
+
+- computed `PanelFieldRecord`s on the panel boundary,
+- replace the Phase 1 spec-only layout metadata with authored
+  `PanelFieldId` plus editable field spec metadata,
+- field-id uniqueness validation,
+- field hit resolution from panel-local coordinates,
+- double-click activation from panel picking,
+- window-scoped IME lease,
+- crate-owned input blocker,
+- activation-frame capture for the starting gesture,
+- replace Phase 1's temporary global Enter/Escape shortcut path with
+  lease-scoped command routing,
+- terminal cleanup for lease loss, focus loss, window close, and stale targets.
+
+Acceptance: activation resolves a semantic panel field instead of a render
+command, the starting click does not also drive camera or app input, IME
+ownership has one writer, and terminal causes clean up the session idempotently.
+
+#### Retrospective
+
+**What worked:**
+
+- `PanelFieldRecord` now lives on `ComputedDiegeticPanel`, so activation and
+  later anchoring can resolve `PanelFieldId` without reading render commands.
+- Panel double-click activation now routes through the Phase 1 `ImeOpenSession`
+  observer and uses `ImeInputBlocker` for window-scoped ownership.
+
+**What deviated from the plan:**
+
+- `ComputedDiegeticPanel::set_result` kept its old public signature; the panel
+  layout system uses an internal setter to attach field records.
+- Phase 2 records duplicate field ids and ignores duplicated records during hit
+  resolution instead of failing panel layout.
+
+**Surprises:**
+
+- The Phase 1 `ImeOpenSession` request needed an explicit window entity before
+  lease ownership and terminal cleanup could be reliable.
+- Commit requests need the field spec copied from the active session, otherwise
+  later apply sinks cannot validate without looking back into layout metadata.
+
+**Implications for remaining phases:**
+
+- Phase 3 can keep `ImeInputBlocker` as the routing gate while replacing the
+  Enter/Escape-only command path with the full IME-aware transition table.
+- Phase 4 should consume `PanelFieldRecord::bounds` from
+  `ComputedDiegeticPanel` for projection instead of re-resolving field ids.
+- Phase 5 can validate against `ImeCommitRequested::field_spec` without
+  assuming the panel layout tree is still available or unchanged.
+
+#### Phase 2 Review
+
+- Phase 3 now explicitly replaces the raw session text with an editing state
+  machine, single-line buffer API, `ImeTextChanged`, and buffer snapshots.
+- Phase 3 now adds durable IME/input system sets so `ImeInputBlocker` has a
+  documented early read point for camera and app adapters.
+- Phase 4 now captures camera/viewport provenance and extends field records or
+  derives anchor snapshots before editor projection.
+- Phase 5 now adds a backing binding or built-in apply-sink contract before
+  built-in values can be parsed and written.
+- Phase 5 keeps commit-authority work because session/attempt checks alone do
+  not give app code a pre-mutation current-attempt guard.
+- Phase 6 now narrows app-owned work to focus, routing, popup behavior, and
+  examples on the existing `ImeOpenSession` / `ImeTarget::AppOwned` path.
+- Phase 6 now includes duplicate field-id diagnostics and ambiguous-field
+  non-activation coverage.
+
+### Phase 3 — IME and keyboard input (complete)
 
 Wire the active session to Bevy window IME:
 
+- replace the raw Phase 2 session buffer with a closed editing state machine
+  that separates editing, composing, pending-commit, and terminal states,
+- introduce the single-line edit buffer API and the `ImeTextChanged` /
+  buffer-snapshot surface,
+- publish durable IME/input system sets so `ImeInputBlocker` has an early,
+  documented read point for camera and app input adapters,
 - toggle `Window::ime_enabled`,
 - handle `Ime::Preedit`,
 - handle `Ime::Commit`,
 - maintain committed buffer plus composing string,
-- update `Window::ime_position` from the caret anchor,
+- publish a temporary coarse `Window::ime_position` only until Phase 4 supplies
+  laid-out caret geometry,
 - support selection, word movement/deletion, start/end, select-all, and
-  Backspace/Delete/Left/Right across macOS, Windows, and Linux shortcuts.
+  Backspace/Delete/Left/Right across macOS, Windows, and Linux shortcuts,
+- keep buffer boundaries private behind UTF-8-safe editing operations.
 
 Acceptance: composed text input works for a single-line field, preedit is shown
 without changing the stored value, IME commit inserts text into the edit buffer
@@ -480,31 +610,267 @@ without requesting field commit, field commit is requested only by a field-level
 cause, selection and word shortcuts update the buffer snapshot, and cancel
 clears composition.
 
-### Phase 3 — Screen-space rendering
+#### Retrospective
+
+**What worked:**
+
+- `ime/buffer.rs` now owns UTF-8-safe single-line editing, selection, word
+  movement/deletion, preedit snapshots, and `ImeTextChanged`.
+- `ime/input.rs` now routes Bevy `Ime` and `KeyboardInput` through
+  `ImeInputBlocker`, with `ImeSystemSet` ordering for external input systems.
+
+**What deviated from the plan:**
+
+- Terminal teardown remains represented by removing `ActiveImeSession.active`
+  after emitting `ImeCanceled`/`ImeApplied`, not by retaining a stored terminal
+  enum variant.
+- `Window::ime_position` is still cursor-position/zero fallback only; real
+  caret geometry stays in Phase 4.
+
+**Surprises:**
+
+- Bevy 0.19 exposes text through both `bevy_window::Ime` messages and
+  `KeyboardInput::text`, so Phase 3 needed a per-frame guard to avoid duplicate
+  text insertion when platform IME events arrive.
+- Opening a session needs an initial `ImeTextChanged` so Phase 4 can render the
+  editor from a snapshot without reconstructing buffer state.
+
+**Implications for remaining phases:**
+
+- Phase 4 should consume `ImeBufferSnapshot`/`ImeTextChanged` directly for
+  editor text, selection, caret, and preedit rendering.
+- Phase 4 should replace the coarse `Window::ime_position` writer in
+  `ime/input.rs` once caret layout exists.
+- Phase 5 can rely on pending-commit state blocking further edits until an
+  accept/reject response returns.
+
+#### Phase 3 Review
+
+- Phase 4 now explicitly renders from `ImeTextChanged`/`ImeBufferSnapshot`
+  instead of reading `ActiveImeSession`.
+- Phase 4 now adds a later caret/IME-position system set and makes it the final
+  `Window::ime_position` writer after editor layout.
+- Phase 4 now builds only the validation-feedback slot; Phase 5 populates it
+  from invalid commit/rejection results.
+- Phase 4 and Phase 5 now name outside-blur classification and policy as
+  implementation work before Phase 6 example coverage.
+- Phase 5 now calls out the public current-attempt authority guard before
+  app-owned backing-state mutation.
+- Phase 6 now treats platform shortcut work as coverage of the Phase 3 command
+  router and places app-owned input disposition before built-in command mapping.
+
+### Phase 4 — Screen-space rendering and anchoring (complete)
 
 Render the transient editor:
 
+- consume `ImeBufferSnapshot` from `ImeTextChanged` as the editor source of
+  truth for text, selection, caret, and preedit, without reading
+  `ActiveImeSession`,
+- capture camera and viewport provenance for field-authored sessions before
+  projecting panel fields,
+- extend `PanelFieldRecord` or derive an anchor snapshot with effective clip,
+  style, tree revision or field epoch, and stale-target checks needed by the
+  editor,
 - project target bounds each frame,
-- draw the editor at the projected position,
-- draw caret and composing text,
+- anchor through the supported `screen_space` follow-anchor path,
+- draw the editor, caret, selection, a validation-feedback slot, and composing
+  text,
 - apply basic viewport clamping,
+- add a later caret/IME-position system set after editor layout and move the
+  final `Window::ime_position` write there, replacing the Phase 3 coarse
+  cursor-position fallback,
+- classify inside-editor and outside-editor pointer hits so outside blur can
+  request commit/cancel policy instead of falling through as ordinary panel
+  input,
 - visually mark the target field as active.
 
 Acceptance: the editor tracks a moving camera/panel, remains readable off-angle,
-and the OS candidate popup appears near the editor/caret.
+the OS candidate popup appears near the editor/caret, and the documented
+anchor/caret freshness policy is bounded and tested.
 
-### Phase 4 — Commit integration
+#### Retrospective
+
+**What worked:**
+
+- `ime/editor.rs` now renders the transient editor from `ImeTextChanged` /
+  `ImeBufferSnapshot`, including insertion caret, selection highlight,
+  preedit text, validation text, viewport clamping, and final caret-based
+  `Window::ime_position`.
+- Activation now captures the picked camera in `PendingImePanelAnchor`, so
+  field-authored sessions project `PanelFieldRecord::bounds` through the same
+  camera path that produced the click.
+
+**What deviated from the plan:**
+
+- Phase 4 derives a private anchor snapshot instead of extending
+  `PanelFieldRecord`; the computed panel record remains focused on panel-local
+  field identity, bounds, spec, and display text.
+- The active target is visually marked by the overlaid screen-space editor,
+  not by mutating the source panel's authored tree.
+- Outside pointer blur is classified and captured in `ImeBlurIntent`, but
+  Phase 5 still owns the commit/cancel policy.
+
+**Surprises:**
+
+- The editor panel can reuse the existing `screen_space` panel path with a
+  small internal `DiegeticPanel::set_screen_position` mutator rather than a
+  separate renderer.
+- Short non-empty buffers needed caret math separate from the empty-buffer
+  fallback so candidate popup placement does not drift toward the left edge.
+
+**Implications for remaining phases:**
+
+- Phase 5 should consume `ImeBlurIntent` or replace it with the final blur
+  policy, then emit `ImeCommitCause::Blur` / `ImeCancelCause::Blur`.
+- Phase 5 can populate the existing validation slot by returning
+  `ImeRejectCommit`; `ime/editor.rs` already keeps the editor open and redraws
+  the rejection text.
+- Phase 6 should add example coverage for the one-frame anchor freshness
+  policy and app-owned fallback anchoring, since Phase 4 only gives app-owned
+  sessions a cursor-position fallback.
+
+#### Phase 4 Review
+
+- Phase 5 now treats session/attempt stale-response checks and
+  `ImeCommitRequested::field_spec` / `text` as already-built plumbing, keeping
+  the remaining work focused on built-in apply, commit authority, and blur
+  policy.
+- Phase 5 now scopes parsing to built-in field specs; app-owned parsing and
+  mutation stay app-side behind the current-attempt authority contract.
+- Phase 5 now sequences backing binding/display/revision work before parser
+  and writeback behavior.
+- Phase 5 now extends or replaces `ImeBlurIntent` with semantic blur intent
+  and focus-scope data before implementing blur commit/cancel.
+- Phase 6 now includes app-owned anchoring/open-session API work before
+  app-owned examples, because Phase 4 only provides cursor-position fallback
+  anchoring for `ImeTarget::AppOwned`.
+- Remaining screen-space editor work now accepts the Phase 4 internal
+  `screen_space` panel positioning path; a general follow-anchor abstraction
+  is later work unless app-owned anchors require it.
+- Phase 6 now strengthens candidate-popup coverage around variable-width text,
+  accented/CJK/emoji text, selections, and preedit cursor placement.
+- Phase 6 now narrows duplicate field-id work to diagnostics and example
+  coverage because duplicate-id non-activation is already implemented.
+
+### Phase 5 — Commit integration (complete)
 
 Connect committed text back to real panel values:
 
-- parse text by field mode,
-- reject invalid commits with editor still open,
-- write valid values to backing data,
+- add a backing binding or built-in apply-sink contract for fields whose values
+  are parsed and written by `bevy_diegetic`, including display formatting and
+  value-revision or field-epoch data before parser/writeback work,
+- parse text by built-in field mode; app-owned parsing stays app-side and
+  responds through the current-attempt authority contract,
+- keep invalid commits open and populate the Phase 4 validation-feedback
+  channel,
+- write valid built-in values to backing data,
+- add a public commit-authority token or equivalent current-attempt guard for
+  app-owned apply responses before app code mutates backing state,
+- validate app-owned accept/reject responses without mutating app state again,
+- extend or replace `ImeBlurIntent` with semantic pointer/focus-scope data,
+  then implement outside-blur commit/cancel policy using
+  `ImeCommitCause::Blur` and `ImeCancelCause::Blur`,
 - refresh the diegetic panel,
-- expose commit/cancel events for app-specific synchronization.
+- rely on the Phase 3 session/attempt guards to ignore stale responses.
 
 Acceptance: editing a numeric panel value changes the backing value and the
-panel display after commit; cancel leaves the backing value unchanged.
+panel display after commit; invalid input preserves focus, buffer text, and
+cursor/selection; stale responses are ignored; cancel leaves the backing value
+unchanged.
+
+#### Retrospective
+
+**What worked:**
+- `ime/apply.rs` keeps built-in parser/writeback separate from app-owned
+  authority and response handling.
+- `ImeCommitAuthority` gives app code a current-attempt check before mutation,
+  while session accept/reject observers still ignore stale responses.
+
+**What deviated from the plan:**
+- Built-in backing is the authored panel tree text descendant plus
+  `tree_revision`, not a separate model-binding registry.
+- Outside blur currently commits when focus leaves the editor/source scope;
+  blur cancellation remains covered by explicit cancel and stale-target cleanup.
+
+**Surprises:**
+- `LayoutTree::set_field_display_text` could stay internal and still satisfy
+  built-in writeback through `DiegeticPanelCommands::set_tree`.
+
+**Implications for remaining phases:**
+- Phase 6 examples should show app-owned code checking `ImeCommitAuthority`
+  before mutating caller state.
+- Later model-binding work can replace the panel-tree text sink without
+  changing the session or attempt lifecycle.
+
+### Phase 6 — App-owned sessions and example coverage (complete)
+
+Finish the caller-owned surface and prove the contract:
+
+- app-authored focus, routing, and popup behavior on top of the existing
+  `ImeOpenSession` / `ImeTarget::AppOwned` core,
+- app-owned anchor/open-session data so app-owned sessions no longer depend on
+  the Phase 4 cursor-position fallback,
+- synchronous app-surface input disposition hook that runs before built-in
+  command mapping for app-owned sessions,
+- popup focus-scope behavior,
+- platform shortcut matrix coverage for the Phase 3 command router rather than
+  a second shortcut implementation,
+- duplicate field-id diagnostics and example coverage for the already-built
+  "ambiguous fields do not activate" behavior,
+- one-frame anchor freshness coverage for the Phase 4 internal `screen_space`
+  panel positioning path,
+- canonical example coverage plus focused unit coverage for CJK,
+  accent/dead-key, multi-byte, emoji, variable-width caret positioning,
+  selection/preedit caret placement, invalid numeric, rejection-retry, outside
+  blur, activation-capture, and app-popup cases.
+
+Acceptance: the canonical IME example shows world-panel editing plus app-owned
+screen-space text entry using the same core session, buffer, IME lease, and
+lifecycle events; focused unit tests cover the detailed parser, shortcut,
+UTF-8, duplicate-field, preedit, selection, and caret cases.
+
+#### Retrospective
+
+**What worked:**
+- `ImeSessionAnchor` removes the app-owned cursor fallback path for callers
+  that can provide screen geometry.
+- `ImeAppInputDispositionHook` lets app-owned sessions consume surface input
+  before built-in command mapping while preserving the shared editor buffer.
+
+**What deviated from the plan:**
+- Coverage is split between the canonical `examples/ime.rs` and focused unit
+  tests for parser bounds, duplicate field updates, shortcut routing, UTF-8
+  boundaries, preedit, selection, and caret placement.
+- Duplicate field-id behavior remains diagnostic plus non-activation coverage;
+  no separate duplicate-field demo was added to the example.
+
+**Surprises:**
+- Example-owned apply logic can stay small because `ImeCommitRequested`
+  already carries target, attempt id, field spec, and text.
+
+**Implications for remaining phases:**
+- There are no numbered phases left; later work should decide whether built-in
+  fields need a model-binding registry beyond panel-tree text writeback.
+
+#### Phase 5 and 6 Review
+
+- Later work now records that there are no remaining numbered phases; any
+  unsatisfied items are explicit later-work gaps.
+- Later work now names the model-binding decision created by Phase 5's
+  panel-tree text sink and `tree_revision` value reporting.
+- Later work now narrows `ScreenPanelFollowAnchor` to general screen-space
+  cleanup because Phase 6 added `ImeSessionAnchor` for app-owned geometry.
+- R0-R7 now mark the portions satisfied or partially satisfied by Phases 1-6
+  instead of remaining as proposed backlog.
+- R11 now documents that the Phase 4 internal editor-panel path superseded the
+  earlier follow-anchor requirement.
+- Later work now records the narrower Phase 6 app-owned popup hook: keyboard
+  disposition is implemented; pointer actions, row focus, semantic action
+  tokens, and forwarding remain later work.
+- Later work now records that external value conflict detection still needs
+  original-value snapshots, field epochs, and conflict policy.
+- Phase 6 acceptance now states that the canonical example and focused unit
+  tests share the acceptance matrix.
 
 ## Later work
 
@@ -512,6 +878,27 @@ A later world-space editor can reuse most of the session and parsing model. The
 main difference would be rendering caret, selection, and preedit directly on the
 panel while still projecting the caret to `Window::ime_position` for the OS IME
 candidate popup.
+
+A general `ScreenPanelFollowAnchor` abstraction remains later work. Phase 4
+uses an internal screen-space editor panel plus `DiegeticPanel::set_screen_position`;
+Phase 6 app-owned sessions use `ImeSessionAnchor`, so this is now a general
+screen-space architecture cleanup rather than an app-owned IME blocker.
+
+Built-in field writeback currently updates the authored panel tree text
+descendant and reports `tree_revision` as `ImeValueRevision`. Keep that sink
+until a caller needs external backing-value conflict semantics; only then add a
+model-binding registry with original value snapshots, revisions, and conflict
+policy.
+
+App-owned popup routing currently exposes a keyboard-frame
+`ImeAppInputDispositionHook` with edit, surface, commit, and cancel decisions.
+Pointer-scoped popup actions, result-row focus scope, semantic action tokens,
+and post-commit action forwarding remain later work.
+
+External value conflict detection remains later work. Active sessions do not
+yet store original text, starting tree revision, computed field epoch, or a
+value snapshot, so concurrent external changes are not compared against a
+field-level conflict policy.
 
 ## Team review follow-ups
 
@@ -594,11 +981,11 @@ introducing a generic editing namespace unless another editing domain appears.
 
 ```text
 crates/bevy_diegetic/src/ime/
-  mod.rs          // public facade, ImePlugin, ImeSystems, system wiring
-  ids.rs          // SessionId, CommitAttemptId
-  target.rs       // Target and target adapters
-  events.rs       // public lifecycle events and validation responses
-  requests.rs     // public app intent events: open, focus, request commit, cancel
+  mod.rs          // private facade, ImePlugin, internal system wiring
+  ids.rs          // ImeSessionId, ImeCommitAttemptId
+  target.rs       // ImeTarget and target adapters
+  events.rs       // lifecycle events and validation responses re-exported at crate root
+  requests.rs     // app intent events: open, focus, request commit, cancel
   session.rs      // active session resource and session-owned entities
   state.rs        // closed transition table / typestate API
   buffer.rs       // SingleLineEditBuffer, cursor, ranges, preedit
@@ -614,10 +1001,10 @@ crates/bevy_diegetic/src/ime/
 with their struct in this codebase, and the module root should read as the table
 of contents for the IME feature.
 
-If a public anchor type named `Ime` becomes useful, it should live in this module
-root. Do not force it in just to make names look symmetrical; `bevy_window::Ime`
-already names the raw Bevy OS event stream, while this module owns the higher
-level session API.
+If a public anchor type named `Ime` becomes useful, expose it as a curated
+crate-root export instead of making `ime` public. `bevy_window::Ime` already
+names the raw Bevy OS event stream, while this module owns the higher-level
+session API.
 
 `requests.rs` is not a command-palette implementation. Its request events are
 typed app intents such as "open an IME session for this field", "request commit",
@@ -637,7 +1024,7 @@ not a built-in fuzzy-search feature.
   for hit resolution and field-bound lookup.
 - `src/panel/diegetic_panel.rs`: expose crate-internal computed field records
   from `ComputedDiegeticPanel`.
-- `src/panel/mod.rs`: order `ImeSystems` relative to `PanelSystems`.
+- `src/panel/mod.rs`: order exported IME system sets relative to `PanelSystems`.
 - `src/screen_space/mod.rs`: add a supported follow-anchor path for the transient
   screen-space IME panel.
 - `examples/ime.rs`: canonical example covering composed/accented/CJK input,
@@ -647,17 +1034,16 @@ not a built-in fuzzy-search feature.
 
 ### R0 — Namespace and public/private boundary
 
-Status: proposed
+Status: satisfied by Phases 1, 3, and 4
 
-Short IME names live under `bevy_diegetic::ime`, for example `ime::SessionId`
-and `ime::TextChanged`. The crate root should not glob-re-export the full IME
-event set. Public API starts with the IME lifecycle events, request events,
-`Target`, session/attempt ids, field specs, and possibly `ImePlugin` /
-`ImeSystems`.
+Public IME names use the crate-root `Ime...` prefix, for example
+`ImeSessionId` and `ImeCommitRequested`. Do not add a public `ime` module.
+Public API starts with the IME lifecycle events, request events, `ImeTarget`,
+session/attempt ids, field specs, and possibly exported IME system sets.
 
-`DiegeticUiPlugin` should install `ime::ImePlugin` by default. `ImePlugin` lives
-in `ime/mod.rs`; do not create a separate `plugin.rs`. `ime::ImeSystems` should
-expose the ordering points external code needs,
+`DiegeticUiPlugin` should install the private `ImePlugin` by default.
+`ImePlugin` lives in `ime/mod.rs`; do not create a separate `plugin.rs`.
+Exported IME system sets should expose the ordering points external code needs,
 such as `AcquireFocusLease`, `PublishInputBlockers`, `ProcessInput`,
 `ResolveAnchors`, `UpdateSurface`, `UpdateImePosition`, and `Cleanup`.
 `PublishInputBlockers` must run before app camera/input consumers;
@@ -670,7 +1056,7 @@ external integration needs it.
 
 ### R1 — Split core sessions from field adapters
 
-Status: proposed
+Status: partially satisfied by Phases 1, 4, and 6
 
 The core IME surface should be a shared single-line session API, not a
 world-field-only abstraction. Model the target as a closed enum such as
@@ -693,7 +1079,7 @@ fields.
 
 ### R2 — Make editable identity explicit in the layout API
 
-Status: proposed
+Status: satisfied by Phase 2
 
 Stable field identity should be authored in the layout tree, not inferred by the
 resolver. Add an `EditableFieldId`/`PanelFieldId` newtype and an authoring path
@@ -710,7 +1096,7 @@ uniqueness where the authoring API can catch it.
 
 ### R3 — Use session IDs and typed lifecycle events
 
-Status: proposed
+Status: satisfied by Phases 1, 3, and 5
 
 Every start, text-change, commit-request, validation-rejected, applied, and
 canceled event should carry a `SessionId` plus a typed target.
@@ -733,7 +1119,7 @@ command-palette implementation.
 
 ### R4 — Specify IME lease, input blocker, and cleanup ownership
 
-Status: proposed
+Status: satisfied by Phases 2 and 3
 
 Represent IME ownership with a typed lease token, not only a window entity.
 Acquire the lease before editing, release idempotently only if the owner still
@@ -756,7 +1142,7 @@ keyboard, pointer, wheel, and camera input.
 
 ### R5 — Define composition, blur, and validation policy
 
-Status: proposed
+Status: partially satisfied by Phases 3, 5, and 6
 
 Field-level Enter/Escape/navigation should not fire while IME composition is
 active. During preedit, keyboard events belong to the IME/editor layer. Model
@@ -799,7 +1185,7 @@ close on outside blur if the app requests that behavior.
 
 ### R6 — Define editor scheduling, anchor mutation, and caret IME position
 
-Status: proposed
+Status: partially satisfied by Phases 4 and 6
 
 Add explicit IME system sets and ordering. Re-resolve target layout after
 panel layout, project from current transform/camera data, mutate the
@@ -830,7 +1216,7 @@ during implementation.
 
 ### R7 — Example acceptance matrix
 
-Status: proposed
+Status: split between `examples/ime.rs` and focused unit tests
 
 The IME example should prove the contract, not only render a text box:
 
@@ -900,11 +1286,11 @@ Source dimension: architecture
 
 Class: design-improvement
 
-Expose only durable integration points in public `ime::ImeSystems`, such as
-publishing input blockers and applying the final IME candidate-popup position.
-Keep lifecycle sequencing, input translation, anchor resolution, surface update,
-and cleanup in crate-private `ImeInternalSystems` so the module can evolve
-without freezing every internal step as public API.
+Expose only durable integration points as curated crate-root IME system sets,
+such as publishing input blockers and applying the final IME candidate-popup
+position. Keep lifecycle sequencing, input translation, anchor resolution,
+surface update, and cleanup in crate-private internal system sets so the module
+can evolve without freezing every internal step as public API.
 
 The first implementation should use a documented one-frame anchor/caret
 freshness policy unless implementation work proves the stricter same-frame path
@@ -960,7 +1346,7 @@ Bevy picking details.
 
 ### R11 — Keep follow-anchor ownership in `screen_space`
 
-Status: accepted
+Status: superseded by the Phase 4 internal editor-panel path; later-work only
 
 Severity: important
 
@@ -968,11 +1354,13 @@ Source dimension: architecture and risk
 
 Class: design-improvement
 
-The transient editor should not mutate screen-space panel transforms or sizing
-ad hoc. Add a generic crate-private follow-anchor path in `screen_space`, such
-as `ScreenPanelFollowAnchor`, consumed by the existing screen-space owner. The
-IME anchor system publishes an anchor snapshot; `screen_space` applies it and
-reports the final rect that caret layout and IME positioning use.
+The accepted implementation uses a session-owned screen-space editor panel and
+mutates it through `DiegeticPanel::set_screen_position`. A generic
+crate-private follow-anchor path in `screen_space`, such as
+`ScreenPanelFollowAnchor`, is no longer required for app-owned IME anchoring;
+revisit it only as a general screen-space ownership cleanup. If added later,
+the IME anchor system should publish an anchor snapshot and `screen_space`
+should report the final rect that caret layout and IME positioning use.
 
 Make coordinate domains explicit in the anchor snapshot. Carry the concrete
 window entity, viewport-local rect, window-logical rect, camera viewport

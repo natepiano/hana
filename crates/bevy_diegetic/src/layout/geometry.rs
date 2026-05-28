@@ -1,6 +1,7 @@
 //! Geometry primitives shared by layout and rendering.
 
 use bevy::color::Color;
+use bevy::math::Vec2;
 
 use super::Dimension;
 
@@ -22,6 +23,15 @@ impl BoundingBox {
     #[must_use]
     pub const fn center(&self) -> (f32, f32) {
         (self.x + self.width * 0.5, self.y + self.height * 0.5)
+    }
+
+    /// Returns `true` when `point` is inside this box.
+    #[must_use]
+    pub fn contains(&self, point: Vec2) -> bool {
+        point.x >= self.x
+            && point.y >= self.y
+            && point.x <= self.x + self.width
+            && point.y <= self.y + self.height
     }
 
     /// Returns the intersection of two bounding boxes, or `None` if they

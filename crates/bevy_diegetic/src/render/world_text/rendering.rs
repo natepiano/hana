@@ -192,7 +192,9 @@ impl<'a, 'mesh_world, 'mesh_state, 'mesh_data>
             mesh_spawning::despawn_mesh_children(entity, self.old_meshes, commands);
         }
 
-        if let Some(prepared) = text_run.prepared.as_ref() {
+        if readiness == GlyphReadiness::Ready
+            && let Some(prepared) = text_run.prepared.as_ref()
+        {
             mesh_ms_total += self.spawn_run(
                 prepared,
                 entity,
@@ -237,7 +239,7 @@ fn apply_readiness_markers(entity: Entity, readiness: GlyphReadiness, commands: 
     // Glyph geometry is built synchronously, so a rendered run is ready at once;
     // mark it for the post-`CalculateBounds` `WorldTextReady`. `Failed`/`Idle`
     // produce no meshes and need no signal.
-    if matches!(readiness, GlyphReadiness::Ready | GlyphReadiness::Invisible) {
+    if readiness == GlyphReadiness::Ready {
         commands.entity(entity).insert(AwaitingReady);
     }
 }

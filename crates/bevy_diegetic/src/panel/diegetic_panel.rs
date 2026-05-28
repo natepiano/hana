@@ -7,7 +7,9 @@ use super::builder::NeedsSize;
 use super::builder::Screen;
 use super::builder::World;
 use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
+use super::field::PanelFieldRecord;
 use crate::cascade;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
@@ -140,7 +142,7 @@ impl DiegeticPanel {
 
     /// Revision of the current layout tree.
     #[must_use]
-    pub(super) const fn tree_revision(&self) -> u64 { self.tree_revision }
+    pub(crate) const fn tree_revision(&self) -> u64 { self.tree_revision }
 
     /// Panel width in layout units.
     #[must_use]
@@ -558,9 +560,13 @@ impl ScaledLayoutTreeCache {
 #[reflect(Component)]
 pub struct ComputedDiegeticPanel {
     #[reflect(ignore)]
-    result:         Option<LayoutResult>,
-    content_width:  f32,
-    content_height: f32,
+    result:             Option<LayoutResult>,
+    #[reflect(ignore)]
+    field_records:      Vec<PanelFieldRecord>,
+    #[reflect(ignore)]
+    field_id_conflicts: Vec<crate::PanelFieldId>,
+    content_width:      f32,
+    content_height:     f32,
 }
 
 impl ComputedDiegeticPanel {
@@ -582,6 +588,26 @@ impl ComputedDiegeticPanel {
         self.result.as_ref().and_then(LayoutResult::content_bounds)
     }
 
+    /// Returns computed editable fields in draw-independent element order.
+    #[must_use]
+    pub fn field_records(&self) -> &[PanelFieldRecord] { &self.field_records }
+
+    /// Returns duplicated editable field ids found during the latest layout.
+    #[must_use]
+    pub fn field_id_conflicts(&self) -> &[crate::PanelFieldId] { &self.field_id_conflicts }
+
+    /// Resolves an editable field at a panel-local layout point.
+    ///
+    /// Records with duplicated ids are ignored because their semantic target
+    /// is ambiguous.
+    #[must_use]
+    pub fn field_at_local_position(&self, panel_local: Vec2) -> Option<&PanelFieldRecord> {
+        self.field_records
+            .iter()
+            .rev()
+            .find(|record| !record.duplicate_id && record.contains(panel_local))
+    }
+
     /// Returns the computed layout result, or `None` if not yet computed.
     #[must_use]
     pub const fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
@@ -590,12 +616,37 @@ impl ComputedDiegeticPanel {
     pub(super) const fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
 
     /// Stores the computed layout result.
-    pub fn set_result(&mut self, result: LayoutResult) { self.result = Some(result); }
+    pub fn set_result(&mut self, result: LayoutResult) {
+        self.result = Some(result);
+        self.field_records.clear();
+        self.field_id_conflicts.clear();
+    }
+
+    pub(super) fn set_result_with_fields(
+        &mut self,
+        result: LayoutResult,
+        field_records: Vec<PanelFieldRecord>,
+        field_id_conflicts: Vec<crate::PanelFieldId>,
+    ) {
+        self.result = Some(result);
+        self.field_records = field_records;
+        self.field_id_conflicts = field_id_conflicts;
+    }
 
     /// Sets the content dimensions in world units.
     pub const fn set_content_size(&mut self, width: f32, height: f32) {
         self.content_width = width;
         self.content_height = height;
+    }
+}
+
+impl DiegeticPanel {
+    pub(crate) const fn set_screen_position(&mut self, screen_position: Vec2) -> bool {
+        let CoordinateSpace::Screen { position, .. } = &mut self.coordinate_space else {
+            return false;
+        };
+        *position = ScreenPosition::At(screen_position);
+        true
     }
 }
 

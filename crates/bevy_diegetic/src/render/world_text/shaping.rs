@@ -105,8 +105,11 @@ pub(super) fn build_world_text_run(
         },
     };
 
-    stats.ready_glyphs = positioned_glyphs.len();
-    stats.emitted_quads = prepared.glyph_count();
+    text_shaping::record_prepared_glyphs(
+        &mut stats,
+        positioned_glyphs.len(),
+        prepared.glyph_count(),
+    );
     stats.atlas_ms = run_start.elapsed().as_secs_f32() * crate::constants::MILLISECONDS_PER_SECOND;
 
     #[cfg(feature = "typography_overlay")]

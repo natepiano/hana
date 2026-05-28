@@ -45,6 +45,9 @@ use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
 use crate::DimensionMatch;
+use crate::ImeEditableFieldSpec;
+use crate::ImePanelField;
+use crate::PanelFieldId;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -65,6 +68,7 @@ pub struct El {
     corner_radius: CornerRadius,
     overflow:      ChildOverflow,
     material:      Option<Box<StandardMaterial>>,
+    editable:      Option<ImePanelField>,
 }
 
 impl El {
@@ -181,6 +185,19 @@ impl El {
         self
     }
 
+    /// Marks this element as an editable IME field.
+    ///
+    /// The `field_id` is panel-local semantic identity used for hit testing,
+    /// anchoring, and commit routing.
+    pub fn editable_field(
+        mut self,
+        field_id: impl Into<PanelFieldId>,
+        field_spec: ImeEditableFieldSpec,
+    ) -> Self {
+        self.editable = Some(ImePanelField::new(field_id, field_spec));
+        self
+    }
+
     /// Converts this declaration into an [`Element`] with the given content.
     fn into_element(self, content: ElementContent) -> Element {
         Element {
@@ -196,6 +213,7 @@ impl El {
             corner_radius: self.corner_radius,
             overflow: self.overflow,
             material: self.material,
+            editable: self.editable,
             content,
         }
     }

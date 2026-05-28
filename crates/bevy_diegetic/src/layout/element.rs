@@ -29,6 +29,21 @@ use super::Padding;
 use super::Sizing;
 use super::Unit;
 use super::constants::INLINE_CHILDREN;
+use crate::ImePanelField;
+use crate::PanelFieldId;
+
+/// Result of replacing the display text for a panel field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FieldDisplayTextUpdate {
+    /// Exactly one field matched and its display text was replaced.
+    Updated,
+    /// No editable field had the requested id.
+    MissingField,
+    /// More than one editable field had the requested id.
+    DuplicateField,
+    /// The field had no text descendant to update.
+    MissingText,
+}
 
 /// Whether overflowing children are clipped to the parent's content box.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -70,6 +85,8 @@ pub(super) struct Element {
     /// When present, the rendering system uses this instead of the panel-level default.
     /// `base_color` is overridden by the layout color if both are set.
     pub(super) material:      Option<Box<StandardMaterial>>,
+    /// Optional editable field contract.
+    pub(super) editable:      Option<ImePanelField>,
     /// Content of this element.
     pub(super) content:       ElementContent,
 }
@@ -131,6 +148,7 @@ impl Default for Element {
             corner_radius: CornerRadius::ZERO,
             overflow:      ChildOverflow::Visible,
             material:      None,
+            editable:      None,
             content:       ElementContent::Empty,
         }
     }
@@ -328,6 +346,93 @@ impl LayoutTree {
             .map_or(CornerRadius::ZERO, |e| e.corner_radius)
     }
 
+    /// Returns editable field metadata for the element at `index`, if any.
+    #[must_use]
+    pub(crate) fn editable_field(&self, index: usize) -> Option<&ImePanelField> {
+        self.elements.get(index).and_then(|e| e.editable.as_ref())
+    }
+
+    /// Returns text content for the element at `index`, if any.
+    #[must_use]
+    pub(crate) fn element_text(&self, index: usize) -> Option<&str> {
+        self.elements
+            .get(index)
+            .and_then(|element| match &element.content {
+                ElementContent::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+    }
+
+    /// Returns the first text string owned by `index` or one of its descendants.
+    #[must_use]
+    pub(crate) fn field_display_text(&self, index: usize) -> Option<&str> {
+        let mut stack = vec![index];
+        while let Some(current) = stack.pop() {
+            if let Some(text) = self.element_text(current) {
+                return Some(text);
+            }
+            for &child in self.children_of(current).iter().rev() {
+                stack.push(child);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn set_field_display_text(
+        &mut self,
+        field_id: &PanelFieldId,
+        text: impl Into<String>,
+    ) -> FieldDisplayTextUpdate {
+        let matches: Vec<usize> = self
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| {
+                element
+                    .editable
+                    .as_ref()
+                    .is_some_and(|field| field.field_id == *field_id)
+                    .then_some(index)
+            })
+            .collect();
+
+        let [field_index] = matches.as_slice() else {
+            return if matches.is_empty() {
+                FieldDisplayTextUpdate::MissingField
+            } else {
+                FieldDisplayTextUpdate::DuplicateField
+            };
+        };
+
+        let Some(text_index) = self.first_text_descendant(*field_index) else {
+            return FieldDisplayTextUpdate::MissingText;
+        };
+        if let ElementContent::Text {
+            text: existing_text,
+            ..
+        } = &mut self.elements[text_index].content
+        {
+            *existing_text = text.into();
+        }
+        FieldDisplayTextUpdate::Updated
+    }
+
+    fn first_text_descendant(&self, index: usize) -> Option<usize> {
+        let mut stack = vec![index];
+        while let Some(current) = stack.pop() {
+            if matches!(
+                self.elements.get(current).map(|element| &element.content),
+                Some(ElementContent::Text { .. })
+            ) {
+                return Some(current);
+            }
+            for &child in self.children_of(current).iter().rev() {
+                stack.push(child);
+            }
+        }
+        None
+    }
+
     /// Returns a copy of this tree with all dimensions converted to points.
     ///
     /// `layout_scale` multiplies spatial values (padding, gaps, borders, fixed sizes).
@@ -376,6 +481,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         corner_radius,
         overflow,
         material,
+        editable,
         content,
     } = element;
     let Element {
@@ -391,6 +497,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         corner_radius: n_corner_radius,
         overflow: n_overflow,
         material: n_material,
+        editable: n_editable,
         content: n_content,
     } = next;
 
@@ -403,6 +510,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         || child_align_y != n_child_align_y
         || overflow != n_overflow
     {
+        return LayoutTreeChange::LayoutAffecting;
+    }
+
+    if editable != n_editable {
         return LayoutTreeChange::LayoutAffecting;
     }
 
@@ -519,8 +630,12 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
 mod tests {
     use bevy::color::Color;
 
+    use super::FieldDisplayTextUpdate;
     use super::LayoutTree;
     use super::LayoutTreeChange;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
+    use crate::ImeEditableFieldSpec;
     use crate::layout::Border;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -539,6 +654,10 @@ mod tests {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text("child", LayoutTextStyle::new(10.0));
         builder.build()
+    }
+
+    fn field_spec() -> ImeEditableFieldSpec {
+        ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text))
     }
 
     #[test]
@@ -664,5 +783,35 @@ mod tests {
         let next = text_tree("same", LayoutTextStyle::new(10.0).wrap(TextWrap::Words));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::Identical);
+    }
+
+    #[test]
+    fn updates_field_display_text_descendant() {
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(El::new().editable_field("gain", field_spec()), |builder| {
+            builder.text("10", LayoutTextStyle::new(10.0));
+        });
+        let mut tree = builder.build();
+
+        let update = tree.set_field_display_text(&"gain".into(), "11");
+
+        assert_eq!(update, FieldDisplayTextUpdate::Updated);
+        assert_eq!(tree.field_display_text(1), Some("11"));
+    }
+
+    #[test]
+    fn rejects_duplicate_field_display_update() {
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(El::new().editable_field("gain", field_spec()), |builder| {
+            builder.text("10", LayoutTextStyle::new(10.0));
+        });
+        builder.with(El::new().editable_field("gain", field_spec()), |builder| {
+            builder.text("12", LayoutTextStyle::new(10.0));
+        });
+        let mut tree = builder.build();
+
+        let update = tree.set_field_display_text(&"gain".into(), "11");
+
+        assert_eq!(update, FieldDisplayTextUpdate::DuplicateField);
     }
 }

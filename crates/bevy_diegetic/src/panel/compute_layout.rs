@@ -15,6 +15,7 @@ use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
 use super::diegetic_panel::DiegeticPanelChangeClassification;
 use super::diegetic_panel::ScaledLayoutTreeCache;
+use super::field;
 use super::perf::DiegeticPerfStats;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
@@ -138,7 +139,15 @@ pub(super) fn compute_panel_layouts(
             computed.set_content_size(bounds.width * s, bounds.height * s);
         }
 
-        computed.set_result(result);
+        let (field_records, field_id_conflicts) =
+            field::collect_panel_field_records(scaled_tree, &result);
+        if !field_id_conflicts.is_empty() {
+            bevy::log::warn!(
+                target: "bevy_diegetic::ime",
+                "panel {entity:?} has duplicate editable field ids: {field_id_conflicts:?}"
+            );
+        }
+        computed.set_result_with_fields(result, field_records, field_id_conflicts);
         panel_count += 1;
     }
 
