@@ -88,20 +88,169 @@ enum AtHome {
     No,
 }
 
+/// Color of the home AABB wireframe drawn by [`draw_home_aabb_gizmo`] while
+/// [`HomeAabbGizmoVisible`] is on. Bright orange so it reads against the
+/// usual dark background.
+const HOME_AABB_GIZMO_COLOR: Color = Color::srgb(1.0, 0.5, 0.0);
+
+/// Tracks whether [`draw_home_aabb_gizmo`] is currently drawing a wireframe
+/// of the home cube. Toggled by **Ctrl+Shift+A** — undocumented debug
+/// affordance available in every `fairy_dust`-built example, no setup needed.
+/// Defaults to off.
+#[derive(Resource, Default)]
+struct HomeAabbGizmoVisible(bool);
+
+/// Flips [`HomeAabbGizmoVisible`] on Ctrl+Shift+A. Both Control sides and
+/// both Shift sides count; the gizmo combo is a chord, not a single key, so
+/// it doesn't collide with bare-`A` bindings the caller may have.
+fn toggle_home_aabb_gizmo(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut visible: ResMut<HomeAabbGizmoVisible>,
+) {
+    let ctrl = keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
+    let shift = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    if ctrl && shift && keyboard.just_pressed(KeyCode::KeyA) {
+        visible.0 = !visible.0;
+    }
+}
+
+/// Draws a wireframe of the home cube — sized to the union of every
+/// [`CameraHomeTarget`] entity — while [`HomeAabbGizmoVisible`] is on. Lets
+/// you see what region the camera is actually framing.
+fn draw_home_aabb_gizmo(
+    visible: Res<HomeAabbGizmoVisible>,
+    home: Option<Res<CameraHomeEntity>>,
+    cube: Query<&Transform, With<CameraHomeMarker>>,
+    mut gizmos: Gizmos,
+) {
+    if !visible.0 {
+        return;
+    }
+    let Some(home) = home else {
+        return;
+    };
+    let Ok(transform) = cube.get(home.0) else {
+        return;
+    };
+    gizmos.cube(*transform, HOME_AABB_GIZMO_COLOR);
+}
+
 pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.insert_resource(config);
     app.init_resource::<AtHome>();
     app.init_resource::<CameraHomeOverride>();
+    app.init_resource::<HomeAabbGizmoVisible>();
     app.add_systems(Startup, spawn_home_marker);
+    // `update_home_cube` runs first so the cube reflects the current union of
+    // `CameraHomeTarget` entities before any handler triggers `AnimateToFit`
+    // off it.
     app.add_systems(
         Update,
-        (snap_home_on_ready, handle_home_key, refit_on_window_resized),
+        (
+            update_home_cube,
+            snap_home_on_ready,
+            handle_home_key,
+            refit_on_window_resized,
+        )
+            .chain(),
     );
+    // Ctrl+Shift+A debug toggle — always available, opt-in by keypress.
+    app.add_systems(Update, (toggle_home_aabb_gizmo, draw_home_aabb_gizmo));
     app.add_observer(on_home_animation_begin);
     app.add_observer(on_home_animation_end);
     app.add_observer(on_non_home_animation_begin);
     app.add_observer(on_user_interaction_started);
     app.add_observer(on_set_camera_home);
+}
+
+/// Minimum cube scale along any axis. Text and other planar geometry can give
+/// a union with zero extent in one axis; the fit math handles a zero-extent
+/// vertex cloud poorly, so floor each axis to a small positive value.
+const MIN_HOME_CUBE_SCALE: f32 = 0.001;
+
+/// The 8 corner sign-patterns of a unit AABB, used to transform a local
+/// [`Aabb`] into a world-space bound by walking each corner through a
+/// [`GlobalTransform`].
+const AABB_CORNER_SIGNS: [Vec3; 8] = [
+    Vec3::new(-1.0, -1.0, -1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(1.0, 1.0, -1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+    Vec3::new(1.0, -1.0, 1.0),
+    Vec3::new(-1.0, 1.0, 1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+];
+
+/// World-space union of every [`CameraHomeTarget`] entity and its
+/// descendants' [`Aabb`]s. Returns `(center, size)` of the union box, or
+/// `None` when no marked entity (or descendant) has an [`Aabb`] yet.
+fn world_aabb_union(
+    targets: &Query<Entity, With<CameraHomeTarget>>,
+    children: &Query<&Children>,
+    aabbs: &Query<&Aabb>,
+    transforms: &Query<&GlobalTransform, Without<CameraHomeMarker>>,
+) -> Option<(Vec3, Vec3)> {
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    let mut found = false;
+    for root in targets {
+        for entity in std::iter::once(root).chain(children.iter_descendants(root)) {
+            let (Ok(aabb), Ok(global_transform)) = (aabbs.get(entity), transforms.get(entity))
+            else {
+                continue;
+            };
+            let local_center = Vec3::from(aabb.center);
+            let half = Vec3::from(aabb.half_extents);
+            for sign in AABB_CORNER_SIGNS {
+                let world = global_transform.transform_point(local_center + sign * half);
+                min = min.min(world);
+                max = max.max(world);
+                found = true;
+            }
+        }
+    }
+    if !found {
+        return None;
+    }
+    Some(((min + max) * 0.5, max - min))
+}
+
+/// Each frame, rewrites the hidden home cube's [`Transform`] (and its
+/// [`GlobalTransform`], so same-tick observers see it) to the union of every
+/// [`CameraHomeTarget`] entity. With zero marked entities the cube stays at
+/// the caller-configured fallback transform — the unchanged pre-marker
+/// behavior. The cube is what every fit handler frames, so updating it here
+/// is the only place the framed region changes.
+fn update_home_cube(
+    home: Option<Res<CameraHomeEntity>>,
+    config: Res<CameraHomeConfig>,
+    targets: Query<Entity, With<CameraHomeTarget>>,
+    children: Query<&Children>,
+    aabbs: Query<&Aabb>,
+    target_transforms: Query<&GlobalTransform, Without<CameraHomeMarker>>,
+    mut cube: Query<(&mut Transform, &mut GlobalTransform), With<CameraHomeMarker>>,
+) {
+    let Some(home) = home else {
+        return;
+    };
+    let Ok((mut cube_transform, mut cube_global)) = cube.get_mut(home.0) else {
+        return;
+    };
+    let new_transform = match world_aabb_union(&targets, &children, &aabbs, &target_transforms) {
+        Some((center, size)) => Transform::from_translation(center)
+            .with_scale(size.max(Vec3::splat(MIN_HOME_CUBE_SCALE))),
+        None => config.transform,
+    };
+    if *cube_transform == new_transform {
+        return;
+    }
+    *cube_transform = new_transform;
+    // Write `GlobalTransform` too — `AnimateToFit` observers run after this
+    // system in the same tick and read `GlobalTransform`. `PostUpdate`'s
+    // transform propagation will recompute it from `Transform` afterwards
+    // (same value, no change).
+    *cube_global = GlobalTransform::from(new_transform);
 }
 
 /// Names the entity the camera should treat as home, and snaps to it.
@@ -170,26 +319,35 @@ fn spawn_home_marker(
     commands.insert_resource(CameraHomeEntity(entity));
 }
 
-/// The current home target, in priority order: the [`SetCameraHome`] override,
-/// then the first [`CameraHomeTarget`] entity, then the fallback cube.
-fn resolve_home_target(
-    cube: Entity,
-    override_target: &CameraHomeOverride,
-    targets: &Query<Entity, With<CameraHomeTarget>>,
-) -> Entity {
-    override_target
-        .0
-        .or_else(|| targets.iter().next())
-        .unwrap_or(cube)
+/// The current home fit target: the [`SetCameraHome`] override if any, else
+/// the hidden home cube — which [`update_home_cube`] keeps sized to the union
+/// of every [`CameraHomeTarget`] entity (or the fallback transform when none
+/// are marked).
+fn resolve_home_target(cube: Entity, override_target: &CameraHomeOverride) -> Entity {
+    override_target.0.unwrap_or(cube)
 }
 
-/// Whether `target` or one of its descendants has an [`Aabb`] yet. `Aabb` lands
-/// once a `Mesh3d`'s asset loads, which is also when [`AnimateToFit`] can
-/// extract vertices — so this gates the startup snap on the meshes existing.
-fn target_meshes_ready(target: Entity, children: &Query<&Children>, aabbs: &Query<&Aabb>) -> bool {
-    std::iter::once(target)
-        .chain(children.iter_descendants(target))
-        .any(|entity| aabbs.contains(entity))
+/// Whether the snap can fire: with marked entities present, wait until at
+/// least one (or one of its descendants) has an [`Aabb`] so the union the
+/// cube was sized to is meaningful; without any marker, fall back to the cube
+/// (always ready, since its mesh asset lands at frame 0).
+fn target_meshes_ready(
+    cube: Entity,
+    targets: &Query<Entity, With<CameraHomeTarget>>,
+    children: &Query<&Children>,
+    aabbs: &Query<&Aabb>,
+) -> bool {
+    let mut iter = targets.iter();
+    let Some(first) = iter.next() else {
+        return std::iter::once(cube)
+            .chain(children.iter_descendants(cube))
+            .any(|entity| aabbs.contains(entity));
+    };
+    std::iter::once(first).chain(iter).any(|target| {
+        std::iter::once(target)
+            .chain(children.iter_descendants(target))
+            .any(|entity| aabbs.contains(entity))
+    })
 }
 
 /// Snaps the camera to the home target once its meshes exist, exactly once. A
@@ -217,8 +375,8 @@ fn snap_home_on_ready(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    let target = resolve_home_target(home.0, &override_target, &targets);
-    if !target_meshes_ready(target, &children, &aabbs) {
+    let target = resolve_home_target(home.0, &override_target);
+    if !target_meshes_ready(home.0, &targets, &children, &aabbs) {
         return;
     }
     if restore
@@ -246,7 +404,6 @@ fn handle_home_key(
     override_target: Res<CameraHomeOverride>,
     config: Res<CameraHomeConfig>,
     cameras: Query<Entity, With<FairyDustOrbitCam>>,
-    targets: Query<Entity, With<CameraHomeTarget>>,
 ) {
     if !keys.just_pressed(HOME_KEY) {
         return;
@@ -258,14 +415,11 @@ fn handle_home_key(
         return;
     };
     commands.trigger(
-        AnimateToFit::new(
-            camera,
-            resolve_home_target(home.0, &override_target, &targets),
-        )
-        .yaw(config.yaw)
-        .pitch(config.pitch)
-        .margin(config.margin)
-        .duration(config.duration),
+        AnimateToFit::new(camera, resolve_home_target(home.0, &override_target))
+            .yaw(config.yaw)
+            .pitch(config.pitch)
+            .margin(config.margin)
+            .duration(config.duration),
     );
 }
 
@@ -276,7 +430,6 @@ fn refit_on_window_resized(
     override_target: Res<CameraHomeOverride>,
     config: Res<CameraHomeConfig>,
     cameras: Query<Entity, With<FairyDustOrbitCam>>,
-    targets: Query<Entity, With<CameraHomeTarget>>,
     at_home: Res<AtHome>,
 ) {
     if events.is_empty() {
@@ -293,14 +446,11 @@ fn refit_on_window_resized(
         return;
     };
     commands.trigger(
-        AnimateToFit::new(
-            camera,
-            resolve_home_target(home.0, &override_target, &targets),
-        )
-        .yaw(config.yaw)
-        .pitch(config.pitch)
-        .margin(config.margin)
-        .duration(Duration::ZERO),
+        AnimateToFit::new(camera, resolve_home_target(home.0, &override_target))
+            .yaw(config.yaw)
+            .pitch(config.pitch)
+            .margin(config.margin)
+            .duration(Duration::ZERO),
     );
 }
 

@@ -93,7 +93,7 @@ use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 
 const EXAMPLE_TITLE: &str = "Anti-Aliasing";
-const HEADLINE_TEXT: &str = "Anti-aliasing";
+const HEADLINE_TEXT: &str = "Anti-Aliasing";
 const HEADLINE_SIZE: f32 = 0.40;
 const HEADLINE_Y: f32 = 0.18;
 const SMALL_TEXT: &str = "the quick brown fox jumps over the lazy dog";
@@ -102,14 +102,19 @@ const SMALL_Y: f32 = -0.06;
 const DISPLAY_Z: f32 = 0.0;
 const TEXT_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 
-/// Fallback home region for the cube `fairy_dust` frames before a
-/// [`CameraHomeTarget`] entity exists. The headline carries the marker, so the
-/// camera frames the headline (and its glyph children) directly once its meshes
-/// load; this region is only the pre-load placeholder.
+/// Fallback home region for the cube `fairy_dust` frames before any
+/// [`CameraHomeTarget`] entity has loaded its meshes. The headline, the small
+/// line, and the ground plane all carry the marker, so once their meshes
+/// land the camera frames the union of their AABBs (a box around all three —
+/// dominated by the ground plane, so the framed view shows the floor with
+/// the text centered over it), not this placeholder.
 const HOME_CENTER: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
-const HOME_PITCH: f32 = 0.0;
+/// Opens looking down ~14° (`asin(Δy / radius)` of the framed pose) so the
+/// ground plane tilts toward the camera and more of the cast shadow is visible.
+/// Positive pitch puts the camera above the focus — see `orbital_math`.
+const HOME_PITCH: f32 = 0.24;
 const HOME_YAW: f32 = 0.0;
-const HOME_FIT_MARGIN: f32 = 0.5;
+const HOME_FIT_MARGIN: f32 = 0.1;
 const HOME_FIT_DURATION_MS: u64 = 900;
 
 /// Ground plane sized to frame the word, the way `typography.rs` does it: a
@@ -118,13 +123,32 @@ const HOME_FIT_DURATION_MS: u64 = 900;
 /// *front* edge and the rest recedes behind it. Dropped just below the text so
 /// the lit glyphs stand over it and cast shadows, leaving the text positions —
 /// and the baked `A` / `B` views — untouched.
-const GROUND_SIZE: f32 = 5.4;
-const GROUND_DEPTH_SCALE: f32 = 0.7;
-/// Floor front edge sits this far in front (+z) of the text plane.
-const GROUND_FRONT_MARGIN: f32 = 0.5;
+/// Horizontal shift applied to the headline, small line, and cube together
+/// so their combined AABB straddles `x = 0` instead of leaning right. Picked
+/// to center the actual measured combined extent — headline AABB
+/// `-1.528..+1.548`, cube worst-case (after `sqrt(3) × half`) reaching
+/// `+2.344` — whose midpoint is `+0.408`. The A/B demo-view focuses inherit
+/// the same shift so they still point at the same letters.
+const SCENE_X_OFFSET: f32 = -0.4;
+
+const GROUND_SIZE: f32 = 4.2;
+const GROUND_DEPTH_SCALE: f32 = 0.5;
+/// Floor front edge sits this far in front (+z) of the text plane. Kept
+/// small so most of the ground sits *behind* the text (in `-z`), catching
+/// the headline + cube shadows the key light throws backward — without this
+/// the headline's projection past the floor's back edge clips.
+const GROUND_FRONT_MARGIN: f32 = 0.2;
 const GROUND_CENTER_Z: f32 =
     DISPLAY_Z + GROUND_FRONT_MARGIN - GROUND_SIZE * GROUND_DEPTH_SCALE * 0.5;
 const GROUND_Y: f32 = -0.15;
+
+/// Frontal key/fill rig matching `typography.rs`: aim at the word and place the
+/// key light high and far in front (+z) so the shadow direction
+/// `(aim - key_light_pos)` trails straight back behind the glyphs, the way
+/// typography casts them — rather than the default rig's off-axis light, which
+/// throws shadows to the side.
+const LIGHT_AIM: Vec3 = Vec3::new(0.0, HEADLINE_Y, DISPLAY_Z);
+const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 5.0, DISPLAY_Z + 12.0);
 
 /// A slowly tumbling opaque cube to the right of the word (clear of the left-side
 /// `A` / `B` closeups). Opaque geometry gets no in-shader AA, so its hard edges
@@ -210,7 +234,7 @@ const DEMO_VIEWS: [DemoView; 2] = [
     DemoView {
         key:    KeyCode::KeyA,
         title:  "STEEP GRAZING ANGLE",
-        focus:  Vec3::new(-0.965, 0.051, -0.026),
+        focus:  Vec3::new(-0.965 + SCENE_X_OFFSET, 0.051, -0.026),
         yaw:    1.069,
         pitch:  -0.042,
         radius: 0.193,
@@ -219,7 +243,7 @@ const DEMO_VIEWS: [DemoView; 2] = [
     DemoView {
         key:    KeyCode::KeyB,
         title:  "SHARP-CORNER WINGS",
-        focus:  Vec3::new(-1.413, 0.039, 0.007),
+        focus:  Vec3::new(-1.413 + SCENE_X_OFFSET, 0.039, 0.007),
         yaw:    1.651,
         pitch:  -0.018,
         radius: 0.096,
@@ -318,6 +342,8 @@ fn main() {
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
+        .aim_at(LIGHT_AIM)
+        .key_light_pos(KEY_LIGHT_POS)
         .with_ground_plane()
         .size(GROUND_SIZE)
         .transform(
@@ -327,6 +353,7 @@ fn main() {
                 GROUND_DEPTH_SCALE,
             )),
         )
+        .insert(CameraHomeTarget)
         .with_orbit_cam(
             |_| {},
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
@@ -382,13 +409,14 @@ fn setup(
         CameraHomeTarget,
         WorldText::new(HEADLINE_TEXT),
         WorldTextStyle::new(HEADLINE_SIZE).with_color(TEXT_COLOR),
-        Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z),
+        Transform::from_xyz(SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z),
     ));
     commands.spawn((
         Name::new("Small line"),
+        CameraHomeTarget,
         WorldText::new(SMALL_TEXT),
         WorldTextStyle::new(SMALL_SIZE).with_color(TEXT_COLOR),
-        Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z),
+        Transform::from_xyz(SCENE_X_OFFSET, SMALL_Y, DISPLAY_Z),
     ));
     // Opaque cube to the right, floating with its center on the word's vertical
     // center so a corner never dips into the ground plane as it tumbles.
@@ -400,7 +428,7 @@ fn setup(
             base_color: CUBE_COLOR,
             ..default()
         })),
-        Transform::from_xyz(CUBE_X, HEADLINE_Y, DISPLAY_Z),
+        Transform::from_xyz(CUBE_X + SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z),
     ));
 }
 
@@ -516,12 +544,19 @@ fn select_text_aa(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAl
 }
 
 /// On `A` / `B`, animate every orbit camera to that demo's viewpoint so the
-/// in-shader modes have a visible artifact to compare against.
+/// in-shader modes have a visible artifact to compare against. Skipped while
+/// Ctrl+Shift are both held so the gizmo chord (Ctrl+Shift+A) doesn't also
+/// trigger the `A` demo.
 fn select_demo_view(
     keyboard: Res<ButtonInput<KeyCode>>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
+    if keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+        && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+    {
+        return;
+    }
     for demo in &DEMO_VIEWS {
         if !keyboard.just_pressed(demo.key) {
             continue;
