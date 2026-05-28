@@ -1,4 +1,13 @@
-//! Demonstrates app-authored camera control through direct `OrbitCam` target fields.
+//! Drives an `OrbitCam` from app code by mutating `target_focus`, `target_yaw`,
+//! `target_pitch`, and `target_radius` directly. Pressing **H** kicks off a home
+//! animation that temporarily raises the camera's `orbit_smoothness`,
+//! `pan_smoothness`, and `zoom_smoothness` so the lerp reads as a slow fly-to,
+//! then restores the previous smoothness once the camera arrives. The
+//! `HomeAnimationBegin` / `HomeAnimationEnd` events expose the animation window
+//! for other systems (here, the title-bar control chip) to react to.
+//!
+//! Controls:
+//!   H — home the camera
 
 use bevy::prelude::*;
 use bevy_kana::event;
@@ -9,21 +18,61 @@ use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
 
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
-const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + 0.2, 0.0);
-const DESCRIPTION_CAMERA_DRIVE_LINE: &str = "The `home_camera` system, reads the keypress and mutates `target_focus`, `target_yaw`, `target_pitch`, and `target_radius` directly on the `OrbitCam`.";
-const DESCRIPTION_CAMERA_LERP_LINE: &str = "`OrbitCam` then lerps to the home destination.";
-const DESCRIPTION_HEADING: &str = "PROGRAMMATIC ORBITCAM CONTROL";
-const DESCRIPTION_HOME_CONTROL_LINE: &str = "Press H to home the camera";
+fn main() {
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_orbit_cam(
+            configure_camera,
+            (
+                ProgrammaticCamera,
+                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            ),
+        )
+        .with_ground_plane()
+        .size(GROUND_SIZE)
+        .with_studio_lighting()
+        .with_cube()
+        .size(CUBE_SIZE)
+        .color(CUBE_COLOR)
+        .transform(Transform::from_translation(CUBE_TRANSLATION))
+        .with_title_bar(
+            TitleBar::new()
+                .with_title("Programmatic Control")
+                .with_anchor(Anchor::TopLeft)
+                .control(HOME_CONTROL),
+        )
+        .wire_chip_to_events::<HomeAnimationBegin, HomeAnimationEnd>(HOME_CONTROL)
+        .with_description_panel(description_panel())
+        .with_camera_control_panel()
+        .init_resource::<HomeReset>()
+        // `home_camera` writes the targets and starts the smoothness override;
+        // `update_home_reset` polls each frame for arrival or user takeover, so
+        // it must run after the write in the same frame.
+        .add_systems(Update, (home_camera, update_home_reset).chain())
+        .run();
+}
 
-const GROUND_SIZE: f32 = 8.0;
+// ═════════════════════════════════════════════════════════════════════════════
+// CAMERA HOME — programmatic OrbitCam control via target_focus/yaw/pitch/radius.
+// This is the part to read to learn how the camera is driven from app code.
+//
+// How it works:
+//   1. `configure_camera` seeds the initial `focus`/`yaw`/`pitch`/`radius` when the camera spawns.
+//   2. On **H**, `home_camera` records the camera's current smoothness into `HomeReset`, raises
+//      smoothness so the lerp is slow, writes the home `target_*` fields, and emits
+//      `HomeAnimationBegin`.
+//   3. `OrbitCam` itself lerps `focus`/`yaw`/`pitch`/`radius` toward those targets each frame.
+//   4. `update_home_reset` checks each frame whether the targets still point at home (user takeover
+//      changes them) and whether the camera has arrived; either condition restores the saved
+//      smoothness and emits `HomeAnimationEnd`.
+// ═════════════════════════════════════════════════════════════════════════════
 
+const HOME_CONTROL: &str = "H Home";
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5, 0.0);
 const HOME_PITCH: f32 = 0.42;
 const HOME_RADIUS: f32 = 6.0;
 const HOME_YAW: f32 = -0.85;
-const HOME_CONTROL: &str = "H Home";
 const HOME_SMOOTHNESS: f32 = 0.35;
 const HOME_FOCUS_EPSILON: f32 = 0.01;
 const HOME_ORBIT_EPSILON: f32 = 0.01;
@@ -86,49 +135,11 @@ impl CameraSmoothness {
     }
 }
 
-fn main() {
-    fairy_dust::sprinkle_example()
-        .with_brp_extras()
-        .with_orbit_cam(
-            configure_camera,
-            (
-                ProgrammaticCamera,
-                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-            ),
-        )
-        .with_ground_plane()
-        .size(GROUND_SIZE)
-        .with_studio_lighting()
-        .with_cube()
-        .size(CUBE_SIZE)
-        .color(CUBE_COLOR)
-        .transform(Transform::from_translation(CUBE_TRANSLATION))
-        .with_title_bar(
-            TitleBar::new()
-                .with_anchor(Anchor::TopLeft)
-                .control(HOME_CONTROL),
-        )
-        .wire_chip_to_events::<HomeAnimationBegin, HomeAnimationEnd>(HOME_CONTROL)
-        .with_description_panel(description_panel())
-        .with_camera_control_panel()
-        .init_resource::<HomeReset>()
-        .add_systems(Update, (home_camera, update_home_reset).chain())
-        .run();
-}
-
 const fn configure_camera(camera: &mut OrbitCam) {
     camera.focus = HOME_FOCUS;
     camera.yaw = Some(HOME_YAW);
     camera.pitch = Some(HOME_PITCH);
     camera.radius = Some(HOME_RADIUS);
-}
-
-fn description_panel() -> DescriptionPanel {
-    DescriptionPanel::new(DESCRIPTION_HEADING)
-        .with_anchor(Anchor::BottomLeft)
-        .line(DESCRIPTION_HOME_CONTROL_LINE)
-        .line(DESCRIPTION_CAMERA_DRIVE_LINE)
-        .line(DESCRIPTION_CAMERA_LERP_LINE)
 }
 
 fn home_camera(
@@ -162,6 +173,8 @@ fn update_home_reset(
         return;
     };
 
+    // Finish when the user has taken control (targets no longer point at home)
+    // or when the camera has actually arrived.
     if !camera_targets_home(&camera) || camera_at_home(&camera) {
         reset.finish(&mut camera);
         commands.trigger(HomeAnimationEnd);
@@ -184,4 +197,37 @@ fn camera_at_home(camera: &OrbitCam) -> bool {
         && (yaw - HOME_YAW).abs() <= HOME_ORBIT_EPSILON
         && (pitch - HOME_PITCH).abs() <= HOME_ORBIT_EPSILON
         && (radius - HOME_RADIUS).abs() <= HOME_FOCUS_EPSILON
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SCENE SCAFFOLDING — cube the camera homes onto, ground sized to match.
+// Not essential to the demonstrated API; supports the visual.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_SIZE: f32 = 1.0;
+const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + 0.2, 0.0);
+
+const GROUND_SIZE: f32 = 8.0;
+
+// ═════════════════════════════════════════════════════════════════════════════
+// UI — description panel explaining the home flow on screen.
+// Not essential to the demonstrated API.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const DESCRIPTION_BODY_SIZE: f32 = 10.0;
+const DESCRIPTION_HEADING: &str = "How it works";
+const DESCRIPTION_LINES: [&str; 5] = [
+    "1. When you press H to home the camera",
+    "2. The code saves the current smoothness in HomeReset resource",
+    "3. Raises smoothness so OrbitCam lerps more slowly",
+    "4. Writes the home target focus, yaw, pitch, and radius",
+    "5. Restores the saved smoothness when home is reached",
+];
+
+fn description_panel() -> DescriptionPanel {
+    DescriptionPanel::new(DESCRIPTION_HEADING)
+        .with_fit_width()
+        .with_body_size(DESCRIPTION_BODY_SIZE)
+        .lines(DESCRIPTION_LINES)
 }

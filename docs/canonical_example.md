@@ -139,6 +139,12 @@ Prefer built-in panels (`TitleBar`, `DescriptionPanel`,
 screen-space panel, build only the contents manually and use the shared
 fairy_dust shell:
 
+Descriptive prose should use the same size as title-bar control chips such as
+`H Home` and `Z ZoomToFit`: keep the default `DescriptionPanel` body size, or
+use `fairy_dust::LABEL_SIZE.0` when setting `.with_body_size(...)` explicitly.
+Do not scale descriptive panel text up for emphasis; oversized explanatory
+copy reads as toy-like and competes with the example itself.
+
 ```rust
 let unlit = fairy_dust::screen_panel_material();
 DiegeticPanel::screen()

@@ -26,6 +26,8 @@ pub struct DescriptionPanel {
     title:            String,
     lines:            Vec<String>,
     background_color: Option<Color>,
+    width:            Sizing,
+    body_size:        f32,
 }
 
 impl DescriptionPanel {
@@ -37,6 +39,8 @@ impl DescriptionPanel {
             title:            title.into(),
             lines:            Vec::new(),
             background_color: None,
+            width:            Sizing::fixed(DESCRIPTION_WIDTH),
+            body_size:        LABEL_SIZE.0,
         }
     }
 
@@ -52,6 +56,20 @@ impl DescriptionPanel {
     #[must_use]
     pub const fn with_background_color(mut self, color: Color) -> Self {
         self.background_color = Some(color);
+        self
+    }
+
+    /// Uses content-fit width instead of the default fixed description width.
+    #[must_use]
+    pub const fn with_fit_width(mut self) -> Self {
+        self.width = Sizing::FIT;
+        self
+    }
+
+    /// Overrides the body text size while preserving the shared panel styling.
+    #[must_use]
+    pub const fn with_body_size(mut self, size: f32) -> Self {
+        self.body_size = size;
         self
     }
 
@@ -95,28 +113,23 @@ pub(super) fn spawn_description_panel(commands: &mut Commands, panel: &Descripti
 
 fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPanel) {
     let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let body = LayoutTextStyle::new(LABEL_SIZE).with_color(BODY_COLOR);
+    let body = LayoutTextStyle::new(panel.body_size).with_color(BODY_COLOR);
 
     let background = panel
         .background_color
         .unwrap_or_else(super::default_inner_background);
-    screen_panel_frame(
-        builder,
-        Sizing::fixed(DESCRIPTION_WIDTH),
-        background,
-        |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(DESCRIPTION_CHILD_GAP),
-                |builder| {
-                    builder.text(&panel.title, title);
-                    for line in &panel.lines {
-                        builder.text(line, body.clone());
-                    }
-                },
-            );
-        },
-    );
+    screen_panel_frame(builder, panel.width, background, |builder| {
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .direction(Direction::TopToBottom)
+                .child_gap(DESCRIPTION_CHILD_GAP),
+            |builder| {
+                builder.text(&panel.title, title);
+                for line in &panel.lines {
+                    builder.text(line, body.clone());
+                }
+            },
+        );
+    });
 }
