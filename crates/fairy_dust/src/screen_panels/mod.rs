@@ -50,14 +50,18 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     );
 }
 
-fn unlit_panel_material() -> StandardMaterial {
+/// Material used by Fairy Dust screen-space panels.
+#[must_use]
+pub fn screen_panel_material() -> StandardMaterial {
     StandardMaterial {
         unlit: true,
         ..default_panel_material()
     }
 }
 
-fn panel_frame(
+/// Adds the standard Fairy Dust screen-panel frame, then lets the caller
+/// populate the inner panel contents.
+pub fn screen_panel_frame(
     builder: &mut LayoutBuilder,
     width: Sizing,
     background: Color,

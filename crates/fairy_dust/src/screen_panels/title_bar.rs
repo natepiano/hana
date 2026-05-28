@@ -20,8 +20,8 @@ use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
 use super::constants::TITLE_BAR_DEFAULT_TITLE;
-use super::panel_frame;
-use super::unlit_panel_material;
+use super::screen_panel_frame;
+use super::screen_panel_material;
 use crate::camera_home::CameraHomeConfig;
 use crate::constants::HOME_CONTROL;
 use crate::constants::LABEL_SIZE;
@@ -173,7 +173,7 @@ pub(super) fn spawn_title_bar_with_home_chip(
 
 fn spawn_title_bar(commands: &mut Commands, title_bar: &TitleBar) {
     let state = TitleBarControlState::from_title_bar(title_bar);
-    let unlit = unlit_panel_material();
+    let unlit = screen_panel_material();
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(title_bar.anchor)
@@ -228,7 +228,7 @@ fn build_title_bar_layout(
     let background = title_bar
         .background_color
         .unwrap_or_else(super::default_inner_background);
-    panel_frame(builder, Sizing::FIT, background, |builder| {
+    screen_panel_frame(builder, Sizing::FIT, background, |builder| {
         builder.with(
             El::new()
                 .width(Sizing::GROW)

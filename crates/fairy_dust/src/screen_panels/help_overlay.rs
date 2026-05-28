@@ -23,8 +23,8 @@ use super::constants::HELP_ROW_GAP;
 use super::constants::HELP_SEPARATOR_HEIGHT;
 use super::constants::HELP_TABLE_COLUMN_GAP;
 use super::default_inner_background;
-use super::panel_frame;
-use super::unlit_panel_material;
+use super::screen_panel_frame;
+use super::screen_panel_material;
 use crate::camera_control_panel::CameraGuidancePanel;
 use crate::camera_home::CameraHomeMarker;
 use crate::constants::LABEL_SIZE;
@@ -94,7 +94,7 @@ fn question_mark_pressed(keys: &ButtonInput<KeyCode>) -> bool {
 }
 
 fn spawn_help_overlay(commands: &mut Commands, shortcuts: HelpShortcuts) {
-    let unlit = unlit_panel_material();
+    let unlit = screen_panel_material();
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::Center)
@@ -130,7 +130,7 @@ fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
         .with_color(BODY_COLOR)
         .no_wrap();
 
-    panel_frame(
+    screen_panel_frame(
         builder,
         Sizing::FIT,
         default_inner_background(),

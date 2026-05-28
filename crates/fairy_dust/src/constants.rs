@@ -92,7 +92,8 @@ pub(crate) const INNER_BORDER_WIDTH: Px = Px(1.0);
 /// `panel.with_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(0.85))`.
 pub const DEFAULT_PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.80);
 pub(crate) const INNER_BACKGROUND: Color = DEFAULT_PANEL_BACKGROUND;
-pub(crate) const TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
+/// Canonical HUD title/header color used by Fairy Dust screen panels.
+pub const TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
 
 // theme padding
 pub(crate) const FRAME_PAD: Px = Px(2.0);

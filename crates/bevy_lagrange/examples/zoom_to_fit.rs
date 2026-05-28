@@ -1,4 +1,7 @@
-//! Demonstrates `ZoomToFit`, `LookAt`, and `LookAtAndZoomToFit`.
+//! Demonstrates the three one-shot camera triggers `ZoomToFit`, `LookAt`, and
+//! `LookAtAndZoomToFit` — each constructed with `(camera, target)` entities and
+//! fired through `Commands::trigger`. The target cube is spawned at startup and
+//! its entity stashed in a resource so the keyboard system can name it.
 //!
 //! Controls:
 //!   Z - `ZoomToFit` the cube (frames without changing look direction)
@@ -30,13 +33,11 @@ use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_text;
 
-const FIT_DURATION: Duration = Duration::from_millis(800);
-const FIT_MARGIN: f32 = 0.15;
-const HOME_MARGIN: f32 = 0.7;
-const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
-
+// Camera home pose.
 const HOME_PITCH: f32 = 0.46;
+const HOME_MARGIN: f32 = 0.7;
 
+// Cube placement (reference cube left of origin, target cube right).
 const CUBE_SIZE: f32 = 1.0;
 const CUBE_Y: f32 = CUBE_SIZE / 2.0 + 0.05;
 const CUBE_X_OFFSET: f32 = 8.0 / 6.0;
@@ -47,20 +48,21 @@ const REFERENCE_CUBE_TRANSLATION: Vec3 = Vec3::new(-CUBE_X_OFFSET, CUBE_Y, 0.0);
 const TARGET_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const TARGET_TRANSLATION: Vec3 = Vec3::new(CUBE_X_OFFSET, CUBE_Y, 0.0);
 
-const ZOOM_CONTROL: &str = "Z ZoomToFit";
-const LOOK_CONTROL: &str = "L LookAt";
-const LOOK_AND_ZOOM_CONTROL: &str = "K LookAtAndZoomToFit";
-
+// Cube-face labels.
 const REFERENCE_LABEL: &str = "Home";
 const TARGET_LABEL: &str = "Look At Me";
 const LABEL_SIZE: f32 = 0.15;
 const LABEL_COLOR: Color = Color::srgb(0.05, 0.05, 0.1);
 
-#[derive(Component)]
-struct Target;
+// HUD chip strings (also keyboard hints).
+const ZOOM_CONTROL: &str = "Z ZoomToFit";
+const LOOK_CONTROL: &str = "L LookAt";
+const LOOK_AND_ZOOM_CONTROL: &str = "K LookAtAndZoomToFit";
 
-#[derive(Resource)]
-struct TargetEntity(Entity);
+// Trigger tuning.
+const FIT_DURATION: Duration = Duration::from_millis(800);
+const FIT_MARGIN: f32 = 0.15;
+const LOOK_AT_DURATION: Duration = Duration::from_millis(600);
 
 fn main() {
     fairy_dust::sprinkle_example()
@@ -83,6 +85,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
+                .with_title("Zoom to Fit")
                 .with_anchor(Anchor::TopLeft)
                 .control(ZOOM_CONTROL)
                 .control(LOOK_CONTROL)
@@ -105,6 +108,20 @@ fn main() {
         .run();
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// TRIGGERS — ZoomToFit / LookAt / LookAtAndZoomToFit. Each is constructed with
+// `(camera, target)` entities and fired through `Commands::trigger`. This is
+// the part to read to learn the API.
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[derive(Component)]
+struct Target;
+
+#[derive(Resource)]
+struct TargetEntity(Entity);
+
+// Spawn the cube the triggers will frame / look at, and stash its entity in
+// a resource so keyboard_input can read it later.
 fn spawn_target(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -130,6 +147,8 @@ fn spawn_target(
     commands.insert_resource(TargetEntity(entity));
 }
 
+// Z fires ZoomToFit (radius only), L fires LookAt (rotation only), K fires
+// LookAtAndZoomToFit (rotation + radius + focus move).
 fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,

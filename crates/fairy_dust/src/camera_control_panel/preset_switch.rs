@@ -18,9 +18,6 @@ use bevy_lagrange::ResolvedOrbitCamInputRoute;
 
 use crate::ensure_plugin;
 
-/// Panel hint label for the preset-cycle key.
-pub(super) const PRESET_SWITCH_HINT: &str = "Shift+C  cycle preset";
-
 #[derive(Component)]
 struct FairyDustPresetContext;
 

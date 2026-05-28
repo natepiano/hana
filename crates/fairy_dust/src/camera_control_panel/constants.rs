@@ -1,10 +1,7 @@
 //! Constants for the `camera_control_panel` module.
 
 use bevy::prelude::Color;
-use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
-
-use crate::constants::LABEL_SIZE;
 
 // colors
 pub(super) const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
@@ -14,9 +11,6 @@ pub(super) const SOURCE_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.95);
 
 // hold
 pub(super) const SOURCE_HOLD_SECONDS: f32 = 0.15;
-
-// preset-switch hint, rendered 2pt smaller than the rest of the panel labels
-pub(super) const PRESET_HINT_SIZE: Pt = Pt(LABEL_SIZE.0 - 2.0);
 
 // table
 pub(super) const ACTION_COLUMN_MIN_WIDTH: Px = Px(46.0);

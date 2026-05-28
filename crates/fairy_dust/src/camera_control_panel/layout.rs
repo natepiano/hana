@@ -4,16 +4,13 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamInteractionKind;
 
 use super::constants::ACTION_COLUMN_MIN_WIDTH;
@@ -21,7 +18,6 @@ use super::constants::ACTIVE_COLOR;
 use super::constants::GUIDANCE_CHILD_GAP;
 use super::constants::HEADER_COLOR;
 use super::constants::LABEL_COLOR;
-use super::constants::PRESET_HINT_SIZE;
 use super::constants::SOURCE_COLOR;
 use super::constants::TABLE_ACTION_ARROW;
 use super::constants::TABLE_COLUMN_GAP;
@@ -32,24 +28,11 @@ use super::display::CameraGuidanceDisplay;
 use super::guidance::SourceVisibility;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
-use crate::constants::BORDER;
-use crate::constants::BORDER_ACCENT;
 use crate::constants::BORDER_DIM;
-use crate::constants::FRAME_PAD;
-use crate::constants::INNER_BORDER_WIDTH;
-use crate::constants::INNER_PAD;
-use crate::constants::INNER_RADIUS;
 use crate::constants::LABEL_SIZE;
-use crate::constants::RADIUS;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
-
-pub(super) fn unlit_panel_material() -> StandardMaterial {
-    StandardMaterial {
-        unlit: true,
-        ..default_panel_material()
-    }
-}
+use crate::screen_panels;
 
 pub(super) fn build_guidance_tree(
     snapshot: &CameraGuidanceSnapshot,
@@ -82,61 +65,35 @@ fn build_guidance_layout(
     let source = LayoutTextStyle::new(LABEL_SIZE)
         .with_color(SOURCE_COLOR)
         .no_wrap();
-    let hint_style = LayoutTextStyle::new(PRESET_HINT_SIZE)
-        .with_color(LABEL_COLOR)
-        .no_wrap();
 
-    builder.with(
-        El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .padding(Padding::all(FRAME_PAD))
-            .corner_radius(CornerRadius::all(RADIUS))
-            .border(Border::all(BORDER, BORDER_ACCENT)),
-        |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(INNER_PAD))
-                    .child_gap(GUIDANCE_CHILD_GAP)
-                    .corner_radius(CornerRadius::all(INNER_RADIUS))
-                    .background(background)
-                    .border(Border::all(INNER_BORDER_WIDTH, BORDER_DIM)),
-                |builder| {
-                    builder.text(format!("CAMERA: {}", snapshot.camera_label), title.clone());
-                    builder.text(
-                        format!("{}: {}", snapshot.mode_label, snapshot.mode_value),
-                        header.clone(),
+    screen_panels::screen_panel_frame(builder, Sizing::FIT, background, |builder| {
+        builder.with(
+            El::new()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .direction(Direction::TopToBottom)
+                .child_gap(GUIDANCE_CHILD_GAP),
+            |builder| {
+                builder.text(format!("CAMERA: {}", snapshot.camera_label), title.clone());
+                builder.text(
+                    format!("{}: {}", snapshot.mode_label, snapshot.mode_value),
+                    header.clone(),
+                );
+                build_guidance_table(builder, snapshot, display, &label, &active);
+                if snapshot.source_visibility == SourceVisibility::Visible {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .child_align_x(AlignX::Center),
+                        |builder| {
+                            builder.text(snapshot::source_label(display.all_sources()), source);
+                        },
                     );
-                    build_guidance_table(builder, snapshot, display, &label, &active);
-                    if snapshot.source_visibility == SourceVisibility::Visible {
-                        builder.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .child_align_x(AlignX::Center),
-                            |builder| {
-                                builder.text(snapshot::source_label(display.all_sources()), source);
-                            },
-                        );
-                    }
-                    if let Some(hint) = &snapshot.preset_switch_hint {
-                        builder.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .child_align_x(AlignX::Center),
-                            |builder| {
-                                builder.text(hint, hint_style.clone());
-                            },
-                        );
-                    }
-                },
-            );
-        },
-    );
+                }
+            },
+        );
+    });
 }
 
 fn build_guidance_table(

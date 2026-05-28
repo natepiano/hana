@@ -35,12 +35,12 @@ pub use guidance::CameraGuidance;
 pub use guidance::CameraGuidanceRow;
 pub use guidance::SourceVisibility;
 use layout::build_guidance_tree;
-use layout::unlit_panel_material;
 use snapshot::CameraGuidanceSnapshot;
 use snapshot::resolve_guidance_snapshot;
 
 use crate::constants::INNER_BACKGROUND;
 use crate::ensure_plugin;
+use crate::screen_panels;
 
 /// Singleton marker for the camera control panel. `bound_camera` records
 /// which `OrbitCam` the panel is currently showing — updated each frame from
@@ -82,7 +82,7 @@ fn ensure_panel_plugins(app: &mut App) {
 fn spawn_panel(mut commands: Commands, background: Res<CameraControlPanelBackground>) {
     let snapshot = default_snapshot();
     let display = CameraGuidanceDisplay::default();
-    let unlit = unlit_panel_material();
+    let unlit = screen_panels::screen_panel_material();
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomRight)

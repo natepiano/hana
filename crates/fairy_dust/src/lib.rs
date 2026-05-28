@@ -68,6 +68,7 @@ pub use camera_home::CameraHomeTarget;
 pub use constants::DEFAULT_PANEL_BACKGROUND;
 pub use constants::LABEL_SIZE;
 pub use constants::LOG_FILTER;
+pub use constants::TITLE_COLOR;
 pub use constants::TITLE_SIZE;
 pub use orbit_cam::FairyDustOrbitCam;
 pub use primitive::Face;
@@ -77,6 +78,8 @@ pub use restart_camera::RestoreWindowAnimation;
 pub use screen_panels::ControlActivation;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
+pub use screen_panels::screen_panel_frame;
+pub use screen_panels::screen_panel_material;
 
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.

@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use super::CameraHomeBuilder;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
@@ -65,6 +66,11 @@ impl<S> StudioLightingBuilder<S> {
             inserts: Vec::new(),
         }
     }
+
+    /// Finalizes the studio lighting configuration and starts configuring a
+    /// camera home pose.
+    #[must_use]
+    pub fn with_camera_home(self) -> CameraHomeBuilder<S> { self.finish().with_camera_home() }
 
     fn finish(mut self) -> SprinkleBuilder<S> {
         lighting::install(&mut self.parent.app, self.config);

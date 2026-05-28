@@ -13,8 +13,8 @@ use bevy_diegetic::Sizing;
 use super::constants::BODY_COLOR;
 use super::constants::DESCRIPTION_CHILD_GAP;
 use super::constants::DESCRIPTION_WIDTH;
-use super::panel_frame;
-use super::unlit_panel_material;
+use super::screen_panel_frame;
+use super::screen_panel_material;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
@@ -74,7 +74,7 @@ impl DescriptionPanel {
 struct DescriptionPanelMarker;
 
 pub(super) fn spawn_description_panel(commands: &mut Commands, panel: &DescriptionPanel) {
-    let unlit = unlit_panel_material();
+    let unlit = screen_panel_material();
     let built = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(panel.anchor)
@@ -100,7 +100,7 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
     let background = panel
         .background_color
         .unwrap_or_else(super::default_inner_background);
-    panel_frame(
+    screen_panel_frame(
         builder,
         Sizing::fixed(DESCRIPTION_WIDTH),
         background,

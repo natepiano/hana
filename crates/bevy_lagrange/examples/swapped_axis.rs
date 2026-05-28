@@ -1,26 +1,29 @@
-//! Interactive coordinate-system showcase: one labeled ±X/±Y/±Z gizmo that
-//! reorients to match how different engines lay out their world axes on screen.
+//! Demonstrates re-pointing an `OrbitCam` between coordinate-system conventions
+//! at runtime: swapping `OrbitCam::axis` (the `[right, up, forward]` orbit
+//! basis) per engine, flying the camera with
+//! `PlayAnimation([CameraMove::ToOrbit { ... }])`, and chaining a two-leg fly
+//! by observing `AnimationEnd` to fire the second leg once the first lands.
+//! `UpsideDownPolicy::Allow` removes the ±90° pitch clamp so orbit spins
+//! freely; `FairyDustOrbitCam` tags the camera so the shared control panel
+//! and home logic find it.
 //!
-//! Number keys `1`–`4` pick an engine; the camera reframes to that engine's home
-//! view (its up-axis vertical, orbiting around that up-axis) while the gizmo's six
-//! axis labels orbit across the surrounding sphere to their new world directions
-//! and settle there. A left-handed engine swaps a pair of endpoints, which a rigid
-//! rotation can't reach, so each axis line is animated on its own great-circle arc
-//! rather than as one rigid frame — the arms keep full length and nothing retracts
-//! through the center.
+//! Visually: one labeled ±X/±Y/±Z gizmo reorients to match how different
+//! engines lay out their world axes on screen. Number keys `1`–`4` pick an
+//! engine; the camera reframes to that engine's home view (its up-axis
+//! vertical, orbiting around that up-axis) while the gizmo's six axis labels
+//! orbit across the surrounding sphere to their new world directions and
+//! settle there. A left-handed engine swaps a pair of endpoints, which a
+//! rigid rotation can't reach, so each axis line is animated on its own
+//! great-circle arc rather than as one rigid frame — the arms keep full
+//! length and nothing retracts through the center.
 //!
-//! Arms are immediate-mode gizmos; the letters are unlit billboarded world text,
-//! so the scene needs no ground plane or lights. The bottom-left panel lists each
-//! engine with its up-axis / forward / handedness.
+//! Arms are immediate-mode gizmos; the letters are unlit billboarded world
+//! text. The bottom-left panel lists each engine with its up-axis / forward /
+//! handedness.
 //!
 //! Controls:
 //!   1 Bevy · 2 Blender · 3 Unity · 4 Unreal (re-press to re-home that engine)
 //!   H - reset to the startup (Bevy) home
-//!
-//! Code layout: the CAMERA section below is everything you need to drive an
-//! `OrbitCam` — spawning it, swapping its orbit axis per engine, and flying it
-//! between views. The ENGINE SELECTOR PANEL and AXIS GIZMO ANIMATION sections
-//! that follow are presentation only; neither is required to use the camera.
 
 use std::f32::consts::PI;
 use std::time::Duration;
@@ -28,8 +31,6 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::Direction;
@@ -38,13 +39,11 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::CameraMove;
@@ -57,7 +56,10 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::TITLE_COLOR;
 use fairy_dust::TitleBar;
+use fairy_dust::screen_panel_frame;
+use fairy_dust::screen_panel_material;
 
 fn main() {
     fairy_dust::sprinkle_example()
@@ -111,8 +113,31 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CAMERA — spawning the OrbitCam, the per-engine orbit axis, and the fly between
-// engine views. This is the part to read to learn how the camera is driven.
+// CAMERA — driving OrbitCam: per-engine `OrbitCam::axis` (the `[right, up,
+// forward]` orbit basis), `PlayAnimation([CameraMove::ToOrbit { .. }])` for
+// the fly, and an `AnimationEnd` observer chaining the second leg. This is
+// the part to read to learn how the camera is driven.
+//
+// How it works:
+//   1. `spawn_camera` (Startup) spawns one `OrbitCam` already at the default engine's home: `axis =
+//      engine_camera_axis(engine)` picks the orbit basis (Y-up engines orbit about world Y; Z-up
+//      engines about Z via `SWAPPED_AXIS`); `yaw`/`pitch`/`radius` are `Some(...)` so
+//      initialization keeps them and skips any opening fit. `UpsideDownPolicy::Allow` removes the
+//      pitch clamp; `FairyDustOrbitCam` tags the camera for the shared panel and home logic.
+//   2. `select_engine` (Update) reads number keys. Re-pressing the current engine fires one
+//      `PlayAnimation` straight back to its home view. A new engine starts a two-leg fly: it
+//      records the switch in `PendingEngine`, seeds the gizmo arc tweens, and fires the first
+//      `PlayAnimation` to `yaw=0, pitch=0` — the shared front pose where every basis renders
+//      identically, so the upcoming axis swap is invisible.
+//   3. `advance_engine_fly` (observer on `AnimationEnd`) wakes when the first leg lands. It pulls
+//      the switch out of `PendingEngine`, rotates the orbit focus through `engine_up_world(from) →
+//      engine_up_world(to)` so the floor keeps its screen-space footprint, swaps `OrbitCam::axis`
+//      to the new basis, and fires the second `PlayAnimation` out to the new engine's home angles.
+//      Cancelled or second-leg `AnimationEnd`s short-circuit because `PendingEngine` is already
+//      empty.
+//   4. `reset_home_state` (Update) handles `H Home` by resetting the resource state, swapping
+//      `OrbitCam::axis` back to the default engine's basis, and re-seeding gizmo + ground tweens —
+//      without firing an animation, because Fairy Dust's own `H` handler flies the camera.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // The Z-up engines' (Blender, Unreal) orbit basis: a right-handed Z-up frame
@@ -473,15 +498,10 @@ fn orient_ground(
 // only; the camera works without it.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const PANEL_PADDING: Px = Px(10.0);
-const PANEL_RADIUS: Px = Px(10.0);
-const PANEL_BORDER_WIDTH: Px = Px(1.0);
 const PANEL_COLUMN_GAP: Px = Px(24.0);
 const PANEL_ROW_GAP: Px = Px(4.0);
-const PANEL_HEADER_COLOR: Color = Color::srgb(0.55, 0.78, 0.95);
 const PANEL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 const PANEL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
-const PANEL_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.4);
 
 /// Marker for the bottom-left engine selector panel.
 #[derive(Component)]
@@ -496,10 +516,7 @@ struct ColumnStyles {
 }
 
 fn spawn_engine_panel(mut commands: Commands, engine: Res<Engine>) {
-    let unlit = StandardMaterial {
-        unlit: true,
-        ..default_panel_material()
-    };
+    let unlit = screen_panel_material();
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -540,7 +557,7 @@ fn build_engine_tree(selected: Engine) -> LayoutTree {
 fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
     let styles = ColumnStyles {
         header:   LayoutTextStyle::new(LABEL_SIZE)
-            .with_color(PANEL_HEADER_COLOR)
+            .with_color(TITLE_COLOR)
             .no_wrap(),
         active:   LayoutTextStyle::new(LABEL_SIZE)
             .with_color(PANEL_ACTIVE_COLOR)
@@ -549,51 +566,49 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
             .with_color(PANEL_INACTIVE_COLOR)
             .no_wrap(),
     };
-    builder.with(
-        El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(PANEL_COLUMN_GAP)
-            .padding(Padding::all(PANEL_PADDING))
-            .corner_radius(CornerRadius::all(PANEL_RADIUS))
-            .background(DEFAULT_PANEL_BACKGROUND)
-            .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
-        |builder| {
-            build_column(
-                builder,
-                "ENGINE",
-                ENGINES
-                    .into_iter()
-                    .map(|(_, engine, name, ..)| (name, engine == selected)),
-                &styles,
-            );
-            build_column(
-                builder,
-                "UP",
-                ENGINES
-                    .into_iter()
-                    .map(|(_, engine, _, up, ..)| (up, engine == selected)),
-                &styles,
-            );
-            build_column(
-                builder,
-                "FORWARD",
-                ENGINES
-                    .into_iter()
-                    .map(|(_, engine, _, _, forward, _)| (forward, engine == selected)),
-                &styles,
-            );
-            build_column(
-                builder,
-                "HANDED",
-                ENGINES
-                    .into_iter()
-                    .map(|(_, engine, _, _, _, handed)| (handed, engine == selected)),
-                &styles,
-            );
-        },
-    );
+    screen_panel_frame(builder, Sizing::FIT, DEFAULT_PANEL_BACKGROUND, |builder| {
+        builder.with(
+            El::new()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .direction(Direction::LeftToRight)
+                .child_gap(PANEL_COLUMN_GAP),
+            |builder| {
+                build_column(
+                    builder,
+                    "ENGINE",
+                    ENGINES
+                        .into_iter()
+                        .map(|(_, engine, name, ..)| (name, engine == selected)),
+                    &styles,
+                );
+                build_column(
+                    builder,
+                    "UP",
+                    ENGINES
+                        .into_iter()
+                        .map(|(_, engine, _, up, ..)| (up, engine == selected)),
+                    &styles,
+                );
+                build_column(
+                    builder,
+                    "FORWARD",
+                    ENGINES
+                        .into_iter()
+                        .map(|(_, engine, _, _, forward, _)| (forward, engine == selected)),
+                    &styles,
+                );
+                build_column(
+                    builder,
+                    "HANDED",
+                    ENGINES
+                        .into_iter()
+                        .map(|(_, engine, _, _, _, handed)| (handed, engine == selected)),
+                    &styles,
+                );
+            },
+        );
+    });
 }
 
 /// Draws one labeled column: a header followed by one chip per row, each chip
