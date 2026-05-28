@@ -17,6 +17,7 @@ use bevy::prelude::*;
 
 use super::descriptor::InputBindingDescriptor;
 use super::error::OrbitCamBindingsError;
+use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamHeldBinding;
 use crate::input::CameraInteractionSources;
 use crate::input::CameraSemanticAction;
@@ -177,6 +178,7 @@ impl<A: CameraSemanticAction> ActionBindingEntry<A> {
 pub struct HeldActionBindingEntry<A: HeldCameraAction> {
     pub(super) motion:     InputBindingDescriptor,
     pub(super) engagement: InputBindingDescriptor,
+    pub(super) gates:      BindingGates,
     pub(super) sources:    CameraInteractionSources,
     pub(super) route:      BindingRoutePolicy,
     pub(super) action:     PhantomData<A>,
@@ -195,6 +197,7 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
         Ok(Self {
             motion:     binding.motion.descriptor(),
             engagement: binding.engagement.descriptor(),
+            gates:      binding.gates,
             sources:    binding.sources,
             route:      binding.route,
             action:     PhantomData,
@@ -208,6 +211,10 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
     /// Returns the flattened engagement binding descriptor.
     #[must_use]
     pub const fn engagement_descriptor(&self) -> &InputBindingDescriptor { &self.engagement }
+
+    /// Returns gates applied to both motion and engagement descriptors.
+    #[must_use]
+    pub const fn gates(&self) -> &BindingGates { &self.gates }
 
     /// Returns source metadata for this binding.
     #[must_use]

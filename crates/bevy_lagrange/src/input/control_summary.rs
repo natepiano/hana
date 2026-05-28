@@ -10,12 +10,15 @@ use super::HeldActionBindingEntry;
 use super::HeldCameraAction;
 use super::OrbitCamBindings;
 use super::OrbitCamButtonDragZoom;
+use super::OrbitCamGateInput;
+use super::OrbitCamGatePolarity;
 use super::OrbitCamInputMode;
 use super::OrbitCamInteractionKind;
 use super::OrbitCamPreset;
 use super::OrbitCamTouchBinding;
 use super::OrbitCamTrackpadScroll;
 use super::PinchGestureZoom;
+use super::bindings::BindingGates;
 use super::bindings::InputBindingDescriptor;
 use super::bindings::InputBindingEntry;
 use super::constants::APP_AUTHORED_INPUT_ROW_LABEL;
@@ -274,17 +277,38 @@ fn touch_row(kind: OrbitCamInteractionKind, label: &'static str) -> OrbitCamCont
 }
 
 fn held_binding_stem<A: HeldCameraAction>(entry: &HeldActionBindingEntry<A>) -> String {
-    if let Some(label) = mouse_drag_stem(entry.motion_descriptor(), entry.engagement_descriptor()) {
-        return label;
-    }
+    let stem = if let Some(label) =
+        mouse_drag_stem(entry.motion_descriptor(), entry.engagement_descriptor())
+    {
+        label
+    } else {
+        let motion = descriptor_stem(entry.motion_descriptor(), entry.sources());
+        if entry.motion_descriptor() == entry.engagement_descriptor() {
+            motion
+        } else {
+            let engagement = descriptor_stem(entry.engagement_descriptor(), entry.sources());
+            format!("{motion} + {engagement}")
+        }
+    };
 
-    let motion = descriptor_stem(entry.motion_descriptor(), entry.sources());
-    if entry.motion_descriptor() == entry.engagement_descriptor() {
-        return motion;
-    }
+    with_required_gates(entry.gates(), stem)
+}
 
-    let engagement = descriptor_stem(entry.engagement_descriptor(), entry.sources());
-    format!("{motion} + {engagement}")
+fn with_required_gates(gates: &BindingGates, label: String) -> String {
+    let required = gates
+        .entries()
+        .iter()
+        .filter(|gate| gate.polarity == OrbitCamGatePolarity::Required)
+        .map(|gate| match gate.input {
+            OrbitCamGateInput::GamepadButton(button) => gamepad_button_label(button),
+            OrbitCamGateInput::Key(key) => key_label(key),
+        })
+        .collect::<Vec<_>>();
+    if required.is_empty() {
+        label
+    } else {
+        format!("{}+{label}", required.join("+"))
+    }
 }
 
 fn mouse_drag_stem(
@@ -307,7 +331,7 @@ fn mouse_motion_mod_keys(descriptor: &InputBindingDescriptor) -> Option<ModKeys>
     descriptor
         .entries_slice()
         .iter()
-        .find_map(|entry| match entry.binding {
+        .find_map(|entry| match entry.binding() {
             Binding::MouseMotion { mod_keys } => Some(mod_keys),
             Binding::Keyboard { .. }
             | Binding::MouseButton { .. }
@@ -338,7 +362,7 @@ fn descriptor_stem(
     }
     if descriptor.entries_slice().iter().any(|entry| {
         matches!(
-            entry.binding,
+            entry.binding(),
             Binding::MouseWheel { .. } | Binding::MouseMotion { .. }
         )
     }) {
@@ -347,7 +371,7 @@ fn descriptor_stem(
     if descriptor
         .entries_slice()
         .iter()
-        .any(|entry| matches!(entry.binding, Binding::Custom(_)))
+        .any(|entry| matches!(entry.binding(), Binding::Custom(_)))
     {
         return CUSTOM_INPUT_ROW_LABEL.to_string();
     }
@@ -358,7 +382,7 @@ fn descriptor_stem(
 fn keyboard_stem(entries: &[InputBindingEntry]) -> Option<String> {
     let keys = entries
         .iter()
-        .map(|entry| match entry.binding {
+        .map(|entry| match entry.binding() {
             Binding::Keyboard { key, mod_keys } => Some((key, mod_keys)),
             Binding::MouseButton { .. }
             | Binding::MouseMotion { .. }
@@ -388,7 +412,7 @@ fn keyboard_stem(entries: &[InputBindingEntry]) -> Option<String> {
 fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
     let gamepad_axes = entries
         .iter()
-        .map(|entry| match entry.binding {
+        .map(|entry| match entry.binding() {
             Binding::GamepadAxis(axis) => Some(axis),
             Binding::Keyboard { .. }
             | Binding::MouseButton { .. }
@@ -404,9 +428,9 @@ fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
     match gamepad_axes.as_slice() {
         [] => None,
         [GamepadAxis::LeftStickX, GamepadAxis::LeftStickY]
-        | [GamepadAxis::LeftStickY, GamepadAxis::LeftStickX] => Some("Left stick".to_string()),
+        | [GamepadAxis::LeftStickY, GamepadAxis::LeftStickX] => Some("LS".to_string()),
         [GamepadAxis::RightStickX, GamepadAxis::RightStickY]
-        | [GamepadAxis::RightStickY, GamepadAxis::RightStickX] => Some("Right stick".to_string()),
+        | [GamepadAxis::RightStickY, GamepadAxis::RightStickX] => Some("RS".to_string()),
         [single_axis] => Some(gamepad_axis_label(*single_axis)),
         _ => Some("Gamepad axes".to_string()),
     }
@@ -415,7 +439,7 @@ fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
 fn gamepad_button_stem(entries: &[InputBindingEntry]) -> Option<String> {
     let buttons = entries
         .iter()
-        .map(|entry| match entry.binding {
+        .map(|entry| match entry.binding() {
             Binding::GamepadButton(button) => Some(button),
             Binding::Keyboard { .. }
             | Binding::MouseButton { .. }
@@ -510,18 +534,18 @@ fn mouse_button_label(button: MouseButton) -> String {
 
 fn gamepad_axis_label(axis: GamepadAxis) -> String {
     match axis {
-        GamepadAxis::LeftStickX => "Left stick X".to_string(),
-        GamepadAxis::LeftStickY => "Left stick Y".to_string(),
-        GamepadAxis::RightStickX => "Right stick X".to_string(),
-        GamepadAxis::RightStickY => "Right stick Y".to_string(),
+        GamepadAxis::LeftStickX => "LS X".to_string(),
+        GamepadAxis::LeftStickY => "LS Y".to_string(),
+        GamepadAxis::RightStickX => "RS X".to_string(),
+        GamepadAxis::RightStickY => "RS Y".to_string(),
         _ => debug_name(axis, ""),
     }
 }
 
 fn gamepad_button_label(button: GamepadButton) -> String {
     match button {
-        GamepadButton::LeftTrigger => "L1".to_string(),
-        GamepadButton::RightTrigger => "R1".to_string(),
+        GamepadButton::LeftTrigger => "LB".to_string(),
+        GamepadButton::RightTrigger => "RB".to_string(),
         GamepadButton::LeftTrigger2 => "LT".to_string(),
         GamepadButton::RightTrigger2 => "RT".to_string(),
         _ => debug_name(button, ""),
@@ -559,6 +583,10 @@ const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {
     match preset {
         OrbitCamPreset::SimpleMouse => "SimpleMouse",
         OrbitCamPreset::BlenderLike => "BlenderLike",
+        OrbitCamPreset::Keyboard => "Keyboard",
+        OrbitCamPreset::SimpleMouseKeyboard => "SimpleMouseKeyboard",
+        OrbitCamPreset::BlenderLikeKeyboard => "BlenderLikeKeyboard",
+        OrbitCamPreset::Gamepad => "Gamepad",
     }
 }
 
@@ -643,6 +671,23 @@ mod tests {
         assert!(labels.contains(&"+ / -"));
 
         Ok(())
+    }
+
+    #[test]
+    fn gamepad_preset_summary_has_fast_and_slow_rows() {
+        let summary =
+            describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad));
+        let labels = summary_labels(&summary);
+
+        assert_eq!(summary.mode_value, "Gamepad");
+        assert!(labels.contains(&"RS"));
+        assert!(labels.contains(&"RB+RS"));
+        assert!(labels.contains(&"LS"));
+        assert!(labels.contains(&"LB+LS"));
+        assert!(labels.contains(&"RT"));
+        assert!(labels.contains(&"LT"));
+        assert!(labels.contains(&"RB+RT"));
+        assert!(labels.contains(&"LB+LT"));
     }
 
     #[test]

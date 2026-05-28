@@ -30,6 +30,15 @@ pub enum OrbitCamBindingsError {
         /// Semantic action name.
         action: &'static str,
     },
+    /// A held binding requires and blocks the same gate input.
+    ContradictoryGate {
+        /// Semantic action name.
+        action: &'static str,
+    },
+    /// A scale modifier was not finite.
+    InvalidScale,
+    /// A dead-zone modifier used unsupported thresholds.
+    InvalidDeadZone,
 }
 
 impl OrbitCamBindingsError {
@@ -39,8 +48,9 @@ impl OrbitCamBindingsError {
         match self {
             Self::HeldMotionMissingEngagement { action }
             | Self::ImpulseEngagement { action }
-            | Self::HeldSourceMismatch { action } => Some(*action),
-            Self::MissingSources => None,
+            | Self::HeldSourceMismatch { action }
+            | Self::ContradictoryGate { action } => Some(*action),
+            Self::MissingSources | Self::InvalidScale | Self::InvalidDeadZone => None,
         }
     }
 }
@@ -66,6 +76,16 @@ impl Display for OrbitCamBindingsError {
                     formatter,
                     "{action} motion and engagement bindings do not share source metadata"
                 )
+            },
+            Self::ContradictoryGate { action } => {
+                write!(
+                    formatter,
+                    "{action} requires and blocks the same gate input"
+                )
+            },
+            Self::InvalidScale => formatter.write_str("binding scale modifier must be finite"),
+            Self::InvalidDeadZone => {
+                formatter.write_str("binding dead-zone thresholds are invalid")
             },
         }
     }

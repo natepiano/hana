@@ -20,6 +20,7 @@ mod resolve;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::InputConditionAppExt;
 use install::OrbitCamAdapterDiagnostics;
+use install::OrbitCamBindingGateCondition;
 
 use crate::system_sets::OrbitCamInputInternalSet;
 
@@ -29,6 +30,7 @@ impl Plugin for OrbitCamInputAdapterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitCamAdapterDiagnostics>()
             .add_input_condition::<install::TrackpadBindingCondition>()
+            .add_input_condition::<OrbitCamBindingGateCondition>()
             .add_systems(
                 PreUpdate,
                 (
@@ -53,6 +55,8 @@ impl Plugin for OrbitCamInputAdapterPlugin {
 
 #[cfg(test)]
 mod tests {
+    use core::time::Duration;
+
     use bevy::camera::RenderTarget;
     use bevy::input::gamepad::Gamepad;
     use bevy::input::gestures::PinchGesture;
@@ -63,9 +67,13 @@ mod tests {
     use bevy::window::WindowRef;
     use bevy_enhanced_input::prelude::Binding;
     use bevy_enhanced_input::prelude::BindingOf;
+    use bevy_enhanced_input::prelude::DeadZone;
+    use bevy_enhanced_input::prelude::DeltaScale;
+    use bevy_enhanced_input::prelude::Scale;
 
     use super::OrbitCamInputAdapterPlugin;
     use super::inject::OrbitCamTouchAdapterOverride;
+    use super::install::OrbitCamBindingGateCondition;
     use super::install::OrbitCamInputActionEntities;
     use super::install::TrackpadBindingCondition;
     use crate::constants::PINCH_GESTURE_AMPLIFICATION;
@@ -689,6 +697,136 @@ mod tests {
         assert_f32_close(input.zoom_smooth().amount(), -0.4);
         assert!(input.sources().contains(CameraInteractionSources::GAMEPAD));
         Ok(())
+    }
+
+    #[test]
+    fn gamepad_preset_requires_no_position_route() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+        );
+        let mut gamepad = Gamepad::default();
+        gamepad.analog_mut().set(GamepadAxis::RightStickX, 1.0);
+        app.world_mut().spawn(gamepad);
+
+        app.update();
+
+        assert!(!camera_input(&app, camera)?.has_input());
+        Ok(())
+    }
+
+    #[test]
+    fn gamepad_preset_installs_modifiers_and_gate_conditions() {
+        let mut app = test_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+        );
+        route_to(&mut app, camera);
+
+        app.update();
+
+        let installed = modes::installed_input_entities(app.world(), camera);
+        assert!(
+            installed
+                .iter()
+                .any(|entity| app.world().get::<DeadZone>(*entity).is_some())
+        );
+        assert!(
+            installed
+                .iter()
+                .any(|entity| app.world().get::<Scale>(*entity).is_some())
+        );
+        assert!(
+            installed
+                .iter()
+                .any(|entity| app.world().get::<DeltaScale>(*entity).is_some())
+        );
+        assert!(installed.iter().any(|entity| {
+            app.world()
+                .get::<OrbitCamBindingGateCondition>(*entity)
+                .is_some()
+        }));
+    }
+
+    #[test]
+    fn gamepad_preset_fast_and_slow_orbit_are_exclusive() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+        );
+        route_to(&mut app, camera);
+        let gamepad_entity = app.world_mut().spawn(Gamepad::default()).id();
+        app.update();
+
+        {
+            let mut gamepad = app
+                .world_mut()
+                .get_mut::<Gamepad>(gamepad_entity)
+                .ok_or("gamepad should exist")?;
+            gamepad.analog_mut().set(GamepadAxis::RightStickX, 1.0);
+        }
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_millis(16));
+        app.update();
+        let fast_orbit = camera_input(&app, camera)?.orbit().pixels().x;
+        assert!(camera_input(&app, camera)?.has_orbit());
+        assert!(fast_orbit > 0.0);
+
+        {
+            let mut gamepad = app
+                .world_mut()
+                .get_mut::<Gamepad>(gamepad_entity)
+                .ok_or("gamepad should exist")?;
+            gamepad.digital_mut().press(GamepadButton::RightTrigger);
+        }
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_millis(16));
+        app.update();
+        let slow_orbit = camera_input(&app, camera)?.orbit().pixels().x;
+
+        assert!(camera_input(&app, camera)?.has_orbit());
+        assert!(slow_orbit > 0.0);
+        assert!(slow_orbit < fast_orbit);
+        Ok(())
+    }
+
+    #[test]
+    fn gamepad_gate_conditions_despawn_when_mode_changes() {
+        let mut app = test_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+        );
+        route_to(&mut app, camera);
+        app.update();
+
+        assert!(
+            modes::installed_input_entities(app.world(), camera)
+                .iter()
+                .any(|entity| app
+                    .world()
+                    .get::<OrbitCamBindingGateCondition>(*entity)
+                    .is_some())
+        );
+
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse));
+        app.update();
+
+        assert!(
+            !modes::installed_input_entities(app.world(), camera)
+                .iter()
+                .any(|entity| app
+                    .world()
+                    .get::<OrbitCamBindingGateCondition>(*entity)
+                    .is_some())
+        );
     }
 
     #[test]

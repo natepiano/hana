@@ -1,21 +1,12 @@
-//! Demonstrates gamepad user input through `OrbitCamBindings`.
-//!
-//! Synthetic tests that drive the trigger bindings must set both the analog
-//! button value and the digital pressed state. The current public gamepad
-//! selection policy is `Active`, which routes any active gamepad through the
-//! camera input route; selected-device routing is future API work.
+//! Demonstrates gamepad user input through `OrbitCamPreset::Gamepad`.
 
 use bevy::input::gamepad::Gamepad;
 use bevy::prelude::*;
-use bevy_lagrange::CameraInputGamepadSelectionPolicy;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamBindingsError;
-use bevy_lagrange::OrbitCamHeldBinding;
-use bevy_lagrange::OrbitCamInputBinding;
 use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -38,8 +29,13 @@ const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + CUBE_GROUND_CLEA
 const GROUND_COLOR: Color = Color::srgb(0.28, 0.42, 0.34);
 const GROUND_SIZE: f32 = 7.0;
 const ORBIT_CONTROL: &str = "RS Orbit";
-const PAN_CONTROL: &str = "LB+LS Pan";
-const ZOOM_CONTROL: &str = "LT/RT Zoom";
+const SLOW_ORBIT_CONTROL: &str = "RB+RS Slow Orbit";
+const PAN_CONTROL: &str = "LS Pan";
+const SLOW_PAN_CONTROL: &str = "LB+LS Slow Pan";
+const ZOOM_IN_CONTROL: &str = "RT Zoom In";
+const ZOOM_OUT_CONTROL: &str = "LT Zoom Out";
+const SLOW_ZOOM_IN_CONTROL: &str = "RB+RT Slow Zoom In";
+const SLOW_ZOOM_OUT_CONTROL: &str = "LB+LT Slow Zoom Out";
 const GAMEPAD_CONNECTED_CONTROL: &str = "Gamepad Connected";
 
 #[derive(Resource, Default)]
@@ -47,33 +43,7 @@ struct GamepadConnection {
     connected: bool,
 }
 
-fn gamepad_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-    let right_stick =
-        OrbitCamInputBinding::gamepad_axes_2d(GamepadAxis::RightStickX, GamepadAxis::RightStickY);
-    let left_stick =
-        OrbitCamInputBinding::gamepad_axes_2d(GamepadAxis::LeftStickX, GamepadAxis::LeftStickY);
-    let triggers = OrbitCamInputBinding::bidirectional_gamepad_buttons(
-        GamepadButton::RightTrigger2,
-        GamepadButton::LeftTrigger2,
-    );
-
-    OrbitCamBindings::builder()
-        .orbit(right_stick)
-        .pan(OrbitCamHeldBinding::new(
-            left_stick,
-            GamepadButton::LeftTrigger,
-        ))
-        .zoom(triggers)
-        .gamepad(CameraInputGamepadSelectionPolicy::Active)
-        .build()
-}
-
 fn main() {
-    let Ok(bindings) = gamepad_bindings() else {
-        error!("gamepad camera bindings failed to validate");
-        return;
-    };
-
     fairy_dust::sprinkle_example()
         .insert_resource(
             CameraInputRoutingConfig::cursor_hit_test()
@@ -90,7 +60,10 @@ fn main() {
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .insert(CameraHomeTarget)
-        .with_orbit_cam(configure_camera, OrbitCamInputMode::Bindings(bindings))
+        .with_orbit_cam(
+            configure_camera,
+            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+        )
         .with_camera_home()
         .yaw(CAMERA_YAW)
         .pitch(CAMERA_PITCH)
@@ -100,8 +73,13 @@ fn main() {
                 .with_title("Gamepad")
                 .with_anchor(Anchor::TopLeft)
                 .control(ORBIT_CONTROL)
+                .control(SLOW_ORBIT_CONTROL)
                 .control(PAN_CONTROL)
-                .control(ZOOM_CONTROL)
+                .control(SLOW_PAN_CONTROL)
+                .control(ZOOM_IN_CONTROL)
+                .control(ZOOM_OUT_CONTROL)
+                .control(SLOW_ZOOM_IN_CONTROL)
+                .control(SLOW_ZOOM_OUT_CONTROL)
                 .control(GAMEPAD_CONNECTED_CONTROL),
         )
         .wire_chip_to_state::<GamepadConnection, _>(GAMEPAD_CONNECTED_CONTROL, |connection| {

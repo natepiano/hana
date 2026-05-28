@@ -18,6 +18,8 @@
 //! - [`apply_context_gating`] — flips each camera's [`ContextActivity<OrbitCamInputContext>`] based
 //!   on its [`OrbitCamInputContextGated`] state.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::Accumulation;
 use bevy_enhanced_input::prelude::Action;
@@ -28,11 +30,15 @@ use bevy_enhanced_input::prelude::Actions;
 use bevy_enhanced_input::prelude::ActionsQuery;
 use bevy_enhanced_input::prelude::Binding;
 use bevy_enhanced_input::prelude::BindingOf;
+use bevy_enhanced_input::prelude::ConditionKind;
 use bevy_enhanced_input::prelude::ContextActivity;
 use bevy_enhanced_input::prelude::ContextPriority;
 use bevy_enhanced_input::prelude::ContextTime;
 use bevy_enhanced_input::prelude::CustomInput;
 use bevy_enhanced_input::prelude::CustomInputs;
+use bevy_enhanced_input::prelude::DeadZone;
+use bevy_enhanced_input::prelude::DeadZoneKind;
+use bevy_enhanced_input::prelude::DeltaScale;
 use bevy_enhanced_input::prelude::GamepadDevice;
 use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::InputCondition;
@@ -46,14 +52,20 @@ use super::inject::OrbitCamAdapterFrameSources;
 use super::inject::TrackpadScrollTarget;
 use crate::constants::PIXEL_SCROLL_SCALE;
 use crate::input::ActionBindingEntry;
+use crate::input::BindingGates;
 use crate::input::CameraInputGamepadSelectionPolicy;
 use crate::input::CameraInteractionSources;
 use crate::input::CameraSemanticAction;
 use crate::input::HeldActionBindingEntry;
 use crate::input::HeldCameraAction;
+use crate::input::InputAxisTransform;
 use crate::input::InputBindingDescriptor;
-use crate::input::InputBindingTransform;
+use crate::input::InputBindingModifiers;
+use crate::input::InputDeadZone;
+use crate::input::InputDeltaScale;
 use crate::input::OrbitCamBindings;
+use crate::input::OrbitCamGateInput;
+use crate::input::OrbitCamGatePolarity;
 use crate::input::OrbitCamInputContext;
 use crate::input::OrbitCamInputContextGated;
 use crate::input::OrbitCamOrbitAction;
@@ -67,6 +79,7 @@ use crate::input::actions::OrbitCamAdapterOrbitAction;
 use crate::input::actions::OrbitCamAdapterPanAction;
 use crate::input::actions::OrbitCamAdapterZoomCoarseAction;
 use crate::input::actions::OrbitCamAdapterZoomSmoothAction;
+use crate::input::actions::OrbitCamGateAction;
 use crate::input::actions::OrbitCamOrbitEngagedAction;
 use crate::input::actions::OrbitCamPanEngagedAction;
 use crate::input::actions::OrbitCamZoomEngagedAction;
@@ -135,6 +148,56 @@ impl InputCondition for TrackpadBindingCondition {
             TriggerState::None
         }
     }
+}
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(super) struct OrbitCamBindingGateCondition {
+    pub(super) gates: Vec<InstalledBindingGate>,
+}
+
+impl OrbitCamBindingGateCondition {
+    fn new(gates: impl Into<Vec<InstalledBindingGate>>) -> Self {
+        Self {
+            gates: gates.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct InstalledBindingGate {
+    action:   Entity,
+    polarity: OrbitCamGatePolarity,
+}
+
+impl InputCondition for OrbitCamBindingGateCondition {
+    fn evaluate(
+        &mut self,
+        actions: &ActionsQuery,
+        _time: &ContextTime,
+        value: ActionValue,
+    ) -> TriggerState {
+        let actuated = value.as_bool();
+        if !actuated {
+            return TriggerState::None;
+        }
+
+        let gates_satisfied = self.gates.iter().all(|gate| {
+            let active = actions.get(gate.action).is_ok_and(|(_, state, ..)| {
+                matches!(*state, TriggerState::Ongoing | TriggerState::Fired)
+            });
+            match gate.polarity {
+                OrbitCamGatePolarity::Required => active,
+                OrbitCamGatePolarity::Blocked => !active,
+            }
+        });
+        if gates_satisfied {
+            TriggerState::Fired
+        } else {
+            TriggerState::None
+        }
+    }
+
+    fn kind(&self) -> ConditionKind { ConditionKind::Implicit }
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
@@ -220,111 +283,174 @@ struct SpawnedInputInstallation {
     entities:      Vec<Entity>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SpawnedInputActions {
+    orbit:               Entity,
+    orbit_engaged:       Entity,
+    pan:                 Entity,
+    pan_engaged:         Entity,
+    zoom_coarse:         Entity,
+    zoom_smooth:         Entity,
+    zoom_engaged:        Entity,
+    adapter_orbit:       Entity,
+    adapter_pan:         Entity,
+    adapter_zoom_coarse: Entity,
+    adapter_zoom_smooth: Entity,
+}
+
+impl SpawnedInputActions {
+    fn entities(self) -> Vec<Entity> {
+        vec![
+            self.orbit,
+            self.orbit_engaged,
+            self.pan,
+            self.pan_engaged,
+            self.zoom_coarse,
+            self.zoom_smooth,
+            self.zoom_engaged,
+            self.adapter_orbit,
+            self.adapter_pan,
+            self.adapter_zoom_coarse,
+            self.adapter_zoom_smooth,
+        ]
+    }
+
+    const fn adapter_actions(self) -> (Entity, Entity, Entity, Entity) {
+        (
+            self.adapter_orbit,
+            self.adapter_pan,
+            self.adapter_zoom_coarse,
+            self.adapter_zoom_smooth,
+        )
+    }
+
+    const fn trackpad_actions(self) -> (Entity, Entity, Entity) {
+        (
+            self.adapter_orbit,
+            self.adapter_pan,
+            self.adapter_zoom_smooth,
+        )
+    }
+
+    fn with_sources(self, bindings: &OrbitCamBindings) -> OrbitCamInputActionEntities {
+        OrbitCamInputActionEntities {
+            orbit:               self.orbit,
+            orbit_engaged:       self.orbit_engaged,
+            pan:                 self.pan,
+            pan_engaged:         self.pan_engaged,
+            zoom_coarse:         self.zoom_coarse,
+            zoom_smooth:         self.zoom_smooth,
+            zoom_engaged:        self.zoom_engaged,
+            adapter_orbit:       self.adapter_orbit,
+            adapter_pan:         self.adapter_pan,
+            adapter_zoom_coarse: self.adapter_zoom_coarse,
+            adapter_zoom_smooth: self.adapter_zoom_smooth,
+            orbit_sources:       held_sources(bindings.orbit().entries()),
+            pan_sources:         held_sources(bindings.pan().entries()),
+            zoom_coarse_sources: action_sources(bindings.zoom_coarse().entries()),
+            zoom_smooth_sources: held_sources(bindings.zoom_smooth().entries()),
+        }
+    }
+}
+
+#[derive(Default)]
+struct GateActionCache {
+    actions: HashMap<OrbitCamGateInput, Entity>,
+}
+
 fn spawn_input_installation(
     world: &mut World,
     camera: Entity,
     bindings: &OrbitCamBindings,
 ) -> SpawnedInputInstallation {
     let custom_inputs = register_adapter_custom_inputs(world);
-    let orbit = spawn_action::<OrbitCamOrbitAction>(world, camera);
-    let orbit_engaged = spawn_action::<OrbitCamOrbitEngagedAction>(world, camera);
-    let pan = spawn_action::<OrbitCamPanAction>(world, camera);
-    let pan_engaged = spawn_action::<OrbitCamPanEngagedAction>(world, camera);
-    let zoom_coarse = spawn_action::<OrbitCamZoomCoarseAction>(world, camera);
-    let zoom_smooth = spawn_action::<OrbitCamZoomSmoothAction>(world, camera);
-    let zoom_engaged = spawn_action::<OrbitCamZoomEngagedAction>(world, camera);
-    let adapter_orbit = spawn_action::<OrbitCamAdapterOrbitAction>(world, camera);
-    let adapter_pan = spawn_action::<OrbitCamAdapterPanAction>(world, camera);
-    let adapter_zoom_coarse = spawn_action::<OrbitCamAdapterZoomCoarseAction>(world, camera);
-    let adapter_zoom_smooth = spawn_action::<OrbitCamAdapterZoomSmoothAction>(world, camera);
-
-    let mut entities = vec![
-        orbit,
-        orbit_engaged,
-        pan,
-        pan_engaged,
-        zoom_coarse,
-        zoom_smooth,
-        zoom_engaged,
-        adapter_orbit,
-        adapter_pan,
-        adapter_zoom_coarse,
-        adapter_zoom_smooth,
-    ];
+    let actions = spawn_input_actions(world, camera);
+    let mut entities = actions.entities();
     spawn_adapter_custom_bindings(
         world,
         camera,
         &custom_inputs,
-        (
-            adapter_orbit,
-            adapter_pan,
-            adapter_zoom_coarse,
-            adapter_zoom_smooth,
-        ),
+        actions.adapter_actions(),
         &mut entities,
     );
     spawn_trackpad_custom_bindings(
         world,
         camera,
         &custom_inputs,
-        (adapter_orbit, adapter_pan, adapter_zoom_smooth),
+        actions.trackpad_actions(),
         bindings,
         &mut entities,
     );
-
-    spawn_held_bindings(
-        world,
-        camera,
-        orbit,
-        orbit_engaged,
-        bindings.orbit().entries(),
-        &mut entities,
-    );
-    spawn_held_bindings(
-        world,
-        camera,
-        pan,
-        pan_engaged,
-        bindings.pan().entries(),
-        &mut entities,
-    );
-    spawn_held_bindings(
-        world,
-        camera,
-        zoom_smooth,
-        zoom_engaged,
-        bindings.zoom_smooth().entries(),
-        &mut entities,
-    );
-    for entry in bindings.zoom_coarse().entries() {
-        entities.extend(spawn_binding(
-            world,
-            camera,
-            zoom_coarse,
-            entry.binding_descriptor(),
-        ));
-    }
+    spawn_camera_action_bindings(world, camera, bindings, actions, &mut entities);
 
     SpawnedInputInstallation {
-        actions: OrbitCamInputActionEntities {
-            orbit,
-            orbit_engaged,
-            pan,
-            pan_engaged,
-            zoom_coarse,
-            zoom_smooth,
-            zoom_engaged,
-            adapter_orbit,
-            adapter_pan,
-            adapter_zoom_coarse,
-            adapter_zoom_smooth,
-            orbit_sources: held_sources(bindings.orbit().entries()),
-            pan_sources: held_sources(bindings.pan().entries()),
-            zoom_coarse_sources: action_sources(bindings.zoom_coarse().entries()),
-            zoom_smooth_sources: held_sources(bindings.zoom_smooth().entries()),
-        },
+        actions: actions.with_sources(bindings),
         custom_inputs,
         entities,
+    }
+}
+
+fn spawn_input_actions(world: &mut World, camera: Entity) -> SpawnedInputActions {
+    SpawnedInputActions {
+        orbit:               spawn_action::<OrbitCamOrbitAction>(world, camera),
+        orbit_engaged:       spawn_action::<OrbitCamOrbitEngagedAction>(world, camera),
+        pan:                 spawn_action::<OrbitCamPanAction>(world, camera),
+        pan_engaged:         spawn_action::<OrbitCamPanEngagedAction>(world, camera),
+        zoom_coarse:         spawn_action::<OrbitCamZoomCoarseAction>(world, camera),
+        zoom_smooth:         spawn_action::<OrbitCamZoomSmoothAction>(world, camera),
+        zoom_engaged:        spawn_action::<OrbitCamZoomEngagedAction>(world, camera),
+        adapter_orbit:       spawn_action::<OrbitCamAdapterOrbitAction>(world, camera),
+        adapter_pan:         spawn_action::<OrbitCamAdapterPanAction>(world, camera),
+        adapter_zoom_coarse: spawn_action::<OrbitCamAdapterZoomCoarseAction>(world, camera),
+        adapter_zoom_smooth: spawn_action::<OrbitCamAdapterZoomSmoothAction>(world, camera),
+    }
+}
+
+fn spawn_camera_action_bindings(
+    world: &mut World,
+    camera: Entity,
+    bindings: &OrbitCamBindings,
+    actions: SpawnedInputActions,
+    entities: &mut Vec<Entity>,
+) {
+    let mut gate_actions = GateActionCache::default();
+    spawn_held_bindings(
+        world,
+        camera,
+        actions.orbit,
+        actions.orbit_engaged,
+        bindings.orbit().entries(),
+        &mut gate_actions,
+        entities,
+    );
+    spawn_held_bindings(
+        world,
+        camera,
+        actions.pan,
+        actions.pan_engaged,
+        bindings.pan().entries(),
+        &mut gate_actions,
+        entities,
+    );
+    spawn_held_bindings(
+        world,
+        camera,
+        actions.zoom_smooth,
+        actions.zoom_engaged,
+        bindings.zoom_smooth().entries(),
+        &mut gate_actions,
+        entities,
+    );
+    for entry in bindings.zoom_coarse().entries() {
+        spawn_binding(
+            world,
+            camera,
+            actions.zoom_coarse,
+            entry.binding_descriptor(),
+            &BindingGates::default(),
+            &mut gate_actions,
+            entities,
+        );
     }
 }
 
@@ -499,21 +625,28 @@ fn spawn_held_bindings<A: HeldCameraAction>(
     motion_action: Entity,
     engagement_action: Entity,
     entries: &[HeldActionBindingEntry<A>],
+    gate_actions: &mut GateActionCache,
     entities: &mut Vec<Entity>,
 ) {
     for entry in entries {
-        entities.extend(spawn_binding(
+        spawn_binding(
             world,
             camera,
             motion_action,
             entry.motion_descriptor(),
-        ));
-        entities.extend(spawn_binding(
+            entry.gates(),
+            gate_actions,
+            entities,
+        );
+        spawn_binding(
             world,
             camera,
             engagement_action,
             entry.engagement_descriptor(),
-        ));
+            entry.gates(),
+            gate_actions,
+            entities,
+        );
     }
 }
 
@@ -522,15 +655,27 @@ fn spawn_binding(
     camera: Entity,
     action: Entity,
     binding_descriptor: &InputBindingDescriptor,
-) -> Vec<Entity> {
+    gates: &BindingGates,
+    gate_actions: &mut GateActionCache,
+    entities: &mut Vec<Entity>,
+) {
     let installation = OrbitCamInputInstallationOf(camera);
-    binding_descriptor
-        .entries_slice()
-        .iter()
-        .map(|entry| {
-            spawn_binding_entry(world, action, installation, entry.binding, entry.transform)
-        })
-        .collect()
+    let gate_entities = gate_condition_entities(world, camera, gates, gate_actions, entities);
+    for entry in binding_descriptor.entries_slice() {
+        let binding = spawn_binding_entry(
+            world,
+            action,
+            installation,
+            entry.binding(),
+            entry.modifiers(),
+        );
+        if !gate_entities.is_empty() {
+            world
+                .entity_mut(binding)
+                .insert(OrbitCamBindingGateCondition::new(gate_entities.clone()));
+        }
+        entities.push(binding);
+    }
 }
 
 fn spawn_binding_entry(
@@ -538,20 +683,35 @@ fn spawn_binding_entry(
     action: Entity,
     installation: OrbitCamInputInstallationOf,
     binding: Binding,
-    transform: InputBindingTransform,
+    modifiers: InputBindingModifiers,
 ) -> Entity {
-    match transform {
-        InputBindingTransform::None => spawn_single_binding(world, action, installation, binding),
-        InputBindingTransform::Negate => {
-            spawn_modified_binding(world, action, installation, binding, Negate::all())
+    let entity = spawn_single_binding(world, action, installation, binding);
+    if let Some(dead_zone) = modifiers.dead_zone() {
+        world
+            .entity_mut(entity)
+            .insert(dead_zone_modifier(dead_zone));
+    }
+    if let Some(scale) = modifiers.scale() {
+        world.entity_mut(entity).insert(Scale::splat(scale));
+    }
+    if modifiers.delta_scale() == InputDeltaScale::Auto {
+        world.entity_mut(entity).insert(DeltaScale::AUTO);
+    }
+    match modifiers.axis_transform() {
+        InputAxisTransform::None => {},
+        InputAxisTransform::Negate => {
+            world.entity_mut(entity).insert(Negate::all());
         },
-        InputBindingTransform::Swizzle => {
-            spawn_swizzled_binding(world, action, installation, binding)
+        InputAxisTransform::Swizzle => {
+            world.entity_mut(entity).insert(SwizzleAxis::YXZ);
         },
-        InputBindingTransform::SwizzleNegate => {
-            spawn_swizzled_modified_binding(world, action, installation, binding, Negate::all())
+        InputAxisTransform::SwizzleNegate => {
+            world
+                .entity_mut(entity)
+                .insert((SwizzleAxis::YXZ, Negate::all()));
         },
     }
+    entity
 }
 
 fn spawn_single_binding(
@@ -563,45 +723,63 @@ fn spawn_single_binding(
     world.spawn((binding, BindingOf(action), installation)).id()
 }
 
-fn spawn_modified_binding(
-    world: &mut World,
-    action: Entity,
-    installation: OrbitCamInputInstallationOf,
-    binding: Binding,
-    modifier: Negate,
-) -> Entity {
-    world
-        .spawn((binding, BindingOf(action), installation, modifier))
-        .id()
+const fn dead_zone_modifier(dead_zone: InputDeadZone) -> DeadZone {
+    DeadZone {
+        kind:            DeadZoneKind::Axial,
+        lower_threshold: dead_zone.lower_threshold,
+        upper_threshold: dead_zone.upper_threshold,
+    }
 }
 
-fn spawn_swizzled_binding(
+fn gate_condition_entities(
     world: &mut World,
-    action: Entity,
-    installation: OrbitCamInputInstallationOf,
-    binding: Binding,
-) -> Entity {
-    world
-        .spawn((binding, BindingOf(action), installation, SwizzleAxis::YXZ))
-        .id()
+    camera: Entity,
+    gates: &BindingGates,
+    gate_actions: &mut GateActionCache,
+    entities: &mut Vec<Entity>,
+) -> Vec<InstalledBindingGate> {
+    gates
+        .entries()
+        .iter()
+        .map(|gate| InstalledBindingGate {
+            action:   gate_action_entity(world, camera, gate.input, gate_actions, entities),
+            polarity: gate.polarity,
+        })
+        .collect()
 }
 
-fn spawn_swizzled_modified_binding(
+fn gate_action_entity(
     world: &mut World,
-    action: Entity,
-    installation: OrbitCamInputInstallationOf,
-    binding: Binding,
-    modifier: Negate,
+    camera: Entity,
+    input: OrbitCamGateInput,
+    gate_actions: &mut GateActionCache,
+    entities: &mut Vec<Entity>,
 ) -> Entity {
-    world
-        .spawn((
-            binding,
-            BindingOf(action),
-            installation,
-            SwizzleAxis::YXZ,
-            modifier,
-        ))
-        .id()
+    if let Some(action) = gate_actions.actions.get(&input) {
+        return *action;
+    }
+
+    let action = spawn_action::<OrbitCamGateAction>(world, camera);
+    let binding = spawn_single_binding(
+        world,
+        action,
+        OrbitCamInputInstallationOf(camera),
+        binding_for_gate_input(input),
+    );
+    entities.push(action);
+    entities.push(binding);
+    gate_actions.actions.insert(input, action);
+    action
+}
+
+const fn binding_for_gate_input(input: OrbitCamGateInput) -> Binding {
+    match input {
+        OrbitCamGateInput::GamepadButton(button) => Binding::GamepadButton(button),
+        OrbitCamGateInput::Key(key) => Binding::Keyboard {
+            key,
+            mod_keys: ModKeys::empty(),
+        },
+    }
 }
 
 fn held_sources<A: HeldCameraAction>(

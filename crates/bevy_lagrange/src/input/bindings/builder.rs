@@ -23,8 +23,11 @@ use super::action_set::BindingRoutePolicy;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
 use super::error::OrbitCamBindingsError;
+#[cfg(test)]
+use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamHeldBinding;
 use super::held_binding::OrbitCamInputBinding;
+use super::preset::OrbitCamBindingsProfile;
 use super::validate;
 use crate::input::CameraInteractionSources;
 
@@ -44,6 +47,7 @@ pub struct OrbitCamBindingsDescriptor {
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
     pub(super) zoom_direction:   ZoomDirection,
     pub(super) button_drag_zoom: Option<OrbitCamButtonDragZoom>,
+    pub(super) profile:          OrbitCamBindingsProfile,
 }
 
 impl TryFrom<OrbitCamBindingsDescriptor> for OrbitCamBindings {
@@ -60,6 +64,7 @@ pub(crate) fn invalid_bindings_descriptor_for_tests() -> OrbitCamBindingsDescrip
     descriptor.orbit.push(HeldBindingDescriptor {
         motion:             OrbitCamInputBinding::from(Binding::mouse_motion()).descriptor(),
         engagement:         None,
+        gates:              BindingGates::default(),
         sources:            CameraInteractionSources::MOUSE,
         engagement_sources: CameraInteractionSources::MOUSE,
         route:              BindingRoutePolicy::CursorPosition,
@@ -133,6 +138,11 @@ impl OrbitCamBindingsBuilder {
     #[must_use]
     pub const fn zoom_direction(mut self, zoom_direction: ZoomDirection) -> Self {
         self.descriptor.zoom_direction = zoom_direction;
+        self
+    }
+
+    pub(super) const fn profile(mut self, profile: OrbitCamBindingsProfile) -> Self {
+        self.descriptor.profile = profile;
         self
     }
 

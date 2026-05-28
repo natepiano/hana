@@ -23,7 +23,11 @@ use super::action_set::OrbitCamZoomCoarseActionBindings;
 use super::action_set::OrbitCamZoomSmoothActionBindings;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
+use super::descriptor::InputBindingDescriptor;
+use super::descriptor::InputBindingEntry;
 use super::error::OrbitCamBindingsError;
+use super::held_binding::BindingGates;
+use super::held_binding::OrbitCamGatePolarity;
 use crate::input::CameraSemanticAction;
 use crate::input::HeldCameraAction;
 use crate::input::ImpulseCameraAction;
@@ -75,6 +79,7 @@ pub fn validate_bindings(
         gamepad:          descriptor.gamepad,
         zoom_direction:   descriptor.zoom_direction,
         button_drag_zoom: descriptor.button_drag_zoom,
+        profile:          descriptor.profile,
     })
 }
 
@@ -100,6 +105,11 @@ fn validate_held_entries(
         {
             return Err(OrbitCamBindingsError::MissingSources);
         }
+        validate_gates(action, &entry.gates)?;
+        validate_descriptor_entries(&entry.motion)?;
+        if let Some(engagement) = &entry.engagement {
+            validate_descriptor_entries(engagement)?;
+        }
     }
     Ok(())
 }
@@ -115,6 +125,49 @@ fn validate_impulse_entries(
         if entry.engagement == BindingEngagement::Held {
             return Err(OrbitCamBindingsError::ImpulseEngagement { action });
         }
+        validate_descriptor_entries(&entry.binding)?;
+    }
+    Ok(())
+}
+
+fn validate_gates(action: &'static str, gates: &BindingGates) -> Result<(), OrbitCamBindingsError> {
+    for gate in gates.entries() {
+        let opposite = match gate.polarity {
+            OrbitCamGatePolarity::Required => OrbitCamGatePolarity::Blocked,
+            OrbitCamGatePolarity::Blocked => OrbitCamGatePolarity::Required,
+        };
+        if gates
+            .entries()
+            .iter()
+            .any(|candidate| candidate.input == gate.input && candidate.polarity == opposite)
+        {
+            return Err(OrbitCamBindingsError::ContradictoryGate { action });
+        }
+    }
+    Ok(())
+}
+
+fn validate_descriptor_entries(
+    descriptor: &InputBindingDescriptor,
+) -> Result<(), OrbitCamBindingsError> {
+    for entry in descriptor.entries_slice() {
+        validate_entry(entry)?;
+    }
+    Ok(())
+}
+
+fn validate_entry(entry: &InputBindingEntry) -> Result<(), OrbitCamBindingsError> {
+    let modifiers = entry.modifiers();
+    if modifiers.scale().is_some_and(|scale| !scale.is_finite()) {
+        return Err(OrbitCamBindingsError::InvalidScale);
+    }
+    let Some(dead_zone) = modifiers.dead_zone() else {
+        return Ok(());
+    };
+    let lower = dead_zone.lower_threshold;
+    let upper = dead_zone.upper_threshold;
+    if !lower.is_finite() || !upper.is_finite() || lower < 0.0 || upper > 1.0 || lower >= upper {
+        return Err(OrbitCamBindingsError::InvalidDeadZone);
     }
     Ok(())
 }
@@ -144,6 +197,7 @@ fn held_descriptor_to_entry<A: HeldCameraAction>(
     Ok(HeldActionBindingEntry {
         motion: descriptor.motion.clone(),
         engagement,
+        gates: descriptor.gates.clone(),
         sources: descriptor.sources,
         route: descriptor.route,
         action: PhantomData,

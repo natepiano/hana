@@ -1,9 +1,4 @@
-//! Builds an app-owned keyboard binding set with `OrbitCamBindings::builder()`,
-//! validates it, and gives it to `OrbitCam` as
-//! `OrbitCamInputMode::Bindings(...)`. Pick this mode when you want a fixed
-//! keymap rather than a preset and want Lagrange to handle the input routing
-//! on your behalf — `keyboard_bindings` is the part to copy when wiring a
-//! custom keymap into your own app.
+//! Demonstrates keyboard user input through `OrbitCamPreset::Keyboard`.
 //!
 //! Controls:
 //!   Arrows — orbit
@@ -15,10 +10,8 @@ use bevy_diegetic::WorldText;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamBindingsError;
-use bevy_lagrange::OrbitCamInputBinding;
 use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DescriptionPanel;
@@ -29,19 +22,11 @@ use fairy_dust::TitleBar;
 use fairy_dust::cube_face_text;
 
 fn main() {
-    // Build and validate the binding set up front; if validation fails the
-    // example bails before any plugins spin up.
-    let Ok(bindings) = keyboard_bindings() else {
-        error!("keyboard camera bindings failed to validate");
-        return;
-    };
-
     fairy_dust::sprinkle_example()
         .insert_resource(
             CameraInputRoutingConfig::cursor_hit_test()
                 .with_no_position_fallback(NoPositionFallback::OnlyEligibleCamera),
         )
-        .insert_resource(KeyboardBindings(bindings))
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
@@ -71,17 +56,7 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// KEYBOARD BINDINGS — OrbitCamBindings::builder() + OrbitCamInputMode::Bindings.
-//
-// How it works:
-//   1. `keyboard_bindings` constructs cardinal-key orbit and pan bindings, a bidirectional zoom
-//      binding, and runs them through `OrbitCamBindings::builder().build()`, which validates the
-//      set and returns `Result<OrbitCamBindings, OrbitCamBindingsError>`.
-//   2. `main()` stashes the validated bindings in a `KeyboardBindings` resource before the app
-//      starts.
-//   3. `spawn_camera` (Startup) clones the resource's bindings into
-//      `OrbitCamInputMode::Bindings(...)` on the OrbitCam entity; Lagrange's routing then
-//      translates key state into orbit / pan / zoom intent.
+// KEYBOARD PRESET — OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard).
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
@@ -93,10 +68,7 @@ const CAMERA_YAW: f32 = 0.55;
 const CAMERA_ZOOM_SENSITIVITY: f32 = 0.08;
 const HOME_MARGIN: f32 = 0.5;
 
-#[derive(Resource)]
-struct KeyboardBindings(OrbitCamBindings);
-
-fn spawn_camera(mut commands: Commands, bindings: Res<KeyboardBindings>) {
+fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         OrbitCam {
             focus: CAMERA_FOCUS,
@@ -108,31 +80,9 @@ fn spawn_camera(mut commands: Commands, bindings: Res<KeyboardBindings>) {
             zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
             ..default()
         },
-        OrbitCamInputMode::Bindings(bindings.0.clone()),
+        OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard),
         FairyDustOrbitCam,
     ));
-}
-
-fn keyboard_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-    let orbit_keys = OrbitCamInputBinding::cardinal_keys(
-        KeyCode::ArrowUp,
-        KeyCode::ArrowRight,
-        KeyCode::ArrowDown,
-        KeyCode::ArrowLeft,
-    );
-    let pan_keys = OrbitCamInputBinding::cardinal_keys(
-        KeyCode::KeyW,
-        KeyCode::KeyD,
-        KeyCode::KeyS,
-        KeyCode::KeyA,
-    );
-    let zoom_keys = OrbitCamInputBinding::bidirectional_keys(KeyCode::Equal, KeyCode::Minus);
-
-    OrbitCamBindings::builder()
-        .orbit(orbit_keys)
-        .pan(pan_keys)
-        .zoom(zoom_keys)
-        .build()
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

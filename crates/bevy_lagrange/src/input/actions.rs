@@ -50,6 +50,10 @@ pub(super) struct OrbitCamPanEngagedAction;
 pub(super) struct OrbitCamZoomEngagedAction;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
+#[action_output(bool)]
+pub(super) struct OrbitCamGateAction;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
 #[action_output(Vec2)]
 pub(super) struct OrbitCamAdapterOrbitAction;
 

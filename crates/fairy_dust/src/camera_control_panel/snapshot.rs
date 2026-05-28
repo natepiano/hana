@@ -81,6 +81,10 @@ const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {
     match preset {
         OrbitCamPreset::SimpleMouse => "SimpleMouse",
         OrbitCamPreset::BlenderLike => "BlenderLike",
+        OrbitCamPreset::Keyboard => "Keyboard",
+        OrbitCamPreset::SimpleMouseKeyboard => "SimpleMouseKeyboard",
+        OrbitCamPreset::BlenderLikeKeyboard => "BlenderLikeKeyboard",
+        OrbitCamPreset::Gamepad => "Gamepad",
         _ => "Custom",
     }
 }
