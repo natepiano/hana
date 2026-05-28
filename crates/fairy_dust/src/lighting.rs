@@ -25,6 +25,10 @@ use crate::constants::TARGET;
 #[derive(Component)]
 struct FairyDustStudioLight;
 
+/// Startup set that spawns Fairy Dust's studio lighting rig.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct FairyDustStudioLightingSet;
+
 /// Configuration consumed by the studio-lighting startup system. Defaults
 /// match the original hard-coded rig; builder methods on
 /// [`crate::builder::StudioLightingBuilder`] override individual fields.
@@ -51,7 +55,10 @@ pub(crate) fn install(app: &mut App, config: StudioLightingConfig) {
             size: SHADOW_MAP_SIZE,
         })
         .insert_resource(config)
-        .add_systems(Startup, spawn_studio_lights);
+        .add_systems(
+            Startup,
+            spawn_studio_lights.in_set(FairyDustStudioLightingSet),
+        );
 }
 
 fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>) {

@@ -70,6 +70,7 @@ pub use constants::LABEL_SIZE;
 pub use constants::LOG_FILTER;
 pub use constants::TITLE_COLOR;
 pub use constants::TITLE_SIZE;
+pub use lighting::FairyDustStudioLightingSet;
 pub use orbit_cam::FairyDustOrbitCam;
 pub use primitive::Face;
 pub use primitive::cube_face_text;

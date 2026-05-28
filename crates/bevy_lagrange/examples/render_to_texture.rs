@@ -76,7 +76,6 @@ fn main() {
 // that image on the outer cube. The routing config aims Bevy input at the
 // offscreen camera (which isn't attached to any window), and the input surface
 // metrics convert window-pixel mouse deltas to the 512x512 interaction surface.
-// This is the part to read to learn the API.
 //
 // How it works (all wired in `setup`, Startup):
 //   1. Build a 512x512 `Image` with `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_DST` usages and add

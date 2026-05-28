@@ -55,7 +55,6 @@ fn main() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CAMERA HOME — programmatic OrbitCam control via target_focus/yaw/pitch/radius.
-// This is the part to read to learn how the camera is driven from app code.
 //
 // How it works:
 //   1. `configure_camera` seeds the initial `focus`/`yaw`/`pitch`/`radius` when the camera spawns.
@@ -201,7 +200,6 @@ fn camera_at_home(camera: &OrbitCam) -> bool {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SCENE SCAFFOLDING — cube the camera homes onto, ground sized to match.
-// Not essential to the demonstrated API; supports the visual.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
@@ -212,7 +210,6 @@ const GROUND_SIZE: f32 = 8.0;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // UI — description panel explaining the home flow on screen.
-// Not essential to the demonstrated API.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const DESCRIPTION_BODY_SIZE: f32 = 10.0;
