@@ -224,6 +224,7 @@ const CUBE_COMPAT_PANEL_PADDING: f32 = 0.01;
 const CUBE_COMPAT_PANEL_X: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
 const OIT_COMPAT_MESSAGE: &str = "Incompatible with OIT";
 const TAA_COMPAT_MESSAGE: &str = "Incompatible with TAA";
+const OIT_TAA_COMPAT_MESSAGE: &str = "Incompatible with OIT and TAA";
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
@@ -415,9 +416,10 @@ fn spawn_cube_compatibility_panel(
         .anchor(Anchor::Center)
         .material(transparent.clone())
         .text_material(transparent)
-        .with_tree(build_cube_compatibility_tree(
-            panel_kind.message(oit_enabled, post),
-        ))
+        .with_tree(build_cube_compatibility_tree(cube_compatibility_message(
+            oit_enabled,
+            post,
+        )))
         .build();
 
     match panel {
@@ -936,13 +938,14 @@ impl CubeCompatibilityPanel {
             Self::Taa => "Cube TAA compatibility panel",
         }
     }
+}
 
-    const fn message(self, oit_enabled: bool, post: PostAa) -> Option<&'static str> {
-        match (self, oit_enabled, post) {
-            (Self::Oit, true, _) => Some(OIT_COMPAT_MESSAGE),
-            (Self::Taa, _, PostAa::Taa) => Some(TAA_COMPAT_MESSAGE),
-            _ => None,
-        }
+const fn cube_compatibility_message(oit_enabled: bool, post: PostAa) -> Option<&'static str> {
+    match (oit_enabled, post) {
+        (true, PostAa::Taa) => Some(OIT_TAA_COMPAT_MESSAGE),
+        (true, _) => Some(OIT_COMPAT_MESSAGE),
+        (false, PostAa::Taa) => Some(TAA_COMPAT_MESSAGE),
+        (false, _) => None,
     }
 }
 
@@ -999,16 +1002,16 @@ fn refresh_cube_msaa_text(
 fn refresh_cube_compatibility_panels(
     oit: Res<OitState>,
     post: Res<PostAa>,
-    panels: Query<(Entity, &CubeCompatibilityPanel)>,
+    panels: Query<Entity, With<CubeCompatibilityPanel>>,
     mut commands: Commands,
 ) {
     if !oit.is_changed() && !post.is_changed() {
         return;
     }
-    for (entity, panel_kind) in &panels {
+    for entity in &panels {
         commands.set_tree(
             entity,
-            build_cube_compatibility_tree(panel_kind.message(oit.0, *post)),
+            build_cube_compatibility_tree(cube_compatibility_message(oit.0, *post)),
         );
     }
 }
