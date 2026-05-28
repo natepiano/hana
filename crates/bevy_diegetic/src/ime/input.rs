@@ -177,9 +177,10 @@ pub(super) fn handle_keyboard(
         return;
     }
 
-    if let Some(command) = command_from_keys(&keys) {
+    if let Some(command) = command_from_keyboard_events(&keys, events.as_slice()) {
         let changed = active_session.apply_edit_command(command, &input_blocker);
         trigger_text_changed(changed, &mut commands);
+        return;
     }
 
     if frame.saw_platform_ime || active_session.is_pending_commit() {
@@ -194,9 +195,18 @@ pub(super) fn handle_keyboard(
         let Some(text) = event.text.as_deref() else {
             continue;
         };
+        let Some(text) = editable_keyboard_text(text) else {
+            continue;
+        };
         let changed = active_session.apply_keyboard_text(event.window, text, &input_blocker);
         trigger_text_changed(changed, &mut commands);
     }
+}
+
+fn editable_keyboard_text(text: &str) -> Option<&str> {
+    text.chars()
+        .any(|character| !character.is_control())
+        .then_some(text)
 }
 
 fn app_disposition(
@@ -265,18 +275,29 @@ fn request_from_keys(
         }))
 }
 
-fn command_from_keys(keys: &ButtonInput<KeyCode>) -> Option<ImeEditCommand> {
+fn command_from_keyboard_events(
+    keys: &ButtonInput<KeyCode>,
+    events: &[KeyboardInput],
+) -> Option<ImeEditCommand> {
+    events.iter().find_map(|event| {
+        (event.state == ButtonState::Pressed)
+            .then(|| command_from_key_code(keys, event.key_code))
+            .flatten()
+    })
+}
+
+fn command_from_key_code(keys: &ButtonInput<KeyCode>, key_code: KeyCode) -> Option<ImeEditCommand> {
     let selection = if shift_pressed(keys) {
         ImeSelectionMode::Extend
     } else {
         ImeSelectionMode::Move
     };
 
-    if primary_modifier_pressed(keys) && keys.just_pressed(KeyCode::KeyA) {
+    if primary_modifier_pressed(keys) && key_code == KeyCode::KeyA {
         return Some(ImeEditCommand::SelectAll);
     }
 
-    if keys.just_pressed(KeyCode::ArrowLeft) {
+    if key_code == KeyCode::ArrowLeft {
         return Some(ImeEditCommand::Move {
             direction: ImeMovementDirection::Backward,
             unit: movement_unit(keys),
@@ -284,7 +305,7 @@ fn command_from_keys(keys: &ButtonInput<KeyCode>) -> Option<ImeEditCommand> {
         });
     }
 
-    if keys.just_pressed(KeyCode::ArrowRight) {
+    if key_code == KeyCode::ArrowRight {
         return Some(ImeEditCommand::Move {
             direction: ImeMovementDirection::Forward,
             unit: movement_unit(keys),
@@ -292,7 +313,7 @@ fn command_from_keys(keys: &ButtonInput<KeyCode>) -> Option<ImeEditCommand> {
         });
     }
 
-    if keys.just_pressed(KeyCode::Home) {
+    if key_code == KeyCode::Home {
         return Some(ImeEditCommand::Move {
             direction: ImeMovementDirection::Backward,
             unit: ImeMovementUnit::Line,
@@ -300,7 +321,7 @@ fn command_from_keys(keys: &ButtonInput<KeyCode>) -> Option<ImeEditCommand> {
         });
     }
 
-    if keys.just_pressed(KeyCode::End) {
+    if key_code == KeyCode::End {
         return Some(ImeEditCommand::Move {
             direction: ImeMovementDirection::Forward,
             unit: ImeMovementUnit::Line,
@@ -308,12 +329,11 @@ fn command_from_keys(keys: &ButtonInput<KeyCode>) -> Option<ImeEditCommand> {
         });
     }
 
-    if keys.just_pressed(KeyCode::Backspace) {
+    if key_code == KeyCode::Backspace {
         return Some(ImeEditCommand::DeleteBackward(delete_unit(keys)));
     }
 
-    keys.just_pressed(KeyCode::Delete)
-        .then_some(ImeEditCommand::DeleteForward(delete_unit(keys)))
+    (key_code == KeyCode::Delete).then_some(ImeEditCommand::DeleteForward(delete_unit(keys)))
 }
 
 fn movement_unit(keys: &ButtonInput<KeyCode>) -> ImeMovementUnit {
@@ -327,7 +347,9 @@ fn movement_unit(keys: &ButtonInput<KeyCode>) -> ImeMovementUnit {
 }
 
 fn delete_unit(keys: &ButtonInput<KeyCode>) -> ImeMovementUnit {
-    if word_modifier_pressed(keys) {
+    if super_pressed(keys) {
+        ImeMovementUnit::Line
+    } else if word_modifier_pressed(keys) {
         ImeMovementUnit::Word
     } else {
         ImeMovementUnit::Character
@@ -382,10 +404,17 @@ fn trigger_session_request(request: ImeSessionRequest, commands: &mut Commands) 
 
 #[cfg(test)]
 mod tests {
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::Key;
+    use bevy::input::keyboard::KeyboardInput;
+    use bevy::input::keyboard::NativeKey;
     use bevy::prelude::ButtonInput;
+    use bevy::prelude::Entity;
     use bevy::prelude::KeyCode;
 
-    use super::command_from_keys;
+    use super::command_from_key_code;
+    use super::command_from_keyboard_events;
+    use super::editable_keyboard_text;
     use crate::ime::buffer::ImeEditCommand;
     use crate::ime::buffer::ImeMovementDirection;
     use crate::ime::buffer::ImeMovementUnit;
@@ -399,19 +428,33 @@ mod tests {
         keys
     }
 
+    fn key_event(key_code: KeyCode, repeat: bool) -> KeyboardInput {
+        KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(NativeKey::Unidentified),
+            state: ButtonState::Pressed,
+            text: None,
+            repeat,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
     #[test]
     fn primary_a_maps_to_select_all() {
-        let keys = keys(&[KeyCode::SuperLeft, KeyCode::KeyA]);
+        let keys = keys(&[KeyCode::SuperLeft]);
 
-        assert_eq!(command_from_keys(&keys), Some(ImeEditCommand::SelectAll));
+        assert_eq!(
+            command_from_key_code(&keys, KeyCode::KeyA),
+            Some(ImeEditCommand::SelectAll)
+        );
     }
 
     #[test]
     fn alt_arrow_left_maps_to_word_movement() {
-        let keys = keys(&[KeyCode::AltLeft, KeyCode::ArrowLeft]);
+        let keys = keys(&[KeyCode::AltLeft]);
 
         assert_eq!(
-            command_from_keys(&keys),
+            command_from_key_code(&keys, KeyCode::ArrowLeft),
             Some(ImeEditCommand::Move {
                 direction: ImeMovementDirection::Backward,
                 unit:      ImeMovementUnit::Word,
@@ -422,15 +465,63 @@ mod tests {
 
     #[test]
     fn shift_end_extends_to_line_end() {
-        let keys = keys(&[KeyCode::ShiftLeft, KeyCode::End]);
+        let keys = keys(&[KeyCode::ShiftLeft]);
 
         assert_eq!(
-            command_from_keys(&keys),
+            command_from_key_code(&keys, KeyCode::End),
             Some(ImeEditCommand::Move {
                 direction: ImeMovementDirection::Forward,
                 unit:      ImeMovementUnit::Line,
                 selection: ImeSelectionMode::Extend,
             })
         );
+    }
+
+    #[test]
+    fn backspace_maps_to_delete_backward() {
+        let keys = keys(&[]);
+
+        assert_eq!(
+            command_from_key_code(&keys, KeyCode::Backspace),
+            Some(ImeEditCommand::DeleteBackward(ImeMovementUnit::Character))
+        );
+    }
+
+    #[test]
+    fn command_backspace_maps_to_line_delete() {
+        let keys = keys(&[KeyCode::SuperLeft]);
+
+        assert_eq!(
+            command_from_key_code(&keys, KeyCode::Backspace),
+            Some(ImeEditCommand::DeleteBackward(ImeMovementUnit::Line))
+        );
+    }
+
+    #[test]
+    fn option_backspace_maps_to_word_delete() {
+        let keys = keys(&[KeyCode::AltLeft]);
+
+        assert_eq!(
+            command_from_key_code(&keys, KeyCode::Backspace),
+            Some(ImeEditCommand::DeleteBackward(ImeMovementUnit::Word))
+        );
+    }
+
+    #[test]
+    fn repeated_backspace_maps_to_delete_backward() {
+        let keys = keys(&[]);
+        let events = [key_event(KeyCode::Backspace, true)];
+
+        assert_eq!(
+            command_from_keyboard_events(&keys, &events),
+            Some(ImeEditCommand::DeleteBackward(ImeMovementUnit::Character))
+        );
+    }
+
+    #[test]
+    fn control_only_keyboard_text_is_ignored() {
+        assert_eq!(editable_keyboard_text("\u{8}"), None);
+        assert_eq!(editable_keyboard_text("\u{7f}"), None);
+        assert_eq!(editable_keyboard_text("a"), Some("a"));
     }
 }

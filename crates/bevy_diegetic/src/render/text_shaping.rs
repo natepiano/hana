@@ -97,6 +97,16 @@ impl TextBuildStats {
     }
 }
 
+pub(super) const fn record_prepared_glyphs(
+    stats: &mut TextBuildStats,
+    shaped_glyphs: usize,
+    emitted_quads: usize,
+) {
+    stats.ready_glyphs = emitted_quads;
+    stats.invisible_glyphs = shaped_glyphs.saturating_sub(emitted_quads);
+    stats.emitted_quads = emitted_quads;
+}
+
 pub(super) fn positioned_glyphs<'a>(
     glyphs: &'a [ShapedGlyph],
     font_registry: &'a FontRegistry,
@@ -308,6 +318,18 @@ mod tests {
             invisible_glyphs: 2,
             ..Default::default()
         };
+
+        assert_eq!(GlyphReadiness::from(&stats), GlyphReadiness::Invisible);
+    }
+
+    #[test]
+    fn prepared_glyph_stats_classify_space_only_runs_as_invisible() {
+        let mut stats = TextBuildStats {
+            glyphs: 1,
+            ..Default::default()
+        };
+
+        record_prepared_glyphs(&mut stats, 1, 0);
 
         assert_eq!(GlyphReadiness::from(&stats), GlyphReadiness::Invisible);
     }

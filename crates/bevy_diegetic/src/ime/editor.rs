@@ -1,9 +1,10 @@
 //! Screen-space editor rendering and anchoring for active IME sessions.
 
+use std::borrow::Cow;
+
 use bevy::math::Rect;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
-use bevy_kana::ToF32;
 
 use super::ActiveImeSession;
 use super::ImeApplied;
@@ -30,6 +31,7 @@ use crate::BoundingBox;
 use crate::ComputedDiegeticPanel;
 use crate::DiegeticPanel;
 use crate::DiegeticPanelCommands;
+use crate::DiegeticTextMeasurer;
 use crate::Direction;
 use crate::El;
 use crate::LayoutBuilder;
@@ -40,20 +42,23 @@ use crate::PanelFieldId;
 use crate::PanelFieldRecord;
 use crate::Px;
 use crate::Sizing;
+use crate::TextMeasure;
+use crate::Unit;
+use crate::cascade::FontUnit;
+use crate::cascade::Resolved;
 
 const EDITOR_CAMERA_ORDER: isize = 120;
 const DEFAULT_EDITOR_WIDTH: f32 = 180.0;
-const DEFAULT_EDITOR_HEIGHT: f32 = 34.0;
+const DEFAULT_EDITOR_HEIGHT: f32 = 42.0;
 const MIN_EDITOR_WIDTH: f32 = 72.0;
-const MAX_EDITOR_WIDTH: f32 = 420.0;
-const EDITOR_EXTRA_WIDTH: f32 = 18.0;
+const MAX_EDITOR_WIDTH: f32 = 520.0;
+const EDITOR_EXTRA_WIDTH: f32 = 0.0;
 const EDITOR_FONT_SIZE: f32 = 16.0;
-const EDITOR_PADDING_X: f32 = 8.0;
-const EDITOR_PADDING_Y: f32 = 5.0;
+const EDITOR_PADDING_X: f32 = 10.0;
+const EDITOR_PADDING_Y: f32 = 0.0;
 const EDITOR_GAP: f32 = 3.0;
-const CARET_WIDTH: f32 = 2.0;
+const CARET_WIDTH: f32 = 1.0;
 const CARET_HEIGHT: f32 = 20.0;
-const EMPTY_TEXT_ADVANCE: f32 = 8.0;
 const EDITOR_BORDER_WIDTH: f32 = 1.0;
 const EDITOR_CORNER_RADIUS: f32 = 5.0;
 const SOURCE_RECT_MIN_AXIS: f32 = 1.0;
@@ -313,6 +318,8 @@ pub(super) fn close_editor_on_apply(
 
 pub(super) fn update_editor_anchor(
     mut editor_state: ResMut<ImeEditorState>,
+    measurer: Res<DiegeticTextMeasurer>,
+    panel_font_units: Query<&Resolved<FontUnit>>,
     mut panel_queries: ParamSet<(
         Query<&mut DiegeticPanel>,
         Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
@@ -340,22 +347,35 @@ pub(super) fn update_editor_anchor(
         return;
     };
 
+    let panel_font_unit = panel_font_units
+        .get(editor.panel)
+        .map_or(Unit::Points, |resolved| resolved.0.0);
+
+    let mut panels = panel_queries.p0();
     let editor_size = editor_size(screen_rect);
     let editor_pos = clamp_editor_position(screen_rect.min, editor_size, window);
-    let caret_pos = caret_position(editor_pos, editor_size, &editor.snapshot);
+    let font_scale;
+    {
+        let Ok(mut panel) = panels.get_mut(editor.panel) else {
+            return;
+        };
+        font_scale = panel.font_scale(panel_font_unit);
+        let _ = panel.set_size((Px(editor_size.x), Px(editor_size.y)));
+        panel.set_screen_position(editor_pos);
+    }
+    let caret_pos = caret_position(
+        editor_pos,
+        editor_size,
+        &editor.snapshot,
+        &measurer,
+        font_scale,
+    );
     editor.anchor = Some(ImeEditorAnchor {
         screen_rect,
         editor_pos,
         editor_size,
         caret_pos,
     });
-
-    let mut panels = panel_queries.p0();
-    let Ok(mut panel) = panels.get_mut(editor.panel) else {
-        return;
-    };
-    let _ = panel.set_size((Px(editor_size.x), Px(editor_size.y)));
-    panel.set_screen_position(editor_pos);
 }
 
 pub(super) fn update_window_ime_position(
@@ -590,42 +610,49 @@ fn clamp_editor_position(position: Vec2, editor_size: Vec2, window: &Window) -> 
     Vec2::new(position.x.clamp(0.0, max_x), position.y.clamp(0.0, max_y))
 }
 
-fn caret_position(editor_pos: Vec2, editor_size: Vec2, snapshot: &ImeBufferSnapshot) -> Vec2 {
-    let measured_len = display_text_len(snapshot);
-    let text_len = if measured_len > 0.0 {
-        measured_len
-    } else {
-        EMPTY_TEXT_ADVANCE
-    };
-    let cursor = display_cursor_len(snapshot).min(text_len);
-    let content_width = EDITOR_PADDING_X.mul_add(-2.0, editor_size.x).max(0.0);
-    let caret_x = EDITOR_PADDING_X + content_width * (cursor / text_len);
-    Vec2::new(editor_pos.x + caret_x, editor_pos.y + EDITOR_PADDING_Y)
+fn caret_position(
+    editor_pos: Vec2,
+    editor_size: Vec2,
+    snapshot: &ImeBufferSnapshot,
+    measurer: &DiegeticTextMeasurer,
+    font_scale: f32,
+) -> Vec2 {
+    let horizontal_chrome = (EDITOR_PADDING_X + EDITOR_BORDER_WIDTH) * 2.0;
+    let content_width = (editor_size.x - horizontal_chrome).max(0.0);
+    let prefix = caret_prefix_text(snapshot);
+    let measure = editor_text_measure().scaled(font_scale);
+    let measured_prefix = (measurer.measure_fn)(prefix.as_ref(), &measure).width;
+    let caret_x =
+        EDITOR_BORDER_WIDTH + EDITOR_PADDING_X + measured_prefix.clamp(0.0, content_width);
+    let caret_y = (editor_size.y - CARET_HEIGHT).max(0.0) * 0.5;
+    Vec2::new(
+        (editor_pos.x + caret_x).round(),
+        (editor_pos.y + caret_y).round(),
+    )
 }
 
-fn display_text_len(snapshot: &ImeBufferSnapshot) -> f32 {
-    if let Some(preedit) = &snapshot.preedit {
-        let replaced = preedit.replacement.end.as_usize() - preedit.replacement.start.as_usize();
-        let len = snapshot.committed_text.len() - replaced + preedit.text.len();
-        return len.to_f32();
-    }
-    snapshot.committed_text.len().to_f32()
-}
-
-fn display_cursor_len(snapshot: &ImeBufferSnapshot) -> f32 {
+fn caret_prefix_text(snapshot: &ImeBufferSnapshot) -> Cow<'_, str> {
     if let Some(preedit) = &snapshot.preedit {
         let start = preedit.replacement.start.as_usize();
-        let preedit_cursor = preedit
+        let cursor = preedit
             .cursor
             .map_or(preedit.text.len(), ImePreeditBoundary::as_usize);
-        return (start + preedit_cursor).to_f32();
+        let mut prefix = String::with_capacity(start + cursor);
+        prefix.push_str(&snapshot.committed_text[..start]);
+        prefix.push_str(&preedit.text[..cursor]);
+        return Cow::Owned(prefix);
     }
 
-    match &snapshot.cursor {
-        ImeCursorState::Insertion(boundary) => boundary.as_usize().to_f32(),
-        ImeCursorState::Selection(selection) => selection.focus.as_usize().to_f32(),
-    }
+    let cursor = match &snapshot.cursor {
+        ImeCursorState::Insertion(boundary) => boundary.as_usize(),
+        ImeCursorState::Selection(selection) => selection.focus.as_usize(),
+    };
+    Cow::Borrowed(&snapshot.committed_text[..cursor])
 }
+
+fn editor_text_measure() -> TextMeasure { editor_text_style().as_measure() }
+
+fn editor_text_style() -> LayoutTextStyle { LayoutTextStyle::new(EDITOR_FONT_SIZE).no_wrap() }
 
 fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
@@ -635,6 +662,7 @@ fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> Layout
             .padding(Padding::xy(EDITOR_PADDING_X, EDITOR_PADDING_Y))
             .child_gap(EDITOR_GAP)
             .direction(Direction::TopToBottom)
+            .child_alignment(AlignX::Left, AlignY::Center)
             .background(EDITOR_BACKGROUND)
             .border(Border::all(EDITOR_BORDER_WIDTH, EDITOR_BORDER))
             .corner_radius(EDITOR_CORNER_RADIUS),
@@ -643,7 +671,7 @@ fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> Layout
     builder.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::FIT)
+            .height(Sizing::GROW)
             .direction(Direction::LeftToRight)
             .child_gap(0.0)
             .child_alignment(AlignX::Left, AlignY::Center),
@@ -707,12 +735,7 @@ fn add_text(builder: &mut LayoutBuilder, text: &str, color: Color) {
     if text.is_empty() {
         return;
     }
-    builder.text(
-        text,
-        LayoutTextStyle::new(EDITOR_FONT_SIZE)
-            .with_color(color)
-            .no_wrap(),
-    );
+    builder.text(text, editor_text_style().with_color(color));
 }
 
 fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {
@@ -724,7 +747,7 @@ fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .background(EDITOR_SELECTION)
-            .padding(Padding::xy(EDITOR_GAP, 0.0)),
+            .padding(Padding::xy(0.0, 0.0)),
         |builder| add_text(builder, text, EDITOR_TEXT),
     );
 }
@@ -732,10 +755,19 @@ fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {
 fn add_caret(builder: &mut LayoutBuilder) {
     builder.with(
         El::new()
-            .width(Sizing::fixed(CARET_WIDTH))
-            .height(Sizing::fixed(CARET_HEIGHT))
-            .background(EDITOR_CARET),
-        |_| {},
+            .width(Sizing::fixed(0.0))
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom)
+            .child_alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(CARET_WIDTH))
+                    .height(Sizing::fixed(CARET_HEIGHT))
+                    .background(EDITOR_CARET),
+                |_| {},
+            );
+        },
     );
 }
 
@@ -744,13 +776,12 @@ mod tests {
     use bevy::math::Rect;
     use bevy::math::Vec2;
     use bevy::prelude::Window;
-    use bevy_kana::ToF32;
 
     use super::caret_position;
+    use super::caret_prefix_text;
     use super::clamp_editor_position;
-    use super::display_cursor_len;
-    use super::display_text_len;
     use super::editor_size;
+    use crate::DiegeticTextMeasurer;
     use crate::ImeBufferBoundary;
     use crate::ImeBufferRange;
     use crate::ImeBufferSnapshot;
@@ -758,6 +789,7 @@ mod tests {
     use crate::ImePreedit;
     use crate::ImePreeditBoundary;
     use crate::ImeSelectionSnapshot;
+    use crate::constants::MONOSPACE_WIDTH_RATIO;
 
     fn assert_float_eq(actual: f32, expected: f32) {
         assert!(
@@ -775,15 +807,14 @@ mod tests {
     }
 
     #[test]
-    fn caret_uses_snapshot_cursor_without_splitting_utf8() {
+    fn caret_prefix_uses_snapshot_cursor_without_splitting_utf8() {
         let snapshot = insertion_snapshot("aé日", "aé".len());
 
-        assert_float_eq(display_text_len(&snapshot), "aé日".len().to_f32());
-        assert_float_eq(display_cursor_len(&snapshot), "aé".len().to_f32());
+        assert_eq!(caret_prefix_text(&snapshot), "aé");
     }
 
     #[test]
-    fn preedit_replaces_selection_for_display_length() {
+    fn caret_prefix_includes_preedit_text_before_cursor() {
         let snapshot = ImeBufferSnapshot {
             committed_text: "abcdef".to_owned(),
             cursor:         ImeCursorState::Selection(ImeSelectionSnapshot {
@@ -800,8 +831,7 @@ mod tests {
             }),
         };
 
-        assert_float_eq(display_text_len(&snapshot), 5.0);
-        assert_float_eq(display_cursor_len(&snapshot), 2.0);
+        assert_eq!(caret_prefix_text(&snapshot), "ax");
     }
 
     #[test]
@@ -816,11 +846,20 @@ mod tests {
 
     #[test]
     fn caret_position_tracks_editor_width() {
+        let measurer = DiegeticTextMeasurer::default();
         let snapshot = insertion_snapshot("abcd", 2);
-        let caret = caret_position(Vec2::ZERO, Vec2::new(104.0, 34.0), &snapshot);
+        let caret = caret_position(
+            Vec2::ZERO,
+            Vec2::new(104.0, 34.0),
+            &snapshot,
+            &measurer,
+            1.0,
+        );
+        let expected_x = (super::EDITOR_FONT_SIZE * MONOSPACE_WIDTH_RATIO)
+            .mul_add(2.0, super::EDITOR_BORDER_WIDTH + super::EDITOR_PADDING_X);
 
-        assert!(caret.x > 40.0);
-        assert!(caret.x < 70.0);
+        assert_float_eq(caret.x, expected_x.round());
+        assert_float_eq(caret.y, 7.0);
     }
 
     #[test]

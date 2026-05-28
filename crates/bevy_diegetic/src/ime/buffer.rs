@@ -158,7 +158,7 @@ impl ImeEditBuffer {
     fn insert_text(&mut self, text: &str) -> ImeBufferEdit {
         let single_line = text
             .chars()
-            .filter(|character| !matches!(character, '\n' | '\r'))
+            .filter(|character| !character.is_control())
             .collect::<String>();
         if single_line.is_empty() {
             return ImeBufferEdit::Unchanged;
@@ -392,6 +392,15 @@ mod tests {
         buffer.apply(ImeEditCommand::DeleteBackward(ImeMovementUnit::Word));
 
         assert_eq!(buffer.committed_text(), "alpha ");
+    }
+
+    #[test]
+    fn insertion_ignores_control_characters() {
+        let mut buffer = ImeEditBuffer::new("a");
+
+        buffer.apply(ImeEditCommand::InsertText("\u{8}b\u{7f}".to_owned()));
+
+        assert_eq!(buffer.committed_text(), "ab");
     }
 
     #[test]
