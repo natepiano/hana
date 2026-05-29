@@ -12,8 +12,10 @@ use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::UpsideDownPolicy;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::ControlActivation;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::Face;
 use fairy_dust::FairyDustOrbitCam;
@@ -44,14 +46,19 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .with_title("Keyboard Bindings")
-                .with_anchor(Anchor::TopLeft),
+                .with_anchor(Anchor::TopLeft)
+                .control(CUBE_SPIN_CONTROL),
         )
+        .wire_chip_to_state::<CubeSpinState, _>(CUBE_SPIN_CONTROL, |state| {
+            state.cube_spin.control_activation()
+        })
         .with_description_panel(description_panel())
         .with_camera_control_panel()
         .add_systems(Startup, spawn_camera)
         .add_systems(PostStartup, spawn_face_labels)
+        .init_resource::<CubeSpinState>()
         .insert_resource(FaceLabelHold::default())
-        .add_systems(Update, update_face_labels)
+        .add_systems(Update, (toggle_cube_spin, update_face_labels, spin_cube))
         .run();
 }
 
@@ -63,9 +70,12 @@ const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
 const CAMERA_ORBIT_SENSITIVITY: f32 = 4.0;
 const CAMERA_PAN_SENSITIVITY: f32 = 6.0;
 const CAMERA_PITCH: f32 = 0.45;
+const CAMERA_PITCH_LIMIT: f32 = std::f32::consts::TAU / 3.0;
 const CAMERA_RADIUS: f32 = 6.0;
 const CAMERA_YAW: f32 = 0.55;
+const CAMERA_ZOOM_LOWER_LIMIT: f32 = 1.0;
 const CAMERA_ZOOM_SENSITIVITY: f32 = 0.08;
+const CAMERA_ZOOM_UPPER_LIMIT: f32 = 8.0;
 const HOME_MARGIN: f32 = 0.5;
 
 fn spawn_camera(mut commands: Commands) {
@@ -75,9 +85,14 @@ fn spawn_camera(mut commands: Commands) {
             yaw: Some(CAMERA_YAW),
             pitch: Some(CAMERA_PITCH),
             radius: Some(CAMERA_RADIUS),
+            pitch_upper_limit: Some(CAMERA_PITCH_LIMIT),
+            pitch_lower_limit: Some(-CAMERA_PITCH_LIMIT),
+            zoom_upper_limit: Some(CAMERA_ZOOM_UPPER_LIMIT),
+            zoom_lower_limit: CAMERA_ZOOM_LOWER_LIMIT,
             orbit_sensitivity: CAMERA_ORBIT_SENSITIVITY,
             pan_sensitivity: CAMERA_PAN_SENSITIVITY,
             zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
+            upside_down_policy: UpsideDownPolicy::Allow,
             ..default()
         },
         OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard),
@@ -90,7 +105,7 @@ fn spawn_camera(mut commands: Commands) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const FACE_LABEL_COLOR: Color = Color::srgb(0.1, 0.35, 1.0);
-const FACE_LABEL_RELEASE_DELAY_SECS: f32 = 0.5;
+const FACE_LABEL_RELEASE_DELAY_SECS: f32 = 0.3;
 const FACE_LABEL_SIZE: f32 = 0.095;
 
 const KEYBOARD_ZOOM_LABEL: &str = "+ / -";
@@ -289,6 +304,68 @@ fn description_panel() -> DescriptionPanel {
         .with_fit_width()
         .with_body_size(LABEL_SIZE.0)
         .lines(DESCRIPTION_LINES)
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CUBE SPIN — decorative idle spin toggled by `R`; CubeSpinState drives the chip.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const CUBE_SPIN_CONTROL: &str = "R Spin";
+const CUBE_SPIN_SPEED: f32 = 0.2;
+
+#[derive(Resource)]
+struct CubeSpinState {
+    cube_spin: CubeSpin,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CubeSpin {
+    Spinning,
+    Paused,
+}
+
+impl CubeSpin {
+    const fn control_activation(self) -> ControlActivation {
+        match self {
+            Self::Spinning => ControlActivation::Active,
+            Self::Paused => ControlActivation::Inactive,
+        }
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Spinning => Self::Paused,
+            Self::Paused => Self::Spinning,
+        }
+    }
+}
+
+impl Default for CubeSpinState {
+    fn default() -> Self {
+        Self {
+            cube_spin: CubeSpin::Spinning,
+        }
+    }
+}
+
+fn toggle_cube_spin(key_input: Res<ButtonInput<KeyCode>>, mut spin: ResMut<CubeSpinState>) {
+    if key_input.just_pressed(KeyCode::KeyR) {
+        spin.cube_spin = spin.cube_spin.toggled();
+    }
+}
+
+fn spin_cube(
+    time: Res<Time>,
+    spin: Res<CubeSpinState>,
+    mut cubes: Query<&mut Transform, With<KeyboardInputCube>>,
+) {
+    match spin.cube_spin {
+        CubeSpin::Spinning => {},
+        CubeSpin::Paused => return,
+    }
+    for mut transform in &mut cubes {
+        transform.rotate_y(CUBE_SPIN_SPEED * time.delta_secs());
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

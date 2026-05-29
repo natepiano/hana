@@ -88,8 +88,12 @@ fn main() {
             TitleBar::new()
                 .with_title("Custom Bindings")
                 .with_anchor(Anchor::TopLeft)
+                .control(CUBE_SPIN_CONTROL)
                 .control(INPUT_DISABLED_CONTROL),
         )
+        .wire_chip_to_state::<CubeSpinState, _>(CUBE_SPIN_CONTROL, |state| {
+            state.cube_spin.control_activation()
+        })
         .wire_chip_to_state::<InputDisabledState, _>(INPUT_DISABLED_CONTROL, |state| {
             activation_for(state.disabled)
         })
@@ -97,10 +101,16 @@ fn main() {
         .with_camera_control_panel()
         .add_systems(Startup, spawn_camera)
         .add_systems(PostStartup, spawn_face_labels)
+        .init_resource::<CubeSpinState>()
         .insert_resource(FaceLabelHold::default())
         .add_systems(
             Update,
-            (toggle_camera_controls, update_face_labels, spin_cube),
+            (
+                toggle_camera_controls,
+                toggle_cube_spin,
+                update_face_labels,
+                spin_cube,
+            ),
         )
         .add_observer(capture_zoom_started)
         .run();
@@ -127,7 +137,7 @@ const CAMERA_RADIUS: f32 = 5.0;
 const CAMERA_YAW: f32 = TAU / 8.0;
 const CAMERA_ZOOM_LOWER_LIMIT: f32 = 1.0;
 const CAMERA_ZOOM_SENSITIVITY: f32 = 0.5;
-const CAMERA_ZOOM_UPPER_LIMIT: f32 = 5.0;
+const CAMERA_ZOOM_UPPER_LIMIT: f32 = 8.0;
 const HOME_MARGIN: f32 = 0.5;
 const INPUT_DISABLED_CONTROL: &str = "T Disabled";
 
@@ -212,7 +222,7 @@ const fn activation_for(active: bool) -> ControlActivation {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const FACE_LABEL_COLOR: Color = Color::srgb(0.1, 0.35, 1.0);
-const FACE_LABEL_RELEASE_DELAY_SECS: f32 = 0.5;
+const FACE_LABEL_RELEASE_DELAY_SECS: f32 = 0.3;
 const FACE_PANEL_ACTIVE_SIZE: f32 = 46.0;
 const FACE_PANEL_BODY_SIZE: f32 = 40.0;
 const FACE_PANEL_OFFSET: f32 = CUBE_SIZE * 0.5 + 0.006;
@@ -273,9 +283,15 @@ impl HeldFaceLabel {
 
 #[derive(Clone)]
 struct FacePanelContent {
-    title:  &'static str,
-    lines:  Vec<String>,
-    active: bool,
+    title:    &'static str,
+    lines:    Vec<String>,
+    activity: FacePanelActivity,
+}
+
+#[derive(Clone, Copy)]
+enum FacePanelActivity {
+    Active,
+    Idle,
 }
 
 impl FacePanelContent {
@@ -283,7 +299,7 @@ impl FacePanelContent {
         Self {
             title,
             lines: lines.iter().map(|line| (*line).to_string()).collect(),
-            active: false,
+            activity: FacePanelActivity::Idle,
         }
     }
 
@@ -291,7 +307,7 @@ impl FacePanelContent {
         Self {
             title,
             lines,
-            active: true,
+            activity: FacePanelActivity::Active,
         }
     }
 }
@@ -327,12 +343,6 @@ fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<CustomInp
             );
         }
     });
-}
-
-fn spin_cube(time: Res<Time>, mut cubes: Query<&mut Transform, With<CustomInputCube>>) {
-    for mut transform in &mut cubes {
-        transform.rotate_y(CUBE_SPIN_SPEED * time.delta_secs());
-    }
 }
 
 fn update_face_labels(
@@ -478,10 +488,9 @@ fn build_face_panel_tree(content: FacePanelContent) -> LayoutTree {
             .with_shadow_mode(GlyphShadowMode::None),
     );
 
-    let body_size = if content.active {
-        FACE_PANEL_ACTIVE_SIZE
-    } else {
-        FACE_PANEL_BODY_SIZE
+    let body_size = match content.activity {
+        FacePanelActivity::Active => FACE_PANEL_ACTIVE_SIZE,
+        FacePanelActivity::Idle => FACE_PANEL_BODY_SIZE,
     };
     let body = LayoutTextStyle::new(body_size)
         .with_color(FACE_LABEL_COLOR)
@@ -564,13 +573,74 @@ fn description_panel() -> DescriptionPanel {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// CUBE SPIN — decorative idle spin toggled by `R`; CubeSpinState drives the chip.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const CUBE_SPIN_CONTROL: &str = "R Spin";
+const CUBE_SPIN_SPEED: f32 = 0.2;
+
+#[derive(Resource)]
+struct CubeSpinState {
+    cube_spin: CubeSpin,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CubeSpin {
+    Spinning,
+    Paused,
+}
+
+impl CubeSpin {
+    const fn control_activation(self) -> ControlActivation {
+        match self {
+            Self::Spinning => ControlActivation::Active,
+            Self::Paused => ControlActivation::Inactive,
+        }
+    }
+
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Spinning => Self::Paused,
+            Self::Paused => Self::Spinning,
+        }
+    }
+}
+
+impl Default for CubeSpinState {
+    fn default() -> Self {
+        Self {
+            cube_spin: CubeSpin::Spinning,
+        }
+    }
+}
+
+fn toggle_cube_spin(key_input: Res<ButtonInput<KeyCode>>, mut spin: ResMut<CubeSpinState>) {
+    if key_input.just_pressed(KeyCode::KeyR) {
+        spin.cube_spin = spin.cube_spin.toggled();
+    }
+}
+
+fn spin_cube(
+    time: Res<Time>,
+    spin: Res<CubeSpinState>,
+    mut cubes: Query<&mut Transform, With<CustomInputCube>>,
+) {
+    match spin.cube_spin {
+        CubeSpin::Spinning => {},
+        CubeSpin::Paused => return,
+    }
+    for mut transform in &mut cubes {
+        transform.rotate_y(CUBE_SPIN_SPEED * time.delta_secs());
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // SCENE SCAFFOLDING — cube body and ground sized to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_GROUND_CLEARANCE: f32 = 0.1;
 const CUBE_SIZE: f32 = 1.0;
-const CUBE_SPIN_SPEED: f32 = 0.2;
 const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + CUBE_GROUND_CLEARANCE, 0.0);
 
 const GROUND_SIZE: f32 = 5.0;

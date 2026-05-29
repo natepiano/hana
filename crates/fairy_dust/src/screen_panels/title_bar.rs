@@ -23,6 +23,7 @@ use super::constants::TITLE_BAR_DEFAULT_TITLE;
 use super::screen_panel_frame;
 use super::screen_panel_material;
 use crate::camera_home::CameraHomeConfig;
+use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
@@ -160,7 +161,7 @@ pub(super) fn spawn_title_bar_with_home_chip(
     home: Option<&CameraHomeConfig>,
 ) {
     let mut title_bar = title_bar.clone();
-    if home.is_some()
+    if home.is_some_and(|home| matches!(home.title_bar_control, HomeTitleBarControl::Shown))
         && !title_bar
             .controls
             .iter()

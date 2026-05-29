@@ -20,6 +20,7 @@ use crate::brp_extras;
 use crate::camera_control_panel;
 use crate::camera_control_panel::CameraControlPanelBackground;
 use crate::camera_home::CameraHomeConfig;
+use crate::camera_home::HomeTitleBarControl;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
 use crate::primitive::PrimitiveConfig;
@@ -128,16 +129,18 @@ impl<S> SprinkleBuilder<S> {
     /// Wires `H` to an [`bevy_lagrange::AnimateToFit`] of the union of every
     /// [`crate::CameraHomeTarget`] entity using the configured `yaw`/`pitch`. If
     /// a title bar is installed, the `H Home` chip is prepended automatically
-    /// and highlights for the duration of the home animation.
+    /// and highlights for the duration of the home animation unless disabled
+    /// with [`CameraHomeBuilder::without_title_bar_control`].
     #[must_use]
     pub const fn with_camera_home(self) -> CameraHomeBuilder<S> {
         CameraHomeBuilder {
             parent: self,
             config: CameraHomeConfig {
-                yaw:      0.0,
-                pitch:    0.0,
-                duration: crate::constants::HOME_DEFAULT_DURATION,
-                margin:   crate::constants::HOME_DEFAULT_MARGIN,
+                yaw:               0.0,
+                pitch:             0.0,
+                duration:          crate::constants::HOME_DEFAULT_DURATION,
+                margin:            crate::constants::HOME_DEFAULT_MARGIN,
+                title_bar_control: HomeTitleBarControl::Shown,
             },
         }
     }

@@ -4,7 +4,7 @@
 //! [`CameraHomeTarget`] entity. The builder's `yaw`/`pitch` set the orbit
 //! orientation. The home pose drives both the startup framing (instant) and the
 //! `H` key animation. If a title bar is installed, the `H Home` control chip is
-//! prepended automatically.
+//! prepended automatically unless the home builder opts out.
 //!
 //! Add [`CameraHomeTarget`] to any entity to frame that entity (and its
 //! descendants). [`bevy_lagrange::AnimateToFit`] extracts every descendant
@@ -57,10 +57,18 @@ pub struct CameraHomeTarget;
 /// whether to prepend the `H Home` chip.
 #[derive(Resource, Clone)]
 pub(crate) struct CameraHomeConfig {
-    pub yaw:      f32,
-    pub pitch:    f32,
-    pub duration: Duration,
-    pub margin:   f32,
+    pub yaw:               f32,
+    pub pitch:             f32,
+    pub duration:          Duration,
+    pub margin:            f32,
+    pub title_bar_control: HomeTitleBarControl,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum HomeTitleBarControl {
+    #[default]
+    Shown,
+    Hidden,
 }
 
 /// Resource holding the entity used as the invisible home cube.

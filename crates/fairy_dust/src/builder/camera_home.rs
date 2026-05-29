@@ -17,6 +17,7 @@ use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::camera_home;
+use crate::camera_home::HomeTitleBarControl;
 use crate::restart_camera;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
@@ -50,6 +51,14 @@ impl<S> CameraHomeBuilder<S> {
     #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.config.margin = margin;
+        self
+    }
+
+    /// Keeps the home behavior installed but does not add the automatic
+    /// `H Home` chip to Fairy Dust title bars.
+    #[must_use]
+    pub const fn without_title_bar_control(mut self) -> Self {
+        self.config.title_bar_control = HomeTitleBarControl::Hidden;
         self
     }
 
