@@ -118,7 +118,7 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
     let background = panel
         .background_color
         .unwrap_or_else(super::default_inner_background);
-    screen_panel_frame(builder, panel.width, background, |builder| {
+    screen_panel_frame(builder, panel.width, Sizing::FIT, background, |builder| {
         builder.with(
             El::new()
                 .width(Sizing::GROW)

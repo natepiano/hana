@@ -8,6 +8,8 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;
@@ -18,6 +20,8 @@ use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::camera_home;
 use crate::camera_home::HomeTitleBarControl;
+use crate::constants::HOME_CONTROL;
+use crate::cube_spin::CubeSpinConfig;
 use crate::restart_camera;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
@@ -90,6 +94,19 @@ impl<S> CameraHomeBuilder<S> {
         self.finish().with_camera_control_panel()
     }
 
+    /// Finalizes the current home registration and adds a marker-scoped cube spin helper.
+    #[must_use]
+    pub fn with_cube_spin<M: Component>(self) -> SprinkleBuilder<S> {
+        self.finish().with_cube_spin::<M>()
+    }
+
+    /// Finalizes the current home registration and adds a customized marker-scoped cube spin
+    /// helper.
+    #[must_use]
+    pub fn with_cube_spin_config<M: Component>(self, config: CubeSpinConfig) -> SprinkleBuilder<S> {
+        self.finish().with_cube_spin_config::<M>(config)
+    }
+
     /// Finalizes the current home registration and adds studio lighting.
     #[must_use]
     pub fn with_studio_lighting(self) -> StudioLightingBuilder<S> {
@@ -151,6 +168,9 @@ impl<S> CameraHomeBuilder<S> {
     pub fn run(self) -> AppExit { self.finish().run() }
 
     fn finish(mut self) -> SprinkleBuilder<S> {
+        if matches!(self.config.title_bar_control, HomeTitleBarControl::Shown) {
+            crate::screen_panels::register_title_control(&mut self.parent.app, HOME_CONTROL);
+        }
         camera_home::install(&mut self.parent.app, self.config);
         self.parent
     }
@@ -174,6 +194,88 @@ impl CameraHomeBuilder<NoOrbitCam> {
         B: Bundle + Send + Sync + 'static,
     {
         self.finish().with_orbit_cam(configure, bundle)
+    }
+
+    /// Finalizes the current home registration, spawns an `OrbitCam`, and
+    /// installs one built-in input preset.
+    pub fn with_orbit_cam_preset<F>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_preset(configure, preset)
+    }
+
+    /// Finalizes the current home registration, spawns an `OrbitCam`, installs
+    /// one built-in input preset, and inserts extra camera-side components.
+    pub fn with_orbit_cam_preset_bundle<F, B>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_preset_bundle(configure, preset, bundle)
+    }
+
+    /// Finalizes the current home registration, spawns an `OrbitCam`, and
+    /// installs app-owned input bindings.
+    pub fn with_orbit_cam_bindings<F>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_bindings(configure, bindings)
+    }
+
+    /// Finalizes the current home registration, spawns an `OrbitCam`, installs
+    /// app-owned input bindings, and inserts extra camera-side components.
+    pub fn with_orbit_cam_bindings_bundle<F, B>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_bindings_bundle(configure, bindings, bundle)
+    }
+
+    /// Finalizes the current home registration and spawns a manually driven
+    /// `OrbitCam`.
+    pub fn with_orbit_cam_manual<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_manual(configure)
+    }
+
+    /// Finalizes the current home registration, spawns a manually driven
+    /// `OrbitCam`, and inserts extra camera-side components.
+    pub fn with_orbit_cam_manual_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_manual_bundle(configure, bundle)
     }
 }
 

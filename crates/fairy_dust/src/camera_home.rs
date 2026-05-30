@@ -396,12 +396,26 @@ fn refit_on_window_resized(
     );
 }
 
+/// Whether an animation lifecycle event is the home fit.
+///
+/// The home fit is an `AnimateToFit` that frames the home cube. A user-issued
+/// `AnimateToFit` aimed at some other entity shares the `AnimateToFit` source
+/// but carries a different `target`, so it is not the home fit and must not
+/// drive the `H Home` chip.
+fn frames_home(
+    home: Option<&CameraHomeEntity>,
+    source: AnimationSource,
+    target: Option<Entity>,
+) -> bool {
+    home.is_some_and(|home| source == AnimationSource::AnimateToFit && target == Some(home.0))
+}
+
 fn on_home_animation_begin(
     trigger: On<AnimationBegin>,
     home: Option<Res<CameraHomeEntity>>,
     mut bars: Query<&mut TitleBarControlState>,
 ) {
-    if home.is_none() || trigger.source != AnimationSource::AnimateToFit {
+    if !frames_home(home.as_deref(), trigger.source, trigger.target) {
         return;
     }
     for mut bar in &mut bars {
@@ -415,7 +429,7 @@ fn on_home_animation_end(
     mut bars: Query<&mut TitleBarControlState>,
     mut at_home: ResMut<AtHome>,
 ) {
-    if home.is_none() || trigger.source != AnimationSource::AnimateToFit {
+    if !frames_home(home.as_deref(), trigger.source, trigger.target) {
         return;
     }
     for mut bar in &mut bars {
@@ -426,8 +440,12 @@ fn on_home_animation_end(
     }
 }
 
-fn on_non_home_animation_begin(trigger: On<AnimationBegin>, mut at_home: ResMut<AtHome>) {
-    if trigger.source != AnimationSource::AnimateToFit {
+fn on_non_home_animation_begin(
+    trigger: On<AnimationBegin>,
+    home: Option<Res<CameraHomeEntity>>,
+    mut at_home: ResMut<AtHome>,
+) {
+    if !frames_home(home.as_deref(), trigger.source, trigger.target) {
         *at_home = AtHome::No;
     }
 }

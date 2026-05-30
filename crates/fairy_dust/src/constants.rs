@@ -37,9 +37,26 @@ pub(crate) const CLEAR_COLOR: Color = Color::srgb(0.012, 0.014, 0.018);
 pub(crate) const CUBE_DEFAULT_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 pub(crate) const CUBE_DEFAULT_SIZE: f32 = 1.0;
 
+/// Canonical example cube color.
+pub const EXAMPLE_CUBE_COLOR: Color = CUBE_DEFAULT_COLOR;
+/// Canonical example cube edge length in world units.
+pub const EXAMPLE_CUBE_SIZE: f32 = CUBE_DEFAULT_SIZE;
+/// Canonical example ground-plane edge length in world units.
+pub const EXAMPLE_GROUND_SIZE: f32 = 5.0;
+/// Canonical cube transform for a cube sitting on the ground plane with extra clearance.
+pub const fn example_cube_on_ground(clearance: f32) -> Vec3 {
+    Vec3::new(0.0, EXAMPLE_CUBE_SIZE * 0.5 + clearance, 0.0)
+}
+
 // face text
 /// Outward offset for a face label so it does not z-fight the cube surface.
 pub(crate) const FACE_TEXT_Z_OFFSET: f32 = 0.001;
+/// Canonical blue for cube-mounted labels and panels.
+pub const CUBE_FACE_PANEL_BLUE: Color = Color::srgb(0.1, 0.35, 1.0);
+/// Default time that cube face input labels remain visible after release.
+pub const CUBE_FACE_PANEL_RELEASE_HOLD: Duration = Duration::from_millis(300);
+/// Default face-label size for simple cube-mounted `WorldText` labels.
+pub const CUBE_FACE_LABEL_SIZE: f32 = 0.095;
 
 // fill light
 pub(crate) const FILL_LIGHT_ILLUMINANCE: f32 = 1_400.0;

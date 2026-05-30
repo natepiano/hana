@@ -7,7 +7,10 @@
 //!
 //! ```ignore
 //! fairy_dust::sprinkle_example()
-//!     .with_orbit_cam_configured(|orbit_cam| { orbit_cam.radius = Some(5.0); })
+//!     .with_orbit_cam_preset(
+//!         |orbit_cam| { orbit_cam.radius = Some(5.0); },
+//!         OrbitCamPreset::BlenderLike,
+//!     )
 //!     .with_stable_transparency()       // only callable after with_orbit_cam_*
 //!     .with_save_window_position()
 //!     .with_brp_extras()
@@ -22,7 +25,7 @@
 //! Methods that act on the spawned `OrbitCam` entity (such as
 //! [`SprinkleBuilder::with_stable_transparency`]) are only defined on
 //! `SprinkleBuilder<WithOrbitCam>`, so calling them before
-//! [`SprinkleBuilder::with_orbit_cam_configured`] is a compile error.
+//! [`SprinkleBuilder::with_orbit_cam_preset`] is a compile error.
 //!
 //! ## Plugin deduplication
 //!
@@ -35,9 +38,11 @@ mod builder;
 mod camera_control_panel;
 mod camera_home;
 mod constants;
+mod cube_spin;
 mod lighting;
 mod orbit_cam;
 mod primitive;
+mod release_hold;
 mod restart;
 mod restart_camera;
 mod save_window_position;
@@ -62,23 +67,54 @@ pub use builder::TitleBarBuilder;
 pub use builder::WithOrbitCam;
 pub use camera_control_panel::CameraGuidance;
 pub use camera_control_panel::CameraGuidanceRow;
-pub use camera_control_panel::SourceVisibility;
 pub use camera_home::CameraHomeEntity;
 pub use camera_home::CameraHomeTarget;
+pub use constants::CUBE_FACE_LABEL_SIZE;
+pub use constants::CUBE_FACE_PANEL_BLUE;
+pub use constants::CUBE_FACE_PANEL_RELEASE_HOLD;
 pub use constants::DEFAULT_PANEL_BACKGROUND;
+pub use constants::EXAMPLE_CUBE_COLOR;
+pub use constants::EXAMPLE_CUBE_SIZE;
+pub use constants::EXAMPLE_GROUND_SIZE;
 pub use constants::LABEL_SIZE;
 pub use constants::LOG_FILTER;
 pub use constants::TITLE_COLOR;
 pub use constants::TITLE_SIZE;
+pub use constants::example_cube_on_ground;
+pub use cube_spin::CubeSpinConfig;
+pub use cube_spin::CubeSpinControl;
+pub use cube_spin::CubeSpinMode;
+pub use cube_spin::CubeSpinMotion;
+pub use cube_spin::CubeSpinTimeSource;
+pub use cube_spin::FairyDustCubeSpinTarget;
 pub use lighting::FairyDustStudioLightingSet;
 pub use orbit_cam::FairyDustOrbitCam;
+pub use orbit_cam::apply_example_orbit_cam_limits;
+pub use primitive::CubeFaceLabel;
+pub use primitive::CubeFacePanelActivity;
+pub use primitive::CubeFacePanelContent;
+pub use primitive::CubeFacePanelStyle;
 pub use primitive::Face;
+pub use primitive::FairyDustCube;
+pub use primitive::cube_face_label;
+pub use primitive::cube_face_panel;
+pub use primitive::cube_face_panel_material;
+pub use primitive::cube_face_panel_tree;
+pub use primitive::cube_face_panel_with_tree;
 pub use primitive::cube_face_text;
+pub use primitive::cube_face_transform;
+pub use primitive::set_cube_face_panel_tree;
+pub use release_hold::HoldState;
+pub use release_hold::ReleaseHold;
 pub use restart_camera::RestartCameraRestore;
 pub use restart_camera::RestoreWindowAnimation;
 pub use screen_panels::ControlActivation;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
+pub use screen_panels::TitleBarControl;
+pub use screen_panels::TitleBarOrientation;
+pub use screen_panels::TitleChip;
+pub use screen_panels::TitleChipActivation;
 pub use screen_panels::screen_panel_frame;
 pub use screen_panels::screen_panel_material;
 

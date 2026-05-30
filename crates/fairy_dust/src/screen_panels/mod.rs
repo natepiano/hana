@@ -17,7 +17,12 @@ use bevy_diegetic::default_panel_material;
 pub use description::DescriptionPanel;
 pub use title_bar::ControlActivation;
 pub use title_bar::TitleBar;
+pub use title_bar::TitleBarControl;
+pub(crate) use title_bar::TitleBarControlRegistry;
 pub(crate) use title_bar::TitleBarControlState;
+pub use title_bar::TitleBarOrientation;
+pub use title_bar::TitleChip;
+pub use title_bar::TitleChipActivation;
 
 use crate::camera_home::CameraHomeConfig;
 use crate::constants::BORDER;
@@ -44,10 +49,27 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     app.add_systems(PostUpdate, title_bar::refresh_changed_title_bar);
     app.add_systems(
         Startup,
-        move |mut commands: Commands, home: Option<Res<CameraHomeConfig>>| {
-            title_bar::spawn_title_bar_with_home_chip(&mut commands, &title_bar, home.as_deref());
+        move |mut commands: Commands,
+              home: Option<Res<CameraHomeConfig>>,
+              registry: Option<Res<TitleBarControlRegistry>>| {
+            title_bar::spawn_title_bar_with_home_chip(
+                &mut commands,
+                &title_bar,
+                home.as_deref(),
+                registry.as_deref(),
+            );
         },
     );
+}
+
+pub(crate) fn register_title_control(
+    app: &mut App,
+    control: impl Into<title_bar::TitleBarControl>,
+) {
+    let mut registry = app
+        .world_mut()
+        .get_resource_or_insert_with(TitleBarControlRegistry::default);
+    registry.push(control);
 }
 
 /// Material used by Fairy Dust screen-space panels.
@@ -64,13 +86,14 @@ pub fn screen_panel_material() -> StandardMaterial {
 pub fn screen_panel_frame(
     builder: &mut LayoutBuilder,
     width: Sizing,
+    height: Sizing,
     background: Color,
     content: impl FnOnce(&mut LayoutBuilder),
 ) {
     builder.with(
         El::new()
             .width(width)
-            .height(Sizing::FIT)
+            .height(height)
             .padding(Padding::all(FRAME_PAD))
             .corner_radius(CornerRadius::all(RADIUS))
             .border(Border::all(BORDER, BORDER_ACCENT)),

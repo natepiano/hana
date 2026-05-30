@@ -6,6 +6,8 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;
@@ -14,6 +16,9 @@ use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
+use crate::cube_spin;
+use crate::cube_spin::CubeSpinConfig;
+use crate::cube_spin::FairyDustCubeSpinTarget;
 use crate::primitive;
 use crate::primitive::Face;
 use crate::primitive::FaceTextSpec;
@@ -91,6 +96,30 @@ impl<S> PrimitiveBuilder<S> {
         self
     }
 
+    /// Adds a canonical blue label to one cube face.
+    #[must_use]
+    pub fn face_label(mut self, face: Face, text: impl Into<String>) -> Self {
+        self.config.push_face_text(FaceTextSpec {
+            face,
+            text: text.into(),
+            text_size: crate::constants::CUBE_FACE_LABEL_SIZE,
+            color: crate::constants::CUBE_FACE_PANEL_BLUE,
+        });
+        self
+    }
+
+    /// Rotates this cube with the shared Fairy Dust cube-spin helper.
+    ///
+    /// This is intended for single-cube examples. For manual or multi-cube
+    /// scenes, prefer [`SprinkleBuilder::with_cube_spin`] with an explicit
+    /// marker component.
+    #[must_use]
+    pub fn cube_spin(mut self, config: CubeSpinConfig) -> Self {
+        cube_spin::install::<FairyDustCubeSpinTarget>(&mut self.parent.app, config);
+        self = self.insert(FairyDustCubeSpinTarget);
+        self
+    }
+
     /// Finalizes the current primitive and starts configuring a ground plane.
     #[must_use]
     pub fn with_ground_plane(self) -> Self { self.finish().with_ground_plane() }
@@ -113,6 +142,18 @@ impl<S> PrimitiveBuilder<S> {
     #[must_use]
     pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
         self.finish().with_camera_control_panel()
+    }
+
+    /// Finalizes the current primitive and adds a marker-scoped cube spin helper.
+    #[must_use]
+    pub fn with_cube_spin<M: Component>(self) -> SprinkleBuilder<S> {
+        self.finish().with_cube_spin::<M>()
+    }
+
+    /// Finalizes the current primitive and adds a customized marker-scoped cube spin helper.
+    #[must_use]
+    pub fn with_cube_spin_config<M: Component>(self, config: CubeSpinConfig) -> SprinkleBuilder<S> {
+        self.finish().with_cube_spin_config::<M>(config)
     }
 
     /// Finalizes the current primitive and adds studio lighting.
@@ -203,6 +244,87 @@ impl PrimitiveBuilder<NoOrbitCam> {
         B: Bundle + Send + Sync + 'static,
     {
         self.finish().with_orbit_cam(configure, bundle)
+    }
+
+    /// Finalizes the current primitive, spawns an `OrbitCam`, and installs one
+    /// built-in input preset.
+    pub fn with_orbit_cam_preset<F>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_preset(configure, preset)
+    }
+
+    /// Finalizes the current primitive, spawns an `OrbitCam`, installs one
+    /// built-in input preset, and inserts extra camera-side components.
+    pub fn with_orbit_cam_preset_bundle<F, B>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_preset_bundle(configure, preset, bundle)
+    }
+
+    /// Finalizes the current primitive, spawns an `OrbitCam`, and installs
+    /// app-owned input bindings.
+    pub fn with_orbit_cam_bindings<F>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_bindings(configure, bindings)
+    }
+
+    /// Finalizes the current primitive, spawns an `OrbitCam`, installs
+    /// app-owned input bindings, and inserts extra camera-side components.
+    pub fn with_orbit_cam_bindings_bundle<F, B>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_bindings_bundle(configure, bindings, bundle)
+    }
+
+    /// Finalizes the current primitive and spawns a manually driven `OrbitCam`.
+    pub fn with_orbit_cam_manual<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_manual(configure)
+    }
+
+    /// Finalizes the current primitive, spawns a manually driven `OrbitCam`,
+    /// and inserts extra camera-side components.
+    pub fn with_orbit_cam_manual_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_manual_bundle(configure, bundle)
     }
 }
 

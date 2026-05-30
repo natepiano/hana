@@ -1,11 +1,16 @@
 //! `StudioLightingBuilder` impls.
 
 use bevy::prelude::*;
+use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
+use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
+use super::WithOrbitCam;
 use crate::lighting;
 use crate::primitive::PrimitiveConfig;
 
@@ -75,5 +80,110 @@ impl<S> StudioLightingBuilder<S> {
     fn finish(mut self) -> SprinkleBuilder<S> {
         lighting::install(&mut self.parent.app, self.config);
         self.parent
+    }
+}
+
+impl StudioLightingBuilder<NoOrbitCam> {
+    /// Finalizes the studio lighting configuration, adds `LagrangePlugin`, and
+    /// spawns an `OrbitCam` entity.
+    pub fn with_orbit_cam_configured<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_configured(configure)
+    }
+
+    /// Finalizes the studio lighting configuration, spawns an `OrbitCam`, and
+    /// inserts extra camera-side components.
+    pub fn with_orbit_cam<F, B>(self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam(configure, bundle)
+    }
+
+    /// Finalizes the studio lighting configuration, spawns an `OrbitCam`, and
+    /// installs one built-in input preset.
+    pub fn with_orbit_cam_preset<F>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_preset(configure, preset)
+    }
+
+    /// Finalizes the studio lighting configuration, spawns an `OrbitCam`,
+    /// installs one built-in input preset, and inserts extra camera-side
+    /// components.
+    pub fn with_orbit_cam_preset_bundle<F, B>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_preset_bundle(configure, preset, bundle)
+    }
+
+    /// Finalizes the studio lighting configuration, spawns an `OrbitCam`, and
+    /// installs app-owned input bindings.
+    pub fn with_orbit_cam_bindings<F>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_bindings(configure, bindings)
+    }
+
+    /// Finalizes the studio lighting configuration, spawns an `OrbitCam`,
+    /// installs app-owned input bindings, and inserts extra camera-side
+    /// components.
+    pub fn with_orbit_cam_bindings_bundle<F, B>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_bindings_bundle(configure, bindings, bundle)
+    }
+
+    /// Finalizes the studio lighting configuration and spawns a manually
+    /// driven `OrbitCam`.
+    pub fn with_orbit_cam_manual<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_manual(configure)
+    }
+
+    /// Finalizes the studio lighting configuration, spawns a manually driven
+    /// `OrbitCam`, and inserts extra camera-side components.
+    pub fn with_orbit_cam_manual_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_manual_bundle(configure, bundle)
     }
 }

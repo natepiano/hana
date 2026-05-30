@@ -8,6 +8,9 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;
@@ -19,8 +22,11 @@ use super::WithOrbitCam;
 use crate::brp_extras;
 use crate::camera_control_panel;
 use crate::camera_control_panel::CameraControlPanelBackground;
+use crate::camera_control_panel::CameraPresetSwitching;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
+use crate::cube_spin;
+use crate::cube_spin::CubeSpinConfig;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
 use crate::primitive::PrimitiveConfig;
@@ -62,6 +68,15 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Pins the camera to its spawned preset: suppresses the Shift+C cycle and
+    /// its entry in the keyboard-shortcut overlay. Pair with
+    /// [`with_camera_control_panel`](Self::with_camera_control_panel).
+    #[must_use]
+    pub fn lock_camera_preset(mut self) -> Self {
+        self.app.insert_resource(CameraPresetSwitching::Disabled);
+        self
+    }
+
     /// Overrides the inner background color of the camera control panel.
     /// Pair with [`with_camera_control_panel`](Self::with_camera_control_panel).
     /// Use [`DEFAULT_PANEL_BACKGROUND`](crate::DEFAULT_PANEL_BACKGROUND) and
@@ -71,6 +86,19 @@ impl<S> SprinkleBuilder<S> {
     pub fn with_camera_control_panel_background_color(mut self, color: Color) -> Self {
         self.app
             .insert_resource(CameraControlPanelBackground(color));
+        self
+    }
+
+    /// Adds a marker-scoped cube spin helper.
+    #[must_use]
+    pub fn with_cube_spin<M: Component>(self) -> Self {
+        self.with_cube_spin_config::<M>(CubeSpinConfig::default())
+    }
+
+    /// Adds a marker-scoped cube spin helper with a customized configuration.
+    #[must_use]
+    pub fn with_cube_spin_config<M: Component>(mut self, config: CubeSpinConfig) -> Self {
+        cube_spin::install::<M>(&mut self.app, config);
         self
     }
 
@@ -234,6 +262,87 @@ impl SprinkleBuilder<NoOrbitCam> {
             app:          self.app,
             state_marker: PhantomData,
         }
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
+    /// install one built-in input preset.
+    pub fn with_orbit_cam_preset<F>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.with_orbit_cam(configure, OrbitCamInputMode::Preset(preset))
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
+    /// install one built-in input preset, and insert extra camera-side
+    /// components.
+    pub fn with_orbit_cam_preset_bundle<F, B>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.with_orbit_cam(configure, (OrbitCamInputMode::Preset(preset), bundle))
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
+    /// install app-owned input bindings.
+    pub fn with_orbit_cam_bindings<F>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.with_orbit_cam(configure, OrbitCamInputMode::Bindings(bindings))
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
+    /// install app-owned input bindings, and insert extra camera-side
+    /// components.
+    pub fn with_orbit_cam_bindings_bundle<F, B>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.with_orbit_cam(configure, (OrbitCamInputMode::Bindings(bindings), bundle))
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin` and spawn a manually driven
+    /// `OrbitCam` entity.
+    pub fn with_orbit_cam_manual<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.with_orbit_cam(configure, OrbitCamInputMode::Manual)
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn a manually driven `OrbitCam`,
+    /// and insert extra camera-side components.
+    pub fn with_orbit_cam_manual_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.with_orbit_cam(configure, (OrbitCamInputMode::Manual, bundle))
     }
 }
 

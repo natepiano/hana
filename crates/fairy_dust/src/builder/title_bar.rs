@@ -5,7 +5,11 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
+use bevy_lagrange::AnimationBegin;
+use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamBindings;
+use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;
@@ -14,10 +18,12 @@ use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
+use crate::cube_spin::CubeSpinConfig;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 use crate::screen_panels::TitleBarControlState;
+use crate::screen_panels::TitleChipActivation;
 
 impl<S> TitleBarBuilder<S> {
     /// Toggles `chip` active on `Begin` and inactive on `End` for any event
@@ -81,6 +87,16 @@ impl<S> TitleBarBuilder<S> {
         self
     }
 
+    /// Mirrors the activation state of `chip` onto a resource that implements
+    /// [`TitleChipActivation`]. Use this only for one-resource / one-chip state.
+    #[must_use]
+    pub fn wire_chip_to_activation<R>(self, chip: impl Into<String>) -> Self
+    where
+        R: Resource + TitleChipActivation,
+    {
+        self.wire_chip_to_state::<R, _>(chip, TitleChipActivation::activation)
+    }
+
     /// Like [`Self::wire_chip_to_events`], but each filter decides whether a
     /// given event applies to this chip. Return `false` to ignore.
     #[must_use]
@@ -122,6 +138,48 @@ impl<S> TitleBarBuilder<S> {
         self
     }
 
+    /// Toggles `chip` active while a fit animation frames an entity carrying
+    /// marker `M`, and inactive when it ends.
+    ///
+    /// `AnimateToFit`, `LookAt`, and `ZoomToFit` all carry the framed `target`
+    /// on their lifecycle events; matching on `M` is what distinguishes a
+    /// caller's fit from the built-in Home fit, so a chip wired this way lights
+    /// only for fits aimed at `M`-marked entities — never the Home pose, which
+    /// frames its own internal cube.
+    #[must_use]
+    pub fn wire_chip_to_fit_target<M: Component>(mut self, chip: impl Into<String>) -> Self {
+        let chip = chip.into();
+        let activate = chip.clone();
+        self.parent.app.add_observer(
+            move |trigger: On<AnimationBegin>,
+                  targets: Query<(), With<M>>,
+                  mut bars: Query<&mut TitleBarControlState>| {
+                let Some(target) = trigger.target else { return };
+                if targets.get(target).is_err() {
+                    return;
+                }
+                for mut bar in &mut bars {
+                    bar.set_active(&activate, ControlActivation::Active);
+                }
+            },
+        );
+        let deactivate = chip;
+        self.parent.app.add_observer(
+            move |trigger: On<AnimationEnd>,
+                  targets: Query<(), With<M>>,
+                  mut bars: Query<&mut TitleBarControlState>| {
+                let Some(target) = trigger.target else { return };
+                if targets.get(target).is_err() {
+                    return;
+                }
+                for mut bar in &mut bars {
+                    bar.set_active(&deactivate, ControlActivation::Inactive);
+                }
+            },
+        );
+        self
+    }
+
     fn finish(self) -> SprinkleBuilder<S> { self.parent }
 
     /// Finalizes the title bar and starts configuring a ground plane.
@@ -146,6 +204,18 @@ impl<S> TitleBarBuilder<S> {
     #[must_use]
     pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
         self.finish().with_camera_control_panel()
+    }
+
+    /// Finalizes the title bar and adds a marker-scoped cube spin helper.
+    #[must_use]
+    pub fn with_cube_spin<M: Component>(self) -> SprinkleBuilder<S> {
+        self.finish().with_cube_spin::<M>()
+    }
+
+    /// Finalizes the title bar and adds a customized marker-scoped cube spin helper.
+    #[must_use]
+    pub fn with_cube_spin_config<M: Component>(self, config: CubeSpinConfig) -> SprinkleBuilder<S> {
+        self.finish().with_cube_spin_config::<M>(config)
     }
 
     /// Finalizes the title bar and adds studio lighting.
@@ -230,6 +300,87 @@ impl TitleBarBuilder<NoOrbitCam> {
         B: Bundle + Send + Sync + 'static,
     {
         self.finish().with_orbit_cam(configure, bundle)
+    }
+
+    /// Finalizes the title bar, spawns an `OrbitCam`, and installs one
+    /// built-in input preset.
+    pub fn with_orbit_cam_preset<F>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_preset(configure, preset)
+    }
+
+    /// Finalizes the title bar, spawns an `OrbitCam`, installs one built-in
+    /// input preset, and inserts extra camera-side components.
+    pub fn with_orbit_cam_preset_bundle<F, B>(
+        self,
+        configure: F,
+        preset: OrbitCamPreset,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_preset_bundle(configure, preset, bundle)
+    }
+
+    /// Finalizes the title bar, spawns an `OrbitCam`, and installs app-owned
+    /// input bindings.
+    pub fn with_orbit_cam_bindings<F>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_bindings(configure, bindings)
+    }
+
+    /// Finalizes the title bar, spawns an `OrbitCam`, installs app-owned input
+    /// bindings, and inserts extra camera-side components.
+    pub fn with_orbit_cam_bindings_bundle<F, B>(
+        self,
+        configure: F,
+        bindings: OrbitCamBindings,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_bindings_bundle(configure, bindings, bundle)
+    }
+
+    /// Finalizes the title bar and spawns a manually driven `OrbitCam`.
+    pub fn with_orbit_cam_manual<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+    {
+        self.finish().with_orbit_cam_manual(configure)
+    }
+
+    /// Finalizes the title bar, spawns a manually driven `OrbitCam`, and
+    /// inserts extra camera-side components.
+    pub fn with_orbit_cam_manual_bundle<F, B>(
+        self,
+        configure: F,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_manual_bundle(configure, bundle)
     }
 }
 

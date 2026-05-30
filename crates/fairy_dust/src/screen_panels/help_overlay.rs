@@ -26,6 +26,7 @@ use super::default_inner_background;
 use super::screen_panel_frame;
 use super::screen_panel_material;
 use crate::camera_control_panel::CameraGuidancePanel;
+use crate::camera_control_panel::CameraPresetSwitching;
 use crate::camera_home::CameraHomeMarker;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
@@ -45,8 +46,8 @@ pub(super) struct KeyboardShortcutHelp;
 
 #[derive(Clone, Copy)]
 struct HelpShortcuts {
-    home_marker:  bool,
-    camera_panel: bool,
+    home_marker:   bool,
+    camera_preset: bool,
 }
 
 struct HelpRow {
@@ -60,6 +61,7 @@ pub(super) fn toggle_keyboard_shortcut_help(
     overlay: Query<Entity, With<KeyboardShortcutHelp>>,
     home_markers: Query<Entity, With<CameraHomeMarker>>,
     camera_panels: Query<Entity, With<CameraGuidancePanel>>,
+    preset_switching: Option<Res<CameraPresetSwitching>>,
 ) {
     let question_mark = question_mark_pressed(&keys);
     let escape = keys.just_pressed(KeyCode::Escape);
@@ -79,11 +81,13 @@ pub(super) fn toggle_keyboard_shortcut_help(
         return;
     }
 
+    let preset_switching_enabled =
+        preset_switching.is_none_or(|switching| *switching == CameraPresetSwitching::Enabled);
     spawn_help_overlay(
         &mut commands,
         HelpShortcuts {
-            home_marker:  !home_markers.is_empty(),
-            camera_panel: !camera_panels.is_empty(),
+            home_marker:   !home_markers.is_empty(),
+            camera_preset: !camera_panels.is_empty() && preset_switching_enabled,
         },
     );
 }
@@ -132,6 +136,7 @@ fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
 
     screen_panel_frame(
         builder,
+        Sizing::FIT,
         Sizing::FIT,
         default_inner_background(),
         |builder| {
@@ -247,7 +252,7 @@ fn shortcut_rows(shortcuts: HelpShortcuts) -> Vec<HelpRow> {
         keys:  SCREEN_PANEL_KEYS,
         label: SCREEN_PANEL_LABEL,
     });
-    if shortcuts.camera_panel {
+    if shortcuts.camera_preset {
         rows.push(HelpRow {
             keys:  CAMERA_PRESET_KEYS,
             label: CAMERA_PRESET_LABEL,
